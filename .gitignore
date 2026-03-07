@@ -1,0 +1,46 @@
+# Backend build output
+/backend/omnillm-studio
+/backend/omnillm-studio.exe
+/backend/omnillm-studio.db
+/backend/attachments/
+
+# Desktop build output (Wails)
+/build/
+/backend/cmd/desktop/build/
+/backend/cmd/desktop/frontend_dist/*
+!/backend/cmd/desktop/frontend_dist/.gitkeep
+/build/
+
+# Frontend build output
+/frontend/dist/
+/frontend/node_modules/
+
+# Internal Docs
+/docs/internal_docs/*
+
+# IDE
+.vscode/
+.idea/
+.serena/
+.github/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+*.exe
+*.db
+playright.config.ts
+tests/
+

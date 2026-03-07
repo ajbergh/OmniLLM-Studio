@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0a14" />
+    <meta name="description" content="OmniLLM-Studio — Your unified AI chat interface" />
+    <link rel="icon" type="image/svg+xml" href="/omnillm-studio-icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <title>OmniLLM-Studio</title>
+    <script>
+      // Synchronous theme bootstrap — prevents flash of wrong background color
+      (function() {
+        var BG = { aurora: '#0c0c16', ember: '#120e0a', light: '#f8f9fc', terminal: '#0a0a0a' };
+        try {
+          var id = localStorage.getItem('omnillm.theme') || 'aurora';
+          if (!BG[id]) id = 'aurora';
+          document.documentElement.dataset.theme = id;
+          document.documentElement.style.setProperty('--color-surface', BG[id]);
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.content = BG[id];
+        } catch(e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

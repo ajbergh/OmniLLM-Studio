@@ -1,0 +1,21 @@
+{
+  "name": "omnillm-studio",
+  "version": "1.0.0",
+  "description": "<p align=\"center\">\r   <img src=\"docs/assets/banner.svg\" alt=\"OmniLLM-Studio\" width=\"100%\"/>\r </p>",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test:smoke": "playwright test tests/image-editor-toolbar.smoke.spec.ts --project=chromium",
+    "test:smoke:headed": "playwright test tests/image-editor-toolbar.smoke.spec.ts --project=chromium --headed"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^25.3.5"
+  }
+}

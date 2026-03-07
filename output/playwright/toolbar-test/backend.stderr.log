@@ -1,0 +1,14 @@
+2026/03/06 19:36:27 [db] applying migration V22: agent_runs_awaiting_approval
+2026/03/06 19:36:27 [db] migration V22 applied successfully
+2026/03/06 19:36:27 [db] applying migration V23: image_sessions_and_nodes
+2026/03/06 19:36:27 [db] migration V23 applied successfully
+2026/03/06 19:36:27 [db] applying migration V24: image_node_assets_and_references
+2026/03/06 19:36:27 [db] migration V24 applied successfully
+2026/03/06 19:36:27 [db] applying migration V25: provider_default_image_model
+2026/03/06 19:36:27 [db] migration V25 applied successfully
+2026/03/06 19:36:27 [db] applying migration V26: conversation_kind
+2026/03/06 19:36:27 [db] migration V26 applied successfully
+2026/03/06 19:36:27 [websearch] no search API key configured; using DuckDuckGo (zero-config)
+2026/03/06 19:36:27 [websearch] Jina Reader enabled (maxLen=3000 chars per page)
+2026/03/06 19:36:27 OmniLLM-Studio server starting on 127.0.0.1:8080
+2026/03/06 19:36:49 [WARN] Running in solo mode (no users). Register an account to enable authentication.

@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 405" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="800" y2="405" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0f0f23"/>
+      <stop offset="100%" stop-color="#1a1a3e"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="405" rx="16" fill="url(#bg)"/>
+
+  <!-- Row 1 -->
+  <!-- Streaming -->
+  <rect x="24" y="20" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#6366f1" stroke-width="0.5"/>
+  <circle cx="50" cy="46" r="12" fill="#6366f1" fill-opacity="0.15"/>
+  <text x="50" y="50" font-family="system-ui,sans-serif" font-size="14" fill="#6366f1" text-anchor="middle">⚡</text>
+  <text x="68" y="50" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Streaming Chat</text>
+  <text x="36" y="70" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Token-by-token SSE</text>
+  <text x="36" y="82" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">responses with real-time</text>
+  <text x="36" y="94" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">markdown rendering</text>
+  <rect x="36" y="106" width="40" height="14" rx="7" fill="#6366f1" fill-opacity="0.12"/>
+  <text x="56" y="116" font-family="monospace" font-size="8" fill="#818cf8" text-anchor="middle">SSE</text>
+
+  <!-- Multi-Provider -->
+  <rect x="214" y="20" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#a855f7" stroke-width="0.5"/>
+  <circle cx="240" cy="46" r="12" fill="#a855f7" fill-opacity="0.15"/>
+  <text x="240" y="50" font-family="system-ui,sans-serif" font-size="14" fill="#a855f7" text-anchor="middle">🔌</text>
+  <text x="258" y="50" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Multi-Provider</text>
+  <text x="226" y="70" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">OpenAI, Anthropic, Ollama,</text>
+  <text x="226" y="82" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Groq, Together, Mistral,</text>
+  <text x="226" y="94" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">and any OpenAI-compatible</text>
+  <rect x="226" y="106" width="52" height="14" rx="7" fill="#a855f7" fill-opacity="0.12"/>
+  <text x="252" y="116" font-family="monospace" font-size="8" fill="#c4b5fd" text-anchor="middle">8+ APIs</text>
+
+  <!-- Image Studio -->
+  <rect x="404" y="20" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#f472b6" stroke-width="0.5"/>
+  <circle cx="430" cy="46" r="12" fill="#f472b6" fill-opacity="0.15"/>
+  <text x="430" y="50" font-family="system-ui,sans-serif" font-size="14" fill="#f472b6" text-anchor="middle">🎨</text>
+  <text x="448" y="50" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Image Studio</text>
+  <text x="416" y="70" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Canvas editor, inpainting,</text>
+  <text x="416" y="82" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">variant compare, branching</text>
+  <text x="416" y="94" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">history, and multi-provider</text>
+  <rect x="416" y="106" width="54" height="14" rx="7" fill="#f472b6" fill-opacity="0.12"/>
+  <text x="443" y="116" font-family="monospace" font-size="8" fill="#f9a8d4" text-anchor="middle">canvas</text>
+
+  <!-- RAG -->
+  <rect x="594" y="20" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#f59e0b" stroke-width="0.5"/>
+  <circle cx="620" cy="46" r="12" fill="#f59e0b" fill-opacity="0.15"/>
+  <text x="620" y="50" font-family="system-ui,sans-serif" font-size="14" fill="#f59e0b" text-anchor="middle">📚</text>
+  <text x="638" y="50" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">RAG Pipeline</text>
+  <text x="606" y="70" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Document chunking,</text>
+  <text x="606" y="82" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">embedding, and semantic</text>
+  <text x="606" y="94" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">search over your files</text>
+  <rect x="606" y="106" width="60" height="14" rx="7" fill="#f59e0b" fill-opacity="0.12"/>
+  <text x="636" y="116" font-family="monospace" font-size="8" fill="#fbbf24" text-anchor="middle">vectors</text>
+
+  <!-- Row 2 -->
+  <!-- Agent Mode -->
+  <rect x="24" y="145" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#10b981" stroke-width="0.5"/>
+  <circle cx="50" cy="171" r="12" fill="#10b981" fill-opacity="0.15"/>
+  <text x="50" y="175" font-family="system-ui,sans-serif" font-size="14" fill="#10b981" text-anchor="middle">🤖</text>
+  <text x="68" y="175" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Agent Mode</text>
+  <text x="36" y="195" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Autonomous multi-step</text>
+  <text x="36" y="207" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">task execution with tool</text>
+  <text x="36" y="219" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">calling and planning</text>
+  <rect x="36" y="231" width="44" height="14" rx="7" fill="#10b981" fill-opacity="0.12"/>
+  <text x="58" y="241" font-family="monospace" font-size="8" fill="#34d399" text-anchor="middle">tools</text>
+
+  <!-- Branching -->
+  <rect x="214" y="145" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#ec4899" stroke-width="0.5"/>
+  <circle cx="240" cy="171" r="12" fill="#ec4899" fill-opacity="0.15"/>
+  <text x="240" y="175" font-family="system-ui,sans-serif" font-size="14" fill="#ec4899" text-anchor="middle">🌿</text>
+  <text x="258" y="175" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Branching</text>
+  <text x="226" y="195" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Fork conversations into</text>
+  <text x="226" y="207" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">parallel branches to</text>
+  <text x="226" y="219" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">explore different paths</text>
+  <rect x="226" y="231" width="38" height="14" rx="7" fill="#ec4899" fill-opacity="0.12"/>
+  <text x="245" y="241" font-family="monospace" font-size="8" fill="#f472b6" text-anchor="middle">git</text>
+
+  <!-- Web Search -->
+  <rect x="404" y="145" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#3b82f6" stroke-width="0.5"/>
+  <circle cx="430" cy="171" r="12" fill="#3b82f6" fill-opacity="0.15"/>
+  <text x="430" y="175" font-family="system-ui,sans-serif" font-size="14" fill="#3b82f6" text-anchor="middle">🔍</text>
+  <text x="448" y="175" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Web Search</text>
+  <text x="416" y="195" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Brave Search or DuckDuckGo</text>
+  <text x="416" y="207" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">with Jina Reader for</text>
+  <text x="416" y="219" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">article content extraction</text>
+  <rect x="416" y="231" width="64" height="14" rx="7" fill="#3b82f6" fill-opacity="0.12"/>
+  <text x="448" y="241" font-family="monospace" font-size="8" fill="#60a5fa" text-anchor="middle">grounded</text>
+
+  <!-- Security -->
+  <rect x="594" y="145" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#ef4444" stroke-width="0.5"/>
+  <circle cx="620" cy="171" r="12" fill="#ef4444" fill-opacity="0.15"/>
+  <text x="620" y="175" font-family="system-ui,sans-serif" font-size="14" fill="#ef4444" text-anchor="middle">🔒</text>
+  <text x="638" y="175" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Security</text>
+  <text x="606" y="195" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">AES-256-GCM key encryption,</text>
+  <text x="606" y="207" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">optional multi-user auth,</text>
+  <text x="606" y="219" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">data never leaves your machine</text>
+  <rect x="606" y="231" width="52" height="14" rx="7" fill="#ef4444" fill-opacity="0.12"/>
+  <text x="632" y="241" font-family="monospace" font-size="8" fill="#f87171" text-anchor="middle">local</text>
+
+  <!-- Row 3 -->
+  <!-- Analytics -->
+  <rect x="24" y="270" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#14b8a6" stroke-width="0.5"/>
+  <circle cx="50" cy="296" r="12" fill="#14b8a6" fill-opacity="0.15"/>
+  <text x="50" y="300" font-family="system-ui,sans-serif" font-size="14" fill="#14b8a6" text-anchor="middle">📊</text>
+  <text x="68" y="300" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Analytics</text>
+  <text x="36" y="320" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Token usage, cost tracking,</text>
+  <text x="36" y="332" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">per-model breakdowns, and</text>
+  <text x="36" y="344" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">custom pricing rules</text>
+  <rect x="36" y="356" width="42" height="14" rx="7" fill="#14b8a6" fill-opacity="0.12"/>
+  <text x="57" y="366" font-family="monospace" font-size="8" fill="#2dd4bf" text-anchor="middle">cost</text>
+
+  <!-- Workspaces -->
+  <rect x="214" y="270" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#8b5cf6" stroke-width="0.5"/>
+  <circle cx="240" cy="296" r="12" fill="#8b5cf6" fill-opacity="0.15"/>
+  <text x="240" y="300" font-family="system-ui,sans-serif" font-size="14" fill="#8b5cf6" text-anchor="middle">📁</text>
+  <text x="258" y="300" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Workspaces</text>
+  <text x="226" y="320" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Organize conversations,</text>
+  <text x="226" y="332" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">member management, and</text>
+  <text x="226" y="344" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">role-based access control</text>
+  <rect x="226" y="356" width="46" height="14" rx="7" fill="#8b5cf6" fill-opacity="0.12"/>
+  <text x="249" y="366" font-family="monospace" font-size="8" fill="#a78bfa" text-anchor="middle">teams</text>
+
+  <!-- Plugins -->
+  <rect x="404" y="270" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#06b6d4" stroke-width="0.5"/>
+  <circle cx="430" cy="296" r="12" fill="#06b6d4" fill-opacity="0.15"/>
+  <text x="430" y="300" font-family="system-ui,sans-serif" font-size="14" fill="#06b6d4" text-anchor="middle">🧩</text>
+  <text x="448" y="300" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Plugin SDK</text>
+  <text x="416" y="320" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">JSON-RPC subprocess</text>
+  <text x="416" y="332" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">model for extending with</text>
+  <text x="416" y="344" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">custom tools and actions</text>
+  <rect x="416" y="356" width="62" height="14" rx="7" fill="#06b6d4" fill-opacity="0.12"/>
+  <text x="447" y="366" font-family="monospace" font-size="8" fill="#22d3ee" text-anchor="middle">extensible</text>
+
+  <!-- Import/Export -->
+  <rect x="594" y="270" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#84cc16" stroke-width="0.5"/>
+  <circle cx="620" cy="296" r="12" fill="#84cc16" fill-opacity="0.15"/>
+  <text x="620" y="300" font-family="system-ui,sans-serif" font-size="14" fill="#84cc16" text-anchor="middle">💾</text>
+  <text x="638" y="300" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Import / Export</text>
+  <text x="606" y="320" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Full backup and restore</text>
+  <text x="606" y="332" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">of conversations, settings,</text>
+  <text x="606" y="344" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">and attachments</text>
+  <rect x="606" y="356" width="52" height="14" rx="7" fill="#84cc16" fill-opacity="0.12"/>
+  <text x="632" y="366" font-family="monospace" font-size="8" fill="#a3e635" text-anchor="middle">bundle</text>
+</svg>

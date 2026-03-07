@@ -1,0 +1,3 @@
+[2m8:16:00 PM[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Can't resolve 'tailwindcss' in 'C:\Users\ajbergh\Documents\GitHub\ajbergh\OmniLLM-Studio\frontend\src'
+  Plugin: [35m@tailwindcss/vite:generate:serve[39m
+  File: [36mC:/Users/ajbergh/Documents/GitHub/ajbergh/OmniLLM-Studio/frontend/src/index.css[39m

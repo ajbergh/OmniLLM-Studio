@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 260" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">OmniLLM-Studio request lifecycle</title>
+  <desc id="desc">A left-to-right flow from frontend prompt to backend orchestration and streamed response.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1100" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#081120"/>
+      <stop offset="100%" stop-color="#13233a"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#4fd1c5"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="cardA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f1d31"/>
+      <stop offset="100%" stop-color="#1a2f4c"/>
+    </linearGradient>
+    <linearGradient id="cardB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#11283a"/>
+      <stop offset="100%" stop-color="#1f3d4f"/>
+    </linearGradient>
+    <linearGradient id="chip" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a1a2f"/>
+      <stop offset="100%" stop-color="#0d2743"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#02050c" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <rect width="1100" height="260" rx="18" fill="url(#bg)"/>
+
+  <text x="550" y="28" font-family="Segoe UI, Arial, sans-serif" font-size="14" letter-spacing="2" fill="#7aa3c7" text-anchor="middle">REQUEST LIFECYCLE</text>
+
+  <g filter="url(#softShadow)">
+    <rect x="24" y="56" width="206" height="156" rx="14" fill="url(#cardA)" stroke="#2b5f83"/>
+    <rect x="250" y="56" width="250" height="156" rx="14" fill="url(#cardB)" stroke="#2f6f6d"/>
+    <rect x="520" y="56" width="260" height="156" rx="14" fill="url(#cardA)" stroke="#4e6f4d"/>
+    <rect x="800" y="56" width="276" height="156" rx="14" fill="url(#cardB)" stroke="#38708e"/>
+  </g>
+
+  <g>
+    <text x="44" y="84" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#7dd3fc">1) FRONTEND</text>
+    <text x="44" y="106" font-family="Consolas, monospace" font-size="10" fill="#dbeafe">POST /v1/conversations/:id</text>
+    <text x="44" y="119" font-family="Consolas, monospace" font-size="10" fill="#dbeafe">/messages/stream</text>
+    <rect x="44" y="132" width="166" height="24" rx="12" fill="url(#chip)" stroke="#28608a"/>
+    <text x="127" y="148" font-family="Consolas, monospace" font-size="10" fill="#8fd3ff" text-anchor="middle">prompt + model + context</text>
+    <text x="44" y="178" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#9db5cb">React + Zustand + SSE parser</text>
+    <text x="44" y="194" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#9db5cb">starts token stream immediately</text>
+  </g>
+
+  <g>
+    <text x="270" y="84" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#5eead4">2) API ROUTER</text>
+    <text x="270" y="108" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#d2f9f0">chi route + auth middleware</text>
+    <text x="270" y="124" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#d2f9f0">ownership checks + request shaping</text>
+
+    <rect x="270" y="140" width="106" height="24" rx="12" fill="url(#chip)" stroke="#2f6f6d"/>
+    <text x="323" y="156" font-family="Consolas, monospace" font-size="10" fill="#80cbc4" text-anchor="middle">solo bypass</text>
+
+    <rect x="388" y="140" width="92" height="24" rx="12" fill="url(#chip)" stroke="#2f6f6d"/>
+    <text x="434" y="156" font-family="Consolas, monospace" font-size="10" fill="#80cbc4" text-anchor="middle">RBAC</text>
+
+    <text x="270" y="188" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#9cd0c3">handler selects stream path</text>
+  </g>
+
+  <g>
+    <text x="540" y="84" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#bef264">3) LLM ORCHESTRATION</text>
+    <text x="540" y="108" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#e7f7cc">provider profile + settings + model routing</text>
+
+    <rect x="540" y="126" width="72" height="24" rx="12" fill="url(#chip)" stroke="#4e6f4d"/>
+    <text x="576" y="142" font-family="Consolas, monospace" font-size="10" fill="#cde891" text-anchor="middle">RAG</text>
+
+    <rect x="618" y="126" width="72" height="24" rx="12" fill="url(#chip)" stroke="#4e6f4d"/>
+    <text x="654" y="142" font-family="Consolas, monospace" font-size="10" fill="#cde891" text-anchor="middle">tools</text>
+
+    <rect x="696" y="126" width="64" height="24" rx="12" fill="url(#chip)" stroke="#4e6f4d"/>
+    <text x="728" y="142" font-family="Consolas, monospace" font-size="10" fill="#cde891" text-anchor="middle">web</text>
+
+    <text x="540" y="188" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#b9cf9b">token events emitted as they arrive</text>
+  </g>
+
+  <g>
+    <text x="820" y="84" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#67e8f9">4) SSE RESPONSE</text>
+    <text x="820" y="108" font-family="Consolas, monospace" font-size="11" fill="#d5f6fb">event: token | tool_start | done</text>
+    <rect x="820" y="126" width="236" height="24" rx="12" fill="url(#chip)" stroke="#38708e"/>
+    <text x="938" y="142" font-family="Consolas, monospace" font-size="10" fill="#8ed8e5" text-anchor="middle">incremental markdown rendering in UI</text>
+    <text x="820" y="172" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#acd6df">low-latency, observable, interruptible flow</text>
+    <text x="820" y="188" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#acd6df">for chat and agent interactions</text>
+  </g>
+
+  <g stroke="url(#line)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9">
+    <line x1="230" y1="134" x2="250" y2="134"/>
+    <path d="M245 129 L250 134 L245 139" fill="none"/>
+
+    <line x1="500" y1="134" x2="520" y2="134"/>
+    <path d="M515 129 L520 134 L515 139" fill="none"/>
+
+    <line x1="780" y1="134" x2="800" y2="134"/>
+    <path d="M795 129 L800 134 L795 139" fill="none"/>
+
+    <line x1="800" y1="164" x2="230" y2="164" opacity="0.5"/>
+    <path d="M235 159 L230 164 L235 169" fill="none" opacity="0.5"/>
+  </g>
+
+  <text x="550" y="238" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#6f8ba8" text-anchor="middle">Local-first architecture: SQLite storage, encrypted secrets, and provider calls routed from your backend.</text>
+</svg>
