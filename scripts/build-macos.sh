@@ -79,14 +79,3 @@ echo "  Build complete!"
 echo "  Output: build/bin/OmniLLM-Studio.app"
 echo "=========================================="
 echo ""
-    <string>11.0</string>
-</dict>
-</plist>
-PLIST
-
-echo ""
-echo "=========================================="
-echo "  Build complete!"
-echo "  Output: build/bin/OmniLLM-Studio.app"
-echo "=========================================="
-echo ""
