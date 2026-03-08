@@ -22,7 +22,8 @@
 .vscode/
 .idea/
 .serena/
-.github/
+# Keep .github/workflows tracked; exclude internal agent/copilot config
+.github/agents/
 
 # OS
 .DS_Store
