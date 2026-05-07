@@ -1,0 +1,62 @@
+{{- include "omnillm-studio.validate" . -}}
+{{/*
+nginx config rendered into a ConfigMap so we can flip proxy_pass between
+the sidecar (combined topology) and the backend Service (split topology).
+*/}}
+{{- $proxyTarget := "" -}}
+{{- if eq .Values.topology "combined" -}}
+  {{- $proxyTarget = printf "http://127.0.0.1:%d" (int .Values.service.backendPort) -}}
+{{- else -}}
+  {{- $proxyTarget = printf "http://%s:%d" (include "omnillm-studio.backendName" .) (int .Values.service.backendPort) -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnillm-studio.nginxConfigMapName" . }}
+  labels:
+    {{- include "omnillm-studio.labels" . | nindent 4 }}
+data:
+  default.conf: |
+    server {
+      listen {{ .Values.service.frontendPort }};
+      server_name _;
+
+      root /usr/share/nginx/html;
+      index index.html;
+
+      location / {
+        try_files $uri $uri/ /index.html;
+      }
+
+      location ~* \.(?:css|js|woff2?|ttf|eot|otf|svg|png|jpg|jpeg|gif|webp|ico)$ {
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800, immutable";
+        try_files $uri =404;
+      }
+
+      location /v1/ {
+        proxy_pass         {{ $proxyTarget }};
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+
+        proxy_buffering          off;
+        proxy_cache              off;
+        proxy_request_buffering  off;
+        chunked_transfer_encoding on;
+
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+
+        client_max_body_size 100m;
+      }
+
+      location = /healthz {
+        access_log off;
+        proxy_pass {{ $proxyTarget }}/v1/health;
+        proxy_read_timeout 5s;
+      }
+    }

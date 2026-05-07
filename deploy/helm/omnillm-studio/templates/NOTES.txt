@@ -1,0 +1,43 @@
+OmniLLM-Studio has been deployed in the {{ .Values.topology }} topology.
+
+Release name: {{ .Release.Name }}
+Namespace:    {{ .Release.Namespace }}
+Backend:      {{ include "omnillm-studio.backendImage" . }}
+Frontend:     {{ include "omnillm-studio.frontendImage" . }}
+Storage:      {{- if .Values.persistence.enabled }} {{ .Values.persistence.size }} ({{ .Values.persistence.storageClass | default "default StorageClass" }}){{- else }} ephemeral (emptyDir — DATA WILL NOT SURVIVE POD RESTART){{- end }}
+
+{{- if .Values.ingress.enabled }}
+
+Open the app:
+  https://{{ .Values.ingress.host }}/         (or http:// if tls.enabled=false)
+
+Make sure {{ .Values.ingress.host }} resolves to your ingress controller's external IP.
+{{- else }}
+
+Ingress is disabled. Port-forward to access:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "omnillm-studio.fullname" . }} 8080:{{ .Values.service.port }}
+  open http://localhost:8080
+{{- end }}
+
+Backend health endpoint (Pod-internal):
+  kubectl --namespace {{ .Release.Namespace }} exec sts/{{ include "omnillm-studio.backendName" . }} -c backend -- \
+    wget -qO- http://127.0.0.1:{{ .Values.service.backendPort }}/v1/health
+
+{{- if and (not .Values.secrets.existingSecret) .Values.secrets.encryptionKey }}
+
+⚠  You provided secrets.encryptionKey via --set / values.yaml. For production,
+   use --set secrets.existingSecret=<name> and manage the Secret out-of-band
+   (sealed-secrets, external-secrets, vault, etc.) so the key never lives in
+   Helm release history.
+{{- end }}
+
+{{- if eq .Values.topology "combined" }}
+
+Topology: combined — nginx runs as a sidecar on the same Pod as the backend.
+{{- else }}
+
+Topology: split — frontend Deployment ({{ .Values.replicaCount }} backend pod / 2 frontend pods).
+{{- end }}
+
+To smoke-test the install:
+  helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}

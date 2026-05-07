@@ -1,0 +1,82 @@
+{{- include "omnillm-studio.validate" . -}}
+{{/*
+Headless Service backing the StatefulSet's stable network identity.
+Always rendered, used by both topologies for DNS within the namespace.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnillm-studio.backendName" . }}-headless
+  labels:
+    {{- include "omnillm-studio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    {{- include "omnillm-studio.backendSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.backendPort }}
+      targetPort: http
+      protocol: TCP
+---
+{{- if eq .Values.topology "combined" }}
+{{/*
+Combined topology: a single user-facing Service points at the StatefulSet
+Pod (which contains both nginx and the backend). Ingress hits frontend port.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnillm-studio.fullname" . }}
+  labels:
+    {{- include "omnillm-studio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: combined
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "omnillm-studio.backendSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: web
+      port: {{ .Values.service.port }}
+      targetPort: web
+      protocol: TCP
+{{- else }}
+{{/*
+Split topology: separate Services for backend and frontend.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnillm-studio.backendName" . }}
+  labels:
+    {{- include "omnillm-studio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "omnillm-studio.backendSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.backendPort }}
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnillm-studio.frontendName" . }}
+  labels:
+    {{- include "omnillm-studio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "omnillm-studio.frontendSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: web
+      port: {{ .Values.service.port }}
+      targetPort: web
+      protocol: TCP
+{{- end }}

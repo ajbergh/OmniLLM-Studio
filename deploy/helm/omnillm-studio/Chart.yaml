@@ -1,0 +1,35 @@
+apiVersion: v2
+name: omnillm-studio
+description: |
+  OmniLLM-Studio: a local-first LLM chat application (Go backend + React/TypeScript
+  frontend) packaged for Kubernetes. Single-replica StatefulSet with persistent
+  storage for SQLite, attachments, and chromem-go vector data.
+
+type: application
+
+# Chart version. Bump on chart-template changes.
+version: 0.1.0
+
+# AppVersion tracks the OmniLLM-Studio release this chart was authored against.
+# CI overrides this for tagged releases via `helm package --app-version`.
+appVersion: "0.2.0"
+
+home: https://github.com/ajbergh/OmniLLM-Studio
+sources:
+  - https://github.com/ajbergh/OmniLLM-Studio
+
+maintainers:
+  - name: ajbergh
+    url: https://github.com/ajbergh
+
+keywords:
+  - llm
+  - chat
+  - rag
+  - local-first
+  - sqlite
+  - chromem-go
+
+annotations:
+  category: AI/ML
+  licenses: see repository LICENSE

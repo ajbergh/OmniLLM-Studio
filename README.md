@@ -347,7 +347,12 @@ OmniLLM-Studio/
 │   ├── build-web-macos.sh               # Web server build (macOS x64/arm64/universal)
 │   └── build-all.sh                     # Build orchestrator (CI/CD, Wails + web)
 ├── build/bin/                           # Desktop build output (git-ignored)
-├── docs/                                # Implementation plans & assets
+├── deploy/                              # Kubernetes / container deployment artifacts
+│   ├── docker/                          # Dockerfiles for backend + frontend, local docker-compose
+│   └── helm/omnillm-studio/             # Helm chart (StatefulSet, single-replica, PVC-backed)
+├── docs/                                # Implementation plans, deployment guides & assets
+│   ├── how_to_helm.md                   # Operator's guide to the Helm deployment
+│   └── internal_docs/                   # Plans, security reviews, remediation docs
 └── LICENSE
 ```
 
@@ -571,6 +576,7 @@ All routes are under `/v1/`.
 | `OMNILLM_PLUGIN_DIR` | `~/.omnillm-studio/plugins` | Plugin directory |
 | `OMNILLM_CHROMEM_DIR` | `<dir of OMNILLM_DB_PATH>/chromem` | Directory for chromem-go RAG vector files (one subdirectory per conversation) |
 | `OMNILLM_CHROMEM_COMPRESS` | `false` | Set to `true` to gzip-compress chromem persistent files |
+| `OMNILLM_MASTER_KEY` | _(machine-scoped seed file)_ | Hex-encoded 32 bytes (64 chars) used by AES-256-GCM to encrypt provider API keys at rest. **Required** for the Kubernetes / container deployment; for desktop and headless installs the seed file is auto-generated under the user config dir. Generate with `openssl rand -hex 32`. |
 
 ---
 
@@ -732,6 +738,64 @@ scripts/start-wails-dev.sh         # Linux/macOS — same
 #### CI/CD (GitHub Actions)
 
 For automated cross-platform releases, use platform-native CI runners (CGO cross-compilation is not practical). A sample workflow is documented in [docs/Wails Build Plan.md](docs/Wails%20Build%20Plan.md).
+
+---
+
+## Deploy
+
+OmniLLM-Studio supports three deployment shapes, each from the **same backend codebase**:
+
+| Shape | Build artifact | Use case |
+|-------|----------------|----------|
+| **Desktop** | Wails binary (`build/bin/OmniLLM-Studio[.exe\|.app]`) | Single-user, runs locally, native window |
+| **Headless server** | Go binary + static `frontend/dist` | Self-hosting on a single VM / bare host |
+| **Kubernetes** | Container images + Helm chart | Multi-user team deployment |
+
+The desktop and headless paths are documented above. The Kubernetes path is described next.
+
+### Kubernetes (Helm chart)
+
+A first-class Helm chart lives at [`deploy/helm/omnillm-studio/`](deploy/helm/omnillm-studio/). Container images are published to GHCR by [`.github/workflows/container.yml`](.github/workflows/container.yml).
+
+**Architecture in one paragraph:** the Go backend uses CGO SQLite (`mattn/go-sqlite3`) and stores chromem-go vector collections on local disk, so the chart deploys a **single-replica StatefulSet** with a PVC mounted at `/data`. nginx serves the React SPA and reverse-proxies `/v1/*` to the backend, with all the right SSE-buffering knobs disabled. Provider API keys remain AES-256-GCM encrypted at rest using `OMNILLM_MASTER_KEY` from a Kubernetes `Secret`.
+
+**Quick start:**
+
+```bash
+kubectl create namespace omnillm
+
+kubectl create secret generic omnillm-studio-secrets \
+  --namespace omnillm \
+  --from-literal=OMNILLM_MASTER_KEY=$(openssl rand -hex 32)
+
+helm install omnillm deploy/helm/omnillm-studio \
+  --namespace omnillm \
+  --set ingress.host=omnillm.example.com \
+  --set secrets.existingSecret=omnillm-studio-secrets
+
+helm test omnillm --namespace omnillm
+```
+
+For a complete walk-through — kind cluster setup, BYO Secret patterns, SSE troubleshooting, backups, upgrades, and cloud-specific Ingress notes — see **[docs/how_to_helm.md](docs/how_to_helm.md)**.
+
+For the chart's reference values and templated outputs, see [`deploy/helm/omnillm-studio/README.md`](deploy/helm/omnillm-studio/README.md).
+
+For the design rationale and implementation status, see [`docs/internal_docs/Kubernetes_Helm_Plan.md`](docs/internal_docs/Kubernetes_Helm_Plan.md).
+
+> **Important:** The Kubernetes path is **additive**. The Wails desktop binaries and the headless web binaries continue to be produced by `scripts/build-wails-*` and `scripts/build-web-*` exactly as before — none of those scripts or the existing GitHub Actions release workflow are touched by the container build path.
+
+#### Container images (standalone)
+
+If you don't want Helm, the Dockerfiles in [`deploy/docker/`](deploy/docker/) can be used directly:
+
+```bash
+docker build -f deploy/docker/Dockerfile.backend  -t omnillm-studio-backend:dev  .
+docker build -f deploy/docker/Dockerfile.frontend -t omnillm-studio-frontend:dev .
+
+# Or run the bundled compose stack:
+docker compose -f deploy/docker/docker-compose.yaml up --build
+# → http://localhost:8081
+```
 
 ---
 
