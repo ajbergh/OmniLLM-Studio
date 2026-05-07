@@ -2,8 +2,6 @@
 
 This is the operator's guide to running OmniLLM-Studio on Kubernetes. It walks you from "I have a cluster" to "the team is using it" — including the boring parts (TLS, backups, upgrades) and the parts that catch people out (SSE buffering, the single-replica constraint, the encryption key).
 
-If you only want the **chart's reference values and templates**, see [`deploy/helm/omnillm-studio/README.md`](../deploy/helm/omnillm-studio/README.md). If you want the **design rationale**, see [`docs/internal_docs/Kubernetes_Helm_Plan.md`](internal_docs/Kubernetes_Helm_Plan.md).
-
 ---
 
 ## Table of Contents
