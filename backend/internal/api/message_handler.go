@@ -128,9 +128,9 @@ type sendMessageRequest struct {
 		Model        *string `json:"model,omitempty"`
 		SystemPrompt *string `json:"system_prompt,omitempty"`
 	} `json:"override,omitempty"`
-	WebSearch       *bool   `json:"web_search,omitempty"`
-	Think           *bool   `json:"think,omitempty"`            // Ollama-only: enable/disable thinking
-	ReasoningEffort string  `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high"
+	WebSearch       *bool  `json:"web_search,omitempty"`
+	Think           *bool  `json:"think,omitempty"`            // Ollama-only: enable/disable thinking
+	ReasoningEffort string `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high"
 }
 
 // Create handles non-streaming message creation + LLM response.

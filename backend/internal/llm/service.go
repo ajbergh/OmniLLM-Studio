@@ -80,11 +80,11 @@ type EmbeddingResponse struct {
 
 // ChatRequest holds the parameters for a chat completion request.
 type ChatRequest struct {
-	Provider       string        `json:"provider"`
-	Model          string        `json:"model"`
-	Messages       []ChatMessage `json:"messages"`
-	Think          *bool         `json:"think,omitempty"`           // Ollama-only: enable/disable thinking
-	ReasoningEffort string       `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" — for OpenAI o-series, gpt-5.x, and Anthropic extended thinking
+	Provider        string        `json:"provider"`
+	Model           string        `json:"model"`
+	Messages        []ChatMessage `json:"messages"`
+	Think           *bool         `json:"think,omitempty"`            // Ollama-only: enable/disable thinking
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" — for OpenAI o-series, gpt-5.x, and Anthropic extended thinking
 }
 
 // ChatResponse holds the result of a non-streaming chat completion.
