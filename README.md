@@ -29,7 +29,8 @@
 | Feature | Description |
 |---------|-------------|
 | **Streaming Chat** | Token-by-token responses via Server-Sent Events with real-time markdown rendering |
-| **Multi-Provider** | OpenAI, Anthropic, Ollama, OpenRouter, Groq, Together, Mistral, and any OpenAI-compatible API |
+| **Multi-Provider** | OpenAI (GPT-5.x, o-series), Anthropic (Claude 4.x), Google Gemini, Ollama, OpenRouter, Groq, Together AI, Mistral, and any OpenAI-compatible API |
+| **Reasoning Effort** | Per-message thinking level (auto / low / medium / high) for models that support it — OpenAI o-series, GPT-5.x, Claude 4.x+, Groq compound |
 | **Conversation Management** | Create, rename, pin, archive, delete, full-text search, per-conversation model override |
 | **Image Studio** | Full canvas editor with generation, editing, inpainting, variant comparison, and branching history |
 | **Markdown Rendering** | Syntax highlighting, KaTeX math, Mermaid diagrams, inline image rendering |
@@ -66,11 +67,11 @@ A dedicated image workspace with canvas-based editing, multi-provider generation
 
 | Provider | Models | Features |
 |----------|--------|----------|
-| **OpenAI** | GPT-Image-1.5, GPT-Image-1, DALL-E 3, DALL-E 2 | Generate, Edit, Mask, Content Refs |
-| **Gemini** | Gemini 3.1 Flash Image, Gemini 3 Pro Image, Gemini 2.5 Flash Image | Generate, Edit, Mask, Seed, Guidance, Style Refs |
+| **OpenAI** | gpt-image-2, gpt-image-1.5, GPT-Image-1, DALL-E 3, DALL-E 2 | Generate, Edit, Mask, Content Refs |
+| **Gemini** | Imagen 4.0 Ultra/Fast/Standard, Imagen 3.0, Gemini 3.1 Flash Image, Gemini 2.5 Flash Image | Generate, Edit, Mask, Seed, Guidance, Style Refs |
 | **Stable Diffusion** | SDXL 1.0, SD v1.6 | Generate, Edit, Mask, Seed, Guidance, Style Refs |
-| **Together** | FLUX.1 Pro/Schnell, Imagen 4.0, and 30+ models | Generate, Multi-variant |
-| **OpenRouter** | openai/dall-e-3, openai/gpt-image-1 | Generate |
+| **Together** | FLUX.1 Pro/Schnell/Kontext/Krea, FLUX.2 Pro/Dev/Flex, Imagen 4.0, HiDream I1, Ideogram 3.0, Seedream 3/4, and 30+ models | Generate, Multi-variant |
+| **OpenRouter** | openai/gpt-image-2, openai/dall-e-3 | Generate |
 
 ### Platform
 
@@ -85,6 +86,57 @@ A dedicated image workspace with canvas-based editing, multi-provider generation
 | **Multi-User Auth** | Optional — token-based sessions with role-based access (admin / member / viewer) |
 | **Encrypted Secrets** | API keys encrypted at rest with AES-256-GCM, never exposed to the frontend |
 | **Local-First Storage** | SQLite database with WAL mode, optimized PRAGMAs, survives restarts |
+
+---
+
+## Supported Models
+
+> Ollama models are fetched dynamically from your local instance — any model you have pulled is available automatically.
+
+### Chat Models
+
+| Provider | Models |
+|----------|--------|
+| **OpenAI** | `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.4-pro`, `gpt-5.2`, `gpt-5.2-pro`, `gpt-5.1`, `gpt-5`, `gpt-5-pro`, `gpt-5-mini`, `gpt-5-nano`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `gpt-4o`, `gpt-4o-mini`, `o3-pro`, `o4-mini`, `o3`, `o3-mini`, `o1`, `o1-mini` |
+| **Anthropic** | `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `claude-sonnet-4-20250514`, `claude-3-7-sonnet-20250219`, `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`, `claude-3-opus-20240229` |
+| **Google Gemini** | `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite`, `gemini-3.1-flash-lite-preview`, `gemini-3-flash-preview`, `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-1.5-pro`, `gemini-1.5-flash` |
+| **Ollama** | Dynamic — any model available in your local Ollama instance (`ollama pull <model>`) |
+| **OpenRouter** | `openai/gpt-5.5`, `openai/gpt-5.4-mini`, `openai/gpt-4.1`, `openai/gpt-4o`, `anthropic/claude-opus-4-7`, `anthropic/claude-sonnet-4-6`, `google/gemini-3.1-pro-preview`, `google/gemini-2.5-pro`, `google/gemini-2.5-flash`, `meta-llama/llama-4-maverick`, `meta-llama/llama-3.3-70b-instruct`, `deepseek/deepseek-r1`, `qwen/qwen3-235b-a22b`, `mistralai/mistral-medium-3-5`, `mistralai/mistral-large-2512`, and 2,000+ additional models via OpenRouter's marketplace |
+| **Groq** | `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `meta-llama/llama-4-scout-17b-16e-instruct`, `moonshotai/kimi-k2-instruct`, `deepseek-r1-distill-llama-70b`, `qwen/qwen3-32b`, `qwen-qwq-32b`, `mistral-saba-24b`, `gemma2-9b-it`, `groq/compound`, `groq/compound-mini` |
+| **Together AI** | `MiniMaxAI/MiniMax-M2.5`, `moonshotai/Kimi-K2.5`, `zai-org/GLM-5`, `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8`, `meta-llama/Meta-Llama-3.3-70B-Instruct-Turbo`, `Qwen/Qwen3-235B-A22B-Instruct`, `Qwen/Qwen3-Coder-480B-A35B`, `deepseek-ai/DeepSeek-R1`, `deepseek-ai/DeepSeek-V3.1`, `mistralai/Mistral-Small-24B-Instruct`, `mistralai/Mixtral-8x22B`, and 40+ more |
+| **Mistral** | `mistral-medium-3-5`, `mistral-medium-latest`, `mistral-small-2603`, `mistral-small-latest`, `mistral-large-2512`, `mistral-large-latest`, `magistral-medium-2509`, `magistral-small-2509`, `devstral-2512`, `codestral-2508`, `codestral-latest`, `open-mistral-nemo`, `pixtral-large-latest` |
+| **Custom** | Any OpenAI-compatible API — configure a custom base URL in Settings |
+
+### Reasoning / Thinking Levels
+
+For models that support it, a compact **Reasoning Effort** selector appears in the chat toolbar:
+
+| Level | Effect | Best for |
+|-------|--------|----------|
+| **auto** | Provider default | Everyday use |
+| **low** | Minimal pre-thinking — fastest, lowest cost | Simple lookups, rephrasing |
+| **medium** | Balanced reasoning | Coding, analysis, general tasks |
+| **high** | Extended thinking — maximum reasoning depth | Complex math, multi-step planning, research |
+
+**Supported providers and models:**
+
+| Provider | Models with reasoning effort support |
+|----------|--------------------------------------|
+| **OpenAI** | All `o1`, `o3`, `o3-mini`, `o3-pro`, `o4-mini`, `gpt-5.x`, `gpt-4.1.x` models |
+| **Anthropic** | `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `claude-3-7-sonnet` |
+| **OpenRouter** | OpenAI and Anthropic models routed via OpenRouter |
+| **Groq** | `groq/compound`, `groq/compound-mini` |
+
+When **Anthropic** is selected, effort levels map to extended thinking `budget_tokens` (low → 2,000, medium → 8,000, high → 16,000).
+
+### Image Models
+
+| Provider | Chat Image Models |
+|----------|-------------------|
+| **OpenAI** | `gpt-image-2`, `gpt-image-1.5`, `chatgpt-image-latest`, `gpt-image-1`, `gpt-image-1-mini`, `dall-e-3`, `dall-e-2` |
+| **Google Gemini** | `imagen-4.0-generate-001`, `imagen-4.0-ultra-generate-001`, `imagen-4.0-fast-generate-001`, `imagen-3.0-generate-002`, `imagen-3.0-fast-generate-001`, `gemini-3.1-flash-image-preview`, `gemini-2.5-flash-image` |
+| **Together AI** | `google/imagen-4.0-preview`, `google/imagen-4.0-fast`, `google/imagen-4.0-ultra`, `google/flash-image-2.5`, `black-forest-labs/FLUX.1-schnell-Free`, `black-forest-labs/FLUX.1.1-pro`, `black-forest-labs/FLUX.1-kontext-pro`, `black-forest-labs/FLUX.2-pro`, `ByteDance-Seed/Seedream-3.0`, `ByteDance-Seed/Seedream-4.0`, `HiDream-ai/HiDream-I1-Full`, `ideogram/ideogram-3.0`, `stabilityai/stable-diffusion-xl-base-1.0`, and 20+ more |
+| **OpenRouter** | `openai/gpt-image-2`, `openai/dall-e-3`, `openai/gpt-image-1` |
 
 ---
 
@@ -544,8 +596,8 @@ The SQLite database is tuned for performance out of the box:
 | **Backend** | Go 1.24+, Chi router, SQLite (WAL), SSE streaming, AES-256-GCM |
 | **Desktop** | Wails v2, OS-native WebView (WebView2 / WebKitGTK / WebKit) |
 | **Search** | Brave Search API, DuckDuckGo (zero-config), Jina Reader |
-| **LLM** | OpenAI, Anthropic, Ollama, OpenRouter, Groq, Together, Mistral — any OpenAI-compatible API |
-| **Image** | OpenAI (DALL-E/GPT-Image), Gemini, Stable Diffusion, Together (FLUX/Imagen), OpenRouter |
+| **LLM** | OpenAI (GPT-5.x, o-series), Anthropic (Claude 4.x), Google Gemini, Ollama, OpenRouter, Groq, Together AI, Mistral — any OpenAI-compatible API |
+| **Image** | OpenAI (DALL-E / GPT-Image), Gemini (Imagen 4.0 / Gemini image), Stable Diffusion, Together (FLUX / Imagen / Seedream / HiDream), OpenRouter |
 
 ---
 
