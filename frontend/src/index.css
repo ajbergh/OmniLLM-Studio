@@ -282,10 +282,34 @@ html, body, #root {
   text-underline-offset: 2px;
 }
 
+.message-content {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.message-content pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.message-table-wrap {
+  max-width: 100%;
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 0.75rem;
+}
+
+.message-table-wrap:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .message-content table {
   border-collapse: collapse;
-  margin: 0.75rem 0;
-  width: 100%;
+  margin: 0;
+  min-width: 100%;
+  width: max-content;
   font-size: 0.9em;
 }
 
@@ -293,6 +317,8 @@ html, body, #root {
   border: 1px solid var(--color-border);
   padding: 0.5rem 0.75rem;
   text-align: left;
+  min-width: 8rem;
+  vertical-align: top;
 }
 
 .message-content th {
@@ -445,4 +471,3 @@ select:focus-visible,
   background: var(--color-surface-hover);
   color: var(--color-text);
 }
-

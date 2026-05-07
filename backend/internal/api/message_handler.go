@@ -128,8 +128,9 @@ type sendMessageRequest struct {
 		Model        *string `json:"model,omitempty"`
 		SystemPrompt *string `json:"system_prompt,omitempty"`
 	} `json:"override,omitempty"`
-	WebSearch *bool `json:"web_search,omitempty"`
-	Think     *bool `json:"think,omitempty"` // Ollama-only: enable/disable thinking
+	WebSearch       *bool   `json:"web_search,omitempty"`
+	Think           *bool   `json:"think,omitempty"`            // Ollama-only: enable/disable thinking
+	ReasoningEffort string  `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high"
 }
 
 // Create handles non-streaming message creation + LLM response.
@@ -181,6 +182,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	llmReq := h.buildLLMRequest(convo, history, req.Override)
 	llmReq.Think = req.Think
+	llmReq.ReasoningEffort = req.ReasoningEffort
 
 	// Inject attachment context into the last user message if applicable
 	if attachCtx := h.linkAndBuildAttachmentContext(req.AttachmentIDs, userMsg.ID, convoID); attachCtx != "" {
@@ -361,6 +363,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	llmReq := h.buildLLMRequest(convo, history, req.Override)
 	llmReq.Think = req.Think
+	llmReq.ReasoningEffort = req.ReasoningEffort
 
 	// Inject attachment context into the last user message if applicable
 	if attachCtx := h.linkAndBuildAttachmentContext(req.AttachmentIDs, userMsg.ID, convoID); attachCtx != "" {
@@ -404,6 +407,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var fullContent string
 	var fullThinking string
 	var provider, model string
+	var tokenIn, tokenOut int
 
 	start := time.Now()
 
@@ -449,6 +453,12 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			fullContent += chunk.Content
 			provider = chunk.Provider
 			model = chunk.Model
+			if chunk.TokenInput > 0 {
+				tokenIn = chunk.TokenInput
+			}
+			if chunk.TokenOutput > 0 {
+				tokenOut = chunk.TokenOutput
+			}
 
 			if chunk.Thinking != "" {
 				fullThinking += chunk.Thinking
@@ -480,6 +490,12 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			fullContent += chunk.Content
 			provider = chunk.Provider
 			model = chunk.Model
+			if chunk.TokenInput > 0 {
+				tokenIn = chunk.TokenInput
+			}
+			if chunk.TokenOutput > 0 {
+				tokenOut = chunk.TokenOutput
+			}
 
 			if chunk.Thinking != "" {
 				fullThinking += chunk.Thinking
@@ -529,6 +545,13 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Save assistant message
 	pProvider := &provider
 	pModel := &model
+	var pTokenIn, pTokenOut *int
+	if tokenIn > 0 {
+		pTokenIn = &tokenIn
+	}
+	if tokenOut > 0 {
+		pTokenOut = &tokenOut
+	}
 	assistantMsg := &models.Message{
 		ID:             msgID,
 		ConversationID: convoID,
@@ -537,6 +560,8 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:      time.Now().UTC(),
 		Provider:       pProvider,
 		Model:          pModel,
+		TokenInput:     pTokenIn,
+		TokenOutput:    pTokenOut,
 		LatencyMs:      &latency,
 		MetadataJSON:   metaJSON,
 	}

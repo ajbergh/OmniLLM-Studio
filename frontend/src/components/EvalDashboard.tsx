@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { evalApi } from '../api';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { toast } from 'sonner';
-import { FlaskConical, Play, Trash2, X, ChevronRight, Upload } from 'lucide-react';
+import { FlaskConical, Play, Trash2, ChevronRight, Upload } from 'lucide-react';
+import { DialogShell } from './DialogShell';
 import type { EvalRun, EvalSuite, EvalCaseResult } from '../types';
 
 interface EvalDashboardProps {
@@ -13,6 +14,7 @@ interface EvalDashboardProps {
 export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [selectedRun, setSelectedRun] = useState<EvalRun | null>(null);
   const [results, setResults] = useState<EvalCaseResult[]>([]);
   const [tab, setTab] = useState<'runs' | 'new'>('runs');
@@ -25,11 +27,14 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
 
   const fetchRuns = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const data = await evalApi.listRuns();
       setRuns(data || []);
     } catch (err) {
-      toast.error(`Failed to load eval runs: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      setLoadError(message);
+      toast.error(`Failed to load eval runs: ${message}`);
     } finally {
       setLoading(false);
     }
@@ -115,57 +120,39 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
   if (!open) return null;
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center"
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          onClick={(e) => e.stopPropagation()}
-          className="glass-strong rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-hidden mx-4"
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-            <div className="flex items-center gap-2">
-              <FlaskConical size={18} className="text-primary" />
-              <h2 className="text-lg font-semibold text-text">Evaluation Harness</h2>
+    <DialogShell
+      open={open}
+      onClose={onClose}
+      title="Evaluation Harness"
+      icon={<FlaskConical size={18} />}
+      maxWidth="max-w-3xl"
+      maxHeight="max-h-[85vh]"
+      bodyClassName="px-4 py-4 sm:px-6"
+    >
+            {/* Tabs */}
+            <div className="flex gap-1 p-1 glass rounded-xl w-fit">
+              <button
+                onClick={() => { setTab('runs'); setSelectedRun(null); }}
+                className={`min-h-10 px-4 rounded-lg text-sm font-medium transition-colors ${
+                  tab === 'runs' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text'
+                }`}
+              >
+                Past Runs
+              </button>
+              <button
+                onClick={() => setTab('new')}
+                className={`min-h-10 px-4 rounded-lg text-sm font-medium transition-colors ${
+                  tab === 'new' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text'
+                }`}
+              >
+                New Eval
+              </button>
             </div>
-            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={onClose}>
-              <X size={18} className="text-text-muted hover:text-text" />
-            </motion.button>
-          </div>
 
-          {/* Tabs */}
-          <div className="flex gap-1 p-1 mx-6 mt-4 glass rounded-xl w-fit">
-            <button
-              onClick={() => { setTab('runs'); setSelectedRun(null); }}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                tab === 'runs' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text'
-              }`}
-            >
-              Past Runs
-            </button>
-            <button
-              onClick={() => setTab('new')}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                tab === 'new' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text'
-              }`}
-            >
-              New Eval
-            </button>
-          </div>
-
-          {/* Content */}
-          <div className="px-6 py-4 overflow-y-auto max-h-[65vh]">
+          <div className="pt-4">
             {tab === 'new' ? (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-text-muted mb-1">Provider</label>
                     <input
@@ -213,7 +200,7 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
                   whileTap={{ scale: 0.99 }}
                   onClick={handleRunEval}
                   disabled={running || !suiteJson.trim() || !provider.trim()}
-                  className="w-full py-2.5 rounded-xl btn-primary text-sm font-medium flex items-center justify-center gap-2
+                    className="w-full py-2.5 rounded-xl btn-primary text-sm font-medium flex items-center justify-center gap-2
                              disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {running ? (
@@ -239,9 +226,9 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
                 </button>
 
                 <div className="glass rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <h3 className="text-sm font-medium text-text">{selectedRun.suite_name}</h3>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-medium text-text break-words">{selectedRun.suite_name}</h3>
                       <div className="text-xs text-text-muted mt-0.5">
                         {selectedRun.provider} / {selectedRun.model || 'default'}
                       </div>
@@ -285,7 +272,7 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
                             <span className="font-medium">Response:</span> {cr.response}
                           </div>
                         )}
-                        <div className="flex gap-3 mt-2 text-xs">
+                        <div className="flex flex-wrap gap-3 mt-2 text-xs">
                           {cr.keyword_hits && cr.keyword_hits.length > 0 && (
                             <span className="text-emerald-400">
                               Hits: {cr.keyword_hits.join(', ')}
@@ -298,7 +285,7 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
                           )}
                         </div>
                         {cr.breakdown && Object.keys(cr.breakdown).length > 0 && (
-                          <div className="flex gap-2 mt-2">
+                          <div className="flex flex-wrap gap-2 mt-2">
                             {Object.entries(cr.breakdown).map(([key, val]) => (
                               <span key={key} className="text-xs px-1.5 py-0.5 rounded bg-surface-light text-text-muted">
                                 {key}: {(val * 100).toFixed(0)}%
@@ -316,6 +303,17 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
               <div className="space-y-2">
                 {loading ? (
                   <div className="py-12 text-center text-text-muted">Loading...</div>
+                ) : loadError ? (
+                  <div className="py-12 text-center">
+                    <p className="text-sm text-danger">Failed to load eval runs</p>
+                    <p className="text-xs text-text-muted mt-1 break-words">{loadError}</p>
+                    <button
+                      onClick={fetchRuns}
+                      className="mt-4 min-h-10 px-4 rounded-xl glass text-sm text-text hover:bg-surface-hover transition-colors"
+                    >
+                      Retry
+                    </button>
+                  </div>
                 ) : runs.length === 0 ? (
                   <div className="py-12 text-center text-text-muted text-sm">
                     <FlaskConical size={32} className="mx-auto mb-3 opacity-30" />
@@ -324,18 +322,18 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
                   </div>
                 ) : (
                   runs.map((run) => (
-                    <div key={run.id} className="glass rounded-xl p-3 group flex items-center justify-between">
+                    <div key={run.id} className="glass rounded-xl p-3 group flex items-center justify-between gap-2">
                       <button
                         onClick={() => viewRunDetails(run)}
-                        className="flex-1 text-left flex items-center gap-3"
+                        className="flex-1 min-w-0 text-left flex items-center gap-3"
                       >
                         <div className={`text-lg font-bold ${scoreColor(run.total_score || 0)}`}>
                           {((run.total_score || 0) * 100).toFixed(0)}%
                         </div>
-                        <div>
-                          <div className="text-sm font-medium text-text">{run.suite_name}</div>
-                          <div className="text-xs text-text-muted">
-                            {run.provider} / {run.model || 'default'} — {new Date(run.created_at).toLocaleDateString()}
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-text truncate">{run.suite_name}</div>
+                          <div className="text-xs text-text-muted truncate">
+                            {run.provider} / {run.model || 'default'} - {new Date(run.created_at).toLocaleDateString()}
                           </div>
                         </div>
                         <ChevronRight size={14} className="ml-auto text-text-muted" />
@@ -344,7 +342,9 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
                         whileHover={{ scale: 1.1 }}
                         whileTap={{ scale: 0.9 }}
                         onClick={() => handleDelete(run.id)}
-                        className="p-1.5 rounded-lg text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all ml-2"
+                        className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg text-text-muted hover:text-red-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
+                        aria-label={`Delete eval run ${run.suite_name}`}
+                        title="Delete"
                       >
                         <Trash2 size={14} />
                       </motion.button>
@@ -354,8 +354,6 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
               </div>
             )}
           </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+    </DialogShell>
   );
 }

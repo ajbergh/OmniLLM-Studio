@@ -80,10 +80,11 @@ type EmbeddingResponse struct {
 
 // ChatRequest holds the parameters for a chat completion request.
 type ChatRequest struct {
-	Provider string        `json:"provider"`
-	Model    string        `json:"model"`
-	Messages []ChatMessage `json:"messages"`
-	Think    *bool         `json:"think,omitempty"` // Ollama-only: enable/disable thinking
+	Provider       string        `json:"provider"`
+	Model          string        `json:"model"`
+	Messages       []ChatMessage `json:"messages"`
+	Think          *bool         `json:"think,omitempty"`           // Ollama-only: enable/disable thinking
+	ReasoningEffort string       `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" — for OpenAI o-series, gpt-5.x, and Anthropic extended thinking
 }
 
 // ChatResponse holds the result of a non-streaming chat completion.
@@ -98,10 +99,12 @@ type ChatResponse struct {
 
 // StreamChunk represents a single token/chunk from a streaming response.
 type StreamChunk struct {
-	Content  string `json:"content"`
-	Thinking string `json:"thinking,omitempty"` // Ollama-only: thinking content
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	Content     string `json:"content"`
+	Thinking    string `json:"thinking,omitempty"` // Ollama-only: thinking content
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
+	TokenInput  int    `json:"token_input,omitempty"`  // populated in the final usage chunk
+	TokenOutput int    `json:"token_output,omitempty"` // populated in the final usage chunk
 }
 
 // Service orchestrates LLM calls using configured provider profiles.
@@ -226,13 +229,13 @@ func getBaseURL(providerType string, customURL *string) string {
 func getDefaultModel(providerType string) string {
 	switch strings.ToLower(providerType) {
 	case "openai":
-		return "gpt-4o"
+		return "gpt-5.5"
 	case "anthropic":
-		return "claude-sonnet-4-20250514"
+		return "claude-opus-4-7"
 	case "ollama":
 		return "llama3.2"
 	case "openrouter":
-		return "openai/gpt-4o"
+		return "openai/gpt-5.5"
 	case "groq":
 		return "llama-3.3-70b-versatile"
 	case "together":
@@ -240,9 +243,9 @@ func getDefaultModel(providerType string) string {
 	case "mistral":
 		return "mistral-large-latest"
 	case "gemini":
-		return "gemini-2.0-flash"
+		return "gemini-2.5-flash"
 	default:
-		return "gpt-4o"
+		return "gpt-5.5"
 	}
 }
 
@@ -252,6 +255,20 @@ func getDefaultEmbeddingModel(providerType string) string {
 		return "nomic-embed-text"
 	default:
 		return "text-embedding-3-small"
+	}
+}
+
+// effortToBudgetTokens converts a reasoning effort level to Anthropic thinking budget_tokens.
+func effortToBudgetTokens(effort string) int {
+	switch strings.ToLower(effort) {
+	case "low":
+		return 2000
+	case "medium":
+		return 8000
+	case "high":
+		return 16000
+	default:
+		return 0
 	}
 }
 
@@ -458,6 +475,23 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 		body["think"] = *req.Think
 	}
 
+	// Reasoning effort for OpenAI-compatible providers (o-series, gpt-5.x, etc.)
+	// and Anthropic extended thinking via their OpenAI-compat endpoint.
+	if req.ReasoningEffort != "" && strings.ToLower(providerType) != "ollama" {
+		if strings.ToLower(providerType) == "anthropic" {
+			// Map effort level to Anthropic thinking budget tokens
+			budgetTokens := effortToBudgetTokens(req.ReasoningEffort)
+			if budgetTokens > 0 {
+				body["thinking"] = map[string]interface{}{
+					"type":          "enabled",
+					"budget_tokens": budgetTokens,
+				}
+			}
+		} else {
+			body["reasoning_effort"] = req.ReasoningEffort
+		}
+	}
+
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -473,6 +507,9 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 		if strings.ToLower(providerType) == "anthropic" {
 			httpReq.Header.Set("x-api-key", apiKey)
 			httpReq.Header.Set("anthropic-version", "2023-06-01")
+			if req.ReasoningEffort != "" {
+				httpReq.Header.Set("anthropic-beta", "interleaved-thinking-2025-05-14")
+			}
 		} else {
 			httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 		}
@@ -543,9 +580,30 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 		"stream":   true,
 	}
 
+	// Request usage stats in the final streaming chunk (OpenAI-compatible providers).
+	// Ollama uses a different final-chunk format so skip it there.
+	if strings.ToLower(providerType) != "ollama" {
+		body["stream_options"] = map[string]interface{}{"include_usage": true}
+	}
+
 	// Ollama-only: pass think parameter when explicitly set
 	if strings.ToLower(providerType) == "ollama" && req.Think != nil {
 		body["think"] = *req.Think
+	}
+
+	// Reasoning effort for OpenAI-compatible providers and Anthropic extended thinking.
+	if req.ReasoningEffort != "" && strings.ToLower(providerType) != "ollama" {
+		if strings.ToLower(providerType) == "anthropic" {
+			budgetTokens := effortToBudgetTokens(req.ReasoningEffort)
+			if budgetTokens > 0 {
+				body["thinking"] = map[string]interface{}{
+					"type":          "enabled",
+					"budget_tokens": budgetTokens,
+				}
+			}
+		} else {
+			body["reasoning_effort"] = req.ReasoningEffort
+		}
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -567,6 +625,9 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 		if strings.ToLower(providerType) == "anthropic" {
 			httpReq.Header.Set("x-api-key", apiKey)
 			httpReq.Header.Set("anthropic-version", "2023-06-01")
+			if req.ReasoningEffort != "" {
+				httpReq.Header.Set("anthropic-beta", "interleaved-thinking-2025-05-14")
+			}
 		} else {
 			httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 		}
@@ -620,6 +681,10 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 								Thinking string `json:"thinking"`
 							} `json:"delta"`
 						} `json:"choices"`
+						Usage *struct {
+							PromptTokens     int `json:"prompt_tokens"`
+							CompletionTokens int `json:"completion_tokens"`
+						} `json:"usage"`
 					}
 
 					if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
@@ -636,6 +701,15 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 								Model:    model,
 							})
 						}
+					}
+					// Emit token counts from usage chunk (sent at end of stream)
+					if chunk.Usage != nil && (chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0) {
+						onChunk(StreamChunk{
+							Provider:    providerType,
+							Model:       model,
+							TokenInput:  chunk.Usage.PromptTokens,
+							TokenOutput: chunk.Usage.CompletionTokens,
+						})
 					}
 				}
 			}

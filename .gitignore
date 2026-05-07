@@ -40,8 +40,11 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+/backend/test-results/
 *.exe
 *.db
 playright.config.ts
-tests/
 
+output/*
+*.exe
+build/*

@@ -74,6 +74,14 @@ export function MarkdownContent({ content }: Props) {
               </a>
             );
           },
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          table({ children, ref: _ref, ...props }) {
+            return (
+              <div className="message-table-wrap" role="region" aria-label="Scrollable table" tabIndex={0}>
+                <table {...props}>{children}</table>
+              </div>
+            );
+          },
         }}
       >
         {content}

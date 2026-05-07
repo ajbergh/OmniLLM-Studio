@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { pluginApi } from '../api';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { Puzzle, Plus, Trash2, Power, PowerOff, X, FolderOpen, RefreshCw } from 'lucide-react';
+import { DialogShell } from './DialogShell';
 import type { InstalledPlugin } from '../types';
 
 interface PluginManagerProps {
@@ -13,16 +14,20 @@ interface PluginManagerProps {
 export function PluginManager({ open, onClose }: PluginManagerProps) {
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [installing, setInstalling] = useState(false);
   const [installDir, setInstallDir] = useState('');
 
   const fetchPlugins = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const data = await pluginApi.list();
       setPlugins(data);
     } catch (err) {
-      toast.error(`Failed to load plugins: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      setLoadError(message);
+      toast.error(`Failed to load plugins: ${message}`);
     } finally {
       setLoading(false);
     }
@@ -68,54 +73,39 @@ export function PluginManager({ open, onClose }: PluginManagerProps) {
   if (!open) return null;
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center"
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          onClick={(e) => e.stopPropagation()}
-          className="glass-strong rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden mx-4"
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-            <div className="flex items-center gap-2">
-              <Puzzle size={18} className="text-primary" />
-              <h2 className="text-lg font-semibold text-text">Plugin Manager</h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={fetchPlugins}
-                className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-light transition-colors"
-              >
-                <RefreshCw size={14} />
-              </motion.button>
-              {!installing && (
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setInstalling(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg btn-primary text-xs font-medium"
-                >
-                  <Plus size={14} /> Install Plugin
-                </motion.button>
-              )}
-              <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={onClose}>
-                <X size={18} className="text-text-muted hover:text-text" />
-              </motion.button>
-            </div>
-          </div>
-
-          {/* Content */}
-          <div className="px-6 py-4 overflow-y-auto max-h-[65vh]">
+    <DialogShell
+      open={open}
+      onClose={onClose}
+      title="Plugin Manager"
+      icon={<Puzzle size={18} />}
+      maxWidth="max-w-2xl"
+      maxHeight="max-h-[80vh]"
+      bodyClassName="px-4 py-4 sm:px-6"
+      actions={(
+        <>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={fetchPlugins}
+            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl text-text-muted hover:text-text hover:bg-surface-light transition-colors"
+            aria-label="Refresh plugins"
+            title="Refresh plugins"
+          >
+            <RefreshCw size={14} />
+          </motion.button>
+          {!installing && (
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setInstalling(true)}
+              className="min-h-10 inline-flex items-center gap-1.5 px-3 rounded-xl btn-primary text-xs font-medium"
+            >
+              <Plus size={14} /> Install
+            </motion.button>
+          )}
+        </>
+      )}
+    >
             {/* Install form */}
             {installing && (
               <div className="glass rounded-xl p-4 mb-4 space-y-3">
@@ -123,7 +113,7 @@ export function PluginManager({ open, onClose }: PluginManagerProps) {
                   <FolderOpen size={14} />
                   <span>Install from directory</span>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <input
                     type="text"
                     value={installDir}
@@ -138,13 +128,15 @@ export function PluginManager({ open, onClose }: PluginManagerProps) {
                     whileTap={{ scale: 0.98 }}
                     onClick={handleInstall}
                     disabled={!installDir.trim()}
-                    className="px-4 py-2 rounded-lg btn-primary text-sm font-medium disabled:opacity-50"
+                    className="min-h-10 px-4 rounded-lg btn-primary text-sm font-medium disabled:opacity-50"
                   >
                     Install
                   </motion.button>
                   <button
                     onClick={() => { setInstalling(false); setInstallDir(''); }}
-                    className="p-2 text-text-muted hover:text-text"
+                    className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                    aria-label="Cancel plugin install"
+                    title="Cancel"
                   >
                     <X size={16} />
                   </button>
@@ -155,6 +147,17 @@ export function PluginManager({ open, onClose }: PluginManagerProps) {
             {/* Plugin list */}
             {loading ? (
               <div className="py-12 text-center text-text-muted">Loading plugins...</div>
+            ) : loadError ? (
+              <div className="py-12 text-center">
+                <p className="text-sm text-danger">Failed to load plugins</p>
+                <p className="text-xs text-text-muted mt-1 break-words">{loadError}</p>
+                <button
+                  onClick={fetchPlugins}
+                  className="mt-4 min-h-10 px-4 rounded-xl glass text-sm text-text hover:bg-surface-hover transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
             ) : plugins.length === 0 ? (
               <div className="py-12 text-center text-text-muted text-sm">
                 <Puzzle size={32} className="mx-auto mb-3 opacity-30" />
@@ -165,10 +168,10 @@ export function PluginManager({ open, onClose }: PluginManagerProps) {
               <div className="space-y-3">
                 {plugins.map((plugin) => (
                   <div key={plugin.name} className="glass rounded-xl p-4 group">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-text">{plugin.name}</span>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-text break-words">{plugin.name}</span>
                           <span className="text-xs px-1.5 py-0.5 rounded-full bg-surface-light text-text-muted">
                             v{plugin.version}
                           </span>
@@ -184,10 +187,10 @@ export function PluginManager({ open, onClose }: PluginManagerProps) {
                           )}
                         </div>
                         {plugin.manifest?.description && (
-                          <p className="text-xs text-text-muted mt-1">{plugin.manifest.description}</p>
+                          <p className="text-xs text-text-muted mt-1 break-words">{plugin.manifest.description}</p>
                         )}
                         {plugin.manifest?.capabilities && (
-                          <div className="flex gap-1 mt-2">
+                          <div className="flex flex-wrap gap-1 mt-2">
                             {plugin.manifest.capabilities.map((cap) => (
                               <span key={cap} className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                                 {cap}
@@ -196,22 +199,23 @@ export function PluginManager({ open, onClose }: PluginManagerProps) {
                           </div>
                         )}
                         {plugin.manifest?.tools && plugin.manifest.tools.length > 0 && (
-                          <div className="mt-2 text-xs text-text-muted">
+                          <div className="mt-2 text-xs text-text-muted break-words">
                             Tools: {plugin.manifest.tools.map((t) => t.name).join(', ')}
                           </div>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-1 ml-3">
+                      <div className="flex items-center gap-1 sm:ml-3">
                         <motion.button
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
                           onClick={() => handleToggle(plugin.name, plugin.enabled)}
-                          className={`p-2 rounded-lg transition-colors ${
+                          className={`min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg transition-colors ${
                             plugin.enabled
                               ? 'text-emerald-400 hover:bg-emerald-400/10'
                               : 'text-gray-400 hover:bg-gray-400/10'
                           }`}
+                          aria-label={plugin.enabled ? `Disable ${plugin.name}` : `Enable ${plugin.name}`}
                           title={plugin.enabled ? 'Disable' : 'Enable'}
                         >
                           {plugin.enabled ? <Power size={14} /> : <PowerOff size={14} />}
@@ -220,7 +224,8 @@ export function PluginManager({ open, onClose }: PluginManagerProps) {
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
                           onClick={() => handleUninstall(plugin.name)}
-                          className="p-2 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                          className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                          aria-label={`Uninstall ${plugin.name}`}
                           title="Uninstall"
                         >
                           <Trash2 size={14} />
@@ -231,9 +236,6 @@ export function PluginManager({ open, onClose }: PluginManagerProps) {
                 ))}
               </div>
             )}
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+    </DialogShell>
   );
 }

@@ -16,6 +16,7 @@ export function SearchPanel({ open, onClose, onSelectResult }: SearchPanelProps)
   const [results, setResults] = useState<SearchResult[]>([]);
   const [activeResultIndex, setActiveResultIndex] = useState(-1);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
   const [mode, setMode] = useState<SearchMode>('hybrid');
   const [showFilters, setShowFilters] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -43,13 +44,16 @@ export function SearchPanel({ open, onClose, onSelectResult }: SearchPanelProps)
     if (!query.trim()) return;
     setLoading(true);
     setSearched(true);
+    setSearchError('');
     try {
       const data = await searchApi.search(query, mode, 50);
       const nextResults = data.results || [];
       setResults(nextResults);
       setActiveResultIndex(nextResults.length > 0 ? 0 : -1);
     } catch (err) {
-      toast.error(`Search failed: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      setSearchError(message);
+      toast.error(`Search failed: ${message}`);
       setResults([]);
       setActiveResultIndex(-1);
     } finally {
@@ -160,6 +164,8 @@ export function SearchPanel({ open, onClose, onSelectResult }: SearchPanelProps)
                 className={`p-1.5 rounded-lg transition-colors ${
                   showFilters ? 'text-primary bg-primary/10' : 'text-text-muted hover:text-text'
                 }`}
+                aria-label={showFilters ? 'Hide search filters' : 'Show search filters'}
+                title={showFilters ? 'Hide filters' : 'Show filters'}
               >
                 <SlidersHorizontal size={14} />
               </motion.button>
@@ -168,6 +174,8 @@ export function SearchPanel({ open, onClose, onSelectResult }: SearchPanelProps)
                 whileTap={{ scale: 0.95 }}
                 onClick={onClose}
                 className="p-1.5 rounded-lg text-text-muted hover:text-text"
+                aria-label="Close search"
+                title="Close search"
               >
                 <X size={14} />
               </motion.button>
@@ -212,6 +220,7 @@ export function SearchPanel({ open, onClose, onSelectResult }: SearchPanelProps)
                       }}
                       disabled={reindexing}
                       className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-text-muted hover:text-primary transition-colors disabled:opacity-50"
+                      aria-label="Rebuild search index"
                     >
                       <RefreshCw size={11} className={reindexing ? 'animate-spin' : ''} />
                       {reindexing ? 'Reindexing...' : 'Reindex'}
@@ -228,6 +237,17 @@ export function SearchPanel({ open, onClose, onSelectResult }: SearchPanelProps)
               <div className="py-16 text-center">
                 <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto" />
                 <p className="text-xs text-text-muted mt-2">Searching...</p>
+              </div>
+            ) : searchError ? (
+              <div className="py-16 px-6 text-center">
+                <p className="text-sm text-danger">Search failed</p>
+                <p className="text-xs text-text-muted mt-1 break-words">{searchError}</p>
+                <button
+                  onClick={handleSearch}
+                  className="mt-4 min-h-10 px-4 rounded-xl glass text-sm text-text hover:bg-surface-hover transition-colors"
+                >
+                  Retry
+                </button>
               </div>
             ) : !searched ? (
               <div className="py-16 text-center text-text-muted text-sm">

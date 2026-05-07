@@ -127,6 +127,7 @@ export function KeyboardShortcuts({ open, onClose }: Props) {
                   <button
                     onClick={handleResetAll}
                     className="p-1.5 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
+                    aria-label="Reset all shortcuts to defaults"
                     title="Reset all to defaults"
                   >
                     <RotateCcw size={14} />
@@ -134,6 +135,8 @@ export function KeyboardShortcuts({ open, onClose }: Props) {
                   <button
                     onClick={() => { cancelRecording(); onClose(); }}
                     className="p-1.5 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
+                    aria-label="Close Keyboard Shortcuts"
+                    title="Close Keyboard Shortcuts"
                   >
                     <X size={16} />
                   </button>
@@ -167,6 +170,7 @@ export function KeyboardShortcuts({ open, onClose }: Props) {
                           <button
                             onClick={(e) => { e.stopPropagation(); handleResetOne(shortcut.id); }}
                             className="p-1 rounded hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
+                            aria-label={`Reset shortcut for ${shortcut.description}`}
                             title="Reset to default"
                           >
                             <RotateCcw size={11} />

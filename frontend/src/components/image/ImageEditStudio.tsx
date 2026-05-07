@@ -22,6 +22,8 @@ interface ImageEditStudioProps {
   onClose?: () => void;
 }
 
+type MobileImagePanel = 'prompt' | 'canvas' | 'history';
+
 export function ImageEditStudio({ conversationId: propConversationId, onClose }: ImageEditStudioProps = {}) {
   const providers = useProviderStore((s) => s.providers);
   const activeConversationId = useImageEditorStore((s) => s.activeConversationId);
@@ -83,11 +85,12 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const [compareOpen, setCompareOpen] = useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [mobilePanel, setMobilePanel] = useState<MobileImagePanel>('prompt');
   const refInputRef = useRef<HTMLInputElement>(null);
   const pendingRefType = useRef<'content' | 'style'>('content');
   const canvasRef = useRef<ImageCanvasHandle>(null);
   const [capabilities, setCapabilities] = useState<ImageCapabilities | null>(null);
-  const imageCapableProviders = providers.filter((p) => p.image_capable && p.enabled);
+  const imageCapableProviders = useMemo(() => providers.filter((p) => p.image_capable && p.enabled), [providers]);
   const prevProviderRef = useRef<string | null>(null);
   const baseImageInputRef = useRef<HTMLInputElement>(null);
   const [uploadedBaseImageId, setUploadedBaseImageId] = useState<string | null>(null);
@@ -208,6 +211,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   }, [activeNodeId, activeSessionId, conversationId, loadNodeAssets]);
   const handleGenerate = async () => {
     if (!prompt.trim() || !activeSessionId) return;
+    if (imageCapableProviders.length === 0) {
+      toast.error('Add an image-capable provider before generating images');
+      return;
+    }
     await generate(conversationId!, {
       prompt: prompt.trim(),
       size,
@@ -223,6 +230,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
 
   const handleEdit = async () => {
     if (!prompt.trim() || !activeSessionId) return;
+    if (imageCapableProviders.length === 0) {
+      toast.error('Add an image-capable provider before editing images');
+      return;
+    }
     const selectedAsset = activeNodeAssets.find((a) => a.is_selected);
     const baseAttachmentId = selectedAsset?.attachment_id ?? uploadedBaseImageId;
     if (!baseAttachmentId) {
@@ -295,13 +306,13 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   return (
     <div className="flex-1 flex flex-col bg-surface min-h-0">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-surface-raised shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-2 px-3 py-2 border-b border-border bg-surface-raised shrink-0 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+        <div className="flex min-w-0 items-center gap-3">
           <Image size={18} className="text-primary" />
-          <span className="text-sm font-medium text-text">Image Edit Studio</span>
+          <span className="text-sm font-medium text-text shrink-0">Image Edit Studio</span>
           {activeSessionId && (
-            <span className="text-xs text-text-muted">
-              — {sessions.find((s) => s.id === activeSessionId)?.title}
+            <span className="min-w-0 truncate text-xs text-text-muted">
+              - {sessions.find((s) => s.id === activeSessionId)?.title}
             </span>
           )}
           {/* Node-level undo/redo */}
@@ -311,11 +322,12 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                 onClick={undoNodeNavigation}
                 disabled={nodeUndoStack.length === 0}
                 className={clsx(
-                  'p-1 rounded-md transition-colors',
+                  'min-h-8 min-w-8 inline-flex items-center justify-center rounded-md transition-colors',
                   nodeUndoStack.length === 0
                     ? 'text-text-muted/20 cursor-not-allowed'
                     : 'text-text-muted hover:text-text hover:bg-surface-hover'
                 )}
+                aria-label="Undo node navigation"
                 title="Undo node navigation"
               >
                 <Undo2 size={14} />
@@ -324,11 +336,12 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                 onClick={redoNodeNavigation}
                 disabled={nodeRedoStack.length === 0}
                 className={clsx(
-                  'p-1 rounded-md transition-colors',
+                  'min-h-8 min-w-8 inline-flex items-center justify-center rounded-md transition-colors',
                   nodeRedoStack.length === 0
                     ? 'text-text-muted/20 cursor-not-allowed'
                     : 'text-text-muted hover:text-text hover:bg-surface-hover'
                 )}
+                aria-label="Redo node navigation"
                 title="Redo node navigation"
               >
                 <Redo2 size={14} />
@@ -340,9 +353,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
           <button
             onClick={() => setLeftPanelOpen((v) => !v)}
             className={clsx(
-              'p-1.5 rounded-lg transition-colors',
+              'hidden lg:inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg transition-colors',
               leftPanelOpen ? 'text-text-muted hover:text-text hover:bg-surface-hover' : 'text-primary bg-primary/10'
             )}
+            aria-label={leftPanelOpen ? 'Hide controls' : 'Show controls'}
             title={leftPanelOpen ? 'Hide controls' : 'Show controls'}
           >
             <PanelLeft size={16} />
@@ -350,9 +364,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
           <button
             onClick={() => setRightPanelOpen((v) => !v)}
             className={clsx(
-              'p-1.5 rounded-lg transition-colors',
+              'hidden lg:inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg transition-colors',
               rightPanelOpen ? 'text-text-muted hover:text-text hover:bg-surface-hover' : 'text-primary bg-primary/10'
             )}
+            aria-label={rightPanelOpen ? 'Hide history' : 'Show history'}
             title={rightPanelOpen ? 'Hide history' : 'Show history'}
           >
             <PanelRight size={16} />
@@ -360,7 +375,9 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
           {onClose && (
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+              className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+              aria-label="Close Image Studio"
+              title="Close Image Studio"
             >
               <X size={18} />
             </button>
@@ -368,11 +385,38 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
         </div>
       </div>
 
-      {/* Main content — 3-column layout */}
-      <div className="flex flex-1 min-h-0">
+      <div className="grid grid-cols-3 gap-1 border-b border-border bg-surface-raised p-2 lg:hidden">
+        {([
+          { key: 'prompt', label: 'Prompt', Icon: Sparkles },
+          { key: 'canvas', label: 'Canvas', Icon: Image },
+          { key: 'history', label: 'History', Icon: PanelRight },
+        ] as const).map(({ key, label, Icon }) => (
+          <button
+            key={key}
+            onClick={() => setMobilePanel(key)}
+            className={clsx(
+              'min-h-10 rounded-xl text-xs font-medium transition-colors inline-flex items-center justify-center gap-1.5',
+              mobilePanel === key
+                ? 'bg-primary/20 text-primary'
+                : 'text-text-muted hover:text-text hover:bg-surface-hover'
+            )}
+          >
+            <Icon size={13} />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Main content */}
+      <div className="flex flex-1 min-h-0 flex-col lg:flex-row">
         {/* Left panel — generation controls */}
-        {leftPanelOpen && (
-        <div className="w-80 border-r border-border bg-surface-raised flex flex-col shrink-0 overflow-y-auto">
+        {(leftPanelOpen || mobilePanel === 'prompt') && (
+        <div className={clsx(
+          'min-h-0 flex-1 flex-col overflow-y-auto border-border bg-surface-raised',
+          'border-b lg:border-b-0 lg:border-r',
+          mobilePanel === 'prompt' ? 'flex' : 'hidden',
+          leftPanelOpen ? 'lg:flex lg:w-80 lg:flex-none lg:shrink-0' : 'lg:hidden'
+        )}>
           <div className="p-4 space-y-4">
             {activeSessionId && (
               <>
@@ -457,6 +501,13 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                         e.target.value = '';
                       }}
                     />
+                  </div>
+                )}
+
+                {imageCapableProviders.length === 0 && (
+                  <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[11px]">
+                    <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                    <span>Add an image-capable provider in Settings before generating or editing images.</span>
                   </div>
                 )}
 
@@ -559,6 +610,8 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                         <button
                           onClick={() => removeContentReference(id)}
                           className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                          aria-label="Remove content reference image"
+                          title="Remove content reference"
                         >
                           <XCircle size={14} className="text-danger bg-surface rounded-full" />
                         </button>
@@ -570,6 +623,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                         className="w-12 h-12 rounded-lg border border-dashed border-border
                                    text-text-muted hover:text-text hover:border-primary/40
                                    flex items-center justify-center transition-colors"
+                        aria-label="Add content reference image"
                         title="Add content reference image"
                       >
                         <ImagePlus size={14} />
@@ -593,6 +647,8 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                             <button
                               onClick={() => removeStyleReference(id)}
                               className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                              aria-label="Remove style reference image"
+                              title="Remove style reference"
                             >
                               <XCircle size={14} className="text-danger bg-surface rounded-full" />
                             </button>
@@ -604,6 +660,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                             className="w-12 h-12 rounded-lg border border-dashed border-accent/30
                                        text-text-muted hover:text-accent hover:border-accent/50
                                        flex items-center justify-center transition-colors"
+                            aria-label="Add style reference image"
                             title="Add style reference image"
                           >
                             <ImagePlus size={14} />
@@ -652,9 +709,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                       <button
                         onClick={() => setTool('brush')}
                         className={clsx(
-                          'p-2 rounded-lg transition-colors',
+                          'min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg transition-colors',
                           tool === 'brush' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text hover:bg-surface-hover'
                         )}
+                        aria-label="Brush tool"
                         title="Brush (B)"
                       >
                         <Paintbrush size={14} />
@@ -662,9 +720,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                       <button
                         onClick={() => setTool('eraser')}
                         className={clsx(
-                          'p-2 rounded-lg transition-colors',
+                          'min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg transition-colors',
                           tool === 'eraser' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text hover:bg-surface-hover'
                         )}
+                        aria-label="Eraser tool"
                         title="Eraser (E)"
                       >
                         <Eraser size={14} />
@@ -672,9 +731,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                       <button
                         onClick={() => setTool('pan')}
                         className={clsx(
-                          'p-2 rounded-lg transition-colors',
+                          'min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg transition-colors',
                           tool === 'pan' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text hover:bg-surface-hover'
                         )}
+                        aria-label="Pan tool"
                         title="Pan (Space)"
                       >
                         <Move size={14} />
@@ -682,7 +742,8 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                       <div className="w-px h-5 bg-border mx-1" />
                       <button
                         onClick={toggleMask}
-                        className="p-2 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                        className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                        aria-label={maskVisible ? 'Hide mask' : 'Show mask'}
                         title="Toggle mask visibility (M)"
                       >
                         {maskVisible ? <Eye size={14} /> : <EyeOff size={14} />}
@@ -719,14 +780,16 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={undoMaskStroke}
-                        className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                        className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                        aria-label="Undo mask stroke"
                         title="Undo mask stroke (Ctrl+Z)"
                       >
                         <Undo2 size={13} />
                       </button>
                       <button
                         onClick={redoMaskStroke}
-                        className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                        className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                        aria-label="Redo mask stroke"
                         title="Redo mask stroke (Ctrl+Shift+Z)"
                       >
                         <Redo2 size={13} />
@@ -750,10 +813,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                 {/* Generate / Edit button */}
                 <button
                   onClick={handleSubmit}
-                  disabled={generating || !prompt.trim()}
+                  disabled={generating || !prompt.trim() || imageCapableProviders.length === 0}
                   className={clsx(
                     'w-full py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2',
-                    generating || !prompt.trim()
+                    generating || !prompt.trim() || imageCapableProviders.length === 0
                       ? 'bg-surface-hover text-text-muted cursor-not-allowed'
                       : 'bg-primary text-white hover:bg-primary-hover shadow-glow'
                   )}
@@ -784,7 +847,12 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
         )}
 
         {/* Center — canvas */}
-        <div className="flex-1 min-w-0 bg-surface flex items-center justify-center relative overflow-hidden">
+        <div className={clsx(
+          'min-w-0 flex-1 bg-surface items-center justify-center relative overflow-hidden',
+          'min-h-[360px] lg:min-h-0',
+          mobilePanel === 'canvas' ? 'flex' : 'hidden',
+          'lg:flex'
+        )}>
           {activeSessionId && selectedAsset ? (
             <ImageCanvas
               ref={canvasRef}
@@ -802,7 +870,9 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
               <Image size={48} className="mx-auto opacity-30" />
               <p className="text-sm">
                 {activeSessionId
-                  ? 'Generate an image to get started'
+                  ? imageCapableProviders.length === 0
+                    ? 'Add an image-capable provider to generate images'
+                    : 'Generate an image to get started'
                   : 'Create or select a session'}
               </p>
             </div>
@@ -816,6 +886,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                   <button
                     key={asset.id}
                     onClick={() => selectVariant(conversationId!, activeNodeId!, asset.id)}
+                    aria-label={`Select image variant ${idx + 1}`}
                     className={clsx(
                       'shrink-0 w-16 h-16 rounded-lg border-2 overflow-hidden transition-all',
                       asset.is_selected
@@ -846,8 +917,13 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
         </div>
 
         {/* Right panel — history */}
-        {rightPanelOpen && (
-        <div className="w-72 border-l border-border bg-surface-raised shrink-0 overflow-y-auto">
+        {(rightPanelOpen || mobilePanel === 'history') && (
+        <div className={clsx(
+          'min-h-0 flex-1 overflow-y-auto border-border bg-surface-raised',
+          'border-t lg:border-t-0 lg:border-l',
+          mobilePanel === 'history' ? 'block' : 'hidden',
+          rightPanelOpen ? 'lg:block lg:w-72 lg:flex-none lg:shrink-0' : 'lg:hidden'
+        )}>
           <ImageHistoryPanel
             conversationId={conversationId!}
             nodes={nodes}

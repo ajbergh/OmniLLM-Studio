@@ -154,10 +154,18 @@ Visit **http://localhost:5173**. The Vite dev server proxies `/v1/*` to the Go b
 
 ### Windows Helper Scripts
 
+```bat
+scripts\start-dev.bat        :: Both backend and frontend
+scripts\start-backend.bat    :: Backend only
+scripts\start-frontend.bat   :: Frontend only
+```
+
+### Linux / macOS Helper Scripts
+
 ```bash
-scripts\start-dev.bat        # Both backend and frontend
-scripts\start-backend.bat    # Backend only
-scripts\start-frontend.bat   # Frontend only
+scripts/start-dev.sh         # Both backend and frontend
+scripts/start-backend.sh     # Backend only
+scripts/start-frontend.sh    # Frontend only
 ```
 
 ### Desktop App (Wails)
@@ -168,11 +176,26 @@ OmniLLM-Studio can also run as a **native desktop application** using [Wails v2]
 # Install Wails CLI (one-time)
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
-# Build for your current platform
-scripts/build-windows.bat    # Windows → build/bin/OmniLLM-Studio.exe
-scripts/build-linux.sh       # Linux   → build/bin/OmniLLM-Studio
-scripts/build-macos.sh       # macOS   → build/bin/OmniLLM-Studio.app
-scripts/build-all.sh         # Detect current OS and build
+# Wails desktop build
+scripts/build-wails-windows.bat          # Windows x64   → build/bin/OmniLLM-Studio.exe
+scripts/build-wails-windows.bat arm64    # Windows ARM64 → build/bin/OmniLLM-Studio-arm64.exe
+scripts/build-wails-linux.sh             # Linux x64     → build/bin/OmniLLM-Studio
+scripts/build-wails-linux.sh arm64       # Linux ARM64   → build/bin/OmniLLM-Studio-arm64
+scripts/build-wails-macos.sh             # macOS (current arch)
+scripts/build-wails-macos.sh arm64       # Apple Silicon → build/bin/OmniLLM-Studio-arm64.app
+scripts/build-wails-macos.sh amd64       # Intel         → build/bin/OmniLLM-Studio.app
+scripts/build-wails-macos.sh universal   # Universal     → build/bin/OmniLLM-Studio-universal.app
+
+# Web server build (headless, no Wails/WebView)
+scripts/build-web-windows.bat      # Windows x64
+scripts/build-web-linux.sh         # Linux x64
+scripts/build-web-macos.sh         # macOS (current arch)
+
+# Orchestrator (CI/CD)
+scripts/build-all.sh               # Wails: current OS, amd64
+scripts/build-all.sh --platform macos arm64   # Specific platform + arch
+scripts/build-all.sh --web --platform linux   # Web build for Linux
+scripts/build-all.sh --all         # All arches for current OS
 ```
 
 See the [Desktop App](#desktop-app) section below for full details.
@@ -255,13 +278,21 @@ OmniLLM-Studio/
 │               ├── ImageAdvancedControls.tsx # Size, seed, creativity, variants
 │               └── PromptQualityTips.tsx # Real-time prompt quality analyzer
 ├── scripts/
-│   ├── start-dev.bat                    # Dev: backend + frontend
-│   ├── start-backend.bat                # Dev: backend only
-│   ├── start-frontend.bat               # Dev: frontend only
-│   ├── build-windows.bat                # Wails desktop build (Windows)
-│   ├── build-linux.sh                   # Wails desktop build (Linux)
-│   ├── build-macos.sh                   # Wails desktop build (macOS)
-│   └── build-all.sh                     # Wails build orchestrator (CI/CD)
+│   ├── start-dev.bat                    # Dev: backend + frontend (Windows)
+│   ├── start-dev.sh                     # Dev: backend + frontend (Linux/macOS)
+│   ├── start-backend.bat                # Dev: backend only (Windows)
+│   ├── start-backend.sh                 # Dev: backend only (Linux/macOS)
+│   ├── start-frontend.bat               # Dev: frontend only (Windows)
+│   ├── start-frontend.sh                # Dev: frontend only (Linux/macOS)
+│   ├── start-wails-dev.bat              # Wails hot-reload dev mode (Windows)
+│   ├── start-wails-dev.sh               # Wails hot-reload dev mode (Linux/macOS)
+│   ├── build-wails-windows.bat                # Wails desktop build (Windows x64/ARM64)
+│   ├── build-wails-linux.sh                   # Wails desktop build (Linux x64/ARM64)
+│   ├── build-wails-macos.sh                   # Wails desktop build (macOS x64/arm64/universal)
+│   ├── build-web-windows.bat            # Web server build (Windows x64/ARM64)
+│   ├── build-web-linux.sh               # Web server build (Linux x64/ARM64)
+│   ├── build-web-macos.sh               # Web server build (macOS x64/arm64/universal)
+│   └── build-all.sh                     # Build orchestrator (CI/CD, Wails + web)
 ├── build/bin/                           # Desktop build output (git-ignored)
 ├── docs/                                # Implementation plans & assets
 └── LICENSE
@@ -583,12 +614,33 @@ Verify your environment with `wails doctor`.
 
 #### Build Scripts
 
-| Script | Platform | Output |
-|--------|----------|--------|
-| `scripts/build-windows.bat` | Windows | `build/bin/OmniLLM-Studio.exe` |
-| `scripts/build-linux.sh` | Linux | `build/bin/OmniLLM-Studio` |
-| `scripts/build-macos.sh` | macOS | `build/bin/OmniLLM-Studio.app` |
-| `scripts/build-all.sh` | Current OS / CI | All platforms |
+**Wails desktop builds:**
+
+| Script | Platform | Arch options | Output |
+|--------|----------|--------------|--------|
+| `scripts/build-wails-windows.bat [arch]` | Windows | `amd64` (default), `arm64` | `build/bin/OmniLLM-Studio[-arm64].exe` |
+| `scripts/build-wails-linux.sh [arch]` | Linux | `amd64` (default), `arm64` | `build/bin/OmniLLM-Studio[-arm64]` |
+| `scripts/build-wails-macos.sh [arch]` | macOS | `amd64`, `arm64` (default: current), `universal` | `build/bin/OmniLLM-Studio[-arm64\|-universal].app` |
+| `scripts/build-all.sh [opts]` | Current OS / CI | See `--help` | All arches for current OS |
+
+**Web server builds** (headless, no WebView/Wails — serve the React SPA separately):
+
+| Script | Platform | Arch options | Output |
+|--------|----------|--------------|--------|
+| `scripts/build-web-windows.bat [arch]` | Windows | `amd64` (default), `arm64` | `build/web/omnillm-studio[-arm64].exe` + `build/web/frontend/` |
+| `scripts/build-web-linux.sh [arch]` | Linux | `amd64` (default), `arm64` | `build/web/omnillm-studio[-arm64]` + `build/web/frontend/` |
+| `scripts/build-web-macos.sh [arch]` | macOS | `amd64`, `arm64` (default: current), `universal` | `build/web/omnillm-studio[-arm64\|-universal]` + `build/web/frontend/` |
+
+**`build-all.sh` flags:**
+
+```bash
+./build-all.sh                           # Wails: current OS, amd64
+./build-all.sh --platform linux arm64    # Wails: Linux ARM64
+./build-all.sh --web                     # Web: current OS, amd64
+./build-all.sh --web --platform macos universal  # Web: macOS universal
+./build-all.sh --all                     # Wails: current OS, all arches
+./build-all.sh --all --web               # Web: current OS, all arches
+```
 
 Each script follows the same flow:
 
@@ -598,11 +650,27 @@ Each script follows the same flow:
 3. cd backend && go build ./cmd/desktop          # Compile native binary
 ```
 
-macOS builds support architecture targeting:
+macOS builds support architecture targeting via the first argument:
 
 ```bash
-GOARCH=arm64 scripts/build-macos.sh   # Apple Silicon
-GOARCH=amd64 scripts/build-macos.sh   # Intel
+scripts/build-wails-macos.sh             # Current arch (native)
+scripts/build-wails-macos.sh arm64       # Apple Silicon
+scripts/build-wails-macos.sh amd64       # Intel
+scripts/build-wails-macos.sh universal   # Universal binary (lipo)
+```
+
+Similarly for Linux and Windows ARM64:
+
+```bash
+scripts/build-wails-linux.sh arm64       # Linux ARM64
+scripts/build-wails-windows.bat arm64    # Windows ARM64
+```
+
+**Dev mode (Wails hot-reload):**
+
+```bash
+scripts/start-wails-dev.bat        # Windows — opens app window with live reload
+scripts/start-wails-dev.sh         # Linux/macOS — same
 ```
 
 #### CI/CD (GitHub Actions)

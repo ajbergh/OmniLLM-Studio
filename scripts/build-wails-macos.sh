@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # OmniLLM-Studio — Wails Build Script for macOS
-# Produces: build/bin/OmniLLM-Studio.app
+# Produces: build/bin/OmniLLM-Studio[.app]
 #
 # Requirements:
 #   - Go 1.24+
@@ -9,17 +9,28 @@
 #   - Xcode Command Line Tools: xcode-select --install
 #
 # Usage:
-#   ./build-macos.sh                 # Build for current architecture
-#   GOARCH=arm64 ./build-macos.sh    # Build for Apple Silicon
-#   GOARCH=amd64 ./build-macos.sh    # Build for Intel
+#   ./build-macos.sh              # Build for current architecture
+#   ./build-macos.sh amd64        # Intel x86_64
+#   ./build-macos.sh arm64        # Apple Silicon
+#   ./build-macos.sh universal    # Universal binary (amd64 + arm64)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Default to current architecture
-TARGET_ARCH="${GOARCH:-$(go env GOARCH)}"
+# --- Architecture ---
+RAW_ARCH="${1:-${GOARCH:-$(go env GOARCH 2>/dev/null || echo 'amd64')}}"
+UNIVERSAL=false
+case "$RAW_ARCH" in
+    x64|x86_64|amd64)  TARGET_ARCH="amd64" ;;
+    arm64|aarch64)     TARGET_ARCH="arm64" ;;
+    universal)         TARGET_ARCH="universal"; UNIVERSAL=true ;;
+    *)
+        echo "[ERROR] Unsupported architecture: $RAW_ARCH (use amd64, arm64, or universal)"
+        exit 1
+        ;;
+esac
 PLATFORM="darwin/$TARGET_ARCH"
 
 echo ""
@@ -63,19 +74,27 @@ wails build -s -clean -trimpath -platform "$PLATFORM" \
     -ldflags "-X main.version=$GIT_VERSION -X main.commit=$GIT_COMMIT"
 
 # Copy output to project build directory
+OUTPUT_SUFFIX=""
+[ "$TARGET_ARCH" = "arm64" ]     && OUTPUT_SUFFIX="-arm64"
+[ "$TARGET_ARCH" = "universal" ] && OUTPUT_SUFFIX="-universal"
+
 mkdir -p "$PROJECT_ROOT/build/bin"
 if [ -d "$PROJECT_ROOT/backend/cmd/desktop/build/bin/OmniLLM-Studio.app" ]; then
-    rm -rf "$PROJECT_ROOT/build/bin/OmniLLM-Studio.app"
+    rm -rf "$PROJECT_ROOT/build/bin/OmniLLM-Studio${OUTPUT_SUFFIX}.app"
     cp -r "$PROJECT_ROOT/backend/cmd/desktop/build/bin/OmniLLM-Studio.app" \
-        "$PROJECT_ROOT/build/bin/OmniLLM-Studio.app"
+        "$PROJECT_ROOT/build/bin/OmniLLM-Studio${OUTPUT_SUFFIX}.app"
+    echo ""
+    echo "=========================================="
+    echo "  Build complete!"
+    echo "  Output: build/bin/OmniLLM-Studio${OUTPUT_SUFFIX}.app"
+    echo "=========================================="
 else
     cp -f "$PROJECT_ROOT/backend/cmd/desktop/build/bin/OmniLLM-Studio" \
-        "$PROJECT_ROOT/build/bin/OmniLLM-Studio" 2>/dev/null || true
+        "$PROJECT_ROOT/build/bin/OmniLLM-Studio${OUTPUT_SUFFIX}" 2>/dev/null || true
+    echo ""
+    echo "=========================================="
+    echo "  Build complete!"
+    echo "  Output: build/bin/OmniLLM-Studio${OUTPUT_SUFFIX}"
+    echo "=========================================="
 fi
-
-echo ""
-echo "=========================================="
-echo "  Build complete!"
-echo "  Output: build/bin/OmniLLM-Studio.app"
-echo "=========================================="
 echo ""

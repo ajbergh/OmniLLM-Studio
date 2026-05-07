@@ -24,6 +24,18 @@ function getProviderMeta(type: string) {
   return PROVIDER_TYPES.find((t) => t.value === type) || PROVIDER_TYPES[PROVIDER_TYPES.length - 1];
 }
 
+type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'tools' | 'pricing' | 'auth';
+
+const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
+  { key: 'providers', label: 'Providers' },
+  { key: 'general', label: 'General' },
+  { key: 'appearance', label: 'Appearance' },
+  { key: 'rag', label: 'RAG' },
+  { key: 'tools', label: 'Tools' },
+  { key: 'pricing', label: 'Pricing' },
+  { key: 'auth', label: 'Auth' },
+];
+
 const panelVariants = {
   hidden: { x: '100%', opacity: 0 },
   visible: { x: 0, opacity: 1, transition: { type: 'spring' as const, damping: 30, stiffness: 300 } },
@@ -40,7 +52,7 @@ export function SettingsPanel() {
   const { settingsOpen, toggleSettings, fetchSettings } = useSettingsStore();
   const { providers, fetchProviders, createProvider, updateProvider, deleteProvider } =
     useProviderStore();
-  const [tab, setTab] = useState<'providers' | 'general' | 'appearance' | 'rag' | 'tools' | 'pricing' | 'auth'>('providers');
+  const [tab, setTab] = useState<SettingsTab>('providers');
 
   useEffect(() => {
     if (settingsOpen) {
@@ -85,22 +97,29 @@ export function SettingsPanel() {
                 whileTap={{ scale: 0.9 }}
                 onClick={toggleSettings}
                 className="p-2 rounded-xl hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
+                aria-label="Close Settings"
+                title="Close Settings"
               >
                 <X size={18} />
               </motion.button>
             </div>
 
             {/* Tabs */}
-            <div className="flex mx-5 bg-surface-alt rounded-xl p-1 gap-1 overflow-x-auto">
-              {([
-                { key: 'providers', label: 'Providers' },
-                { key: 'general', label: 'General' },
-                { key: 'appearance', label: 'Appearance' },
-                { key: 'rag', label: 'RAG' },
-                { key: 'tools', label: 'Tools' },
-                { key: 'pricing', label: 'Pricing' },
-                { key: 'auth', label: 'Auth' },
-              ] as const).map((t) => (
+            <div className="mx-5 sm:hidden">
+              <label className="sr-only" htmlFor="settings-tab-select">Settings section</label>
+              <select
+                id="settings-tab-select"
+                value={tab}
+                onChange={(event) => setTab(event.target.value as SettingsTab)}
+                className="w-full min-h-11 rounded-xl border border-border bg-surface-alt px-3 text-sm text-text focus:outline-none focus:border-primary/50"
+              >
+                {SETTINGS_TABS.map((t) => (
+                  <option key={t.key} value={t.key}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="hidden sm:flex mx-5 bg-surface-alt rounded-xl p-1 gap-1 overflow-x-auto">
+              {SETTINGS_TABS.map((t) => (
                 <button
                   key={t.key}
                   onClick={() => setTab(t.key)}
@@ -252,7 +271,10 @@ function ProvidersTab({
   // Auto-fetch Ollama models when type changes to ollama
   useEffect(() => {
     if (newProvider.type === 'ollama' && adding) {
-      fetchOllama(newProvider.base_url || undefined);
+      const timer = window.setTimeout(() => {
+        fetchOllama(newProvider.base_url || undefined);
+      }, 300);
+      return () => window.clearTimeout(timer);
     }
   }, [newProvider.type, adding, fetchOllama, newProvider.base_url]);
 
@@ -276,13 +298,13 @@ function ProvidersTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-text-muted">Configure your AI provider connections.</p>
         <motion.button
           whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.97 }}
           onClick={() => setAdding(true)}
-          className="btn-primary flex items-center gap-1.5 px-4 py-2 text-xs rounded-xl font-medium"
+          className="btn-primary min-h-11 flex items-center justify-center gap-1.5 px-4 text-xs rounded-xl font-medium"
         >
           <Plus size={14} /> Add Provider
         </motion.button>
@@ -304,7 +326,7 @@ function ProvidersTab({
               {/* Provider type selection - visual grid */}
               <div>
                 <label className="block text-xs text-text-muted mb-2 font-medium">Provider Type</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {PROVIDER_TYPES.map((t) => (
                     <button
                       key={t.value}
@@ -315,7 +337,7 @@ function ProvidersTab({
                         default_image_model: '',
                       }))}
                       className={clsx(
-                        'p-3 rounded-xl text-left transition-all duration-200 border',
+                        'min-h-14 p-3 rounded-xl text-left transition-all duration-200 border',
                         newProvider.type === t.value
                           ? `bg-gradient-to-br ${t.color} border-primary/30 shadow-sm`
                           : 'bg-surface-alt border-border hover:border-border-subtle hover:bg-surface-hover'
@@ -331,7 +353,7 @@ function ProvidersTab({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <InputField
                   label="Display Name"
                   value={newProvider.name}
@@ -348,7 +370,7 @@ function ProvidersTab({
                         <select
                           value={newProvider.default_model}
                           onChange={(e) => setNewProvider((s) => ({ ...s, default_model: e.target.value }))}
-                          className="flex-1 px-3 py-2.5 text-sm bg-surface border border-border rounded-xl
+                          className="min-w-0 flex-1 px-3 py-2.5 text-sm bg-surface border border-border rounded-xl
                                      text-text focus:outline-none focus:border-primary transition-all input-glow"
                         >
                           <option value="">{ollamaLoading ? 'Loading...' : ollamaModels.length ? 'Select a model...' : 'No models found'}</option>
@@ -361,7 +383,7 @@ function ProvidersTab({
                           whileTap={{ scale: 0.95 }}
                           onClick={() => fetchOllama(newProvider.base_url || undefined)}
                           disabled={ollamaLoading}
-                          className="p-2.5 rounded-xl border border-border hover:bg-surface-hover
+                          className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl border border-border hover:bg-surface-hover
                                      text-text-muted hover:text-text transition-all disabled:opacity-40"
                           aria-label="Refresh models from Ollama"
                         >
@@ -380,7 +402,7 @@ function ProvidersTab({
                       <select
                         value={newProvider.default_model}
                         onChange={(e) => setNewProvider((s) => ({ ...s, default_model: e.target.value }))}
-                        className="w-full px-3 py-2.5 text-sm bg-surface border border-border rounded-xl
+                        className="w-full min-w-0 px-3 py-2.5 text-sm bg-surface border border-border rounded-xl
                                    text-text focus:outline-none focus:border-primary transition-all input-glow"
                       >
                         <option value="">Select a model...</option>
@@ -404,7 +426,7 @@ function ProvidersTab({
                       <select
                         value={newProvider.default_image_model}
                         onChange={(e) => setNewProvider((s) => ({ ...s, default_image_model: e.target.value }))}
-                        className="w-full px-3 py-2.5 text-sm bg-surface border border-border rounded-xl
+                        className="w-full min-w-0 px-3 py-2.5 text-sm bg-surface border border-border rounded-xl
                                    text-text focus:outline-none focus:border-primary transition-all input-glow"
                       >
                         <option value="">Use built-in default</option>
@@ -431,10 +453,10 @@ function ProvidersTab({
                 placeholder="https://api.openai.com/v1"
               />
 
-              <div className="flex justify-end gap-2 pt-1">
+              <div className="flex flex-col justify-end gap-2 pt-1 sm:flex-row">
                 <button
                   onClick={() => setAdding(false)}
-                  className="px-4 py-2 text-sm rounded-xl border border-border hover:bg-surface-hover
+                  className="min-h-11 px-4 text-sm rounded-xl border border-border hover:bg-surface-hover
                              text-text-secondary transition-all"
                 >
                   Cancel
@@ -444,7 +466,7 @@ function ProvidersTab({
                   whileTap={{ scale: 0.98 }}
                   onClick={handleAdd}
                   disabled={!newProvider.name}
-                  className="btn-primary px-4 py-2 text-sm rounded-xl font-medium
+                  className="btn-primary min-h-11 px-4 text-sm rounded-xl font-medium
                              disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
                   <Save size={14} /> Save Provider
@@ -536,16 +558,16 @@ function ProviderCard({
       'p-4 rounded-2xl border bg-surface-alt space-y-3 transition-all duration-200',
       provider.enabled ? 'border-border hover:border-primary/20' : 'border-border opacity-60'
     )}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
           <div className={clsx(
             'w-9 h-9 rounded-xl bg-gradient-to-br flex items-center justify-center',
             meta.color
           )}>
             <meta.icon size={16} className={meta.iconColor} />
           </div>
-          <div>
-            <h3 className="text-sm font-semibold">{provider.name}</h3>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold truncate">{provider.name}</h3>
             <span className="text-[11px] text-text-muted capitalize">{meta.label}</span>
           </div>
         </div>
@@ -558,7 +580,7 @@ function ProviderCard({
               toast.success(provider.enabled ? 'Provider disabled' : 'Provider enabled');
             }}
             className={clsx(
-              'px-3 py-1 text-xs rounded-full font-medium transition-all border',
+              'min-h-9 px-3 text-xs rounded-full font-medium transition-all border',
               provider.enabled
                 ? 'bg-success-soft text-success border-success/20'
                 : 'bg-surface-hover text-text-muted border-border'
@@ -570,7 +592,9 @@ function ProviderCard({
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
             onClick={() => onDelete(provider.id)}
-            className="p-2 rounded-xl hover:bg-danger-soft text-text-muted hover:text-danger transition-all"
+            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl hover:bg-danger-soft text-text-muted hover:text-danger transition-all"
+            aria-label={`Delete ${provider.name}`}
+            title="Delete provider"
           >
             <Trash2 size={14} />
           </motion.button>
@@ -597,7 +621,7 @@ function ProviderCard({
                 onUpdate(provider.id, { default_model: e.target.value });
                 toast.success('Model updated');
               }}
-              className="flex-1 px-3 py-2 text-sm bg-surface border border-border rounded-xl
+              className="min-w-0 flex-1 px-3 py-2 text-sm bg-surface border border-border rounded-xl
                          text-text focus:outline-none focus:border-primary transition-all input-glow"
             >
               <option value="">{ollamaLoading ? 'Loading...' : ollamaModels.length ? 'Select a model...' : 'No models found'}</option>
@@ -613,7 +637,7 @@ function ProviderCard({
               whileTap={{ scale: 0.95 }}
               onClick={fetchOllamaModelsForCard}
               disabled={ollamaLoading}
-              className="p-2 rounded-xl border border-border hover:bg-surface-hover
+              className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl border border-border hover:bg-surface-hover
                          text-text-muted hover:text-text transition-all disabled:opacity-40"
               aria-label="Refresh models from Ollama"
             >
@@ -635,7 +659,7 @@ function ProviderCard({
               onUpdate(provider.id, { default_model: e.target.value });
               toast.success('Model updated');
             }}
-            className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl
+            className="w-full min-w-0 px-3 py-2 text-sm bg-surface border border-border rounded-xl
                        text-text focus:outline-none focus:border-primary transition-all input-glow"
           >
             <option value="">Select a model...</option>
@@ -665,7 +689,7 @@ function ProviderCard({
               onUpdate(provider.id, { default_image_model: e.target.value });
               toast.success('Default image model updated');
             }}
-            className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl
+            className="w-full min-w-0 px-3 py-2 text-sm bg-surface border border-border rounded-xl
                        text-text focus:outline-none focus:border-primary transition-all input-glow"
           >
             <option value="">Use built-in default</option>
@@ -680,13 +704,13 @@ function ProviderCard({
       )}
 
       {/* API Key update */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
           type="password"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           placeholder="Update API key..."
-          className="flex-1 px-3 py-2 text-sm bg-surface border border-border rounded-xl
+          className="min-w-0 flex-1 px-3 py-2 text-sm bg-surface border border-border rounded-xl
                      text-text placeholder-text-muted focus:outline-none focus:border-primary
                      transition-all input-glow"
         />
@@ -695,7 +719,9 @@ function ProviderCard({
           whileTap={{ scale: 0.95 }}
           onClick={handleSaveKey}
           disabled={!apiKey}
-          className="p-2.5 rounded-xl btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+          className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label={`Save API key for ${provider.name}`}
+          title="Save API key"
         >
           {saved ? <Check size={14} /> : <Save size={14} />}
         </motion.button>
@@ -728,7 +754,7 @@ function InputField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full px-3 py-2.5 text-sm bg-surface border border-border rounded-xl
+          className="w-full min-w-0 px-3 py-2.5 text-sm bg-surface border border-border rounded-xl
                      text-text placeholder-text-muted focus:outline-none
                      transition-all pr-9 input-glow"
         />
@@ -738,6 +764,8 @@ function InputField({
             onClick={() => setShow(!show)}
             className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md
                        text-text-muted hover:text-text transition-colors"
+            aria-label={show ? `Hide ${label}` : `Show ${label}`}
+            title={show ? 'Hide value' : 'Show value'}
           >
             {show ? <EyeOff size={14} /> : <Eye size={14} />}
           </button>
@@ -1338,13 +1366,13 @@ function PricingTab() {
           </div>
         </div>
 
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-col gap-2 mb-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-text-muted">{rules.length} rule{rules.length !== 1 ? 's' : ''} configured</p>
           <motion.button
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.97 }}
             onClick={() => setAdding(true)}
-            className="btn-primary flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-xl font-medium"
+            className="btn-primary min-h-10 flex items-center justify-center gap-1.5 px-3 text-xs rounded-xl font-medium"
           >
             <Plus size={12} /> Add Rule
           </motion.button>
@@ -1360,7 +1388,7 @@ function PricingTab() {
               className="overflow-hidden mb-3"
             >
               <div className="p-4 rounded-xl border border-primary/20 bg-gradient-to-br from-primary-glow to-transparent space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-text-muted mb-1 font-medium">Provider</label>
                     <input
@@ -1382,7 +1410,7 @@ function PricingTab() {
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-text-muted mb-1 font-medium">Input $/M tokens</label>
                     <input
@@ -1408,13 +1436,13 @@ function PricingTab() {
                     />
                   </div>
                 </div>
-                <div className="flex justify-end gap-2">
+                <div className="flex flex-col justify-end gap-2 sm:flex-row">
                   <button onClick={() => setAdding(false)}
-                    className="px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-surface-hover text-text-secondary"
+                    className="min-h-10 px-3 text-xs rounded-lg border border-border hover:bg-surface-hover text-text-secondary"
                   >Cancel</button>
                   <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                     onClick={handleAdd}
-                    className="btn-primary px-3 py-1.5 text-xs rounded-lg font-medium flex items-center gap-1"
+                    className="btn-primary min-h-10 px-3 text-xs rounded-lg font-medium flex items-center justify-center gap-1"
                   ><Save size={12} /> Save</motion.button>
                 </div>
               </div>
@@ -1436,11 +1464,11 @@ function PricingTab() {
             {rules.map((rule) => (
               <div
                 key={rule.id}
-                className="flex items-center justify-between p-3 rounded-xl bg-surface border border-border"
+                className="flex flex-col gap-3 p-3 rounded-xl bg-surface border border-border sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium text-text">{rule.provider_type}/{rule.model_pattern}</span>
-                  <div className="flex gap-3 mt-0.5">
+                  <span className="text-sm font-medium text-text break-words">{rule.provider_type}/{rule.model_pattern}</span>
+                  <div className="flex flex-wrap gap-3 mt-0.5">
                     <span className="text-[11px] text-text-muted">In: ${rule.input_cost_per_mtok}/M</span>
                     <span className="text-[11px] text-text-muted">Out: ${rule.output_cost_per_mtok}/M</span>
                   </div>
@@ -1449,7 +1477,9 @@ function PricingTab() {
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   onClick={() => handleDelete(rule.id)}
-                  className="p-2 rounded-xl hover:bg-danger-soft text-text-muted hover:text-danger transition-all"
+                  className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl hover:bg-danger-soft text-text-muted hover:text-danger transition-all self-start sm:self-center"
+                  aria-label={`Delete pricing rule for ${rule.provider_type}/${rule.model_pattern}`}
+                  title="Delete pricing rule"
                 >
                   <Trash2 size={14} />
                 </motion.button>

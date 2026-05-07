@@ -111,7 +111,7 @@ interface MessageState {
   webSearchQuery: string | null;
 
   fetchMessages: (conversationId: string) => Promise<void>;
-  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean) => void;
+  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string) => void;
   generateImage: (conversationId: string, prompt: string, override?: { provider?: string; model?: string }, options?: { size?: string; quality?: string; referenceImageId?: string }) => Promise<void>;
   regenerateLastMessage: (conversationId: string) => Promise<void>;
   editAndResend: (conversationId: string, messageId: string, newContent: string) => Promise<void>;
@@ -150,14 +150,15 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
   },
 
-  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean) => {
+  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string) => {
     set({ streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null });
 
-    const reqBody: { content: string; override?: { provider?: string; model?: string }; attachment_ids?: string[]; web_search?: boolean; think?: boolean } = { content };
+    const reqBody: { content: string; override?: { provider?: string; model?: string }; attachment_ids?: string[]; web_search?: boolean; think?: boolean; reasoning_effort?: string } = { content };
     if (override) reqBody.override = override;
     if (attachmentIds && attachmentIds.length > 0) reqBody.attachment_ids = attachmentIds;
     if (webSearch !== undefined) reqBody.web_search = webSearch;
     if (think !== undefined) reqBody.think = think;
+    if (reasoningEffort) reqBody.reasoning_effort = reasoningEffort;
 
     const { abort } = api.streamMessage(
       conversationId,

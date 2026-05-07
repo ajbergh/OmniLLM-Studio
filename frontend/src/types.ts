@@ -85,6 +85,7 @@ export interface SendMessageRequest {
   attachment_ids?: string[];
   web_search?: boolean;
   think?: boolean;
+  reasoning_effort?: string;
   override?: {
     provider?: string;
     model?: string;

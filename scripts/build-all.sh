@@ -3,9 +3,13 @@
 # Orchestrator script for CI/CD pipelines.
 #
 # Usage:
-#   ./build-all.sh                    # Build for current OS only
-#   ./build-all.sh --platform linux   # Build for a specific platform
-#   ./build-all.sh --all              # Build all (only works with cross-compile support)
+#   ./build-all.sh                           # Wails build for current OS (amd64)
+#   ./build-all.sh --platform linux          # Wails: Linux amd64
+#   ./build-all.sh --platform linux arm64    # Wails: Linux arm64
+#   ./build-all.sh --web                     # Web (non-Wails) build for current OS
+#   ./build-all.sh --web --platform linux    # Web: Linux amd64
+#   ./build-all.sh --all                     # All Wails platforms (current OS only)
+#   ./build-all.sh --all --web               # All platforms, both Wails + Web
 #
 # Note: Cross-compiling CGO (required for SQLite) needs platform-specific
 # toolchains. For full cross-platform builds, use the GitHub Actions workflow
@@ -16,14 +20,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-    echo "Usage: $0 [--platform windows|linux|macos] [--all]"
+    echo "Usage: $0 [--platform <os> [arch]] [--web] [--all] [--help]"
     echo ""
     echo "Options:"
-    echo "  --platform <os>   Build for a specific platform"
-    echo "  --all             Attempt to build all platforms (requires cross-compile toolchains)"
-    echo "  --help            Show this help"
+    echo "  --platform <os> [arch]  Build for a specific platform and optional arch"
+    echo "                          OS: windows | linux | macos"
+    echo "                          Arch: amd64 | arm64 | universal (macOS only)"
+    echo "  --web                   Build the web server (non-Wails) instead of desktop"
+    echo "  --all                   Build all platforms for current OS (ignores cross-compile limits)"
+    echo "  --help                  Show this help"
     echo ""
-    echo "If no option is given, builds for the current OS."
+    echo "If no option is given, builds Wails desktop for the current OS (amd64)."
 }
 
 detect_platform() {
@@ -36,16 +43,22 @@ detect_platform() {
 }
 
 build_platform() {
-    local platform="$1"
+    local mode="$1"   # wails | web
+    local platform="$2"
+    local arch="${3:-amd64}"
+
     echo ""
-    echo ">>> Building for $platform..."
+    echo ">>> Building [$mode] for $platform/$arch..."
     echo ""
 
     case "$platform" in
         windows)
             if [ "$(detect_platform)" = "windows" ]; then
-                # Running in Git Bash / MSYS on Windows
-                cmd.exe /c "$SCRIPT_DIR\\build-windows.bat"
+                if [ "$mode" = "web" ]; then
+                    cmd.exe /c "$SCRIPT_DIR\\build-web-windows.bat $arch"
+                else
+                    cmd.exe /c "$SCRIPT_DIR\\build-wails-windows.bat $arch"
+                fi
             else
                 echo "[WARN] Cross-compiling for Windows from $(detect_platform) requires MinGW-w64 toolchain."
                 echo "       Skipping. Use GitHub Actions for cross-platform CI builds."
@@ -53,10 +66,18 @@ build_platform() {
             fi
             ;;
         linux)
-            bash "$SCRIPT_DIR/build-linux.sh"
+            if [ "$mode" = "web" ]; then
+                bash "$SCRIPT_DIR/build-web-linux.sh" "$arch"
+            else
+                bash "$SCRIPT_DIR/build-wails-linux.sh" "$arch"
+            fi
             ;;
         macos)
-            bash "$SCRIPT_DIR/build-macos.sh"
+            if [ "$mode" = "web" ]; then
+                bash "$SCRIPT_DIR/build-web-macos.sh" "$arch"
+            else
+                bash "$SCRIPT_DIR/build-wails-macos.sh" "$arch"
+            fi
             ;;
         *)
             echo "[ERROR] Unknown platform: $platform"
@@ -66,16 +87,32 @@ build_platform() {
 }
 
 # --- Parse arguments ---
-PLATFORMS=()
+BUILDS=()   # Each entry is "mode:platform:arch"
+WEB_MODE=false
+BUILD_ALL=false
+NEXT_PLATFORM=""
+NEXT_ARCH=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --platform)
-            PLATFORMS+=("$2")
+            NEXT_PLATFORM="$2"
             shift 2
+            # Optional arch argument
+            if [[ $# -gt 0 && ! "$1" =~ ^-- ]]; then
+                NEXT_ARCH="$1"
+                shift
+            else
+                NEXT_ARCH="amd64"
+            fi
+            BUILDS+=("PLACEHOLDER:$NEXT_PLATFORM:$NEXT_ARCH")
+            ;;
+        --web)
+            WEB_MODE=true
+            shift
             ;;
         --all)
-            PLATFORMS=("windows" "linux" "macos")
+            BUILD_ALL=true
             shift
             ;;
         --help|-h)
@@ -90,26 +127,51 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Default to current platform
-if [ ${#PLATFORMS[@]} -eq 0 ]; then
+# Resolve mode into builds
+MODE="wails"
+$WEB_MODE && MODE="web"
+
+if $BUILD_ALL; then
+    CURRENT="$(detect_platform)"
+    BUILDS=(
+        "${MODE}:${CURRENT}:amd64"
+        "${MODE}:${CURRENT}:arm64"
+    )
+    # macOS gets universal too (Wails mode only)
+    if [ "$CURRENT" = "macos" ] && [ "$MODE" = "wails" ]; then
+        BUILDS+=("wails:macos:universal")
+    fi
+elif [ ${#BUILDS[@]} -gt 0 ]; then
+    # Replace PLACEHOLDER mode with resolved mode
+    RESOLVED=()
+    for entry in "${BUILDS[@]}"; do
+        platform="${entry#PLACEHOLDER:}"
+        platform="${platform%%:*}"
+        arch="${entry##*:}"
+        RESOLVED+=("${MODE}:${platform}:${arch}")
+    done
+    BUILDS=("${RESOLVED[@]}")
+else
+    # Default: current platform, amd64
     CURRENT="$(detect_platform)"
     if [ "$CURRENT" = "unknown" ]; then
         echo "[ERROR] Could not detect current platform. Use --platform to specify."
         exit 1
     fi
-    PLATFORMS=("$CURRENT")
+    BUILDS=("${MODE}:${CURRENT}:amd64")
 fi
 
 # --- Build ---
 echo "=========================================="
 echo "  OmniLLM-Studio — Multi-Platform Build"
-echo "  Targets: ${PLATFORMS[*]}"
+echo "  Targets: ${BUILDS[*]}"
 echo "=========================================="
 
 FAILED=()
-for p in "${PLATFORMS[@]}"; do
-    if ! build_platform "$p"; then
-        FAILED+=("$p")
+for entry in "${BUILDS[@]}"; do
+    IFS=':' read -r b_mode b_platform b_arch <<< "$entry"
+    if ! build_platform "$b_mode" "$b_platform" "$b_arch"; then
+        FAILED+=("$entry")
     fi
 done
 
@@ -119,10 +181,10 @@ if [ ${#FAILED[@]} -eq 0 ]; then
     echo "  All builds succeeded!"
 else
     echo "  Some builds failed: ${FAILED[*]}"
-    echo "  Successful: $(echo "${PLATFORMS[@]}" "${FAILED[@]}" | tr ' ' '\n' | sort | uniq -u | tr '\n' ' ')"
 fi
-echo "  Output directory: build/bin/"
+echo "  Output directory: build/bin/ and build/web/"
 echo "=========================================="
 echo ""
 
 [ ${#FAILED[@]} -eq 0 ]
+

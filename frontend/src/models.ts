@@ -6,7 +6,10 @@ type ProviderModelCatalog = Record<string, { chat: string[]; image?: string[] }>
 const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
   openai: {
     chat: [
+      'gpt-5.5',
       'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.4-nano',
       'gpt-5.4-pro',
       'gpt-5.2',
       'gpt-5.2-pro',
@@ -27,10 +30,11 @@ const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
       'o1',
       'o1-mini',
     ],
-    image: ['gpt-image-1.5', 'chatgpt-image-latest', 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3', 'dall-e-2'],
+    image: ['gpt-image-2', 'gpt-image-1.5', 'chatgpt-image-latest', 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3', 'dall-e-2'],
   },
   anthropic: {
     chat: [
+      'claude-opus-4-7',
       'claude-opus-4-6',
       'claude-sonnet-4-6',
       'claude-haiku-4-5',
@@ -44,8 +48,8 @@ const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
   gemini: {
     chat: [
       'gemini-3.1-pro-preview',
+      'gemini-3.1-flash-lite',
       'gemini-3.1-flash-lite-preview',
-      'gemini-3-pro-preview',
       'gemini-3-flash-preview',
       'gemini-2.5-pro',
       'gemini-2.5-pro-preview-06-05',
@@ -61,9 +65,9 @@ const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
       'gemini-3.1-flash-image-preview',
       'gemini-3-pro-image-preview',
       'gemini-2.5-flash-image',
-      'gemini-2.0-flash-preview-image-generation',
-      'gemini-2.0-flash-lite-preview-image-generation',
-      'imagen',
+      'imagen-4.0-generate-001',
+      'imagen-4.0-ultra-generate-001',
+      'imagen-4.0-fast-generate-001',
       'imagen-3.0-generate-002',
       'imagen-3.0-fast-generate-001',
     ],
@@ -71,11 +75,14 @@ const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
   ollama: { chat: [] },
   openrouter: {
     chat: [
+      'openai/gpt-5.5',
       'openai/gpt-5.4',
+      'openai/gpt-5.4-mini',
       'openai/gpt-5.4-pro',
       'openai/gpt-5.2',
       'openai/gpt-4.1',
       'openai/gpt-4o',
+      'anthropic/claude-opus-4-7',
       'anthropic/claude-opus-4-6',
       'anthropic/claude-sonnet-4-6',
       'google/gemini-3.1-pro-preview',
@@ -86,13 +93,17 @@ const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
       'meta-llama/llama-3.3-70b-instruct',
       'deepseek/deepseek-r1',
       'qwen/qwen3-235b-a22b',
+      'mistralai/mistral-medium-3-5',
+      'mistralai/mistral-large-2512',
     ],
-    image: ['openai/dall-e-3', 'openai/gpt-image-1'],
+    image: ['openai/dall-e-3', 'openai/gpt-image-2', 'openai/gpt-image-1'],
   },
   groq: {
     chat: [
       'openai/gpt-oss-120b',
       'openai/gpt-oss-20b',
+      'groq/compound',
+      'groq/compound-mini',
       'llama-3.3-70b-versatile',
       'llama-3.1-8b-instant',
       'meta-llama/llama-4-scout-17b-16e-instruct',
@@ -162,14 +173,17 @@ const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
   },
   mistral: {
     chat: [
+      'mistral-medium-3-5',
+      'mistral-medium-latest',
+      'mistral-small-2603',
+      'mistral-small-latest',
       'mistral-large-2512',
       'mistral-large-latest',
       'mistral-medium-2508',
-      'mistral-medium-latest',
-      'mistral-small-2506',
-      'mistral-small-latest',
+      'mistral-medium-3-1',
       'magistral-medium-2509',
       'magistral-small-2509',
+      'devstral-2512',
       'codestral-2508',
       'codestral-latest',
       'open-mistral-nemo',
@@ -197,4 +211,57 @@ export function getKnownChatModels(providerType: string): string[] {
 
 export function getKnownImageModels(providerType: string): string[] {
   return [...(PROVIDER_MODEL_CATALOG[providerType.toLowerCase()]?.image || [])];
+}
+
+// ---------------------------------------------------------------------------
+// Reasoning effort support
+// ---------------------------------------------------------------------------
+
+/** Ordered effort levels from least to most reasoning compute. */
+export const REASONING_EFFORT_LEVELS = ['low', 'medium', 'high'] as const;
+export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
+
+/**
+ * Models per provider that accept a `reasoning_effort` parameter.
+ * OpenAI o-series and gpt-5.x / gpt-4.x support this natively.
+ * Anthropic Claude 3.7+ and 4.x support extended thinking (mapped to budget_tokens server-side).
+ * Groq compound systems support it.
+ */
+const REASONING_EFFORT_MODELS: Record<string, string[]> = {
+  openai: [
+    'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.4-pro',
+    'gpt-5.2', 'gpt-5.2-pro', 'gpt-5.1', 'gpt-5', 'gpt-5-pro', 'gpt-5-mini', 'gpt-5-nano',
+    'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+    'gpt-4o', 'gpt-4o-mini',
+    'o3-pro', 'o4-mini', 'o3', 'o3-mini', 'o1', 'o1-mini',
+  ],
+  anthropic: [
+    'claude-opus-4-7', 'claude-opus-4-6',
+    'claude-sonnet-4-6', 'claude-haiku-4-5',
+    'claude-sonnet-4-20250514', 'claude-3-7-sonnet-20250219',
+  ],
+  openrouter: [
+    'openai/gpt-5.5', 'openai/gpt-5.4', 'openai/gpt-5.4-mini', 'openai/gpt-5.4-pro',
+    'openai/gpt-5.2', 'openai/gpt-4.1', 'openai/gpt-4o',
+    'anthropic/claude-opus-4-7', 'anthropic/claude-opus-4-6',
+    'anthropic/claude-sonnet-4-6',
+  ],
+  groq: [
+    'openai/gpt-oss-120b', 'openai/gpt-oss-20b',
+    'groq/compound', 'groq/compound-mini',
+  ],
+};
+
+/**
+ * Returns the supported reasoning effort levels for the given provider+model,
+ * or null if the model does not support reasoning effort.
+ */
+export function getModelReasoningLevels(
+  providerType: string,
+  model: string
+): ReasoningEffortLevel[] | null {
+  const supported = REASONING_EFFORT_MODELS[providerType.toLowerCase()];
+  if (!supported) return null;
+  if (supported.includes(model)) return [...REASONING_EFFORT_LEVELS];
+  return null;
 }

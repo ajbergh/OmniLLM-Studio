@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { templateApi } from '../api';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { FileText, Plus, Trash2, Edit3, X, Copy, Save, ChevronRight } from 'lucide-react';
+import { FileText, Plus, Trash2, Edit3, Copy, Save, ChevronRight } from 'lucide-react';
+import { DialogShell } from './DialogShell';
 import type { PromptTemplate } from '../types';
 
 interface TemplateManagerProps {
@@ -13,6 +14,7 @@ interface TemplateManagerProps {
 export function TemplateManager({ open, onClose }: TemplateManagerProps) {
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [editing, setEditing] = useState<PromptTemplate | null>(null);
   const [creating, setCreating] = useState(false);
   const [formName, setFormName] = useState('');
@@ -22,11 +24,14 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
 
   const fetchTemplates = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const data = await templateApi.list();
       setTemplates(data);
     } catch (err) {
-      toast.error(`Failed to load templates: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      setLoadError(message);
+      toast.error(`Failed to load templates: ${message}`);
     } finally {
       setLoading(false);
     }
@@ -97,46 +102,25 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
   const showForm = creating || editing;
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center"
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          onClick={(e) => e.stopPropagation()}
-          className="glass-strong rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden mx-4"
+    <DialogShell
+      open={open}
+      onClose={onClose}
+      title="Prompt Templates"
+      icon={<FileText size={18} />}
+      maxWidth="max-w-2xl"
+      maxHeight="max-h-[80vh]"
+      bodyClassName="px-4 py-4 sm:px-6"
+      actions={!showForm && (
+        <motion.button
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.97 }}
+          onClick={startCreate}
+          className="min-h-10 inline-flex items-center gap-1.5 px-3 rounded-xl btn-primary text-xs font-medium"
         >
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-            <div className="flex items-center gap-2">
-              <FileText size={18} className="text-primary" />
-              <h2 className="text-lg font-semibold text-text">Prompt Templates</h2>
-            </div>
-            <div className="flex items-center gap-2">
-              {!showForm && (
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={startCreate}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg btn-primary text-xs font-medium"
-                >
-                  <Plus size={14} /> New Template
-                </motion.button>
-              )}
-              <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={onClose}>
-                <X size={18} className="text-text-muted hover:text-text" />
-              </motion.button>
-            </div>
-          </div>
-
-          {/* Content */}
-          <div className="px-6 py-4 overflow-y-auto max-h-[65vh]">
+          <Plus size={14} /> New
+        </motion.button>
+      )}
+    >
             {showForm ? (
               <div className="space-y-3">
                 <div>
@@ -188,7 +172,7 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
                 <div className="flex justify-end gap-2">
                   <button
                     onClick={() => { setEditing(null); setCreating(false); }}
-                    className="px-4 py-1.5 rounded-lg text-sm text-text-muted hover:text-text transition-colors"
+                    className="min-h-10 px-4 rounded-lg text-sm text-text-muted hover:text-text transition-colors"
                   >
                     Cancel
                   </button>
@@ -197,7 +181,7 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
                     whileTap={{ scale: 0.98 }}
                     onClick={handleSave}
                     disabled={!formName.trim() || !formContent.trim()}
-                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg btn-primary text-sm font-medium disabled:opacity-50"
+                    className="min-h-10 flex items-center gap-1.5 px-4 rounded-lg btn-primary text-sm font-medium disabled:opacity-50"
                   >
                     <Save size={14} /> {editing ? 'Update' : 'Create'}
                   </motion.button>
@@ -205,6 +189,17 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
               </div>
             ) : loading ? (
               <div className="py-12 text-center text-text-muted">Loading...</div>
+            ) : loadError ? (
+              <div className="py-12 text-center">
+                <p className="text-sm text-danger">Failed to load templates</p>
+                <p className="text-xs text-text-muted mt-1 break-words">{loadError}</p>
+                <button
+                  onClick={fetchTemplates}
+                  className="mt-4 min-h-10 px-4 rounded-xl glass text-sm text-text hover:bg-surface-hover transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
             ) : templates.length === 0 ? (
               <div className="py-12 text-center text-text-muted text-sm">
                 No templates yet. Create one to get started.
@@ -213,10 +208,10 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
               <div className="space-y-2">
                 {templates.map((t) => (
                   <div key={t.id} className="glass rounded-xl p-3 group">
-                    <div className="flex items-start justify-between">
+                    <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-text">{t.name}</span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-text break-words">{t.name}</span>
                           {t.category && (
                             <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
                               {t.category}
@@ -238,7 +233,9 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
                           onClick={() => { navigator.clipboard.writeText(t.template_body); toast.success('Copied'); }}
-                          className="p-1.5 rounded-lg hover:bg-surface-light text-text-muted hover:text-text transition-colors"
+                          className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-surface-light text-text-muted hover:text-text transition-colors"
+                          aria-label={`Copy ${t.name}`}
+                          title="Copy"
                         >
                           <Copy size={14} />
                         </motion.button>
@@ -246,7 +243,9 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
                           onClick={() => startEdit(t)}
-                          className="p-1.5 rounded-lg hover:bg-surface-light text-text-muted hover:text-text transition-colors"
+                          className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-surface-light text-text-muted hover:text-text transition-colors"
+                          aria-label={`Edit ${t.name}`}
+                          title="Edit"
                         >
                           <Edit3 size={14} />
                         </motion.button>
@@ -255,7 +254,9 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.9 }}
                             onClick={() => handleDelete(t.id)}
-                            className="p-1.5 rounded-lg hover:bg-surface-light text-text-muted hover:text-red-400 transition-colors"
+                            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg hover:bg-surface-light text-text-muted hover:text-red-400 transition-colors"
+                            aria-label={`Delete ${t.name}`}
+                            title="Delete"
                           >
                             <Trash2 size={14} />
                           </motion.button>
@@ -266,10 +267,7 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
                 ))}
               </div>
             )}
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+    </DialogShell>
   );
 }
 

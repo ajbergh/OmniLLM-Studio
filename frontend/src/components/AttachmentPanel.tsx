@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { toast } from 'sonner';
-import { Paperclip, Download, Trash2, X, FileText, Image, File } from 'lucide-react';
+import { Paperclip, Download, Trash2, FileText, Image, File } from 'lucide-react';
+import { DialogShell } from './DialogShell';
 import type { Attachment } from '../types';
 
 interface AttachmentPanelProps {
@@ -14,14 +15,18 @@ interface AttachmentPanelProps {
 export function AttachmentPanel({ conversationId, open, onClose }: AttachmentPanelProps) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   const fetchAttachments = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const data = await api.listAttachments(conversationId);
       setAttachments(data || []);
     } catch (err) {
-      toast.error(`Failed to load attachments: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      setLoadError(message);
+      toast.error(`Failed to load attachments: ${message}`);
     } finally {
       setLoading(false);
     }
@@ -61,99 +66,85 @@ export function AttachmentPanel({ conversationId, open, onClose }: AttachmentPan
   if (!open) return null;
 
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center"
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          onClick={(e) => e.stopPropagation()}
-          className="glass-strong rounded-2xl w-full max-w-lg mx-4 max-h-[60vh] flex flex-col overflow-hidden"
-        >
-          {/* Header */}
-          <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Paperclip size={16} className="text-primary" />
-              <h3 className="text-sm font-bold text-text">Attachments</h3>
-              <span className="text-xs text-text-muted">({attachments.length})</span>
-            </div>
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={onClose}
-              className="p-1.5 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
-            >
-              <X size={16} />
-            </motion.button>
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto p-4">
-            {loading ? (
-              <div className="py-12 text-center">
-                <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto" />
-                <p className="text-xs text-text-muted mt-2">Loading attachments...</p>
-              </div>
-            ) : attachments.length === 0 ? (
-              <div className="py-12 text-center text-text-muted">
-                <Paperclip size={28} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm">No attachments in this conversation</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {attachments.map((att) => {
-                  const Icon = getIcon(att.mime_type);
-                  return (
-                    <motion.div
-                      key={att.id}
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="flex items-center gap-3 p-3 rounded-xl bg-surface-light/50 group hover:bg-surface-light transition-colors"
-                    >
-                      <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                        <Icon size={16} className="text-primary" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-text font-medium truncate">
-                          {att.storage_path.split('/').pop() || 'Attachment'}
-                        </p>
-                        <p className="text-[11px] text-text-muted">
-                          {att.mime_type} · {formatBytes(att.bytes)}
-                          {att.width && att.height && ` · ${att.width}×${att.height}`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <motion.button
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => handleDownload(att.id)}
-                          className="p-1.5 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition-colors"
-                          title="Download"
-                        >
-                          <Download size={14} />
-                        </motion.button>
-                        <motion.button
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => handleDelete(att.id)}
-                          className="p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 size={14} />
-                        </motion.button>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+    <DialogShell
+      open={open}
+      onClose={onClose}
+      title={`Attachments (${attachments.length})`}
+      icon={<Paperclip size={16} />}
+      maxWidth="max-w-lg"
+      maxHeight="max-h-[70vh]"
+      bodyClassName="p-4"
+    >
+      {loading ? (
+        <div className="py-12 text-center">
+          <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto" />
+          <p className="text-xs text-text-muted mt-2">Loading attachments...</p>
+        </div>
+      ) : loadError ? (
+        <div className="py-12 text-center">
+          <p className="text-sm text-danger">Failed to load attachments</p>
+          <p className="text-xs text-text-muted mt-1 break-words">{loadError}</p>
+          <button
+            onClick={fetchAttachments}
+            className="mt-4 min-h-10 px-4 rounded-xl glass text-sm text-text hover:bg-surface-hover transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      ) : attachments.length === 0 ? (
+        <div className="py-12 text-center text-text-muted">
+          <Paperclip size={28} className="mx-auto mb-3 opacity-30" />
+          <p className="text-sm">No attachments in this conversation</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {attachments.map((att) => {
+            const Icon = getIcon(att.mime_type);
+            const name = att.storage_path.split('/').pop() || 'Attachment';
+            return (
+              <motion.div
+                key={att.id}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center gap-3 p-3 rounded-xl bg-surface-light/50 group hover:bg-surface-light transition-colors"
+              >
+                <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                  <Icon size={16} className="text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-text font-medium truncate">
+                    {name}
+                  </p>
+                  <p className="text-[11px] text-text-muted break-words">
+                    {att.mime_type} · {formatBytes(att.bytes)}
+                    {att.width && att.height && ` · ${att.width}×${att.height}`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                  <motion.button
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => handleDownload(att.id)}
+                    className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition-colors"
+                    aria-label={`Download ${name}`}
+                    title="Download"
+                  >
+                    <Download size={14} />
+                  </motion.button>
+                  <motion.button
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => handleDelete(att.id)}
+                    className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                    aria-label={`Delete ${name}`}
+                    title="Delete"
+                  >
+                    <Trash2 size={14} />
+                  </motion.button>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+    </DialogShell>
   );
 }

@@ -1,6 +1,6 @@
 @echo off
 REM OmniLLM-Studio — Wails Build Script for Windows
-REM Produces: backend\cmd\desktop\build\bin\OmniLLM-Studio.exe
+REM Produces: build\bin\OmniLLM-Studio[-arm64].exe
 REM
 REM Requirements:
 REM   - Go 1.24+
@@ -8,15 +8,26 @@ REM   - Node.js 18+
 REM   - Wails CLI v2: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 REM   - GCC (MinGW-w64) for CGO/SQLite
 REM   - WebView2 runtime (ships with Win10 1803+)
+REM
+REM Usage:
+REM   build-windows.bat           -> Windows x64 (amd64)
+REM   build-windows.bat arm64     -> Windows ARM64
 
 setlocal enabledelayedexpansion
 
 set SCRIPT_DIR=%~dp0
 set PROJECT_ROOT=%SCRIPT_DIR%..
 
+REM --- Architecture ---
+set ARCH=%1
+if "%ARCH%"=="" set ARCH=amd64
+if /i "%ARCH%"=="x64" set ARCH=amd64
+if /i "%ARCH%"=="x86_64" set ARCH=amd64
+
 echo.
 echo ==========================================
 echo   OmniLLM-Studio — Build for Windows
+echo   Architecture: %ARCH%
 echo ==========================================
 echo.
 
@@ -91,7 +102,7 @@ if "%GIT_VERSION%"=="" set GIT_VERSION=dev
 for /f "tokens=*" %%i in ('git rev-parse --short HEAD 2^>nul') do set GIT_COMMIT=%%i
 if "%GIT_COMMIT%"=="" set GIT_COMMIT=unknown
 
-wails build -s -clean -trimpath -platform windows/amd64 -ldflags "-X main.version=%GIT_VERSION% -X main.commit=%GIT_COMMIT%"
+wails build -s -clean -trimpath -platform windows/%ARCH% -ldflags "-X main.version=%GIT_VERSION% -X main.commit=%GIT_COMMIT%"
 if %errorlevel% neq 0 (
     echo [ERROR] Wails build failed.
     exit /b 1
@@ -99,11 +110,17 @@ if %errorlevel% neq 0 (
 
 REM --- Copy output to project build directory ---
 if not exist "%PROJECT_ROOT%\build\bin" mkdir "%PROJECT_ROOT%\build\bin"
-copy /y "%PROJECT_ROOT%\backend\cmd\desktop\build\bin\OmniLLM-Studio.exe" "%PROJECT_ROOT%\build\bin\OmniLLM-Studio.exe" >nul
+if /i "%ARCH%"=="arm64" (
+    copy /y "%PROJECT_ROOT%\backend\cmd\desktop\build\bin\OmniLLM-Studio.exe" "%PROJECT_ROOT%\build\bin\OmniLLM-Studio-arm64.exe" >nul
+    set OUTPUT_FILE=build\bin\OmniLLM-Studio-arm64.exe
+) else (
+    copy /y "%PROJECT_ROOT%\backend\cmd\desktop\build\bin\OmniLLM-Studio.exe" "%PROJECT_ROOT%\build\bin\OmniLLM-Studio.exe" >nul
+    set OUTPUT_FILE=build\bin\OmniLLM-Studio.exe
+)
 
 echo.
 echo ==========================================
 echo   Build complete!
-echo   Output: build\bin\OmniLLM-Studio.exe
+echo   Output: !OUTPUT_FILE!
 echo ==========================================
 echo.

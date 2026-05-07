@@ -11,13 +11,15 @@ import { PluginManager } from './components/PluginManager';
 import { EvalDashboard } from './components/EvalDashboard';
 import { SearchPanel } from './components/SearchPanel';
 import { ImportExportPanel } from './components/ImportExportPanel';
+import { DialogShell } from './components/DialogShell';
 import { useSettingsStore, useConversationStore, useMessageStore } from './stores';
 import { useImageEditorStore } from './stores/imageEditor';
 import { authApi } from './api';
 import { matchesShortcut } from './shortcuts';
 import {
   Settings, Keyboard, BarChart3, Layout, Puzzle, FlaskConical,
-  Search, FileArchive,
+  Search, FileArchive, SlidersHorizontal,
+  type LucideIcon,
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -36,7 +38,23 @@ function useIsMobile(breakpoint = 768) {
   return isMobile;
 }
 
-type OverlayPanel = 'shortcuts' | 'usage' | 'templates' | 'plugins' | 'eval' | 'search' | 'importExport';
+type OverlayPanel = 'shortcuts' | 'usage' | 'templates' | 'plugins' | 'eval' | 'search' | 'importExport' | 'tools';
+type ToolPanel = Exclude<OverlayPanel, 'tools'>;
+
+const GLOBAL_TOOL_ACTIONS: Array<{
+  panel: ToolPanel;
+  label: string;
+  ariaLabel: string;
+  Icon: LucideIcon;
+}> = [
+  { panel: 'search', label: 'Search', ariaLabel: 'Search conversations', Icon: Search },
+  { panel: 'usage', label: 'Usage', ariaLabel: 'Usage Dashboard', Icon: BarChart3 },
+  { panel: 'templates', label: 'Templates', ariaLabel: 'Prompt Templates', Icon: Layout },
+  { panel: 'plugins', label: 'Plugins', ariaLabel: 'Plugins', Icon: Puzzle },
+  { panel: 'eval', label: 'Eval', ariaLabel: 'Evaluation Harness', Icon: FlaskConical },
+  { panel: 'importExport', label: 'Import/Export', ariaLabel: 'Import and export data', Icon: FileArchive },
+  { panel: 'shortcuts', label: 'Shortcuts', ariaLabel: 'Keyboard shortcuts', Icon: Keyboard },
+];
 
 function getNewImageSessionTitle() {
   const now = new Date();
@@ -63,6 +81,7 @@ function App() {
   const evalOpen = activePanel === 'eval';
   const searchOpen = activePanel === 'search';
   const importExportOpen = activePanel === 'importExport';
+  const toolsOpen = activePanel === 'tools';
 
   const openPanel = useCallback((panel: OverlayPanel) => {
     setActivePanel(panel);
@@ -75,6 +94,11 @@ function App() {
   const closePanels = useCallback(() => {
     setActivePanel(null);
   }, []);
+
+  const openSettingsPanel = useCallback(() => {
+    closePanels();
+    toggleSettings();
+  }, [closePanels, toggleSettings]);
 
   // Check auth status on mount — solo mode (no users) stays authenticated
   useEffect(() => {
@@ -121,8 +145,7 @@ function App() {
 
       if (matchesShortcut(e, 'openSettings')) {
         e.preventDefault();
-        closePanels();
-        toggleSettings();
+        openSettingsPanel();
       }
 
       if (matchesShortcut(e, 'openShortcuts')) {
@@ -160,6 +183,7 @@ function App() {
       clearMessages,
       loadAllSessions,
       loadImageSession,
+      openSettingsPanel,
       selectConversation,
       settingsOpen,
       togglePanel,
@@ -274,104 +298,105 @@ function App() {
         {isMobile && !sidebarOpen && <Sidebar />}
 
         <main className="flex-1 flex flex-col relative z-10 min-w-0">
-          {/* Top bar */}
-          <div className="absolute top-3 right-3 z-30 flex items-center gap-1">
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => openPanel('search')}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2.5 rounded-xl glass text-text-muted hover:text-text
-                         transition-colors duration-200"
-              aria-label="Search (Ctrl+/)"
-            >
-              <Search size={16} />
-              <span className="hidden xl:inline text-[11px]">Search</span>
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => openPanel('usage')}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2.5 rounded-xl glass text-text-muted hover:text-text
-                         transition-colors duration-200"
-              aria-label="Usage Dashboard"
-            >
-              <BarChart3 size={16} />
-              <span className="hidden xl:inline text-[11px]">Usage</span>
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => openPanel('templates')}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2.5 rounded-xl glass text-text-muted hover:text-text
-                         transition-colors duration-200"
-              aria-label="Prompt Templates"
-            >
-              <Layout size={16} />
-              <span className="hidden xl:inline text-[11px]">Templates</span>
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => openPanel('plugins')}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2.5 rounded-xl glass text-text-muted hover:text-text
-                         transition-colors duration-200"
-              aria-label="Plugins"
-            >
-              <Puzzle size={16} />
-              <span className="hidden xl:inline text-[11px]">Plugins</span>
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => openPanel('eval')}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2.5 rounded-xl glass text-text-muted hover:text-text
-                         transition-colors duration-200"
-              aria-label="Evaluation Harness"
-            >
-              <FlaskConical size={16} />
-              <span className="hidden xl:inline text-[11px]">Eval</span>
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => openPanel('importExport')}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2.5 rounded-xl glass text-text-muted hover:text-text
-                         transition-colors duration-200"
-              aria-label="Import/Export"
-            >
-              <FileArchive size={16} />
-              <span className="hidden xl:inline text-[11px]">Import/Export</span>
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => openPanel('shortcuts')}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2.5 rounded-xl glass text-text-muted hover:text-text
-                         transition-colors duration-200"
-              aria-label="Keyboard shortcuts (Ctrl+K)"
-            >
-              <Keyboard size={16} />
-              <span className="hidden xl:inline text-[11px]">Shortcuts</span>
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                closePanels();
-                toggleSettings();
-              }}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2.5 rounded-xl glass text-text-muted hover:text-text
-                         transition-colors duration-200"
-              aria-label="Settings (Ctrl+,)"
-            >
-              <Settings size={16} />
-              <span className="hidden xl:inline text-[11px]">Settings</span>
-            </motion.button>
+          {/* Global tools participate in layout so they cannot cover workspace controls. */}
+          <div className="shrink-0 border-b border-border bg-surface-raised/85 backdrop-blur px-3 py-2 pl-14 md:pl-3">
+            <div className="flex min-h-11 items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-text-muted">
+                  {appMode === 'image' ? 'Image Studio' : 'Chat Studio'}
+                </p>
+              </div>
+
+              {isMobile ? (
+                <div className="flex shrink-0 items-center gap-2">
+                  <motion.button
+                    whileTap={{ scale: 0.97 }}
+                    onClick={openSettingsPanel}
+                    className="min-h-11 inline-flex items-center gap-2 rounded-xl glass px-3 text-sm font-medium text-text-muted hover:text-text transition-colors"
+                    aria-label="Settings"
+                    title="Settings"
+                  >
+                    <Settings size={16} />
+                    <span>Settings</span>
+                  </motion.button>
+                  <motion.button
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => openPanel('tools')}
+                    className="min-h-11 inline-flex items-center gap-2 rounded-xl glass px-3 text-sm font-medium text-text-muted hover:text-text transition-colors"
+                    aria-label="Open tools menu"
+                  >
+                    <SlidersHorizontal size={16} />
+                    <span>Tools</span>
+                  </motion.button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                  {GLOBAL_TOOL_ACTIONS.map(({ panel, label, ariaLabel, Icon }) => (
+                    <motion.button
+                      key={panel}
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => openPanel(panel)}
+                      className="min-h-10 inline-flex items-center gap-1.5 rounded-xl glass px-2.5 text-text-muted hover:text-text transition-colors duration-200"
+                      aria-label={ariaLabel}
+                      title={ariaLabel}
+                    >
+                      <Icon size={16} />
+                      <span className="hidden xl:inline text-[11px]">{label}</span>
+                    </motion.button>
+                  ))}
+                  <motion.button
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={openSettingsPanel}
+                    className="min-h-10 inline-flex items-center gap-1.5 rounded-xl glass px-2.5 text-text-muted hover:text-text transition-colors duration-200"
+                    aria-label="Settings"
+                    title="Settings"
+                  >
+                    <Settings size={16} />
+                    <span className="hidden xl:inline text-[11px]">Settings</span>
+                  </motion.button>
+                </div>
+              )}
+            </div>
           </div>
 
           {appMode === 'chat' && <ChatView />}
           {appMode === 'image' && <ImageEditStudio />}
         </main>
+
+        <DialogShell
+          open={toolsOpen}
+          onClose={closePanels}
+          title="Tools"
+          icon={<SlidersHorizontal size={18} />}
+          maxWidth="max-w-md"
+          maxHeight="max-h-[70vh]"
+          placement="bottom"
+          bodyClassName="p-3 sm:p-4"
+        >
+          <div className="grid grid-cols-2 gap-2">
+            {GLOBAL_TOOL_ACTIONS.map(({ panel, label, ariaLabel, Icon }) => (
+              <button
+                key={panel}
+                onClick={() => openPanel(panel)}
+                className="min-h-12 rounded-xl border border-border bg-surface-alt px-3 text-left text-sm text-text-secondary hover:text-text hover:border-primary/30 transition-colors inline-flex items-center gap-2"
+                aria-label={ariaLabel}
+              >
+                <Icon size={16} className="shrink-0 text-primary" />
+                <span className="truncate">{label}</span>
+              </button>
+            ))}
+            <button
+              onClick={openSettingsPanel}
+              className="min-h-12 rounded-xl border border-border bg-surface-alt px-3 text-left text-sm text-text-secondary hover:text-text hover:border-primary/30 transition-colors inline-flex items-center gap-2"
+              aria-label="Settings"
+            >
+              <Settings size={16} className="shrink-0 text-primary" />
+              <span className="truncate">Settings</span>
+            </button>
+          </div>
+        </DialogShell>
 
         <SettingsPanel />
         <KeyboardShortcuts open={shortcutsOpen} onClose={closePanels} />

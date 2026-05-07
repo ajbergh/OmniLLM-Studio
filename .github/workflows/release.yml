@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   # ── Linux ────────────────────────────────────────────────────────────────────
-  build-linux:
+  build-wails-linux:
     name: Build (Linux / amd64)
     runs-on: ubuntu-latest
     steps:
@@ -47,8 +47,8 @@ jobs:
 
       - name: Build
         run: |
-          chmod +x scripts/build-linux.sh
-          ./scripts/build-linux.sh
+          chmod +x scripts/build-wails-linux.sh
+          ./scripts/build-wails-linux.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -58,7 +58,7 @@ jobs:
           if-no-files-found: error
 
   # ── macOS ────────────────────────────────────────────────────────────────────
-  build-macos:
+  build-wails-macos:
     name: Build (macOS / arm64)
     runs-on: macos-latest
     steps:
@@ -84,8 +84,8 @@ jobs:
 
       - name: Build
         run: |
-          chmod +x scripts/build-macos.sh
-          ./scripts/build-macos.sh
+          chmod +x scripts/build-wails-macos.sh
+          ./scripts/build-wails-macos.sh
 
       - name: Package .app bundle as zip
         run: |
@@ -105,7 +105,7 @@ jobs:
           if-no-files-found: error
 
   # ── Windows ──────────────────────────────────────────────────────────────────
-  build-windows:
+  build-wails-windows:
     name: Build (Windows / amd64)
     runs-on: windows-latest
     steps:
@@ -131,7 +131,7 @@ jobs:
         shell: pwsh
 
       - name: Build
-        run: scripts\build-windows.bat
+        run: scripts\build-wails-windows.bat
         shell: cmd
 
       - name: Upload artifact
@@ -144,7 +144,7 @@ jobs:
   # ── Release ──────────────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
-    needs: [build-linux, build-macos, build-windows]
+    needs: [build-wails-linux, build-wails-macos, build-wails-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts

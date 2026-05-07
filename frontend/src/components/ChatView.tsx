@@ -21,6 +21,7 @@ import { api, templateApi, branchApi, agentApi } from '../api';
 import { matchesShortcut } from '../shortcuts';
 import type { Message, WebSearchResult, MessageMetadata, PromptTemplate, UsageSummary } from '../types';
 import { AgentEventType } from '../types';
+import { getModelReasoningLevels, type ReasoningEffortLevel } from '../models';
 
 type PendingUploadStatus = 'pending' | 'uploading' | 'failed';
 
@@ -75,6 +76,7 @@ export function ChatView() {
   const [attachmentPanelOpen, setAttachmentPanelOpen] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [thinkEnabled, setThinkEnabled] = useState(false);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortLevel | undefined>(undefined);
 
   // Detect if the active conversation is using an Ollama provider
   const activeConvo = conversations.find((c) => c.id === activeId);
@@ -98,6 +100,12 @@ export function ChatView() {
 
   // Check if the active provider supports image generation (from backend capability field)
   const isImageCapable = activeProvider?.image_capable === true;
+
+  // Reasoning effort levels supported by the current model (null = not supported)
+  const reasoningLevels = getModelReasoningLevels(
+    activeProvider?.type || '',
+    activeConvo?.default_model || ''
+  );
 
   // Find the most recent generated-image attachment ID in the conversation.
   // Image generation messages have metadata_json containing "image_generation".
@@ -328,13 +336,13 @@ export function ChatView() {
 
     if (input.trim() || attachmentIds.length > 0) {
       const content = input.trim() || 'Please analyze the attached files.';
-      sendMessage(currentId!, content, undefined, attachmentIds.length > 0 ? attachmentIds : undefined, webSearchEnabled, isOllamaProvider && thinkEnabled ? true : undefined);
+      sendMessage(currentId!, content, undefined, attachmentIds.length > 0 ? attachmentIds : undefined, webSearchEnabled, isOllamaProvider && thinkEnabled ? true : undefined, reasoningLevels ? reasoningEffort : undefined);
       setInput('');
       if (inputRef.current) {
         inputRef.current.style.height = 'auto';
       }
     }
-  }, [input, activeId, streaming, pendingFiles, imageMode, editPreviousImage, lastImageAttachmentId, agentMode, activeConvo, webSearchEnabled, thinkEnabled, isOllamaProvider, sendMessage, generateImage, createConversation, clearMessages, selectConversation]);
+  }, [input, activeId, streaming, pendingFiles, imageMode, editPreviousImage, lastImageAttachmentId, agentMode, activeConvo, webSearchEnabled, thinkEnabled, isOllamaProvider, reasoningEffort, reasoningLevels, sendMessage, generateImage, createConversation, clearMessages, selectConversation]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (matchesShortcut(e as unknown as KeyboardEvent, 'sendMessage')) {
@@ -405,17 +413,17 @@ export function ChatView() {
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="px-5 py-3 border-b border-border flex items-center justify-between glass-strong relative z-20"
+        className="px-3 py-3 sm:px-5 border-b border-border flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between glass-strong relative z-20"
       >
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
             <Bot size={14} className="text-primary" />
           </div>
-          <div>
-            <h2 className="text-sm font-medium text-text leading-tight">
+          <div className="min-w-0">
+            <h2 className="text-sm font-medium text-text leading-tight truncate">
               {activeConvo?.title || 'Chat'}
             </h2>
-            <p className="text-[11px] text-text-muted">
+            <p className="text-[11px] text-text-muted truncate">
               {messageCount} message{messageCount !== 1 ? 's' : ''} · {wordCount.toLocaleString()} words
               {conversationUsage && conversationUsage.estimated_cost > 0 && (
                 <span className="ml-1">· ${conversationUsage.estimated_cost.toFixed(4)}</span>
@@ -426,7 +434,7 @@ export function ChatView() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {/* Branch Switcher */}
           {activeId && (
             <BranchSwitcher
@@ -453,7 +461,8 @@ export function ChatView() {
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => setAttachmentPanelOpen(true)}
-              className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-light/50 transition-colors"
+              className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-lg text-text-muted hover:text-text hover:bg-surface-light/50 transition-colors"
+              aria-label="Manage attachments"
               title="Manage attachments"
             >
               <Paperclip size={14} />
@@ -466,7 +475,7 @@ export function ChatView() {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={() => setExportMenuOpen(!exportMenuOpen)}
-                className="p-2 rounded-xl hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
+                className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
                 aria-label="Export conversation"
               >
                 <Download size={14} />
@@ -557,12 +566,12 @@ export function ChatView() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex items-start gap-3 max-w-3xl"
+              className="flex items-start gap-3 max-w-3xl min-w-0"
             >
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center shrink-0 mt-0.5">
                 <Globe size={15} className="text-blue-400 animate-pulse" />
               </div>
-              <div className="flex flex-col gap-1 px-4 py-3 rounded-2xl bg-surface-alt border border-blue-500/20 rounded-bl-md">
+              <div className="flex min-w-0 flex-col gap-1 px-4 py-3 rounded-2xl bg-surface-alt border border-blue-500/20 rounded-bl-md">
                 <div className="flex items-center gap-2">
                   <div className="flex gap-1">
                     <span className="typing-dot" />
@@ -585,7 +594,7 @@ export function ChatView() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex items-start gap-3 max-w-3xl"
+              className="flex items-start gap-3 max-w-3xl min-w-0"
             >
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-purple-500/20 to-violet-500/20 flex items-center justify-center shrink-0 mt-0.5">
                 <Brain size={15} className="text-purple-400 animate-pulse" />
@@ -616,7 +625,7 @@ export function ChatView() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex items-start gap-3 max-w-3xl"
+              className="flex items-start gap-3 max-w-3xl min-w-0"
             >
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center shrink-0 mt-0.5">
                 <Bot size={15} className="text-primary" />
@@ -680,7 +689,7 @@ export function ChatView() {
       )}
 
       {/* Input area */}
-      <div className="p-4 sm:p-4 px-2">
+      <div className="px-3 py-4 sm:px-4">
         <div className="max-w-3xl mx-auto">
           {/* Streaming controls */}
           {streaming && (
@@ -702,12 +711,12 @@ export function ChatView() {
           )}
 
           {/* Composer mode chips */}
-          <div className="mb-2 flex items-center justify-between gap-2 px-1">
-            <div className="inline-flex items-center gap-1 rounded-xl bg-surface-alt border border-border p-1">
+          <div className="mb-2 flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
+            <div className="inline-flex w-fit max-w-full flex-wrap items-center gap-1 rounded-xl bg-surface-alt border border-border p-1">
               <button
                 onClick={() => setComposerMode('chat')}
                 className={clsx(
-                  'px-2.5 py-1 rounded-lg text-[11px] transition-colors',
+                  'min-h-8 px-2.5 rounded-lg text-[11px] transition-colors',
                   !imageMode && !agentMode
                     ? 'bg-primary/20 text-primary'
                     : 'text-text-muted hover:text-text'
@@ -719,7 +728,7 @@ export function ChatView() {
               <button
                 onClick={() => setComposerMode(imageMode ? 'chat' : 'image')}
                 className={clsx(
-                  'px-2.5 py-1 rounded-lg text-[11px] transition-colors inline-flex items-center gap-1',
+                  'min-h-8 px-2.5 rounded-lg text-[11px] transition-colors inline-flex items-center gap-1',
                   imageMode
                     ? 'bg-primary/20 text-primary'
                     : 'text-text-muted hover:text-text'
@@ -731,7 +740,7 @@ export function ChatView() {
               <button
                 onClick={() => setComposerMode(agentMode ? 'chat' : 'agent')}
                 className={clsx(
-                  'px-2.5 py-1 rounded-lg text-[11px] transition-colors inline-flex items-center gap-1',
+                  'min-h-8 px-2.5 rounded-lg text-[11px] transition-colors inline-flex items-center gap-1',
                   agentMode
                     ? 'bg-amber-500/20 text-amber-400'
                     : 'text-text-muted hover:text-text'
@@ -808,7 +817,7 @@ export function ChatView() {
               </div>
             )}
 
-            <div className="flex items-end gap-3">
+            <div className="flex flex-wrap items-end gap-2 sm:flex-nowrap sm:gap-3">
             {/* Hidden file input */}
             <input
               ref={fileInputRef}
@@ -826,14 +835,14 @@ export function ChatView() {
             {/* Paperclip button */}
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="p-2.5 rounded-xl text-text-muted hover:text-text transition-colors shrink-0"
+              className="order-1 min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl text-text-muted hover:text-text transition-colors shrink-0"
               aria-label="Attach file"
             >
               <Paperclip size={16} />
             </button>
 
             {/* Template picker */}
-            <div className="relative">
+            <div className="relative order-1">
               <button
                 onClick={() => {
                   if (!templatePickerOpen) {
@@ -842,7 +851,7 @@ export function ChatView() {
                   setTemplatePickerOpen(!templatePickerOpen);
                 }}
                 className={clsx(
-                  'p-2.5 rounded-xl transition-colors shrink-0',
+                  'min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl transition-colors shrink-0',
                   templatePickerOpen
                     ? 'bg-primary/20 text-primary'
                     : 'text-text-muted hover:text-text'
@@ -897,7 +906,7 @@ export function ChatView() {
             <button
               onClick={() => setWebSearchEnabled((v) => !v)}
               className={clsx(
-                'p-2.5 rounded-xl transition-colors shrink-0',
+                'order-1 min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl transition-colors shrink-0',
                 webSearchEnabled
                   ? 'bg-blue-500/20 text-blue-400'
                   : 'text-text-muted hover:text-text'
@@ -913,7 +922,7 @@ export function ChatView() {
               <button
                 onClick={() => setThinkEnabled((v) => !v)}
                 className={clsx(
-                  'p-2.5 rounded-xl transition-colors shrink-0',
+                  'order-1 min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl transition-colors shrink-0',
                   thinkEnabled
                     ? 'bg-purple-500/20 text-purple-400'
                     : 'text-text-muted hover:text-text'
@@ -925,7 +934,50 @@ export function ChatView() {
               </button>
             )}
 
-            <div className="flex-1 relative">
+            {/* Reasoning effort picker (models that support reasoning_effort: o-series, gpt-5.x, claude-3.7+) */}
+            {reasoningLevels && !isOllamaProvider && !imageMode && (
+              <div className="order-1 flex items-center gap-0.5 rounded-xl border border-border/50 bg-surface-hover/50 p-0.5" title="Reasoning effort — controls how much the model thinks before responding">
+                <button
+                  onClick={() => setReasoningEffort(undefined)}
+                  className={clsx(
+                    'h-8 px-2 rounded-lg text-[11px] font-medium transition-colors',
+                    reasoningEffort === undefined
+                      ? 'bg-surface text-text shadow-sm'
+                      : 'text-text-muted hover:text-text'
+                  )}
+                  title="Default reasoning (no effort override)"
+                >
+                  auto
+                </button>
+                {reasoningLevels.map((level) => (
+                  <button
+                    key={level}
+                    onClick={() => setReasoningEffort(level === reasoningEffort ? undefined : level)}
+                    className={clsx(
+                      'h-8 px-2 rounded-lg text-[11px] font-medium transition-colors capitalize',
+                      reasoningEffort === level
+                        ? level === 'low'
+                          ? 'bg-sky-500/20 text-sky-400 shadow-sm'
+                          : level === 'medium'
+                          ? 'bg-amber-500/20 text-amber-400 shadow-sm'
+                          : 'bg-purple-500/20 text-purple-400 shadow-sm'
+                        : 'text-text-muted hover:text-text'
+                    )}
+                    title={
+                      level === 'low'
+                        ? 'Low reasoning — faster, less compute'
+                        : level === 'medium'
+                        ? 'Medium reasoning — balanced'
+                        : 'High reasoning — slower, deeper thinking'
+                    }
+                  >
+                    {level}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="order-2 min-w-0 flex-1 basis-[calc(100%-3rem)] sm:basis-auto relative">
               {imageMode && (
                 <div className="mb-1.5 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-[11px] text-primary flex items-center gap-1.5">
                   <Image size={12} />
@@ -972,7 +1024,7 @@ export function ChatView() {
 
             {/* Character count for long messages */}
             {input.length > 200 && (
-              <span className="text-[10px] text-text-muted self-center pr-1">
+              <span className="order-3 text-[10px] text-text-muted self-center pr-1 sm:order-none">
                 {input.length.toLocaleString()}
               </span>
             )}
@@ -985,7 +1037,7 @@ export function ChatView() {
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ scale: 0.8, opacity: 0 }}
                   onClick={stopStreaming}
-                  className="p-2.5 rounded-xl bg-danger/90 hover:bg-danger text-white
+                  className="order-2 min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl bg-danger/90 hover:bg-danger text-white
                              transition-colors shrink-0"
                   aria-label="Stop generation (Esc)"
                 >
@@ -1002,7 +1054,7 @@ export function ChatView() {
                   onClick={handleSend}
                   disabled={(!input.trim() && pendingFiles.length === 0) || uploading}
                   className={clsx(
-                    'p-2.5 rounded-xl transition-all duration-200 shrink-0',
+                    'order-2 min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl transition-all duration-200 shrink-0',
                     input.trim() || pendingFiles.length > 0
                       ? 'btn-primary shadow-md shadow-primary/20'
                       : 'bg-surface-hover text-text-muted cursor-not-allowed'
@@ -1017,7 +1069,7 @@ export function ChatView() {
           </motion.div>
 
           {/* Input hints */}
-          <div className="flex items-center justify-between mt-1.5 px-1">
+          <div className="flex flex-col gap-1 mt-1.5 px-1 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-[10px] text-text-muted/40">
               {imageMode ? (
                 <span className="flex items-center gap-1"><Image size={8} /> {editPreviousImage && lastImageAttachmentId ? 'Edit mode · Enter to edit image' : 'Image mode · Enter to generate'}</span>
@@ -1028,9 +1080,9 @@ export function ChatView() {
               )}
             </span>
             {activeConvo?.default_model && (
-              <span className="text-[10px] text-text-muted/40 flex items-center gap-1">
+              <span className="text-[10px] text-text-muted/40 flex min-w-0 items-center gap-1">
                 <Sparkles size={8} />
-                {activeConvo.default_model}
+                <span className="truncate">{activeConvo.default_model}</span>
               </span>
             )}
           </div>
@@ -1056,11 +1108,11 @@ export function ChatView() {
 
 function StreamingBubble({ content }: { content: string }) {
   return (
-    <div className="flex gap-3 justify-start">
+    <div className="flex min-w-0 gap-3 justify-start">
       <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center shrink-0 mt-0.5">
         <Bot size={15} className="text-primary" />
       </div>
-      <div className="group relative max-w-[85%] text-sm leading-relaxed rounded-2xl rounded-bl-md px-4 py-3 bg-surface-alt border border-border">
+      <div className="group relative min-w-0 max-w-[calc(100%-2.75rem)] sm:max-w-[85%] text-sm leading-relaxed rounded-2xl rounded-bl-md px-4 py-3 bg-surface-alt border border-border">
         <MarkdownContent content={content} />
         <span
           className="inline-block w-[2px] h-4 ml-0.5 rounded-full align-middle"
@@ -1142,7 +1194,7 @@ function MessageBubble({
   };
 
   return (
-    <div className={clsx('flex gap-3 group/msg', isUser ? 'justify-end' : 'justify-start')}>
+    <div className={clsx('flex min-w-0 gap-3 group/msg', isUser ? 'justify-end' : 'justify-start')}>
       {!isUser && (
         <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center shrink-0 mt-0.5">
           <Bot size={15} className="text-primary" />
@@ -1151,7 +1203,7 @@ function MessageBubble({
 
       <div
         className={clsx(
-          'relative max-w-[85%] text-sm leading-relaxed',
+          'relative min-w-0 max-w-[calc(100%-2.75rem)] sm:max-w-[85%] text-sm leading-relaxed',
           isUser
             ? 'rounded-2xl rounded-br-md px-4 py-3 bg-gradient-to-br from-primary to-primary-hover text-white shadow-md shadow-primary/10'
             : 'rounded-2xl rounded-bl-md px-4 py-3 bg-surface-alt border border-border'
