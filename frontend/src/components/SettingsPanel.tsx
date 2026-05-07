@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useProviderStore, useSettingsStore } from '../stores';
 import { api, authApi, setAuthToken } from '../api';
-import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette } from 'lucide-react';
+import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw } from 'lucide-react';
 import { useTheme, THEMES } from '../theme';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -1040,22 +1040,46 @@ function GeneralTab() {
 // RAG Settings Tab
 // ============================================
 
+// RAG default values — kept in sync with backend `models.DefaultAppSettings`.
+// "" embedding model means "Auto" (backend resolver picks canonical model per provider).
+const RAG_DEFAULTS = {
+  embeddingModel: '',
+  chunkSize: 1000,
+  chunkOverlap: 200,
+  topK: 5,
+} as const;
+
 function RAGTab() {
   const { settings, updateSettings } = useSettingsStore();
   const [ragEnabled, setRagEnabled] = useState(settings.rag_enabled ?? false);
-  const [embeddingModel, setEmbeddingModel] = useState(settings.rag_embedding_model || 'text-embedding-3-small');
-  const [chunkSize, setChunkSize] = useState(settings.rag_chunk_size ?? 512);
-  const [chunkOverlap, setChunkOverlap] = useState(settings.rag_chunk_overlap ?? 64);
-  const [topK, setTopK] = useState(settings.rag_top_k ?? 5);
+  const [embeddingModel, setEmbeddingModel] = useState(settings.rag_embedding_model ?? RAG_DEFAULTS.embeddingModel);
+  const [chunkSize, setChunkSize] = useState(settings.rag_chunk_size ?? RAG_DEFAULTS.chunkSize);
+  const [chunkOverlap, setChunkOverlap] = useState(settings.rag_chunk_overlap ?? RAG_DEFAULTS.chunkOverlap);
+  const [topK, setTopK] = useState(settings.rag_top_k ?? RAG_DEFAULTS.topK);
   const [saving, setSaving] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     setRagEnabled(settings.rag_enabled ?? false);
-    setEmbeddingModel(settings.rag_embedding_model || 'text-embedding-3-small');
-    setChunkSize(settings.rag_chunk_size ?? 512);
-    setChunkOverlap(settings.rag_chunk_overlap ?? 64);
-    setTopK(settings.rag_top_k ?? 5);
+    setEmbeddingModel(settings.rag_embedding_model ?? RAG_DEFAULTS.embeddingModel);
+    setChunkSize(settings.rag_chunk_size ?? RAG_DEFAULTS.chunkSize);
+    setChunkOverlap(settings.rag_chunk_overlap ?? RAG_DEFAULTS.chunkOverlap);
+    setTopK(settings.rag_top_k ?? RAG_DEFAULTS.topK);
   }, [settings]);
+
+  const isCustomized =
+    embeddingModel !== RAG_DEFAULTS.embeddingModel ||
+    chunkSize !== RAG_DEFAULTS.chunkSize ||
+    chunkOverlap !== RAG_DEFAULTS.chunkOverlap ||
+    topK !== RAG_DEFAULTS.topK;
+
+  const resetAdvanced = () => {
+    setEmbeddingModel(RAG_DEFAULTS.embeddingModel);
+    setChunkSize(RAG_DEFAULTS.chunkSize);
+    setChunkOverlap(RAG_DEFAULTS.chunkOverlap);
+    setTopK(RAG_DEFAULTS.topK);
+  };
 
   const saveRAGSettings = async () => {
     setSaving(true);
@@ -1072,6 +1096,23 @@ function RAGTab() {
       toast.error('Failed to save RAG settings');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleReindexAll = async () => {
+    if (!window.confirm(
+      'Drop every conversation\'s vector index? Each conversation will lazy-rebuild from existing chunk text on its next query. This is safe but may make the first retrieval per conversation a bit slower.'
+    )) {
+      return;
+    }
+    setReindexing(true);
+    try {
+      const result = await api.reindexAll();
+      toast.success(`Reset ${result.conversations_dropped} conversation${result.conversations_dropped === 1 ? '' : 's'}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reindex');
+    } finally {
+      setReindexing(false);
     }
   };
 
@@ -1111,84 +1152,157 @@ function RAGTab() {
           </div>
 
           {ragEnabled && (
-            <>
-              {/* Embedding model */}
-              <div>
-                <label className="text-xs font-medium text-text-secondary mb-1.5 block">Embedding Model</label>
-                <select
-                  value={embeddingModel}
-                  onChange={(e) => setEmbeddingModel(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl
-                             text-text focus:outline-none focus:border-primary/50 transition-colors"
-                >
-                  <option value="text-embedding-3-small">text-embedding-3-small (OpenAI)</option>
-                  <option value="text-embedding-3-large">text-embedding-3-large (OpenAI)</option>
-                  <option value="text-embedding-ada-002">text-embedding-ada-002 (OpenAI)</option>
-                  <option value="nomic-embed-text">nomic-embed-text (Ollama)</option>
-                  <option value="all-minilm">all-minilm (Ollama)</option>
-                </select>
-              </div>
-
-              {/* Chunk size */}
-              <div>
-                <label className="text-xs font-medium text-text-secondary mb-1.5 block">
-                  Chunk Size <span className="text-text-muted font-normal">({chunkSize} tokens)</span>
-                </label>
-                <input
-                  type="range"
-                  min={128}
-                  max={2048}
-                  step={64}
-                  value={chunkSize}
-                  onChange={(e) => setChunkSize(Number(e.target.value))}
-                  className="w-full accent-primary"
+            <div className="rounded-xl border border-border bg-surface/50 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen((v) => !v)}
+                className="w-full flex items-center justify-between px-3 py-2.5 text-xs font-medium
+                           text-text-secondary hover:text-text hover:bg-surface transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  Advanced
+                  {isCustomized && (
+                    <span className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded
+                                     bg-primary/20 text-primary font-semibold">
+                      Customized
+                    </span>
+                  )}
+                </span>
+                <ChevronDown
+                  size={14}
+                  className={`transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
                 />
-                <div className="flex justify-between text-[10px] text-text-muted mt-0.5">
-                  <span>128</span>
-                  <span>2048</span>
-                </div>
-              </div>
+              </button>
 
-              {/* Chunk overlap */}
-              <div>
-                <label className="text-xs font-medium text-text-secondary mb-1.5 block">
-                  Chunk Overlap <span className="text-text-muted font-normal">({chunkOverlap} tokens)</span>
-                </label>
-                <input
-                  type="range"
-                  min={0}
-                  max={256}
-                  step={16}
-                  value={chunkOverlap}
-                  onChange={(e) => setChunkOverlap(Number(e.target.value))}
-                  className="w-full accent-primary"
-                />
-                <div className="flex justify-between text-[10px] text-text-muted mt-0.5">
-                  <span>0</span>
-                  <span>256</span>
-                </div>
-              </div>
+              {advancedOpen && (
+                <div className="px-3 pb-4 pt-1 space-y-4 border-t border-border">
+                  <p className="text-[11px] text-text-muted leading-relaxed pt-2">
+                    Sensible defaults work for most users. These knobs are useful if you want to
+                    tune retrieval quality vs. token cost or pin a specific embedding model.
+                  </p>
 
-              {/* Top-K */}
-              <div>
-                <label className="text-xs font-medium text-text-secondary mb-1.5 block">
-                  Top-K Results <span className="text-text-muted font-normal">({topK})</span>
-                </label>
-                <input
-                  type="range"
-                  min={1}
-                  max={20}
-                  step={1}
-                  value={topK}
-                  onChange={(e) => setTopK(Number(e.target.value))}
-                  className="w-full accent-primary"
-                />
-                <div className="flex justify-between text-[10px] text-text-muted mt-0.5">
-                  <span>1</span>
-                  <span>20</span>
+                  {/* Embedding model */}
+                  <div>
+                    <label className="text-xs font-medium text-text-secondary mb-1.5 block">Embedding Model</label>
+                    <select
+                      value={embeddingModel}
+                      onChange={(e) => setEmbeddingModel(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl
+                                 text-text focus:outline-none focus:border-primary/50 transition-colors"
+                    >
+                      <option value="">Auto (recommended) — picks the canonical model per provider</option>
+                      <optgroup label="OpenAI">
+                        <option value="text-embedding-3-small">text-embedding-3-small</option>
+                        <option value="text-embedding-3-large">text-embedding-3-large</option>
+                        <option value="text-embedding-ada-002">text-embedding-ada-002</option>
+                      </optgroup>
+                      <optgroup label="Mistral">
+                        <option value="mistral-embed">mistral-embed</option>
+                      </optgroup>
+                      <optgroup label="Together">
+                        <option value="togethercomputer/m2-bert-80M-8k-base">m2-bert-80M-8k-base</option>
+                        <option value="WhereIsAI/UAE-Large-V1">UAE-Large-V1</option>
+                      </optgroup>
+                      <optgroup label="Gemini">
+                        <option value="text-embedding-004">text-embedding-004</option>
+                      </optgroup>
+                      <optgroup label="Ollama (Local)">
+                        <option value="nomic-embed-text">nomic-embed-text</option>
+                        <option value="mxbai-embed-large">mxbai-embed-large</option>
+                        <option value="bge-m3">bge-m3</option>
+                        <option value="all-minilm">all-minilm</option>
+                      </optgroup>
+                      <optgroup label="OpenRouter">
+                        <option value="openai/text-embedding-3-small">openai/text-embedding-3-small</option>
+                        <option value="openai/text-embedding-3-large">openai/text-embedding-3-large</option>
+                      </optgroup>
+                    </select>
+                    <p className="text-[10px] text-text-muted mt-1.5">
+                      Embeddings auto-route to the first enabled provider that supports them
+                      (OpenAI → Mistral → Together → Ollama → Gemini). Pin a specific model only
+                      if you have a reason to — changing it after indexing requires a reindex.
+                    </p>
+                  </div>
+
+                  {/* Chunk size */}
+                  <div>
+                    <label className="text-xs font-medium text-text-secondary mb-1.5 block">
+                      Chunk Size <span className="text-text-muted font-normal">({chunkSize} chars)</span>
+                    </label>
+                    <input
+                      type="range"
+                      min={128}
+                      max={2048}
+                      step={64}
+                      value={chunkSize}
+                      onChange={(e) => setChunkSize(Number(e.target.value))}
+                      className="w-full accent-primary"
+                    />
+                    <div className="flex justify-between text-[10px] text-text-muted mt-0.5">
+                      <span>128</span>
+                      <span>2048</span>
+                    </div>
+                    <p className="text-[10px] text-text-muted mt-1">
+                      Smaller for Q&amp;A; larger for code or structured docs. Changing this requires a reindex.
+                    </p>
+                  </div>
+
+                  {/* Chunk overlap */}
+                  <div>
+                    <label className="text-xs font-medium text-text-secondary mb-1.5 block">
+                      Chunk Overlap <span className="text-text-muted font-normal">({chunkOverlap} chars)</span>
+                    </label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={500}
+                      step={20}
+                      value={chunkOverlap}
+                      onChange={(e) => setChunkOverlap(Number(e.target.value))}
+                      className="w-full accent-primary"
+                    />
+                    <div className="flex justify-between text-[10px] text-text-muted mt-0.5">
+                      <span>0</span>
+                      <span>500</span>
+                    </div>
+                  </div>
+
+                  {/* Top-K */}
+                  <div>
+                    <label className="text-xs font-medium text-text-secondary mb-1.5 block">
+                      Top-K Results <span className="text-text-muted font-normal">({topK})</span>
+                    </label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={20}
+                      step={1}
+                      value={topK}
+                      onChange={(e) => setTopK(Number(e.target.value))}
+                      className="w-full accent-primary"
+                    />
+                    <div className="flex justify-between text-[10px] text-text-muted mt-0.5">
+                      <span>1</span>
+                      <span>20</span>
+                    </div>
+                    <p className="text-[10px] text-text-muted mt-1">
+                      How many chunks to inject per query. More context = more tokens. No reindex required.
+                    </p>
+                  </div>
+
+                  {isCustomized && (
+                    <button
+                      type="button"
+                      onClick={resetAdvanced}
+                      className="flex items-center gap-1.5 text-[11px] text-text-muted hover:text-text transition-colors"
+                    >
+                      <RotateCcw size={12} />
+                      Reset to defaults
+                    </button>
+                  )}
                 </div>
-              </div>
-            </>
+              )}
+            </div>
           )}
 
           <motion.button
@@ -1203,6 +1317,38 @@ function RAGTab() {
             Save RAG Settings
           </motion.button>
         </div>
+      </div>
+
+      {/* Maintenance — admin only */}
+      <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center shadow-md shadow-amber-500/10">
+            <RefreshCw size={18} className="text-amber-400" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold">Maintenance</h3>
+            <p className="text-[11px] text-text-muted">Vector store cleanup &amp; migration</p>
+          </div>
+        </div>
+
+        <p className="text-[11px] text-text-muted mb-3 leading-relaxed">
+          Reset every conversation's vector index. Each conversation lazy-rebuilds from existing
+          chunks on its next query — no re-embedding network call required for documents that
+          were indexed before the chromem-go upgrade.
+        </p>
+
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={handleReindexAll}
+          disabled={reindexing}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25
+                     border border-amber-500/30 text-amber-300 text-sm font-medium
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {reindexing ? <RefreshCw size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          Reindex All Documents
+        </motion.button>
       </div>
     </div>
   );

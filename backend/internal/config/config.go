@@ -2,18 +2,21 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 // Config holds application configuration.
 type Config struct {
-	Port           int
-	BindAddress    string // Network interface to bind; default "127.0.0.1" (localhost only).
-	DatabasePath   string
-	AttachmentsDir string
-	CORSOrigins    []string
-	AllowPublicReg bool // When false (default), only the first user can register.
+	Port            int
+	BindAddress     string // Network interface to bind; default "127.0.0.1" (localhost only).
+	DatabasePath    string
+	AttachmentsDir  string
+	CORSOrigins     []string
+	AllowPublicReg  bool   // When false (default), only the first user can register.
+	ChromemDir      string // Directory for chromem-go persistent vector files.
+	ChromemCompress bool   // Enable gzip compression for chromem data files.
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -42,6 +45,18 @@ func Load() *Config {
 
 	allowPublicReg := os.Getenv("OMNILLM_ALLOW_PUBLIC_REGISTRATION") == "true"
 
+	chromemDir := os.Getenv("OMNILLM_CHROMEM_DIR")
+	if chromemDir == "" {
+		dbDir := filepath.Dir(dbPath)
+		if dbDir == "" || dbDir == "." {
+			chromemDir = "chromem"
+		} else {
+			chromemDir = filepath.Join(dbDir, "chromem")
+		}
+	}
+
+	chromemCompress := os.Getenv("OMNILLM_CHROMEM_COMPRESS") == "true"
+
 	origins := []string{"http://localhost:5173", "http://localhost:3000"}
 	if corsEnv := os.Getenv("OMNILLM_CORS_ORIGINS"); corsEnv != "" {
 		origins = strings.Split(corsEnv, ",")
@@ -51,11 +66,13 @@ func Load() *Config {
 	}
 
 	return &Config{
-		Port:           port,
-		BindAddress:    bindAddr,
-		DatabasePath:   dbPath,
-		AttachmentsDir: attachDir,
-		CORSOrigins:    origins,
-		AllowPublicReg: allowPublicReg,
+		Port:            port,
+		BindAddress:     bindAddr,
+		DatabasePath:    dbPath,
+		AttachmentsDir:  attachDir,
+		CORSOrigins:     origins,
+		AllowPublicReg:  allowPublicReg,
+		ChromemDir:      chromemDir,
+		ChromemCompress: chromemCompress,
 	}
 }

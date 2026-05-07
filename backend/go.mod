@@ -8,6 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/mattn/go-sqlite3 v1.14.24
+	github.com/philippgille/chromem-go v0.7.0
 	github.com/wailsapp/wails/v2 v2.11.0
 	golang.org/x/crypto v0.48.0
 	golang.org/x/net v0.50.0

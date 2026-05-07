@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/db"
 	"github.com/ajbergh/omnillm-studio/internal/models"
+	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 )
 
@@ -35,6 +37,7 @@ type Exporter struct {
 	attachRepo     *repository.AttachmentRepo
 	providerRepo   *repository.ProviderRepo
 	settingsRepo   *repository.SettingsRepo
+	vectorStore    *rag.VectorStore // optional — chromem RAG vectors
 	attachmentsDir string
 	appVersion     string
 }
@@ -47,6 +50,7 @@ func NewExporter(
 	attachRepo *repository.AttachmentRepo,
 	providerRepo *repository.ProviderRepo,
 	settingsRepo *repository.SettingsRepo,
+	vectorStore *rag.VectorStore,
 	attachmentsDir string,
 	appVersion string,
 ) *Exporter {
@@ -57,6 +61,7 @@ func NewExporter(
 		attachRepo:     attachRepo,
 		providerRepo:   providerRepo,
 		settingsRepo:   settingsRepo,
+		vectorStore:    vectorStore,
 		attachmentsDir: attachmentsDir,
 		appVersion:     appVersion,
 	}
@@ -189,6 +194,19 @@ func (e *Exporter) Export(w io.Writer, opts ExportOptions) error {
 	}
 	if _, err := f.Write(settingsData); err != nil {
 		return err
+	}
+
+	// 4b. Export chromem RAG vectors (best-effort — never blocks the bundle).
+	if e.vectorStore != nil {
+		ragWriter, err := zw.Create("rag/chromem.gob")
+		if err != nil {
+			return err
+		}
+		if err := e.vectorStore.ExportToWriter(ragWriter, false, ""); err != nil {
+			log.Printf("[bundle] skip chromem export: %v", err)
+		} else {
+			stats.RAGVectorsExported = true
+		}
 	}
 
 	// 5. Write manifest (last, since we need final stats)

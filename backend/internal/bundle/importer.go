@@ -2,6 +2,7 @@ package bundle
 
 import (
 	"archive/zip"
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/ajbergh/omnillm-studio/internal/db"
 	"github.com/ajbergh/omnillm-studio/internal/models"
+	"github.com/ajbergh/omnillm-studio/internal/rag"
 )
 
 // importableSettingsKeys is the allowlist of settings keys that may be imported from a bundle.
@@ -81,6 +83,7 @@ type ImportResult struct {
 	ProvidersImported     int      `json:"providers_imported"`
 	ProvidersSkipped      int      `json:"providers_skipped"`
 	SettingsImported      int      `json:"settings_imported"`
+	RAGVectorsImported    bool     `json:"rag_vectors_imported,omitempty"`
 	Warnings              []string `json:"warnings"`
 }
 
@@ -88,11 +91,12 @@ type ImportResult struct {
 type Importer struct {
 	database       *sql.DB
 	attachmentsDir string
+	vectorStore    *rag.VectorStore // optional — if set, chromem RAG vectors will be restored
 }
 
 // NewImporter creates an Importer.
-func NewImporter(database *sql.DB, attachmentsDir string) *Importer {
-	return &Importer{database: database, attachmentsDir: attachmentsDir}
+func NewImporter(database *sql.DB, attachmentsDir string, vectorStore *rag.VectorStore) *Importer {
+	return &Importer{database: database, attachmentsDir: attachmentsDir, vectorStore: vectorStore}
 }
 
 // Validate checks the bundle without importing anything.
@@ -254,6 +258,17 @@ func (imp *Importer) Import(r io.ReaderAt, size int64, strategy ImportStrategy) 
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	// 5. Import chromem RAG vectors (best-effort — outside the SQL transaction)
+	if imp.vectorStore != nil {
+		if data, err := readZipEntry(zr, "rag/chromem.gob"); err == nil {
+			if err := imp.vectorStore.ImportFromReader(bytes.NewReader(data), ""); err != nil {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("rag vectors: %v", err))
+			} else {
+				result.RAGVectorsImported = true
+			}
+		}
 	}
 
 	return result, nil

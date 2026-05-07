@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 
 	"os"
@@ -64,13 +65,18 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	attachRepo := repository.NewAttachmentRepo(database)
 	featureFlagRepo := repository.NewFeatureFlagRepo(database)
 	chunkRepo := repository.NewChunkRepo(database)
-	embeddingRepo := repository.NewEmbeddingRepo(database)
+	embeddingRepo := repository.NewEmbeddingRepo(database) // legacy SQL embeddings, used only for lazy migration
 
 	// Services
 	llmService := llm.NewService(providerRepo, settingsRepo)
 
-	// RAG retriever
-	ragRetriever := rag.NewRetriever(llmService, chunkRepo, embeddingRepo)
+	// RAG vector store (chromem-go) + retriever
+	vectorStore, err := rag.NewVectorStore(cfg.ChromemDir, cfg.ChromemCompress)
+	if err != nil {
+		log.Fatalf("init chromem vector store at %s: %v", cfg.ChromemDir, err)
+	}
+	ragRetriever := rag.NewChromemRetriever(llmService, chunkRepo, vectorStore).
+		WithLegacyEmbeddingRepo(embeddingRepo)
 
 	// Web search orchestrator (auto-selects provider from settings:
 	//   - Brave Search if brave_api_key is set
@@ -81,8 +87,8 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	orchestrator := websearch.NewOrchestrator(wsProvider, llmService, jinaReader)
 
 	// Handlers
-	convoHandler := NewConversationHandler(convoRepo)
-	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, chunkRepo, embeddingRepo)
+	convoHandler := NewConversationHandler(convoRepo, vectorStore)
+	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore)
 	providerHandler := NewProviderHandler(providerRepo)
 	settingsHandler := NewSettingsHandler(settingsRepo, orchestrator)
 	wsHandler := NewWebSearchHandler(orchestrator)
@@ -90,7 +96,7 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	attachHandler := NewAttachmentHandler(attachRepo, convoRepo, cfg.AttachmentsDir)
 	imageHandler := NewImageHandler(msgRepo, convoRepo, attachRepo, llmService, cfg.AttachmentsDir)
 	featureFlagHandler := NewFeatureFlagHandler(featureFlagRepo)
-	ragHandler := NewRAGHandler(chunkRepo, embeddingRepo, attachRepo, convoRepo, settingsRepo, llmService, cfg.AttachmentsDir)
+	ragHandler := NewRAGHandler(chunkRepo, vectorStore, attachRepo, convoRepo, settingsRepo, providerRepo, llmService, cfg.AttachmentsDir)
 
 	// Tool Calling Framework
 	toolPermRepo := repository.NewToolPermissionRepo(database)
@@ -113,8 +119,8 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	templateHandler := NewTemplateHandler(templateRepo)
 
 	// Import/Export
-	bundleExporter := bundle.NewExporter(database, convoRepo, msgRepo, attachRepo, providerRepo, settingsRepo, cfg.AttachmentsDir, version)
-	bundleImporter := bundle.NewImporter(database, cfg.AttachmentsDir)
+	bundleExporter := bundle.NewExporter(database, convoRepo, msgRepo, attachRepo, providerRepo, settingsRepo, vectorStore, cfg.AttachmentsDir, version)
+	bundleImporter := bundle.NewImporter(database, cfg.AttachmentsDir, vectorStore)
 	bundleHandler := NewBundleHandler(bundleExporter, bundleImporter)
 
 	// Agent Mode
@@ -369,6 +375,12 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 				r.Post("/approve/{stepId}", agentHandler.ApproveStep)
 				r.Post("/cancel", agentHandler.CancelRun)
 				r.Post("/resume", agentHandler.ResumeRun)
+			})
+
+			// RAG (global / admin)
+			r.Group(func(r chi.Router) {
+				r.Use(auth.RequireRole("admin"))
+				r.Post("/rag/reindex-all", ragHandler.ReindexAll)
 			})
 
 			// Search

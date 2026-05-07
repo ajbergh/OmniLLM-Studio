@@ -475,6 +475,11 @@ export const api = {
       method: 'POST',
     }),
 
+  reindexAll: () =>
+    apiFetch<{ conversations_dropped: number; note: string }>('/rag/reindex-all', {
+      method: 'POST',
+    }),
+
   // ---- Tools ----
 
   listTools: () =>

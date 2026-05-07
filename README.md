@@ -41,7 +41,7 @@
 | Feature | Description |
 |---------|-------------|
 | **Agent Mode** | Autonomous multi-step task execution with planning, tool calling, and step approval |
-| **RAG Pipeline** | Document chunking, embedding generation, and semantic retrieval over uploaded files |
+| **RAG Pipeline** | Document chunking, embedding generation, and persistent vector retrieval (chromem-go) over uploaded files |
 | **Conversation Branching** | Fork any message into parallel branches — explore different response paths |
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
 | **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction |
@@ -159,6 +159,7 @@ Frontend (React/TS)  ──SSE/REST──▶  Backend (Go/Chi)  ──SQL──�
 - **Frontend** — Single-page React app with Zustand state management, Tailwind v4 styling, and Framer Motion animations. Includes a full-featured Image Studio with canvas editor.
 - **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image generation routed through provider-specific adapters (OpenAI, Gemini, Stable Diffusion, Together).
 - **Database** — SQLite with WAL mode, 21 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions, nodes, assets, masks, and references stored relationally.
+- **Vector store (RAG)** — [`chromem-go`](https://github.com/philippgille/chromem-go) embedded vector DB with one persistent collection per conversation under `<OMNILLM_CHROMEM_DIR>/<conversation_id>/`. Multi-threaded NN search; zero third-party Go dependencies. Chunk text stays in SQLite (`document_chunks`); chromem stores vectors only. Legacy `document_embeddings` rows lazy-migrate on first retrieval after upgrade.
 
 ## Request Lifecycle
 
@@ -406,6 +407,7 @@ All routes are under `/v1/`.
 | `POST` | `/v1/conversations/:id/reindex` | Re-chunk + re-embed documents |
 | `GET` | `/v1/attachments/:aid/chunks` | List chunks for attachment |
 | `POST` | `/v1/attachments/:aid/index` | Index attachment (chunk + embed) |
+| `POST` | `/v1/rag/reindex-all` | **Admin** — drop all chromem collections so subsequent retrievals lazy-migrate from legacy embeddings |
 
 </details>
 
@@ -567,6 +569,8 @@ All routes are under `/v1/`.
 | `OMNILLM_CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Comma-separated allowed CORS origins |
 | `OMNILLM_ALLOW_PUBLIC_REGISTRATION` | `false` | Allow registration after first user is created |
 | `OMNILLM_PLUGIN_DIR` | `~/.omnillm-studio/plugins` | Plugin directory |
+| `OMNILLM_CHROMEM_DIR` | `<dir of OMNILLM_DB_PATH>/chromem` | Directory for chromem-go RAG vector files (one subdirectory per conversation) |
+| `OMNILLM_CHROMEM_COMPRESS` | `false` | Set to `true` to gzip-compress chromem persistent files |
 
 ---
 

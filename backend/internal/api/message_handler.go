@@ -21,16 +21,17 @@ import (
 
 // MessageHandler handles message API endpoints.
 type MessageHandler struct {
-	msgRepo       *repository.MessageRepo
-	convoRepo     *repository.ConversationRepo
-	attachRepo    *repository.AttachmentRepo
-	storageDir    string
-	llmSvc        *llm.Service
-	orchestrator  *websearch.Orchestrator
-	retriever     *rag.Retriever
-	settingsRepo  *repository.SettingsRepo
-	chunkRepo     *repository.ChunkRepo
-	embeddingRepo *repository.EmbeddingRepo
+	msgRepo      *repository.MessageRepo
+	convoRepo    *repository.ConversationRepo
+	attachRepo   *repository.AttachmentRepo
+	storageDir   string
+	llmSvc       *llm.Service
+	orchestrator *websearch.Orchestrator
+	retriever    rag.Retriever
+	settingsRepo *repository.SettingsRepo
+	providerRepo *repository.ProviderRepo
+	chunkRepo    *repository.ChunkRepo
+	vectorStore  *rag.VectorStore
 }
 
 // NewMessageHandler creates a new MessageHandler.
@@ -41,22 +42,24 @@ func NewMessageHandler(
 	storageDir string,
 	llmSvc *llm.Service,
 	orch *websearch.Orchestrator,
-	retriever *rag.Retriever,
+	retriever rag.Retriever,
 	settingsRepo *repository.SettingsRepo,
+	providerRepo *repository.ProviderRepo,
 	chunkRepo *repository.ChunkRepo,
-	embeddingRepo *repository.EmbeddingRepo,
+	vectorStore *rag.VectorStore,
 ) *MessageHandler {
 	return &MessageHandler{
-		msgRepo:       msgRepo,
-		convoRepo:     convoRepo,
-		attachRepo:    attachRepo,
-		storageDir:    storageDir,
-		llmSvc:        llmSvc,
-		orchestrator:  orch,
-		retriever:     retriever,
-		settingsRepo:  settingsRepo,
-		chunkRepo:     chunkRepo,
-		embeddingRepo: embeddingRepo,
+		msgRepo:      msgRepo,
+		convoRepo:    convoRepo,
+		attachRepo:   attachRepo,
+		storageDir:   storageDir,
+		llmSvc:       llmSvc,
+		orchestrator: orch,
+		retriever:    retriever,
+		settingsRepo: settingsRepo,
+		providerRepo: providerRepo,
+		chunkRepo:    chunkRepo,
+		vectorStore:  vectorStore,
 	}
 }
 
@@ -620,12 +623,18 @@ func (h *MessageHandler) injectRAGContext(
 		topK = 5
 	}
 
+	embedProvider, embedModel, err := rag.ResolveEmbeddingProvider(llmReq.Provider, settings, h.providerRepo)
+	if err != nil {
+		log.Printf("[rag] embedding provider resolution error for conversation %s: %v", conversationID, err)
+		return nil
+	}
+
 	chunks, err := h.retriever.Retrieve(
 		ctx,
 		conversationID,
 		query,
-		llmReq.Provider,
-		settings.RAGEmbeddingModel,
+		embedProvider,
+		embedModel,
 		topK,
 	)
 	if err != nil {
@@ -760,7 +769,7 @@ func (h *MessageHandler) linkAndBuildAttachmentContext(attachmentIDs []string, m
 // autoIndexForRAG asynchronously indexes text-extractable attachments for RAG
 // retrieval. Runs in a background goroutine so it doesn't block the response.
 func (h *MessageHandler) autoIndexForRAG(attachmentIDs []string, conversationID string) {
-	if h.chunkRepo == nil || h.embeddingRepo == nil || h.settingsRepo == nil || h.llmSvc == nil {
+	if h.chunkRepo == nil || h.vectorStore == nil || h.settingsRepo == nil || h.llmSvc == nil {
 		return
 	}
 	settings, err := h.settingsRepo.GetTyped()
@@ -769,10 +778,19 @@ func (h *MessageHandler) autoIndexForRAG(attachmentIDs []string, conversationID 
 	}
 
 	// Resolve embedding provider from conversation
-	embeddingProvider := ""
+	activeProvider := ""
 	if convo, err := h.convoRepo.GetByID(conversationID); err == nil && convo != nil && convo.DefaultProvider != nil {
-		embeddingProvider = *convo.DefaultProvider
+		activeProvider = *convo.DefaultProvider
 	}
+
+	embedProvider, embedModel, err := rag.ResolveEmbeddingProvider(activeProvider, settings, h.providerRepo)
+	if err != nil {
+		log.Printf("[rag-auto] embedding provider resolution error: %v", err)
+		return
+	}
+
+	embedFunc := rag.NewLLMEmbeddingFunc(h.llmSvc, embedProvider, embedModel)
+	providerType := h.providerTypeFor(embedProvider)
 
 	chunkOpts := rag.ChunkOptions{
 		ChunkSize: settings.RAGChunkSize,
@@ -815,40 +833,34 @@ func (h *MessageHandler) autoIndexForRAG(attachmentIDs []string, conversationID 
 			continue
 		}
 
-		texts := make([]string, len(dbChunks))
-		for i, c := range dbChunks {
-			texts[i] = c.Content
-		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		embResp, err := h.llmSvc.Embed(ctx, llm.EmbeddingRequest{
-			Provider: embeddingProvider,
-			Model:    settings.RAGEmbeddingModel,
-			Input:    texts,
-		})
+		err = h.vectorStore.IndexChunks(ctx, conversationID, dbChunks, providerType, embedFunc)
 		cancel()
 		if err != nil {
-			log.Printf("[rag-auto] embedding failed for %s: %v", aid, err)
+			log.Printf("[rag-auto] indexing failed for %s: %v", aid, err)
 			continue
 		}
 
-		embModels := make([]models.DocumentEmbedding, len(embResp.Embeddings))
-		for i, vec := range embResp.Embeddings {
-			embModels[i] = models.DocumentEmbedding{
-				ChunkID:    dbChunks[i].ID,
-				Embedding:  vec,
-				Model:      embResp.Model,
-				Dimensions: embResp.Dimensions,
-			}
-		}
-
-		if err := h.embeddingRepo.UpsertBatch(embModels); err != nil {
-			log.Printf("[rag-auto] embedding storage failed for %s: %v", aid, err)
-			continue
-		}
-
-		log.Printf("[rag-auto] indexed attachment %s: %d chunks, %d embeddings", aid, len(dbChunks), len(embModels))
+		log.Printf("[rag-auto] indexed attachment %s: %d chunks (%s/%s)", aid, len(dbChunks), embedProvider, embedModel)
 	}
+}
+
+// providerTypeFor returns the provider type ("openai", "ollama", ...) for a
+// provider profile name. Used to tune indexing concurrency.
+func (h *MessageHandler) providerTypeFor(providerName string) string {
+	if h.providerRepo == nil || providerName == "" {
+		return ""
+	}
+	all, err := h.providerRepo.List()
+	if err != nil {
+		return ""
+	}
+	for _, p := range all {
+		if p.Name == providerName {
+			return p.Type
+		}
+	}
+	return ""
 }
 
 // isTextMIME returns true for MIME types whose content can be included as text context.

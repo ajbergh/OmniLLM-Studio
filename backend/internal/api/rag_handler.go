@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/ajbergh/omnillm-studio/internal/llm"
-	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/go-chi/chi/v5"
@@ -13,33 +12,36 @@ import (
 
 // RAGHandler handles RAG-related API endpoints.
 type RAGHandler struct {
-	chunkRepo     *repository.ChunkRepo
-	embeddingRepo *repository.EmbeddingRepo
-	attachRepo    *repository.AttachmentRepo
-	convoRepo     *repository.ConversationRepo
-	settingsRepo  *repository.SettingsRepo
-	llmSvc        *llm.Service
-	storageDir    string
+	chunkRepo    *repository.ChunkRepo
+	vectorStore  *rag.VectorStore
+	attachRepo   *repository.AttachmentRepo
+	convoRepo    *repository.ConversationRepo
+	settingsRepo *repository.SettingsRepo
+	providerRepo *repository.ProviderRepo
+	llmSvc       *llm.Service
+	storageDir   string
 }
 
 // NewRAGHandler creates a new RAGHandler.
 func NewRAGHandler(
 	chunkRepo *repository.ChunkRepo,
-	embeddingRepo *repository.EmbeddingRepo,
+	vectorStore *rag.VectorStore,
 	attachRepo *repository.AttachmentRepo,
 	convoRepo *repository.ConversationRepo,
 	settingsRepo *repository.SettingsRepo,
+	providerRepo *repository.ProviderRepo,
 	llmSvc *llm.Service,
 	storageDir string,
 ) *RAGHandler {
 	return &RAGHandler{
-		chunkRepo:     chunkRepo,
-		embeddingRepo: embeddingRepo,
-		attachRepo:    attachRepo,
-		convoRepo:     convoRepo,
-		settingsRepo:  settingsRepo,
-		llmSvc:        llmSvc,
-		storageDir:    storageDir,
+		chunkRepo:    chunkRepo,
+		vectorStore:  vectorStore,
+		attachRepo:   attachRepo,
+		convoRepo:    convoRepo,
+		settingsRepo: settingsRepo,
+		providerRepo: providerRepo,
+		llmSvc:       llmSvc,
+		storageDir:   storageDir,
 	}
 }
 
@@ -101,11 +103,6 @@ func (h *RAGHandler) Reindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	embeddingProvider := ""
-	if convo != nil && convo.DefaultProvider != nil {
-		embeddingProvider = *convo.DefaultProvider
-	}
-
 	settings, err := h.settingsRepo.GetTyped()
 	if err != nil {
 		respondInternalError(w, err)
@@ -116,11 +113,20 @@ func (h *RAGHandler) Reindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete existing chunks + embeddings for this conversation
-	if err := h.embeddingRepo.DeleteByConversation(convoID); err != nil {
-		log.Printf("ERROR: delete embeddings for conversation %s: %v", convoID, err)
-		respondError(w, http.StatusInternalServerError, "failed to reindex")
+	activeProvider := ""
+	if convo != nil && convo.DefaultProvider != nil {
+		activeProvider = *convo.DefaultProvider
+	}
+
+	embedProvider, embedModel, err := rag.ResolveEmbeddingProvider(activeProvider, settings, h.providerRepo)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// Delete existing chunks + chromem collection for this conversation
+	if err := h.vectorStore.DeleteCollection(convoID); err != nil {
+		log.Printf("[rag] delete chromem collection for %s: %v", convoID, err)
 	}
 	if err := h.chunkRepo.DeleteByConversation(convoID); err != nil {
 		log.Printf("ERROR: delete chunks for conversation %s: %v", convoID, err)
@@ -128,7 +134,6 @@ func (h *RAGHandler) Reindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get all attachments for the conversation
 	attachments, err := h.attachRepo.ListByConversation(convoID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -143,8 +148,10 @@ func (h *RAGHandler) Reindex(w http.ResponseWriter, r *http.Request) {
 		chunkOpts = rag.DefaultChunkOptions()
 	}
 
+	embedFunc := rag.NewLLMEmbeddingFunc(h.llmSvc, embedProvider, embedModel)
+	providerType := h.providerTypeFor(embedProvider)
+
 	var totalChunks int
-	var totalEmbeddings int
 
 	for _, att := range attachments {
 		if !canExtractAttachmentText(att.MimeType) {
@@ -171,46 +178,19 @@ func (h *RAGHandler) Reindex(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[rag] failed to create chunks for attachment %s: %v", att.ID, err)
 			continue
 		}
+
+		if err := h.vectorStore.IndexChunks(r.Context(), convoID, dbChunks, providerType, embedFunc); err != nil {
+			log.Printf("[rag] failed to index chunks for attachment %s: %v", att.ID, err)
+			continue
+		}
 		totalChunks += len(dbChunks)
-
-		// Embed the chunks
-		texts := make([]string, len(dbChunks))
-		for i, c := range dbChunks {
-			texts[i] = c.Content
-		}
-
-		embResp, err := h.llmSvc.Embed(r.Context(), llm.EmbeddingRequest{
-			Provider: embeddingProvider,
-			Model:    settings.RAGEmbeddingModel,
-			Input:    texts,
-		})
-		if err != nil {
-			log.Printf("[rag] failed to embed chunks for attachment %s: %v", att.ID, err)
-			continue
-		}
-
-		// Store embeddings
-		embModels := make([]models.DocumentEmbedding, len(embResp.Embeddings))
-		for i, vec := range embResp.Embeddings {
-			embModels[i] = models.DocumentEmbedding{
-				ChunkID:    dbChunks[i].ID,
-				Embedding:  vec,
-				Model:      embResp.Model,
-				Dimensions: embResp.Dimensions,
-			}
-		}
-
-		if err := h.embeddingRepo.UpsertBatch(embModels); err != nil {
-			log.Printf("[rag] failed to store embeddings for attachment %s: %v", att.ID, err)
-			continue
-		}
-		totalEmbeddings += len(embModels)
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"conversation_id":   convoID,
-		"chunks_created":    totalChunks,
-		"embeddings_stored": totalEmbeddings,
+		"conversation_id": convoID,
+		"chunks_indexed":  totalChunks,
+		"embed_provider":  embedProvider,
+		"embed_model":     embedModel,
 	})
 }
 
@@ -235,7 +215,6 @@ func (h *RAGHandler) IndexAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify user owns the parent conversation
 	if !verifyConversationAccessByID(w, r, h.convoRepo, att.ConversationID) {
 		return
 	}
@@ -245,20 +224,33 @@ func (h *RAGHandler) IndexAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete any existing chunks + embeddings for this attachment
-	_ = h.embeddingRepo.DeleteByAttachment(attachID)
-	_ = h.chunkRepo.DeleteByAttachment(attachID)
-
 	convo, err := h.convoRepo.GetByID(att.ConversationID)
 	if err != nil {
 		respondInternalError(w, err)
 		return
 	}
 
-	embeddingProvider := ""
+	activeProvider := ""
 	if convo != nil && convo.DefaultProvider != nil {
-		embeddingProvider = *convo.DefaultProvider
+		activeProvider = *convo.DefaultProvider
 	}
+
+	embedProvider, embedModel, err := rag.ResolveEmbeddingProvider(activeProvider, settings, h.providerRepo)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Remove any existing chunks + vector entries for this attachment
+	existing, _ := h.chunkRepo.ListByAttachment(attachID)
+	if len(existing) > 0 {
+		ids := make([]string, len(existing))
+		for i, c := range existing {
+			ids[i] = c.ID
+		}
+		_ = h.vectorStore.DeleteDocuments(r.Context(), att.ConversationID, ids...)
+	}
+	_ = h.chunkRepo.DeleteByAttachment(attachID)
 
 	safePath, pathErr := SafeJoin(h.storageDir, att.StoragePath)
 	if pathErr != nil {
@@ -282,9 +274,8 @@ func (h *RAGHandler) IndexAttachment(w http.ResponseWriter, r *http.Request) {
 	dbChunks := rag.DetectAndChunk(content, att.MimeType, att.ID, att.ConversationID, chunkOpts)
 	if len(dbChunks) == 0 {
 		respondJSON(w, http.StatusOK, map[string]interface{}{
-			"attachment_id":     attachID,
-			"chunks_created":    0,
-			"embeddings_stored": 0,
+			"attachment_id":  attachID,
+			"chunks_indexed": 0,
 		})
 		return
 	}
@@ -295,42 +286,60 @@ func (h *RAGHandler) IndexAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Embed
-	texts := make([]string, len(dbChunks))
-	for i, c := range dbChunks {
-		texts[i] = c.Content
-	}
+	embedFunc := rag.NewLLMEmbeddingFunc(h.llmSvc, embedProvider, embedModel)
+	providerType := h.providerTypeFor(embedProvider)
 
-	embResp, err := h.llmSvc.Embed(r.Context(), llm.EmbeddingRequest{
-		Provider: embeddingProvider,
-		Model:    settings.RAGEmbeddingModel,
-		Input:    texts,
-	})
-	if err != nil {
-		log.Printf("ERROR: embed chunks for attachment %s: %v", attachID, err)
+	if err := h.vectorStore.IndexChunks(r.Context(), att.ConversationID, dbChunks, providerType, embedFunc); err != nil {
+		log.Printf("ERROR: index chunks for attachment %s: %v", attachID, err)
 		respondError(w, http.StatusBadGateway, "embedding failed")
 		return
 	}
 
-	embModels := make([]models.DocumentEmbedding, len(embResp.Embeddings))
-	for i, vec := range embResp.Embeddings {
-		embModels[i] = models.DocumentEmbedding{
-			ChunkID:    dbChunks[i].ID,
-			Embedding:  vec,
-			Model:      embResp.Model,
-			Dimensions: embResp.Dimensions,
-		}
-	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"attachment_id":  attachID,
+		"chunks_indexed": len(dbChunks),
+		"embed_provider": embedProvider,
+		"embed_model":    embedModel,
+	})
+}
 
-	if err := h.embeddingRepo.UpsertBatch(embModels); err != nil {
-		log.Printf("ERROR: store embeddings for attachment %s: %v", attachID, err)
-		respondError(w, http.StatusInternalServerError, "failed to store embeddings")
+// ReindexAll drops every chromem collection so the next query against each
+// conversation triggers a lazy re-migration from legacy SQL embeddings (or
+// returns empty if none exist). Admin-only — wired in router under /rag/reindex-all.
+func (h *RAGHandler) ReindexAll(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.chunkRepo.DistinctConversationIDsWithChunks()
+	if err != nil {
+		respondInternalError(w, err)
 		return
 	}
-
+	dropped := 0
+	for _, convoID := range rows {
+		if err := h.vectorStore.DeleteCollection(convoID); err != nil {
+			log.Printf("[rag] reindex-all: drop %s: %v", convoID, err)
+			continue
+		}
+		dropped++
+	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"attachment_id":     attachID,
-		"chunks_created":    len(dbChunks),
-		"embeddings_stored": len(embModels),
+		"conversations_dropped": dropped,
+		"note":                  "next retrieval per conversation will lazy-migrate from legacy embeddings (if any) or remain empty until a per-conversation reindex is triggered",
 	})
+}
+
+// providerTypeFor returns the provider type ("openai", "ollama", ...) for a
+// provider profile name. Used to tune indexing concurrency.
+func (h *RAGHandler) providerTypeFor(providerName string) string {
+	if h.providerRepo == nil || providerName == "" {
+		return ""
+	}
+	all, err := h.providerRepo.List()
+	if err != nil {
+		return ""
+	}
+	for _, p := range all {
+		if p.Name == providerName {
+			return p.Type
+		}
+	}
+	return ""
 }

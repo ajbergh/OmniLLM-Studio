@@ -20,10 +20,11 @@ type Manifest struct {
 
 // ManifestStats contains counts of exported entities.
 type ManifestStats struct {
-	Conversations int `json:"conversations"`
-	Messages      int `json:"messages"`
-	Attachments   int `json:"attachments"`
-	Providers     int `json:"providers"`
+	Conversations      int  `json:"conversations"`
+	Messages           int  `json:"messages"`
+	Attachments        int  `json:"attachments"`
+	Providers          int  `json:"providers"`
+	RAGVectorsExported bool `json:"rag_vectors_exported,omitempty"`
 }
 
 // ValidateCompatibility checks whether this bundle can be imported.
