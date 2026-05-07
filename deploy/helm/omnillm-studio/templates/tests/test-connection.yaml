@@ -1,0 +1,44 @@
+{{- include "omnillm-studio.validate" . -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "omnillm-studio.fullname" . }}-test-connection
+  labels:
+    {{- include "omnillm-studio.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  {{- with .Values.podSecurityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: curl
+      image: curlimages/curl:8.10.1
+      {{- with .Values.containerSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+          {{- if eq .Values.topology "combined" }}
+          BASE="http://{{ include "omnillm-studio.fullname" . }}:{{ .Values.service.port }}"
+          {{- else }}
+          BASE="http://{{ include "omnillm-studio.backendName" . }}:{{ .Values.service.backendPort }}"
+          {{- end }}
+          echo "Probing $BASE/v1/health"
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS --max-time 5 "$BASE/v1/health" | grep -q '"ok":true'; then
+              echo "OK"
+              exit 0
+            fi
+            echo "  attempt $i not ready yet, retrying..."
+            sleep 3
+          done
+          echo "health check failed"
+          exit 1

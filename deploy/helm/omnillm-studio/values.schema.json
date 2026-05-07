@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "omnillm-studio values",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["topology", "replicaCount", "image", "secrets"],
+  "properties": {
+    "fullnameOverride": { "type": "string" },
+    "nameOverride":     { "type": "string" },
+
+    "topology": {
+      "type": "string",
+      "enum": ["combined", "split"],
+      "description": "combined: nginx sidecar in backend Pod. split: separate frontend Deployment."
+    },
+
+    "replicaCount": {
+      "type": "integer",
+      "const": 1,
+      "description": "Pinned to 1: SQLite + chromem-go on local disk are single-writer."
+    },
+
+    "image": {
+      "type": "object",
+      "required": ["registry", "repository"],
+      "properties": {
+        "registry":    { "type": "string", "minLength": 1 },
+        "repository":  { "type": "string", "minLength": 1 },
+        "backendTag":  { "type": "string" },
+        "frontendTag": { "type": "string" },
+        "pullPolicy":  { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] },
+        "pullSecrets": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "enabled":        { "type": "boolean" },
+        "storageClass":   { "type": "string" },
+        "size":           { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)?$" },
+        "accessModes":    { "type": "array", "items": { "type": "string", "enum": ["ReadWriteOnce", "ReadWriteMany", "ReadOnlyMany", "ReadWriteOncePod"] } },
+        "retainOnDelete": { "type": "boolean" }
+      }
+    },
+
+    "config": {
+      "type": "object",
+      "properties": {
+        "port":                    { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "corsOrigins":             { "type": "array", "items": { "type": "string" } },
+        "allowPublicRegistration": { "type": "boolean" },
+        "chromemCompress":         { "type": "boolean" },
+        "extraEnv":                { "type": "array", "items": { "type": "object" } }
+      }
+    },
+
+    "secrets": {
+      "type": "object",
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "encryptionKey":  {
+          "type": "string",
+          "description": "Hex-encoded 32-byte master key. Required when existingSecret is empty.",
+          "oneOf": [
+            { "const": "" },
+            { "pattern": "^[0-9a-fA-F]{64}$" }
+          ]
+        }
+      }
+    },
+
+    "service": {
+      "type": "object",
+      "properties": {
+        "type":         { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+        "port":         { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "frontendPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "backendPort":  { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled":     { "type": "boolean" },
+        "className":   { "type": "string" },
+        "host":        { "type": "string" },
+        "annotations": { "type": "object" },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "enabled":    { "type": "boolean" },
+            "secretName": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "resources": {
+      "type": "object",
+      "properties": {
+        "backend":  { "type": "object" },
+        "frontend": { "type": "object" }
+      }
+    },
+
+    "podSecurityContext":       { "type": "object" },
+    "containerSecurityContext": { "type": "object" },
+    "probes":                   { "type": "object" },
+
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create":      { "type": "boolean" },
+        "name":        { "type": "string" },
+        "annotations": { "type": "object" }
+      }
+    },
+
+    "nodeSelector":                  { "type": "object" },
+    "tolerations":                   { "type": "array" },
+    "affinity":                      { "type": "object" },
+    "priorityClassName":             { "type": "string" },
+    "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1 },
+    "podAnnotations":                { "type": "object" },
+    "podLabels":                     { "type": "object" },
+
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled":      { "type": "boolean" },
+        "ingressFrom":  { "type": "array" }
+      }
+    },
+
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "enabled":      { "type": "boolean" },
+        "minAvailable": { "oneOf": [ { "type": "integer" }, { "type": "string" } ] }
+      }
+    }
+  }
+}

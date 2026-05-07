@@ -1,0 +1,38 @@
+{{- include "omnillm-studio.validate" . -}}
+{{- if .Values.networkPolicy.enabled -}}
+{{/*
+Restrict ingress to the backend Pod. Default-deny on ingress; egress is
+unrestricted (the backend talks to LLM providers on the public internet).
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "omnillm-studio.backendName" . }}
+  labels:
+    {{- include "omnillm-studio.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "omnillm-studio.backendSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- if eq .Values.topology "split" }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "omnillm-studio.frontendSelectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.backendPort }}
+    {{- end }}
+    {{- with .Values.networkPolicy.ingressFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.service.backendPort }}
+        - protocol: TCP
+          port: {{ $.Values.service.frontendPort }}
+    {{- end }}
+{{- end -}}
