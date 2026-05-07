@@ -105,7 +105,7 @@ func DefaultAppSettings() AppSettings {
 		JinaReaderEnabled: true,
 		JinaReaderMaxLen:  3000,
 		RAGEnabled:        false,
-		RAGEmbeddingModel: "text-embedding-3-small",
+		RAGEmbeddingModel: "", // "" = Auto: ResolveEmbeddingProvider picks the canonical model per provider type.
 		RAGChunkSize:      1000,
 		RAGChunkOverlap:   200,
 		RAGTopK:           5,
@@ -131,9 +131,9 @@ func (s AppSettings) ToMap() map[string]string {
 	} else {
 		m["rag_enabled"] = "false"
 	}
-	if s.RAGEmbeddingModel != "" {
-		m["rag_embedding_model"] = s.RAGEmbeddingModel
-	}
+	// Always persist (including empty) so an explicit "Auto" choice round-trips
+	// instead of falling back to the default on reload.
+	m["rag_embedding_model"] = s.RAGEmbeddingModel
 	if s.RAGChunkSize > 0 {
 		m["rag_chunk_size"] = fmt.Sprintf("%d", s.RAGChunkSize)
 	}

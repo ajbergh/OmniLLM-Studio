@@ -165,6 +165,25 @@ func (r *ChunkRepo) DeleteByConversation(conversationID string) error {
 	return nil
 }
 
+// DistinctConversationIDsWithChunks returns the unique conversation IDs that
+// currently have at least one document chunk in SQLite.
+func (r *ChunkRepo) DistinctConversationIDsWithChunks() ([]string, error) {
+	rows, err := r.db.Query(`SELECT DISTINCT conversation_id FROM document_chunks`)
+	if err != nil {
+		return nil, fmt.Errorf("distinct conversation ids: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // CountByAttachment returns the number of chunks for an attachment.
 func (r *ChunkRepo) CountByAttachment(attachmentID string) (int, error) {
 	var count int

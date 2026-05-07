@@ -2,22 +2,25 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/ajbergh/omnillm-studio/internal/auth"
 	"github.com/ajbergh/omnillm-studio/internal/models"
+	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/go-chi/chi/v5"
 )
 
 // ConversationHandler handles conversation API endpoints.
 type ConversationHandler struct {
-	repo *repository.ConversationRepo
+	repo        *repository.ConversationRepo
+	vectorStore *rag.VectorStore
 }
 
 // NewConversationHandler creates a new ConversationHandler.
-func NewConversationHandler(repo *repository.ConversationRepo) *ConversationHandler {
-	return &ConversationHandler{repo: repo}
+func NewConversationHandler(repo *repository.ConversationRepo, vectorStore *rag.VectorStore) *ConversationHandler {
+	return &ConversationHandler{repo: repo, vectorStore: vectorStore}
 }
 
 func parseConversationKind(raw string) (string, error) {
@@ -141,6 +144,14 @@ func (h *ConversationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.Delete(id, userID); err != nil {
 		respondInternalError(w, err)
 		return
+	}
+	// Best-effort cleanup of the conversation's chromem collection. Failure is
+	// non-fatal — the SQL row is already gone and a stale on-disk collection
+	// will simply never be queried again.
+	if h.vectorStore != nil {
+		if err := h.vectorStore.DeleteCollection(id); err != nil {
+			log.Printf("[rag] delete chromem collection for %s: %v", id, err)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

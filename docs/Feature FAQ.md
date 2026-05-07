@@ -35,19 +35,28 @@ RAG (Retrieval-Augmented Generation) allows the LLM to answer questions grounded
 
 1. **Upload a document** (PDF, text, markdown) to a conversation via the attachment feature.
 2. OmniLLM-Studio **automatically chunks** the document into manageable segments (default ~1000 characters with 200-character overlap).
-3. Each chunk is **embedded** using your configured embedding model (e.g., `text-embedding-3-small`).
-4. When you send a message, OmniLLM-Studio **retrieves the top-k most relevant chunks** (default 5) using cosine similarity.
+3. Each chunk is **embedded** using an embed-capable provider (resolved automatically — see "Provider fallback" below) and stored in a per-conversation collection inside the embedded [chromem-go](https://github.com/philippgille/chromem-go) vector database.
+4. When you send a message, OmniLLM-Studio **retrieves the top-k most relevant chunks** (default 5) via chromem-go's multi-threaded nearest-neighbor search.
 5. The relevant chunks are **injected into the prompt** as cited context, and the AI responds with `[Source N]` citations pointing back to your documents.
 
 ### How do I use it?
 
-- **Enable RAG** by setting the `rag_enabled` key to `true` via the Settings API (`PUT /v1/settings`).
-- **Configure** the embedding model, chunk size, chunk overlap, and top-k retrieval count via the Settings API (keys: `rag_embedding_model`, `rag_chunk_size`, `rag_chunk_overlap`, `rag_top_k`).
+- **Enable RAG** in Settings → RAG, or set the `rag_enabled` key via the Settings API (`PUT /v1/settings`).
+- **Configure** the embedding model, chunk size, chunk overlap, and top-k retrieval count via Settings → RAG, or the API keys: `rag_embedding_model`, `rag_chunk_size`, `rag_chunk_overlap`, `rag_top_k`.
 - **Upload files** to any conversation — they'll be indexed automatically.
-- **Reindex** a conversation manually via the API (`POST /v1/conversations/{id}/reindex`).
+- **Reindex** a single conversation via `POST /v1/conversations/{id}/reindex` (re-chunks + re-embeds from raw text).
+- **Admin reindex-all** — `POST /v1/rag/reindex-all` drops every chromem collection so subsequent retrievals lazy-migrate from legacy SQL embeddings (useful right after upgrading).
 - RAG source citations are included in the assistant message metadata when relevant documents are found.
 
-> **UI:** RAG settings are available in Settings under the **RAG** tab — toggle RAG on/off, choose your embedding model, and adjust chunk size, overlap, and top-k values. When RAG sources are used, an inline **RAG Sources** panel appears below the assistant's message showing which document chunks were retrieved.
+> **UI:** RAG settings live in Settings → **RAG** — toggle RAG on/off, pick the embedding model, and tune chunk size, overlap, and top-k. When RAG sources are used, an inline **RAG Sources** panel appears below the assistant's message showing which document chunks were retrieved.
+
+### Provider fallback
+
+If your conversation's active provider doesn't expose an embeddings API (e.g., Anthropic, Groq), OmniLLM-Studio automatically falls back to the first enabled provider whose type does. The fallback order considered is **OpenAI → Mistral → Together → Ollama → Gemini → OpenRouter**. You don't need to pick an "embedding provider" yourself — just make sure at least one embed-capable provider is configured.
+
+### Storage
+
+Vectors are persisted under `<OMNILLM_CHROMEM_DIR>/<conversation_id>/` (default `<dir of OMNILLM_DB_PATH>/chromem`). Chunk text + metadata stay in the SQLite `document_chunks` table. The chromem directory is included automatically in workspace bundle exports and restored on import — no extra step.
 
 ### What are the benefits?
 
@@ -55,6 +64,7 @@ RAG (Retrieval-Augmented Generation) allows the LLM to answer questions grounded
 - **Works with large files** that exceed the LLM context window by intelligently selecting only the most relevant passages.
 - **Supports multiple file types** including plain text, markdown, and PDFs.
 - **Fully local** — your documents stay on your machine, never sent to third parties (only your configured LLM provider sees the relevant chunks).
+- **Persistent + fast** — vectors survive restarts in chromem-go's gob-encoded files; queries run multi-threaded.
 
 ### FAQ
 
@@ -66,6 +76,12 @@ A: Yes — adjust the `rag_top_k` setting (default 5). Higher values give more c
 
 **Q: What happens if I update a document?**
 A: Re-upload the file, or call the reindex API (`POST /v1/conversations/{id}/reindex`) to re-chunk and re-embed all attachments in the conversation.
+
+**Q: I upgraded from an older version — do I need to re-embed all my documents?**
+A: No. The first time you query a conversation after upgrading, its existing SQL-stored embeddings are copied straight into chromem-go (no network call, no re-embedding). It happens once per conversation, transparently.
+
+**Q: My active provider is Anthropic / Groq — does RAG still work?**
+A: Yes. OmniLLM-Studio detects that the active provider has no embeddings API and automatically routes embedding calls to the first available provider that does (OpenAI, Mistral, Together, Ollama, or Gemini). If none are configured, RAG returns a clear error asking you to add one.
 
 ---
 

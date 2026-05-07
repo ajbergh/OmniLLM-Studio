@@ -17,21 +17,31 @@ type RetrievedChunk struct {
 	Score float64 // cosine similarity in [−1, 1]
 }
 
-// Retriever finds the most relevant chunks for a query using embedding
-// similarity.
-type Retriever struct {
+// Retriever is the interface implemented by both the legacy SQL-backed
+// retriever and the chromem-go-backed retriever. Call sites depend only on
+// this interface so the implementation can be swapped.
+type Retriever interface {
+	Retrieve(ctx context.Context, conversationID, query, provider, model string, topK int) ([]RetrievedChunk, error)
+}
+
+// SQLRetriever finds the most relevant chunks for a query using embedding
+// similarity stored in the SQLite document_embeddings table.
+//
+// Deprecated: superseded by ChromemRetriever. Retained while migration code
+// path still needs to read legacy data.
+type SQLRetriever struct {
 	llmService    *llm.Service
 	chunkRepo     *repository.ChunkRepo
 	embeddingRepo *repository.EmbeddingRepo
 }
 
-// NewRetriever creates a Retriever.
-func NewRetriever(
+// NewSQLRetriever creates a SQLRetriever (legacy SQL-backed retriever).
+func NewSQLRetriever(
 	llmService *llm.Service,
 	chunkRepo *repository.ChunkRepo,
 	embeddingRepo *repository.EmbeddingRepo,
-) *Retriever {
-	return &Retriever{
+) *SQLRetriever {
+	return &SQLRetriever{
 		llmService:    llmService,
 		chunkRepo:     chunkRepo,
 		embeddingRepo: embeddingRepo,
@@ -41,7 +51,7 @@ func NewRetriever(
 // Retrieve returns the top-k most similar chunks for the given query text,
 // scoped to a single conversation. The provider/model are used to generate
 // the query embedding so they should match whatever was used at indexing time.
-func (r *Retriever) Retrieve(
+func (r *SQLRetriever) Retrieve(
 	ctx context.Context,
 	conversationID string,
 	query string,

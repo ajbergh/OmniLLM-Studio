@@ -79,5 +79,6 @@ The SQLite database file (`omnillm-studio.db`) is created in the `backend/` work
 
 - **LLM providers:** OpenAI-compatible API format. `llm/service.go` handles provider routing, streaming, embeddings, and image generation.
 - **Web search:** Brave Search API (key in settings) or DuckDuckGo (zero-config fallback). Jina Reader for URL content extraction.
+- **RAG vector store:** [`chromem-go`](https://github.com/philippgille/chromem-go) v0.7.0 — embedded, persistent, zero-deps Go vector DB. One collection per conversation, persisted under `<OMNILLM_CHROMEM_DIR>/<conversation_id>/`. The wrapper lives at `internal/rag/store.go` (`VectorStore`); call sites never import chromem directly. Chunk text + metadata still live in the SQLite `document_chunks` table (chromem stores vectors only). Legacy `document_embeddings` rows lazy-migrate into chromem on first retrieve via `ChromemRetriever.tryLazyMigrate`.
 - **Plugins:** JSON-RPC subprocess model. Plugin directory: `~/.omnillm-studio/plugins/` (override with `OMNILLM_PLUGIN_DIR`).
 - **Encryption:** AES-256-GCM for API keys at rest (`internal/crypto/`). Derived from a machine-specific key.
