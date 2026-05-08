@@ -15,23 +15,26 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
+	"github.com/ajbergh/omnillm-studio/internal/wordgen"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 // MessageHandler handles message API endpoints.
 type MessageHandler struct {
-	msgRepo      *repository.MessageRepo
-	convoRepo    *repository.ConversationRepo
-	attachRepo   *repository.AttachmentRepo
-	storageDir   string
-	llmSvc       *llm.Service
-	orchestrator *websearch.Orchestrator
-	retriever    rag.Retriever
-	settingsRepo *repository.SettingsRepo
-	providerRepo *repository.ProviderRepo
-	chunkRepo    *repository.ChunkRepo
-	vectorStore  *rag.VectorStore
+	msgRepo         *repository.MessageRepo
+	convoRepo       *repository.ConversationRepo
+	attachRepo      *repository.AttachmentRepo
+	storageDir      string
+	llmSvc          *llm.Service
+	orchestrator    *websearch.Orchestrator
+	retriever       rag.Retriever
+	settingsRepo    *repository.SettingsRepo
+	providerRepo    *repository.ProviderRepo
+	chunkRepo       *repository.ChunkRepo
+	vectorStore     *rag.VectorStore
+	wordGen         *wordgen.Generator
+	featureFlagRepo *repository.FeatureFlagRepo
 }
 
 // NewMessageHandler creates a new MessageHandler.
@@ -47,19 +50,23 @@ func NewMessageHandler(
 	providerRepo *repository.ProviderRepo,
 	chunkRepo *repository.ChunkRepo,
 	vectorStore *rag.VectorStore,
+	wordGen *wordgen.Generator,
+	featureFlagRepo *repository.FeatureFlagRepo,
 ) *MessageHandler {
 	return &MessageHandler{
-		msgRepo:      msgRepo,
-		convoRepo:    convoRepo,
-		attachRepo:   attachRepo,
-		storageDir:   storageDir,
-		llmSvc:       llmSvc,
-		orchestrator: orch,
-		retriever:    retriever,
-		settingsRepo: settingsRepo,
-		providerRepo: providerRepo,
-		chunkRepo:    chunkRepo,
-		vectorStore:  vectorStore,
+		msgRepo:         msgRepo,
+		convoRepo:       convoRepo,
+		attachRepo:      attachRepo,
+		storageDir:      storageDir,
+		llmSvc:          llmSvc,
+		orchestrator:    orch,
+		retriever:       retriever,
+		settingsRepo:    settingsRepo,
+		providerRepo:    providerRepo,
+		chunkRepo:       chunkRepo,
+		vectorStore:     vectorStore,
+		wordGen:         wordGen,
+		featureFlagRepo: featureFlagRepo,
 	}
 }
 
@@ -208,6 +215,13 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	ragCtx := h.injectRAGContext(r.Context(), convoID, req.Content, &llmReq)
 	if ragCtx != nil {
 		ragSources = ragCtx.Sources
+	}
+
+	// Word-doc intent: layer the word-doc directive onto the base system prompt
+	// (the one that already carries the Markdown formatting directive). The backend
+	// will automatically convert the response to a .docx download link.
+	if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
+		appendToBaseSystemPrompt(&llmReq, wordDocSystemDirective)
 	}
 
 	// ----- Web search orchestration -----
@@ -390,6 +404,12 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		ragSources = ragCtx.Sources
 	}
 
+	// Word-doc intent: layer the word-doc directive onto the base system prompt.
+	// Stacks on top of the Markdown formatting directive that's always present.
+	if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
+		appendToBaseSystemPrompt(&llmReq, wordDocSystemDirective)
+	}
+
 	// Set SSE headers
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -450,6 +470,16 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			"query":   searchResp.Query,
 			"results": json.RawMessage(sourcesJSON),
 		})
+
+		// The websearch orchestrator owns its own summarizer system prompt that
+		// already covers Markdown formatting; do NOT layer the base directive on
+		// top — small models (e.g. gemini-3.1-flash-lite) get derailed by the
+		// extra instructions and start describing sources instead of answering.
+		// Word-doc intent is the only directive that's safe to append because it
+		// changes the *task*, not the *style*.
+		if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
+			appendToBaseSystemPrompt(wsLLMReq, wordDocSystemDirective)
+		}
 
 		// Stream the summarizer LLM response
 		err = h.llmSvc.ChatStream(r.Context(), *wsLLMReq, func(chunk llm.StreamChunk) {
@@ -520,6 +550,39 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ERROR: LLM stream: %v", err)
 		sendSSE(w, flusher, "error", map[string]string{"error": "internal server error"})
 		return
+	}
+
+	// Word document generation (keyword-triggered, standard chat mode only).
+	// When the user asks for a Word doc we convert the full Markdown response to
+	// a .docx file and append a download link to the assistant message.
+	if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
+		suggestedName := suggestWordDocFilename(req.Content)
+		if storagePath, bytes, genErr := h.wordGen.Generate(fullContent, suggestedName); genErr == nil {
+			attachment := &models.Attachment{
+				ConversationID: convoID,
+				Type:           "file",
+				MimeType:       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+				StoragePath:    storagePath,
+				Bytes:          bytes,
+				CreatedAt:      time.Now().UTC(),
+			}
+			if createErr := h.attachRepo.Create(attachment); createErr == nil {
+				link := fmt.Sprintf("\n\n[📄 Download %s](/v1/attachments/%s/download)", storagePath, attachment.ID)
+				fullContent += link
+				// Emit the link as an additional SSE token so the frontend appends it live.
+				sendSSE(w, flusher, "token", map[string]string{"content": link})
+			} else {
+				log.Printf("WARN: word doc: create attachment record: %v", createErr)
+				note := "\n\n*⚠️ Word document was generated but could not be saved. Please try again.*"
+				fullContent += note
+				sendSSE(w, flusher, "token", map[string]string{"content": note})
+			}
+		} else {
+			log.Printf("WARN: word doc: generate: %v", genErr)
+			note := "\n\n*⚠️ Word document conversion failed. Please try again or copy the text above.*"
+			fullContent += note
+			sendSSE(w, flusher, "token", map[string]string{"content": note})
+		}
 	}
 
 	// Build metadata for the saved message
@@ -684,20 +747,21 @@ func (h *MessageHandler) buildLLMRequest(
 		req.Model = *convo.DefaultModel
 	}
 
-	// System prompt
-	var systemPrompt string
+	// System prompt: always include the markdown formatting directive so every
+	// response is rendered with rich structure. Layer any user/conversation
+	// prompt on top.
+	var userSystemPrompt string
 	if override != nil && override.SystemPrompt != nil {
-		systemPrompt = *override.SystemPrompt
+		userSystemPrompt = strings.TrimSpace(*override.SystemPrompt)
 	} else if convo.SystemPrompt != nil {
-		systemPrompt = *convo.SystemPrompt
+		userSystemPrompt = strings.TrimSpace(*convo.SystemPrompt)
 	}
 
-	if systemPrompt != "" {
-		req.Messages = append(req.Messages, llm.ChatMessage{
-			Role:    "system",
-			Content: systemPrompt,
-		})
-	}
+	systemPrompt := composeSystemPrompt(userSystemPrompt)
+	req.Messages = append(req.Messages, llm.ChatMessage{
+		Role:    "system",
+		Content: systemPrompt,
+	})
 
 	// Add history
 	for _, m := range history {
@@ -886,4 +950,153 @@ func isTextMIME(mime string) bool {
 		}
 	}
 	return false
+}
+
+// markdownFormattingDirective is appended to every system prompt so that
+// responses are rendered with rich Markdown structure regardless of provider.
+const markdownFormattingDirective = `Format every response in well-structured GitHub-Flavored Markdown:
+- Use headings (##, ###) to organise longer answers.
+- Use **bold** for key terms, names, numbers, and important warnings.
+- Use bullet or numbered lists for steps, options, or comparisons.
+- Use fenced code blocks with a language tag (` + "```language" + `) for ALL code, commands, and config snippets — never inline code blocks for multi-line code.
+- Use tables for structured tabular data.
+- Use > blockquotes for callouts or quoted material.
+- Use inline ` + "`code`" + ` for short identifiers (file names, flags, function names).
+- Keep paragraphs short. Add a blank line between sections.
+
+Do not wrap your entire response in a single code block. Output Markdown directly — the client renders it.`
+
+// wordDocSystemDirective is layered into the system prompt when the user's
+// message looks like a request for a Word document. The backend converts the
+// resulting Markdown response into a downloadable .docx file.
+const wordDocSystemDirective = `WORD DOCUMENT MODE: The user is requesting a Word document. Write the full document body as Markdown — headings, lists, bold, tables, etc. Do NOT say you cannot create or export files; this application automatically converts your Markdown response into a downloadable .docx and posts a download link. Provide the document content directly, with no preamble like "Here is your document".`
+
+// composeSystemPrompt builds the effective system prompt. It always includes
+// the Markdown formatting directive so every LLM response is well-structured,
+// and layers any user-supplied prompt on top.
+func composeSystemPrompt(userPrompt string) string {
+	const baseAssistant = "You are a helpful, knowledgeable assistant."
+
+	var parts []string
+	if userPrompt != "" {
+		parts = append(parts, userPrompt)
+	} else {
+		parts = append(parts, baseAssistant)
+	}
+	parts = append(parts, markdownFormattingDirective)
+	return strings.Join(parts, "\n\n")
+}
+
+// wordGenEnabled reports whether the word-doc-generation feature is wired up
+// and turned on (defaults to enabled when the feature-flag repo is absent).
+func (h *MessageHandler) wordGenEnabled() bool {
+	if h.wordGen == nil {
+		return false
+	}
+	if h.featureFlagRepo == nil {
+		return true
+	}
+	return h.featureFlagRepo.IsEnabled("word_doc_generation")
+}
+
+// appendToBaseSystemPrompt appends extra to the system message that carries the
+// Markdown formatting directive (the one composeSystemPrompt produced). Falls
+// back to the first system message, or prepends a new system message if none
+// exists. This keeps RAG/web-search prompts intact while letting word-doc
+// instructions stack cleanly on top of the user's effective system prompt.
+func appendToBaseSystemPrompt(req *llm.ChatRequest, extra string) {
+	for i := range req.Messages {
+		if req.Messages[i].Role == "system" && strings.Contains(req.Messages[i].Content, markdownFormattingDirective) {
+			req.Messages[i].Content += "\n\n" + extra
+			return
+		}
+	}
+	for i := range req.Messages {
+		if req.Messages[i].Role == "system" {
+			req.Messages[i].Content += "\n\n" + extra
+			return
+		}
+	}
+	req.Messages = append([]llm.ChatMessage{{Role: "system", Content: extra}}, req.Messages...)
+}
+
+// detectWordDocIntent returns true when the user message is asking for a Word document output.
+func detectWordDocIntent(userMsg string) bool {
+	lower := strings.ToLower(userMsg)
+	keywords := []string{
+		".docx",
+		"word doc",
+		"word document",
+		"as a word",
+		"word file",
+		"microsoft word",
+		"in word format",
+		"save as word",
+		"export as word",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// suggestWordDocFilename tries to derive a meaningful filename from the user message.
+// Falls back to an empty string (which lets wordgen choose a timestamped default).
+func suggestWordDocFilename(userMsg string) string {
+	lower := strings.ToLower(userMsg)
+
+	// Strip known intent phrases to isolate the subject matter.
+	strippers := []string{
+		" as a word doc", " as a word document", " as a .docx", " as a word file",
+		" in word format", " to word", " as word", " word doc", " word document",
+		" word file", " .docx",
+	}
+	for _, s := range strippers {
+		lower = strings.ReplaceAll(lower, s, "")
+	}
+
+	// Strip leading filler verbs and articles so the filename reflects the subject.
+	fillerPrefixes := []string{
+		"please ", "can you ", "could you ", "i need ", "i want ",
+		"write me ", "write a ", "write an ", "write the ",
+		"create me ", "create a ", "create an ", "create the ",
+		"generate me ", "generate a ", "generate an ", "generate the ",
+		"make me ", "make a ", "make an ", "make the ",
+		"draft me ", "draft a ", "draft an ", "draft the ",
+		"produce a ", "produce an ", "produce the ",
+		"give me a ", "give me an ", "give me the ",
+	}
+	for _, p := range fillerPrefixes {
+		if strings.HasPrefix(lower, p) {
+			lower = lower[len(p):]
+			break
+		}
+	}
+
+	// Take the first 8 words of the cleaned message as the filename.
+	words := strings.Fields(lower)
+	if len(words) == 0 {
+		return ""
+	}
+	if len(words) > 8 {
+		words = words[:8]
+	}
+	name := strings.Join(words, "-")
+
+	// Replace characters that are invalid in filenames.
+	unsafe := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|", "'", ",", "."}
+	for _, c := range unsafe {
+		name = strings.ReplaceAll(name, c, "")
+	}
+	// Collapse any double dashes produced by replacements.
+	for strings.Contains(name, "--") {
+		name = strings.ReplaceAll(name, "--", "-")
+	}
+	name = strings.Trim(name, "-")
+	if name == "" {
+		return ""
+	}
+	return name + ".docx"
 }

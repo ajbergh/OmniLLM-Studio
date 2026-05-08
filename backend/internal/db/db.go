@@ -119,6 +119,7 @@ func versionedMigrations() []Migration {
 		{Version: 24, Name: "image_node_assets_and_references", SQL: migrationImageNodeAssetsAndReferences},
 		{Version: 25, Name: "provider_default_image_model", SQL: migrationProviderDefaultImageModel},
 		{Version: 26, Name: "conversation_kind", SQL: migrationConversationKind},
+		{Version: 27, Name: "word_doc_generation_flag", SQL: migrationWordDocGenerationFlag},
 	}
 }
 
@@ -725,6 +726,13 @@ CREATE INDEX IF NOT EXISTS idx_image_references_node ON image_references(node_id
 // V25: Provider-level default image generation model
 const migrationProviderDefaultImageModel = `
 ALTER TABLE provider_profiles ADD COLUMN default_image_model TEXT;
+`
+
+// V27: Seed word_doc_generation feature flag as enabled.
+const migrationWordDocGenerationFlag = `
+INSERT INTO feature_flags (key, enabled, metadata)
+VALUES ('word_doc_generation', 1, 'Auto-generate a .docx file when the user requests a Word document')
+ON CONFLICT(key) DO NOTHING;
 `
 
 // V26: Distinguish chat conversations from image-studio backing conversations.

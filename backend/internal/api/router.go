@@ -22,6 +22,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/templates"
 	"github.com/ajbergh/omnillm-studio/internal/tools"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
+	"github.com/ajbergh/omnillm-studio/internal/wordgen"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -88,7 +89,8 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 
 	// Handlers
 	convoHandler := NewConversationHandler(convoRepo, vectorStore)
-	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore)
+	wordGen := wordgen.NewGenerator(cfg.AttachmentsDir)
+	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, featureFlagRepo)
 	providerHandler := NewProviderHandler(providerRepo)
 	settingsHandler := NewSettingsHandler(settingsRepo, orchestrator)
 	wsHandler := NewWebSearchHandler(orchestrator)
@@ -104,6 +106,7 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	toolRegistry.MustRegister(tools.NewWebSearchTool(orchestrator, "", ""))
 	toolRegistry.MustRegister(tools.NewCalculatorTool())
 	toolRegistry.MustRegister(tools.NewURLFetchTool())
+	toolRegistry.MustRegister(tools.NewWordDocTool(wordGen, attachRepo))
 	toolExecutor := tools.NewExecutor(toolRegistry, toolPermRepo.PolicyResolver(), 0)
 	toolHandler := NewToolHandler(toolRegistry, toolExecutor, toolPermRepo)
 

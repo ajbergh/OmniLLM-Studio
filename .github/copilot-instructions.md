@@ -9,7 +9,7 @@ Local-first LLM chat app: **Go backend** (API + SQLite) + **React/TypeScript fro
 - **Entry point:** `cmd/server/main.go` — opens SQLite DB, runs migrations, builds router, starts HTTP server with graceful shutdown.
 - **Router:** `internal/api/router.go` — single `NewRouter()` function wires ALL repos → services → handlers → chi routes. This is the composition root; understand it first when tracing any feature.
 - **Layered architecture:** `api/` handlers → domain services (`llm/`, `agent/`, `search/`, `analytics/`, `bundle/`, `rag/`, `tools/`, `templates/`, `plugins/`, `eval/`, `websearch/`, `auth/`) → `repository/` → `models/` → `db/`.
-- **Database:** SQLite with WAL mode, `MaxOpenConns(1)`. Versioned migrations in `internal/db/db.go` (V1–V20). New tables always use `CREATE TABLE IF NOT EXISTS` with defaults on new columns. Migration versions are tracked in a `schema_versions` table.
+- **Database:** SQLite with WAL mode, `MaxOpenConns(1)`. Versioned migrations in `internal/db/db.go` (V1–V27). New tables always use `CREATE TABLE IF NOT EXISTS` with defaults on new columns. Migration versions are tracked in a `schema_versions` table.
 - **Auth:** Solo-mode by default (no users = middleware passthrough). Multi-user mode activates when first user registers. Auth middleware in `auth/auth.go` uses Bearer tokens (`Authorization` header).
 - **Streaming:** SSE (Server-Sent Events) for LLM responses. `WriteTimeout: 0` on the HTTP server. SSE events use `event:` + `data:` format (e.g., `token`, `done`, `web_search_*`, `tool_start`, `agent_*`).
 

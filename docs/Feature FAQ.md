@@ -18,8 +18,9 @@ A comprehensive guide to all features in OmniLLM-Studio, covering what each feat
 10. [Local Collaboration Mode](#10-local-collaboration-mode)
 11. [Plugin SDK](#11-plugin-sdk)
 12. [Evaluation Harness](#12-evaluation-harness)
-13. [Feature Flags](#13-feature-flags)
-14. [General Questions](#14-general-questions)
+13. [Word Document Generation](#13-word-document-generation)
+14. [Feature Flags](#14-feature-flags)
+15. [General Questions](#15-general-questions)
 
 ---
 
@@ -662,7 +663,61 @@ A: The eval API (`POST /v1/eval/run`) can be called from any HTTP client. A dedi
 
 ---
 
-## 13. Feature Flags
+## 13. Word Document Generation
+
+**Feature Flag:** `word_doc_generation`
+
+### What is Word Document Generation?
+
+When you ask the LLM to produce something "as a Word doc" (or any similar phrasing), OmniLLM-Studio automatically converts the Markdown response into a `.docx` file using the [go-word](https://github.com/drumkitai/go-word) library — no copy-pasting required.
+
+### How does it work?
+
+1. After the LLM finishes streaming its response, the backend detects word-doc intent in your message.
+2. The full Markdown response is converted to a `.docx` file and saved in the attachment store.
+3. A styled download button is appended to the chat message — click it to save the file to your computer.
+4. In Agent Mode the `generate_word_doc` tool is registered and can be called autonomously by the LLM.
+
+### Trigger phrases
+
+Any of the following in your message will trigger generation:
+
+- `word doc` / `word document` / `word file` / `.docx`
+- `as a word` / `in word format`
+- `microsoft word`
+- `save as word` / `export as word`
+
+### How do I use it?
+
+1. Make sure Word Document Generation is enabled (Settings → General → Document Generation toggle).
+2. Ask the LLM to write something and include one of the trigger phrases, e.g.:
+   - *"Write me a project proposal for AcmeCorp as a Word doc"*
+   - *"Draft a meeting agenda in Word format"*
+3. A **📄 Download** button will appear at the bottom of the response.
+
+### What are the benefits?
+
+- One-click export to `.docx` without leaving the app
+- Full Markdown formatting preserved (headings, bold, tables, code blocks, lists)
+- Files are stored per-conversation in the attachment system
+
+### FAQ
+
+**Q: What Markdown features are supported in the Word doc?**
+A: Headings (H1–H6), paragraphs, bold, italic, tables, fenced code blocks, unordered/ordered lists, and task lists. Math (LaTeX) blocks are passed through as-is.
+
+**Q: Where is the .docx file stored?**
+A: Under `backend/attachments/` (or the directory set by `OMNILLM_ATTACHMENTS_DIR`). The file is also linked from the message so you can re-download it later.
+
+**Q: Can I disable it?**
+A: Yes — toggle **Word Document Generation** off in Settings → General, or use `PATCH /v1/features/word_doc_generation` with `{"enabled": false}`.
+
+**Q: Does it work in Agent Mode?**
+A: Yes. The `generate_word_doc` tool is registered in the tool registry and the LLM can call it directly when it decides a Word doc is appropriate.
+
+---
+
+## 14. Feature Flags
 
 ### What are Feature Flags?
 
@@ -684,6 +739,7 @@ Feature flags let you enable or disable individual features without restarting t
 | `collaboration` | Local Collaboration Mode |
 | `plugins` | Plugin SDK |
 | `eval_harness` | Evaluation Harness |
+| `word_doc_generation` | Word Document Generation |
 
 ### How do I manage them?
 
@@ -701,7 +757,7 @@ A: Yes. Feature flag changes take effect immediately via the API.
 
 ---
 
-## 14. General Questions
+## 15. General Questions
 
 ### What is OmniLLM-Studio?
 

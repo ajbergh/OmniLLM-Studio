@@ -34,6 +34,52 @@ interface PendingUploadFile {
 
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
+// MIME types whose text content the backend can extract for LLM context / RAG.
+// Kept in sync with isTextMIME + canExtractAttachmentText in attachment_text.go.
+const EXTRACTABLE_MIME_PREFIXES = ['text/'];
+const EXTRACTABLE_MIME_EXACT = new Set([
+  'application/pdf',
+  'application/json',
+  'application/xml',
+  'application/javascript',
+  'application/typescript',
+  'application/x-yaml',
+  'application/yaml',
+  'application/toml',
+  'application/x-sh',
+  'application/sql',
+  'application/csv',
+  // Office Open XML
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',        // .xlsx
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+]);
+
+function isExtractableMIME(mime: string): boolean {
+  const base = mime.split(';')[0].trim().toLowerCase();
+  return EXTRACTABLE_MIME_PREFIXES.some((p) => base.startsWith(p)) || EXTRACTABLE_MIME_EXACT.has(base);
+}
+
+// File-picker accept string covering images + all extractable types.
+const FILE_ACCEPT = [
+  'image/*',
+  'application/pdf',
+  'text/*',
+  'application/json',
+  'application/xml',
+  'application/javascript',
+  'application/typescript',
+  'application/x-yaml',
+  'application/yaml',
+  'application/toml',
+  'application/x-sh',
+  'application/sql',
+  'application/csv',
+  '.docx',
+  '.xlsx',
+  '.pptx',
+].join(',');
+
 function toPendingUpload(file: File): PendingUploadFile {
   return {
     id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
@@ -214,12 +260,22 @@ export function ChatView() {
   }, [activeId, messages, streaming, conversations, titleGenerated, updateConversation, fetchConversations]);
 
   const queueFiles = useCallback((files: File[]) => {
-    const valid = files.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
-    if (valid.length < files.length) {
+    const withinLimit = files.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
+    if (withinLimit.length < files.length) {
       toast.error('Some files exceed the 10 MB limit and were skipped');
     }
 
-    if (valid.length === 0) return;
+    if (withinLimit.length === 0) return;
+
+    // Warn about files that will be uploaded but whose content can't be extracted
+    // for LLM context or RAG (not text, not PDF/docx/xlsx/pptx, not images).
+    const notExtractable = withinLimit.filter(
+      (f) => !isExtractableMIME(f.type) && !f.type.startsWith('image/')
+    );
+    if (notExtractable.length > 0) {
+      const names = notExtractable.map((f) => f.name).join(', ');
+      toast.warning(`File content will not be readable by the AI (unsupported type): ${names}`);
+    }
 
     setPendingFiles((prev) => {
       const existing = new Set(
@@ -227,7 +283,7 @@ export function ChatView() {
       );
       const next = [...prev];
 
-      for (const file of valid) {
+      for (const file of withinLimit) {
         const signature = `${file.name}-${file.size}-${file.lastModified}`;
         if (existing.has(signature)) continue;
         existing.add(signature);
@@ -245,7 +301,12 @@ export function ChatView() {
     // Auto-create conversation if none selected
     if (!currentId) {
       try {
-        const convo = await createConversation();
+        const enabledProviders = providers.filter((p) => p.enabled);
+        const defaultProvider = enabledProviders[0];
+        const convo = await createConversation(undefined, {
+          provider: defaultProvider?.id,
+          model: defaultProvider?.default_model || undefined,
+        });
         clearMessages();
         selectConversation(convo.id);
         currentId = convo.id;
@@ -356,7 +417,12 @@ export function ChatView() {
   };
 
   const handleNewChat = async () => {
-    const convo = await createConversation();
+    const enabledProviders = providers.filter((p) => p.enabled);
+    const defaultProvider = enabledProviders[0];
+    const convo = await createConversation(undefined, {
+      provider: defaultProvider?.id,
+      model: defaultProvider?.default_model || undefined,
+    });
     clearMessages();
     selectConversation(convo.id);
     toast.success('New conversation created');
@@ -408,7 +474,7 @@ export function ChatView() {
 
   return (
     <>
-    <div className="flex-1 flex flex-col h-full">
+    <div className="flex-1 flex flex-col min-h-0">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
@@ -514,7 +580,7 @@ export function ChatView() {
 
       {/* Messages */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto relative">
-        <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+        <div className="max-w-3xl xl:max-w-4xl 2xl:max-w-5xl mx-auto px-4 py-6 space-y-6">
           {messages.length === 0 && !streaming && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -566,7 +632,7 @@ export function ChatView() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex items-start gap-3 max-w-3xl min-w-0"
+              className="flex items-start gap-3 max-w-3xl xl:max-w-4xl 2xl:max-w-5xl min-w-0"
             >
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center shrink-0 mt-0.5">
                 <Globe size={15} className="text-blue-400 animate-pulse" />
@@ -594,7 +660,7 @@ export function ChatView() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex items-start gap-3 max-w-3xl min-w-0"
+              className="flex items-start gap-3 max-w-3xl xl:max-w-4xl 2xl:max-w-5xl min-w-0"
             >
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-purple-500/20 to-violet-500/20 flex items-center justify-center shrink-0 mt-0.5">
                 <Brain size={15} className="text-purple-400 animate-pulse" />
@@ -625,7 +691,7 @@ export function ChatView() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex items-start gap-3 max-w-3xl min-w-0"
+              className="flex items-start gap-3 max-w-3xl xl:max-w-4xl 2xl:max-w-5xl min-w-0"
             >
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center shrink-0 mt-0.5">
                 <Bot size={15} className="text-primary" />
@@ -690,7 +756,7 @@ export function ChatView() {
 
       {/* Input area */}
       <div className="px-3 py-4 sm:px-4">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-3xl xl:max-w-4xl 2xl:max-w-5xl mx-auto">
           {/* Streaming controls */}
           {streaming && (
             <motion.div
@@ -823,6 +889,7 @@ export function ChatView() {
               ref={fileInputRef}
               type="file"
               multiple
+              accept={FILE_ACCEPT}
               className="hidden"
               onChange={(e) => {
                 if (e.target.files) {

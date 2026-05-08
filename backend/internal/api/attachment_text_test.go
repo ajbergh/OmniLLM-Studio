@@ -33,7 +33,11 @@ func TestCanExtractAttachmentText(t *testing.T) {
 		{name: "json", mime: "application/json", want: true},
 		{name: "pdf", mime: "application/pdf", want: true},
 		{name: "pdf with params", mime: "application/pdf; charset=binary", want: true},
+		{name: "docx", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", want: true},
+		{name: "xlsx", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", want: true},
+		{name: "pptx", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", want: true},
 		{name: "image", mime: "image/png", want: false},
+		{name: "zip", mime: "application/zip", want: false},
 	}
 
 	for _, tt := range tests {

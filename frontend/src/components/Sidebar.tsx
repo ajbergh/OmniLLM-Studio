@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useConversationStore, useSettingsStore, useMessageStore } from '../stores';
+import { useConversationStore, useSettingsStore, useMessageStore, useProviderStore } from '../stores';
 import { useImageEditorStore } from '../stores/imageEditor';
 import {
   Plus,
@@ -107,6 +107,7 @@ export function Sidebar() {
   } = useConversationStore();
   const { sidebarOpen, toggleSidebar, appMode, setAppMode } = useSettingsStore();
   const { fetchMessages, clearMessages } = useMessageStore();
+  const providers = useProviderStore((s) => s.providers);
   const {
     allSessions: imageSessions,
     activeSessionId,
@@ -178,7 +179,12 @@ export function Sidebar() {
   );
 
   const handleNew = async () => {
-    const convo = await createConversation();
+    const enabledProviders = providers.filter((p) => p.enabled);
+    const defaultProvider = enabledProviders[0];
+    const convo = await createConversation(undefined, {
+      provider: defaultProvider?.id,
+      model: defaultProvider?.default_model || undefined,
+    });
     clearMessages();
     selectConversation(convo.id);
     toast.success('New conversation created');

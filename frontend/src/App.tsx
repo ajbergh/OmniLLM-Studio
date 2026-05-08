@@ -12,7 +12,7 @@ import { EvalDashboard } from './components/EvalDashboard';
 import { SearchPanel } from './components/SearchPanel';
 import { ImportExportPanel } from './components/ImportExportPanel';
 import { DialogShell } from './components/DialogShell';
-import { useSettingsStore, useConversationStore, useMessageStore } from './stores';
+import { useSettingsStore, useConversationStore, useMessageStore, useProviderStore } from './stores';
 import { useImageEditorStore } from './stores/imageEditor';
 import { authApi } from './api';
 import { matchesShortcut } from './shortcuts';
@@ -68,6 +68,7 @@ function App() {
   const { toggleSettings, settingsOpen, sidebarOpen, toggleSidebar, appMode, setAppMode } = useSettingsStore();
   const { createConversation, selectConversation } = useConversationStore();
   const { clearMessages, fetchMessages } = useMessageStore();
+  const providers = useProviderStore((s) => s.providers);
   const { createSession: createImageSession, loadAllSessions, loadSession: loadImageSession } = useImageEditorStore();
   const [activePanel, setActivePanel] = useState<OverlayPanel | null>(null);
   const [authenticated, setAuthenticated] = useState(true); // Default true (solo mode)
@@ -136,7 +137,12 @@ function App() {
           });
           return;
         }
-        createConversation().then((convo) => {
+        const enabledProviders = providers.filter((p) => p.enabled);
+        const defaultProvider = enabledProviders[0];
+        createConversation(undefined, {
+          provider: defaultProvider?.id,
+          model: defaultProvider?.default_model || undefined,
+        }).then((convo) => {
           clearMessages();
           selectConversation(convo.id);
           toast.success('New conversation created');

@@ -64,15 +64,6 @@ STRICT RULES:
 3. If the search results are insufficient or contradictory, explicitly state what is uncertain and why.
 4. If results conflict, present all perspectives and identify which sources disagree.
 
-RESPONSE FORMAT GUIDELINES:
-- Start with a brief 1-2 sentence direct answer to the question.
-- Then provide detailed supporting information organized with clear headers (## or ###) where appropriate.
-- Use bullet points for lists of items, comparisons, or multiple facts.
-- Use bold (**text**) to highlight key terms, names, numbers, or dates.
-- For time-sensitive topics, include dates and timestamps from the sources.
-- For technical/how-to questions, provide step-by-step instructions.
-- End with a brief "Key Takeaways" section if the response covers multiple aspects.
-
 QUALITY GUIDELINES:
 - Be thorough — aim for comprehensive coverage, not just surface-level summaries.
 - Synthesize information across sources rather than summarizing each source separately.
@@ -84,6 +75,18 @@ SEARCH RESULTS:
 %s
 
 USER QUESTION: %s
+
+CRITICAL FORMATTING RULES (Output GitHub-Flavored Markdown):
+- Start with a brief 1-2 sentence direct answer to the question.
+- Then provide detailed supporting information organized with Markdown headers (## or ###) where appropriate.
+- For ANY list of three or more items, comparisons, or multiple facts, use real Markdown bullets — every bulleted line MUST start with a literal "- " (hyphen + space) at the beginning of its own line. Do NOT use indented paragraphs in place of bullets.
+- For ordered steps or rankings, use "1. ", "2. ", "3. " on separate lines.
+- Use bold (**text**) to highlight key terms, names, numbers, dates.
+- For tabular data (scores, comparisons with multiple columns), use a Markdown table.
+- For time-sensitive topics, include dates and timestamps from the sources.
+- For technical/how-to questions, provide step-by-step instructions as a numbered list.
+- End with a brief "## Key Takeaways" section if the response covers multiple aspects.
+- Do not wrap the whole response in a single code block.
 
 Respond now with a comprehensive, well-cited answer.`
 

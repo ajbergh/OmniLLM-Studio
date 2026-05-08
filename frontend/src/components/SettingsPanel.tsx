@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useProviderStore, useSettingsStore } from '../stores';
+import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
 import { api, authApi, setAuthToken } from '../api';
-import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw } from 'lucide-react';
+import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, FileText } from 'lucide-react';
 import { useTheme, THEMES } from '../theme';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -52,14 +52,16 @@ export function SettingsPanel() {
   const { settingsOpen, toggleSettings, fetchSettings } = useSettingsStore();
   const { providers, fetchProviders, createProvider, updateProvider, deleteProvider } =
     useProviderStore();
+  const { fetchFeatures } = useFeatureFlagStore();
   const [tab, setTab] = useState<SettingsTab>('providers');
 
   useEffect(() => {
     if (settingsOpen) {
       fetchProviders();
       fetchSettings();
+      fetchFeatures();
     }
-  }, [settingsOpen, fetchProviders, fetchSettings]);
+  }, [settingsOpen, fetchProviders, fetchSettings, fetchFeatures]);
 
   return (
     <AnimatePresence>
@@ -837,6 +839,55 @@ function AppearanceTab() {
 }
 
 // ============================================
+// Word Document Generation Card (used in General Tab)
+// ============================================
+
+function WordDocGenerationCard() {
+  const { isEnabled, updateFeature } = useFeatureFlagStore();
+  const enabled = isEnabled('word_doc_generation');
+
+  const toggle = async () => {
+    await updateFeature('word_doc_generation', !enabled);
+  };
+
+  return (
+    <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center shadow-md shadow-indigo-500/10">
+          <FileText size={18} className="text-indigo-400" />
+        </div>
+        <div>
+          <h3 className="text-sm font-bold">Document Generation</h3>
+          <p className="text-[11px] text-text-muted">Automatically export LLM responses as downloadable files</p>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between py-2">
+        <div>
+          <label className="text-xs font-medium text-text-secondary block">Word Document Generation</label>
+          <p className="text-[10px] text-text-muted mt-0.5">
+            When you ask for a Word doc, the response is automatically saved as a .docx file you can download
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={toggle}
+          className={`relative w-10 h-5 rounded-full transition-colors ${
+            enabled ? 'bg-primary' : 'bg-border'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+              enabled ? 'translate-x-5' : ''
+            }`}
+          />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
 // General Tab
 // ============================================
 
@@ -998,6 +1049,9 @@ function GeneralTab() {
           </motion.button>
         </div>
       </div>
+
+      {/* Word Document Generation */}
+      <WordDocGenerationCard />
 
       {/* App info */}
       <div className="p-5 rounded-2xl bg-surface-alt border border-border">

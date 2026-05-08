@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Local-first LLM chat application</strong> — Go backend + React frontend<br/>
-  Multi-provider streaming · Image Studio · RAG · Agent mode · Branching · Web search · Encrypted secrets
+  Multi-provider streaming · Image Studio · RAG · Agent mode · Branching · Web search · Word document export · Encrypted secrets
 </p>
 
 <p align="center">
@@ -45,7 +45,8 @@
 | **Conversation Branching** | Fork any message into parallel branches — explore different response paths |
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
 | **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction |
-| **Tool Calling** | Extensible tool framework — web search, calculator, URL fetch, and plugin tools |
+| **Tool Calling** | Extensible tool framework — web search, calculator, URL fetch, Word document generation, and plugin tools |
+| **Word Document Export** | Ask the LLM for a Word doc and it auto-generates a `.docx` download from the Markdown response (go-word / goldmark) |
 
 ### Image Studio
 
@@ -158,7 +159,7 @@ Frontend (React/TS)  ──SSE/REST──▶  Backend (Go/Chi)  ──SQL──�
 
 - **Frontend** — Single-page React app with Zustand state management, Tailwind v4 styling, and Framer Motion animations. Includes a full-featured Image Studio with canvas editor.
 - **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image generation routed through provider-specific adapters (OpenAI, Gemini, Stable Diffusion, Together).
-- **Database** — SQLite with WAL mode, 21 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions, nodes, assets, masks, and references stored relationally.
+- **Database** — SQLite with WAL mode, 27 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions, nodes, assets, masks, and references stored relationally.
 - **Vector store (RAG)** — [`chromem-go`](https://github.com/philippgille/chromem-go) embedded vector DB with one persistent collection per conversation under `<OMNILLM_CHROMEM_DIR>/<conversation_id>/`. Multi-threaded NN search; zero third-party Go dependencies. Chunk text stays in SQLite (`document_chunks`); chromem stores vectors only. Legacy `document_embeddings` rows lazy-migrate on first retrieval after upgrade.
 
 ## Request Lifecycle
@@ -290,7 +291,7 @@ OmniLLM-Studio/
 │       ├── bundle/                      # Import/export (conversations, attachments)
 │       ├── config/                      # Environment variable config
 │       ├── crypto/                      # AES-256-GCM encryption
-│       ├── db/                          # SQLite init, 21 versioned migrations
+│       ├── db/                          # SQLite init, 27 versioned migrations
 │       ├── eval/                        # Evaluation harness (scorer, runner)
 │       ├── llm/                         # Provider routing, streaming, embeddings, image generation
 │       ├── models/                      # Data models (Go structs + JSON tags)
@@ -299,8 +300,9 @@ OmniLLM-Studio/
 │       ├── repository/                  # Database CRUD layer
 │       ├── search/                      # Semantic search service
 │       ├── templates/                   # Prompt template seeding
-│       ├── tools/                       # Tool registry + executor
-│       └── websearch/                   # Brave/DDG + Jina Reader orchestrator
+│       ├── tools/                       # Tool registry + executor (web search, calculator, word doc, plugins)
+│       ├── websearch/                   # Brave/DDG + Jina Reader orchestrator
+│       └── wordgen/                     # Markdown → .docx generator (go-word wrapper)
 ├── frontend/
 │   └── src/
 │       ├── api.ts                       # Typed API client + SSE stream parser
@@ -309,7 +311,7 @@ OmniLLM-Studio/
 │       └── components/                  # React components
 │           ├── ChatView.tsx             # Chat interface + streaming + usage display
 │           ├── Sidebar.tsx              # Conversation list, workspace filter, auth
-│           ├── SettingsPanel.tsx         # 6-tab settings (Providers, General, RAG, Tools, Pricing, Auth)
+│           ├── SettingsPanel.tsx         # 7-tab settings (Providers, General, Appearance, RAG, Tools, Pricing, Auth)
 │           ├── SearchPanel.tsx           # Semantic search + reindex
 │           ├── AgentRunView.tsx          # Agent run visualization + resume
 │           ├── BranchSwitcher.tsx        # Branch management UI
@@ -594,7 +596,9 @@ The SQLite database is tuned for performance out of the box:
 | `MaxOpenConns` | 4 | Concurrent read connections |
 | `PRAGMA optimize` | On shutdown | Updates query planner statistics |
 
-21 versioned migrations, 21+ indexes covering all hot query paths, and periodic session cleanup.
+27 versioned migrations, 21+ indexes covering all hot query paths, and periodic session cleanup.
+
+> **Note:** V27 seeds the `word_doc_generation` feature flag (enabled by default).
 
 ---
 
@@ -603,7 +607,7 @@ The SQLite database is tuned for performance out of the box:
 | Layer | Technologies |
 |-------|-------------|
 | **Frontend** | React 19, TypeScript 5, Vite, Tailwind CSS v4, Zustand, Framer Motion, Lucide icons, ReactMarkdown, KaTeX, Sonner |
-| **Backend** | Go 1.24+, Chi router, SQLite (WAL), SSE streaming, AES-256-GCM |
+| **Backend** | Go 1.24+, Chi router, SQLite (WAL), SSE streaming, AES-256-GCM, go-word (Markdown → .docx) |
 | **Desktop** | Wails v2, OS-native WebView (WebView2 / WebKitGTK / WebKit) |
 | **Search** | Brave Search API, DuckDuckGo (zero-config), Jina Reader |
 | **LLM** | OpenAI (GPT-5.x, o-series), Anthropic (Claude 4.x), Google Gemini, Ollama, OpenRouter, Groq, Together AI, Mistral — any OpenAI-compatible API |

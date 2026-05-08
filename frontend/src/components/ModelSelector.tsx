@@ -61,6 +61,12 @@ export function ModelSelector({ conversationId }: Props) {
   const currentModel = convo?.default_model;
   const enabledProviders = providers.filter((p) => p.enabled);
 
+  // Derive the effective model to display: prefer the conversation's stored model,
+  // then fall back to the first enabled provider's default_model.
+  const fallbackProvider = enabledProviders[0];
+  const effectiveModel = currentModel || fallbackProvider?.default_model || fallbackProvider?.name;
+  const effectiveProvider = currentProvider || fallbackProvider?.id;
+
   const handleSelect = async (providerId: string, model: string) => {
     await updateConversation(conversationId, {
       default_provider: providerId,
@@ -77,7 +83,7 @@ export function ModelSelector({ conversationId }: Props) {
     setShowCustomInput(false);
   };
 
-  const displayLabel = currentModel || currentProvider || 'Select model';
+  const displayLabel = effectiveModel || effectiveProvider || 'Select model';
 
   // Get models for a provider, using dynamic Ollama models when available
   const getModels = (providerType: string): string[] => {
@@ -185,7 +191,7 @@ export function ModelSelector({ conversationId }: Props) {
 
                         {/* Dynamic/known models */}
                         {filtered.map((model) => {
-                          const isActive = currentModel === model && currentProvider === provider.id;
+                          const isActive = effectiveModel === model && effectiveProvider === provider.id;
                           return (
                             <button
                               key={model}
@@ -213,14 +219,14 @@ export function ModelSelector({ conversationId }: Props) {
                               className={clsx(
                                 'w-full text-left px-3 py-1.5 text-[13px] hover:bg-surface-hover text-text-secondary',
                                 'hover:text-text transition-all mx-1 rounded-lg flex items-center justify-between gap-2',
-                                currentModel === provider.default_model && currentProvider === provider.id
+                                effectiveModel === provider.default_model && effectiveProvider === provider.id
                                   ? 'text-primary font-medium bg-primary/5'
                                   : ''
                               )}
                               style={{ width: 'calc(100% - 8px)' }}
                             >
                               <span className="truncate">{provider.default_model}</span>
-                              {currentModel === provider.default_model && currentProvider === provider.id && (
+                              {effectiveModel === provider.default_model && effectiveProvider === provider.id && (
                                 <Check size={12} className="text-primary shrink-0" />
                               )}
                             </button>

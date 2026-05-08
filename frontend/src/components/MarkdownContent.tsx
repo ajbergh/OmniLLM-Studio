@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, FileText } from 'lucide-react';
 import { resolveApiUrl } from '../api';
 
 interface Props {
@@ -80,6 +80,37 @@ export function MarkdownContent({ content }: Props) {
               <div className="message-table-wrap" role="region" aria-label="Scrollable table" tabIndex={0}>
                 <table {...props}>{children}</table>
               </div>
+            );
+          },
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          a({ href, children, ref: _ref, ...props }) {
+            const docExts = ['docx', 'xlsx', 'pptx', 'pdf'];
+            const resolvedHref = href ? resolveApiUrl(href) : href;
+            const isAttachmentDownload =
+              href?.startsWith('/v1/attachments/') && href.endsWith('/download');
+            const childText = String(children ?? '');
+            const extMatch = childText.match(/\.(\w+)$/);
+            const isDocFile = isAttachmentDownload && extMatch && docExts.includes(extMatch[1].toLowerCase());
+
+            if (isDocFile) {
+              return (
+                <a
+                  href={resolvedHref}
+                  download
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 mt-2 rounded-lg
+                             bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium
+                             transition-colors no-underline"
+                  {...props}
+                >
+                  <FileText size={14} />
+                  {children}
+                </a>
+              );
+            }
+            return (
+              <a href={resolvedHref} target="_blank" rel="noopener noreferrer" {...props}>
+                {children}
+              </a>
             );
           },
         }}

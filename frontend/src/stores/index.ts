@@ -15,7 +15,7 @@ interface ConversationState {
 
   fetchConversations: (includeArchived?: boolean, workspaceId?: string | null) => Promise<void>;
   setShowArchived: (show: boolean) => void;
-  createConversation: (title?: string) => Promise<Conversation>;
+  createConversation: (title?: string, defaults?: { provider?: string; model?: string }) => Promise<Conversation>;
   selectConversation: (id: string) => void;
   updateConversation: (id: string, data: Partial<Conversation>) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
@@ -48,8 +48,12 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     get().fetchConversations(show);
   },
 
-  createConversation: async (title?: string) => {
-    const convo = await api.createConversation({ title: title || 'New Conversation' });
+  createConversation: async (title?: string, defaults?: { provider?: string; model?: string }) => {
+    const convo = await api.createConversation({
+      title: title || 'New Conversation',
+      default_provider: defaults?.provider,
+      default_model: defaults?.model,
+    });
     set((s) => ({
       conversations: [convo, ...s.conversations],
       activeId: convo.id,
