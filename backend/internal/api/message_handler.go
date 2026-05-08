@@ -13,6 +13,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/auth"
 	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/models"
+	"github.com/ajbergh/omnillm-studio/internal/news"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/ajbergh/omnillm-studio/internal/sports"
@@ -38,6 +39,7 @@ type MessageHandler struct {
 	wordGen         *wordgen.Generator
 	artifactGen     *artifacts.Generator
 	featureFlagRepo *repository.FeatureFlagRepo
+	newsSvc         *news.Service
 }
 
 // NewMessageHandler creates a new MessageHandler.
@@ -56,6 +58,7 @@ func NewMessageHandler(
 	wordGen *wordgen.Generator,
 	artifactGen *artifacts.Generator,
 	featureFlagRepo *repository.FeatureFlagRepo,
+	newsSvc *news.Service,
 ) *MessageHandler {
 	return &MessageHandler{
 		msgRepo:         msgRepo,
@@ -72,6 +75,7 @@ func NewMessageHandler(
 		wordGen:         wordGen,
 		artifactGen:     artifactGen,
 		featureFlagRepo: featureFlagRepo,
+		newsSvc:         newsSvc,
 	}
 }
 
@@ -216,6 +220,17 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if assistantMsg, handled := h.handleSportsLookupMessage(r.Context(), convoID, uuid.New().String(), req.Content); handled {
+		if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+			respondInternalError(w, err)
+			return
+		}
+		_ = h.convoRepo.TouchUpdatedAt(convoID)
+		respondJSON(w, http.StatusOK, assistantMsg)
+		return
+	}
+
+	// News lookup (non-sports current-events)
+	if assistantMsg, handled := h.handleNewsLookupMessage(r.Context(), convoID, uuid.New().String(), req.Content); handled {
 		if _, err := h.msgRepo.Create(assistantMsg); err != nil {
 			respondInternalError(w, err)
 			return
@@ -544,6 +559,35 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			"latency_ms":    latencyMS,
 			"sports_lookup": true,
 			"source":        sports.SourceESPN,
+		}
+		sendSSE(w, flusher, "done", donePayload)
+		return
+	}
+
+	// News lookup (non-sports current-events, streaming path)
+	if assistantMsg, handled := h.handleNewsLookupMessage(r.Context(), convoID, msgID, req.Content); handled {
+		sendSSE(w, flusher, "news_lookup", map[string]interface{}{
+			"status": "complete",
+			"source": news.SourceName,
+		})
+		sendSSE(w, flusher, "token", map[string]string{
+			"content": assistantMsg.Content,
+		})
+		if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+			log.Printf("error saving news lookup message: %v", err)
+		}
+		_ = h.convoRepo.TouchUpdatedAt(convoID)
+		latencyMS := 0
+		if assistantMsg.LatencyMs != nil {
+			latencyMS = *assistantMsg.LatencyMs
+		}
+		donePayload := map[string]interface{}{
+			"message_id":  msgID,
+			"provider":    "news_lookup",
+			"model":       "actually_relevant",
+			"latency_ms":  latencyMS,
+			"news_lookup": true,
+			"source":      news.SourceName,
 		}
 		sendSSE(w, flusher, "done", donePayload)
 		return
@@ -1201,6 +1245,60 @@ func (h *MessageHandler) sportsLookupEnabled() bool {
 		return true
 	}
 	enabled, ok := flags[sportsLookupFeatureFlag]
+	if !ok {
+		return true
+	}
+	return enabled
+}
+
+const newsLookupFeatureFlag = "news_lookup_enabled"
+
+func (h *MessageHandler) handleNewsLookupMessage(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool) {
+	if !h.newsLookupEnabled() {
+		return nil, false
+	}
+
+	start := time.Now()
+	result, err := h.newsSvc.TryAnswer(ctx, query)
+	if err != nil {
+		log.Printf("[news] lookup failed query=%q: %v", query, err)
+	}
+	latency := int(time.Since(start).Milliseconds())
+
+	if result == nil || !result.Handled {
+		return nil, false
+	}
+
+	metaJSON, _ := json.Marshal(result.Metadata)
+	provider := "news_lookup"
+	model := "actually_relevant"
+
+	return &models.Message{
+		ID:             messageID,
+		ConversationID: conversationID,
+		Role:           "assistant",
+		Content:        result.Content,
+		CreatedAt:      time.Now().UTC(),
+		Provider:       &provider,
+		Model:          &model,
+		LatencyMs:      &latency,
+		MetadataJSON:   string(metaJSON),
+	}, true
+}
+
+func (h *MessageHandler) newsLookupEnabled() bool {
+	if h.newsSvc == nil {
+		return false
+	}
+	if h.featureFlagRepo == nil {
+		return true
+	}
+	flags, err := h.featureFlagRepo.AsMap()
+	if err != nil {
+		log.Printf("[news] feature flag lookup failed: %v", err)
+		return true
+	}
+	enabled, ok := flags[newsLookupFeatureFlag]
 	if !ok {
 		return true
 	}

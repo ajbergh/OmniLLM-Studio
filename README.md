@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Local-first LLM chat application</strong> — Go backend + React frontend<br/>
-  Multi-provider streaming · Image Studio · RAG · Agent mode · Branching · Web search · Live sports lookup · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
+  Multi-provider streaming · Image Studio · RAG · Agent mode · Branching · Web search · Live sports lookup · News lookup · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
 </p>
 
 <p align="center">
@@ -46,6 +46,7 @@
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
 | **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction |
 | **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, IPL cricket, and broad sports headlines |
+| **News Lookup** | Actually Relevant News API-backed newspaper-style editions for non-sports current events — no API key required |
 | **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, and document generation |
 | **Artifact Export** | Ask the LLM for any supported format and it generates a downloadable file automatically — `.docx` (Word), `.xlsx` (Excel), `.csv`, `.pdf`, `.md` (Markdown), `.html`, `.json`, `.yaml` — no copy-pasting required |
 
@@ -157,10 +158,11 @@ Frontend (React/TS)  ──SSE/REST──▶  Backend (Go/Chi)  ──SQL──�
                                           ├──▶  Brave Search / DuckDuckGo
                                           ├──▶  Jina Reader
                                           └──▶  ESPN public sports APIs
+                                          └──▶  Actually Relevant News API
 ```
 
 - **Frontend** — Single-page React app with Zustand state management, Tailwind v4 styling, and Framer Motion animations. Includes a full-featured Image Studio with canvas editor.
-- **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image generation routed through provider-specific adapters (OpenAI, Gemini, Stable Diffusion, Together), with ESPN-backed sports lookup handled locally before LLM fallback.
+- **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image generation routed through provider-specific adapters (OpenAI, Gemini, Stable Diffusion, Together), with ESPN-backed sports lookup and Actually Relevant News lookup handled locally before LLM fallback.
 - **Database** — SQLite with WAL mode, 28 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions, nodes, assets, masks, and references stored relationally.
 - **Vector store (RAG)** — [`chromem-go`](https://github.com/philippgille/chromem-go) embedded vector DB with one persistent collection per conversation under `<OMNILLM_CHROMEM_DIR>/<conversation_id>/`. Multi-threaded NN search; zero third-party Go dependencies. Chunk text stays in SQLite (`document_chunks`); chromem stores vectors only. Legacy `document_embeddings` rows lazy-migrate on first retrieval after upgrade.
 
@@ -175,8 +177,9 @@ From a single chat prompt to streamed tokens back in the UI:
 1. Frontend sends the prompt to `/v1/conversations/:conversationId/messages/stream`
 2. Backend validates auth/ownership, loads context, and applies local preflight checks
 3. High-confidence ESPN-backed sports data prompts are answered directly through `sports_lookup`
-4. If not handled locally, optional enrichments run (RAG retrieval, tools, web search) based on settings and model behavior
-5. SSE events stream tokens and metadata back to the client in real time
+4. High-confidence non-sports news prompts are answered directly through `news_lookup`
+5. If not handled locally, optional enrichments run (RAG retrieval, tools, web search) based on settings and model behavior
+6. SSE events stream tokens and metadata back to the client in real time
 
 ---
 
@@ -290,6 +293,31 @@ Sports lookup is enabled by default and does not require an API key. Ask natural
 
 The backend detects high-confidence sports intent, calls ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a Markdown table directly instead of letting the LLM answer from memory. It supports scores, schedules, standings, betting odds, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals. IPL cricket uses ESPN's Indian Premier League cricket series (`8048`) and renders cricket standings with M/W/L/T/N/R/PT/NRR columns. Odds prompts return ESPN-provided moneylines, spreads, totals, and provider names when ESPN includes them. Leaderboard/stat prompts are routed before standings so wording like "in a table" does not accidentally become a standings lookup. Toggle it with `sports_lookup_enabled` via the feature flags API.
 
+### 6. Ask Current News Questions (optional)
+
+News lookup is enabled by default and does not require an API key. OmniLLM-Studio detects high-confidence non-sports news prompts, calls the Actually Relevant public API, and returns a newspaper-style Markdown edition. Ask naturally:
+
+- *"What are the latest headlines?"*
+- *"Show me today's AI news."*
+- *"Latest climate headlines."*
+- *"Give me a front page of important global stories."*
+- *"What's happening with nuclear risk?"*
+- *"Show me the latest public health news."*
+- *"What are the top global news stories that matter?"*
+
+The backend detects high-confidence non-sports news intent, calls the Actually Relevant News API (free, no key required), and returns a formatted newspaper-style response with lead story, headlines, and news briefs. Sports prompts continue to route to the ESPN-backed sports lookup. Toggle it with `news_lookup_enabled` via the feature flags API.
+
+**Configuration (environment variables):**
+
+| Variable | Default | Description |
+|---|---|---|
+| `NEWS_LOOKUP_ENABLED` | `true` | Enable/disable news lookup |
+| `NEWS_LOOKUP_BASE_URL` | `https://actually-relevant-api.onrender.com/api` | Actually Relevant API base URL |
+| `NEWS_LOOKUP_TIMEOUT_SECONDS` | `8` | HTTP client timeout |
+| `NEWS_LOOKUP_CACHE_TTL_SECONDS` | `300` | In-memory cache TTL (5 min) |
+| `NEWS_LOOKUP_DEFAULT_PAGE_SIZE` | `8` | Default stories per request |
+| `NEWS_LOOKUP_MAX_PAGE_SIZE` | `15` | Maximum stories per request |
+
 ---
 
 ## Project Structure
@@ -325,6 +353,7 @@ OmniLLM-Studio/
 │       ├── rag/                         # Chunker, retriever, context builder
 │       ├── repository/                  # Database CRUD layer
 │       ├── search/                      # Semantic search service
+│       ├── news/                       # Actually Relevant News API — newspaper-style current events lookup
 │       ├── sports/                      # ESPN-backed scores, schedules, standings, odds, news, stats, and roster lookup
 │       ├── templates/                   # Prompt template seeding
 │       ├── tools/                       # Tool registry + executor (web search, sports, calculator, document gen)
@@ -643,7 +672,7 @@ The SQLite database is tuned for performance out of the box:
 
 28 versioned migrations, 21+ indexes covering all hot query paths, and periodic session cleanup.
 
-> **Note:** V27 seeds the `word_doc_generation` feature flag and V28 seeds `sports_lookup_enabled` (both enabled by default). The multi-format artifact export system (`.xlsx`, `.csv`, `.pdf`, `.md`, `.html`, `.json`, `.yaml`) runs alongside them without a separate flag.
+> **Note:** V27 seeds the `word_doc_generation` feature flag, V28 seeds `sports_lookup_enabled`, and V29 seeds `news_lookup_enabled` (all enabled by default). The multi-format artifact export system (`.xlsx`, `.csv`, `.pdf`, `.md`, `.html`, `.json`, `.yaml`) runs alongside them without a separate flag.
 
 ---
 
@@ -656,6 +685,7 @@ The SQLite database is tuned for performance out of the box:
 | **Desktop** | Wails v2, OS-native WebView (WebView2 / WebKitGTK / WebKit) |
 | **Search** | Brave Search API, DuckDuckGo (zero-config), Jina Reader |
 | **Sports** | ESPN public APIs through `github.com/chinmaykhachane/espn-go` |
+| **News** | Actually Relevant News API (free, no key required) |
 | **LLM** | OpenAI (GPT-5.x, o-series), Anthropic (Claude 4.x), Google Gemini, Ollama, OpenRouter, Groq, Together AI, Mistral — any OpenAI-compatible API |
 | **Image** | OpenAI (DALL-E / GPT-Image), Gemini (Imagen 4.0 / Gemini image), Stable Diffusion, Together (FLUX / Imagen / Seedream / HiDream), OpenRouter |
 

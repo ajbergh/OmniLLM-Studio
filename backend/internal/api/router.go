@@ -16,6 +16,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/bundle"
 	"github.com/ajbergh/omnillm-studio/internal/config"
 	"github.com/ajbergh/omnillm-studio/internal/llm"
+	"github.com/ajbergh/omnillm-studio/internal/news"
 	"github.com/ajbergh/omnillm-studio/internal/plugins"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
@@ -89,11 +90,15 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	jinaReader := websearch.NewJinaReaderFromSettings(settingsRepo)
 	orchestrator := websearch.NewOrchestrator(wsProvider, llmService, jinaReader)
 
+	// News Lookup Service (Actually Relevant API, no key required)
+	newsCfg := news.LoadConfigFromEnv()
+	newsSvc := news.NewService(newsCfg)
+
 	// Handlers
 	convoHandler := NewConversationHandler(convoRepo, vectorStore)
 	wordGen := wordgen.NewGenerator(cfg.AttachmentsDir)
 	artifactGen := artifacts.NewGenerator(cfg.AttachmentsDir)
-	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo)
+	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo, newsSvc)
 	providerHandler := NewProviderHandler(providerRepo)
 	settingsHandler := NewSettingsHandler(settingsRepo, orchestrator)
 	wsHandler := NewWebSearchHandler(orchestrator)
