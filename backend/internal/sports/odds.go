@@ -34,15 +34,19 @@ func (c *ESPNClient) lookupLeagueOdds(ctx context.Context, cfg LeagueConfig, req
 	}
 
 	retrievedAt := c.timeNow()
+	leagueLogoURL := leagueIdentityForConfig(cfg).LogoURL
+	req.LeagueLogoURL = leagueLogoURL
 	return &SportsLookupResult{
-		Intent:      SportsIntentOdds,
-		League:      cfg.League,
-		LeagueName:  cfg.DisplayName,
-		Sport:       cfg.Sport,
-		DateLabel:   req.DateLabel,
-		Markdown:    RenderOddsMarkdown(req, cfg, rows, retrievedAt),
-		Source:      SourceESPN,
-		RetrievedAt: retrievedAt,
+		Intent:        SportsIntentOdds,
+		League:        cfg.League,
+		LeagueName:    cfg.DisplayName,
+		LeagueLogoURL: leagueLogoURL,
+		Sport:         cfg.Sport,
+		DateLabel:     req.DateLabel,
+		Markdown:      RenderOddsMarkdown(req, cfg, rows, retrievedAt),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+		RenderMode:    renderMode(req),
 	}, nil
 }
 
@@ -85,6 +89,7 @@ func (c *ESPNClient) lookupBroadOdds(ctx context.Context, req SportsRequest) (*S
 		Markdown:    RenderOddsMarkdown(req, cfg, rows, retrievedAt),
 		Source:      SourceESPN,
 		RetrievedAt: retrievedAt,
+		RenderMode:  renderMode(req),
 	}, nil
 }
 
@@ -134,20 +139,23 @@ func normalizeOdds(sb *espn.Scoreboard, cfg LeagueConfig) []OddsRow {
 			Date:       formatGameDate(eventDate),
 			Time:       formatGameTime(eventDate),
 			Status:     statusText(status, eventDate),
+			StatusType: statusKind(status),
 			Provider:   strings.TrimSpace(odds.Provider.Name),
 			Spread:     spreadText(odds, away, home),
 			OverUnder:  overUnderText(odds),
 		}
 		if away != nil {
-			row.AwayTeam = teamDisplayName(away.Team)
-			row.AwayAbbr = away.Team.Abbreviation
+			row.Away = extractTeamIdentityFromCompetitor(*away)
+			row.AwayTeam = row.Away.DisplayName
+			row.AwayAbbr = row.Away.Abbreviation
 			if odds.AwayTeamOdds != nil {
 				row.AwayMoneyLine = moneyLineText(odds.AwayTeamOdds.MoneyLine)
 			}
 		}
 		if home != nil {
-			row.HomeTeam = teamDisplayName(home.Team)
-			row.HomeAbbr = home.Team.Abbreviation
+			row.Home = extractTeamIdentityFromCompetitor(*home)
+			row.HomeTeam = row.Home.DisplayName
+			row.HomeAbbr = row.Home.Abbreviation
 			if odds.HomeTeamOdds != nil {
 				row.HomeMoneyLine = moneyLineText(odds.HomeTeamOdds.MoneyLine)
 			}
@@ -194,7 +202,11 @@ func filterOddsRowsByTeam(rows []OddsRow, teamQuery string) []OddsRow {
 }
 
 func oddsRowMatchesTeam(row OddsRow, query string) bool {
-	fields := []string{row.AwayTeam, row.AwayAbbr, row.HomeTeam, row.HomeAbbr}
+	fields := []string{
+		row.AwayTeam, row.AwayAbbr, row.HomeTeam, row.HomeAbbr,
+		row.Away.DisplayName, row.Away.ShortName, row.Away.Location,
+		row.Home.DisplayName, row.Home.ShortName, row.Home.Location,
+	}
 	for _, field := range fields {
 		norm := normalizeText(field)
 		if norm == "" {
@@ -270,6 +282,17 @@ func teamShortLabel(team espn.Team) string {
 }
 
 func RenderOddsMarkdown(req SportsRequest, cfg LeagueConfig, rows []OddsRow, retrievedAt time.Time) string {
+	switch renderMode(req) {
+	case SportsRenderPlainMarkdown:
+		return renderOddsPlainMarkdown(req, cfg, rows, retrievedAt)
+	case SportsRenderHTMLMarkdown:
+		return renderOddsHTMLMarkdown(req, cfg, rows, retrievedAt)
+	default:
+		return renderOddsEnhancedMarkdown(req, cfg, rows, retrievedAt)
+	}
+}
+
+func renderOddsPlainMarkdown(req SportsRequest, cfg LeagueConfig, rows []OddsRow, retrievedAt time.Time) string {
 	var b strings.Builder
 	titleName := cfg.DisplayName
 	if titleName == "" {
@@ -317,6 +340,125 @@ func RenderOddsMarkdown(req SportsRequest, cfg LeagueConfig, rows []OddsRow, ret
 	}
 	b.WriteString(renderTable(headers, separators, tableRows))
 	return strings.TrimSpace(b.String())
+}
+
+func renderOddsEnhancedMarkdown(req SportsRequest, cfg LeagueConfig, rows []OddsRow, retrievedAt time.Time) string {
+	var b strings.Builder
+	titleName := oddsTitleName(req, cfg)
+	title := titleName + " Betting Odds"
+	if label := strings.TrimSpace(req.DateLabel); label != "" {
+		title += " — " + label
+	}
+	b.WriteString(renderLeagueHeader(SportsLookupResult{
+		League:        cfg.League,
+		LeagueName:    titleName,
+		LeagueLogoURL: firstNonEmpty(req.LeagueLogoURL, leagueIdentityForConfig(cfg).LogoURL),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+	}, title, SportsRenderEnhancedMarkdown))
+
+	includeLeague := strings.EqualFold(titleName, "sports") || oddsRowsHaveMultipleLeagues(rows)
+	headers := []string{"Date", "Time", "Matchup", "Moneyline", "Spread", "O/U", "Provider"}
+	separators := []string{"---", "---", "---", "---:", "---", "---", "---"}
+	if includeLeague {
+		headers = append([]string{"League"}, headers...)
+		separators = append([]string{"---"}, separators...)
+	}
+
+	tableRows := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		timeText := firstNonEmpty(row.Time, row.Status)
+		moneyline := fmt.Sprintf("%s %s · %s %s",
+			emptyAsDash(firstNonEmpty(oddsAway(row).Abbreviation, oddsAway(row).ShortName, oddsAway(row).DisplayName)),
+			emptyAsDash(row.AwayMoneyLine),
+			emptyAsDash(firstNonEmpty(oddsHome(row).Abbreviation, oddsHome(row).ShortName, oddsHome(row).DisplayName)),
+			emptyAsDash(row.HomeMoneyLine),
+		)
+		cells := []string{
+			emptyAsDash(row.Date),
+			emptyAsDash(timeText),
+			oddsMatchupCell(row, SportsRenderEnhancedMarkdown),
+			moneyline,
+			emptyAsDash(row.Spread),
+			emptyAsDash(row.OverUnder),
+			emptyAsDash(row.Provider),
+		}
+		if includeLeague {
+			cells = append([]string{emptyAsDash(row.LeagueName)}, cells...)
+		}
+		tableRows = append(tableRows, cells)
+	}
+	b.WriteString(renderTable(headers, separators, tableRows))
+	return strings.TrimSpace(b.String())
+}
+
+func renderOddsHTMLMarkdown(req SportsRequest, cfg LeagueConfig, rows []OddsRow, retrievedAt time.Time) string {
+	var b strings.Builder
+	titleName := oddsTitleName(req, cfg)
+	title := titleName + " Betting Odds"
+	if label := strings.TrimSpace(req.DateLabel); label != "" {
+		title += " — " + label
+	}
+	b.WriteString(renderLeagueHeader(SportsLookupResult{
+		League:        cfg.League,
+		LeagueName:    titleName,
+		LeagueLogoURL: firstNonEmpty(req.LeagueLogoURL, leagueIdentityForConfig(cfg).LogoURL),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+	}, title, SportsRenderHTMLMarkdown))
+
+	headers := []htmlHeader{{"Date", "left"}, {"Time", "left"}, {"Matchup", "left"}, {"Moneyline", "right"}, {"Spread", "left"}, {"O/U", "left"}, {"Provider", "left"}}
+	includeLeague := strings.EqualFold(titleName, "sports") || oddsRowsHaveMultipleLeagues(rows)
+	if includeLeague {
+		headers = append([]htmlHeader{{"League", "left"}}, headers...)
+	}
+
+	htmlRows := make([][]htmlCell, 0, len(rows))
+	for _, row := range rows {
+		timeText := firstNonEmpty(row.Time, row.Status)
+		moneyline := fmt.Sprintf("%s %s · %s %s",
+			emptyAsDash(firstNonEmpty(oddsAway(row).Abbreviation, oddsAway(row).ShortName, oddsAway(row).DisplayName)),
+			emptyAsDash(row.AwayMoneyLine),
+			emptyAsDash(firstNonEmpty(oddsHome(row).Abbreviation, oddsHome(row).ShortName, oddsHome(row).DisplayName)),
+			emptyAsDash(row.HomeMoneyLine),
+		)
+		cells := []htmlCell{
+			{text: escapeHTML(emptyAsDash(row.Date))},
+			{text: escapeHTML(emptyAsDash(timeText))},
+			{text: oddsMatchupCell(row, SportsRenderHTMLMarkdown)},
+			{text: escapeHTML(moneyline), align: "right"},
+			{text: escapeHTML(emptyAsDash(row.Spread))},
+			{text: escapeHTML(emptyAsDash(row.OverUnder))},
+			{text: escapeHTML(emptyAsDash(row.Provider))},
+		}
+		if includeLeague {
+			cells = append([]htmlCell{{text: escapeHTML(emptyAsDash(row.LeagueName))}}, cells...)
+		}
+		htmlRows = append(htmlRows, cells)
+	}
+	writeHTMLTable(&b, headers, htmlRows)
+	b.WriteString("</div>\n")
+	return strings.TrimSpace(b.String())
+}
+
+func oddsTitleName(req SportsRequest, cfg LeagueConfig) string {
+	titleName := cfg.DisplayName
+	if titleName == "" {
+		titleName = "Sports"
+	}
+	if strings.TrimSpace(req.TeamQuery) != "" && !strings.EqualFold(titleName, "sports") {
+		titleName = req.TeamQuery
+	}
+	return titleName
+}
+
+func oddsMatchupCell(row OddsRow, mode SportsRenderMode) string {
+	away := renderTeamCell(oddsAway(row), mode)
+	home := renderTeamCell(oddsHome(row), mode)
+	if mode == SportsRenderHTMLMarkdown {
+		return away + ` <span class="sports-matchup-at">at</span> ` + home
+	}
+	return away + " at " + home
 }
 
 func oddsRowsHaveMultipleLeagues(rows []OddsRow) bool {

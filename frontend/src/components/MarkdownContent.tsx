@@ -63,6 +63,28 @@ function artifactStyle(ext: string): { icon: React.ReactNode; colorClass: string
   }
 }
 
+function safeImageSrc(src?: string): string | undefined {
+  const raw = src?.trim();
+  if (!raw) return undefined;
+
+  if (raw.startsWith('/v1/')) {
+    return resolveApiUrl(raw);
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:') return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function isSportsLogo(src?: string, alt?: string): boolean {
+  const text = `${src ?? ''} ${alt ?? ''}`.toLowerCase();
+  return text.includes('logo') && text.includes('espncdn.com');
+}
+
 export function MarkdownContent({ content }: Props) {
   return (
     <div className="message-content">
@@ -79,9 +101,21 @@ export function MarkdownContent({ content }: Props) {
           },
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
           img({ src, alt, ref: _ref, ...props }) {
-            // In the Wails desktop build, /v1/ URLs must be rewritten to
-            // point at the real local HTTP server instead of wails.localhost.
-            const resolvedSrc = src ? resolveApiUrl(src) : src;
+            const resolvedSrc = safeImageSrc(src);
+            if (!resolvedSrc) {
+              return alt ? <span>{alt}</span> : null;
+            }
+            if (isSportsLogo(resolvedSrc, alt)) {
+              return (
+                <img
+                  src={resolvedSrc}
+                  alt={alt || ''}
+                  className="sports-inline-logo"
+                  loading="lazy"
+                  {...props}
+                />
+              );
+            }
             return (
               <a href={resolvedSrc} target="_blank" rel="noopener noreferrer" className="block my-2">
                 <img

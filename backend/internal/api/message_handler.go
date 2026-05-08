@@ -1169,7 +1169,9 @@ func (h *MessageHandler) handleSportsLookupMessage(ctx context.Context, conversa
 	} else {
 		content = result.Markdown
 		metaMap["league_name"] = result.LeagueName
+		metaMap["league_logo_url"] = result.LeagueLogoURL
 		metaMap["retrieved_at"] = result.RetrievedAt.Format(time.RFC3339)
+		metaMap["render_mode"] = result.RenderMode
 	}
 
 	metaJSON, _ := json.Marshal(metaMap)

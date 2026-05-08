@@ -186,6 +186,9 @@ func TestNormalizeScoreboardAndFilter(t *testing.T) {
 								Team: espn.Team{
 									DisplayName:  "Chicago Cubs",
 									Abbreviation: "CHC",
+									Logos: []espn.Logo{
+										{Href: "http://a.espncdn.com/i/teamlogos/mlb/500/chc.png", Rel: []string{"default"}},
+									},
 								},
 							},
 							{
@@ -217,6 +220,12 @@ func TestNormalizeScoreboardAndFilter(t *testing.T) {
 	if row.AwayScore != "5" || row.HomeScore != "3" || row.Venue != "Busch Stadium" || row.Broadcasts != "ESPN" {
 		t.Fatalf("unexpected row: %+v", row)
 	}
+	if row.StatusType != "final" {
+		t.Fatalf("status type = %q, want final", row.StatusType)
+	}
+	if row.Away.LogoURL != "https://a.espncdn.com/i/teamlogos/mlb/500/chc.png" {
+		t.Fatalf("away logo = %q", row.Away.LogoURL)
+	}
 
 	filtered := filterGameRowsByTeam(rows, "Cubs")
 	if len(filtered) != 1 {
@@ -224,6 +233,49 @@ func TestNormalizeScoreboardAndFilter(t *testing.T) {
 	}
 	if filtered[0].AwayAbbr != "CHC" {
 		t.Fatalf("filtered wrong row: %+v", filtered[0])
+	}
+}
+
+func TestExtractTeamIdentityFromCompetitor(t *testing.T) {
+	identity := extractTeamIdentityFromCompetitor(espn.Competitor{
+		Team: espn.Team{
+			DisplayName:      "Chicago Cubs",
+			ShortDisplayName: "Cubs",
+			Location:         "Chicago",
+			Abbreviation:     "CHC",
+			Color:            "0E3386",
+			AlternateColor:   "CC3433",
+			Logos: []espn.Logo{
+				{Href: "javascript:alert(1)", Rel: []string{"default"}},
+				{Href: "https://a.espncdn.com/i/teamlogos/mlb/500/chc-dark.png", Rel: []string{"dark"}},
+				{Href: "https://a.espncdn.com/i/teamlogos/mlb/500/chc.png", Rel: []string{"default"}},
+			},
+		},
+	})
+	if identity.DisplayName != "Chicago Cubs" || identity.Abbreviation != "CHC" {
+		t.Fatalf("identity basics = %+v", identity)
+	}
+	if identity.LogoURL != "https://a.espncdn.com/i/teamlogos/mlb/500/chc.png" {
+		t.Fatalf("logo = %q", identity.LogoURL)
+	}
+	if identity.DarkLogoURL != "https://a.espncdn.com/i/teamlogos/mlb/500/chc-dark.png" {
+		t.Fatalf("dark logo = %q", identity.DarkLogoURL)
+	}
+	if identity.PrimaryColor != "#0E3386" || identity.AlternateColor != "#CC3433" {
+		t.Fatalf("colors = %q/%q", identity.PrimaryColor, identity.AlternateColor)
+	}
+}
+
+func TestExtractTeamIdentityRejectsInvalidLogo(t *testing.T) {
+	identity := extractTeamIdentityFromCompetitor(espn.Competitor{
+		Team: espn.Team{
+			DisplayName:  "Bad Logo",
+			Abbreviation: "BAD",
+			Logo:         "data:image/svg+xml;base64,abc",
+		},
+	})
+	if identity.LogoURL != "" {
+		t.Fatalf("logo = %q, want empty", identity.LogoURL)
 	}
 }
 

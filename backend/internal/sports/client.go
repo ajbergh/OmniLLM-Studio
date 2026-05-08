@@ -79,6 +79,8 @@ func (c *ESPNClient) LookupScores(ctx context.Context, req SportsRequest) (*Spor
 		return nil, wrapESPNError(ctx, err)
 	}
 
+	leagueLogoURL := logoURLFromScoreboard(sb, cfg)
+	req.LeagueLogoURL = leagueLogoURL
 	rows := normalizeScoreboard(sb)
 	if len(rows) == 0 {
 		return nil, ErrNoGames
@@ -92,14 +94,16 @@ func (c *ESPNClient) LookupScores(ctx context.Context, req SportsRequest) (*Spor
 
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
-		Intent:      req.Intent,
-		League:      cfg.League,
-		LeagueName:  cfg.DisplayName,
-		Sport:       cfg.Sport,
-		DateLabel:   req.DateLabel,
-		Markdown:    RenderGamesMarkdown(req, cfg, rows, retrievedAt),
-		Source:      SourceESPN,
-		RetrievedAt: retrievedAt,
+		Intent:        req.Intent,
+		League:        cfg.League,
+		LeagueName:    cfg.DisplayName,
+		LeagueLogoURL: leagueLogoURL,
+		Sport:         cfg.Sport,
+		DateLabel:     req.DateLabel,
+		Markdown:      RenderGamesMarkdown(req, cfg, rows, retrievedAt),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+		RenderMode:    renderMode(req),
 	}, nil
 }
 
@@ -122,15 +126,19 @@ func (c *ESPNClient) LookupStandings(ctx context.Context, req SportsRequest) (*S
 	}
 
 	retrievedAt := c.timeNow()
+	leagueLogoURL := leagueIdentityForConfig(cfg).LogoURL
+	req.LeagueLogoURL = leagueLogoURL
 	return &SportsLookupResult{
-		Intent:      SportsIntentStandings,
-		League:      cfg.League,
-		LeagueName:  cfg.DisplayName,
-		Sport:       cfg.Sport,
-		DateLabel:   req.DateLabel,
-		Markdown:    RenderStandingsMarkdown(req, cfg, rows, retrievedAt),
-		Source:      SourceESPN,
-		RetrievedAt: retrievedAt,
+		Intent:        SportsIntentStandings,
+		League:        cfg.League,
+		LeagueName:    cfg.DisplayName,
+		LeagueLogoURL: leagueLogoURL,
+		Sport:         cfg.Sport,
+		DateLabel:     req.DateLabel,
+		Markdown:      RenderStandingsMarkdown(req, cfg, rows, retrievedAt),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+		RenderMode:    renderMode(req),
 	}, nil
 }
 
@@ -198,14 +206,16 @@ func (c *ESPNClient) LookupNews(ctx context.Context, req SportsRequest) (*Sports
 
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
-		Intent:      SportsIntentNews,
-		League:      league,
-		LeagueName:  leagueName,
-		Sport:       sport,
-		DateLabel:   req.DateLabel,
-		Markdown:    RenderNewsMarkdown(req, leagueName, rows, retrievedAt),
-		Source:      SourceESPN,
-		RetrievedAt: retrievedAt,
+		Intent:        SportsIntentNews,
+		League:        league,
+		LeagueName:    leagueName,
+		LeagueLogoURL: leagueIdentityForConfig(cfg).LogoURL,
+		Sport:         sport,
+		DateLabel:     req.DateLabel,
+		Markdown:      RenderNewsMarkdown(req, leagueName, rows, retrievedAt),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+		RenderMode:    renderMode(req),
 	}, nil
 }
 
@@ -261,17 +271,20 @@ func normalizeScoreboard(sb *espn.Scoreboard) []GameRow {
 			Date:       formatGameDate(eventDate),
 			Time:       formatGameTime(eventDate),
 			Status:     statusText(status, eventDate),
+			StatusType: statusKind(status),
 			Venue:      venueName(comp.Venue),
 			Broadcasts: broadcastNames(comp.Broadcasts, comp.GeoBroadcasts),
 		}
 		if away != nil {
-			row.AwayTeam = teamDisplayName(away.Team)
-			row.AwayAbbr = away.Team.Abbreviation
+			row.Away = extractTeamIdentityFromCompetitor(*away)
+			row.AwayTeam = row.Away.DisplayName
+			row.AwayAbbr = row.Away.Abbreviation
 			row.AwayScore = strings.TrimSpace(away.Score)
 		}
 		if home != nil {
-			row.HomeTeam = teamDisplayName(home.Team)
-			row.HomeAbbr = home.Team.Abbreviation
+			row.Home = extractTeamIdentityFromCompetitor(*home)
+			row.HomeTeam = row.Home.DisplayName
+			row.HomeAbbr = row.Home.Abbreviation
 			row.HomeScore = strings.TrimSpace(home.Score)
 		}
 		rows = append(rows, row)
@@ -351,11 +364,13 @@ func collectStandingsRows(groupName string, group espn.StandingsGroup, rows *[]S
 
 func standingsRowFromEntry(group string, entry espn.StandingsEntry) StandingsRow {
 	rank := statIntAny(entry, []string{"rank", "playoffSeed", "seed"})
+	team := extractTeamIdentityFromStandingEntry(entry)
 	row := StandingsRow{
 		Group:            group,
 		Rank:             rank,
-		Team:             teamDisplayName(entry.Team),
-		Abbr:             entry.Team.Abbreviation,
+		TeamIdentity:     team,
+		Team:             team.DisplayName,
+		Abbr:             team.Abbreviation,
 		Wins:             statDisplayAny(entry, []string{"wins", "W"}),
 		Losses:           statDisplayAny(entry, []string{"losses", "L"}),
 		Ties:             statDisplayAny(entry, []string{"ties", "T"}),
@@ -368,6 +383,7 @@ func standingsRowFromEntry(group string, entry espn.StandingsEntry) StandingsRow
 		GamesPlayed:      statDisplayAny(entry, []string{"gamesPlayed", "matchesPlayed", "GP"}),
 		GoalDifferential: statDisplayAny(entry, []string{"goalDifferential", "goalDifference", "pointDifferential", "GD"}),
 	}
+	row.GoalDiff = row.GoalDifferential
 	if entry.Note != nil {
 		row.Note = strings.TrimSpace(entry.Note.Description)
 	}
@@ -452,6 +468,23 @@ func statusText(status espn.Status, eventDate string) string {
 		return t
 	}
 	return ""
+}
+
+func statusKind(status espn.Status) string {
+	st := status.Type
+	text := normalizeText(firstNonEmpty(st.State, st.Name, st.Description, st.Detail, st.ShortDetail))
+	switch {
+	case strings.Contains(text, "postponed"), strings.Contains(text, "canceled"), strings.Contains(text, "cancelled"), strings.Contains(text, "suspended"):
+		return "postponed"
+	case st.Completed, text == "post", strings.Contains(text, "final"):
+		return "final"
+	case text == "in", strings.Contains(text, "progress"), strings.Contains(text, "halftime"):
+		return "live"
+	case text == "pre", strings.Contains(text, "scheduled"), strings.Contains(text, "preview"):
+		return "scheduled"
+	default:
+		return strings.TrimSpace(st.State)
+	}
 }
 
 func teamDisplayName(team espn.Team) string {
@@ -545,6 +578,8 @@ func filterGameRowsByTeam(rows []GameRow, teamQuery string) []GameRow {
 func rowMatchesTeam(row GameRow, query string) bool {
 	fields := []string{
 		row.AwayTeam, row.AwayAbbr, row.HomeTeam, row.HomeAbbr,
+		row.Away.DisplayName, row.Away.ShortName, row.Away.Location,
+		row.Home.DisplayName, row.Home.ShortName, row.Home.Location,
 	}
 	for _, field := range fields {
 		norm := normalizeText(field)

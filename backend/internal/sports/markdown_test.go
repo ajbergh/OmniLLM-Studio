@@ -16,6 +16,36 @@ func TestEscapeMarkdownCell(t *testing.T) {
 	}
 }
 
+func TestEscapeHTML(t *testing.T) {
+	got := escapeHTML(`<img src=x onerror=alert(1)>`)
+	want := "&lt;img src=x onerror=alert(1)&gt;"
+	if got != want {
+		t.Fatalf("escapeHTML = %q, want %q", got, want)
+	}
+}
+
+func TestSanitizeImageURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"https", "https://a.espncdn.com/i/teamlogos/mlb/500/chc.png", "https://a.espncdn.com/i/teamlogos/mlb/500/chc.png"},
+		{"http upgraded", "http://a.espncdn.com/i/teamlogos/mlb/500/chc.png", "https://a.espncdn.com/i/teamlogos/mlb/500/chc.png"},
+		{"protocol relative", "//a.espncdn.com/i/teamlogos/mlb/500/chc.png", "https://a.espncdn.com/i/teamlogos/mlb/500/chc.png"},
+		{"javascript rejected", "javascript:alert(1)", ""},
+		{"data rejected", "data:image/svg+xml;base64,abc", ""},
+		{"file rejected", "file:///tmp/logo.png", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeImageURL(tt.input); got != tt.want {
+				t.Fatalf("sanitizeImageURL = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFormatFloatStat(t *testing.T) {
 	tests := map[float64]string{
 		26:     "26",
@@ -31,7 +61,7 @@ func TestFormatFloatStat(t *testing.T) {
 }
 
 func TestRenderGamesMarkdownScores(t *testing.T) {
-	req := SportsRequest{Intent: SportsIntentScores, DateLabel: "Today"}
+	req := SportsRequest{Intent: SportsIntentScores, DateLabel: "Today", RenderMode: SportsRenderPlainMarkdown}
 	cfg := LeagueConfig{DisplayName: "MLB", Sport: espn.SportBaseball, League: espn.LeagueMLB}
 	retrieved := time.Date(2026, 5, 7, 18, 45, 0, 0, time.Local)
 	rows := []GameRow{
@@ -58,7 +88,7 @@ func TestRenderGamesMarkdownScores(t *testing.T) {
 }
 
 func TestRenderGamesMarkdownScheduleWhenPregame(t *testing.T) {
-	req := SportsRequest{Intent: SportsIntentScores, DateLabel: "Tomorrow"}
+	req := SportsRequest{Intent: SportsIntentScores, DateLabel: "Tomorrow", RenderMode: SportsRenderPlainMarkdown}
 	cfg := LeagueConfig{DisplayName: "NFL", Sport: espn.SportFootball, League: espn.LeagueNFL}
 	rows := []GameRow{
 		{Time: "7:20 PM", AwayTeam: "Dallas Cowboys", HomeTeam: "New York Giants", Venue: "MetLife Stadium", Broadcasts: "NBC"},
@@ -70,8 +100,78 @@ func TestRenderGamesMarkdownScheduleWhenPregame(t *testing.T) {
 	}
 }
 
+func TestRenderGamesMarkdownEnhancedScores(t *testing.T) {
+	req := SportsRequest{Intent: SportsIntentScores, DateLabel: "Today"}
+	cfg := LeagueConfig{DisplayName: "MLB", Sport: espn.SportBaseball, League: espn.LeagueMLB}
+	rows := []GameRow{
+		{
+			Status:     "Final",
+			StatusType: "final",
+			Away: TeamIdentity{
+				DisplayName:  "Chicago Cubs",
+				Abbreviation: "CHC",
+				LogoURL:      "https://a.espncdn.com/i/teamlogos/mlb/500/chc.png",
+			},
+			AwayTeam:  "Chicago Cubs",
+			AwayAbbr:  "CHC",
+			AwayScore: "5",
+			Home: TeamIdentity{
+				DisplayName:  "St. Louis | Cardinals",
+				Abbreviation: "STL",
+			},
+			HomeTeam:  "St. Louis | Cardinals",
+			HomeAbbr:  "STL",
+			HomeScore: "3",
+			Venue:     "Busch Stadium",
+		},
+	}
+
+	got := RenderGamesMarkdown(req, cfg, rows, fixedNow())
+	if !strings.Contains(got, "### ![MLB logo]") {
+		t.Fatalf("missing league logo header: %s", got)
+	}
+	if !strings.Contains(got, "| Status | Matchup | Score | Venue |") {
+		t.Fatalf("missing enhanced score header: %s", got)
+	}
+	if !strings.Contains(got, "![CHC logo](https://a.espncdn.com/i/teamlogos/mlb/500/chc.png) Chicago Cubs at **STL** St. Louis \\| Cardinals") {
+		t.Fatalf("missing logo matchup cell: %s", got)
+	}
+	if !strings.Contains(got, "CHC 5 · STL 3") {
+		t.Fatalf("missing compact score: %s", got)
+	}
+}
+
+func TestRenderTeamCellWithoutLogoUsesAbbreviationBadge(t *testing.T) {
+	got := renderTeamCell(TeamIdentity{DisplayName: "New York Yankees", Abbreviation: "NYY"}, SportsRenderEnhancedMarkdown)
+	want := "**NYY** New York Yankees"
+	if got != want {
+		t.Fatalf("renderTeamCell = %q, want %q", got, want)
+	}
+}
+
+func TestRenderStatusBadgeLabels(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     string
+		statusType string
+		want       string
+	}{
+		{"final", "Final", "final", "Final"},
+		{"live", "7th", "live", "**7th**"},
+		{"preview", "8:10 PM", "scheduled", "8:10 PM"},
+		{"postponed", "Postponed", "postponed", "Postponed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := renderStatusBadge(tt.status, tt.statusType, SportsRenderEnhancedMarkdown); got != tt.want {
+				t.Fatalf("renderStatusBadge = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRenderStandingsMarkdownGrouped(t *testing.T) {
-	req := SportsRequest{Intent: SportsIntentStandings}
+	req := SportsRequest{Intent: SportsIntentStandings, RenderMode: SportsRenderPlainMarkdown}
 	cfg := LeagueConfig{DisplayName: "MLB", Sport: espn.SportBaseball, League: espn.LeagueMLB}
 	rows := []StandingsRow{
 		{Group: "American League East", Rank: 1, Team: "New York Yankees", Wins: "26", Losses: "12", Pct: ".684", GamesBack: "", Streak: "W2"},
@@ -91,8 +191,39 @@ func TestRenderStandingsMarkdownGrouped(t *testing.T) {
 	}
 }
 
-func TestRenderSoccerStandingsMarkdown(t *testing.T) {
+func TestRenderStandingsMarkdownEnhancedGrouped(t *testing.T) {
 	req := SportsRequest{Intent: SportsIntentStandings}
+	cfg := LeagueConfig{DisplayName: "MLB", Sport: espn.SportBaseball, League: espn.LeagueMLB}
+	rows := []StandingsRow{
+		{
+			Group: "American League East",
+			Rank:  1,
+			TeamIdentity: TeamIdentity{
+				DisplayName:  "New York Yankees",
+				Abbreviation: "NYY",
+				LogoURL:      "https://a.espncdn.com/i/teamlogos/mlb/500/nyy.png",
+			},
+			Team:      "New York Yankees",
+			Abbr:      "NYY",
+			Wins:      "26",
+			Losses:    "12",
+			Pct:       ".684",
+			GamesBack: "",
+			Streak:    "W2",
+		},
+	}
+
+	got := RenderStandingsMarkdown(req, cfg, rows, fixedNow())
+	if !strings.Contains(got, "### ![MLB logo]") {
+		t.Fatalf("missing enhanced standings header: %s", got)
+	}
+	if !strings.Contains(got, "![NYY logo](https://a.espncdn.com/i/teamlogos/mlb/500/nyy.png) New York Yankees") {
+		t.Fatalf("missing standings logo row: %s", got)
+	}
+}
+
+func TestRenderSoccerStandingsMarkdown(t *testing.T) {
+	req := SportsRequest{Intent: SportsIntentStandings, RenderMode: SportsRenderPlainMarkdown}
 	cfg := LeagueConfig{DisplayName: "Premier League", Sport: espn.SportSoccer, League: espn.LeagueEPL}
 	rows := []StandingsRow{
 		{Rank: 1, Team: "Arsenal", GamesPlayed: "38", Wins: "26", Draws: "8", Losses: "4", Points: "86", GoalDifferential: "+48"},
@@ -141,7 +272,7 @@ func TestRenderBroadNewsMarkdown(t *testing.T) {
 }
 
 func TestRenderOddsMarkdown(t *testing.T) {
-	req := SportsRequest{Intent: SportsIntentOdds, DateLabel: "Today"}
+	req := SportsRequest{Intent: SportsIntentOdds, DateLabel: "Today", RenderMode: SportsRenderPlainMarkdown}
 	cfg := LeagueConfig{DisplayName: "NBA"}
 	rows := []OddsRow{
 		{

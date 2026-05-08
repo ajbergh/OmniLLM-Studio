@@ -44,21 +44,33 @@ const (
 	SportsIntentOdds         SportsIntentType = "odds"
 )
 
+type SportsRenderMode string
+
+const (
+	SportsRenderPlainMarkdown    SportsRenderMode = "plain_markdown"
+	SportsRenderEnhancedMarkdown SportsRenderMode = "enhanced_markdown"
+	SportsRenderHTMLMarkdown     SportsRenderMode = "html_markdown"
+)
+
+const DefaultSportsRenderMode = SportsRenderEnhancedMarkdown
+
 type SportsRequest struct {
-	RawQuery     string
-	Intent       SportsIntentType
-	League       string
-	Sport        string
-	TeamQuery    string
-	AthleteQuery string
-	StatCategory string
-	StatName     string
-	StatLabel    string
-	StatSort     string
-	Date         *time.Time
-	DateLabel    string
-	Season       int
-	Limit        int
+	RawQuery      string
+	Intent        SportsIntentType
+	League        string
+	Sport         string
+	TeamQuery     string
+	AthleteQuery  string
+	StatCategory  string
+	StatName      string
+	StatLabel     string
+	StatSort      string
+	Date          *time.Time
+	DateLabel     string
+	Season        int
+	Limit         int
+	RenderMode    SportsRenderMode
+	LeagueLogoURL string
 }
 
 type LeagueConfig struct {
@@ -69,23 +81,46 @@ type LeagueConfig struct {
 }
 
 type SportsLookupResult struct {
-	Intent      SportsIntentType
-	League      string
-	LeagueName  string
-	Sport       string
-	DateLabel   string
-	Markdown    string
-	Source      string
-	RetrievedAt time.Time
+	Intent        SportsIntentType
+	League        string
+	LeagueName    string
+	LeagueLogoURL string
+	Sport         string
+	DateLabel     string
+	Markdown      string
+	Source        string
+	RetrievedAt   time.Time
+	RenderMode    SportsRenderMode
+}
+
+type TeamIdentity struct {
+	DisplayName    string `json:"display_name"`
+	ShortName      string `json:"short_name,omitempty"`
+	Abbreviation   string `json:"abbreviation,omitempty"`
+	Location       string `json:"location,omitempty"`
+	LogoURL        string `json:"logo_url,omitempty"`
+	DarkLogoURL    string `json:"dark_logo_url,omitempty"`
+	PrimaryColor   string `json:"primary_color,omitempty"`
+	AlternateColor string `json:"alternate_color,omitempty"`
+}
+
+type LeagueIdentity struct {
+	League       string
+	DisplayName  string
+	LogoURL      string
+	Abbreviation string
 }
 
 type GameRow struct {
 	Date       string
 	Time       string
 	Status     string
+	StatusType string
+	Away       TeamIdentity
 	AwayTeam   string
 	AwayAbbr   string
 	AwayScore  string
+	Home       TeamIdentity
 	HomeTeam   string
 	HomeAbbr   string
 	HomeScore  string
@@ -96,6 +131,7 @@ type GameRow struct {
 type StandingsRow struct {
 	Group            string
 	Rank             int
+	TeamIdentity     TeamIdentity
 	Team             string
 	Abbr             string
 	Wins             string
@@ -109,6 +145,7 @@ type StandingsRow struct {
 	Points           string
 	GamesPlayed      string
 	GoalDifferential string
+	GoalDiff         string
 	Note             string
 }
 
@@ -125,9 +162,12 @@ type OddsRow struct {
 	Date          string
 	Time          string
 	Status        string
+	StatusType    string
+	Away          TeamIdentity
 	AwayTeam      string
 	AwayAbbr      string
 	AwayMoneyLine string
+	Home          TeamIdentity
 	HomeTeam      string
 	HomeAbbr      string
 	HomeMoneyLine string

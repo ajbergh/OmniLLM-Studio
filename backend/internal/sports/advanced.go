@@ -35,13 +35,15 @@ func (c *ESPNClient) LookupRoster(ctx context.Context, req SportsRequest) (*Spor
 	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
-		Intent:      SportsIntentRoster,
-		League:      cfg.League,
-		LeagueName:  cfg.DisplayName,
-		Sport:       cfg.Sport,
-		Markdown:    RenderRosterMarkdown(req, cfg, rows, retrievedAt),
-		Source:      SourceESPN,
-		RetrievedAt: retrievedAt,
+		Intent:        SportsIntentRoster,
+		League:        cfg.League,
+		LeagueName:    cfg.DisplayName,
+		LeagueLogoURL: leagueIdentityForConfig(cfg).LogoURL,
+		Sport:         cfg.Sport,
+		Markdown:      RenderRosterMarkdown(req, cfg, rows, retrievedAt),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+		RenderMode:    renderMode(req),
 	}, nil
 }
 
@@ -78,13 +80,15 @@ func (c *ESPNClient) LookupLeaders(ctx context.Context, req SportsRequest) (*Spo
 		}
 		retrievedAt := c.timeNow()
 		return &SportsLookupResult{
-			Intent:      SportsIntentLeaders,
-			League:      cfg.League,
-			LeagueName:  cfg.DisplayName,
-			Sport:       cfg.Sport,
-			Markdown:    RenderSimpleMarkdown(title, table, retrievedAt),
-			Source:      SourceESPN,
-			RetrievedAt: retrievedAt,
+			Intent:        SportsIntentLeaders,
+			League:        cfg.League,
+			LeagueName:    cfg.DisplayName,
+			LeagueLogoURL: leagueIdentityForConfig(cfg).LogoURL,
+			Sport:         cfg.Sport,
+			Markdown:      RenderSimpleMarkdown(title, table, retrievedAt),
+			Source:        SourceESPN,
+			RetrievedAt:   retrievedAt,
+			RenderMode:    renderMode(req),
 		}, nil
 	}
 	limit := req.Limit
@@ -114,14 +118,16 @@ func (c *ESPNClient) LookupLeaders(ctx context.Context, req SportsRequest) (*Spo
 	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
-		Intent:      SportsIntentLeaders,
-		League:      cfg.League,
-		LeagueName:  cfg.DisplayName,
-		Sport:       cfg.Sport,
-		DateLabel:   req.DateLabel,
-		Markdown:    RenderLeaderboardMarkdown(req, cfg, rows, retrievedAt),
-		Source:      SourceESPN,
-		RetrievedAt: retrievedAt,
+		Intent:        SportsIntentLeaders,
+		League:        cfg.League,
+		LeagueName:    cfg.DisplayName,
+		LeagueLogoURL: leagueIdentityForConfig(cfg).LogoURL,
+		Sport:         cfg.Sport,
+		DateLabel:     req.DateLabel,
+		Markdown:      RenderLeaderboardMarkdown(req, cfg, rows, retrievedAt),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+		RenderMode:    renderMode(req),
 	}, nil
 }
 
@@ -149,13 +155,15 @@ func (c *ESPNClient) LookupAthlete(ctx context.Context, req SportsRequest) (*Spo
 		}
 		retrievedAt := c.timeNow()
 		return &SportsLookupResult{
-			Intent:      SportsIntentAthleteNews,
-			League:      cfg.League,
-			LeagueName:  cfg.DisplayName,
-			Sport:       cfg.Sport,
-			Markdown:    RenderNewsMarkdown(req, cfg.DisplayName, rows, retrievedAt),
-			Source:      SourceESPN,
-			RetrievedAt: retrievedAt,
+			Intent:        SportsIntentAthleteNews,
+			League:        cfg.League,
+			LeagueName:    cfg.DisplayName,
+			LeagueLogoURL: leagueIdentityForConfig(cfg).LogoURL,
+			Sport:         cfg.Sport,
+			Markdown:      RenderNewsMarkdown(req, cfg.DisplayName, rows, retrievedAt),
+			Source:        SourceESPN,
+			RetrievedAt:   retrievedAt,
+			RenderMode:    renderMode(req),
 		}, nil
 	}
 
@@ -169,13 +177,15 @@ func (c *ESPNClient) LookupAthlete(ctx context.Context, req SportsRequest) (*Spo
 	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
-		Intent:      SportsIntentAthleteStats,
-		League:      cfg.League,
-		LeagueName:  cfg.DisplayName,
-		Sport:       cfg.Sport,
-		Markdown:    RenderSimpleMarkdown(title, table, retrievedAt),
-		Source:      SourceESPN,
-		RetrievedAt: retrievedAt,
+		Intent:        SportsIntentAthleteStats,
+		League:        cfg.League,
+		LeagueName:    cfg.DisplayName,
+		LeagueLogoURL: leagueIdentityForConfig(cfg).LogoURL,
+		Sport:         cfg.Sport,
+		Markdown:      RenderSimpleMarkdown(title, table, retrievedAt),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+		RenderMode:    renderMode(req),
 	}, nil
 }
 
@@ -194,13 +204,15 @@ func (c *ESPNClient) LookupGeneric(ctx context.Context, req SportsRequest) (*Spo
 	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
-		Intent:      req.Intent,
-		League:      cfg.League,
-		LeagueName:  cfg.DisplayName,
-		Sport:       cfg.Sport,
-		Markdown:    RenderSimpleMarkdown(title, table, retrievedAt),
-		Source:      SourceESPN,
-		RetrievedAt: retrievedAt,
+		Intent:        req.Intent,
+		League:        cfg.League,
+		LeagueName:    cfg.DisplayName,
+		LeagueLogoURL: leagueIdentityForConfig(cfg).LogoURL,
+		Sport:         cfg.Sport,
+		Markdown:      RenderSimpleMarkdown(title, table, retrievedAt),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+		RenderMode:    renderMode(req),
 	}, nil
 }
 

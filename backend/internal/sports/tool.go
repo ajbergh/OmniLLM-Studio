@@ -26,20 +26,23 @@ func NewSportsLookupTool(client *ESPNClient) *SportsLookupTool {
 }
 
 type sportsLookupArgs struct {
-	Query  string `json:"query"`
-	Intent string `json:"intent,omitempty"`
-	League string `json:"league,omitempty"`
-	Date   string `json:"date,omitempty"`
-	Limit  int    `json:"limit,omitempty"`
+	Query      string `json:"query"`
+	Intent     string `json:"intent,omitempty"`
+	League     string `json:"league,omitempty"`
+	Date       string `json:"date,omitempty"`
+	Limit      int    `json:"limit,omitempty"`
+	RenderMode string `json:"render_mode,omitempty"`
 }
 
 type sportsLookupOutput struct {
-	Intent      SportsIntentType `json:"intent"`
-	League      string           `json:"league"`
-	LeagueName  string           `json:"league_name"`
-	Markdown    string           `json:"markdown"`
-	Source      string           `json:"source"`
-	RetrievedAt string           `json:"retrieved_at"`
+	Intent        SportsIntentType `json:"intent"`
+	League        string           `json:"league"`
+	LeagueName    string           `json:"league_name"`
+	LeagueLogoURL string           `json:"league_logo_url,omitempty"`
+	Markdown      string           `json:"markdown"`
+	Source        string           `json:"source"`
+	RetrievedAt   string           `json:"retrieved_at"`
+	RenderMode    SportsRenderMode `json:"render_mode"`
 }
 
 func (t *SportsLookupTool) Definition() tools.ToolDefinition {
@@ -66,6 +69,11 @@ func (t *SportsLookupTool) Definition() tools.ToolDefinition {
 			"limit": {
 				"type": "integer",
 				"description": "Optional maximum number of rows or articles to return"
+			},
+			"render_mode": {
+				"type": "string",
+				"enum": ["plain_markdown", "enhanced_markdown", "html_markdown"],
+				"description": "Optional output renderer. Defaults to enhanced_markdown."
 			}
 		},
 		"required": ["query"]
@@ -96,6 +104,13 @@ func (t *SportsLookupTool) Validate(args json.RawMessage) error {
 			SportsIntentAthleteStats, SportsIntentAthleteNews, SportsIntentRankings, SportsIntentLeagueStats:
 		default:
 			return fmt.Errorf("unsupported sports intent")
+		}
+	}
+	if a.RenderMode != "" {
+		switch SportsRenderMode(strings.ToLower(strings.TrimSpace(a.RenderMode))) {
+		case SportsRenderPlainMarkdown, SportsRenderEnhancedMarkdown, SportsRenderHTMLMarkdown:
+		default:
+			return fmt.Errorf("unsupported sports render mode")
 		}
 	}
 	return nil
@@ -155,6 +170,9 @@ func (t *SportsLookupTool) Execute(ctx context.Context, args json.RawMessage) (*
 	if a.Limit > 0 {
 		req.Limit = a.Limit
 	}
+	if a.RenderMode != "" {
+		req.RenderMode = SportsRenderMode(strings.ToLower(strings.TrimSpace(a.RenderMode)))
+	}
 
 	result, err := t.client.Lookup(ctx, *req)
 	if err != nil {
@@ -170,12 +188,14 @@ func (t *SportsLookupTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	out := sportsLookupOutput{
-		Intent:      result.Intent,
-		League:      result.League,
-		LeagueName:  result.LeagueName,
-		Markdown:    result.Markdown,
-		Source:      result.Source,
-		RetrievedAt: result.RetrievedAt.Format(time.RFC3339),
+		Intent:        result.Intent,
+		League:        result.League,
+		LeagueName:    result.LeagueName,
+		LeagueLogoURL: result.LeagueLogoURL,
+		Markdown:      result.Markdown,
+		Source:        result.Source,
+		RetrievedAt:   result.RetrievedAt.Format(time.RFC3339),
+		RenderMode:    result.RenderMode,
 	}
 	content, err := json.Marshal(out)
 	if err != nil {
@@ -189,8 +209,10 @@ func (t *SportsLookupTool) Execute(ctx context.Context, args json.RawMessage) (*
 			"intent":       result.Intent,
 			"league":       result.League,
 			"league_name":  result.LeagueName,
+			"league_logo":  result.LeagueLogoURL,
 			"source":       result.Source,
 			"retrieved_at": result.RetrievedAt.Format(time.RFC3339),
+			"render_mode":  result.RenderMode,
 			"markdown":     result.Markdown,
 		},
 	}, nil
