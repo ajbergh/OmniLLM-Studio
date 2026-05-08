@@ -26,7 +26,7 @@ A comprehensive guide to all features in OmniLLM-Studio, covering what each feat
 
 ## 1. RAG (Retrieval-Augmented Generation)
 
-**Feature Flag:** `rag_v1`
+**Configuration:** Settings -> RAG (`rag_enabled`, embedding model, chunk size, overlap, and top-k)
 
 ### What is RAG?
 
@@ -88,11 +88,11 @@ A: Yes. OmniLLM-Studio detects that the active provider has no embeddings API an
 
 ## 2. Tool Calling Framework
 
-**Feature Flag:** `tool_framework`
+**Availability:** Built in; individual tools are controlled through tool permissions.
 
 ### What is the Tool Calling Framework?
 
-The Tool Calling Framework provides a generic, extensible system for the AI to invoke external capabilities (tools) during a conversation. Instead of being limited to web search only, the AI can now call any registered tool — web search, sports lookup, a calculator, URL fetching, document generation, or custom tools added via plugins.
+The Tool Calling Framework provides a generic, extensible system for the AI to invoke external capabilities (tools) during a conversation. Instead of being limited to web search only, the AI can now call registered backend tools: web search, sports lookup, calculator, URL fetching, and Word document generation.
 
 ### What tools are built-in?
 
@@ -180,7 +180,7 @@ The result includes `intent`, `league`, `league_name`, `markdown`, `source`, and
 
 ### What are the benefits?
 
-- **Extensible** — new tools can be added via the Plugin SDK without modifying core code.
+- **Extensible** — new first-party tools can be registered in the backend without changing the chat pipeline.
 - **Permission controls** — you decide which tools the AI can invoke automatically.
 - **Transparent** — every tool call is visible in the conversation with full input/output details.
 - **Timeout protection** — tools have configurable execution timeouts to prevent hung operations.
@@ -201,7 +201,7 @@ A: Tool results are injected back into the conversation context, so they consume
 
 ## 3. Usage & Cost Dashboard
 
-**Feature Flag:** `usage_dashboard`
+**Availability:** Built in; no dedicated feature flag is currently enforced.
 
 ### What is the Usage & Cost Dashboard?
 
@@ -246,7 +246,7 @@ A: Add a custom pricing rule via the Pricing settings. Rules use glob matching, 
 
 ## 4. Import/Export (Workspace Portability)
 
-**Feature Flag:** `import_export_v2`
+**Availability:** Built in; no dedicated feature flag is currently enforced.
 
 ### What is Import/Export v2?
 
@@ -296,7 +296,7 @@ A: No. Provider profiles are exported with keys redacted for security.
 
 ## 5. Prompt Templates & Presets
 
-**Feature Flag:** `prompt_templates`
+**Availability:** Built in; no dedicated feature flag is currently enforced.
 
 ### What are Prompt Templates?
 
@@ -352,7 +352,7 @@ A: Yes. Templates support an optional `workspace_id` to limit visibility to a sp
 
 ## 6. Agent Mode
 
-**Feature Flag:** `agent_mode`
+**Availability:** Built in; no dedicated feature flag is currently enforced.
 
 ### What is Agent Mode?
 
@@ -364,7 +364,7 @@ Agent Mode transforms the AI from a simple question-answer chatbot into an auton
 2. The **Planner** (LLM-powered) generates a structured execution plan with steps.
 3. The **Runner** executes each step in order:
    - **Think** steps: internal LLM reasoning
-   - **Tool calls**: web search, sports lookup, URL fetch, calculator, or plugin tools
+   - **Tool calls**: web search, sports lookup, URL fetch, or calculator
    - **Approval** steps: pause and wait for user confirmation before proceeding (e.g., before destructive actions)
    - **Message** steps: send an interim message to the conversation
 4. Real-time **SSE events** (`agent_plan`, `agent_step_start`, `agent_step_complete`, `agent_approval_required`, `agent_complete`) stream the agent's progress.
@@ -372,7 +372,7 @@ Agent Mode transforms the AI from a simple question-answer chatbot into an auton
 
 ### How do I use it?
 
-- Enable the `agent_mode` feature flag.
+- Start an agent run from the UI or API; no feature flag is required in the current backend.
 - Start a run via the API: `POST /v1/conversations/{id}/agent/run` with `{"goal": "your goal here"}`.
 - **Approve** pending steps: `POST /v1/agent/runs/{runId}/approve/{stepId}`.
 - **Cancel** a running agent: `POST /v1/agent/runs/{runId}/cancel`.
@@ -386,7 +386,7 @@ Agent Mode transforms the AI from a simple question-answer chatbot into an auton
 - **Autonomous multi-step execution** — handle complex tasks that require research, reasoning, and tool use.
 - **Transparent planning** — see the agent's plan before and during execution.
 - **Human-in-the-loop** — approval steps ensure you stay in control of sensitive actions.
-- **Tool integration** — agents can use all registered tools (web search, sports lookup, calculator, URL fetch, plugins).
+- **Tool integration** — agents can use registered backend tools such as web search, sports lookup, calculator, and URL fetch.
 - **Resumable** — paused agents can be resumed later.
 
 ### FAQ
@@ -404,7 +404,7 @@ A: There's no hard limit — the planner generates as many steps as needed, and 
 
 ## 7. Conversation Branching & Forking
 
-**Feature Flag:** `branching`
+**Availability:** Built in; no dedicated feature flag is currently enforced.
 
 ### What is Conversation Branching?
 
@@ -452,7 +452,7 @@ A: Yes! A **Branch Switcher** dropdown is in the chat header, and every message 
 
 ## 8. Semantic Search
 
-**Feature Flag:** `semantic_search`
+**Availability:** Built in; no dedicated feature flag is currently enforced.
 
 ### What is Semantic Search?
 
@@ -498,7 +498,7 @@ A: Yes. The hybrid search can return both message results and document chunk res
 
 ## 9. Workspaces & Projects
 
-**Feature Flag:** `workspaces`
+**Availability:** Built in; no dedicated feature flag is currently enforced.
 
 ### What are Workspaces?
 
@@ -537,7 +537,7 @@ A: Yes. Templates support an optional `workspace_id` field to scope them to a sp
 
 ## 10. Local Collaboration Mode
 
-**Feature Flag:** `collaboration`
+**Availability:** Built in; authentication/collaboration activates after users are registered.
 
 ### What is Local Collaboration Mode?
 
@@ -587,11 +587,11 @@ A: It's designed for LAN use. For internet access, you'd need to configure TLS/H
 
 ## 11. Plugin SDK
 
-**Feature Flag:** `plugins`
+**Availability:** Built in; plugins are enabled or disabled per installed plugin.
 
 ### What is the Plugin SDK?
 
-The Plugin SDK lets you extend OmniLLM-Studio with third-party tools, providers, and processors. Plugins are standalone executables that communicate with OmniLLM-Studio via JSON-RPC over stdin/stdout, making them language-agnostic — write plugins in any language that can read/write JSON.
+The Plugin SDK provides discovery, manifest validation, install state, and subprocess lifecycle management for local plugins. Plugins are standalone executables that communicate with OmniLLM-Studio via JSON-RPC over stdin/stdout, making them language-agnostic — write plugins in any language that can read/write JSON. The manifest format can declare tool, provider, or processor capabilities, but the current backend does not yet automatically expose plugin-declared tools in the chat tool registry or add plugin providers/processors to provider routing.
 
 ### How do plugins work?
 
@@ -599,21 +599,21 @@ The Plugin SDK lets you extend OmniLLM-Studio with third-party tools, providers,
 2. Each plugin has a `manifest.json` declaring its name, version, capabilities, tools, and required permissions.
 3. On startup, OmniLLM-Studio auto-discovers and loads plugin manifests.
 4. Plugins run as **subprocesses** communicating via JSON-RPC over stdin/stdout.
-5. Plugin lifecycle: `initialize` → `ready` → handle tool calls → `shutdown`.
+5. Plugin lifecycle: `initialize` -> running subprocess -> `shutdown`.
 
 ### How do I use them?
 
 - **Install:** Place your plugin directory under `~/.omnillm-studio/plugins/` or use the API (`POST /v1/plugins`).
 - **Manage plugins** in the **Plugin Manager** (accessible from the top bar, puzzle icon): view installed plugins, enable/disable them, or uninstall.
-- Once installed, plugin tools appear in the **Tool Registry** alongside built-in tools.
-- The AI can invoke plugin tools just like built-in ones, with the same permission controls.
+- Installed plugins appear in the **Plugin Manager** with enabled/running status.
+- Disabling a plugin stops its subprocess. Re-enabling updates the database state; the plugin is started on the next discovery/startup pass.
 
 ### What are the benefits?
 
-- **Extensible** — add any capability you need without modifying OmniLLM-Studio's core.
+- **Extension foundation** — manage local plugin executables and metadata without modifying OmniLLM-Studio's core.
 - **Language-agnostic** — write plugins in Go, Python, Node.js, Rust, or any language.
-- **Permission-based sandboxing** — plugins declare required permissions (network, filesystem_read, etc.).
-- **Hot-reload** — enable/disable plugins without restarting the server.
+- **Permission metadata** — plugins declare required permissions (network, filesystem_read, etc.) for review and install-time visibility.
+- **Process isolation** — plugins run as subprocesses, and disabling/uninstalling a plugin stops the running process.
 - **Standardized protocol** — JSON-RPC makes plugin development straightforward.
 
 ### Plugin Manifest Example
@@ -644,7 +644,7 @@ The Plugin SDK lets you extend OmniLLM-Studio with third-party tools, providers,
 ### FAQ
 
 **Q: What permissions can plugins request?**
-A: Currently `network` and `filesystem_read`. Permissions are declared in the manifest and validated on install.
+A: Permissions are declared in the manifest and stored as metadata for review. The current backend validates the manifest shape and entrypoint containment, but it does not enforce OS-level permission sandboxing.
 
 **Q: Can a plugin crash the main server?**
 A: No. Plugins run as separate subprocesses. If a plugin crashes, OmniLLM-Studio detects it and marks it as stopped. The main server continues running.
@@ -656,7 +656,7 @@ A: Create a directory with a `manifest.json` and an executable. The executable m
 
 ## 12. Evaluation Harness
 
-**Feature Flag:** `eval_harness`
+**Availability:** Built in; no dedicated feature flag is currently enforced.
 
 ### What is the Evaluation Harness?
 
@@ -863,24 +863,12 @@ A: The detection logic picks the first explicitly-requested format. If you ask f
 
 ### What are Feature Flags?
 
-Feature flags let you enable or disable individual features without restarting the server. Every major feature in OmniLLM-Studio is gated behind a flag, giving you control over which capabilities are active.
+Feature flags let selected backend capabilities be enabled or disabled without restarting the server. Most core modules are always available in a standard deployment and are controlled through settings, permissions, provider configuration, or per-plugin enablement instead of feature flags.
 
-### Available Flags
+### Seeded Flags
 
 | Flag | Feature |
 |---|---|
-| `rag_v1` | RAG (Retrieval-Augmented Generation) |
-| `tool_framework` | Tool Calling Framework |
-| `usage_dashboard` | Usage & Cost Dashboard |
-| `import_export_v2` | Import/Export v2 |
-| `prompt_templates` | Prompt Templates |
-| `agent_mode` | Agent Mode |
-| `branching` | Conversation Branching |
-| `semantic_search` | Semantic Search |
-| `workspaces` | Workspaces/Projects |
-| `collaboration` | Local Collaboration Mode |
-| `plugins` | Plugin SDK |
-| `eval_harness` | Evaluation Harness |
 | `word_doc_generation` | Word Document Generation (.docx) |
 | `sports_lookup_enabled` | ESPN-backed sports scores, schedules, standings, betting odds, news, rosters, injuries, transactions, rankings, and stats |
 
@@ -894,8 +882,8 @@ Feature flags let you enable or disable individual features without restarting t
 
 ### FAQ
 
-**Q: Are features enabled by default?**
-A: Most optional features default to disabled. `word_doc_generation` and `sports_lookup_enabled` are seeded enabled by default because they are local backend capabilities with clear deterministic triggers.
+**Q: Are feature flags enabled by default?**
+A: The two currently seeded feature flags, `word_doc_generation` and `sports_lookup_enabled`, are enabled by default because they are local backend capabilities with clear deterministic triggers. Additional flags can be created through the API, but the current frontend only exposes the Word document toggle.
 
 **Q: Can I enable features without restarting?**
 A: Yes. Feature flag changes take effect immediately via the API.
@@ -922,7 +910,7 @@ Any provider with an OpenAI-compatible API format, including:
 ### How do I get started?
 
 ```bash
-# Backend (requires Go 1.23+ and GCC for cgo/SQLite)
+# Backend (requires Go 1.24+ and GCC for cgo/SQLite)
 cd backend && go run ./cmd/server
 
 # Frontend (requires Node 18+)
@@ -940,7 +928,7 @@ Yes. All data is stored locally in SQLite. API keys are encrypted at rest using 
 
 ### How does the database handle migrations?
 
-OmniLLM-Studio uses a versioned migration system (V1–V20). Migrations run automatically on startup, tracked in a `schema_versions` table. All migrations are additive — new columns have defaults, new tables don't break existing queries. You never need to run migrations manually.
+OmniLLM-Studio uses a versioned migration system (V1-V28). Migrations run automatically on startup, tracked in a `schema_versions` table. All migrations are additive — new columns have defaults, new tables don't break existing queries. You never need to run migrations manually.
 
 ### Can I use multiple LLM providers simultaneously?
 

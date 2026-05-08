@@ -46,7 +46,7 @@
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
 | **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction |
 | **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, and broad sports headlines |
-| **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, document generation, and plugin tools |
+| **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, and document generation |
 | **Artifact Export** | Ask the LLM for any supported format and it generates a downloadable file automatically — `.docx` (Word), `.xlsx` (Excel), `.csv`, `.pdf`, `.md` (Markdown), `.html`, `.json`, `.yaml` — no copy-pasting required |
 
 ### Image Studio
@@ -83,7 +83,7 @@ A dedicated image workspace with canvas-based editing, multi-provider generation
 | **Usage & Cost Analytics** | Token usage, cost estimates, per-provider / per-model breakdowns with custom pricing rules |
 | **Prompt Templates** | Reusable prompt presets with variable interpolation and categories |
 | **Import / Export** | Full backup and restore of conversations, messages, attachments, and settings |
-| **Plugin SDK** | JSON-RPC subprocess model for extending functionality with custom plugins |
+| **Plugin SDK** | JSON-RPC subprocess model with plugin discovery, manifests, install state, and lifecycle management |
 | **Evaluation Harness** | Run test suites against models and compare scoring results |
 | **Multi-User Auth** | Optional — token-based sessions with role-based access (admin / member / viewer) |
 | **Encrypted Secrets** | API keys encrypted at rest with AES-256-GCM, never exposed to the frontend |
@@ -174,7 +174,7 @@ From a single chat prompt to streamed tokens back in the UI:
 
 1. Frontend sends the prompt to `/v1/conversations/:conversationId/messages/stream`
 2. Backend validates auth/ownership, loads context, and applies local preflight checks
-3. High-confidence current sports prompts are answered directly through `sports_lookup` using ESPN public APIs
+3. High-confidence ESPN-backed sports data prompts are answered directly through `sports_lookup`
 4. If not handled locally, optional enrichments run (RAG retrieval, tools, web search) based on settings and model behavior
 5. SSE events stream tokens and metadata back to the client in real time
 
@@ -315,7 +315,7 @@ OmniLLM-Studio/
 │       ├── bundle/                      # Import/export (conversations, attachments)
 │       ├── config/                      # Environment variable config
 │       ├── crypto/                      # AES-256-GCM encryption
-│       ├── db/                          # SQLite init, 27 versioned migrations
+│       ├── db/                          # SQLite init, 28 versioned migrations
 │       ├── eval/                        # Evaluation harness (scorer, runner)
 │       ├── llm/                         # Provider routing, streaming, embeddings, image generation
 │       ├── models/                      # Data models (Go structs + JSON tags)
@@ -325,7 +325,7 @@ OmniLLM-Studio/
 │       ├── search/                      # Semantic search service
 │       ├── sports/                      # ESPN-backed scores, schedules, standings, odds, news, stats, and roster lookup
 │       ├── templates/                   # Prompt template seeding
-│       ├── tools/                       # Tool registry + executor (web search, sports, calculator, document gen, plugins)
+│       ├── tools/                       # Tool registry + executor (web search, sports, calculator, document gen)
 │       ├── websearch/                   # Brave/DDG + Jina Reader orchestrator
 │       ├── wordgen/                     # Markdown → .docx generator (go-word wrapper)
 │       └── artifacts/                   # Multi-format artifact export (xlsx, csv, pdf, md, html, json, yaml)
