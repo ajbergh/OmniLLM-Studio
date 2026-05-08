@@ -9,6 +9,11 @@ import (
 
 const SourceESPN = "ESPN public API via espn-go"
 
+// LeagueIPL is ESPN's cricket series identifier for the Indian Premier League.
+// espn-go exposes SportCricket, but does not currently define league constants
+// for cricket series pages such as /cricket/standings/series/8048/ipl.
+const LeagueIPL = "8048"
+
 var (
 	ErrUnsupportedLeague = errors.New("unsupported sports league")
 	ErrMalformedDate     = errors.New("malformed sports date")
@@ -138,6 +143,7 @@ type StandingsRow struct {
 	Losses           string
 	Ties             string
 	Draws            string
+	NoResult         string
 	Pct              string
 	GamesBack        string
 	Streak           string
@@ -146,6 +152,9 @@ type StandingsRow struct {
 	GamesPlayed      string
 	GoalDifferential string
 	GoalDiff         string
+	NetRunRate       string
+	For              string
+	Against          string
 	Note             string
 }
 
@@ -155,6 +164,8 @@ type NewsRow struct {
 	Description string
 	Byline      string
 	URL         string
+	ImageURL    string
+	ImageAlt    string
 }
 
 type OddsRow struct {

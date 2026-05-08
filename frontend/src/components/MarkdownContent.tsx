@@ -85,6 +85,11 @@ function isSportsLogo(src?: string, alt?: string): boolean {
   return text.includes('logo') && text.includes('espncdn.com');
 }
 
+function isSportsNewsImage(src?: string, alt?: string): boolean {
+  const text = `${src ?? ''} ${alt ?? ''}`.toLowerCase();
+  return text.includes('sports news image') && text.includes('espncdn.com');
+}
+
 export function MarkdownContent({ content }: Props) {
   return (
     <div className="message-content">
@@ -114,6 +119,19 @@ export function MarkdownContent({ content }: Props) {
                   loading="lazy"
                   {...props}
                 />
+              );
+            }
+            if (isSportsNewsImage(resolvedSrc, alt)) {
+              return (
+                <a href={resolvedSrc} target="_blank" rel="noopener noreferrer" className="sports-news-image-link">
+                  <img
+                    src={resolvedSrc}
+                    alt={alt || 'ESPN news image'}
+                    className="sports-news-image"
+                    loading="lazy"
+                    {...props}
+                  />
+                </a>
               );
             }
             return (

@@ -3,6 +3,7 @@ package sports
 import (
 	"fmt"
 	"html"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -68,6 +69,11 @@ func renderStandingsPlainMarkdown(req SportsRequest, cfg LeagueConfig, rows []St
 	b.WriteString("\n\n")
 	writeSourceLine(&b, retrievedAt)
 
+	if grouping, ok := standingsGroupingForLeague(cfg); ok {
+		writeStructuredStandingsMarkdown(&b, rows, SportsRenderPlainMarkdown, grouping)
+		return strings.TrimSpace(b.String())
+	}
+
 	groups := orderedGroups(rows)
 	sectioned := len(groups) > 1
 	for i, group := range groups {
@@ -80,7 +86,9 @@ func renderStandingsPlainMarkdown(req SportsRequest, cfg LeagueConfig, rows []St
 			b.WriteString("\n\n")
 		}
 		groupRows := rowsForGroup(rows, group)
-		if isSoccerLeague(cfg) {
+		if isCricketLeague(cfg) {
+			b.WriteString(renderCricketStandingsTable(groupRows, !sectioned, SportsRenderPlainMarkdown))
+		} else if isSoccerLeague(cfg) {
 			b.WriteString(renderSoccerStandingsTable(groupRows, !sectioned, SportsRenderPlainMarkdown))
 		} else {
 			b.WriteString(renderDefaultStandingsTable(groupRows, !sectioned, SportsRenderPlainMarkdown))
@@ -138,6 +146,11 @@ func renderStandingsEnhancedMarkdown(req SportsRequest, cfg LeagueConfig, rows [
 		RetrievedAt:   retrievedAt,
 	}, fmt.Sprintf("%s Standings", cfg.DisplayName), SportsRenderEnhancedMarkdown))
 
+	if grouping, ok := standingsGroupingForLeague(cfg); ok {
+		writeStructuredStandingsMarkdown(&b, rows, SportsRenderEnhancedMarkdown, grouping)
+		return strings.TrimSpace(b.String())
+	}
+
 	groups := orderedGroups(rows)
 	sectioned := len(groups) > 1
 	for i, group := range groups {
@@ -150,7 +163,9 @@ func renderStandingsEnhancedMarkdown(req SportsRequest, cfg LeagueConfig, rows [
 			b.WriteString("\n\n")
 		}
 		groupRows := rowsForGroup(rows, group)
-		if isSoccerLeague(cfg) {
+		if isCricketLeague(cfg) {
+			b.WriteString(renderCricketStandingsTable(groupRows, !sectioned, SportsRenderEnhancedMarkdown))
+		} else if isSoccerLeague(cfg) {
 			b.WriteString(renderSoccerStandingsTable(groupRows, !sectioned, SportsRenderEnhancedMarkdown))
 		} else {
 			b.WriteString(renderDefaultStandingsTable(groupRows, !sectioned, SportsRenderEnhancedMarkdown))
@@ -206,6 +221,12 @@ func renderStandingsHTMLMarkdown(req SportsRequest, cfg LeagueConfig, rows []Sta
 		RetrievedAt:   retrievedAt,
 	}, fmt.Sprintf("%s Standings", cfg.DisplayName), SportsRenderHTMLMarkdown))
 
+	if grouping, ok := standingsGroupingForLeague(cfg); ok {
+		writeStructuredStandingsHTML(&b, rows, grouping)
+		b.WriteString("</div>\n")
+		return strings.TrimSpace(b.String())
+	}
+
 	groups := orderedGroups(rows)
 	sectioned := len(groups) > 1
 	for _, group := range groups {
@@ -215,7 +236,12 @@ func renderStandingsHTMLMarkdown(req SportsRequest, cfg LeagueConfig, rows []Sta
 			b.WriteString("</h4>\n")
 		}
 		groupRows := rowsForGroup(rows, group)
-		if isSoccerLeague(cfg) {
+		if isCricketLeague(cfg) {
+			writeHTMLTable(&b,
+				[]htmlHeader{{"Rank", "right"}, {"Team", "left"}, {"M", "right"}, {"W", "right"}, {"L", "right"}, {"T", "right"}, {"N/R", "right"}, {"PT", "right"}, {"NRR", "right"}, {"For", "right"}, {"Against", "right"}},
+				cricketStandingsRowsHTML(groupRows),
+			)
+		} else if isSoccerLeague(cfg) {
 			writeHTMLTable(&b,
 				[]htmlHeader{{"Rank", "right"}, {"Club", "left"}, {"GP", "right"}, {"W", "right"}, {"D", "right"}, {"L", "right"}, {"Pts", "right"}, {"GD", "right"}},
 				soccerStandingsRowsHTML(groupRows),
@@ -232,6 +258,17 @@ func renderStandingsHTMLMarkdown(req SportsRequest, cfg LeagueConfig, rows []Sta
 }
 
 func RenderNewsMarkdown(req SportsRequest, leagueName string, rows []NewsRow, retrievedAt time.Time) string {
+	switch renderMode(req) {
+	case SportsRenderPlainMarkdown:
+		return renderNewsPlainMarkdown(req, leagueName, rows, retrievedAt)
+	case SportsRenderHTMLMarkdown:
+		return renderNewsHTMLMarkdown(req, leagueName, rows, retrievedAt)
+	default:
+		return renderNewsEnhancedMarkdown(req, leagueName, rows, retrievedAt)
+	}
+}
+
+func renderNewsPlainMarkdown(req SportsRequest, leagueName string, rows []NewsRow, retrievedAt time.Time) string {
 	var b strings.Builder
 	b.WriteString(newsTitle(req, leagueName))
 	b.WriteString("\n\n")
@@ -241,6 +278,102 @@ func RenderNewsMarkdown(req SportsRequest, leagueName string, rows []NewsRow, re
 		[]string{"---", "---", "---", "---"},
 		newsRows(rows),
 	))
+	return strings.TrimSpace(b.String())
+}
+
+func renderNewsEnhancedMarkdown(req SportsRequest, leagueName string, rows []NewsRow, retrievedAt time.Time) string {
+	var b strings.Builder
+	b.WriteString(newsTitle(req, leagueName))
+	b.WriteString("\n\n")
+	writeEnhancedSourceLine(&b, retrievedAt)
+	b.WriteString("_Latest headlines from ESPN are shown with the newest story first._\n\n")
+
+	lead := rows[0]
+	b.WriteString("#### Lead Story\n\n")
+	if image := renderNewsImage(lead, SportsRenderEnhancedMarkdown); image != "" {
+		b.WriteString(image)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("### ")
+	b.WriteString(newsHeadlineLink(lead))
+	b.WriteString("\n\n")
+	if meta := newsMetaMarkdown(lead); meta != "" {
+		b.WriteString(meta)
+		b.WriteString("\n\n")
+	}
+	if summary := strings.TrimSpace(lead.Description); summary != "" {
+		b.WriteString("> ")
+		b.WriteString(escapeMarkdownText(summary))
+		b.WriteString("\n\n")
+	}
+	if link := newsReadLink(lead.URL); link != "" {
+		b.WriteString(link)
+		b.WriteString("\n\n")
+	}
+
+	if len(rows) > 1 {
+		b.WriteString("---\n\n")
+		b.WriteString("#### More Headlines\n\n")
+		for i, row := range rows[1:] {
+			b.WriteString(strconv.Itoa(i + 1))
+			b.WriteString(". **")
+			b.WriteString(newsHeadlineLink(row))
+			b.WriteString("**\n")
+			if meta := newsMetaMarkdown(row); meta != "" {
+				b.WriteString("   ")
+				b.WriteString(meta)
+				b.WriteString("\n")
+			}
+			if summary := strings.TrimSpace(row.Description); summary != "" {
+				b.WriteString("   ")
+				b.WriteString(escapeMarkdownText(summary))
+				b.WriteString("\n")
+			}
+			if link := newsReadLink(row.URL); link != "" {
+				b.WriteString("   ")
+				b.WriteString(link)
+				b.WriteString("\n")
+			}
+			if i < len(rows[1:])-1 {
+				b.WriteString("\n")
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func renderNewsHTMLMarkdown(req SportsRequest, leagueName string, rows []NewsRow, retrievedAt time.Time) string {
+	var b strings.Builder
+	b.WriteString(`<div class="sports-news-card">`)
+	b.WriteString("<h3>")
+	b.WriteString(escapeHTML(strings.TrimPrefix(newsTitle(req, leagueName), "### ")))
+	b.WriteString("</h3>")
+	b.WriteString("<small>ESPN public API · Retrieved ")
+	b.WriteString(escapeHTML(retrievedAt.Local().Format("Jan 2, 2006, 3:04 PM")))
+	b.WriteString("</small>")
+	for i, row := range rows {
+		if i == 0 {
+			b.WriteString(`<article class="sports-news-lead">`)
+		} else {
+			b.WriteString(`<article class="sports-news-item">`)
+		}
+		if image := renderNewsImage(row, SportsRenderHTMLMarkdown); image != "" {
+			b.WriteString(image)
+		}
+		b.WriteString("<h4>")
+		b.WriteString(newsHeadlineLinkHTML(row))
+		b.WriteString("</h4>")
+		b.WriteString("<small>")
+		b.WriteString(escapeHTML(newsMetaText(row)))
+		b.WriteString("</small>")
+		if row.Description != "" {
+			b.WriteString("<p>")
+			b.WriteString(escapeHTML(row.Description))
+			b.WriteString("</p>")
+		}
+		b.WriteString("</article>")
+	}
+	b.WriteString("</div>")
 	return strings.TrimSpace(b.String())
 }
 
@@ -264,6 +397,13 @@ func escapeMarkdownAlt(s string) string {
 	s = escapeMarkdownText(s)
 	s = strings.ReplaceAll(s, "[", "")
 	s = strings.ReplaceAll(s, "]", "")
+	return s
+}
+
+func escapeMarkdownLinkText(s string) string {
+	s = escapeMarkdownText(s)
+	s = strings.ReplaceAll(s, "[", `\[`)
+	s = strings.ReplaceAll(s, "]", `\]`)
 	return s
 }
 
@@ -524,6 +664,79 @@ func newsRows(rows []NewsRow) [][]string {
 	return out
 }
 
+func renderNewsImage(row NewsRow, mode SportsRenderMode) string {
+	url := sanitizeImageURL(row.ImageURL)
+	if url == "" || mode == SportsRenderPlainMarkdown {
+		return ""
+	}
+	alt := firstNonEmpty(row.ImageAlt, row.Headline, "ESPN news image")
+	if mode == SportsRenderHTMLMarkdown {
+		return `<img src="` + escapeHTML(url) + `" alt="` + escapeHTML(alt) + `">`
+	}
+	return "![Sports news image: " + escapeMarkdownAlt(alt) + "](" + strings.ReplaceAll(url, ")", "%29") + ")"
+}
+
+func writeNewsMetaLine(b *strings.Builder, row NewsRow, mode SportsRenderMode) {
+	meta := newsMetaText(row)
+	if meta == "" {
+		return
+	}
+	if mode == SportsRenderHTMLMarkdown {
+		b.WriteString("<small>")
+		b.WriteString(escapeHTML(meta))
+		b.WriteString("</small>")
+		return
+	}
+	b.WriteString("_")
+	b.WriteString(escapeMarkdownText(meta))
+	b.WriteString("_\n\n")
+}
+
+func newsMetaMarkdown(row NewsRow) string {
+	meta := newsMetaText(row)
+	if meta == "" {
+		return ""
+	}
+	return "_" + escapeMarkdownText(meta) + "_"
+}
+
+func newsMetaText(row NewsRow) string {
+	var parts []string
+	if row.Published != "" {
+		parts = append(parts, row.Published)
+	}
+	if row.Byline != "" {
+		parts = append(parts, row.Byline)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func newsHeadlineLink(row NewsRow) string {
+	headline := firstNonEmpty(row.Headline, row.Description, "ESPN story")
+	url := safeExternalURL(row.URL)
+	if url == "" {
+		return escapeMarkdownText(headline)
+	}
+	return "[" + escapeMarkdownLinkText(headline) + "](" + url + ")"
+}
+
+func newsHeadlineLinkHTML(row NewsRow) string {
+	headline := firstNonEmpty(row.Headline, row.Description, "ESPN story")
+	url := safeExternalURL(row.URL)
+	if url == "" {
+		return escapeHTML(headline)
+	}
+	return `<a href="` + escapeHTML(url) + `">` + escapeHTML(headline) + `</a>`
+}
+
+func newsReadLink(url string) string {
+	url = safeExternalURL(url)
+	if url == "" {
+		return ""
+	}
+	return "[Read on ESPN](" + url + ")"
+}
+
 func renderTeamCell(team TeamIdentity, mode SportsRenderMode) string {
 	name := firstNonEmpty(team.DisplayName, team.ShortName, team.Abbreviation)
 	if name == "" {
@@ -608,10 +821,10 @@ func renderDefaultStandingsTable(rows []StandingsRow, includeGroup bool, mode Sp
 	}
 
 	tableRows := make([][]string, 0, len(rows))
-	for _, row := range rows {
+	for i, row := range rows {
 		team := standingsTeam(row)
 		cells := []string{
-			rankCell(row.Rank),
+			standingsRankCell(row, i),
 			emptyAsDash(renderTeamCell(team, mode)),
 			emptyAsDash(row.Wins),
 			emptyAsDash(row.Losses),
@@ -636,10 +849,10 @@ func renderSoccerStandingsTable(rows []StandingsRow, includeGroup bool, mode Spo
 	}
 
 	tableRows := make([][]string, 0, len(rows))
-	for _, row := range rows {
+	for i, row := range rows {
 		team := standingsTeam(row)
 		cells := []string{
-			rankCell(row.Rank),
+			standingsRankCell(row, i),
 			emptyAsDash(renderTeamCell(team, mode)),
 			emptyAsDash(row.GamesPlayed),
 			emptyAsDash(row.Wins),
@@ -656,11 +869,43 @@ func renderSoccerStandingsTable(rows []StandingsRow, includeGroup bool, mode Spo
 	return renderTable(headers, separators, tableRows)
 }
 
+func renderCricketStandingsTable(rows []StandingsRow, includeGroup bool, mode SportsRenderMode) string {
+	headers := []string{"Rank", "Team", "M", "W", "L", "T", "N/R", "PT", "NRR", "For", "Against"}
+	separators := []string{"---:", "---", "---:", "---:", "---:", "---:", "---:", "---:", "---:", "---:", "---:"}
+	if includeGroup && hasAnyGroup(rows) {
+		headers = append([]string{"Group"}, headers...)
+		separators = append([]string{"---"}, separators...)
+	}
+
+	tableRows := make([][]string, 0, len(rows))
+	for i, row := range rows {
+		team := standingsTeam(row)
+		cells := []string{
+			standingsRankCell(row, i),
+			emptyAsDash(renderTeamCell(team, mode)),
+			emptyAsDash(row.GamesPlayed),
+			emptyAsDash(row.Wins),
+			emptyAsDash(row.Losses),
+			emptyAsDash(row.Ties),
+			emptyAsDash(row.NoResult),
+			emptyAsDash(row.Points),
+			emptyAsDash(row.NetRunRate),
+			emptyAsDash(row.For),
+			emptyAsDash(row.Against),
+		}
+		if includeGroup && hasAnyGroup(rows) {
+			cells = append([]string{emptyAsDash(row.Group)}, cells...)
+		}
+		tableRows = append(tableRows, cells)
+	}
+	return renderTable(headers, separators, tableRows)
+}
+
 func defaultStandingsRowsHTML(rows []StandingsRow) [][]htmlCell {
 	out := make([][]htmlCell, 0, len(rows))
-	for _, row := range rows {
+	for i, row := range rows {
 		out = append(out, []htmlCell{
-			{text: escapeHTML(rankCell(row.Rank)), align: "right"},
+			{text: escapeHTML(standingsRankCell(row, i)), align: "right"},
 			{text: renderTeamCell(standingsTeam(row), SportsRenderHTMLMarkdown)},
 			{text: escapeHTML(emptyAsDash(row.Wins)), align: "right"},
 			{text: escapeHTML(emptyAsDash(row.Losses)), align: "right"},
@@ -674,9 +919,9 @@ func defaultStandingsRowsHTML(rows []StandingsRow) [][]htmlCell {
 
 func soccerStandingsRowsHTML(rows []StandingsRow) [][]htmlCell {
 	out := make([][]htmlCell, 0, len(rows))
-	for _, row := range rows {
+	for i, row := range rows {
 		out = append(out, []htmlCell{
-			{text: escapeHTML(rankCell(row.Rank)), align: "right"},
+			{text: escapeHTML(standingsRankCell(row, i)), align: "right"},
 			{text: renderTeamCell(standingsTeam(row), SportsRenderHTMLMarkdown)},
 			{text: escapeHTML(emptyAsDash(row.GamesPlayed)), align: "right"},
 			{text: escapeHTML(emptyAsDash(row.Wins)), align: "right"},
@@ -687,6 +932,126 @@ func soccerStandingsRowsHTML(rows []StandingsRow) [][]htmlCell {
 		})
 	}
 	return out
+}
+
+func cricketStandingsRowsHTML(rows []StandingsRow) [][]htmlCell {
+	out := make([][]htmlCell, 0, len(rows))
+	for i, row := range rows {
+		out = append(out, []htmlCell{
+			{text: escapeHTML(standingsRankCell(row, i)), align: "right"},
+			{text: renderTeamCell(standingsTeam(row), SportsRenderHTMLMarkdown)},
+			{text: escapeHTML(emptyAsDash(row.GamesPlayed)), align: "right"},
+			{text: escapeHTML(emptyAsDash(row.Wins)), align: "right"},
+			{text: escapeHTML(emptyAsDash(row.Losses)), align: "right"},
+			{text: escapeHTML(emptyAsDash(row.Ties)), align: "right"},
+			{text: escapeHTML(emptyAsDash(row.NoResult)), align: "right"},
+			{text: escapeHTML(emptyAsDash(row.Points)), align: "right"},
+			{text: escapeHTML(emptyAsDash(row.NetRunRate)), align: "right"},
+			{text: escapeHTML(emptyAsDash(row.For)), align: "right"},
+			{text: escapeHTML(emptyAsDash(row.Against)), align: "right"},
+		})
+	}
+	return out
+}
+
+type mlbDivisionID struct {
+	League   string
+	Division string
+}
+
+var mlbDivisionOrder = []mlbDivisionID{
+	{League: "American League", Division: "East"},
+	{League: "American League", Division: "Central"},
+	{League: "American League", Division: "West"},
+	{League: "National League", Division: "East"},
+	{League: "National League", Division: "Central"},
+	{League: "National League", Division: "West"},
+}
+
+var mlbTeamDivisions = map[string]mlbDivisionID{
+	"nyy":                  {League: "American League", Division: "East"},
+	"newyorkyankees":       {League: "American League", Division: "East"},
+	"tb":                   {League: "American League", Division: "East"},
+	"tbr":                  {League: "American League", Division: "East"},
+	"tampabayrays":         {League: "American League", Division: "East"},
+	"bal":                  {League: "American League", Division: "East"},
+	"baltimoreorioles":     {League: "American League", Division: "East"},
+	"tor":                  {League: "American League", Division: "East"},
+	"torontobluejays":      {League: "American League", Division: "East"},
+	"bos":                  {League: "American League", Division: "East"},
+	"bostonredsox":         {League: "American League", Division: "East"},
+	"cle":                  {League: "American League", Division: "Central"},
+	"clevelandguardians":   {League: "American League", Division: "Central"},
+	"det":                  {League: "American League", Division: "Central"},
+	"detroittigers":        {League: "American League", Division: "Central"},
+	"chw":                  {League: "American League", Division: "Central"},
+	"cws":                  {League: "American League", Division: "Central"},
+	"chicagowhitesox":      {League: "American League", Division: "Central"},
+	"kc":                   {League: "American League", Division: "Central"},
+	"kcr":                  {League: "American League", Division: "Central"},
+	"kansascityroyals":     {League: "American League", Division: "Central"},
+	"min":                  {League: "American League", Division: "Central"},
+	"minnesotatwins":       {League: "American League", Division: "Central"},
+	"hou":                  {League: "American League", Division: "West"},
+	"houstonastros":        {League: "American League", Division: "West"},
+	"sea":                  {League: "American League", Division: "West"},
+	"seattlemariners":      {League: "American League", Division: "West"},
+	"tex":                  {League: "American League", Division: "West"},
+	"texasrangers":         {League: "American League", Division: "West"},
+	"laa":                  {League: "American League", Division: "West"},
+	"losangelesangels":     {League: "American League", Division: "West"},
+	"ath":                  {League: "American League", Division: "West"},
+	"oak":                  {League: "American League", Division: "West"},
+	"athletics":            {League: "American League", Division: "West"},
+	"oaklandathletics":     {League: "American League", Division: "West"},
+	"phi":                  {League: "National League", Division: "East"},
+	"philadelphiaphillies": {League: "National League", Division: "East"},
+	"nym":                  {League: "National League", Division: "East"},
+	"newyorkmets":          {League: "National League", Division: "East"},
+	"atl":                  {League: "National League", Division: "East"},
+	"atlantabraves":        {League: "National League", Division: "East"},
+	"mia":                  {League: "National League", Division: "East"},
+	"miamimarlins":         {League: "National League", Division: "East"},
+	"wsh":                  {League: "National League", Division: "East"},
+	"was":                  {League: "National League", Division: "East"},
+	"wsn":                  {League: "National League", Division: "East"},
+	"washingtonnationals":  {League: "National League", Division: "East"},
+	"chc":                  {League: "National League", Division: "Central"},
+	"chicagocubs":          {League: "National League", Division: "Central"},
+	"mil":                  {League: "National League", Division: "Central"},
+	"milwaukeebrewers":     {League: "National League", Division: "Central"},
+	"stl":                  {League: "National League", Division: "Central"},
+	"stlouiscardinals":     {League: "National League", Division: "Central"},
+	"cin":                  {League: "National League", Division: "Central"},
+	"cincinnatireds":       {League: "National League", Division: "Central"},
+	"pit":                  {League: "National League", Division: "Central"},
+	"pittsburghpirates":    {League: "National League", Division: "Central"},
+	"lad":                  {League: "National League", Division: "West"},
+	"losangelesdodgers":    {League: "National League", Division: "West"},
+	"sd":                   {League: "National League", Division: "West"},
+	"sdp":                  {League: "National League", Division: "West"},
+	"sandiegopadres":       {League: "National League", Division: "West"},
+	"sf":                   {League: "National League", Division: "West"},
+	"sfg":                  {League: "National League", Division: "West"},
+	"sanfranciscogiants":   {League: "National League", Division: "West"},
+	"ari":                  {League: "National League", Division: "West"},
+	"arizona":              {League: "National League", Division: "West"},
+	"arizonadiamondbacks":  {League: "National League", Division: "West"},
+	"col":                  {League: "National League", Division: "West"},
+	"coloradorockies":      {League: "National League", Division: "West"},
+}
+
+func compactSportsKey(value string) string {
+	return strings.ReplaceAll(normalizeText(value), " ", "")
+}
+
+func parseStandingsNumber(value string) (float64, bool) {
+	value = strings.TrimSpace(strings.ReplaceAll(value, ",", ""))
+	if value == "" || value == "—" || value == "-" {
+		return 0, false
+	}
+	n, err := strconv.ParseFloat(value, 64)
+	return n, err == nil
 }
 
 func renderTable(headers, separators []string, rows [][]string) string {
@@ -801,8 +1166,23 @@ func rankCell(rank int) string {
 	return strconv.Itoa(rank)
 }
 
+func standingsRankCell(row StandingsRow, index int) string {
+	if row.Rank > 0 {
+		return rankCell(row.Rank)
+	}
+	return strconv.Itoa(index + 1)
+}
+
 func isSoccerLeague(cfg LeagueConfig) bool {
 	return cfg.Sport == "soccer"
+}
+
+func isCricketLeague(cfg LeagueConfig) bool {
+	return strings.EqualFold(cfg.Sport, "cricket") || strings.EqualFold(cfg.League, LeagueIPL)
+}
+
+func isMLBLeague(cfg LeagueConfig) bool {
+	return strings.EqualFold(cfg.League, "mlb")
 }
 
 func newsTitle(req SportsRequest, leagueName string) string {
@@ -819,11 +1199,27 @@ func newsTitle(req SportsRequest, leagueName string) string {
 }
 
 func newsLinkCell(url string) string {
-	url = strings.TrimSpace(url)
+	url = safeExternalURL(url)
 	if url == "" {
 		return "—"
 	}
-	url = strings.ReplaceAll(url, " ", "%20")
-	url = strings.ReplaceAll(url, ")", "%29")
 	return "[ESPN](" + url + ")"
+}
+
+func safeExternalURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.ContainsAny(raw, "\r\n\t") {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(raw), "http://") {
+		raw = "https://" + raw[len("http://"):]
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return ""
+	}
+	out := parsed.String()
+	out = strings.ReplaceAll(out, " ", "%20")
+	out = strings.ReplaceAll(out, ")", "%29")
+	return out
 }

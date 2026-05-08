@@ -99,7 +99,7 @@ The Tool Calling Framework provides a generic, extensible system for the AI to i
 | Tool | Description |
 |---|---|
 | **Web Search** | Searches the web using Brave Search API or DuckDuckGo fallback, with Jina Reader for content extraction. |
-| **Sports Lookup** | Fetches ESPN-backed sports scores, schedules, standings, betting odds, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards, then returns a Markdown table. |
+| **Sports Lookup** | Fetches ESPN-backed sports scores, schedules, standings, betting odds, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards, including IPL cricket, then returns a Markdown table. |
 | **Calculator** | Evaluates mathematical expressions safely using Go's AST parser. |
 | **URL Fetch** | Fetches and extracts readable text content from any URL. |
 | **Word Document Generation** | Converts Markdown content into a downloadable `.docx` file. |
@@ -123,7 +123,7 @@ The Tool Calling Framework provides a generic, extensible system for the AI to i
 
 **Feature Flag:** `sports_lookup_enabled` (enabled by default)
 
-OmniLLM-Studio includes a ChatGPT-style `sports_lookup` capability for current and ESPN-specific sports data. When you ask a high-confidence sports question, the backend detects it before the LLM provider is called, retrieves data from ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a compact Markdown table directly in the chat. It supports scores, schedules, standings, betting odds, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals. Odds prompts return ESPN-provided moneylines, spreads, totals, and provider names when ESPN includes them.
+OmniLLM-Studio includes a ChatGPT-style `sports_lookup` capability for current and ESPN-specific sports data. When you ask a high-confidence sports question, the backend detects it before the LLM provider is called, retrieves data from ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a compact Markdown table directly in the chat. It supports scores, schedules, standings, betting odds, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals. IPL cricket uses ESPN's Indian Premier League cricket series (`8048`) and renders cricket standings with M/W/L/T/N/R/PT/NRR columns. Odds prompts return ESPN-provided moneylines, spreads, totals, and provider names when ESPN includes them.
 
 **Supported leagues:**
 
@@ -139,6 +139,7 @@ OmniLLM-Studio includes a ChatGPT-style `sports_lookup` capability for current a
 | Women's college basketball | `ncaawb`, `women's college basketball` |
 | Premier League | `premier league`, `epl`, `english premier league` |
 | MLS | `mls`, `major league soccer` |
+| Indian Premier League | `ipl`, `ipl cricket`, `indian premier league`, `indian premier cricket league` |
 
 **Examples that use sports lookup:**
 
@@ -147,6 +148,8 @@ OmniLLM-Studio includes a ChatGPT-style `sports_lookup` capability for current a
 - *"What NFL games are on tomorrow?"*
 - *"How did the Cubs do today?"*
 - *"Premier League table"*
+- *"IPL points table"*
+- *"CSK score today"*
 - *"What's the latest sports news?"*
 - *"What's the latest Chicago Cubs news?"*
 - *"Show me NBA odds today"*
@@ -184,7 +187,7 @@ The result includes `intent`, `league`, `league_name`, `markdown`, `source`, and
 - **Permission controls** — you decide which tools the AI can invoke automatically.
 - **Transparent** — every tool call is visible in the conversation with full input/output details.
 - **Timeout protection** — tools have configurable execution timeouts to prevent hung operations.
-- **Current sports answers** — live scores, schedules, standings, betting odds, headlines, rosters, injuries, transactions, rankings, and stats come from ESPN instead of model memory.
+- **Current sports answers** — live scores, schedules, standings, betting odds, headlines, rosters, injuries, transactions, rankings, and stats come from ESPN instead of model memory, including IPL cricket where ESPN exposes the data.
 
 ### FAQ
 
@@ -870,7 +873,7 @@ Feature flags let selected backend capabilities be enabled or disabled without r
 | Flag | Feature |
 |---|---|
 | `word_doc_generation` | Word Document Generation (.docx) |
-| `sports_lookup_enabled` | ESPN-backed sports scores, schedules, standings, betting odds, news, rosters, injuries, transactions, rankings, and stats |
+| `sports_lookup_enabled` | ESPN-backed sports scores, schedules, standings, betting odds, news, rosters, injuries, transactions, rankings, and stats, including IPL cricket |
 
 > **Note:** The multi-format artifact export system (`.xlsx`, `.csv`, `.pdf`, `.md`, `.html`, `.json`, `.yaml`) does not have a separate feature flag — it is always active in a standard deployment. `.docx` generation is gated behind `word_doc_generation`; ESPN-backed sports lookup is gated behind `sports_lookup_enabled`.
 

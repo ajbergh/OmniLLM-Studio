@@ -45,7 +45,7 @@
 | **Conversation Branching** | Fork any message into parallel branches — explore different response paths |
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
 | **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction |
-| **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, and broad sports headlines |
+| **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, IPL cricket, and broad sports headlines |
 | **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, and document generation |
 | **Artifact Export** | Ask the LLM for any supported format and it generates a downloadable file automatically — `.docx` (Word), `.xlsx` (Excel), `.csv`, `.pdf`, `.md` (Markdown), `.html`, `.json`, `.yaml` — no copy-pasting required |
 
@@ -275,6 +275,8 @@ Sports lookup is enabled by default and does not require an API key. Ask natural
 - *"Show me NBA scores today"*
 - *"What NFL games are on tomorrow?"*
 - *"Premier League table"*
+- *"IPL points table"*
+- *"CSK score today"*
 - *"What's the latest sports news?"*
 - *"What's the latest Chicago Cubs news?"*
 - *"Show me NBA odds today"*
@@ -286,7 +288,7 @@ Sports lookup is enabled by default and does not require an API key. Ask natural
 - *"Yankees injuries"*
 - *"College football rankings"*
 
-The backend detects high-confidence sports intent, calls ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a Markdown table directly instead of letting the LLM answer from memory. It supports scores, schedules, standings, betting odds, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals. Odds prompts return ESPN-provided moneylines, spreads, totals, and provider names when ESPN includes them. Leaderboard/stat prompts are routed before standings so wording like "in a table" does not accidentally become a standings lookup. Toggle it with `sports_lookup_enabled` via the feature flags API.
+The backend detects high-confidence sports intent, calls ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a Markdown table directly instead of letting the LLM answer from memory. It supports scores, schedules, standings, betting odds, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals. IPL cricket uses ESPN's Indian Premier League cricket series (`8048`) and renders cricket standings with M/W/L/T/N/R/PT/NRR columns. Odds prompts return ESPN-provided moneylines, spreads, totals, and provider names when ESPN includes them. Leaderboard/stat prompts are routed before standings so wording like "in a table" does not accidentally become a standings lookup. Toggle it with `sports_lookup_enabled` via the feature flags API.
 
 ---
 
@@ -539,7 +541,7 @@ All routes are under `/v1/`.
 | `PATCH` | `/v1/plugins/:name` | Update plugin |
 | `DELETE` | `/v1/plugins/:name` | Uninstall plugin |
 
-Built-in tools include `web_search`, `sports_lookup`, `calculator`, `url_fetch`, and `generate_word_doc`. `sports_lookup` accepts scores, schedules, standings, betting odds, news, rosters, injuries, transactions, rankings, player stats, league stats, and stat leaderboards:
+Built-in tools include `web_search`, `sports_lookup`, `calculator`, `url_fetch`, and `generate_word_doc`. `sports_lookup` accepts scores, schedules, standings, betting odds, news, rosters, injuries, transactions, rankings, player stats, league stats, and stat leaderboards across supported ESPN leagues including IPL cricket:
 
 ```json
 {

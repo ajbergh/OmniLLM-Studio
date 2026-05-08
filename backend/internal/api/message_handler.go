@@ -1132,7 +1132,7 @@ func composeSystemPrompt(userPrompt string) string {
 
 const sportsLookupFeatureFlag = "sports_lookup_enabled"
 
-const sportsLookupSystemDirective = `You have access to a local sports_lookup capability that can retrieve ESPN-backed sports standings, scores, schedules, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders using ESPN public APIs. For current sports questions, betting odds questions, and ESPN-specific sports data questions, do not answer from memory and do not say you cannot access current sports data. Request or use sports_lookup and present the returned Markdown table. If the tool returns an error or unsupported league, explain that clearly.`
+const sportsLookupSystemDirective = `You have access to a local sports_lookup capability that can retrieve ESPN-backed sports standings, scores, schedules, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders using ESPN public APIs, including IPL cricket. For current sports questions, betting odds questions, and ESPN-specific sports data questions, do not answer from memory and do not say you cannot access current sports data. Request or use sports_lookup and present the returned Markdown table. If the tool returns an error or unsupported league, explain that clearly.`
 
 func (h *MessageHandler) handleSportsLookupMessage(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool) {
 	if !h.sportsLookupEnabled() {

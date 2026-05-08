@@ -2,6 +2,7 @@ package sports
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,10 +27,16 @@ func TestDetectSportsIntent(t *testing.T) {
 		{"what NFL games are on tomorrow", true, SportsIntentSchedule, espn.LeagueNFL, "", "Tomorrow"},
 		{"Yankees score", true, SportsIntentScores, espn.LeagueMLB, "New York Yankees", ""},
 		{"Premier League table", true, SportsIntentStandings, espn.LeagueEPL, "", ""},
+		{"IPL standings", true, SportsIntentStandings, LeagueIPL, "", ""},
+		{"Indian Premier League points table", true, SportsIntentStandings, LeagueIPL, "", ""},
+		{"CSK score today", true, SportsIntentScores, LeagueIPL, "Chennai Super Kings", "Today"},
+		{"latest Mumbai Indians news", true, SportsIntentNews, LeagueIPL, "Mumbai Indians", ""},
 		{"current NHL standings", true, SportsIntentStandings, espn.LeagueNHL, "", "Current"},
 		{"college football scores yesterday", true, SportsIntentScores, espn.LeagueCollegeFootball, "", "Yesterday"},
 		{"show me NBA scores in a table", true, SportsIntentScores, espn.LeagueNBA, "", ""},
 		{"What'st the latest sports news?", true, SportsIntentNews, "", "", ""},
+		{"What's the latest ESPN news?", true, SportsIntentNews, "", "", ""},
+		{"ESPN headlines", true, SportsIntentNews, "", "", ""},
 		{"What the latest Chicago Cubs news?", true, SportsIntentNews, espn.LeagueMLB, "Chicago Cubs", ""},
 		{"latest MLB news", true, SportsIntentNews, espn.LeagueMLB, "", ""},
 		{"latest NBA scores", true, SportsIntentScores, espn.LeagueNBA, "", ""},
@@ -351,6 +358,54 @@ func TestStandingsStatExtraction(t *testing.T) {
 	}
 }
 
+func TestCricketStandingsStatExtraction(t *testing.T) {
+	entry := espn.StandingsEntry{
+		Team: espn.Team{DisplayName: "Chennai Super Kings", Abbreviation: "CSK"},
+		Stats: []espn.Statistic{
+			{Name: "rank", DisplayValue: "1"},
+			{Name: "matchesWon", DisplayValue: "5"},
+			{Name: "matchesLost", DisplayValue: "5"},
+		},
+	}
+	entry.Stats = append(entry.Stats,
+		espn.Statistic{Abbreviation: "M", DisplayValue: "10"},
+		espn.Statistic{Abbreviation: "T", DisplayValue: "0"},
+		espn.Statistic{Abbreviation: "N/R", DisplayValue: "1"},
+		espn.Statistic{Abbreviation: "PT", DisplayValue: "11"},
+		espn.Statistic{Abbreviation: "NRR", DisplayValue: "0.151"},
+		espn.Statistic{Abbreviation: "FOR", DisplayValue: "1815/195.4"},
+		espn.Statistic{DisplayName: "Against", DisplayValue: "1711/187.3"},
+	)
+
+	row := standingsRowFromEntry("Indian Premier League", entry)
+	if row.GamesPlayed != "10" || row.Wins != "5" || row.Losses != "5" || row.Ties != "0" || row.NoResult != "1" {
+		t.Fatalf("cricket record stats not extracted: %+v", row)
+	}
+	if row.Points != "11" || row.NetRunRate != "0.151" || row.For != "1815/195.4" || row.Against != "1711/187.3" {
+		t.Fatalf("cricket table stats not extracted: %+v", row)
+	}
+}
+
+func TestStandingsPlayoffSeedDoesNotOverrideDisplayOrder(t *testing.T) {
+	entry := standingsEntry("Tampa Bay Rays", "TB", 0, "25", "12")
+	entry.Stats = append(entry.Stats,
+		espn.Statistic{Name: "playoffSeed", DisplayValue: "4"},
+		espn.Statistic{Name: "winPercent", DisplayValue: ".676"},
+	)
+
+	row := standingsRowFromEntry("American League", entry)
+	if row.Rank != 0 {
+		t.Fatalf("rank = %d, want 0 when ESPN only returns playoffSeed", row.Rank)
+	}
+	got := renderDefaultStandingsTable([]StandingsRow{
+		{Rank: 1, Team: "New York Yankees", Abbr: "NYY", Wins: "26", Losses: "12", Pct: ".684"},
+		row,
+	}, false, SportsRenderPlainMarkdown)
+	if !strings.Contains(got, "| 2 | Tampa Bay Rays | 25 | 12 | .676 | — | — |") {
+		t.Fatalf("expected second displayed row to render rank 2, got: %s", got)
+	}
+}
+
 func TestNormalizeNewsFeed(t *testing.T) {
 	feed := &espn.NewsFeed{
 		Articles: []espn.Article{
@@ -360,6 +415,9 @@ func TestNormalizeNewsFeed(t *testing.T) {
 				Byline:      "ESPN News",
 				Published:   "2026-05-07T18:20:00Z",
 				Links:       espn.ArticleLinks{Web: &espn.Link{Href: "https://www.espn.com/mlb/story/_/id/1"}},
+				Images: []espn.Image{
+					{URL: "http://a.espncdn.com/photo/2026/0507/cubs.jpg", Alt: "Cubs image"},
+				},
 			},
 			{},
 		},
@@ -377,6 +435,9 @@ func TestNormalizeNewsFeed(t *testing.T) {
 	}
 	if rows[0].Published == "" || rows[0].URL == "" || rows[0].Byline != "ESPN News" {
 		t.Fatalf("unexpected row: %+v", rows[0])
+	}
+	if rows[0].ImageURL != "https://a.espncdn.com/photo/2026/0507/cubs.jpg" || rows[0].ImageAlt != "Cubs image" {
+		t.Fatalf("unexpected image fields: %+v", rows[0])
 	}
 }
 
@@ -457,6 +518,7 @@ func TestNormalizeNowFeed(t *testing.T) {
 				Description: "A national sports update.",
 				Published:   "2026-05-07T18:20:00Z",
 				Links:       espn.ArticleLinks{Web: &espn.Link{Href: "https://www.espn.com/"}},
+				Images:      []espn.Image{{URL: "https://a.espncdn.com/photo/2026/0507/news.jpg", Caption: "News image"}},
 			},
 		},
 	}
@@ -467,6 +529,70 @@ func TestNormalizeNowFeed(t *testing.T) {
 	}
 	if rows[0].Headline != "Latest sports headline" || rows[0].Description != "A national sports update." {
 		t.Fatalf("unexpected now row: %+v", rows[0])
+	}
+	if rows[0].ImageURL == "" || rows[0].ImageAlt != "News image" {
+		t.Fatalf("unexpected now image row: %+v", rows[0])
+	}
+}
+
+func TestNormalizeNowNewsPayloadHeadlines(t *testing.T) {
+	raw := []byte(`{
+		"resultsCount": 1,
+		"headlines": [
+			{
+				"headline": "Latest ESPN headline",
+				"description": "<p>A broad ESPN sports update.</p>",
+				"published": "2026-05-07T18:20:00Z",
+				"links": {
+					"web": {"href": "https://www.espn.com/story/_/id/1/latest-news"}
+				},
+				"images": [
+					{"url": "https://a.espncdn.com/photo/2026/0507/news.jpg", "alt": "ESPN news image"}
+				]
+			}
+		]
+	}`)
+
+	rows, err := normalizeNowNewsPayload(raw)
+	if err != nil {
+		t.Fatalf("normalizeNowNewsPayload error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].Headline != "Latest ESPN headline" || rows[0].Description != "A broad ESPN sports update." {
+		t.Fatalf("unexpected row: %+v", rows[0])
+	}
+	if rows[0].URL != "https://www.espn.com/story/_/id/1/latest-news" {
+		t.Fatalf("url = %q", rows[0].URL)
+	}
+	if rows[0].ImageURL == "" || rows[0].ImageAlt != "ESPN news image" {
+		t.Fatalf("unexpected image row: %+v", rows[0])
+	}
+}
+
+func TestNormalizeNowNewsPayloadFallbackTitleAndLinkArray(t *testing.T) {
+	raw := []byte(`{
+		"headlines": [
+			{
+				"title": "Title-only ESPN headline",
+				"description": "A title fallback update.",
+				"links": [
+					{"href": "https://www.espn.com/title-only"}
+				]
+			}
+		]
+	}`)
+
+	rows, err := normalizeNowNewsPayload(raw)
+	if err != nil {
+		t.Fatalf("normalizeNowNewsPayload error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].Headline != "Title-only ESPN headline" || rows[0].URL != "https://www.espn.com/title-only" {
+		t.Fatalf("unexpected fallback row: %+v", rows[0])
 	}
 }
 
