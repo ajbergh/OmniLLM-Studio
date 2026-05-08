@@ -239,10 +239,13 @@ func DetectSportsIntent(query string, now time.Time) (*SportsRequest, bool) {
 		}
 	}
 
-	if !hasLeague && intent != SportsIntentNews {
+	if !hasLeague && intent != SportsIntentNews && intent != SportsIntentOdds {
 		return nil, false
 	}
 	if !hasLeague && intent == SportsIntentNews && !hasBroadSportsNewsPhrase(norm) {
+		return nil, false
+	}
+	if !hasLeague && intent == SportsIntentOdds && !hasBroadSportsOddsPhrase(norm) {
 		return nil, false
 	}
 
@@ -344,6 +347,9 @@ func isNonLookupQuery(norm string) bool {
 	) {
 		return true
 	}
+	if hasAnyPhrase(norm, "explain betting odds", "explain how betting odds work", "how betting odds work", "how do betting odds work") {
+		return true
+	}
 	if hasPhrase(norm, "explain how") && hasPhrase(norm, "standings work") {
 		return true
 	}
@@ -401,6 +407,9 @@ func detectIntent(norm string) SportsIntentType {
 	}
 	if hasAnyPhrase(norm, "player news", "athlete news") {
 		return SportsIntentAthleteNews
+	}
+	if hasOddsIntent(norm) {
+		return SportsIntentOdds
 	}
 	if isLeaderQuery(norm) {
 		return SportsIntentLeaders
@@ -477,11 +486,31 @@ func hasBroadSportsNewsPhrase(norm string) bool {
 		)
 }
 
+func hasBroadSportsOddsPhrase(norm string) bool {
+	return hasAnyPhrase(norm,
+		"sports betting odds", "sports odds", "current betting odds",
+		"latest betting odds", "today betting odds", "today s betting odds", "todays betting odds",
+		"current betting lines", "latest betting lines", "sports betting lines",
+	)
+}
+
+func hasOddsIntent(norm string) bool {
+	return hasAnyPhrase(norm,
+		"odds", "betting odds", "sportsbook odds", "betting lines", "game lines",
+		"spread", "spreads", "point spread", "moneyline", "money line",
+		"over under", "overunder", "over odds", "under odds",
+		"who is favored", "who s favored", "who is the favorite", "point total",
+	)
+}
+
 func defaultLimitForIntent(intent SportsIntentType) int {
 	if intent == SportsIntentNews {
 		return 10
 	}
 	if intent == SportsIntentLeaders {
+		return 50
+	}
+	if intent == SportsIntentOdds {
 		return 50
 	}
 	return 100

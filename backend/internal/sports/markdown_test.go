@@ -139,3 +139,32 @@ func TestRenderBroadNewsMarkdown(t *testing.T) {
 		t.Fatalf("missing broad title: %s", got)
 	}
 }
+
+func TestRenderOddsMarkdown(t *testing.T) {
+	req := SportsRequest{Intent: SportsIntentOdds, DateLabel: "Today"}
+	cfg := LeagueConfig{DisplayName: "NBA"}
+	rows := []OddsRow{
+		{
+			Date:          "May 7",
+			Time:          "7:30 PM",
+			AwayTeam:      "Boston Celtics",
+			AwayMoneyLine: "-120",
+			HomeTeam:      "New York Knicks",
+			HomeMoneyLine: "+100",
+			Spread:        "BOS -2.5",
+			OverUnder:     "214.5",
+			Provider:      "ESPN BET",
+		},
+	}
+
+	got := RenderOddsMarkdown(req, cfg, rows, fixedNow())
+	if !strings.Contains(got, "### NBA Betting Odds — Today") {
+		t.Fatalf("missing odds title: %s", got)
+	}
+	if !strings.Contains(got, "| Date | Time | Away | Away ML | Home | Home ML | Spread | O/U | Provider |") {
+		t.Fatalf("missing odds table header: %s", got)
+	}
+	if !strings.Contains(got, "| May 7 | 7:30 PM | Boston Celtics | -120 | New York Knicks | +100 | BOS -2.5 | 214.5 | ESPN BET |") {
+		t.Fatalf("missing odds row: %s", got)
+	}
+}

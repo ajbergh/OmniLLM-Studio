@@ -45,7 +45,7 @@
 | **Conversation Branching** | Fork any message into parallel branches — explore different response paths |
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
 | **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction |
-| **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, and broad sports headlines |
+| **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, and broad sports headlines |
 | **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, document generation, and plugin tools |
 | **Artifact Export** | Ask the LLM for any supported format and it generates a downloadable file automatically — `.docx` (Word), `.xlsx` (Excel), `.csv`, `.pdf`, `.md` (Markdown), `.html`, `.json`, `.yaml` — no copy-pasting required |
 
@@ -277,13 +277,16 @@ Sports lookup is enabled by default and does not require an API key. Ask natural
 - *"Premier League table"*
 - *"What's the latest sports news?"*
 - *"What's the latest Chicago Cubs news?"*
+- *"Show me NBA odds today"*
+- *"What are the NFL spreads tomorrow?"*
+- *"Cubs betting odds"*
 - *"Print out the top 50 in HR for the 2025 MLB season in a table"*
 - *"Show me Shohei Ohtani stats for 2025"*
 - *"Chicago Cubs roster"*
 - *"Yankees injuries"*
 - *"College football rankings"*
 
-The backend detects high-confidence sports intent, calls ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a Markdown table directly instead of letting the LLM answer from memory. It supports scores, schedules, standings, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals. Leaderboard/stat prompts are routed before standings so wording like "in a table" does not accidentally become a standings lookup. Toggle it with `sports_lookup_enabled` via the feature flags API.
+The backend detects high-confidence sports intent, calls ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a Markdown table directly instead of letting the LLM answer from memory. It supports scores, schedules, standings, betting odds, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals. Odds prompts return ESPN-provided moneylines, spreads, totals, and provider names when ESPN includes them. Leaderboard/stat prompts are routed before standings so wording like "in a table" does not accidentally become a standings lookup. Toggle it with `sports_lookup_enabled` via the feature flags API.
 
 ---
 
@@ -320,7 +323,7 @@ OmniLLM-Studio/
 │       ├── rag/                         # Chunker, retriever, context builder
 │       ├── repository/                  # Database CRUD layer
 │       ├── search/                      # Semantic search service
-│       ├── sports/                      # ESPN-backed scores, schedules, standings, news, stats, and roster lookup
+│       ├── sports/                      # ESPN-backed scores, schedules, standings, odds, news, stats, and roster lookup
 │       ├── templates/                   # Prompt template seeding
 │       ├── tools/                       # Tool registry + executor (web search, sports, calculator, document gen, plugins)
 │       ├── websearch/                   # Brave/DDG + Jina Reader orchestrator
@@ -536,7 +539,7 @@ All routes are under `/v1/`.
 | `PATCH` | `/v1/plugins/:name` | Update plugin |
 | `DELETE` | `/v1/plugins/:name` | Uninstall plugin |
 
-Built-in tools include `web_search`, `sports_lookup`, `calculator`, `url_fetch`, and `generate_word_doc`. `sports_lookup` accepts scores, schedules, standings, news, rosters, injuries, transactions, rankings, player stats, league stats, and stat leaderboards:
+Built-in tools include `web_search`, `sports_lookup`, `calculator`, `url_fetch`, and `generate_word_doc`. `sports_lookup` accepts scores, schedules, standings, betting odds, news, rosters, injuries, transactions, rankings, player stats, league stats, and stat leaderboards:
 
 ```json
 {
@@ -551,7 +554,7 @@ Built-in tools include `web_search`, `sports_lookup`, `calculator`, `url_fetch`,
 }
 ```
 
-For news, use `"intent": "news"` with an optional league or a team-specific query such as `"latest Chicago Cubs news"`. For leaderboards, use `"intent": "leaders"` with a query such as `"top 50 HR leaders for the 2025 MLB season"`. It returns JSON containing `intent`, `league`, `league_name`, `markdown`, `source`, and `retrieved_at`. The Markdown is ready to insert into a chat response.
+For news, use `"intent": "news"` with an optional league or a team-specific query such as `"latest Chicago Cubs news"`. For betting lines, use `"intent": "odds"` with a query such as `"NFL spreads tomorrow"` or `"Cubs betting odds"`. For leaderboards, use `"intent": "leaders"` with a query such as `"top 50 HR leaders for the 2025 MLB season"`. It returns JSON containing `intent`, `league`, `league_name`, `markdown`, `source`, and `retrieved_at`. The Markdown is ready to insert into a chat response.
 
 </details>
 

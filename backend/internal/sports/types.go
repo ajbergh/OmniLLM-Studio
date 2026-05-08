@@ -16,6 +16,7 @@ var (
 	ErrNoMatchingGames   = errors.New("espn returned no games matching team")
 	ErrNoStandings       = errors.New("espn returned no standings")
 	ErrNoNews            = errors.New("espn returned no sports news")
+	ErrNoOdds            = errors.New("espn returned no betting odds")
 	ErrNoSportsData      = errors.New("espn returned no sports data")
 	ErrTeamNotFound      = errors.New("espn team not found")
 	ErrAthleteNotFound   = errors.New("espn athlete not found")
@@ -40,6 +41,7 @@ const (
 	SportsIntentAthleteNews  SportsIntentType = "athlete_news"
 	SportsIntentRankings     SportsIntentType = "rankings"
 	SportsIntentLeagueStats  SportsIntentType = "league_stats"
+	SportsIntentOdds         SportsIntentType = "odds"
 )
 
 type SportsRequest struct {
@@ -118,6 +120,22 @@ type NewsRow struct {
 	URL         string
 }
 
+type OddsRow struct {
+	LeagueName    string
+	Date          string
+	Time          string
+	Status        string
+	AwayTeam      string
+	AwayAbbr      string
+	AwayMoneyLine string
+	HomeTeam      string
+	HomeAbbr      string
+	HomeMoneyLine string
+	Spread        string
+	OverUnder     string
+	Provider      string
+}
+
 type RosterRow struct {
 	Group    string
 	Name     string
@@ -151,7 +169,7 @@ func UserFacingError(req SportsRequest, err error) string {
 		return ""
 	}
 	if errors.Is(err, ErrUnsupportedLeague) {
-		return "I can retrieve ESPN-backed scores, schedules, standings, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders for supported leagues."
+		return "I can retrieve ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders for supported leagues."
 	}
 	if errors.Is(err, ErrMalformedDate) {
 		return "I could not understand that sports date. Please use today, tomorrow, yesterday, or YYYY-MM-DD."
@@ -184,6 +202,19 @@ func UserFacingError(req SportsRequest, err error) string {
 			name = "sports"
 		}
 		return fmt.Sprintf("I could not retrieve %s news from ESPN right now.", name)
+	}
+	if errors.Is(err, ErrNoOdds) {
+		name := req.League
+		if cfg, ok := leagueConfigForRequest(req); ok {
+			name = cfg.DisplayName
+		}
+		if req.TeamQuery != "" {
+			name = req.TeamQuery
+		}
+		if name == "" {
+			name = "sports"
+		}
+		return fmt.Sprintf("ESPN did not return betting odds for %s right now.", name)
 	}
 	if errors.Is(err, ErrNoSportsData) {
 		name := req.League
@@ -226,6 +257,9 @@ func UserFacingError(req SportsRequest, err error) string {
 	}
 	if req.Intent == SportsIntentNews {
 		return fmt.Sprintf("I could not retrieve %s news from ESPN right now.", name)
+	}
+	if req.Intent == SportsIntentOdds {
+		return fmt.Sprintf("I could not retrieve %s betting odds from ESPN right now.", name)
 	}
 	return fmt.Sprintf("I could not retrieve %s sports data from ESPN right now.", name)
 }

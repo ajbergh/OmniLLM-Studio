@@ -99,7 +99,7 @@ The Tool Calling Framework provides a generic, extensible system for the AI to i
 | Tool | Description |
 |---|---|
 | **Web Search** | Searches the web using Brave Search API or DuckDuckGo fallback, with Jina Reader for content extraction. |
-| **Sports Lookup** | Fetches ESPN-backed sports scores, schedules, standings, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards, then returns a Markdown table. |
+| **Sports Lookup** | Fetches ESPN-backed sports scores, schedules, standings, betting odds, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards, then returns a Markdown table. |
 | **Calculator** | Evaluates mathematical expressions safely using Go's AST parser. |
 | **URL Fetch** | Fetches and extracts readable text content from any URL. |
 | **Word Document Generation** | Converts Markdown content into a downloadable `.docx` file. |
@@ -123,7 +123,7 @@ The Tool Calling Framework provides a generic, extensible system for the AI to i
 
 **Feature Flag:** `sports_lookup_enabled` (enabled by default)
 
-OmniLLM-Studio includes a ChatGPT-style `sports_lookup` capability for current and ESPN-specific sports data. When you ask a high-confidence sports question, the backend detects it before the LLM provider is called, retrieves data from ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a compact Markdown table directly in the chat. It supports scores, schedules, standings, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals.
+OmniLLM-Studio includes a ChatGPT-style `sports_lookup` capability for current and ESPN-specific sports data. When you ask a high-confidence sports question, the backend detects it before the LLM provider is called, retrieves data from ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a compact Markdown table directly in the chat. It supports scores, schedules, standings, betting odds, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals. Odds prompts return ESPN-provided moneylines, spreads, totals, and provider names when ESPN includes them.
 
 **Supported leagues:**
 
@@ -149,13 +149,16 @@ OmniLLM-Studio includes a ChatGPT-style `sports_lookup` capability for current a
 - *"Premier League table"*
 - *"What's the latest sports news?"*
 - *"What's the latest Chicago Cubs news?"*
+- *"Show me NBA odds today"*
+- *"What are the NFL spreads tomorrow?"*
+- *"Cubs betting odds"*
 - *"Print out the top 50 in HR for the 2025 MLB season in a table"*
 - *"Show me Shohei Ohtani stats for 2025"*
 - *"Chicago Cubs roster"*
 - *"Yankees injuries"*
 - *"College football rankings"*
 
-The detector stays conservative. Requests like *"write a story about baseball"*, *"write a sports news article"*, *"explain how standings work"*, *"make a sports logo"*, or *"who is the greatest baseball player ever"* continue through the normal LLM path. ESPN-supported stat prompts are routed before standings, so a request like *"top 50 home run leaders for the 2025 MLB season in a table"* is treated as a leaderboard lookup instead of a standings lookup.
+The detector stays conservative. Requests like *"write a story about baseball"*, *"write a sports news article"*, *"explain how standings work"*, *"explain how betting odds work"*, *"make a sports logo"*, or *"who is the greatest baseball player ever"* continue through the normal LLM path. ESPN-supported odds and stat prompts are routed before standings, so a request like *"top 50 home run leaders for the 2025 MLB season in a table"* is treated as a leaderboard lookup instead of a standings lookup.
 
 You can also invoke the tool directly:
 
@@ -171,7 +174,7 @@ You can also invoke the tool directly:
 }
 ```
 
-For sports news, use `"intent": "news"` with an optional league or a team-specific query such as `"latest Chicago Cubs news"`. Broad prompts such as `"What's the latest sports news?"` use ESPN's current sports news feed. For stat leaderboards, use `"intent": "leaders"` with a query such as `"top 50 HR leaders for the 2025 MLB season"`; for league-level stats, use `"intent": "league_stats"`.
+For sports news, use `"intent": "news"` with an optional league or a team-specific query such as `"latest Chicago Cubs news"`. Broad prompts such as `"What's the latest sports news?"` use ESPN's current sports news feed. For betting odds, use `"intent": "odds"` with a query such as `"NBA odds today"`, `"NFL spreads tomorrow"`, or `"Cubs betting odds"`. For stat leaderboards, use `"intent": "leaders"` with a query such as `"top 50 HR leaders for the 2025 MLB season"`; for league-level stats, use `"intent": "league_stats"`.
 
 The result includes `intent`, `league`, `league_name`, `markdown`, `source`, and `retrieved_at` metadata. Chat messages answered through this preflight path are marked with `sports_lookup: true` metadata and use provider/model labels of `sports_lookup` / `espn-go`.
 
@@ -181,7 +184,7 @@ The result includes `intent`, `league`, `league_name`, `markdown`, `source`, and
 - **Permission controls** — you decide which tools the AI can invoke automatically.
 - **Transparent** — every tool call is visible in the conversation with full input/output details.
 - **Timeout protection** — tools have configurable execution timeouts to prevent hung operations.
-- **Current sports answers** — live scores, schedules, standings, headlines, rosters, injuries, transactions, rankings, and stats come from ESPN instead of model memory.
+- **Current sports answers** — live scores, schedules, standings, betting odds, headlines, rosters, injuries, transactions, rankings, and stats come from ESPN instead of model memory.
 
 ### FAQ
 
@@ -879,7 +882,7 @@ Feature flags let you enable or disable individual features without restarting t
 | `plugins` | Plugin SDK |
 | `eval_harness` | Evaluation Harness |
 | `word_doc_generation` | Word Document Generation (.docx) |
-| `sports_lookup_enabled` | ESPN-backed sports scores, schedules, standings, news, rosters, injuries, transactions, rankings, and stats |
+| `sports_lookup_enabled` | ESPN-backed sports scores, schedules, standings, betting odds, news, rosters, injuries, transactions, rankings, and stats |
 
 > **Note:** The multi-format artifact export system (`.xlsx`, `.csv`, `.pdf`, `.md`, `.html`, `.json`, `.yaml`) does not have a separate feature flag — it is always active in a standard deployment. `.docx` generation is gated behind `word_doc_generation`; ESPN-backed sports lookup is gated behind `sports_lookup_enabled`.
 

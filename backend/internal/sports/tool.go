@@ -52,7 +52,7 @@ func (t *SportsLookupTool) Definition() tools.ToolDefinition {
 			},
 			"intent": {
 				"type": "string",
-				"enum": ["standings", "scores", "schedule", "news", "roster", "injuries", "transactions", "team_record", "team_schedule", "leaders", "athlete_stats", "athlete_news", "rankings", "league_stats"],
+				"enum": ["standings", "scores", "schedule", "news", "odds", "roster", "injuries", "transactions", "team_record", "team_schedule", "leaders", "athlete_stats", "athlete_news", "rankings", "league_stats"],
 				"description": "Optional explicit sports intent"
 			},
 			"league": {
@@ -73,7 +73,7 @@ func (t *SportsLookupTool) Definition() tools.ToolDefinition {
 
 	return tools.ToolDefinition{
 		Name:        "sports_lookup",
-		Description: "Fetch ESPN-backed sports scores, schedules, standings, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders. Use this for current or ESPN-specific sports questions instead of answering from model memory.",
+		Description: "Fetch ESPN-backed sports scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders. Use this for current or ESPN-specific sports questions instead of answering from model memory.",
 		Parameters:  schema,
 		Category:    "sports",
 		Enabled:     true,
@@ -90,7 +90,7 @@ func (t *SportsLookupTool) Validate(args json.RawMessage) error {
 	}
 	if a.Intent != "" {
 		switch SportsIntentType(strings.ToLower(strings.TrimSpace(a.Intent))) {
-		case SportsIntentStandings, SportsIntentScores, SportsIntentSchedule, SportsIntentNews,
+		case SportsIntentStandings, SportsIntentScores, SportsIntentSchedule, SportsIntentNews, SportsIntentOdds,
 			SportsIntentRoster, SportsIntentInjuries, SportsIntentTransactions,
 			SportsIntentTeamRecord, SportsIntentTeamSchedule, SportsIntentLeaders,
 			SportsIntentAthleteStats, SportsIntentAthleteNews, SportsIntentRankings, SportsIntentLeagueStats:

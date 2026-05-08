@@ -39,10 +39,16 @@ func TestDetectSportsIntent(t *testing.T) {
 		{"Yankees injuries", true, SportsIntentInjuries, espn.LeagueMLB, "New York Yankees", ""},
 		{"latest MLB transactions", true, SportsIntentTransactions, espn.LeagueMLB, "", ""},
 		{"Yankees record", true, SportsIntentTeamRecord, espn.LeagueMLB, "New York Yankees", ""},
+		{"show me NBA odds today", true, SportsIntentOdds, espn.LeagueNBA, "", "Today"},
+		{"what are the NFL spreads tomorrow", true, SportsIntentOdds, espn.LeagueNFL, "", "Tomorrow"},
+		{"Cubs betting odds", true, SportsIntentOdds, espn.LeagueMLB, "Chicago Cubs", ""},
+		{"who is favored in the Cubs game today", true, SportsIntentOdds, espn.LeagueMLB, "Chicago Cubs", "Today"},
+		{"current betting odds", true, SportsIntentOdds, "", "", "Today"},
 		{"Shohei Ohtani stats 2025", true, SportsIntentAthleteStats, "", "", ""},
 		{"Patrick Mahomes game log", true, SportsIntentAthleteStats, "", "", ""},
 		{"write a story about baseball", false, SportsIntentUnknown, "", "", ""},
 		{"write a sports news article", false, SportsIntentUnknown, "", "", ""},
+		{"explain how betting odds work", false, SportsIntentUnknown, "", "", ""},
 		{"explain how MLB standings work", false, SportsIntentUnknown, "", "", ""},
 		{"who is the greatest baseball player ever", false, SportsIntentUnknown, "", "", ""},
 		{"make a sports logo", false, SportsIntentUnknown, "", "", ""},
@@ -319,6 +325,75 @@ func TestNormalizeNewsFeed(t *testing.T) {
 	}
 	if rows[0].Published == "" || rows[0].URL == "" || rows[0].Byline != "ESPN News" {
 		t.Fatalf("unexpected row: %+v", rows[0])
+	}
+}
+
+func TestNormalizeOddsAndFilter(t *testing.T) {
+	awayOdds := &espn.TeamOdds{MoneyLine: 120, Underdog: true, SpreadOdds: -110}
+	homeOdds := &espn.TeamOdds{MoneyLine: -140, Favorite: true, SpreadOdds: -110}
+	odds := espn.OddsSummary{
+		Details:      "CHC -1.5",
+		OverUnder:    8.5,
+		OverOdds:     -105,
+		UnderOdds:    -115,
+		AwayTeamOdds: awayOdds,
+		HomeTeamOdds: homeOdds,
+	}
+	odds.Provider.Name = "ESPN BET"
+	sb := &espn.Scoreboard{
+		Events: []espn.Event{
+			{
+				Date: "2026-05-07T18:20:00Z",
+				Status: espn.Status{Type: espn.StatusType{
+					ShortDetail: "7:20 PM",
+					State:       "pre",
+				}},
+				Competitions: []espn.Competition{
+					{
+						Date: "2026-05-07T18:20:00Z",
+						Competitors: []espn.Competitor{
+							{
+								HomeAway: "away",
+								Team: espn.Team{
+									DisplayName:  "St. Louis Cardinals",
+									Abbreviation: "STL",
+								},
+							},
+							{
+								HomeAway: "home",
+								Team: espn.Team{
+									DisplayName:  "Chicago Cubs",
+									Abbreviation: "CHC",
+								},
+							},
+						},
+						Odds: []espn.OddsSummary{odds},
+					},
+				},
+			},
+			{
+				Date: "2026-05-07T20:00:00Z",
+				Competitions: []espn.Competition{
+					{Competitors: []espn.Competitor{{Team: espn.Team{DisplayName: "Away"}}}},
+				},
+			},
+		},
+	}
+
+	rows := normalizeOdds(sb, LeagueConfig{DisplayName: "MLB"})
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Provider != "ESPN BET" || row.Spread != "CHC -1.5" || row.OverUnder != "8.5 (O -105 / U -115)" {
+		t.Fatalf("unexpected odds row: %+v", row)
+	}
+	if row.AwayMoneyLine != "+120" || row.HomeMoneyLine != "-140" {
+		t.Fatalf("moneylines = %q/%q", row.AwayMoneyLine, row.HomeMoneyLine)
+	}
+	filtered := filterOddsRowsByTeam(rows, "Cubs")
+	if len(filtered) != 1 {
+		t.Fatalf("filtered rows = %d, want 1", len(filtered))
 	}
 }
 

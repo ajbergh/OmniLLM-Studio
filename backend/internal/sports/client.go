@@ -38,6 +38,8 @@ func (c *ESPNClient) Lookup(ctx context.Context, req SportsRequest) (*SportsLook
 		return c.LookupScores(ctx, req)
 	case SportsIntentNews:
 		return c.LookupNews(ctx, req)
+	case SportsIntentOdds:
+		return c.LookupOdds(ctx, req)
 	case SportsIntentRoster:
 		return c.LookupRoster(ctx, req)
 	case SportsIntentInjuries, SportsIntentTransactions, SportsIntentTeamRecord, SportsIntentTeamSchedule, SportsIntentRankings, SportsIntentLeagueStats:
