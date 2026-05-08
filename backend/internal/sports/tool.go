@@ -60,7 +60,7 @@ func (t *SportsLookupTool) Definition() tools.ToolDefinition {
 			},
 			"league": {
 				"type": "string",
-				"description": "Optional league alias like mlb, nfl, nba, nhl, epl, mls"
+				"description": "Optional league alias like mlb, nfl, nba, nhl, epl, mls, or ipl"
 			},
 			"date": {
 				"type": "string",
@@ -81,7 +81,7 @@ func (t *SportsLookupTool) Definition() tools.ToolDefinition {
 
 	return tools.ToolDefinition{
 		Name:        "sports_lookup",
-		Description: "Fetch ESPN-backed sports scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders. Use this for current or ESPN-specific sports questions instead of answering from model memory.",
+		Description: "Fetch ESPN-backed sports scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders, including IPL cricket. Use this for current or ESPN-specific sports questions instead of answering from model memory.",
 		Parameters:  schema,
 		Category:    "sports",
 		Enabled:     true,

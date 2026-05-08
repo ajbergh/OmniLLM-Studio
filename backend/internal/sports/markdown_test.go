@@ -180,14 +180,122 @@ func TestRenderStandingsMarkdownGrouped(t *testing.T) {
 	}
 
 	got := RenderStandingsMarkdown(req, cfg, rows, fixedNow())
-	if !strings.Contains(got, "#### American League East") || !strings.Contains(got, "#### National League West") {
+	if !strings.Contains(got, "#### American League") || !strings.Contains(got, "##### East") ||
+		!strings.Contains(got, "#### National League") || !strings.Contains(got, "##### West") {
 		t.Fatalf("missing grouped headings: %s", got)
 	}
 	if strings.Contains(got, "| Group | Rank |") {
 		t.Fatalf("grouped standings should not include redundant group column: %s", got)
 	}
-	if !strings.Contains(got, "| 1 | New York Yankees | 26 | 12 | .684 | — | W2 |") {
+	if !strings.Contains(got, "| 1 | New York Yankees | 26 | 12 | .684 | W2 | — | — |") {
 		t.Fatalf("missing standings row: %s", got)
+	}
+}
+
+func TestRenderMLBStandingsSplitsLeagueRowsByDivision(t *testing.T) {
+	req := SportsRequest{Intent: SportsIntentStandings, RenderMode: SportsRenderPlainMarkdown}
+	cfg := LeagueConfig{DisplayName: "MLB", Sport: espn.SportBaseball, League: espn.LeagueMLB}
+	rows := []StandingsRow{
+		{Group: "American League", Team: "New York Yankees", Abbr: "NYY", Wins: "26", Losses: "12", Pct: ".684", Streak: "W1", LastTen: "8-2"},
+		{Group: "American League", Team: "Tampa Bay Rays", Abbr: "TB", Wins: "25", Losses: "12", Pct: ".676", Streak: "W7", LastTen: "9-1"},
+		{Group: "American League", Team: "Athletics", Abbr: "ATH", Wins: "19", Losses: "18", Pct: ".514", Streak: "W1", LastTen: "5-5"},
+		{Group: "American League", Team: "Cleveland Guardians", Abbr: "CLE", Wins: "20", Losses: "19", Pct: ".513", Streak: "W2", LastTen: "5-5"},
+	}
+
+	got := RenderStandingsMarkdown(req, cfg, rows, fixedNow())
+	if !strings.Contains(got, "##### East") || !strings.Contains(got, "##### Central") || !strings.Contains(got, "##### West") {
+		t.Fatalf("missing MLB division headings: %s", got)
+	}
+	if !strings.Contains(got, "| 2 | Tampa Bay Rays | 25 | 12 | .676 | W7 | 9-1 | 0.5 |") {
+		t.Fatalf("Rays should be second in AL East, got: %s", got)
+	}
+	if !strings.Contains(got, "| 1 | Cleveland Guardians | 20 | 19 | .513 | W2 | 5-5 | — |") {
+		t.Fatalf("Guardians should lead AL Central, got: %s", got)
+	}
+	if !strings.Contains(got, "| 1 | Athletics | 19 | 18 | .514 | W1 | 5-5 | — |") {
+		t.Fatalf("Athletics should lead AL West, got: %s", got)
+	}
+}
+
+func TestRenderNFLStandingsSplitsConferenceRowsByDivision(t *testing.T) {
+	req := SportsRequest{Intent: SportsIntentStandings, RenderMode: SportsRenderPlainMarkdown}
+	cfg := LeagueConfig{DisplayName: "NFL", Sport: espn.SportFootball, League: espn.LeagueNFL}
+	rows := []StandingsRow{
+		{Group: "AFC", Team: "Buffalo Bills", Abbr: "BUF", Wins: "10", Losses: "3", Pct: ".769", Streak: "W2", LastTen: "8-2"},
+		{Group: "AFC", Team: "Miami Dolphins", Abbr: "MIA", Wins: "8", Losses: "5", Pct: ".615", Streak: "L1", LastTen: "6-4"},
+		{Group: "AFC", Team: "Baltimore Ravens", Abbr: "BAL", Wins: "9", Losses: "4", Pct: ".692", Streak: "W1", LastTen: "7-3"},
+	}
+
+	got := RenderStandingsMarkdown(req, cfg, rows, fixedNow())
+	if !strings.Contains(got, "#### AFC") || !strings.Contains(got, "##### East") || !strings.Contains(got, "##### North") {
+		t.Fatalf("missing NFL division headings: %s", got)
+	}
+	if !strings.Contains(got, "| 2 | Miami Dolphins | 8 | 5 | .615 | L1 | 6-4 | 2.0 |") {
+		t.Fatalf("expected Dolphins second in AFC East with division GB: %s", got)
+	}
+	if !strings.Contains(got, "| 1 | Baltimore Ravens | 9 | 4 | .692 | W1 | 7-3 | — |") {
+		t.Fatalf("expected Ravens to lead AFC North: %s", got)
+	}
+}
+
+func TestRenderNBAStandingsSplitsConferenceRowsByDivision(t *testing.T) {
+	req := SportsRequest{Intent: SportsIntentStandings, RenderMode: SportsRenderPlainMarkdown}
+	cfg := LeagueConfig{DisplayName: "NBA", Sport: espn.SportBasketball, League: espn.LeagueNBA}
+	rows := []StandingsRow{
+		{Group: "Eastern Conference", Team: "Boston Celtics", Abbr: "BOS", Wins: "50", Losses: "20", Pct: ".714", Streak: "W3", LastTen: "7-3"},
+		{Group: "Eastern Conference", Team: "Cleveland Cavaliers", Abbr: "CLE", Wins: "48", Losses: "22", Pct: ".686", Streak: "W1", LastTen: "6-4"},
+		{Group: "Eastern Conference", Team: "Miami Heat", Abbr: "MIA", Wins: "41", Losses: "29", Pct: ".586", Streak: "L1", LastTen: "5-5"},
+	}
+
+	got := RenderStandingsMarkdown(req, cfg, rows, fixedNow())
+	if !strings.Contains(got, "#### Eastern Conference") ||
+		!strings.Contains(got, "##### Atlantic") ||
+		!strings.Contains(got, "##### Central") ||
+		!strings.Contains(got, "##### Southeast") {
+		t.Fatalf("missing NBA division headings: %s", got)
+	}
+	if !strings.Contains(got, "| 1 | Cleveland Cavaliers | 48 | 22 | .686 | W1 | 6-4 | — |") {
+		t.Fatalf("expected Cavaliers to lead Central: %s", got)
+	}
+}
+
+func TestRenderNHLStandingsUsesDivisionAndHockeyColumns(t *testing.T) {
+	req := SportsRequest{Intent: SportsIntentStandings, RenderMode: SportsRenderPlainMarkdown}
+	cfg := LeagueConfig{DisplayName: "NHL", Sport: espn.SportHockey, League: espn.LeagueNHL}
+	rows := []StandingsRow{
+		{Group: "Eastern Conference", Team: "Boston Bruins", Abbr: "BOS", GamesPlayed: "70", Wins: "42", Losses: "20", Ties: "8", Points: "92", Pct: ".657", Streak: "W2", LastTen: "7-2-1"},
+		{Group: "Eastern Conference", Team: "New York Rangers", Abbr: "NYR", GamesPlayed: "70", Wins: "40", Losses: "23", Ties: "7", Points: "87", Pct: ".621", Streak: "L1", LastTen: "5-4-1"},
+	}
+
+	got := RenderStandingsMarkdown(req, cfg, rows, fixedNow())
+	if !strings.Contains(got, "##### Atlantic") || !strings.Contains(got, "##### Metropolitan") {
+		t.Fatalf("missing NHL division headings: %s", got)
+	}
+	if !strings.Contains(got, "| Rank | Team | GP | W | L | OT | Pts | Pct | Strk | L10 |") {
+		t.Fatalf("missing NHL table columns: %s", got)
+	}
+	if !strings.Contains(got, "| 1 | New York Rangers | 70 | 40 | 23 | 7 | 87 | .621 | L1 | 5-4-1 |") {
+		t.Fatalf("expected Rangers to lead Metropolitan: %s", got)
+	}
+}
+
+func TestRenderMLSStandingsSplitsByConference(t *testing.T) {
+	req := SportsRequest{Intent: SportsIntentStandings, RenderMode: SportsRenderPlainMarkdown}
+	cfg := LeagueConfig{DisplayName: "MLS", Sport: espn.SportSoccer, League: espn.LeagueMLS}
+	rows := []StandingsRow{
+		{Team: "Inter Miami CF", Abbr: "MIA", GamesPlayed: "10", Wins: "7", Draws: "2", Losses: "1", Points: "23", GoalDifferential: "+12"},
+		{Team: "Los Angeles FC", Abbr: "LAFC", GamesPlayed: "10", Wins: "6", Draws: "1", Losses: "3", Points: "19", GoalDifferential: "+8"},
+	}
+
+	got := RenderStandingsMarkdown(req, cfg, rows, fixedNow())
+	if !strings.Contains(got, "#### Eastern Conference") || !strings.Contains(got, "#### Western Conference") {
+		t.Fatalf("missing MLS conference headings: %s", got)
+	}
+	if !strings.Contains(got, "| Rank | Club | GP | W | D | L | Pts | GD |") {
+		t.Fatalf("missing MLS soccer columns: %s", got)
+	}
+	if !strings.Contains(got, "| 1 | Los Angeles FC | 10 | 6 | 1 | 3 | 19 | +8 |") {
+		t.Fatalf("expected LAFC to render in Western Conference: %s", got)
 	}
 }
 
@@ -238,8 +346,37 @@ func TestRenderSoccerStandingsMarkdown(t *testing.T) {
 	}
 }
 
+func TestRenderCricketStandingsMarkdown(t *testing.T) {
+	req := SportsRequest{Intent: SportsIntentStandings, RenderMode: SportsRenderPlainMarkdown}
+	cfg := LeagueConfig{DisplayName: "Indian Premier League", Sport: espn.SportCricket, League: LeagueIPL}
+	rows := []StandingsRow{
+		{
+			Rank:        1,
+			Team:        "Chennai Super Kings",
+			Abbr:        "CSK",
+			GamesPlayed: "10",
+			Wins:        "5",
+			Losses:      "5",
+			Ties:        "0",
+			NoResult:    "1",
+			Points:      "11",
+			NetRunRate:  "0.151",
+			For:         "1815/195.4",
+			Against:     "1711/187.3",
+		},
+	}
+
+	got := RenderStandingsMarkdown(req, cfg, rows, fixedNow())
+	if !strings.Contains(got, "| Rank | Team | M | W | L | T | N/R | PT | NRR | For | Against |") {
+		t.Fatalf("missing cricket table header: %s", got)
+	}
+	if !strings.Contains(got, "| 1 | Chennai Super Kings | 10 | 5 | 5 | 0 | 1 | 11 | 0.151 | 1815/195.4 | 1711/187.3 |") {
+		t.Fatalf("missing cricket row: %s", got)
+	}
+}
+
 func TestRenderNewsMarkdown(t *testing.T) {
-	req := SportsRequest{Intent: SportsIntentNews, TeamQuery: "Chicago Cubs"}
+	req := SportsRequest{Intent: SportsIntentNews, TeamQuery: "Chicago Cubs", RenderMode: SportsRenderPlainMarkdown}
 	rows := []NewsRow{
 		{
 			Published:   "May 7, 1:20 PM",
@@ -258,6 +395,62 @@ func TestRenderNewsMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(got, "| May 7, 1:20 PM | Cubs \\| bullpen update | Chicago gets late-inning help. | [ESPN](https://www.espn.com/mlb/story/_/id/1/cubs-news) |") {
 		t.Fatalf("missing escaped news row: %s", got)
+	}
+}
+
+func TestRenderNewsMarkdownEnhancedNewspaper(t *testing.T) {
+	req := SportsRequest{Intent: SportsIntentNews, TeamQuery: "Chicago Cubs"}
+	rows := []NewsRow{
+		{
+			Published:   "May 7, 1:20 PM",
+			Headline:    "Cubs make late move",
+			Description: "Chicago gets late-inning help.",
+			Byline:      "ESPN News",
+			URL:         "https://www.espn.com/mlb/story/_/id/1/cubs-news",
+			ImageURL:    "https://a.espncdn.com/photo/2026/0507/cubs.jpg",
+			ImageAlt:    "Cubs celebration",
+		},
+		{
+			Published:   "May 7, 12:00 PM",
+			Headline:    "Bullpen notes",
+			Description: "A quick look around the roster.",
+			URL:         "https://www.espn.com/mlb/story/_/id/2/bullpen",
+		},
+	}
+
+	got := RenderNewsMarkdown(req, "MLB", rows, fixedNow())
+	if !strings.Contains(got, "#### Lead Story") || !strings.Contains(got, "#### More Headlines") {
+		t.Fatalf("missing newspaper sections: %s", got)
+	}
+	if !strings.Contains(got, "![Sports news image: Cubs celebration](https://a.espncdn.com/photo/2026/0507/cubs.jpg)") {
+		t.Fatalf("missing safe lead image: %s", got)
+	}
+	if !strings.Contains(got, "### [Cubs make late move](https://www.espn.com/mlb/story/_/id/1/cubs-news)") {
+		t.Fatalf("missing linked lead headline: %s", got)
+	}
+	if !strings.Contains(got, "_May 7, 1:20 PM · ESPN News_") {
+		t.Fatalf("missing metadata line: %s", got)
+	}
+	if !strings.Contains(got, "> Chicago gets late-inning help.") {
+		t.Fatalf("missing lead summary: %s", got)
+	}
+}
+
+func TestRenderNewsMarkdownRejectsUnsafeImageAndLink(t *testing.T) {
+	req := SportsRequest{Intent: SportsIntentNews}
+	rows := []NewsRow{{
+		Headline:    "Unsafe story",
+		Description: "No unsafe URL should be emitted.",
+		URL:         "javascript:alert(1)",
+		ImageURL:    "data:image/svg+xml;base64,abc",
+	}}
+
+	got := RenderNewsMarkdown(req, "Sports", rows, fixedNow())
+	if strings.Contains(got, "javascript:") || strings.Contains(got, "data:image") {
+		t.Fatalf("unsafe URL emitted: %s", got)
+	}
+	if !strings.Contains(got, "### Unsafe story") {
+		t.Fatalf("expected plain headline fallback: %s", got)
 	}
 }
 

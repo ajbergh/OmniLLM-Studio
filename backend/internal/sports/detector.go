@@ -75,6 +75,19 @@ var leagueConfigs = []LeagueConfig{
 		League:      espn.LeagueMLS,
 		Aliases:     []string{"mls", "major league soccer"},
 	},
+	{
+		DisplayName: "Indian Premier League",
+		Sport:       espn.SportCricket,
+		League:      LeagueIPL,
+		Aliases: []string{
+			"ipl",
+			"ipl cricket",
+			"indian premier league",
+			"indian premier league cricket",
+			"indian premier cricket league",
+			"indian premier cricket league cricket",
+		},
+	},
 }
 
 type teamAlias struct {
@@ -120,6 +133,16 @@ var teamAliases = []teamAlias{
 	{League: espn.LeagueNHL, TeamQuery: "Tampa Bay Lightning", Aliases: []string{"lightning", "tampa bay lightning"}},
 	{League: espn.LeagueNHL, TeamQuery: "Florida Panthers", Aliases: []string{"florida panthers"}},
 	{League: espn.LeagueNHL, TeamQuery: "Vegas Golden Knights", Aliases: []string{"golden knights", "vegas golden knights", "vgk"}},
+	{League: LeagueIPL, TeamQuery: "Chennai Super Kings", Aliases: []string{"chennai super kings", "csk"}},
+	{League: LeagueIPL, TeamQuery: "Mumbai Indians", Aliases: []string{"mumbai indians", "mi"}},
+	{League: LeagueIPL, TeamQuery: "Royal Challengers Bengaluru", Aliases: []string{"royal challengers bengaluru", "royal challengers bangalore", "rcb"}},
+	{League: LeagueIPL, TeamQuery: "Kolkata Knight Riders", Aliases: []string{"kolkata knight riders", "kkr"}},
+	{League: LeagueIPL, TeamQuery: "Delhi Capitals", Aliases: []string{"delhi capitals", "dc"}},
+	{League: LeagueIPL, TeamQuery: "Rajasthan Royals", Aliases: []string{"rajasthan royals", "rr"}},
+	{League: LeagueIPL, TeamQuery: "Punjab Kings", Aliases: []string{"punjab kings", "pbks", "kings xi punjab", "kxip"}},
+	{League: LeagueIPL, TeamQuery: "Sunrisers Hyderabad", Aliases: []string{"sunrisers hyderabad", "srh"}},
+	{League: LeagueIPL, TeamQuery: "Gujarat Titans", Aliases: []string{"gujarat titans", "gt"}},
+	{League: LeagueIPL, TeamQuery: "Lucknow Super Giants", Aliases: []string{"lucknow super giants", "lsg"}},
 }
 
 type statMetricConfig struct {
@@ -471,18 +494,34 @@ func hasStandingsTableIntent(norm string) bool {
 		"english premier league table",
 		"epl table",
 		"soccer table",
+		"points table",
+		"ipl table",
+		"ipl points table",
+		"indian premier league table",
+		"indian premier league points table",
+		"indian premier cricket league table",
 	) || hasAnyPhrase(norm,
 		"premier league",
 		"english premier league",
 		"epl",
+		"ipl",
+		"indian premier league",
+		"indian premier cricket league",
 	)
 }
 
 func hasBroadSportsNewsPhrase(norm string) bool {
-	return hasPhrase(norm, "sports") &&
+	if hasPhrase(norm, "sports") &&
 		hasAnyPhrase(norm,
 			"news", "headlines", "sports news", "sports headlines",
 			"latest in sports", "what is new in sports", "what s new in sports",
+		) {
+		return true
+	}
+	return hasPhrase(norm, "espn") &&
+		hasAnyPhrase(norm,
+			"news", "headlines", "latest news", "latest espn news", "espn news", "espn headlines",
+			"what is new", "what s new",
 		)
 }
 

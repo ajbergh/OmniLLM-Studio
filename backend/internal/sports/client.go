@@ -2,6 +2,7 @@ package sports
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -184,11 +185,11 @@ func (c *ESPNClient) LookupNews(ctx context.Context, req SportsRequest) (*Sports
 		}
 		rows = normalizeNewsFeed(feed)
 	} else {
-		feed, err := c.client.NowNews(ctx, &espn.NowOptions{Limit: limit})
+		var err error
+		rows, err = c.lookupBroadNewsRows(ctx, limit)
 		if err != nil {
-			return nil, wrapESPNError(ctx, err)
+			return nil, err
 		}
-		rows = normalizeNowFeed(feed)
 	}
 
 	if len(rows) == 0 {
@@ -217,6 +218,22 @@ func (c *ESPNClient) LookupNews(ctx context.Context, req SportsRequest) (*Sports
 		RetrievedAt:   retrievedAt,
 		RenderMode:    renderMode(req),
 	}, nil
+}
+
+func (c *ESPNClient) lookupBroadNewsRows(ctx context.Context, limit int) ([]NewsRow, error) {
+	params := espn.Params{}
+	if limit > 0 {
+		params["limit"] = limit
+	}
+	raw, err := c.client.GetRaw(ctx, espn.DomainNow, "/v1/sports/news", params)
+	if err != nil {
+		return nil, wrapESPNError(ctx, err)
+	}
+	rows, err := normalizeNowNewsPayload(raw)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (c *ESPNClient) timeNow() time.Time {
@@ -318,6 +335,8 @@ func normalizeNewsFeed(feed *espn.NewsFeed) []NewsRow {
 			Description: compactNewsDescription(article.Description),
 			Byline:      strings.TrimSpace(article.Byline),
 			URL:         articleURL(article.Links),
+			ImageURL:    firstNewsImageURL(article.Images),
+			ImageAlt:    firstNewsImageAlt(article.Images, article.Headline),
 		}
 		if row.Headline == "" && row.Description == "" {
 			continue
@@ -331,13 +350,61 @@ func normalizeNowFeed(feed *espn.NowFeed) []NewsRow {
 	if feed == nil || len(feed.Feed) == 0 {
 		return nil
 	}
-	rows := make([]NewsRow, 0, len(feed.Feed))
+	items := make([]nowNewsItem, 0, len(feed.Feed))
 	for _, item := range feed.Feed {
+		items = append(items, nowNewsItem{
+			Description: item.Description,
+			Published:   item.Published,
+			Headline:    item.Headline,
+			Links:       mustMarshalJSON(item.Links),
+			Images:      mustMarshalJSON(item.Images),
+		})
+	}
+	return normalizeNowNewsItems(items)
+}
+
+func normalizeNowNewsPayload(raw []byte) ([]NewsRow, error) {
+	var payload nowNewsPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("decode espn now news: %w", err)
+	}
+	items := payload.Feed
+	if len(items) == 0 {
+		items = payload.Headlines
+	}
+	return normalizeNowNewsItems(items), nil
+}
+
+type nowNewsPayload struct {
+	Feed      []nowNewsItem `json:"feed"`
+	Headlines []nowNewsItem `json:"headlines"`
+}
+
+type nowNewsItem struct {
+	Description string          `json:"description"`
+	Published   string          `json:"published"`
+	Headline    string          `json:"headline"`
+	Title       string          `json:"title"`
+	LinkText    string          `json:"linkText"`
+	Links       json.RawMessage `json:"links"`
+	Images      json.RawMessage `json:"images"`
+}
+
+func normalizeNowNewsItems(items []nowNewsItem) []NewsRow {
+	if len(items) == 0 {
+		return nil
+	}
+	rows := make([]NewsRow, 0, len(items))
+	for _, item := range items {
+		headline := firstNonEmpty(item.Headline, item.Title, item.LinkText)
+		images := nowNewsImages(item.Images)
 		row := NewsRow{
 			Published:   formatNewsPublished(item.Published),
-			Headline:    strings.TrimSpace(item.Headline),
+			Headline:    strings.TrimSpace(headline),
 			Description: compactNewsDescription(item.Description),
-			URL:         articleURL(item.Links),
+			URL:         nowNewsURL(item.Links),
+			ImageURL:    firstNewsImageURL(images),
+			ImageAlt:    firstNewsImageAlt(images, headline),
 		}
 		if row.Headline == "" && row.Description == "" {
 			continue
@@ -345,6 +412,61 @@ func normalizeNowFeed(feed *espn.NowFeed) []NewsRow {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+func nowNewsURL(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var links espn.ArticleLinks
+	if err := json.Unmarshal(raw, &links); err == nil {
+		if url := articleURL(links); url != "" {
+			return url
+		}
+	}
+	var list []espn.Link
+	if err := json.Unmarshal(raw, &list); err == nil {
+		for _, link := range list {
+			if href := strings.TrimSpace(link.Href); href != "" {
+				return href
+			}
+		}
+	}
+	var link espn.Link
+	if err := json.Unmarshal(raw, &link); err == nil {
+		return strings.TrimSpace(link.Href)
+	}
+	var href struct {
+		Href string `json:"href"`
+		URL  string `json:"url"`
+	}
+	if err := json.Unmarshal(raw, &href); err == nil {
+		return firstNonEmpty(href.Href, href.URL)
+	}
+	return ""
+}
+
+func nowNewsImages(raw json.RawMessage) []espn.Image {
+	if len(raw) == 0 {
+		return nil
+	}
+	var images []espn.Image
+	if err := json.Unmarshal(raw, &images); err == nil {
+		return images
+	}
+	var image espn.Image
+	if err := json.Unmarshal(raw, &image); err == nil {
+		return []espn.Image{image}
+	}
+	return nil
+}
+
+func mustMarshalJSON(value any) json.RawMessage {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 func collectStandingsRows(groupName string, group espn.StandingsGroup, rows *[]StandingsRow) {
@@ -363,7 +485,7 @@ func collectStandingsRows(groupName string, group espn.StandingsGroup, rows *[]S
 }
 
 func standingsRowFromEntry(group string, entry espn.StandingsEntry) StandingsRow {
-	rank := statIntAny(entry, []string{"rank", "playoffSeed", "seed"})
+	rank := statIntAny(entry, []string{"rank"})
 	team := extractTeamIdentityFromStandingEntry(entry)
 	row := StandingsRow{
 		Group:            group,
@@ -371,17 +493,21 @@ func standingsRowFromEntry(group string, entry espn.StandingsEntry) StandingsRow
 		TeamIdentity:     team,
 		Team:             team.DisplayName,
 		Abbr:             team.Abbreviation,
-		Wins:             statDisplayAny(entry, []string{"wins", "W"}),
-		Losses:           statDisplayAny(entry, []string{"losses", "L"}),
-		Ties:             statDisplayAny(entry, []string{"ties", "T"}),
+		Wins:             statDisplayAny(entry, []string{"wins", "matchesWon", "matches won", "W"}),
+		Losses:           statDisplayAny(entry, []string{"losses", "matchesLost", "matches lost", "L"}),
+		Ties:             statDisplayAny(entry, []string{"ties", "tied", "matchesTied", "matches tied", "otLosses", "overtimeLosses", "OT", "OTL", "T"}),
 		Draws:            statDisplayAny(entry, []string{"draws", "ties", "D"}),
+		NoResult:         statDisplayAny(entry, []string{"noResult", "noResults", "no result", "no results", "N/R", "NR"}),
 		Pct:              statDisplayAny(entry, []string{"winPercent", "winPercentage", "percentage", "pct"}),
 		GamesBack:        statDisplayAny(entry, []string{"gamesBack", "gamesBehind", "GB"}),
 		Streak:           statDisplayAny(entry, []string{"streak", "STREAK"}),
 		LastTen:          statDisplayAny(entry, []string{"lastTenGames", "lastTen", "lastTenRecord", "L10"}),
-		Points:           statDisplayAny(entry, []string{"points", "PTS"}),
-		GamesPlayed:      statDisplayAny(entry, []string{"gamesPlayed", "matchesPlayed", "GP"}),
+		Points:           statDisplayAny(entry, []string{"points", "matchPoints", "match points", "PTS", "PT"}),
+		GamesPlayed:      statDisplayAny(entry, []string{"gamesPlayed", "matchesPlayed", "matches", "played", "GP", "M"}),
 		GoalDifferential: statDisplayAny(entry, []string{"goalDifferential", "goalDifference", "pointDifferential", "GD"}),
+		NetRunRate:       statDisplayAny(entry, []string{"netRunRate", "net run rate", "netrr", "net rr", "NRR"}),
+		For:              statDisplayAny(entry, []string{"for", "runsFor", "runs for", "FOR"}),
+		Against:          statDisplayAny(entry, []string{"against", "runsAgainst", "runs against"}),
 	}
 	row.GoalDiff = row.GoalDifferential
 	if entry.Note != nil {
@@ -709,6 +835,24 @@ func articleURL(links espn.ArticleLinks) string {
 		}
 	}
 	return ""
+}
+
+func firstNewsImageURL(images []espn.Image) string {
+	for _, image := range images {
+		if url := sanitizeImageURL(image.URL); url != "" {
+			return url
+		}
+	}
+	return ""
+}
+
+func firstNewsImageAlt(images []espn.Image, fallback string) string {
+	for _, image := range images {
+		if alt := strings.TrimSpace(firstNonEmpty(image.Alt, image.Caption, image.Name)); alt != "" {
+			return alt
+		}
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func formatFloatStat(v float64) string {

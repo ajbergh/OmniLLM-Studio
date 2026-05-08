@@ -391,6 +391,41 @@ html, body, #root {
   color: var(--color-success);
 }
 
+.message-content a.sports-news-image-link {
+  display: block;
+  max-width: 42rem;
+  margin: 0.65rem 0 0.85rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.message-content img.sports-news-image {
+  display: block;
+  width: 100%;
+  max-height: 18rem;
+  object-fit: cover;
+  border-radius: 0.35rem;
+  border: 1px solid var(--color-border);
+  box-shadow: none;
+}
+
+.message-content .sports-news-card {
+  max-width: 100%;
+  padding: 0.9rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+}
+
+.message-content .sports-news-card article {
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.message-content .sports-news-card article:first-of-type {
+  border-top: 0;
+}
+
 .message-content hr {
   border: none;
   border-top: 1px solid var(--color-border);

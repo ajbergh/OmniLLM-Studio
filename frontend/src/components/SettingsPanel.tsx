@@ -898,6 +898,60 @@ function WordDocGenerationCard() {
 }
 
 // ============================================
+// News Lookup Card (used in General Tab)
+// ============================================
+
+function NewsLookupCard() {
+  const { isEnabled, updateFeature } = useFeatureFlagStore();
+  const enabled = isEnabled('news_lookup_enabled');
+
+  const toggle = async () => {
+    await updateFeature('news_lookup_enabled', !enabled);
+  };
+
+  return (
+    <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center shadow-md shadow-amber-500/10">
+          <svg className="text-amber-400" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0v-9" />
+            <path d="M10 7h6" />
+            <path d="M10 11h6" />
+            <path d="M10 15h4" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-sm font-bold">News Lookup</h3>
+          <p className="text-[11px] text-text-muted">Curated non-sports news via Actually Relevant API</p>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between py-2">
+        <div>
+          <label className="text-xs font-medium text-text-secondary block">News Lookup Enabled</label>
+          <p className="text-[10px] text-text-muted mt-0.5">
+            When you ask about current events, headlines, or news topics, the response is generated from the Actually Relevant public news API — no API key required
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={toggle}
+          className={`relative w-10 h-5 rounded-full transition-colors ${
+            enabled ? 'bg-primary' : 'bg-border'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+              enabled ? 'translate-x-5' : ''
+            }`}
+          />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
 // General Tab
 // ============================================
 
@@ -1112,9 +1166,6 @@ function GeneralTab() {
           </motion.button>
         </div>
       </div>
-
-      {/* Word Document Generation */}
-      <WordDocGenerationCard />
 
       {/* App info */}
       <div className="p-5 rounded-2xl bg-surface-alt border border-border">
@@ -1500,6 +1551,7 @@ function ToolsTab() {
 
   return (
     <div className="space-y-6">
+      {/* Tool Permissions */}
       <div className="p-5 rounded-2xl bg-surface-alt border border-border">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-orange-500/20 to-amber-500/20 flex items-center justify-center shadow-md shadow-orange-500/10">
@@ -1548,6 +1600,12 @@ function ToolsTab() {
           </div>
         )}
       </div>
+
+      {/* Document Generation */}
+      <WordDocGenerationCard />
+
+      {/* News Lookup */}
+      <NewsLookupCard />
     </div>
   );
 }

@@ -121,6 +121,7 @@ func versionedMigrations() []Migration {
 		{Version: 26, Name: "conversation_kind", SQL: migrationConversationKind},
 		{Version: 27, Name: "word_doc_generation_flag", SQL: migrationWordDocGenerationFlag},
 		{Version: 28, Name: "sports_lookup_flag", SQL: migrationSportsLookupFlag},
+		{Version: 29, Name: "news_lookup_flag", SQL: migrationNewsLookupFlag},
 	}
 }
 
@@ -740,6 +741,13 @@ ON CONFLICT(key) DO NOTHING;
 const migrationSportsLookupFlag = `
 INSERT INTO feature_flags (key, enabled, metadata)
 VALUES ('sports_lookup_enabled', 1, 'Retrieve current sports scores, schedules, and standings from ESPN')
+ON CONFLICT(key) DO NOTHING;
+`
+
+// V29: Seed news_lookup feature flag as enabled.
+const migrationNewsLookupFlag = `
+INSERT INTO feature_flags (key, enabled, metadata)
+VALUES ('news_lookup_enabled', 1, 'Look up current non-sports news via the Actually Relevant News API')
 ON CONFLICT(key) DO NOTHING;
 `
 
