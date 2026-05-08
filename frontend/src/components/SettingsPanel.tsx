@@ -1167,12 +1167,6 @@ function GeneralTab() {
         </div>
       </div>
 
-      {/* Word Document Generation */}
-      <WordDocGenerationCard />
-
-      {/* News Lookup */}
-      <NewsLookupCard />
-
       {/* App info */}
       <div className="p-5 rounded-2xl bg-surface-alt border border-border">
         <div className="flex items-center gap-3 mb-4">
@@ -1557,6 +1551,7 @@ function ToolsTab() {
 
   return (
     <div className="space-y-6">
+      {/* Tool Permissions */}
       <div className="p-5 rounded-2xl bg-surface-alt border border-border">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-orange-500/20 to-amber-500/20 flex items-center justify-center shadow-md shadow-orange-500/10">
@@ -1605,6 +1600,12 @@ function ToolsTab() {
           </div>
         )}
       </div>
+
+      {/* Document Generation */}
+      <WordDocGenerationCard />
+
+      {/* News Lookup */}
+      <NewsLookupCard />
     </div>
   );
 }
