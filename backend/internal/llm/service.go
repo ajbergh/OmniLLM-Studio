@@ -758,7 +758,7 @@ func getDefaultImageModel(providerType string) string {
 	case "together":
 		return "black-forest-labs/FLUX.1-schnell-Free"
 	case "openrouter":
-		return "openai/dall-e-3"
+		return "google/gemini-2.5-flash-image"
 	case "gemini":
 		return "gemini-2.0-flash-preview-image-generation"
 	default:
@@ -799,6 +799,169 @@ func sizeToGeminiAspectRatio(size string) string {
 		return r
 	}
 	return "1:1"
+}
+
+// sizeToOpenRouterAspectRatio converts an OpenAI-style WxH size string to an
+// OpenRouter image_config aspect_ratio string. Returns "" for unknown sizes.
+func sizeToOpenRouterAspectRatio(size string) string {
+	known := map[string]string{
+		"1024x1024": "1:1",
+		"832x1248":  "2:3",
+		"1024x1536": "2:3",
+		"1248x832":  "3:2",
+		"1536x1024": "3:2",
+		"864x1184":  "3:4",
+		"768x1024":  "3:4",
+		"1184x864":  "4:3",
+		"1024x768":  "4:3",
+		"896x1152":  "4:5",
+		"1024x1280": "4:5",
+		"1152x896":  "5:4",
+		"1280x1024": "5:4",
+		"768x1344":  "9:16",
+		"576x1024":  "9:16",
+		"1024x1792": "9:16",
+		"1344x768":  "16:9",
+		"1024x576":  "16:9",
+		"1792x1024": "16:9",
+		"1536x672":  "21:9",
+		"1344x576":  "21:9",
+	}
+	if r, ok := known[size]; ok {
+		return r
+	}
+	return ""
+}
+
+// openrouterImageModalities returns the correct "modalities" array for an OpenRouter
+// image model. Models that support text+image output (Gemini, OpenAI GPT-5 image)
+// need ["image", "text"]. Image-only models (FLUX, Recraft, Sourceful, ByteDance)
+// need ["image"] — sending ["image", "text"] to them returns 404.
+func openrouterImageModalities(model string) []string {
+	lower := strings.ToLower(model)
+	if strings.HasPrefix(lower, "google/gemini") {
+		return []string{"image", "text"}
+	}
+	// OpenAI GPT-5 image models output both text and image
+	if strings.HasPrefix(lower, "openai/gpt-") && strings.Contains(lower, "image") {
+		return []string{"image", "text"}
+	}
+	return []string{"image"}
+}
+
+// openrouterImageGenerate uses the OpenRouter /chat/completions endpoint for
+// image generation. OpenRouter image models are accessed via chat completions
+// with the "modalities" parameter — the /images/generations endpoint returns 404.
+func (s *Service) openrouterImageGenerate(ctx context.Context, baseURL, apiKey, model string, req ImageRequest) (*ImageResponse, error) {
+	endpoint := baseURL + "/chat/completions"
+
+	messages := []map[string]interface{}{
+		{"role": "user", "content": req.Prompt},
+	}
+
+	body := map[string]interface{}{
+		"model":      model,
+		"messages":   messages,
+		"modalities": openrouterImageModalities(model),
+		"stream":     false,
+	}
+
+	// Map WxH size → OpenRouter aspect_ratio in image_config
+	if req.Size != "" && req.Size != "auto" {
+		if ar := sizeToOpenRouterAspectRatio(req.Size); ar != "" {
+			body["image_config"] = map[string]interface{}{
+				"aspect_ratio": ar,
+			}
+		}
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	log.Printf("[openrouter-image] POST %s model=%s", endpoint, model)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	imgClient := &http.Client{Timeout: 180 * time.Second}
+	resp, err := imgClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("provider returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// OpenRouter returns images in choices[0].message.images[].image_url.url
+	// as base64 data URLs: "data:image/png;base64,<b64>..."
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+				Images  []struct {
+					Type     string `json:"type"`
+					ImageURL struct {
+						URL string `json:"url"`
+					} `json:"image_url"`
+				} `json:"images"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	var images []ImageResult
+	for _, choice := range result.Choices {
+		revisedPrompt := choice.Message.Content
+		for _, img := range choice.Message.Images {
+			dataURL := img.ImageURL.URL
+			// Strip the "data:image/...;base64," prefix to get raw base64.
+			b64 := dataURL
+			if idx := strings.Index(dataURL, ","); idx >= 0 {
+				b64 = dataURL[idx+1:]
+			}
+			if b64 != "" {
+				images = append(images, ImageResult{
+					B64JSON:       b64,
+					RevisedPrompt: revisedPrompt,
+				})
+			}
+		}
+	}
+
+	if len(images) == 0 {
+		snippet := string(respBody)
+		if len(snippet) > 1000 {
+			snippet = snippet[:1000] + "..."
+		}
+		log.Printf("[openrouter-image] no images found in response: %s", snippet)
+		return nil, fmt.Errorf("no images returned by OpenRouter")
+	}
+
+	log.Printf("[openrouter-image] success: %d image(s) from model %s", len(images), model)
+
+	return &ImageResponse{
+		Images:   images,
+		Provider: "openrouter",
+		Model:    model,
+	}, nil
 }
 
 // geminiImageGenerate uses the native Gemini generateContent API for image generation.
@@ -1169,6 +1332,12 @@ func (s *Service) ImageGenerate(ctx context.Context, req ImageRequest) (*ImageRe
 	// Route Gemini to its native generateContent API
 	if strings.EqualFold(providerType, "gemini") {
 		return s.geminiImageGenerate(ctx, baseURL, apiKey, model, req)
+	}
+
+	// Route OpenRouter to its chat/completions-based image API
+	// (OpenRouter does not support /images/generations — it returns 404)
+	if strings.EqualFold(providerType, "openrouter") {
+		return s.openrouterImageGenerate(ctx, baseURL, apiKey, model, req)
 	}
 
 	// Route edit requests to the OpenAI /images/edits multipart endpoint

@@ -196,9 +196,47 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 		return ImageCapabilities{
 			SupportsGeneration: true,
 			MaxVariants:        1,
-			SupportedSizes:     []string{"1024x1024", "1792x1024", "1024x1792"},
-			ImageModels:        []string{"openai/dall-e-3", "openai/gpt-image-1"},
-			DefaultImageModel:  "openai/dall-e-3",
+			// Sizes map to OpenRouter aspect_ratio values via sizeToOpenRouterAspectRatio.
+			SupportedSizes: []string{
+				"1024x1024", // 1:1
+				"832x1248",  // 2:3
+				"1248x832",  // 3:2
+				"864x1184",  // 3:4
+				"1184x864",  // 4:3
+				"896x1152",  // 4:5
+				"1152x896",  // 5:4
+				"768x1344",  // 9:16
+				"1344x768",  // 16:9
+				"1536x672",  // 21:9
+			},
+			ImageModels: []string{
+				// Google / Gemini (text+image output)
+				"google/gemini-2.5-flash-image",
+				"google/gemini-3.1-flash-image-preview",
+				"google/gemini-3-pro-image-preview",
+				// OpenAI (text+image output)
+				"openai/gpt-5.4-image-2",
+				"openai/gpt-5-image",
+				"openai/gpt-5-image-mini",
+				// Black Forest Labs / FLUX (image-only; note: dot notation)
+				"black-forest-labs/flux.2-pro",
+				"black-forest-labs/flux.2-max",
+				"black-forest-labs/flux.2-flex",
+				"black-forest-labs/flux.2-klein-4b",
+				// Recraft (image-only)
+				"recraft/recraft-v3",
+				"recraft/recraft-v4",
+				"recraft/recraft-v4-pro",
+				// Sourceful (image-only)
+				"sourceful/riverflow-v2-fast",
+				"sourceful/riverflow-v2-fast-preview",
+				"sourceful/riverflow-v2-pro",
+				"sourceful/riverflow-v2-max-preview",
+				"sourceful/riverflow-v2-standard-preview",
+				// ByteDance (image-only)
+				"bytedance-seed/seedream-4.5",
+			},
+			DefaultImageModel: "google/gemini-2.5-flash-image",
 		}
 	default:
 		// Default: generation only
