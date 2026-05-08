@@ -573,14 +573,19 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	provider, model := h.resolveProviderModel(req.Override, convo)
 
 	// Gate: verify the provider supports editing before proceeding
-	providerType, err := h.llmSvc.ResolveProviderType(provider)
+	resolvedModel, providerType, err := h.llmSvc.ResolveImageModel(provider, model)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "cannot resolve provider: "+err.Error())
 		return
 	}
-	caps := llm.GetImageCapabilities(providerType)
+	model = resolvedModel
+	caps := llm.GetEffectiveImageCapabilities(providerType, model)
 	if !caps.SupportsEditing {
-		respondError(w, http.StatusBadRequest, "selected provider does not support image editing")
+		respondError(w, http.StatusBadRequest, "selected provider/model does not support image editing")
+		return
+	}
+	if req.MaskAttachmentID != "" && !caps.SupportsMasking {
+		respondError(w, http.StatusBadRequest, "selected provider/model does not support masked image editing")
 		return
 	}
 

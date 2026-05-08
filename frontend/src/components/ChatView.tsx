@@ -21,7 +21,7 @@ import { api, templateApi, branchApi, agentApi } from '../api';
 import { matchesShortcut } from '../shortcuts';
 import type { Message, WebSearchResult, MessageMetadata, PromptTemplate, UsageSummary } from '../types';
 import { AgentEventType } from '../types';
-import { getModelReasoningLevels, type ReasoningEffortLevel } from '../models';
+import { getModelReasoningLevels, isFreeModel, type ReasoningEffortLevel } from '../models';
 
 type PendingUploadStatus = 'pending' | 'uploading' | 'failed';
 
@@ -152,6 +152,7 @@ export function ChatView() {
     activeProvider?.type || '',
     activeConvo?.default_model || ''
   );
+  const activeModelIsFree = isFreeModel(activeProvider?.type || '', activeConvo?.default_model);
 
   // Find the most recent generated-image attachment ID in the conversation.
   // Image generation messages have metadata_json containing "image_generation".
@@ -1150,6 +1151,11 @@ export function ChatView() {
               <span className="text-[10px] text-text-muted/40 flex min-w-0 items-center gap-1">
                 <Sparkles size={8} />
                 <span className="truncate">{activeConvo.default_model}</span>
+                {activeModelIsFree && (
+                  <span className="shrink-0 rounded border border-success/25 bg-success/10 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-success/80">
+                    FREE
+                  </span>
+                )}
               </span>
             )}
           </div>

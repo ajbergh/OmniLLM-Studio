@@ -5,10 +5,18 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import { toast } from 'sonner';
 import { api } from '../api';
-import { KNOWN_MODELS, getKnownChatModels } from '../models';
+import { KNOWN_MODELS, getKnownChatModels, isFreeModel } from '../models';
 
 interface Props {
   conversationId: string;
+}
+
+function FreeModelBadge() {
+  return (
+    <span className="shrink-0 rounded-md border border-success/30 bg-success/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-success">
+      FREE
+    </span>
+  );
 }
 
 export function ModelSelector({ conversationId }: Props) {
@@ -66,6 +74,10 @@ export function ModelSelector({ conversationId }: Props) {
   const fallbackProvider = enabledProviders[0];
   const effectiveModel = currentModel || fallbackProvider?.default_model || fallbackProvider?.name;
   const effectiveProvider = currentProvider || fallbackProvider?.id;
+  const effectiveProviderProfile = enabledProviders.find(
+    (p) => p.id === effectiveProvider || p.name === effectiveProvider
+  ) || fallbackProvider;
+  const effectiveModelIsFree = isFreeModel(effectiveProviderProfile?.type || '', effectiveModel);
 
   const handleSelect = async (providerId: string, model: string) => {
     await updateConversation(conversationId, {
@@ -119,6 +131,7 @@ export function ModelSelector({ conversationId }: Props) {
       >
         <Cpu size={13} className={open ? 'text-primary' : 'text-text-muted'} />
         <span className="truncate max-w-[180px] font-medium">{displayLabel}</span>
+        {effectiveModelIsFree && <FreeModelBadge />}
         <ChevronDown
           size={13}
           className={clsx(
@@ -192,6 +205,7 @@ export function ModelSelector({ conversationId }: Props) {
                         {/* Dynamic/known models */}
                         {filtered.map((model) => {
                           const isActive = effectiveModel === model && effectiveProvider === provider.id;
+                          const modelIsFree = isFreeModel(provider.type, model);
                           return (
                             <button
                               key={model}
@@ -204,7 +218,10 @@ export function ModelSelector({ conversationId }: Props) {
                               )}
                               style={{ width: 'calc(100% - 8px)' }}
                             >
-                              <span className="truncate">{model}</span>
+                              <span className="min-w-0 flex flex-1 items-center gap-1.5">
+                                <span className="truncate">{model}</span>
+                                {modelIsFree && <FreeModelBadge />}
+                              </span>
                               {isActive && <Check size={12} className="text-primary shrink-0" />}
                             </button>
                           );
@@ -222,10 +239,13 @@ export function ModelSelector({ conversationId }: Props) {
                                 effectiveModel === provider.default_model && effectiveProvider === provider.id
                                   ? 'text-primary font-medium bg-primary/5'
                                   : ''
-                              )}
-                              style={{ width: 'calc(100% - 8px)' }}
-                            >
-                              <span className="truncate">{provider.default_model}</span>
+                            )}
+                            style={{ width: 'calc(100% - 8px)' }}
+                          >
+                              <span className="min-w-0 flex flex-1 items-center gap-1.5">
+                                <span className="truncate">{provider.default_model}</span>
+                                {isFreeModel(provider.type, provider.default_model) && <FreeModelBadge />}
+                              </span>
                               {effectiveModel === provider.default_model && effectiveProvider === provider.id && (
                                 <Check size={12} className="text-primary shrink-0" />
                               )}

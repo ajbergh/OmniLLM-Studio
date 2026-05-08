@@ -186,6 +186,28 @@ func (s *Service) ResolveProviderType(providerName string) (string, error) {
 	return providerType, nil
 }
 
+// ResolveImageModel returns the concrete image model that would be used for an
+// image request, plus the provider type. It mirrors ImageGenerate's model
+// fallback without making a provider API request.
+func (s *Service) ResolveImageModel(providerName, requestedModel string) (string, string, error) {
+	provider, err := s.resolveProviderProfile(providerName)
+	if err != nil {
+		return "", "", err
+	}
+
+	model := strings.TrimSpace(requestedModel)
+	if model == "" {
+		if provider.DefaultImageModel != nil {
+			model = strings.TrimSpace(*provider.DefaultImageModel)
+		}
+		if model == "" {
+			model = getDefaultImageModel(provider.Type)
+		}
+	}
+
+	return model, provider.Type, nil
+}
+
 func (s *Service) extractProviderDetails(p models.ProviderProfile) (baseURL, apiKey, model, providerType string, err error) {
 	key, err := s.providerRepo.GetAPIKey(p.ID)
 	if err != nil {
@@ -849,6 +871,56 @@ func openrouterImageModalities(model string) []string {
 	return []string{"image"}
 }
 
+func openrouterImageContent(req ImageRequest) interface{} {
+	parts := []map[string]interface{}{
+		{"type": "text", "text": req.Prompt},
+	}
+	hasImage := false
+
+	addImage := func(ref ReferenceImage) {
+		if ref.Data == "" {
+			return
+		}
+		mimeType := strings.TrimSpace(ref.MimeType)
+		if mimeType == "" {
+			mimeType = "image/png"
+		}
+		parts = append(parts, map[string]interface{}{
+			"type": "image_url",
+			"image_url": map[string]interface{}{
+				"url": "data:" + mimeType + ";base64," + ref.Data,
+			},
+		})
+		hasImage = true
+	}
+
+	if req.ReferenceImage != nil {
+		addImage(*req.ReferenceImage)
+	}
+	for _, ref := range req.ReferenceImages {
+		addImage(ref)
+	}
+	if req.MaskImage != nil {
+		parts = append(parts, map[string]interface{}{
+			"type": "text",
+			"text": "Use this mask to identify the region to edit.",
+		})
+		addImage(*req.MaskImage)
+	}
+	for _, ref := range req.StyleReferenceImages {
+		parts = append(parts, map[string]interface{}{
+			"type": "text",
+			"text": "Use this image as a style reference.",
+		})
+		addImage(ref)
+	}
+
+	if !hasImage {
+		return req.Prompt
+	}
+	return parts
+}
+
 // openrouterImageGenerate uses the OpenRouter /chat/completions endpoint for
 // image generation. OpenRouter image models are accessed via chat completions
 // with the "modalities" parameter — the /images/generations endpoint returns 404.
@@ -856,7 +928,7 @@ func (s *Service) openrouterImageGenerate(ctx context.Context, baseURL, apiKey, 
 	endpoint := baseURL + "/chat/completions"
 
 	messages := []map[string]interface{}{
-		{"role": "user", "content": req.Prompt},
+		{"role": "user", "content": openrouterImageContent(req)},
 	}
 
 	body := map[string]interface{}{
@@ -866,13 +938,19 @@ func (s *Service) openrouterImageGenerate(ctx context.Context, baseURL, apiKey, 
 		"stream":     false,
 	}
 
+	imageConfig := map[string]interface{}{}
+
 	// Map WxH size → OpenRouter aspect_ratio in image_config
 	if req.Size != "" && req.Size != "auto" {
 		if ar := sizeToOpenRouterAspectRatio(req.Size); ar != "" {
-			body["image_config"] = map[string]interface{}{
-				"aspect_ratio": ar,
-			}
+			imageConfig["aspect_ratio"] = ar
 		}
+	}
+	if req.Strength != nil && strings.HasPrefix(strings.ToLower(model), "recraft/") {
+		imageConfig["strength"] = *req.Strength
+	}
+	if len(imageConfig) > 0 {
+		body["image_config"] = imageConfig
 	}
 
 	jsonBody, err := json.Marshal(body)

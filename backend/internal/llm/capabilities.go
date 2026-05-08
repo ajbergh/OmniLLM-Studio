@@ -1,5 +1,7 @@
 package llm
 
+import "strings"
+
 // ImageCapabilities describes what image operations a provider/model supports.
 type ImageCapabilities struct {
 	SupportsGeneration       bool     `json:"supports_generation"`
@@ -31,6 +33,36 @@ type ModelImageCapabilities struct {
 
 func boolPtr(b bool) *bool { return &b }
 func intPtr(i int) *int    { return &i }
+
+// GetEffectiveImageCapabilities returns provider capabilities with any
+// model-specific overrides applied.
+func GetEffectiveImageCapabilities(providerType, model string) ImageCapabilities {
+	caps := GetImageCapabilities(providerType)
+	model = strings.TrimSpace(model)
+	if model == "" || caps.ModelOverrides == nil {
+		return caps
+	}
+	overrides, ok := caps.ModelOverrides[model]
+	if !ok {
+		return caps
+	}
+	if overrides.SupportsEditing != nil {
+		caps.SupportsEditing = *overrides.SupportsEditing
+	}
+	if overrides.SupportsMasking != nil {
+		caps.SupportsMasking = *overrides.SupportsMasking
+	}
+	if overrides.SupportsContentReference != nil {
+		caps.SupportsContentReference = *overrides.SupportsContentReference
+	}
+	if overrides.MaxVariants != nil {
+		caps.MaxVariants = *overrides.MaxVariants
+	}
+	if overrides.SupportedSizes != nil {
+		caps.SupportedSizes = overrides.SupportedSizes
+	}
+	return caps
+}
 
 // GetImageCapabilities returns the capability matrix for a known provider type.
 func GetImageCapabilities(providerType string) ImageCapabilities {
@@ -193,6 +225,10 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 			DefaultImageModel: "black-forest-labs/FLUX.1-schnell-Free",
 		}
 	case "openrouter":
+		openRouterEditModel := ModelImageCapabilities{
+			SupportsEditing:          boolPtr(true),
+			SupportsContentReference: boolPtr(true),
+		}
 		return ImageCapabilities{
 			SupportsGeneration: true,
 			MaxVariants:        1,
@@ -237,6 +273,29 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 				"bytedance-seed/seedream-4.5",
 			},
 			DefaultImageModel: "google/gemini-2.5-flash-image",
+			ModelOverrides: map[string]ModelImageCapabilities{
+				// OpenRouter image models that accept image input and can perform
+				// image-to-image edits after an initial generation.
+				"google/gemini-2.5-flash-image":           openRouterEditModel,
+				"google/gemini-3.1-flash-image-preview":   openRouterEditModel,
+				"google/gemini-3-pro-image-preview":       openRouterEditModel,
+				"openai/gpt-5.4-image-2":                  openRouterEditModel,
+				"openai/gpt-5-image":                      openRouterEditModel,
+				"openai/gpt-5-image-mini":                 openRouterEditModel,
+				"black-forest-labs/flux.2-pro":            openRouterEditModel,
+				"black-forest-labs/flux.2-max":            openRouterEditModel,
+				"black-forest-labs/flux.2-flex":           openRouterEditModel,
+				"black-forest-labs/flux.2-klein-4b":       openRouterEditModel,
+				"recraft/recraft-v3":                      openRouterEditModel,
+				"recraft/recraft-v4":                      openRouterEditModel,
+				"recraft/recraft-v4-pro":                  openRouterEditModel,
+				"sourceful/riverflow-v2-fast":             openRouterEditModel,
+				"sourceful/riverflow-v2-fast-preview":     openRouterEditModel,
+				"sourceful/riverflow-v2-pro":              openRouterEditModel,
+				"sourceful/riverflow-v2-max-preview":      openRouterEditModel,
+				"sourceful/riverflow-v2-standard-preview": openRouterEditModel,
+				"bytedance-seed/seedream-4.5":             openRouterEditModel,
+			},
 		}
 	default:
 		// Default: generation only

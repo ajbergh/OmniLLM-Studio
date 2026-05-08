@@ -6,7 +6,7 @@ import { useTheme, THEMES } from '../theme';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { getKnownChatModels, getKnownImageModels } from '../models';
+import { formatModelOptionLabel, getKnownChatModels, getKnownImageModels, isFreeModel } from '../models';
 
 const PROVIDER_TYPES = [
   { value: 'openai', label: 'OpenAI', icon: Zap, color: 'from-emerald-500/20 to-green-500/20', iconColor: 'text-emerald-400' },
@@ -22,6 +22,14 @@ const PROVIDER_TYPES = [
 
 function getProviderMeta(type: string) {
   return PROVIDER_TYPES.find((t) => t.value === type) || PROVIDER_TYPES[PROVIDER_TYPES.length - 1];
+}
+
+function FreeModelBadge() {
+  return (
+    <span className="shrink-0 rounded-md border border-success/30 bg-success/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-success">
+      FREE
+    </span>
+  );
 }
 
 type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'tools' | 'pricing' | 'auth';
@@ -409,7 +417,7 @@ function ProvidersTab({
                       >
                         <option value="">Select a model...</option>
                         {newProviderChatModels.map((m) => (
-                          <option key={m} value={m}>{m}</option>
+                          <option key={m} value={m}>{formatModelOptionLabel(newProvider.type, m)}</option>
                         ))}
                       </select>
                     </div>
@@ -666,10 +674,10 @@ function ProviderCard({
           >
             <option value="">Select a model...</option>
             {chatModelOptions.map((m) => (
-              <option key={m} value={m}>{m}</option>
+              <option key={m} value={m}>{formatModelOptionLabel(provider.type, m)}</option>
             ))}
             {provider.default_model && !chatModelOptions.includes(provider.default_model) && (
-              <option value={provider.default_model}>{provider.default_model} (custom)</option>
+              <option value={provider.default_model}>{formatModelOptionLabel(provider.type, provider.default_model)} (custom)</option>
             )}
           </select>
         </div>
@@ -677,7 +685,9 @@ function ProviderCard({
         provider.default_model && (
           <div className="flex items-center gap-1.5 text-xs text-text-muted">
             <Cpu size={10} />
-            <span className="font-medium">Model:</span> {provider.default_model}
+            <span className="font-medium">Model:</span>
+            <span className="truncate">{provider.default_model}</span>
+            {isFreeModel(provider.type, provider.default_model) && <FreeModelBadge />}
           </div>
         )
       )}

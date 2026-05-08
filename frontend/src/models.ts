@@ -75,26 +75,111 @@ const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
   ollama: { chat: [] },
   openrouter: {
     chat: [
+      // Routers and free-tier models
+      'openrouter/auto',
+      'openrouter/free',
+      'openrouter/owl-alpha',
+      'google/gemma-4-31b-it:free',
+      'google/gemma-4-26b-a4b-it:free',
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'nvidia/nemotron-3-nano-30b-a3b:free',
+      'qwen/qwen3-next-80b-a3b-instruct:free',
+      'qwen/qwen3-coder:free',
+      'tencent/hy3-preview:free',
+      'minimax/minimax-m2.5:free',
+      'meta-llama/llama-3.3-70b-instruct:free',
+      'meta-llama/llama-3.2-3b-instruct:free',
+      'openai/gpt-oss-120b:free',
+      'openai/gpt-oss-20b:free',
+
+      // OpenAI
       'openai/gpt-5.5',
+      'openai/gpt-5.5-pro',
       'openai/gpt-5.4',
-      'openai/gpt-5.4-mini',
       'openai/gpt-5.4-pro',
+      'openai/gpt-5.4-mini',
+      'openai/gpt-5.4-nano',
       'openai/gpt-5.2',
+      'openai/gpt-5.2-pro',
+      'openai/gpt-5',
+      'openai/gpt-5-pro',
+      'openai/gpt-5-mini',
+      'openai/gpt-5-nano',
+      'openai/gpt-5.1',
       'openai/gpt-4.1',
-      'openai/gpt-4o',
-      'anthropic/claude-opus-4-7',
-      'anthropic/claude-opus-4-6',
-      'anthropic/claude-sonnet-4-6',
+      'openai/gpt-4.1-mini',
+      'openai/gpt-4.1-nano',
+      'openai/o3',
+      'openai/o3-mini',
+      'openai/o3-pro',
+      'openai/o4-mini',
+
+      // Anthropic
+      'anthropic/claude-opus-4.7',
+      'anthropic/claude-opus-4.6',
+      'anthropic/claude-opus-4.6-fast',
+      'anthropic/claude-sonnet-4.6',
+      'anthropic/claude-sonnet-4.5',
+      'anthropic/claude-sonnet-4',
+      'anthropic/claude-haiku-4.5',
+
+      // Google / Gemini
       'google/gemini-3.1-pro-preview',
+      'google/gemini-3.1-flash-lite',
       'google/gemini-3.1-flash-lite-preview',
+      'google/gemini-3-flash-preview',
       'google/gemini-2.5-pro',
       'google/gemini-2.5-flash',
-      'meta-llama/llama-4-maverick',
-      'meta-llama/llama-3.3-70b-instruct',
+      'google/gemini-2.5-flash-lite',
+
+      // DeepSeek
+      'deepseek/deepseek-v4-pro',
+      'deepseek/deepseek-v4-flash',
       'deepseek/deepseek-r1',
+      'deepseek/deepseek-chat',
+
+      // Meta / Llama
+      'meta-llama/llama-4-maverick',
+      'meta-llama/llama-4-scout',
+      'meta-llama/llama-3.3-70b-instruct',
+
+      // Qwen
+      'qwen/qwen3.6-plus',
+      'qwen/qwen3.6-flash',
+      'qwen/qwen3.5-plus-20260420',
+      'qwen/qwen3.5-flash-02-23',
       'qwen/qwen3-235b-a22b',
+      'qwen/qwen3-coder',
+      'qwen/qwen3-max',
+      'qwen/qwen-plus',
+
+      // xAI / Grok
+      'x-ai/grok-4.20',
+      'x-ai/grok-4.20-multi-agent',
+      'x-ai/grok-4.3',
+      'x-ai/grok-4',
+      'x-ai/grok-4-fast',
+
+      // Mistral
       'mistralai/mistral-medium-3-5',
       'mistralai/mistral-large-2512',
+      'mistralai/mistral-small-2603',
+      'mistralai/codestral-2508',
+
+      // Other useful OpenRouter text models
+      'cohere/command-a',
+      'amazon/nova-lite-v1',
+      'amazon/nova-pro-v1',
+      'amazon/nova-2-lite-v1',
+      'minimax/minimax-m2.5',
+      'minimax/minimax-m2.7',
+      'inclusionai/ling-2.6-1t',
+      'inclusionai/ling-2.6-flash',
+      'bytedance-seed/seed-2.0-lite',
+      'bytedance-seed/seed-2.0-mini',
+      'z-ai/glm-5.1',
+      'z-ai/glm-5',
+      'z-ai/glm-4.7',
     ],
     image: [
       // Google / Gemini (text+image output)
@@ -231,6 +316,22 @@ export const KNOWN_IMAGE_MODELS: Record<string, string[]> = Object.fromEntries(
     .map(([provider, catalog]) => [provider, [...(catalog.image || [])]])
 ) as Record<string, string[]>;
 
+const FREE_OPENROUTER_MODELS = new Set([
+  'openrouter/free',
+  'openrouter/owl-alpha',
+  'google/lyria-3-clip-preview',
+  'google/lyria-3-pro-preview',
+]);
+
+export function isFreeModel(providerType: string, model?: string): boolean {
+  if (providerType.toLowerCase() !== 'openrouter' || !model) return false;
+  return model.endsWith(':free') || FREE_OPENROUTER_MODELS.has(model);
+}
+
+export function formatModelOptionLabel(providerType: string, model: string): string {
+  return isFreeModel(providerType, model) ? `${model} (FREE)` : model;
+}
+
 export function getKnownChatModels(providerType: string): string[] {
   return [...(PROVIDER_MODEL_CATALOG[providerType.toLowerCase()]?.chat || [])];
 }
@@ -267,10 +368,14 @@ const REASONING_EFFORT_MODELS: Record<string, string[]> = {
     'claude-sonnet-4-20250514', 'claude-3-7-sonnet-20250219',
   ],
   openrouter: [
-    'openai/gpt-5.5', 'openai/gpt-5.4', 'openai/gpt-5.4-mini', 'openai/gpt-5.4-pro',
-    'openai/gpt-5.2', 'openai/gpt-4.1', 'openai/gpt-4o',
-    'anthropic/claude-opus-4-7', 'anthropic/claude-opus-4-6',
-    'anthropic/claude-sonnet-4-6',
+    'openai/gpt-5.5', 'openai/gpt-5.5-pro',
+    'openai/gpt-5.4', 'openai/gpt-5.4-mini', 'openai/gpt-5.4-nano', 'openai/gpt-5.4-pro',
+    'openai/gpt-5.2', 'openai/gpt-5.2-pro',
+    'openai/gpt-5.1', 'openai/gpt-5', 'openai/gpt-5-pro', 'openai/gpt-5-mini', 'openai/gpt-5-nano',
+    'openai/gpt-4.1', 'openai/gpt-4.1-mini', 'openai/gpt-4.1-nano',
+    'openai/o3-pro', 'openai/o4-mini', 'openai/o3', 'openai/o3-mini',
+    'anthropic/claude-opus-4.7', 'anthropic/claude-opus-4.6',
+    'anthropic/claude-sonnet-4.6', 'anthropic/claude-sonnet-4.5',
   ],
   groq: [
     'openai/gpt-oss-120b', 'openai/gpt-oss-20b',

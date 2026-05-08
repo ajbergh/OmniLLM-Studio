@@ -103,14 +103,16 @@ func DefaultPricingRules() []models.PricingRule {
 
 		// ---- OpenRouter (pass-through cost with markup) ----
 		// These are approximate; actual cost depends on the routed model.
+		{"openrouter", "*:free", 0.00, 0.00},
+		{"openrouter", "openrouter/free", 0.00, 0.00},
+		{"openrouter", "openrouter/owl-alpha", 0.00, 0.00},
+		{"openrouter", "google/lyria-3*", 0.00, 0.00},
 		{"openrouter", "openai/gpt-5.5*", 6.00, 24.00},
 		{"openrouter", "openai/gpt-5.4-mini*", 0.20, 0.80},
 		{"openrouter", "openai/gpt-5.4*", 3.00, 12.00},
 		{"openrouter", "openai/gpt-5*", 3.00, 12.00},
 		{"openrouter", "openai/gpt-4.1-mini*", 0.40, 1.60},
 		{"openrouter", "openai/gpt-4.1*", 2.00, 8.00},
-		{"openrouter", "openai/gpt-4o-mini*", 0.15, 0.60},
-		{"openrouter", "openai/gpt-4o*", 2.50, 10.00},
 		{"openrouter", "anthropic/claude-opus-4*", 15.00, 75.00},
 		{"openrouter", "anthropic/claude-sonnet-4*", 3.00, 15.00},
 		{"openrouter", "anthropic/claude-3-5-sonnet*", 3.00, 15.00},
