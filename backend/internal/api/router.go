@@ -11,6 +11,7 @@ import (
 
 	"github.com/ajbergh/omnillm-studio/internal/agent"
 	"github.com/ajbergh/omnillm-studio/internal/analytics"
+	"github.com/ajbergh/omnillm-studio/internal/artifacts"
 	"github.com/ajbergh/omnillm-studio/internal/auth"
 	"github.com/ajbergh/omnillm-studio/internal/bundle"
 	"github.com/ajbergh/omnillm-studio/internal/config"
@@ -19,6 +20,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/ajbergh/omnillm-studio/internal/search"
+	"github.com/ajbergh/omnillm-studio/internal/sports"
 	"github.com/ajbergh/omnillm-studio/internal/templates"
 	"github.com/ajbergh/omnillm-studio/internal/tools"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
@@ -90,7 +92,8 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	// Handlers
 	convoHandler := NewConversationHandler(convoRepo, vectorStore)
 	wordGen := wordgen.NewGenerator(cfg.AttachmentsDir)
-	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, featureFlagRepo)
+	artifactGen := artifacts.NewGenerator(cfg.AttachmentsDir)
+	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo)
 	providerHandler := NewProviderHandler(providerRepo)
 	settingsHandler := NewSettingsHandler(settingsRepo, orchestrator)
 	wsHandler := NewWebSearchHandler(orchestrator)
@@ -107,6 +110,7 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	toolRegistry.MustRegister(tools.NewCalculatorTool())
 	toolRegistry.MustRegister(tools.NewURLFetchTool())
 	toolRegistry.MustRegister(tools.NewWordDocTool(wordGen, attachRepo))
+	toolRegistry.MustRegister(sports.NewSportsLookupTool(sports.NewESPNClient()))
 	toolExecutor := tools.NewExecutor(toolRegistry, toolPermRepo.PolicyResolver(), 0)
 	toolHandler := NewToolHandler(toolRegistry, toolExecutor, toolPermRepo)
 

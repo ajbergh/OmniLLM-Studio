@@ -167,6 +167,7 @@ export interface MessageMetadata {
 export interface AppSettings {
   web_search_provider: string;
   brave_api_key: string;
+  jina_api_key: string;
   jina_reader_enabled: boolean;
   jina_reader_max_len?: number;
   rag_enabled: boolean;

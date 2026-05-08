@@ -18,7 +18,7 @@ A comprehensive guide to all features in OmniLLM-Studio, covering what each feat
 10. [Local Collaboration Mode](#10-local-collaboration-mode)
 11. [Plugin SDK](#11-plugin-sdk)
 12. [Evaluation Harness](#12-evaluation-harness)
-13. [Word Document Generation](#13-word-document-generation)
+13. [Artifact Export System](#13-artifact-export-system)
 14. [Feature Flags](#14-feature-flags)
 15. [General Questions](#15-general-questions)
 
@@ -92,15 +92,17 @@ A: Yes. OmniLLM-Studio detects that the active provider has no embeddings API an
 
 ### What is the Tool Calling Framework?
 
-The Tool Calling Framework provides a generic, extensible system for the AI to invoke external capabilities (tools) during a conversation. Instead of being limited to web search only, the AI can now call any registered tool — web search, a calculator, URL fetching, or custom tools added via plugins.
+The Tool Calling Framework provides a generic, extensible system for the AI to invoke external capabilities (tools) during a conversation. Instead of being limited to web search only, the AI can now call any registered tool — web search, sports lookup, a calculator, URL fetching, document generation, or custom tools added via plugins.
 
 ### What tools are built-in?
 
 | Tool | Description |
 |---|---|
 | **Web Search** | Searches the web using Brave Search API or DuckDuckGo fallback, with Jina Reader for content extraction. |
+| **Sports Lookup** | Fetches ESPN-backed sports scores, schedules, standings, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards, then returns a Markdown table. |
 | **Calculator** | Evaluates mathematical expressions safely using Go's AST parser. |
 | **URL Fetch** | Fetches and extracts readable text content from any URL. |
+| **Word Document Generation** | Converts Markdown content into a downloadable `.docx` file. |
 
 ### How does it work?
 
@@ -117,12 +119,69 @@ The Tool Calling Framework provides a generic, extensible system for the AI to i
 
 > **UI:** Tool permissions are managed in Settings under the **Tools** tab — view all registered tools and set each one's policy to Allow, Deny, or Ask. When a tool is invoked during a conversation, an inline **Tool Call Card** appears in the chat showing the tool name, arguments, and result.
 
+### Sports Lookup
+
+**Feature Flag:** `sports_lookup_enabled` (enabled by default)
+
+OmniLLM-Studio includes a ChatGPT-style `sports_lookup` capability for current and ESPN-specific sports data. When you ask a high-confidence sports question, the backend detects it before the LLM provider is called, retrieves data from ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a compact Markdown table directly in the chat. It supports scores, schedules, standings, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals.
+
+**Supported leagues:**
+
+| League | Examples |
+|---|---|
+| MLB | `mlb`, `baseball`, `major league baseball` |
+| NFL | `nfl`, `football`, `pro football` |
+| NBA | `nba`, `basketball` |
+| WNBA | `wnba` |
+| NHL | `nhl`, `hockey` |
+| College football | `college football`, `ncaaf`, `cfb` |
+| Men's college basketball | `ncaamb`, `men's college basketball`, `college basketball` |
+| Women's college basketball | `ncaawb`, `women's college basketball` |
+| Premier League | `premier league`, `epl`, `english premier league` |
+| MLS | `mls`, `major league soccer` |
+
+**Examples that use sports lookup:**
+
+- *"What are the current MLB standings?"*
+- *"Show me NBA scores today"*
+- *"What NFL games are on tomorrow?"*
+- *"How did the Cubs do today?"*
+- *"Premier League table"*
+- *"What's the latest sports news?"*
+- *"What's the latest Chicago Cubs news?"*
+- *"Print out the top 50 in HR for the 2025 MLB season in a table"*
+- *"Show me Shohei Ohtani stats for 2025"*
+- *"Chicago Cubs roster"*
+- *"Yankees injuries"*
+- *"College football rankings"*
+
+The detector stays conservative. Requests like *"write a story about baseball"*, *"write a sports news article"*, *"explain how standings work"*, *"make a sports logo"*, or *"who is the greatest baseball player ever"* continue through the normal LLM path. ESPN-supported stat prompts are routed before standings, so a request like *"top 50 home run leaders for the 2025 MLB season in a table"* is treated as a leaderboard lookup instead of a standings lookup.
+
+You can also invoke the tool directly:
+
+```json
+{
+  "name": "sports_lookup",
+  "arguments": {
+    "query": "What are the current MLB standings?",
+    "intent": "standings",
+    "league": "mlb",
+    "limit": 10
+  }
+}
+```
+
+For sports news, use `"intent": "news"` with an optional league or a team-specific query such as `"latest Chicago Cubs news"`. Broad prompts such as `"What's the latest sports news?"` use ESPN's current sports news feed. For stat leaderboards, use `"intent": "leaders"` with a query such as `"top 50 HR leaders for the 2025 MLB season"`; for league-level stats, use `"intent": "league_stats"`.
+
+The result includes `intent`, `league`, `league_name`, `markdown`, `source`, and `retrieved_at` metadata. Chat messages answered through this preflight path are marked with `sports_lookup: true` metadata and use provider/model labels of `sports_lookup` / `espn-go`.
+
 ### What are the benefits?
 
 - **Extensible** — new tools can be added via the Plugin SDK without modifying core code.
 - **Permission controls** — you decide which tools the AI can invoke automatically.
 - **Transparent** — every tool call is visible in the conversation with full input/output details.
 - **Timeout protection** — tools have configurable execution timeouts to prevent hung operations.
+- **Current sports answers** — live scores, schedules, standings, headlines, rosters, injuries, transactions, rankings, and stats come from ESPN instead of model memory.
 
 ### FAQ
 
@@ -302,7 +361,7 @@ Agent Mode transforms the AI from a simple question-answer chatbot into an auton
 2. The **Planner** (LLM-powered) generates a structured execution plan with steps.
 3. The **Runner** executes each step in order:
    - **Think** steps: internal LLM reasoning
-   - **Tool calls**: web search, URL fetch, calculator, or plugin tools
+   - **Tool calls**: web search, sports lookup, URL fetch, calculator, or plugin tools
    - **Approval** steps: pause and wait for user confirmation before proceeding (e.g., before destructive actions)
    - **Message** steps: send an interim message to the conversation
 4. Real-time **SSE events** (`agent_plan`, `agent_step_start`, `agent_step_complete`, `agent_approval_required`, `agent_complete`) stream the agent's progress.
@@ -324,7 +383,7 @@ Agent Mode transforms the AI from a simple question-answer chatbot into an auton
 - **Autonomous multi-step execution** — handle complex tasks that require research, reasoning, and tool use.
 - **Transparent planning** — see the agent's plan before and during execution.
 - **Human-in-the-loop** — approval steps ensure you stay in control of sensitive actions.
-- **Tool integration** — agents can use all registered tools (web search, calculator, URL fetch, plugins).
+- **Tool integration** — agents can use all registered tools (web search, sports lookup, calculator, URL fetch, plugins).
 - **Resumable** — paused agents can be resumed later.
 
 ### FAQ
@@ -663,57 +722,137 @@ A: The eval API (`POST /v1/eval/run`) can be called from any HTTP client. A dedi
 
 ---
 
-## 13. Word Document Generation
+## 13. Artifact Export System
+
+OmniLLM-Studio can generate downloadable files directly from chat — no copy-pasting, no external tools required. When you ask the LLM for a specific file format, the backend detects the intent, guides the model to produce suitable content, and generates the file locally.
+
+**Supported formats:**
+
+| Format | Extension | Trigger examples |
+|--------|-----------|-----------------|
+| Word Document | `.docx` | *"as a Word doc"*, *"in Word format"*, *"save as .docx"* |
+| Excel Workbook | `.xlsx` | *"put this in Excel"*, *"create a spreadsheet"*, *"export as xlsx"* |
+| CSV | `.csv` | *"export as CSV"*, *"give me a csv"*, *"comma-separated"* |
+| PDF | `.pdf` | *"make this a PDF"*, *"export as PDF"*, *"create a printable report"* |
+| Markdown | `.md` | *"export as Markdown"*, *"save as md"*, *"make this a README"* |
+| HTML | `.html` | *"export as HTML"*, *"make this a web page"*, *"standalone HTML report"* |
+| JSON | `.json` | *"return as JSON"*, *"export as JSON"*, *"make this an API payload"* |
+| YAML | `.yaml` | *"return as YAML"*, *"make this a config file"*, *"Kubernetes YAML"* |
+
+### Word Document Generation
 
 **Feature Flag:** `word_doc_generation`
 
-### What is Word Document Generation?
+When you ask for a Word doc, OmniLLM-Studio converts the Markdown response into a `.docx` file using the [go-word](https://github.com/drumkitai/go-word) library.
 
-When you ask the LLM to produce something "as a Word doc" (or any similar phrasing), OmniLLM-Studio automatically converts the Markdown response into a `.docx` file using the [go-word](https://github.com/drumkitai/go-word) library — no copy-pasting required.
-
-### How does it work?
-
-1. After the LLM finishes streaming its response, the backend detects word-doc intent in your message.
-2. The full Markdown response is converted to a `.docx` file and saved in the attachment store.
-3. A styled download button is appended to the chat message — click it to save the file to your computer.
-4. In Agent Mode the `generate_word_doc` tool is registered and can be called autonomously by the LLM.
-
-### Trigger phrases
-
-Any of the following in your message will trigger generation:
-
+**Trigger phrases:**
 - `word doc` / `word document` / `word file` / `.docx`
-- `as a word` / `in word format`
-- `microsoft word`
+- `as a word` / `in word format` / `microsoft word`
 - `save as word` / `export as word`
+
+**In Agent Mode:** the `generate_word_doc` tool is registered and can be called autonomously by the LLM.
+
+### How does artifact generation work?
+
+1. The backend detects an export format in your message.
+2. A format-specific instruction is added to the system prompt so the LLM structures its content appropriately (clean tables for Excel/CSV, document structure for PDF, raw JSON/YAML for data formats).
+3. After the LLM finishes streaming, the backend renders the response to the requested format locally.
+4. A styled download button is appended to the chat message — click it to save the file.
+
+The LLM is always informed that these formats are available locally, so it will never say *"I can't create Excel files"* or *"I can only provide text you can copy into Excel."*
+
+### Format-specific behaviour
+
+**Excel (.xlsx)**
+- One worksheet per table in the response; multiple distinct tables go to separate sheets.
+- Header row is bold with a light background.
+- First row is frozen; AutoFilter is applied.
+- Column widths are auto-sized from content.
+- Numeric values are stored as numbers (not text).
+- If no tables are present, a Content sheet is created with Section / Type / Content columns.
+
+**CSV (.csv)**
+- First table in the response is exported.
+- UTF-8, properly quoted.
+- If no table is present, a flattened Section / Type / Content fallback is used.
+
+**PDF (.pdf)**
+- Clean A4 report layout with 20 mm margins and automatic page breaks.
+- Heading hierarchy (H1–H4), paragraphs, bullet lists, ordered lists, code blocks (monospace, shaded background), and tables.
+- Tables that are too wide are compressed; cells are truncated with ellipsis rather than overflowing.
+- No external font files required — built-in Helvetica/Courier fonts.
+
+**Markdown (.md)**
+- The raw LLM response is saved directly (with light normalisation).
+- Suitable for README files, documentation, notes.
+
+**HTML (.html)**
+- Self-contained document with inline CSS — no external dependencies, safe to open offline.
+- Headings, paragraphs, lists, tables, code blocks, and blockquotes rendered with semantic tags.
+- All user/model content is HTML-escaped (XSS-safe).
+
+**JSON (.json)**
+- If the response contains a ` ```json ` code fence, that JSON is extracted and pretty-printed.
+- If the whole response is valid JSON, it is pretty-printed.
+- Otherwise the response is serialised as a structured `{title, sections, tables}` object.
+
+**YAML (.yaml)**
+- Same extraction priority as JSON: ` ```yaml ` fence → whole-response YAML → serialised artifact model.
 
 ### How do I use it?
 
-1. Make sure Word Document Generation is enabled (Settings → General → Document Generation toggle).
-2. Ask the LLM to write something and include one of the trigger phrases, e.g.:
-   - *"Write me a project proposal for AcmeCorp as a Word doc"*
-   - *"Draft a meeting agenda in Word format"*
-3. A **📄 Download** button will appear at the bottom of the response.
+1. Simply ask naturally — no special mode or toggle required for most formats:
+   - *"Write me a project proposal as a Word doc"*
+   - *"Turn this comparison into an Excel spreadsheet"*
+   - *"Export the table as CSV"*
+   - *"Create a printable PDF report of this"*
+   - *"Save this as a Markdown file"*
+   - *"Make this a standalone HTML page"*
+   - *"Return the config as YAML"*
+   - *"Give me this data as JSON"*
+2. After streaming completes, a colour-coded download button appears in the chat.
+3. Click the button to download. The file is also stored as a conversation attachment and can be re-downloaded later from the Attachments panel.
+
+### Download button colours
+
+| Format | Colour |
+|--------|--------|
+| `.docx`, `.pdf` | Indigo / Red |
+| `.xlsx`, `.csv` | Green |
+| `.html` | Orange |
+| `.json` | Yellow |
+| `.yaml` | Purple |
+| `.md` | Slate |
 
 ### What are the benefits?
 
-- One-click export to `.docx` without leaving the app
-- Full Markdown formatting preserved (headings, bold, tables, code blocks, lists)
-- Files are stored per-conversation in the attachment system
+- **Zero friction** — one phrase in your message is all it takes.
+- **Local generation** — files are rendered entirely on your server; no data leaves to a conversion service.
+- **Extensible** — the `ArtifactRenderer` interface makes it straightforward to add new formats (`.pptx`, `.epub`, `.svg`, etc.) without touching the chat pipeline.
+- **Consistent filenames** — derived from your message text, lowercased and hyphenated (e.g. *"project plan"* → `project-plan.xlsx`).
 
 ### FAQ
 
-**Q: What Markdown features are supported in the Word doc?**
+**Q: Does the assistant know it can generate these files?**
+A: Yes. The system prompt always includes an artifact capability directive, so the assistant will never tell you it cannot create Excel, PDF, CSV, Word, Markdown, HTML, JSON, or YAML files when running inside OmniLLM-Studio.
+
+**Q: What Markdown features are preserved in the Word doc?**
 A: Headings (H1–H6), paragraphs, bold, italic, tables, fenced code blocks, unordered/ordered lists, and task lists. Math (LaTeX) blocks are passed through as-is.
 
-**Q: Where is the .docx file stored?**
-A: Under `backend/attachments/` (or the directory set by `OMNILLM_ATTACHMENTS_DIR`). The file is also linked from the message so you can re-download it later.
+**Q: Where are generated files stored?**
+A: Under `backend/attachments/` (or the path set by `OMNILLM_ATTACHMENTS_DIR`). Each file is linked to the conversation message and can be re-downloaded at any time via the Attachments panel.
 
-**Q: Can I disable it?**
-A: Yes — toggle **Word Document Generation** off in Settings → General, or use `PATCH /v1/features/word_doc_generation` with `{"enabled": false}`.
+**Q: Can I disable Word Document Generation?**
+A: Yes — toggle it off in Settings → General, or use `PATCH /v1/features/word_doc_generation` with `{"enabled": false}`. The other artifact formats (xlsx, csv, pdf, etc.) do not use a separate feature flag; they are active whenever the artifact generator is wired up (which is always in a standard deployment).
 
 **Q: Does it work in Agent Mode?**
-A: Yes. The `generate_word_doc` tool is registered in the tool registry and the LLM can call it directly when it decides a Word doc is appropriate.
+A: Word document generation works in Agent Mode via the `generate_word_doc` tool. The other artifact formats (xlsx, csv, pdf, md, html, json, yaml) are triggered from the chat pipeline and are not yet exposed as individual Agent tools.
+
+**Q: What if generation fails?**
+A: A warning note is appended to the chat message explaining what went wrong (e.g. "PDF export failed — no content to render"). The LLM response text is always preserved; only the file download is affected.
+
+**Q: Can I request multiple formats at once?**
+A: The detection logic picks the first explicitly-requested format. If you ask for both Excel and CSV in the same message, Excel takes priority. Request them in separate messages to get both files.
 
 ---
 
@@ -739,7 +878,10 @@ Feature flags let you enable or disable individual features without restarting t
 | `collaboration` | Local Collaboration Mode |
 | `plugins` | Plugin SDK |
 | `eval_harness` | Evaluation Harness |
-| `word_doc_generation` | Word Document Generation |
+| `word_doc_generation` | Word Document Generation (.docx) |
+| `sports_lookup_enabled` | ESPN-backed sports scores, schedules, standings, news, rosters, injuries, transactions, rankings, and stats |
+
+> **Note:** The multi-format artifact export system (`.xlsx`, `.csv`, `.pdf`, `.md`, `.html`, `.json`, `.yaml`) does not have a separate feature flag — it is always active in a standard deployment. `.docx` generation is gated behind `word_doc_generation`; ESPN-backed sports lookup is gated behind `sports_lookup_enabled`.
 
 ### How do I manage them?
 
@@ -750,7 +892,7 @@ Feature flags let you enable or disable individual features without restarting t
 ### FAQ
 
 **Q: Are features enabled by default?**
-A: No. Features default to disabled. Enable them as needed via the API or settings.
+A: Most optional features default to disabled. `word_doc_generation` and `sports_lookup_enabled` are seeded enabled by default because they are local backend capabilities with clear deterministic triggers.
 
 **Q: Can I enable features without restarting?**
 A: Yes. Feature flag changes take effect immediately via the API.
@@ -813,4 +955,4 @@ Two options:
 
 ---
 
-*This FAQ covers OmniLLM-Studio features as of the complete Phase 0–12 implementation. For technical implementation details, see the [Implementation Plan - Feature Roadmap](Implementation%20Plan%20-%20Feature%20Roadmap.md).*
+*This FAQ covers OmniLLM-Studio features including the multi-format artifact export system and ESPN-backed sports lookup. For technical implementation details see `backend/internal/artifacts/` and `backend/internal/sports/`.*

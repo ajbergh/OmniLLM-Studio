@@ -416,6 +416,7 @@ interface SettingsState {
 const defaultSettings: import('../types').AppSettings = {
   web_search_provider: 'auto',
   brave_api_key: '',
+  jina_api_key: '',
   jina_reader_enabled: true,
   jina_reader_max_len: 3000,
   rag_enabled: false,

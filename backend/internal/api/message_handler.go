@@ -9,11 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ajbergh/omnillm-studio/internal/artifacts"
 	"github.com/ajbergh/omnillm-studio/internal/auth"
 	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
+	"github.com/ajbergh/omnillm-studio/internal/sports"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
 	"github.com/ajbergh/omnillm-studio/internal/wordgen"
 	"github.com/go-chi/chi/v5"
@@ -34,6 +36,7 @@ type MessageHandler struct {
 	chunkRepo       *repository.ChunkRepo
 	vectorStore     *rag.VectorStore
 	wordGen         *wordgen.Generator
+	artifactGen     *artifacts.Generator
 	featureFlagRepo *repository.FeatureFlagRepo
 }
 
@@ -51,6 +54,7 @@ func NewMessageHandler(
 	chunkRepo *repository.ChunkRepo,
 	vectorStore *rag.VectorStore,
 	wordGen *wordgen.Generator,
+	artifactGen *artifacts.Generator,
 	featureFlagRepo *repository.FeatureFlagRepo,
 ) *MessageHandler {
 	return &MessageHandler{
@@ -66,6 +70,7 @@ func NewMessageHandler(
 		chunkRepo:       chunkRepo,
 		vectorStore:     vectorStore,
 		wordGen:         wordGen,
+		artifactGen:     artifactGen,
 		featureFlagRepo: featureFlagRepo,
 	}
 }
@@ -210,6 +215,16 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		go h.autoIndexForRAG(aids, cid)
 	}
 
+	if assistantMsg, handled := h.handleSportsLookupMessage(r.Context(), convoID, uuid.New().String(), req.Content); handled {
+		if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+			respondInternalError(w, err)
+			return
+		}
+		_ = h.convoRepo.TouchUpdatedAt(convoID)
+		respondJSON(w, http.StatusOK, assistantMsg)
+		return
+	}
+
 	// ----- RAG context injection -----
 	var ragSources []rag.SourceRef
 	ragCtx := h.injectRAGContext(r.Context(), convoID, req.Content, &llmReq)
@@ -217,11 +232,18 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ragSources = ragCtx.Sources
 	}
 
-	// Word-doc intent: layer the word-doc directive onto the base system prompt
-	// (the one that already carries the Markdown formatting directive). The backend
-	// will automatically convert the response to a .docx download link.
+	// Word-doc intent: layer the word-doc directive onto the base system prompt.
 	if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
 		appendToBaseSystemPrompt(&llmReq, wordDocSystemDirective)
+	}
+
+	// Artifact intent: layer a format-specific directive onto the system prompt.
+	var artifactFormat artifacts.ArtifactFormat
+	if h.artifactGen != nil {
+		if f, ok := artifacts.DetectFormat(req.Content); ok {
+			artifactFormat = f
+			appendToBaseSystemPrompt(&llmReq, artifacts.ArtifactSystemDirective(f))
+		}
 	}
 
 	// ----- Web search orchestration -----
@@ -298,12 +320,62 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	assistantContent := resp.Content
+
+	// Word document generation (non-streaming path)
+	if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
+		suggestedName := suggestWordDocFilename(req.Content)
+		if storagePath, bytes, genErr := h.wordGen.Generate(assistantContent, suggestedName); genErr == nil {
+			attachment := &models.Attachment{
+				ConversationID: convoID,
+				Type:           "file",
+				MimeType:       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+				StoragePath:    storagePath,
+				Bytes:          bytes,
+				CreatedAt:      time.Now().UTC(),
+			}
+			if createErr := h.attachRepo.Create(attachment); createErr == nil {
+				assistantContent += fmt.Sprintf("\n\n[📄 Download %s](/v1/attachments/%s/download)", storagePath, attachment.ID)
+			} else {
+				log.Printf("WARN: word doc (non-stream): create attachment: %v", createErr)
+			}
+		} else {
+			log.Printf("WARN: word doc (non-stream): generate: %v", genErr)
+		}
+	}
+
+	// Artifact generation (non-streaming path)
+	if h.artifactGen != nil && artifactFormat != "" {
+		suggestedName := artifacts.SuggestFilename(req.Content, artifactFormat)
+		storagePath, bytes, contentType, genErr := h.artifactGen.Generate(r.Context(), assistantContent, artifactFormat, suggestedName)
+		if genErr == nil {
+			attachment := &models.Attachment{
+				ConversationID: convoID,
+				Type:           "file",
+				MimeType:       contentType,
+				StoragePath:    storagePath,
+				Bytes:          bytes,
+				CreatedAt:      time.Now().UTC(),
+			}
+			if createErr := h.attachRepo.Create(attachment); createErr == nil {
+				icon := artifacts.IconForFormat(artifactFormat)
+				assistantContent += fmt.Sprintf("\n\n[%s Download %s](/v1/attachments/%s/download)", icon, storagePath, attachment.ID)
+			} else {
+				log.Printf("WARN: artifact (non-stream): create attachment: %v", createErr)
+				assistantContent += fmt.Sprintf("\n\n*⚠️ %s file was generated but could not be saved. Please try again.*", artifacts.ExtensionForFormat(artifactFormat))
+			}
+		} else {
+			log.Printf("WARN: artifact (non-stream): generate %s: %v", artifactFormat, genErr)
+			assistantContent += fmt.Sprintf("\n\n*⚠️ %s export failed. Please try again.*", artifacts.ExtensionForFormat(artifactFormat))
+		}
+	}
+
 	// Save assistant message
 	assistantMsg := &models.Message{
 		ID:             uuid.New().String(),
 		ConversationID: convoID,
 		Role:           "assistant",
-		Content:        resp.Content,
+		Content:        assistantContent,
 		CreatedAt:      time.Now().UTC(),
 		Provider:       &resp.Provider,
 		Model:          &resp.Model,
@@ -410,6 +482,15 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		appendToBaseSystemPrompt(&llmReq, wordDocSystemDirective)
 	}
 
+	// Artifact intent: detect and layer a format-specific directive.
+	var streamArtifactFormat artifacts.ArtifactFormat
+	if h.artifactGen != nil {
+		if f, ok := artifacts.DetectFormat(req.Content); ok {
+			streamArtifactFormat = f
+			appendToBaseSystemPrompt(&llmReq, artifacts.ArtifactSystemDirective(f))
+		}
+	}
+
 	// Set SSE headers
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -439,6 +520,34 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		"message_id":      msgID,
 		"user_message_id": userMsg.ID,
 	})
+
+	if assistantMsg, handled := h.handleSportsLookupMessage(r.Context(), convoID, msgID, req.Content); handled {
+		sendSSE(w, flusher, "sports_lookup", map[string]interface{}{
+			"status": "complete",
+			"source": sports.SourceESPN,
+		})
+		sendSSE(w, flusher, "token", map[string]string{
+			"content": assistantMsg.Content,
+		})
+		if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+			log.Printf("error saving sports lookup message: %v", err)
+		}
+		_ = h.convoRepo.TouchUpdatedAt(convoID)
+		latencyMS := 0
+		if assistantMsg.LatencyMs != nil {
+			latencyMS = *assistantMsg.LatencyMs
+		}
+		donePayload := map[string]interface{}{
+			"message_id":    msgID,
+			"provider":      "sports_lookup",
+			"model":         "espn-go",
+			"latency_ms":    latencyMS,
+			"sports_lookup": true,
+			"source":        sports.SourceESPN,
+		}
+		sendSSE(w, flusher, "done", donePayload)
+		return
+	}
 
 	// ----- Web search orchestration for streaming -----
 	providerName := llmReq.Provider
@@ -475,10 +584,12 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		// already covers Markdown formatting; do NOT layer the base directive on
 		// top — small models (e.g. gemini-3.1-flash-lite) get derailed by the
 		// extra instructions and start describing sources instead of answering.
-		// Word-doc intent is the only directive that's safe to append because it
-		// changes the *task*, not the *style*.
+		// Task-changing directives (word-doc, artifact) are safe to append.
 		if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
 			appendToBaseSystemPrompt(wsLLMReq, wordDocSystemDirective)
+		}
+		if streamArtifactFormat != "" {
+			appendToBaseSystemPrompt(wsLLMReq, artifacts.ArtifactSystemDirective(streamArtifactFormat))
 		}
 
 		// Stream the summarizer LLM response
@@ -552,9 +663,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Word document generation (keyword-triggered, standard chat mode only).
-	// When the user asks for a Word doc we convert the full Markdown response to
-	// a .docx file and append a download link to the assistant message.
+	// Word document generation (streaming path).
 	if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
 		suggestedName := suggestWordDocFilename(req.Content)
 		if storagePath, bytes, genErr := h.wordGen.Generate(fullContent, suggestedName); genErr == nil {
@@ -569,7 +678,6 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if createErr := h.attachRepo.Create(attachment); createErr == nil {
 				link := fmt.Sprintf("\n\n[📄 Download %s](/v1/attachments/%s/download)", storagePath, attachment.ID)
 				fullContent += link
-				// Emit the link as an additional SSE token so the frontend appends it live.
 				sendSSE(w, flusher, "token", map[string]string{"content": link})
 			} else {
 				log.Printf("WARN: word doc: create attachment record: %v", createErr)
@@ -580,6 +688,38 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		} else {
 			log.Printf("WARN: word doc: generate: %v", genErr)
 			note := "\n\n*⚠️ Word document conversion failed. Please try again or copy the text above.*"
+			fullContent += note
+			sendSSE(w, flusher, "token", map[string]string{"content": note})
+		}
+	}
+
+	// Artifact generation (streaming path — all non-word-doc formats).
+	if h.artifactGen != nil && streamArtifactFormat != "" {
+		suggestedName := artifacts.SuggestFilename(req.Content, streamArtifactFormat)
+		storagePath, bytes, contentType, genErr := h.artifactGen.Generate(r.Context(), fullContent, streamArtifactFormat, suggestedName)
+		if genErr == nil {
+			attachment := &models.Attachment{
+				ConversationID: convoID,
+				Type:           "file",
+				MimeType:       contentType,
+				StoragePath:    storagePath,
+				Bytes:          bytes,
+				CreatedAt:      time.Now().UTC(),
+			}
+			if createErr := h.attachRepo.Create(attachment); createErr == nil {
+				icon := artifacts.IconForFormat(streamArtifactFormat)
+				link := fmt.Sprintf("\n\n[%s Download %s](/v1/attachments/%s/download)", icon, storagePath, attachment.ID)
+				fullContent += link
+				sendSSE(w, flusher, "token", map[string]string{"content": link})
+			} else {
+				log.Printf("WARN: artifact: create attachment: %v", createErr)
+				note := fmt.Sprintf("\n\n*⚠️ %s file was generated but could not be saved. Please try again.*", artifacts.ExtensionForFormat(streamArtifactFormat))
+				fullContent += note
+				sendSSE(w, flusher, "token", map[string]string{"content": note})
+			}
+		} else {
+			log.Printf("WARN: artifact: generate %s: %v", streamArtifactFormat, genErr)
+			note := fmt.Sprintf("\n\n*⚠️ %s export failed. Please try again.*", artifacts.ExtensionForFormat(streamArtifactFormat))
 			fullContent += note
 			sendSSE(w, flusher, "token", map[string]string{"content": note})
 		}
@@ -972,8 +1112,9 @@ Do not wrap your entire response in a single code block. Output Markdown directl
 const wordDocSystemDirective = `WORD DOCUMENT MODE: The user is requesting a Word document. Write the full document body as Markdown — headings, lists, bold, tables, etc. Do NOT say you cannot create or export files; this application automatically converts your Markdown response into a downloadable .docx and posts a download link. Provide the document content directly, with no preamble like "Here is your document".`
 
 // composeSystemPrompt builds the effective system prompt. It always includes
-// the Markdown formatting directive so every LLM response is well-structured,
-// and layers any user-supplied prompt on top.
+// the Markdown formatting directive and the artifact capability directive so
+// every LLM response is well-structured and the assistant knows it can produce
+// downloadable files.
 func composeSystemPrompt(userPrompt string) string {
 	const baseAssistant = "You are a helpful, knowledgeable assistant."
 
@@ -984,7 +1125,84 @@ func composeSystemPrompt(userPrompt string) string {
 		parts = append(parts, baseAssistant)
 	}
 	parts = append(parts, markdownFormattingDirective)
+	parts = append(parts, sportsLookupSystemDirective)
+	parts = append(parts, artifacts.ArtifactCapabilityDirective)
 	return strings.Join(parts, "\n\n")
+}
+
+const sportsLookupFeatureFlag = "sports_lookup_enabled"
+
+const sportsLookupSystemDirective = `You have access to a local sports_lookup capability that can retrieve ESPN-backed sports standings, scores, schedules, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders using ESPN public APIs. For current sports questions and ESPN-specific sports data questions, do not answer from memory and do not say you cannot access current sports data. Request or use sports_lookup and present the returned Markdown table. If the tool returns an error or unsupported league, explain that clearly.`
+
+func (h *MessageHandler) handleSportsLookupMessage(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool) {
+	if !h.sportsLookupEnabled() {
+		return nil, false
+	}
+
+	req, ok := sports.DetectSportsIntent(query, time.Now())
+	if !ok {
+		return nil, false
+	}
+
+	start := time.Now()
+	var result *sports.SportsLookupResult
+	err := sports.ValidateDateInQuery(query, start)
+	if err == nil {
+		result, err = sports.NewESPNClient().Lookup(ctx, *req)
+	}
+	latency := int(time.Since(start).Milliseconds())
+
+	content := ""
+	metaMap := map[string]interface{}{
+		"sports_lookup": true,
+		"tool":          "sports_lookup",
+		"source":        sports.SourceESPN,
+		"intent":        req.Intent,
+		"league":        req.League,
+	}
+
+	if err != nil {
+		log.Printf("[sports] lookup failed query=%q intent=%s league=%s team=%q: %v",
+			req.RawQuery, req.Intent, req.League, req.TeamQuery, err)
+		content = sports.UserFacingError(*req, err)
+		metaMap["error"] = err.Error()
+	} else {
+		content = result.Markdown
+		metaMap["league_name"] = result.LeagueName
+		metaMap["retrieved_at"] = result.RetrievedAt.Format(time.RFC3339)
+	}
+
+	metaJSON, _ := json.Marshal(metaMap)
+	provider := "sports_lookup"
+	model := "espn-go"
+
+	return &models.Message{
+		ID:             messageID,
+		ConversationID: conversationID,
+		Role:           "assistant",
+		Content:        content,
+		CreatedAt:      time.Now().UTC(),
+		Provider:       &provider,
+		Model:          &model,
+		LatencyMs:      &latency,
+		MetadataJSON:   string(metaJSON),
+	}, true
+}
+
+func (h *MessageHandler) sportsLookupEnabled() bool {
+	if h.featureFlagRepo == nil {
+		return true
+	}
+	flags, err := h.featureFlagRepo.AsMap()
+	if err != nil {
+		log.Printf("[sports] feature flag lookup failed: %v", err)
+		return true
+	}
+	enabled, ok := flags[sportsLookupFeatureFlag]
+	if !ok {
+		return true
+	}
+	return enabled
 }
 
 // wordGenEnabled reports whether the word-doc-generation feature is wired up

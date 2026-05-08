@@ -87,6 +87,7 @@ type Setting struct {
 type AppSettings struct {
 	WebSearchProvider string `json:"web_search_provider"`
 	BraveAPIKey       string `json:"brave_api_key"`
+	JinaAPIKey        string `json:"jina_api_key"`
 	JinaReaderEnabled bool   `json:"jina_reader_enabled"`
 	JinaReaderMaxLen  int    `json:"jina_reader_max_len,omitempty"`
 	// RAG settings
@@ -102,8 +103,9 @@ func DefaultAppSettings() AppSettings {
 	return AppSettings{
 		WebSearchProvider: "auto",
 		BraveAPIKey:       "",
+		JinaAPIKey:        "",
 		JinaReaderEnabled: true,
-		JinaReaderMaxLen:  3000,
+		JinaReaderMaxLen:  10000,
 		RAGEnabled:        false,
 		RAGEmbeddingModel: "", // "" = Auto: ResolveEmbeddingProvider picks the canonical model per provider type.
 		RAGChunkSize:      1000,
@@ -117,6 +119,7 @@ func (s AppSettings) ToMap() map[string]string {
 	m := make(map[string]string)
 	m["web_search_provider"] = s.WebSearchProvider
 	m["brave_api_key"] = s.BraveAPIKey
+	m["jina_api_key"] = s.JinaAPIKey
 	if s.JinaReaderEnabled {
 		m["jina_reader_enabled"] = "true"
 	} else {
@@ -158,6 +161,9 @@ func AppSettingsFromMap(m map[string]string) AppSettings {
 	}
 	if v, ok := m["brave_api_key"]; ok {
 		s.BraveAPIKey = strings.TrimSpace(strings.Trim(v, `"`))
+	}
+	if v, ok := m["jina_api_key"]; ok {
+		s.JinaAPIKey = strings.TrimSpace(strings.Trim(v, `"`))
 	}
 	if v, ok := m["jina_reader_enabled"]; ok {
 		v = strings.TrimSpace(strings.Trim(v, `"`))

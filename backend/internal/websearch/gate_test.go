@@ -98,6 +98,7 @@ func TestShouldWebSearch_EmptyInput(t *testing.T) {
 }
 
 func TestBuildSearchQuery(t *testing.T) {
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		input string
 		want  string
@@ -111,7 +112,7 @@ func TestBuildSearchQuery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := buildSearchQuery(tt.input)
+			got := buildSearchQuery(tt.input, now)
 			if got != tt.want {
 				t.Errorf("buildSearchQuery(%q) = %q, want %q", tt.input, got, tt.want)
 			}

@@ -55,6 +55,12 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 			existing.BraveAPIKey = s
 		}
 	}
+	if v, ok := raw["jina_api_key"]; ok {
+		if s, ok := v.(string); ok && s != "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" {
+			// Only update if not the masked placeholder
+			existing.JinaAPIKey = s
+		}
+	}
 	if v, ok := raw["jina_reader_enabled"]; ok {
 		if b, ok := v.(bool); ok {
 			existing.JinaReaderEnabled = b

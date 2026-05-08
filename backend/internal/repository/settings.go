@@ -111,6 +111,13 @@ func (r *SettingsRepo) GetTyped() (models.AppSettings, error) {
 		}
 		s.BraveAPIKey = decrypted
 	}
+	if s.JinaAPIKey != "" {
+		decrypted, err := crypto.Decrypt(s.JinaAPIKey)
+		if err != nil {
+			return models.AppSettings{}, fmt.Errorf("decrypt jina_api_key: %w", err)
+		}
+		s.JinaAPIKey = decrypted
+	}
 
 	return s, nil
 }
@@ -124,6 +131,9 @@ func (r *SettingsRepo) GetTypedMasked() (models.AppSettings, error) {
 	if s.BraveAPIKey != "" {
 		s.BraveAPIKey = "••••••••"
 	}
+	if s.JinaAPIKey != "" {
+		s.JinaAPIKey = "••••••••"
+	}
 	return s, nil
 }
 
@@ -131,11 +141,32 @@ func (r *SettingsRepo) GetTypedMasked() (models.AppSettings, error) {
 // Sensitive fields (e.g. brave_api_key) are encrypted before storage.
 func (r *SettingsRepo) SetTyped(s models.AppSettings) error {
 	if s.BraveAPIKey != "" {
-		encrypted, err := crypto.Encrypt(s.BraveAPIKey)
-		if err != nil {
-			return fmt.Errorf("encrypt brave_api_key: %w", err)
+		// Only encrypt if it's not the mask
+		if s.BraveAPIKey == "••••••••" {
+			// Restore the original encrypted value from DB
+			val, _ := r.Get("brave_api_key")
+			s.BraveAPIKey = val
+		} else {
+			encrypted, err := crypto.Encrypt(s.BraveAPIKey)
+			if err != nil {
+				return fmt.Errorf("encrypt brave_api_key: %w", err)
+			}
+			s.BraveAPIKey = encrypted
 		}
-		s.BraveAPIKey = encrypted
+	}
+	if s.JinaAPIKey != "" {
+		// Only encrypt if it's not the mask
+		if s.JinaAPIKey == "••••••••" {
+			// Restore the original encrypted value from DB
+			val, _ := r.Get("jina_api_key")
+			s.JinaAPIKey = val
+		} else {
+			encrypted, err := crypto.Encrypt(s.JinaAPIKey)
+			if err != nil {
+				return fmt.Errorf("encrypt jina_api_key: %w", err)
+			}
+			s.JinaAPIKey = encrypted
+		}
 	}
 	return r.SetMany(s.ToMap())
 }

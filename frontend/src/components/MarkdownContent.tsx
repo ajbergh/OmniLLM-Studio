@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, Copy, FileText } from 'lucide-react';
+import { Check, Copy, FileText, Table2, FileJson, FileCode2, Globe } from 'lucide-react';
 import { resolveApiUrl } from '../api';
 
 interface Props {
@@ -40,6 +40,27 @@ function CodeBlock({ className, children }: { className?: string; children: Reac
       </pre>
     </div>
   );
+}
+
+function artifactStyle(ext: string): { icon: React.ReactNode; colorClass: string } {
+  switch (ext) {
+    case 'xlsx':
+    case 'csv':
+      return { icon: <Table2 size={14} />, colorClass: 'bg-green-600 hover:bg-green-700' };
+    case 'pdf':
+      return { icon: <FileText size={14} />, colorClass: 'bg-red-600 hover:bg-red-700' };
+    case 'html':
+      return { icon: <Globe size={14} />, colorClass: 'bg-orange-500 hover:bg-orange-600' };
+    case 'json':
+      return { icon: <FileJson size={14} />, colorClass: 'bg-yellow-600 hover:bg-yellow-700' };
+    case 'yaml':
+    case 'yml':
+      return { icon: <FileCode2 size={14} />, colorClass: 'bg-purple-600 hover:bg-purple-700' };
+    case 'md':
+      return { icon: <FileText size={14} />, colorClass: 'bg-slate-600 hover:bg-slate-700' };
+    default:
+      return { icon: <FileText size={14} />, colorClass: 'bg-indigo-600 hover:bg-indigo-700' };
+  }
 }
 
 export function MarkdownContent({ content }: Props) {
@@ -84,25 +105,27 @@ export function MarkdownContent({ content }: Props) {
           },
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
           a({ href, children, ref: _ref, ...props }) {
-            const docExts = ['docx', 'xlsx', 'pptx', 'pdf'];
             const resolvedHref = href ? resolveApiUrl(href) : href;
             const isAttachmentDownload =
               href?.startsWith('/v1/attachments/') && href.endsWith('/download');
             const childText = String(children ?? '');
             const extMatch = childText.match(/\.(\w+)$/);
-            const isDocFile = isAttachmentDownload && extMatch && docExts.includes(extMatch[1].toLowerCase());
+            const ext = extMatch ? extMatch[1].toLowerCase() : '';
 
-            if (isDocFile) {
+            const artifactExts = ['docx', 'xlsx', 'pptx', 'pdf', 'csv', 'md', 'html', 'json', 'yaml', 'yml'];
+            const isArtifactFile = isAttachmentDownload && artifactExts.includes(ext);
+
+            if (isArtifactFile) {
+              const { icon, colorClass } = artifactStyle(ext);
               return (
                 <a
                   href={resolvedHref}
                   download
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 mt-2 rounded-lg
-                             bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium
-                             transition-colors no-underline"
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 mt-2 rounded-lg
+                             text-white text-sm font-medium transition-colors no-underline ${colorClass}`}
                   {...props}
                 >
-                  <FileText size={14} />
+                  {icon}
                   {children}
                 </a>
               );

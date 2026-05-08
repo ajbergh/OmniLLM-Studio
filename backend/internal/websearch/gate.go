@@ -1,6 +1,7 @@
 package websearch
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -104,7 +105,7 @@ func ShouldWebSearch(userText string, now time.Time, tz string) (bool, *ToolCall
 		return false, nil
 	}
 
-	query := buildSearchQuery(userText)
+	query := buildSearchQuery(userText, now)
 	timeRange := inferTimeRange(lower)
 
 	tc := &ToolCall{
@@ -121,7 +122,7 @@ func ShouldWebSearch(userText string, now time.Time, tz string) (bool, *ToolCall
 }
 
 // buildSearchQuery cleans up the user text into a reasonable search query.
-func buildSearchQuery(userText string) string {
+func buildSearchQuery(userText string, now time.Time) string {
 	q := strings.TrimSpace(userText)
 
 	// Remove question marks and trailing punctuation for cleaner queries
@@ -149,7 +150,17 @@ func buildSearchQuery(userText string) string {
 		}
 	}
 
-	return strings.TrimSpace(q)
+	q = strings.TrimSpace(q)
+
+	// Append current year if it's a "current" or "latest" request and doesn't already have a year
+	hasYear := regexp.MustCompile(`\b20\d{2}\b`).MatchString(q)
+	if !hasYear {
+		if containsAny(lower, "current", "this year", "latest", "now", "today", "standings") {
+			q = fmt.Sprintf("%s %d", q, now.Year())
+		}
+	}
+
+	return q
 }
 
 // inferTimeRange picks a sensible default time range from keywords.

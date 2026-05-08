@@ -27,19 +27,21 @@ import (
 type JinaReader struct {
 	httpClient *http.Client
 	maxLen     int // max characters to keep per page
+	apiKey     string
 }
 
 // NewJinaReader creates a new JinaReader.
 // maxLen controls how many characters of content to keep per page (0 = unlimited).
-func NewJinaReader(maxLen int) *JinaReader {
+func NewJinaReader(maxLen int, apiKey string) *JinaReader {
 	if maxLen <= 0 {
-		maxLen = 3000 // sensible default: ~750 tokens per page
+		maxLen = 10000 // ~2500 tokens per page — enough to capture tables and live data
 	}
 	return &JinaReader{
 		httpClient: &http.Client{
 			Timeout: 12 * time.Second,
 		},
 		maxLen: maxLen,
+		apiKey: strings.TrimSpace(apiKey),
 	}
 }
 
@@ -58,8 +60,12 @@ func (j *JinaReader) FetchContent(ctx context.Context, pageURL string) (string, 
 	}
 	req.Header.Set("Accept", "text/plain")
 	req.Header.Set("User-Agent", "OmniLLM-Studio/1.0")
-	// Request plain text output (no images, minimal formatting)
-	req.Header.Set("X-Return-Format", "text")
+	// Request markdown output (preserves tables and structure)
+	req.Header.Set("X-Return-Format", "markdown")
+
+	if j.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+j.apiKey)
+	}
 
 	resp, err := j.httpClient.Do(req)
 	if err != nil {

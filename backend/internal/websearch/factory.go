@@ -63,7 +63,7 @@ func getSettingString(repo *repository.SettingsRepo, key string) string {
 	val = strings.TrimSpace(strings.Trim(val, `"`))
 
 	// Decrypt sensitive keys stored encrypted at rest
-	if key == "brave_api_key" {
+	if key == "brave_api_key" || key == "jina_api_key" {
 		val = crypto.DecryptOrPlaintext(val)
 	}
 
@@ -76,6 +76,7 @@ func getSettingString(repo *repository.SettingsRepo, key string) string {
 // Settings keys:
 //   - "jina_reader_enabled"  → "true" to enable (default: enabled)
 //   - "jina_reader_max_len"  → max chars per page (default: 3000)
+//   - "jina_api_key"         → API key to bypass rate limits (optional)
 func NewJinaReaderFromSettings(settingsRepo *repository.SettingsRepo) *JinaReader {
 	enabled := getSettingString(settingsRepo, "jina_reader_enabled")
 	if strings.EqualFold(enabled, "false") || strings.EqualFold(enabled, "off") || enabled == "0" {
@@ -90,6 +91,8 @@ func NewJinaReaderFromSettings(settingsRepo *repository.SettingsRepo) *JinaReade
 		}
 	}
 
+	apiKey := getSettingString(settingsRepo, "jina_api_key")
+
 	log.Printf("[websearch] Jina Reader enabled (maxLen=%d chars per page)\n", maxLen)
-	return NewJinaReader(maxLen)
+	return NewJinaReader(maxLen, apiKey)
 }

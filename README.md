@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Local-first LLM chat application</strong> — Go backend + React frontend<br/>
-  Multi-provider streaming · Image Studio · RAG · Agent mode · Branching · Web search · Word document export · Encrypted secrets
+  Multi-provider streaming · Image Studio · RAG · Agent mode · Branching · Web search · Live sports lookup · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
 </p>
 
 <p align="center">
@@ -45,8 +45,9 @@
 | **Conversation Branching** | Fork any message into parallel branches — explore different response paths |
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
 | **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction |
-| **Tool Calling** | Extensible tool framework — web search, calculator, URL fetch, Word document generation, and plugin tools |
-| **Word Document Export** | Ask the LLM for a Word doc and it auto-generates a `.docx` download from the Markdown response (go-word / goldmark) |
+| **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, and broad sports headlines |
+| **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, document generation, and plugin tools |
+| **Artifact Export** | Ask the LLM for any supported format and it generates a downloadable file automatically — `.docx` (Word), `.xlsx` (Excel), `.csv`, `.pdf`, `.md` (Markdown), `.html`, `.json`, `.yaml` — no copy-pasting required |
 
 ### Image Studio
 
@@ -154,12 +155,13 @@ Frontend (React/TS)  ──SSE/REST──▶  Backend (Go/Chi)  ──SQL──�
                                           │
                                           ├──▶  LLM Providers (OpenAI-compatible)
                                           ├──▶  Brave Search / DuckDuckGo
-                                          └──▶  Jina Reader
+                                          ├──▶  Jina Reader
+                                          └──▶  ESPN public sports APIs
 ```
 
 - **Frontend** — Single-page React app with Zustand state management, Tailwind v4 styling, and Framer Motion animations. Includes a full-featured Image Studio with canvas editor.
-- **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image generation routed through provider-specific adapters (OpenAI, Gemini, Stable Diffusion, Together).
-- **Database** — SQLite with WAL mode, 27 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions, nodes, assets, masks, and references stored relationally.
+- **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image generation routed through provider-specific adapters (OpenAI, Gemini, Stable Diffusion, Together), with ESPN-backed sports lookup handled locally before LLM fallback.
+- **Database** — SQLite with WAL mode, 28 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions, nodes, assets, masks, and references stored relationally.
 - **Vector store (RAG)** — [`chromem-go`](https://github.com/philippgille/chromem-go) embedded vector DB with one persistent collection per conversation under `<OMNILLM_CHROMEM_DIR>/<conversation_id>/`. Multi-threaded NN search; zero third-party Go dependencies. Chunk text stays in SQLite (`document_chunks`); chromem stores vectors only. Legacy `document_embeddings` rows lazy-migrate on first retrieval after upgrade.
 
 ## Request Lifecycle
@@ -171,9 +173,10 @@ Frontend (React/TS)  ──SSE/REST──▶  Backend (Go/Chi)  ──SQL──�
 From a single chat prompt to streamed tokens back in the UI:
 
 1. Frontend sends the prompt to `/v1/conversations/:conversationId/messages/stream`
-2. Backend validates auth/ownership, loads context, and routes to the selected provider
-3. Optional enrichments run (RAG retrieval, tools, web search) based on settings and model behavior
-4. SSE events stream tokens and metadata back to the client in real time
+2. Backend validates auth/ownership, loads context, and applies local preflight checks
+3. High-confidence current sports prompts are answered directly through `sports_lookup` using ESPN public APIs
+4. If not handled locally, optional enrichments run (RAG retrieval, tools, web search) based on settings and model behavior
+5. SSE events stream tokens and metadata back to the client in real time
 
 ---
 
@@ -264,6 +267,24 @@ Open **Settings** → enter a **Brave Search API key** → toggle web search on.
 Get a free key at [brave.com/search/api](https://brave.com/search/api/).
 Or leave it unconfigured to use DuckDuckGo as a zero-config fallback.
 
+### 5. Ask Current Sports Questions (optional)
+
+Sports lookup is enabled by default and does not require an API key. Ask naturally:
+
+- *"What are the current MLB standings?"*
+- *"Show me NBA scores today"*
+- *"What NFL games are on tomorrow?"*
+- *"Premier League table"*
+- *"What's the latest sports news?"*
+- *"What's the latest Chicago Cubs news?"*
+- *"Print out the top 50 in HR for the 2025 MLB season in a table"*
+- *"Show me Shohei Ohtani stats for 2025"*
+- *"Chicago Cubs roster"*
+- *"Yankees injuries"*
+- *"College football rankings"*
+
+The backend detects high-confidence sports intent, calls ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a Markdown table directly instead of letting the LLM answer from memory. It supports scores, schedules, standings, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals. Leaderboard/stat prompts are routed before standings so wording like "in a table" does not accidentally become a standings lookup. Toggle it with `sports_lookup_enabled` via the feature flags API.
+
 ---
 
 ## Project Structure
@@ -299,10 +320,12 @@ OmniLLM-Studio/
 │       ├── rag/                         # Chunker, retriever, context builder
 │       ├── repository/                  # Database CRUD layer
 │       ├── search/                      # Semantic search service
+│       ├── sports/                      # ESPN-backed scores, schedules, standings, news, stats, and roster lookup
 │       ├── templates/                   # Prompt template seeding
-│       ├── tools/                       # Tool registry + executor (web search, calculator, word doc, plugins)
+│       ├── tools/                       # Tool registry + executor (web search, sports, calculator, document gen, plugins)
 │       ├── websearch/                   # Brave/DDG + Jina Reader orchestrator
-│       └── wordgen/                     # Markdown → .docx generator (go-word wrapper)
+│       ├── wordgen/                     # Markdown → .docx generator (go-word wrapper)
+│       └── artifacts/                   # Multi-format artifact export (xlsx, csv, pdf, md, html, json, yaml)
 ├── frontend/
 │   └── src/
 │       ├── api.ts                       # Typed API client + SSE stream parser
@@ -513,6 +536,23 @@ All routes are under `/v1/`.
 | `PATCH` | `/v1/plugins/:name` | Update plugin |
 | `DELETE` | `/v1/plugins/:name` | Uninstall plugin |
 
+Built-in tools include `web_search`, `sports_lookup`, `calculator`, `url_fetch`, and `generate_word_doc`. `sports_lookup` accepts scores, schedules, standings, news, rosters, injuries, transactions, rankings, player stats, league stats, and stat leaderboards:
+
+```json
+{
+  "name": "sports_lookup",
+  "arguments": {
+    "query": "Show me NBA scores today",
+    "intent": "scores",
+    "league": "nba",
+    "date": "today",
+    "limit": 10
+  }
+}
+```
+
+For news, use `"intent": "news"` with an optional league or a team-specific query such as `"latest Chicago Cubs news"`. For leaderboards, use `"intent": "leaders"` with a query such as `"top 50 HR leaders for the 2025 MLB season"`. It returns JSON containing `intent`, `league`, `league_name`, `markdown`, `source`, and `retrieved_at`. The Markdown is ready to insert into a chat response.
+
 </details>
 
 <details>
@@ -596,9 +636,9 @@ The SQLite database is tuned for performance out of the box:
 | `MaxOpenConns` | 4 | Concurrent read connections |
 | `PRAGMA optimize` | On shutdown | Updates query planner statistics |
 
-27 versioned migrations, 21+ indexes covering all hot query paths, and periodic session cleanup.
+28 versioned migrations, 21+ indexes covering all hot query paths, and periodic session cleanup.
 
-> **Note:** V27 seeds the `word_doc_generation` feature flag (enabled by default).
+> **Note:** V27 seeds the `word_doc_generation` feature flag and V28 seeds `sports_lookup_enabled` (both enabled by default). The multi-format artifact export system (`.xlsx`, `.csv`, `.pdf`, `.md`, `.html`, `.json`, `.yaml`) runs alongside them without a separate flag.
 
 ---
 
@@ -607,9 +647,10 @@ The SQLite database is tuned for performance out of the box:
 | Layer | Technologies |
 |-------|-------------|
 | **Frontend** | React 19, TypeScript 5, Vite, Tailwind CSS v4, Zustand, Framer Motion, Lucide icons, ReactMarkdown, KaTeX, Sonner |
-| **Backend** | Go 1.24+, Chi router, SQLite (WAL), SSE streaming, AES-256-GCM, go-word (Markdown → .docx) |
+| **Backend** | Go 1.24+, Chi router, SQLite (WAL), SSE streaming, AES-256-GCM, go-word (.docx), excelize (.xlsx), go-pdf/fpdf (.pdf), yaml.v3 (.yaml) |
 | **Desktop** | Wails v2, OS-native WebView (WebView2 / WebKitGTK / WebKit) |
 | **Search** | Brave Search API, DuckDuckGo (zero-config), Jina Reader |
+| **Sports** | ESPN public APIs through `github.com/chinmaykhachane/espn-go` |
 | **LLM** | OpenAI (GPT-5.x, o-series), Anthropic (Claude 4.x), Google Gemini, Ollama, OpenRouter, Groq, Together AI, Mistral — any OpenAI-compatible API |
 | **Image** | OpenAI (DALL-E / GPT-Image), Gemini (Imagen 4.0 / Gemini image), Stable Diffusion, Together (FLUX / Imagen / Seedream / HiDream), OpenRouter |
 

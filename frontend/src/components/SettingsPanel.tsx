@@ -713,7 +713,7 @@ function ProviderCard({
           onChange={(e) => setApiKey(e.target.value)}
           placeholder="Update API key..."
           className="min-w-0 flex-1 px-3 py-2 text-sm bg-surface border border-border rounded-xl
-                     text-text placeholder-text-muted focus:outline-none focus:border-primary
+                     text-text placeholder-text-muted focus:outline-none
                      transition-all input-glow"
         />
         <motion.button
@@ -898,14 +898,19 @@ function GeneralTab() {
   );
   const [braveApiKey, setBraveApiKey] = useState(settings.brave_api_key || '');
   const [showBraveKey, setShowBraveKey] = useState(false);
+  const [jinaApiKey, setJinaApiKey] = useState(settings.jina_api_key || '');
+  const [showJinaKey, setShowJinaKey] = useState(false);
   const [savingSearch, setSavingSearch] = useState(false);
   const [jinaReaderEnabled, setJinaReaderEnabled] = useState(settings.jina_reader_enabled);
+  const [jinaMaxLen, setJinaMaxLen] = useState(settings.jina_reader_max_len || 10000);
   const [appVersion, setAppVersion] = useState('...');
 
   useEffect(() => {
     setWebSearchProvider(settings.web_search_provider || 'auto');
     setBraveApiKey(settings.brave_api_key || '');
+    setJinaApiKey(settings.jina_api_key || '');
     setJinaReaderEnabled(settings.jina_reader_enabled);
+    setJinaMaxLen(settings.jina_reader_max_len || 10000);
   }, [settings]);
 
   // Fetch version from backend
@@ -921,7 +926,9 @@ function GeneralTab() {
       await updateSettings({
         web_search_provider: webSearchProvider === 'auto' ? '' : webSearchProvider,
         brave_api_key: braveApiKey,
+        jina_api_key: jinaApiKey,
         jina_reader_enabled: jinaReaderEnabled,
+        jina_reader_max_len: jinaMaxLen,
       });
       toast.success('Web search settings saved.');
     } catch {
@@ -1013,27 +1020,73 @@ function GeneralTab() {
 
           {/* Jina Reader toggle */}
           {webSearchProvider !== 'none' && (
-            <div className="flex items-center justify-between py-2">
-              <div>
-                <label className="text-xs font-medium text-text-secondary block">Jina Reader</label>
-                <p className="text-[10px] text-text-muted mt-0.5">
-                  Fetches full page content for richer answers (free, no API key)
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setJinaReaderEnabled(!jinaReaderEnabled)}
-                className={`relative w-10 h-5 rounded-full transition-colors ${
-                  jinaReaderEnabled ? 'bg-primary' : 'bg-border'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                    jinaReaderEnabled ? 'translate-x-5' : ''
+            <>
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <label className="text-xs font-medium text-text-secondary block">Jina Reader</label>
+                  <p className="text-[10px] text-text-muted mt-0.5">
+                    Fetches full page content for richer answers. Add an API key below to bypass anti-bot limits.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setJinaReaderEnabled(!jinaReaderEnabled)}
+                  className={`relative w-10 h-5 rounded-full transition-colors ${
+                    jinaReaderEnabled ? 'bg-primary' : 'bg-border'
                   }`}
-                />
-              </button>
-            </div>
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                      jinaReaderEnabled ? 'translate-x-5' : ''
+                    }`}
+                  />
+                </button>
+              </div>
+              {jinaReaderEnabled && (
+                <div className="mt-2 space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-medium text-text-muted uppercase tracking-wider block">
+                      API Key (Optional, bypasses rate limits)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showJinaKey ? 'text' : 'password'}
+                        value={jinaApiKey}
+                        onChange={(e) => setJinaApiKey(e.target.value)}
+                        placeholder="jina_..."
+                        className="w-full px-3 py-2 pr-10 text-sm bg-surface border border-border rounded-xl
+                               text-text focus:outline-none focus:border-primary/50 transition-colors font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowJinaKey(!showJinaKey)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-text-muted hover:text-text transition-colors"
+                      >
+                        {showJinaKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-medium text-text-muted uppercase tracking-wider block">
+                      Max chars per page
+                    </label>
+                    <input
+                      type="number"
+                      min={1000}
+                      max={50000}
+                      step={1000}
+                      value={jinaMaxLen}
+                      onChange={(e) => setJinaMaxLen(Number(e.target.value))}
+                      className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl
+                             text-text focus:outline-none focus:border-primary/50 transition-colors"
+                    />
+                    <p className="text-[10px] text-text-muted">
+                      Characters of page content sent to the LLM per source. Higher = richer data but slower. Default: 10000.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           <motion.button
@@ -1839,7 +1892,7 @@ function AuthTab() {
               <UserPlus size={18} className="text-primary" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-text">Enable Multi-User Mode</h3>
+              <h3 className="text-sm font-bold">Enable Multi-User Mode</h3>
               <p className="text-xs text-text-muted mt-0.5">
                 Register the first admin account to activate authentication
               </p>

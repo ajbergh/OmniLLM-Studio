@@ -1,0 +1,694 @@
+package sports
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"html"
+	"math"
+	"strconv"
+	"strings"
+	"time"
+
+	espn "github.com/chinmaykhachane/espn-go"
+)
+
+type ESPNClient struct {
+	client *espn.Client
+	now    func() time.Time
+}
+
+func NewESPNClient() *ESPNClient {
+	return &ESPNClient{
+		client: espn.New(
+			espn.WithUserAgent("OmniLLM-Studio/1.0"),
+			espn.WithTimeout(10*time.Second),
+			espn.WithMaxRetries(3),
+			espn.WithBackoff(250*time.Millisecond),
+		),
+		now: time.Now,
+	}
+}
+
+func (c *ESPNClient) Lookup(ctx context.Context, req SportsRequest) (*SportsLookupResult, error) {
+	switch req.Intent {
+	case SportsIntentStandings:
+		return c.LookupStandings(ctx, req)
+	case SportsIntentScores, SportsIntentSchedule:
+		return c.LookupScores(ctx, req)
+	case SportsIntentNews:
+		return c.LookupNews(ctx, req)
+	case SportsIntentRoster:
+		return c.LookupRoster(ctx, req)
+	case SportsIntentInjuries, SportsIntentTransactions, SportsIntentTeamRecord, SportsIntentTeamSchedule, SportsIntentRankings, SportsIntentLeagueStats:
+		return c.LookupGeneric(ctx, req)
+	case SportsIntentLeaders:
+		return c.LookupLeaders(ctx, req)
+	case SportsIntentAthleteStats, SportsIntentAthleteNews:
+		return c.LookupAthlete(ctx, req)
+	default:
+		return nil, fmt.Errorf("%w: unknown sports intent", ErrUnsupportedLeague)
+	}
+}
+
+func (c *ESPNClient) LookupScores(ctx context.Context, req SportsRequest) (*SportsLookupResult, error) {
+	cfg, ok := leagueConfigForRequest(req)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedLeague, req.League)
+	}
+	req.League = cfg.League
+	req.Sport = cfg.Sport
+	if req.Intent == SportsIntentUnknown {
+		req.Intent = SportsIntentScores
+	}
+
+	opts := &espn.ScoreboardOptions{}
+	if req.Date != nil {
+		opts.SetDate(*req.Date)
+	}
+	if req.Limit > 0 {
+		opts.Limit = req.Limit
+	} else {
+		opts.Limit = 100
+	}
+
+	sb, err := c.client.Scoreboard(ctx, req.Sport, req.League, opts)
+	if err != nil {
+		return nil, wrapESPNError(ctx, err)
+	}
+
+	rows := normalizeScoreboard(sb)
+	if len(rows) == 0 {
+		return nil, ErrNoGames
+	}
+	if req.TeamQuery != "" {
+		rows = filterGameRowsByTeam(rows, req.TeamQuery)
+		if len(rows) == 0 {
+			return nil, fmt.Errorf("%w: %s", ErrNoMatchingGames, req.TeamQuery)
+		}
+	}
+
+	retrievedAt := c.timeNow()
+	return &SportsLookupResult{
+		Intent:      req.Intent,
+		League:      cfg.League,
+		LeagueName:  cfg.DisplayName,
+		Sport:       cfg.Sport,
+		DateLabel:   req.DateLabel,
+		Markdown:    RenderGamesMarkdown(req, cfg, rows, retrievedAt),
+		Source:      SourceESPN,
+		RetrievedAt: retrievedAt,
+	}, nil
+}
+
+func (c *ESPNClient) LookupStandings(ctx context.Context, req SportsRequest) (*SportsLookupResult, error) {
+	cfg, ok := leagueConfigForRequest(req)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedLeague, req.League)
+	}
+	req.League = cfg.League
+	req.Sport = cfg.Sport
+	req.Intent = SportsIntentStandings
+
+	st, err := c.client.Standings(ctx, req.Sport, req.League, req.Season)
+	if err != nil {
+		return nil, wrapESPNError(ctx, err)
+	}
+	rows := normalizeStandings(st)
+	if len(rows) == 0 {
+		return nil, ErrNoStandings
+	}
+
+	retrievedAt := c.timeNow()
+	return &SportsLookupResult{
+		Intent:      SportsIntentStandings,
+		League:      cfg.League,
+		LeagueName:  cfg.DisplayName,
+		Sport:       cfg.Sport,
+		DateLabel:   req.DateLabel,
+		Markdown:    RenderStandingsMarkdown(req, cfg, rows, retrievedAt),
+		Source:      SourceESPN,
+		RetrievedAt: retrievedAt,
+	}, nil
+}
+
+func (c *ESPNClient) LookupNews(ctx context.Context, req SportsRequest) (*SportsLookupResult, error) {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = defaultLimitForIntent(SportsIntentNews)
+	}
+	req.Intent = SportsIntentNews
+
+	var cfg LeagueConfig
+	hasCfg := false
+	if req.League != "" || req.Sport != "" {
+		var ok bool
+		cfg, ok = leagueConfigForRequest(req)
+		if !ok {
+			return nil, fmt.Errorf("%w: %s", ErrUnsupportedLeague, req.League)
+		}
+		hasCfg = true
+		req.League = cfg.League
+		req.Sport = cfg.Sport
+	}
+
+	var rows []NewsRow
+	if req.TeamQuery != "" {
+		if !hasCfg {
+			return nil, fmt.Errorf("%w: missing league for team news", ErrUnsupportedLeague)
+		}
+		team, err := c.resolveTeam(ctx, cfg, req.TeamQuery)
+		if err != nil {
+			return nil, err
+		}
+		req.TeamQuery = teamDisplayName(*team)
+		feed, err := c.client.TeamNews(ctx, cfg.Sport, cfg.League, team.ID, limit)
+		if err != nil {
+			return nil, wrapESPNError(ctx, err)
+		}
+		rows = normalizeNewsFeed(feed)
+	} else if hasCfg {
+		feed, err := c.client.News(ctx, cfg.Sport, cfg.League, limit)
+		if err != nil {
+			return nil, wrapESPNError(ctx, err)
+		}
+		rows = normalizeNewsFeed(feed)
+	} else {
+		feed, err := c.client.NowNews(ctx, &espn.NowOptions{Limit: limit})
+		if err != nil {
+			return nil, wrapESPNError(ctx, err)
+		}
+		rows = normalizeNowFeed(feed)
+	}
+
+	if len(rows) == 0 {
+		return nil, ErrNoNews
+	}
+
+	leagueName := "Sports"
+	league := ""
+	sport := ""
+	if hasCfg {
+		leagueName = cfg.DisplayName
+		league = cfg.League
+		sport = cfg.Sport
+	}
+
+	retrievedAt := c.timeNow()
+	return &SportsLookupResult{
+		Intent:      SportsIntentNews,
+		League:      league,
+		LeagueName:  leagueName,
+		Sport:       sport,
+		DateLabel:   req.DateLabel,
+		Markdown:    RenderNewsMarkdown(req, leagueName, rows, retrievedAt),
+		Source:      SourceESPN,
+		RetrievedAt: retrievedAt,
+	}, nil
+}
+
+func (c *ESPNClient) timeNow() time.Time {
+	if c != nil && c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+func MaybeHandleSportsQuery(ctx context.Context, query string, now time.Time) (*SportsLookupResult, bool, error) {
+	req, ok := DetectSportsIntent(query, now)
+	if !ok {
+		return nil, false, nil
+	}
+	if err := ValidateDateInQuery(query, now); err != nil {
+		return nil, true, err
+	}
+	result, err := NewESPNClient().Lookup(ctx, *req)
+	return result, true, err
+}
+
+func wrapESPNError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if errors.Is(err, espn.ErrRateLimited) {
+		return fmt.Errorf("%w: %v", ErrRateLimited, err)
+	}
+	return err
+}
+
+func normalizeScoreboard(sb *espn.Scoreboard) []GameRow {
+	if sb == nil || len(sb.Events) == 0 {
+		return nil
+	}
+
+	rows := make([]GameRow, 0, len(sb.Events))
+	for _, ev := range sb.Events {
+		var comp espn.Competition
+		if len(ev.Competitions) > 0 {
+			comp = ev.Competitions[0]
+		}
+
+		status := chooseStatus(ev.Status, comp.Status)
+		eventDate := firstNonEmpty(comp.Date, ev.Date)
+		away, home := splitCompetitors(comp.Competitors)
+		if away == nil && home == nil {
+			continue
+		}
+
+		row := GameRow{
+			Date:       formatGameDate(eventDate),
+			Time:       formatGameTime(eventDate),
+			Status:     statusText(status, eventDate),
+			Venue:      venueName(comp.Venue),
+			Broadcasts: broadcastNames(comp.Broadcasts, comp.GeoBroadcasts),
+		}
+		if away != nil {
+			row.AwayTeam = teamDisplayName(away.Team)
+			row.AwayAbbr = away.Team.Abbreviation
+			row.AwayScore = strings.TrimSpace(away.Score)
+		}
+		if home != nil {
+			row.HomeTeam = teamDisplayName(home.Team)
+			row.HomeAbbr = home.Team.Abbreviation
+			row.HomeScore = strings.TrimSpace(home.Score)
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func normalizeStandings(st *espn.Standings) []StandingsRow {
+	if st == nil {
+		return nil
+	}
+	var rows []StandingsRow
+	root := espn.StandingsGroup{
+		Name:      firstNonEmpty(st.DisplayName, st.Name, st.Abbreviation),
+		Standings: st.Standings,
+		Children:  st.Children,
+	}
+	collectStandingsRows("", root, &rows)
+	return rows
+}
+
+func normalizeNewsFeed(feed *espn.NewsFeed) []NewsRow {
+	if feed == nil || len(feed.Articles) == 0 {
+		return nil
+	}
+	rows := make([]NewsRow, 0, len(feed.Articles))
+	for _, article := range feed.Articles {
+		row := NewsRow{
+			Published:   formatNewsPublished(article.Published),
+			Headline:    strings.TrimSpace(article.Headline),
+			Description: compactNewsDescription(article.Description),
+			Byline:      strings.TrimSpace(article.Byline),
+			URL:         articleURL(article.Links),
+		}
+		if row.Headline == "" && row.Description == "" {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func normalizeNowFeed(feed *espn.NowFeed) []NewsRow {
+	if feed == nil || len(feed.Feed) == 0 {
+		return nil
+	}
+	rows := make([]NewsRow, 0, len(feed.Feed))
+	for _, item := range feed.Feed {
+		row := NewsRow{
+			Published:   formatNewsPublished(item.Published),
+			Headline:    strings.TrimSpace(item.Headline),
+			Description: compactNewsDescription(item.Description),
+			URL:         articleURL(item.Links),
+		}
+		if row.Headline == "" && row.Description == "" {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func collectStandingsRows(groupName string, group espn.StandingsGroup, rows *[]StandingsRow) {
+	currentGroup := combinedGroupName(groupName, standingsGroupName(group))
+	if group.Standings != nil {
+		if currentGroup == "" {
+			currentGroup = group.Standings.Name
+		}
+		for _, entry := range group.Standings.Entries {
+			*rows = append(*rows, standingsRowFromEntry(currentGroup, entry))
+		}
+	}
+	for _, child := range group.Children {
+		collectStandingsRows(currentGroup, child, rows)
+	}
+}
+
+func standingsRowFromEntry(group string, entry espn.StandingsEntry) StandingsRow {
+	rank := statIntAny(entry, []string{"rank", "playoffSeed", "seed"})
+	row := StandingsRow{
+		Group:            group,
+		Rank:             rank,
+		Team:             teamDisplayName(entry.Team),
+		Abbr:             entry.Team.Abbreviation,
+		Wins:             statDisplayAny(entry, []string{"wins", "W"}),
+		Losses:           statDisplayAny(entry, []string{"losses", "L"}),
+		Ties:             statDisplayAny(entry, []string{"ties", "T"}),
+		Draws:            statDisplayAny(entry, []string{"draws", "ties", "D"}),
+		Pct:              statDisplayAny(entry, []string{"winPercent", "winPercentage", "percentage", "pct"}),
+		GamesBack:        statDisplayAny(entry, []string{"gamesBack", "gamesBehind", "GB"}),
+		Streak:           statDisplayAny(entry, []string{"streak", "STREAK"}),
+		LastTen:          statDisplayAny(entry, []string{"lastTenGames", "lastTen", "lastTenRecord", "L10"}),
+		Points:           statDisplayAny(entry, []string{"points", "PTS"}),
+		GamesPlayed:      statDisplayAny(entry, []string{"gamesPlayed", "matchesPlayed", "GP"}),
+		GoalDifferential: statDisplayAny(entry, []string{"goalDifferential", "goalDifference", "pointDifferential", "GD"}),
+	}
+	if entry.Note != nil {
+		row.Note = strings.TrimSpace(entry.Note.Description)
+	}
+	return row
+}
+
+func statDisplayAny(entry espn.StandingsEntry, names []string) string {
+	for _, stat := range entry.Stats {
+		if statMatchesAny(stat, names) {
+			if strings.TrimSpace(stat.DisplayValue) != "" {
+				return strings.TrimSpace(stat.DisplayValue)
+			}
+			return formatFloatStat(stat.Value)
+		}
+	}
+	return ""
+}
+
+func statIntAny(entry espn.StandingsEntry, names []string) int {
+	value := statDisplayAny(entry, names)
+	if value == "" {
+		return 0
+	}
+	value = strings.TrimSpace(strings.TrimSuffix(value, ".0"))
+	n, err := strconv.Atoi(value)
+	if err == nil {
+		return n
+	}
+	return 0
+}
+
+func statMatchesAny(stat espn.Statistic, names []string) bool {
+	fields := []string{stat.Name, stat.DisplayName, stat.ShortDisplayName, stat.Abbreviation}
+	for _, field := range fields {
+		normField := normalizeText(field)
+		for _, name := range names {
+			if normField == normalizeText(name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func splitCompetitors(competitors []espn.Competitor) (*espn.Competitor, *espn.Competitor) {
+	var away, home *espn.Competitor
+	for i := range competitors {
+		switch strings.ToLower(competitors[i].HomeAway) {
+		case "away":
+			away = &competitors[i]
+		case "home":
+			home = &competitors[i]
+		}
+	}
+	if away == nil && len(competitors) > 0 {
+		away = &competitors[0]
+	}
+	if home == nil && len(competitors) > 1 {
+		home = &competitors[1]
+	}
+	return away, home
+}
+
+func chooseStatus(eventStatus, competitionStatus espn.Status) espn.Status {
+	if competitionStatus.Type.ShortDetail != "" ||
+		competitionStatus.Type.Detail != "" ||
+		competitionStatus.Type.Description != "" ||
+		competitionStatus.Type.State != "" {
+		return competitionStatus
+	}
+	return eventStatus
+}
+
+func statusText(status espn.Status, eventDate string) string {
+	st := status.Type
+	for _, candidate := range []string{st.ShortDetail, st.Detail, st.Description, st.State, st.Name} {
+		if strings.TrimSpace(candidate) != "" {
+			return strings.TrimSpace(candidate)
+		}
+	}
+	if t := formatGameTime(eventDate); t != "" {
+		return t
+	}
+	return ""
+}
+
+func teamDisplayName(team espn.Team) string {
+	return firstNonEmpty(team.DisplayName, team.ShortDisplayName, team.Name, team.Location, team.Abbreviation)
+}
+
+func (c *ESPNClient) resolveTeam(ctx context.Context, cfg LeagueConfig, teamQuery string) (*espn.Team, error) {
+	resp, err := c.client.Teams(ctx, cfg.Sport, cfg.League, 100)
+	if err != nil {
+		return nil, wrapESPNError(ctx, err)
+	}
+	query := normalizeText(teamQuery)
+	for _, team := range resp.Flatten() {
+		if espnTeamMatchesQuery(team, query) {
+			t := team
+			return &t, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: %s", ErrTeamNotFound, teamQuery)
+}
+
+func espnTeamMatchesQuery(team espn.Team, query string) bool {
+	if query == "" {
+		return false
+	}
+	fields := []string{
+		team.ID,
+		team.DisplayName,
+		team.ShortDisplayName,
+		team.Name,
+		team.Nickname,
+		team.Location,
+		team.Abbreviation,
+		team.Slug,
+	}
+	for _, field := range fields {
+		norm := normalizeText(field)
+		if norm == "" {
+			continue
+		}
+		if norm == query || strings.Contains(norm, query) || strings.Contains(query, norm) {
+			return true
+		}
+	}
+	return false
+}
+
+func venueName(venue *espn.Venue) string {
+	if venue == nil {
+		return ""
+	}
+	return strings.TrimSpace(venue.FullName)
+}
+
+func broadcastNames(broadcasts []espn.Broadcast, geo []espn.GeoBroadcast) string {
+	seen := map[string]bool{}
+	var names []string
+	for _, b := range broadcasts {
+		for _, name := range b.Names {
+			name = strings.TrimSpace(name)
+			if name != "" && !seen[strings.ToLower(name)] {
+				seen[strings.ToLower(name)] = true
+				names = append(names, name)
+			}
+		}
+	}
+	for _, g := range geo {
+		name := strings.TrimSpace(g.Media.ShortName)
+		if name != "" && !seen[strings.ToLower(name)] {
+			seen[strings.ToLower(name)] = true
+			names = append(names, name)
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+func filterGameRowsByTeam(rows []GameRow, teamQuery string) []GameRow {
+	query := normalizeText(teamQuery)
+	if query == "" {
+		return rows
+	}
+	filtered := make([]GameRow, 0, len(rows))
+	for _, row := range rows {
+		if rowMatchesTeam(row, query) {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
+}
+
+func rowMatchesTeam(row GameRow, query string) bool {
+	fields := []string{
+		row.AwayTeam, row.AwayAbbr, row.HomeTeam, row.HomeAbbr,
+	}
+	for _, field := range fields {
+		norm := normalizeText(field)
+		if norm == "" {
+			continue
+		}
+		if norm == query || strings.Contains(norm, query) || strings.Contains(query, norm) {
+			return true
+		}
+	}
+	return false
+}
+
+func standingsGroupName(group espn.StandingsGroup) string {
+	return firstNonEmpty(group.Name, group.Abbreviation)
+}
+
+func combinedGroupName(parent, child string) string {
+	parent = strings.TrimSpace(parent)
+	child = strings.TrimSpace(child)
+	switch {
+	case parent == "":
+		return child
+	case child == "":
+		return parent
+	case strings.Contains(strings.ToLower(child), strings.ToLower(parent)):
+		return child
+	case isDirectionalDivision(child):
+		return parent + " " + child
+	default:
+		return child
+	}
+}
+
+func isDirectionalDivision(name string) bool {
+	n := normalizeText(name)
+	switch n {
+	case "east", "central", "west", "north", "south", "division":
+		return true
+	default:
+		return strings.HasSuffix(n, " division")
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func formatGameDate(value string) string {
+	t, ok := parseESPNTime(value)
+	if !ok {
+		return ""
+	}
+	return t.Local().Format("Jan 2")
+}
+
+func formatGameTime(value string) string {
+	t, ok := parseESPNTime(value)
+	if !ok {
+		return ""
+	}
+	return t.Local().Format("3:04 PM")
+}
+
+func parseESPNTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02T15:04Z0700",
+		"2006-01-02T15:04:05Z0700",
+		"2006-01-02T15:04:05.000Z0700",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func formatNewsPublished(value string) string {
+	if t, ok := parseESPNTime(value); ok {
+		return t.Local().Format("Jan 2, 3:04 PM")
+	}
+	return strings.TrimSpace(value)
+}
+
+func compactNewsDescription(value string) string {
+	value = html.UnescapeString(stripHTMLTags(value))
+	value = strings.TrimSpace(strings.Join(strings.Fields(value), " "))
+	if len(value) <= 220 {
+		return value
+	}
+	return strings.TrimSpace(value[:217]) + "..."
+}
+
+func stripHTMLTags(value string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range value {
+		switch r {
+		case '<':
+			inTag = true
+		case '>':
+			inTag = false
+		default:
+			if !inTag {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
+func articleURL(links espn.ArticleLinks) string {
+	for _, link := range []*espn.Link{links.Web, links.Mobile, links.App, links.API} {
+		if link != nil && strings.TrimSpace(link.Href) != "" {
+			return strings.TrimSpace(link.Href)
+		}
+	}
+	return ""
+}
+
+func formatFloatStat(v float64) string {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return ""
+	}
+	if v == math.Trunc(v) {
+		return strconv.FormatInt(int64(v), 10)
+	}
+	s := strconv.FormatFloat(v, 'f', 3, 64)
+	s = strings.TrimRight(s, "0")
+	s = strings.TrimRight(s, ".")
+	if strings.HasPrefix(s, "0.") {
+		s = strings.TrimPrefix(s, "0")
+	}
+	if strings.HasPrefix(s, "-0.") {
+		s = "-" + strings.TrimPrefix(s, "-0")
+	}
+	return s
+}

@@ -120,6 +120,7 @@ func versionedMigrations() []Migration {
 		{Version: 25, Name: "provider_default_image_model", SQL: migrationProviderDefaultImageModel},
 		{Version: 26, Name: "conversation_kind", SQL: migrationConversationKind},
 		{Version: 27, Name: "word_doc_generation_flag", SQL: migrationWordDocGenerationFlag},
+		{Version: 28, Name: "sports_lookup_flag", SQL: migrationSportsLookupFlag},
 	}
 }
 
@@ -732,6 +733,13 @@ ALTER TABLE provider_profiles ADD COLUMN default_image_model TEXT;
 const migrationWordDocGenerationFlag = `
 INSERT INTO feature_flags (key, enabled, metadata)
 VALUES ('word_doc_generation', 1, 'Auto-generate a .docx file when the user requests a Word document')
+ON CONFLICT(key) DO NOTHING;
+`
+
+// V28: Seed sports_lookup feature flag as enabled.
+const migrationSportsLookupFlag = `
+INSERT INTO feature_flags (key, enabled, metadata)
+VALUES ('sports_lookup_enabled', 1, 'Retrieve current sports scores, schedules, and standings from ESPN')
 ON CONFLICT(key) DO NOTHING;
 `
 

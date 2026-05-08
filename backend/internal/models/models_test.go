@@ -18,8 +18,8 @@ func TestDefaultAppSettings(t *testing.T) {
 	if !s.JinaReaderEnabled {
 		t.Error("expected jina_reader_enabled=true")
 	}
-	if s.JinaReaderMaxLen != 3000 {
-		t.Errorf("expected jina_reader_max_len=3000, got %d", s.JinaReaderMaxLen)
+	if s.JinaReaderMaxLen != 10000 {
+		t.Errorf("expected jina_reader_max_len=10000, got %d", s.JinaReaderMaxLen)
 	}
 }
 
