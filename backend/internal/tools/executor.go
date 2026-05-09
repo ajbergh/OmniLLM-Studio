@@ -1,3 +1,5 @@
+// Package tools provides the dynamic tool registry and execution framework
+// for OmniLLM-Studio, supporting both local built-in tools and remote MCP tools.
 package tools
 
 import (
@@ -15,6 +17,19 @@ const DefaultTimeout = 30 * time.Second
 // PermissionResolver looks up the policy for a given tool.
 // Return "allow", "deny", or "ask".  A zero-value ("") is treated as "allow".
 type PermissionResolver func(toolName string) string
+
+type approvalContextKey struct{}
+
+const ApprovalStatusMetadataKey = "approval_status"
+
+// ContextWithApprovalHandler attaches a per-request approval handler used for
+// tools with "ask" policy.
+func ContextWithApprovalHandler(ctx context.Context, handler ApprovalHandler) context.Context {
+	if handler == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, approvalContextKey{}, handler)
+}
 
 // Executor orchestrates tool lookup, permission checks, and execution.
 type Executor struct {
@@ -69,12 +84,42 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 				IsError:    true,
 			}
 		case "ask":
-			// In a future iteration this will pause for user approval.
-			// For now, treat "ask" as "deny" to avoid silent execution.
-			return &ToolResult{
-				ToolCallID: call.ID,
-				Content:    fmt.Sprintf("tool %q requires user approval (not yet implemented)", call.Name),
-				IsError:    true,
+			handler, _ := ctx.Value(approvalContextKey{}).(ApprovalHandler)
+			if handler == nil {
+				return &ToolResult{
+					ToolCallID: call.ID,
+					Content:    fmt.Sprintf("tool %q requires user approval", call.Name),
+					IsError:    true,
+					Metadata: map[string]interface{}{
+						ApprovalStatusMetadataKey: "required",
+					},
+				}
+			}
+			approved, err := handler(ctx, ApprovalRequest{
+				ToolCallID:  call.ID,
+				ToolName:    call.Name,
+				Description: tool.Definition().Description,
+				Arguments:   call.Arguments,
+			})
+			if err != nil {
+				return &ToolResult{
+					ToolCallID: call.ID,
+					Content:    fmt.Sprintf("tool %q approval failed: %v", call.Name, err),
+					IsError:    true,
+					Metadata: map[string]interface{}{
+						ApprovalStatusMetadataKey: "error",
+					},
+				}
+			}
+			if !approved {
+				return &ToolResult{
+					ToolCallID: call.ID,
+					Content:    fmt.Sprintf("tool %q was rejected by the user", call.Name),
+					IsError:    true,
+					Metadata: map[string]interface{}{
+						ApprovalStatusMetadataKey: "rejected",
+					},
+				}
 			}
 			// "allow" or "" → continue
 		}

@@ -1,6 +1,9 @@
+// Package api provides HTTP handlers and routing for the OmniLLM-Studio backend.
+// It maps REST endpoints to underlying domain services and repositories.
 package api
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"net/http"
@@ -16,6 +19,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/bundle"
 	"github.com/ajbergh/omnillm-studio/internal/config"
 	"github.com/ajbergh/omnillm-studio/internal/llm"
+	"github.com/ajbergh/omnillm-studio/internal/mcpclient"
 	"github.com/ajbergh/omnillm-studio/internal/news"
 	"github.com/ajbergh/omnillm-studio/internal/plugins"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
@@ -45,7 +49,15 @@ func SecurityHeaders(next http.Handler) http.Handler {
 
 // NewRouter creates the main HTTP router with all API routes.
 func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) http.Handler {
+	handler, _ := NewRouterWithShutdown(database, cfg, version, commit)
+	return handler
+}
+
+// NewRouterWithShutdown creates the main HTTP router and returns a cleanup hook
+// for runtime services owned by the API layer.
+func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit string) (http.Handler, func(context.Context) error) {
 	r := chi.NewRouter()
+	shutdownFns := []func(context.Context) error{}
 
 	// Middleware
 	r.Use(middleware.Logger)
@@ -99,19 +111,8 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	urlCtxCfg := urlcontext.ConfigFromEnv()
 	urlCtxSvc := urlcontext.NewService(urlCtxCfg)
 
-	// Handlers
-	convoHandler := NewConversationHandler(convoRepo, vectorStore)
 	wordGen := wordgen.NewGenerator(cfg.AttachmentsDir)
 	artifactGen := artifacts.NewGenerator(cfg.AttachmentsDir)
-	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo, newsSvc, urlCtxSvc)
-	providerHandler := NewProviderHandler(providerRepo)
-	settingsHandler := NewSettingsHandler(settingsRepo, orchestrator)
-	wsHandler := NewWebSearchHandler(orchestrator)
-	titleHandler := NewTitleHandler(convoRepo, msgRepo, llmService)
-	attachHandler := NewAttachmentHandler(attachRepo, convoRepo, cfg.AttachmentsDir)
-	imageHandler := NewImageHandler(msgRepo, convoRepo, attachRepo, llmService, cfg.AttachmentsDir)
-	featureFlagHandler := NewFeatureFlagHandler(featureFlagRepo)
-	ragHandler := NewRAGHandler(chunkRepo, vectorStore, attachRepo, convoRepo, settingsRepo, providerRepo, llmService, cfg.AttachmentsDir)
 
 	// Tool Calling Framework
 	toolPermRepo := repository.NewToolPermissionRepo(database)
@@ -125,6 +126,25 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	toolRegistry.MustRegister(tools.NewGitHubRepoInspectTool(urlCtxSvc))
 	toolExecutor := tools.NewExecutor(toolRegistry, toolPermRepo.PolicyResolver(), 0)
 	toolHandler := NewToolHandler(toolRegistry, toolExecutor, toolPermRepo)
+
+	// Handlers
+	convoHandler := NewConversationHandler(convoRepo, vectorStore)
+	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo, newsSvc, urlCtxSvc, toolRegistry, toolExecutor)
+	providerHandler := NewProviderHandler(providerRepo)
+	settingsHandler := NewSettingsHandler(settingsRepo, orchestrator)
+	wsHandler := NewWebSearchHandler(orchestrator)
+	titleHandler := NewTitleHandler(convoRepo, msgRepo, llmService)
+	attachHandler := NewAttachmentHandler(attachRepo, convoRepo, cfg.AttachmentsDir)
+	imageHandler := NewImageHandler(msgRepo, convoRepo, attachRepo, llmService, cfg.AttachmentsDir)
+	featureFlagHandler := NewFeatureFlagHandler(featureFlagRepo)
+	ragHandler := NewRAGHandler(chunkRepo, vectorStore, attachRepo, convoRepo, settingsRepo, providerRepo, llmService, cfg.AttachmentsDir)
+
+	// Model Context Protocol
+	mcpRepo := repository.NewMCPServerRepo(database)
+	mcpManager := mcpclient.NewManager(mcpRepo, toolPermRepo, toolRegistry)
+	mcpHandler := NewMCPHandler(mcpRepo, mcpManager)
+	mcpManager.StartEnabled(context.Background())
+	shutdownFns = append(shutdownFns, mcpManager.StopAll)
 
 	// Usage & Cost Analytics
 	pricingRepo := repository.NewPricingRepo(database)
@@ -343,6 +363,28 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 				})
 			})
 
+			// MCP Servers (admin only)
+			r.Route("/mcp", func(r chi.Router) {
+				r.Use(auth.RequireRole("admin"))
+				r.Get("/audit", mcpHandler.ListAudit)
+				r.Route("/servers", func(r chi.Router) {
+					r.Get("/", mcpHandler.ListServers)
+					r.Post("/", mcpHandler.CreateServer)
+					r.Route("/{serverId}", func(r chi.Router) {
+						r.Get("/", mcpHandler.GetServer)
+						r.Patch("/", mcpHandler.UpdateServer)
+						r.Delete("/", mcpHandler.DeleteServer)
+						r.Post("/test", mcpHandler.TestServer)
+						r.Post("/start", mcpHandler.StartServer)
+						r.Post("/stop", mcpHandler.StopServer)
+						r.Post("/restart", mcpHandler.RestartServer)
+						r.Post("/refresh", mcpHandler.RefreshTools)
+						r.Get("/tools", mcpHandler.ListTools)
+						r.Patch("/tools/{toolName}", mcpHandler.UpdateToolPolicy)
+					})
+				})
+			})
+
 			// Analytics
 			r.Route("/analytics", func(r chi.Router) {
 				r.Group(func(r chi.Router) {
@@ -453,5 +495,13 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 		}) // end auth group
 	})
 
-	return r
+	return r, func(ctx context.Context) error {
+		var firstErr error
+		for _, shutdown := range shutdownFns {
+			if err := shutdown(ctx); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		return firstErr
+	}
 }

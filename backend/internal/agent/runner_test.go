@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/db"
 	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
+	"github.com/ajbergh/omnillm-studio/internal/tools"
 )
 
 // --------------- Test helpers ---------------
@@ -471,6 +474,90 @@ func TestCancelRunWithoutRegisteredContext(t *testing.T) {
 	}
 }
 
+// --------------- Tool-call approval ---------------
+
+func TestExecuteToolCallAskApprovalApproved(t *testing.T) {
+	runner, runRepo, stepRepo, convoRepo := newTestRunner(t)
+	registry := tools.NewRegistry()
+	registry.MustRegister(approvalFakeTool{})
+	runner.toolExecutor = tools.NewExecutor(registry, func(string) string { return "ask" }, 0)
+
+	convoID := createTestConversation(t, convoRepo)
+	run := createTestRun(t, runRepo, convoID)
+	step := createToolCallStep(t, stepRepo, run.ID, "approval_tool")
+
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rc := runner.registerRun(run.ID, cancel)
+	defer runner.deregisterRun(run.ID)
+
+	events := make(chan Event, 1)
+	go func() {
+		event := <-events
+		if event.Type != EventApprovalRequired {
+			t.Errorf("event type = %s, want %s", event.Type, EventApprovalRequired)
+		}
+		rc.approval <- true
+	}()
+
+	output, err := runner.executeToolCall(context.Background(), rc, run, step, func(event Event) {
+		events <- event
+	})
+	if err != nil {
+		t.Fatalf("executeToolCall: %v", err)
+	}
+	if output != "approved tool output" {
+		t.Fatalf("output = %q, want approved tool output", output)
+	}
+
+	updatedRun, _ := runRepo.GetByID(run.ID)
+	if updatedRun.Status != RunStatusRunning {
+		t.Fatalf("run status = %q, want %q", updatedRun.Status, RunStatusRunning)
+	}
+	updatedStep, _ := stepRepo.GetByID(step.ID)
+	if updatedStep.Status != StepStatusRunning {
+		t.Fatalf("step status = %q, want %q", updatedStep.Status, StepStatusRunning)
+	}
+}
+
+func TestExecuteToolCallAskApprovalRejected(t *testing.T) {
+	runner, runRepo, stepRepo, convoRepo := newTestRunner(t)
+	registry := tools.NewRegistry()
+	registry.MustRegister(approvalFakeTool{})
+	runner.toolExecutor = tools.NewExecutor(registry, func(string) string { return "ask" }, 0)
+
+	convoID := createTestConversation(t, convoRepo)
+	run := createTestRun(t, runRepo, convoID)
+	step := createToolCallStep(t, stepRepo, run.ID, "approval_tool")
+
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rc := runner.registerRun(run.ID, cancel)
+	defer runner.deregisterRun(run.ID)
+
+	events := make(chan Event, 1)
+	go func() {
+		<-events
+		rc.approval <- false
+	}()
+
+	_, err := runner.executeToolCall(context.Background(), rc, run, step, func(event Event) {
+		events <- event
+	})
+	if !errors.Is(err, errToolApprovalRejected) {
+		t.Fatalf("error = %v, want errToolApprovalRejected", err)
+	}
+
+	updatedRun, _ := runRepo.GetByID(run.ID)
+	if updatedRun.Status != RunStatusCancelled {
+		t.Fatalf("run status = %q, want %q", updatedRun.Status, RunStatusCancelled)
+	}
+	updatedStep, _ := stepRepo.GetByID(step.ID)
+	if updatedStep.Status != StepStatusSkipped {
+		t.Fatalf("step status = %q, want %q", updatedStep.Status, StepStatusSkipped)
+	}
+}
+
 // --------------- Run status transitions via DB ---------------
 
 func TestRunStatusTransitions(t *testing.T) {
@@ -609,4 +696,49 @@ func TestConcurrentRegisterDeregister(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		<-done
 	}
+}
+
+type approvalFakeTool struct{}
+
+func (approvalFakeTool) Definition() tools.ToolDefinition {
+	return tools.ToolDefinition{
+		Name:        "approval_tool",
+		Description: "Approval test tool",
+		Parameters:  json.RawMessage(`{"type":"object"}`),
+		Category:    "test",
+		Enabled:     true,
+	}
+}
+
+func (approvalFakeTool) Validate(json.RawMessage) error {
+	return nil
+}
+
+func (approvalFakeTool) Execute(context.Context, json.RawMessage) (*tools.ToolResult, error) {
+	return &tools.ToolResult{Content: "approved tool output"}, nil
+}
+
+func createToolCallStep(t *testing.T, stepRepo *repository.AgentStepRepo, runID, toolName string) *models.AgentStep {
+	t.Helper()
+	steps := []models.AgentStep{
+		{
+			RunID:       runID,
+			StepIndex:   0,
+			Type:        StepTypeToolCall,
+			Description: "Use approval tool",
+			InputJSON:   `{"value":"x"}`,
+			ToolName:    strPtr(toolName),
+		},
+	}
+	if err := stepRepo.CreateBatch(steps); err != nil {
+		t.Fatalf("create tool step: %v", err)
+	}
+	loaded, err := stepRepo.ListByRun(runID)
+	if err != nil {
+		t.Fatalf("list tool step: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("loaded steps = %d, want 1", len(loaded))
+	}
+	return &loaded[0]
 }

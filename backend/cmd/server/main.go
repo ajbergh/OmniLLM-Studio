@@ -1,3 +1,6 @@
+// Package main is the entry point for the OmniLLM-Studio backend server.
+// It initializes the database, loads configuration, wires up the dependency graph,
+// and starts the HTTP server.
 package main
 
 import (
@@ -35,7 +38,7 @@ func main() {
 		log.Fatalf("failed to run migrations: %v", err)
 	}
 
-	router := api.NewRouter(database, cfg, version, commit)
+	router, shutdownAPI := api.NewRouterWithShutdown(database, cfg, version, commit)
 
 	// Periodic cleanup of expired sessions (every 15 minutes).
 	sessionRepo := repository.NewSessionRepo(database)
@@ -82,6 +85,9 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if err := shutdownAPI(ctx); err != nil {
+		log.Printf("API runtime shutdown failed: %v", err)
+	}
 
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("server shutdown failed: %v", err)

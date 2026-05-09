@@ -122,6 +122,9 @@ func versionedMigrations() []Migration {
 		{Version: 27, Name: "word_doc_generation_flag", SQL: migrationWordDocGenerationFlag},
 		{Version: 28, Name: "sports_lookup_flag", SQL: migrationSportsLookupFlag},
 		{Version: 29, Name: "news_lookup_flag", SQL: migrationNewsLookupFlag},
+		{Version: 30, Name: "mcp_servers", SQL: migrationMCPServers},
+		{Version: 31, Name: "mcp_audit_log", SQL: migrationMCPAuditLog},
+		{Version: 32, Name: "mcp_servers_headers", SQL: migrationMCPServersHeaders},
 	}
 }
 
@@ -749,6 +752,51 @@ const migrationNewsLookupFlag = `
 INSERT INTO feature_flags (key, enabled, metadata)
 VALUES ('news_lookup_enabled', 1, 'Look up current non-sports news via the Actually Relevant News API')
 ON CONFLICT(key) DO NOTHING;
+`
+
+// V30: MCP server configuration.
+const migrationMCPServers = `
+CREATE TABLE IF NOT EXISTS mcp_servers (
+	id           TEXT PRIMARY KEY,
+	name         TEXT NOT NULL UNIQUE,
+	transport    TEXT NOT NULL DEFAULT 'stdio' CHECK(transport IN ('stdio','http')),
+	command      TEXT,
+	args_json    TEXT NOT NULL DEFAULT '[]',
+	url          TEXT,
+	env_json     TEXT NOT NULL DEFAULT '{}',
+	enabled      INTEGER NOT NULL DEFAULT 0,
+	workspace_id TEXT,
+	created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
+	updated_at   DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled);
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_workspace ON mcp_servers(workspace_id);
+`
+
+// V31: MCP audit log.
+const migrationMCPAuditLog = `
+CREATE TABLE IF NOT EXISTS mcp_audit_log (
+	id           TEXT PRIMARY KEY,
+	server_id    TEXT NOT NULL,
+	event_type   TEXT NOT NULL,
+	tool_name    TEXT,
+	input_json   TEXT,
+	output_json  TEXT,
+	duration_ms  INTEGER,
+	error_msg    TEXT,
+	user_id      TEXT,
+	workspace_id TEXT,
+	created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
+	FOREIGN KEY (server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_audit_server ON mcp_audit_log(server_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_audit_created ON mcp_audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_mcp_audit_tool ON mcp_audit_log(tool_name);
+`
+
+// V32: Add encrypted HTTP request headers to MCP server config.
+const migrationMCPServersHeaders = `
+ALTER TABLE mcp_servers ADD COLUMN headers_json TEXT NOT NULL DEFAULT '{}';
 `
 
 // V26: Distinguish chat conversations from image-studio backing conversations.

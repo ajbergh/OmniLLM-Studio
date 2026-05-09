@@ -1,4 +1,6 @@
-// API client for communicating with the Go backend
+// api.ts is the central HTTP client for the OmniLLM-Studio frontend.
+// It wraps `fetch` to automatically attach bearer tokens, handles error parsing,
+// and implements SSE stream parsing for chunked LLM generation.
 
 import type {
   Conversation,
@@ -55,6 +57,12 @@ import type {
   ImageEditEditRequest,
   ImageEditGenerateResponse,
   ImageCapabilities,
+  MCPServer,
+  MCPAuditEvent,
+  MCPTool,
+  CreateMCPServerRequest,
+  UpdateMCPServerRequest,
+  ToolPolicy,
 } from './types';
 
 // In the Wails desktop build the API runs on a real local HTTP server
@@ -844,6 +852,75 @@ export const pluginApi = {
   uninstall: (name: string) =>
     apiFetch<void>(`/plugins/${name}`, {
       method: 'DELETE',
+    }),
+};
+
+// ── MCP Servers ───────────────────────────────────────────────────────────
+
+export const mcpApi = {
+  listAudit: (params: { serverId?: string; limit?: number } = {}) => {
+    const search = new URLSearchParams();
+    if (params.serverId) search.set('server_id', params.serverId);
+    if (params.limit) search.set('limit', String(params.limit));
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    return apiFetch<MCPAuditEvent[]>(`/mcp/audit${suffix}`);
+  },
+
+  listServers: () =>
+    apiFetch<MCPServer[]>('/mcp/servers'),
+
+  getServer: (id: string) =>
+    apiFetch<MCPServer>(`/mcp/servers/${id}`),
+
+  createServer: (data: CreateMCPServerRequest) =>
+    apiFetch<MCPServer>('/mcp/servers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateServer: (id: string, data: UpdateMCPServerRequest) =>
+    apiFetch<MCPServer>(`/mcp/servers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  deleteServer: (id: string) =>
+    apiFetch<void>(`/mcp/servers/${id}`, {
+      method: 'DELETE',
+    }),
+
+  testServer: (id: string) =>
+    apiFetch<{ ok: boolean; tools?: MCPTool[]; error?: string }>(`/mcp/servers/${id}/test`, {
+      method: 'POST',
+    }),
+
+  startServer: (id: string) =>
+    apiFetch<MCPServer>(`/mcp/servers/${id}/start`, {
+      method: 'POST',
+    }),
+
+  stopServer: (id: string) =>
+    apiFetch<MCPServer>(`/mcp/servers/${id}/stop`, {
+      method: 'POST',
+    }),
+
+  restartServer: (id: string) =>
+    apiFetch<MCPServer>(`/mcp/servers/${id}/restart`, {
+      method: 'POST',
+    }),
+
+  refreshTools: (id: string) =>
+    apiFetch<MCPTool[]>(`/mcp/servers/${id}/refresh`, {
+      method: 'POST',
+    }),
+
+  listTools: (id: string) =>
+    apiFetch<MCPTool[]>(`/mcp/servers/${id}/tools`),
+
+  updateToolPolicy: (serverId: string, toolName: string, policy: ToolPolicy) =>
+    apiFetch<{ tool_name: string; policy: ToolPolicy }>(`/mcp/servers/${serverId}/tools/${toolName}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ policy }),
     }),
 };
 

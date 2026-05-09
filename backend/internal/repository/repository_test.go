@@ -327,3 +327,72 @@ func TestAttachmentCRUD(t *testing.T) {
 		t.Error("expected nil after delete")
 	}
 }
+
+// ---------- MCP Repo ----------
+
+func TestMCPAuditList(t *testing.T) {
+	database := newTestDB(t)
+	repo := repository.NewMCPServerRepo(database)
+
+	command := "npx.cmd"
+	server, err := repo.Create(repository.CreateMCPServerInput{
+		Name:      "filesystem",
+		Transport: "stdio",
+		Command:   &command,
+		Args:      []string{"-y", "@modelcontextprotocol/server-filesystem@2025.8.21"},
+	})
+	if err != nil {
+		t.Fatalf("create mcp server: %v", err)
+	}
+
+	toolName := "mcp_filesystem_read_file"
+	inputJSON := `{"path":"example.txt"}`
+	durationMs := 12
+	if err := repo.InsertAudit(models.MCPAuditEvent{
+		ServerID:   server.ID,
+		EventType:  "tool_call",
+		ToolName:   &toolName,
+		InputJSON:  &inputJSON,
+		DurationMs: &durationMs,
+	}); err != nil {
+		t.Fatalf("insert audit: %v", err)
+	}
+	if err := repo.InsertAudit(models.MCPAuditEvent{
+		ServerID:  server.ID,
+		EventType: "server_start",
+	}); err != nil {
+		t.Fatalf("insert second audit: %v", err)
+	}
+
+	events, err := repo.ListAudit(repository.MCPAuditFilter{ServerID: server.ID, Limit: 10})
+	if err != nil {
+		t.Fatalf("list audit: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("audit count: got %d, want 2", len(events))
+	}
+	if events[0].ServerID != server.ID || events[0].EventType == "" {
+		t.Fatalf("unexpected first event: %+v", events[0])
+	}
+	var toolEvent *models.MCPAuditEvent
+	for i := range events {
+		if events[i].ToolName != nil && *events[i].ToolName == toolName {
+			toolEvent = &events[i]
+			break
+		}
+	}
+	if toolEvent == nil {
+		t.Fatalf("tool event not scanned: %+v", events)
+	}
+	if toolEvent.DurationMs == nil || *toolEvent.DurationMs != durationMs {
+		t.Fatalf("duration not scanned: %+v", toolEvent)
+	}
+
+	limited, err := repo.ListAudit(repository.MCPAuditFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("list limited audit: %v", err)
+	}
+	if len(limited) != 1 {
+		t.Fatalf("limited count: got %d, want 1", len(limited))
+	}
+}
