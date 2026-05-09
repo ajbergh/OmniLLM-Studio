@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"unicode"
+
+	goreadability "codeberg.org/readeck/go-readability/v2"
 )
 
 var (
@@ -35,10 +38,20 @@ var htmlEntities = map[string]string{
 	"&hellip;": "…",
 }
 
-// ExtractReadable strips HTML and returns the page title and readable text.
-// It extracts JSON-LD structured data and Open Graph meta tags before stripping
-// scripts, so news sites and articles that embed machine-readable content yield
-// more useful text even when the rendered page is JavaScript-gated.
+const minReadableChars = 100
+
+// ExtractReadable extracts the page title and readable body text from raw HTML.
+//
+// Strategy (in priority order):
+//  1. JSON-LD structured data (extracted before script stripping) — best for news
+//     articles that embed machine-readable content even when JS-rendered.
+//  2. Mozilla Readability (go-readability) — removes nav/ads and returns the main
+//     article text. Works well for any server-rendered article or blog page.
+//  3. Regex fallback — strips tags and normalises whitespace. Used when readability
+//     fails or returns too little text (e.g. a simple one-page utility site).
+//
+// Open Graph / meta description are extracted for metadata regardless of which
+// path produces the body text.
 func ExtractReadable(rawURL string, html []byte, contentType string) *ReadableDocument {
 	if len(html) == 0 {
 		return &ReadableDocument{FinalURL: rawURL}
@@ -46,55 +59,36 @@ func ExtractReadable(rawURL string, html []byte, contentType string) *ReadableDo
 
 	content := string(html)
 
-	// Extract title from <title> tag
-	title := ""
-	if m := reTitle.FindStringSubmatch(content); len(m) > 1 {
-		title = cleanText(reTag.ReplaceAllString(m[1], ""))
-	}
-
-	// Extract structured content from JSON-LD and meta tags BEFORE stripping scripts.
+	// --- Structured data (before script stripping) ---
 	structured := extractJSONLD(content)
 	ogTitle, ogDesc := extractMetaContent(content)
 
-	// Prefer og:title over <title> when it's more descriptive
-	if ogTitle != "" && title == "" {
+	// --- Readability pass ---
+	title, mainText := extractWithReadability(rawURL, html)
+
+	// --- Regex fallback ---
+	if len(strings.TrimSpace(mainText)) < minReadableChars {
+		title, mainText = extractWithRegex(content, title)
+	}
+
+	// Prefer og:title when readability/regex returned nothing
+	if title == "" {
 		title = ogTitle
 	}
 
-	// Remove script, style, comments (after JSON-LD extraction)
-	content = reScript.ReplaceAllString(content, " ")
-	content = reStyle.ReplaceAllString(content, " ")
-	content = reComment.ReplaceAllString(content, " ")
-
-	// Replace block-level tags with newlines for better paragraph separation
-	content = replaceBlockTags(content)
-
-	// Strip remaining tags
-	content = reTag.ReplaceAllString(content, " ")
-
-	// Decode HTML entities
-	content = decodeEntities(content)
-
-	// Normalize whitespace
-	content = reMultiSpace.ReplaceAllString(content, " ")
-	content = normalizeLines(content)
-	content = reMultiLine.ReplaceAllString(content, "\n\n")
-	content = strings.TrimSpace(content)
-
-	// Combine structured content + meta description + body text.
-	// If JSON-LD gave us good content, prepend it so it's the primary signal.
+	// --- Combine ---
 	var parts []string
 	if structured != "" {
 		parts = append(parts, structured)
 	}
 	if ogDesc != "" {
-		// Only add meta description if not already covered by JSON-LD
-		if !strings.Contains(structured, ogDesc[:min(len(ogDesc), 60)]) {
+		// Only add the meta description when it isn't already covered by JSON-LD content.
+		if len(structured) == 0 || !strings.Contains(structured, ogDesc[:min(len(ogDesc), 60)]) {
 			parts = append(parts, "Page description: "+ogDesc)
 		}
 	}
-	if content != "" {
-		parts = append(parts, content)
+	if mainText != "" {
+		parts = append(parts, mainText)
 	}
 	combined := strings.Join(parts, "\n\n")
 
@@ -105,6 +99,51 @@ func ExtractReadable(rawURL string, html []byte, contentType string) *ReadableDo
 		Description: ogDesc,
 		FinalURL:    rawURL,
 	}
+}
+
+// extractWithReadability uses Mozilla Readability to pull the main article content.
+// Returns empty strings when the page cannot be parsed or yields too little text.
+func extractWithReadability(rawURL string, html []byte) (title, text string) {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", ""
+	}
+
+	article, err := goreadability.FromReader(bytes.NewReader(html), parsedURL)
+	if err != nil {
+		return "", ""
+	}
+
+	title = article.Title()
+
+	var sb strings.Builder
+	if err := article.RenderText(&sb); err != nil {
+		return title, ""
+	}
+	return title, strings.TrimSpace(sb.String())
+}
+
+// extractWithRegex is the original regex-based extractor used as a fallback.
+func extractWithRegex(content, existingTitle string) (title, text string) {
+	title = existingTitle
+	if title == "" {
+		if m := reTitle.FindStringSubmatch(content); len(m) > 1 {
+			title = cleanText(reTag.ReplaceAllString(m[1], ""))
+		}
+	}
+
+	body := reScript.ReplaceAllString(content, " ")
+	body = reStyle.ReplaceAllString(body, " ")
+	body = reComment.ReplaceAllString(body, " ")
+	body = replaceBlockTags(body)
+	body = reTag.ReplaceAllString(body, " ")
+	body = decodeEntities(body)
+	body = reMultiSpace.ReplaceAllString(body, " ")
+	body = normalizeLines(body)
+	body = reMultiLine.ReplaceAllString(body, "\n\n")
+	body = strings.TrimSpace(body)
+
+	return title, body
 }
 
 // extractJSONLD finds application/ld+json script blocks and extracts article content.
@@ -182,7 +221,6 @@ func extractArticleLD(obj map[string]interface{}) string {
 	if headline, ok := obj["headline"].(string); ok && headline != "" {
 		fmt.Fprintf(&sb, "# %s\n\n", headline)
 	}
-
 	if desc, ok := obj["description"].(string); ok && desc != "" {
 		fmt.Fprintf(&sb, "%s\n\n", desc)
 	}
@@ -213,7 +251,6 @@ func extractArticleLD(obj map[string]interface{}) string {
 	if date, ok := obj["datePublished"].(string); ok && date != "" {
 		fmt.Fprintf(&sb, "Published: %s\n\n", date)
 	}
-
 	if body, ok := obj["articleBody"].(string); ok && body != "" {
 		sb.WriteString(body)
 		sb.WriteString("\n\n")
@@ -246,7 +283,7 @@ func extractItemListLD(obj map[string]interface{}) string {
 			continue
 		}
 		name, _ := m["name"].(string)
-		if name != "" && len(name) > 20 { // Skip very short nav items
+		if name != "" && len(name) > 20 {
 			headlines = append(headlines, "- "+name)
 		}
 	}
@@ -313,8 +350,8 @@ func parseAttrs(s string) map[string]string {
 
 // IsNavigationOnly returns true when extracted text looks like a navigation skeleton —
 // many short lines typical of JS-rendered homepages where only the shell was served.
-// This does NOT trigger when JSON-LD or other structured data provided real content,
-// since those are prepended and push the total length above the thresholds.
+// This does NOT trigger when JSON-LD or Readability provided real content, since those
+// push the total length well above the thresholds.
 func IsNavigationOnly(text string) bool {
 	if len(text) > 3000 {
 		return false
@@ -363,7 +400,7 @@ func decodeEntities(s string) string {
 	})
 }
 
-// normalizeLines trims each line and removes blank-only lines beyond 2 consecutive.
+// normalizeLines trims each line and collapses consecutive blank lines.
 func normalizeLines(s string) string {
 	var buf bytes.Buffer
 	lines := strings.Split(s, "\n")
