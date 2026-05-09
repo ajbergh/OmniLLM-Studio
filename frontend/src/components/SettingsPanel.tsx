@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
-import { api, authApi, setAuthToken } from '../api';
-import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, FileText } from 'lucide-react';
+import { api, authApi, mcpApi, setAuthToken } from '../api';
+import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, Github, Calculator, Link2, Search } from 'lucide-react';
+import type { CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, ToolPolicy, UpdateMCPServerRequest } from '../types';
 import { useTheme, THEMES } from '../theme';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -32,7 +34,7 @@ function FreeModelBadge() {
   );
 }
 
-type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'tools' | 'pricing' | 'auth';
+type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'tools' | 'mcp' | 'pricing' | 'auth';
 
 const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'providers', label: 'Providers' },
@@ -40,6 +42,7 @@ const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'appearance', label: 'Appearance' },
   { key: 'rag', label: 'RAG' },
   { key: 'tools', label: 'Tools' },
+  { key: 'mcp', label: 'MCP' },
   { key: 'pricing', label: 'Pricing' },
   { key: 'auth', label: 'Auth' },
 ];
@@ -128,13 +131,13 @@ export function SettingsPanel() {
                 ))}
               </select>
             </div>
-            <div className="hidden sm:flex mx-5 bg-surface-alt rounded-xl p-1 gap-1 overflow-x-auto">
+            <div className="hidden sm:flex mx-5 bg-surface-alt rounded-xl p-1 gap-1 flex-wrap">
               {SETTINGS_TABS.map((t) => (
                 <button
                   key={t.key}
                   onClick={() => setTab(t.key)}
                   className={clsx(
-                    'shrink-0 min-w-[92px] px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200',
+                    'shrink-0 min-w-[84px] px-2.5 py-2 text-sm font-medium rounded-lg transition-all duration-200',
                     tab === t.key
                       ? 'bg-surface-hover text-text shadow-sm'
                       : 'text-text-muted hover:text-text'
@@ -217,6 +220,16 @@ export function SettingsPanel() {
                     transition={{ duration: 0.2 }}
                   >
                     <ToolsTab />
+                  </motion.div>
+                ) : tab === 'mcp' ? (
+                  <motion.div
+                    key="mcp"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <MCPServersTab />
                   </motion.div>
                 ) : tab === 'pricing' ? (
                   <motion.div
@@ -849,55 +862,6 @@ function AppearanceTab() {
 }
 
 // ============================================
-// Word Document Generation Card (used in General Tab)
-// ============================================
-
-function WordDocGenerationCard() {
-  const { isEnabled, updateFeature } = useFeatureFlagStore();
-  const enabled = isEnabled('word_doc_generation');
-
-  const toggle = async () => {
-    await updateFeature('word_doc_generation', !enabled);
-  };
-
-  return (
-    <div className="p-5 rounded-2xl bg-surface-alt border border-border">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center shadow-md shadow-indigo-500/10">
-          <FileText size={18} className="text-indigo-400" />
-        </div>
-        <div>
-          <h3 className="text-sm font-bold">Document Generation</h3>
-          <p className="text-[11px] text-text-muted">Automatically export LLM responses as downloadable files</p>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between py-2">
-        <div>
-          <label className="text-xs font-medium text-text-secondary block">Word Document Generation</label>
-          <p className="text-[10px] text-text-muted mt-0.5">
-            When you ask for a Word doc, the response is automatically saved as a .docx file you can download
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={toggle}
-          className={`relative w-10 h-5 rounded-full transition-colors ${
-            enabled ? 'bg-primary' : 'bg-border'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-              enabled ? 'translate-x-5' : ''
-            }`}
-          />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ============================================
 // News Lookup Card (used in General Tab)
 // ============================================
 
@@ -936,7 +900,7 @@ function NewsLookupCard() {
         <button
           type="button"
           onClick={toggle}
-          className={`relative w-10 h-5 rounded-full transition-colors ${
+          className={`shrink-0 relative w-10 h-5 rounded-full transition-colors ${
             enabled ? 'bg-primary' : 'bg-border'
           }`}
         >
@@ -1551,61 +1515,941 @@ function ToolsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Tool Permissions */}
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <RefreshCw size={16} className="animate-spin text-text-muted" />
+        </div>
+      ) : tools.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-sm text-text-muted">No tools registered</p>
+          <p className="text-xs text-text-muted/60 mt-1">Tools will appear here when plugins provide them</p>
+        </div>
+      ) : (
+        <>
+          {tools.map((tool) => {
+            const enabled = tool.policy === 'allow' || tool.policy === 'ask';
+            
+            const toggle = () => {
+              updatePermission(tool.name, enabled ? 'deny' : 'allow');
+            };
+
+            let icon = <Wrench size={18} className="text-orange-400" />;
+            let gradient = "from-orange-500/20 to-amber-500/20";
+            let shadow = "shadow-orange-500/10";
+            
+            if (tool.name === 'sports_lookup') {
+              icon = <Trophy size={18} className="text-emerald-400" />;
+              gradient = "from-emerald-500/20 to-teal-500/20";
+              shadow = "shadow-emerald-500/10";
+            } else if (tool.name.includes('github')) {
+              icon = <Github size={18} className="text-slate-400" />;
+              gradient = "from-slate-500/20 to-gray-500/20";
+              shadow = "shadow-slate-500/10";
+            } else if (tool.name === 'web_search') {
+              icon = <Search size={18} className="text-blue-400" />;
+              gradient = "from-blue-500/20 to-indigo-500/20";
+              shadow = "shadow-blue-500/10";
+            } else if (tool.name === 'calculator') {
+              icon = <Calculator size={18} className="text-pink-400" />;
+              gradient = "from-pink-500/20 to-rose-500/20";
+              shadow = "shadow-pink-500/10";
+            } else if (tool.name.includes('url')) {
+              icon = <Link2 size={18} className="text-cyan-400" />;
+              gradient = "from-cyan-500/20 to-blue-500/20";
+              shadow = "shadow-cyan-500/10";
+            } else if (tool.name.startsWith('mcp_')) {
+              icon = <Plug size={18} className="text-violet-400" />;
+              gradient = "from-violet-500/20 to-purple-500/20";
+              shadow = "shadow-violet-500/10";
+            }
+
+            const shortDesc = tool.description ? tool.description.split('.')[0] + '.' : 'Registered Tool capability';
+
+            return (
+              <div key={tool.name} className="p-5 rounded-2xl bg-surface-alt border border-border">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className={`w-10 h-10 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-md ${shadow} shrink-0`}>
+                    {icon}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold">{tool.name}</h3>
+                    <p className="text-[11px] text-text-muted">{shortDesc}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div className="mr-4">
+                    <label className="text-xs font-medium text-text-secondary block">Enable {tool.name}</label>
+                    <p className="text-[10px] text-text-muted mt-0.5">
+                      {tool.description || 'Allow the AI to use this tool during conversations.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    className={`shrink-0 relative w-10 h-5 rounded-full transition-colors ${
+                      enabled ? 'bg-primary' : 'bg-border'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                        enabled ? 'translate-x-5' : ''
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* News Lookup */}
+      <NewsLookupCard />
+    </div>
+  );
+}
+
+// ============================================
+// MCP Servers Settings Tab
+// ============================================
+
+type MCPFormState = {
+  name: string;
+  transport: MCPTransport;
+  command: string;
+  argsText: string;
+  url: string;
+  envText: string;
+  headersText: string;
+  enabled: boolean;
+};
+
+const emptyMCPForm: MCPFormState = {
+  name: '',
+  transport: 'stdio',
+  command: '',
+  argsText: '',
+  url: '',
+  envText: '',
+  headersText: '',
+  enabled: false,
+};
+
+const filesystemMCPTemplate: MCPFormState = {
+  name: 'filesystem',
+  transport: 'stdio',
+  command: 'npx.cmd',
+  argsText: [
+    '-y',
+    '@modelcontextprotocol/server-filesystem@2025.8.21',
+    'C:\\Users\\you\\Documents',
+  ].join('\n'),
+  url: '',
+  envText: '',
+  headersText: '',
+  enabled: false,
+};
+
+function parseMCPArgs(value: string): string[] {
+  return value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function parseMCPEnv(value: string, label: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const rawLine of value.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const equals = line.indexOf('=');
+    if (equals <= 0) {
+      throw new Error(`${label} must use KEY=value lines`);
+    }
+    const key = line.slice(0, equals).trim();
+    const envValue = line.slice(equals + 1).trim();
+    if (!key) {
+      throw new Error(`${label} keys cannot be empty`);
+    }
+    env[key] = envValue;
+  }
+  return env;
+}
+
+function createMCPRequest(form: MCPFormState): CreateMCPServerRequest {
+  const name = form.name.trim();
+  const transport = form.transport;
+  if (!name) throw new Error('Server name is required');
+  
+  const request: CreateMCPServerRequest = {
+    name,
+    transport,
+    enabled: form.enabled,
+  };
+
+  if (transport === 'stdio') {
+    const command = form.command.trim();
+    if (!command) throw new Error('Command is required for stdio transport');
+    request.command = command;
+    request.args = parseMCPArgs(form.argsText);
+    if (form.envText.trim()) {
+      request.env = parseMCPEnv(form.envText, 'Environment variables');
+    }
+  } else if (transport === 'http') {
+    const url = form.url.trim();
+    if (!url) throw new Error('URL is required for http transport');
+    request.url = url;
+    if (form.headersText.trim()) {
+      request.headers = parseMCPEnv(form.headersText, 'Headers');
+    }
+  }
+
+  return request;
+}
+
+function updateMCPRequest(form: MCPFormState): UpdateMCPServerRequest {
+  const request = createMCPRequest(form) as UpdateMCPServerRequest;
+  if (form.transport === 'stdio' && !form.envText.trim()) {
+    delete request.env;
+  }
+  if (form.transport === 'http' && !form.headersText.trim()) {
+    delete request.headers;
+  }
+  return request;
+}
+
+function formFromMCPServer(server: MCPServer): MCPFormState {
+  return {
+    name: server.name,
+    transport: server.transport || 'stdio',
+    command: server.command || '',
+    argsText: (server.args || []).join('\n'),
+    url: server.url || '',
+    envText: '',
+    headersText: '',
+    enabled: server.enabled,
+  };
+}
+
+function statusBadgeClass(status: MCPServer['status']): string {
+  if (status === 'connected') return 'border-success/30 bg-success/10 text-success';
+  if (status === 'connecting') return 'border-primary/30 bg-primary/10 text-primary';
+  if (status === 'error') return 'border-danger/30 bg-danger-soft text-danger';
+  if (status === 'disabled') return 'border-border bg-surface text-text-muted';
+  return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+}
+
+function MCPServersTab() {
+  const [servers, setServers] = useState<MCPServer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<MCPFormState>(emptyMCPForm);
+  const [saving, setSaving] = useState(false);
+  const [busyById, setBusyById] = useState<Record<string, string>>({});
+  const [testTools, setTestTools] = useState<Record<string, MCPTool[]>>({});
+  const [auditEvents, setAuditEvents] = useState<MCPAuditEvent[]>([]);
+
+  const fetchServers = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [serverData, auditData] = await Promise.all([
+        mcpApi.listServers(),
+        mcpApi.listAudit({ limit: 50 }),
+      ]);
+      setServers(serverData);
+      setAuditEvents(auditData);
+    } catch {
+      toast.error('Failed to load MCP servers');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const refreshAudit = useCallback(async () => {
+    try {
+      setAuditEvents(await mcpApi.listAudit({ limit: 50 }));
+    } catch {
+      // Leave stale audit rows visible if the refresh fails after an action.
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchServers();
+  }, [fetchServers]);
+
+  const resetForm = () => {
+    setAdding(false);
+    setEditingId(null);
+    setForm(emptyMCPForm);
+  };
+
+  const applyServer = (server: MCPServer) => {
+    setServers((prev) => {
+      const next = prev.some((item) => item.id === server.id)
+        ? prev.map((item) => (item.id === server.id ? server : item))
+        : [...prev, server];
+      return [...next].sort((a: MCPServer, b: MCPServer) => a.name.localeCompare(b.name));
+    });
+  };
+
+  const markBusy = (serverId: string, label?: string) => {
+    setBusyById((prev) => {
+      const next = { ...prev };
+      if (label) next[serverId] = label;
+      else delete next[serverId];
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      if (editingId) {
+        const updated = await mcpApi.updateServer(editingId, updateMCPRequest(form));
+        applyServer(updated);
+        toast.success('MCP server updated');
+      } else {
+        const created = await mcpApi.createServer(createMCPRequest(form));
+        applyServer(created);
+        toast.success('MCP server added');
+      }
+      refreshAudit();
+      resetForm();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save MCP server');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLifecycle = async (
+    serverId: string,
+    label: string,
+    action: () => Promise<MCPServer>,
+    success: string,
+  ) => {
+    markBusy(serverId, label);
+    try {
+      applyServer(await action());
+      refreshAudit();
+      toast.success(success);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'MCP server action failed');
+    } finally {
+      markBusy(serverId);
+    }
+  };
+
+  const handleRefreshTools = async (server: MCPServer) => {
+    markBusy(server.id, 'Refreshing');
+    try {
+      const tools = await mcpApi.refreshTools(server.id);
+      applyServer({ ...server, status: 'connected', tools });
+      refreshAudit();
+      toast.success(`${tools.length} MCP tool${tools.length === 1 ? '' : 's'} refreshed`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to refresh MCP tools');
+    } finally {
+      markBusy(server.id);
+    }
+  };
+
+  const handleTest = async (serverId: string) => {
+    markBusy(serverId, 'Testing');
+    try {
+      const result = await mcpApi.testServer(serverId);
+      const tools = result.tools || [];
+      setTestTools((prev) => ({ ...prev, [serverId]: tools }));
+      refreshAudit();
+      toast.success(`MCP test passed with ${tools.length} tool${tools.length === 1 ? '' : 's'}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'MCP test failed');
+    } finally {
+      markBusy(serverId);
+    }
+  };
+
+  const handlePolicy = async (serverId: string, internalName: string, policy: ToolPolicy) => {
+    try {
+      await mcpApi.updateToolPolicy(serverId, internalName, policy);
+      setServers((prev) =>
+        prev.map((server) => {
+          if (server.id !== serverId) return server;
+          return {
+            ...server,
+            tools: (server.tools || []).map((tool) =>
+              tool.internal_name === internalName ? { ...tool, policy } : tool,
+            ),
+          };
+        }),
+      );
+      refreshAudit();
+      toast.success(`${internalName} set to ${policy}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update MCP tool policy');
+    }
+  };
+
+  const startEditing = (server: MCPServer) => {
+    setAdding(false);
+    setEditingId(server.id);
+    setForm(formFromMCPServer(server));
+  };
+
+  const deleteServer = (server: MCPServer) => {
+    toast(`Delete ${server.name}?`, {
+      action: {
+        label: 'Delete',
+        onClick: async () => {
+          try {
+            await mcpApi.deleteServer(server.id);
+            setServers((prev) => prev.filter((item) => item.id !== server.id));
+            refreshAudit();
+            toast.success('MCP server deleted');
+          } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Failed to delete MCP server');
+          }
+        },
+      },
+      cancel: { label: 'Cancel', onClick: () => {} },
+      duration: 5000,
+    });
+  };
+
+  return (
+    <div className="space-y-6">
       <div className="p-5 rounded-2xl bg-surface-alt border border-border">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-orange-500/20 to-amber-500/20 flex items-center justify-center shadow-md shadow-orange-500/10">
-            <Wrench size={18} className="text-orange-400" />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-emerald-500/20 flex items-center justify-center shadow-md shadow-cyan-500/10">
+              <Plug size={18} className="text-cyan-300" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold">MCP Servers</h3>
+              <p className="text-[11px] text-text-muted">Connect stdio and HTTP Model Context Protocol servers</p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-sm font-bold">Tool Permissions</h3>
-            <p className="text-[11px] text-text-muted">Control which tools the AI can use during conversations</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={fetchServers}
+              className="min-h-10 inline-flex items-center justify-center gap-1.5 px-3 rounded-xl border border-border hover:bg-surface-hover text-xs text-text transition-colors"
+            >
+              <RefreshCw size={13} />
+              Refresh
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingId(null);
+                setAdding(true);
+                setForm(emptyMCPForm);
+              }}
+              className="btn-primary min-h-10 inline-flex items-center justify-center gap-1.5 px-3 text-xs rounded-xl font-medium"
+            >
+              <Plus size={13} />
+              Add Server
+            </button>
           </div>
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <RefreshCw size={16} className="animate-spin text-text-muted" />
+        <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+          <div className="flex gap-2">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-300" />
+            <p className="text-[11px] leading-relaxed text-text-muted">
+              Stdio MCP launches local commands. Use absolute paths when the desktop app cannot find
+              `npx`, `uvx`, Node, or Python from its inherited PATH.
+            </p>
           </div>
-        ) : tools.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-sm text-text-muted">No tools registered</p>
-            <p className="text-xs text-text-muted/60 mt-1">Tools will appear here when plugins provide them</p>
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {(adding || editingId) && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <MCPServerForm
+              form={form}
+              editing={Boolean(editingId)}
+              saving={saving}
+              onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
+              onCancel={resetForm}
+              onSave={handleSave}
+              onUseFilesystemTemplate={() => setForm(filesystemMCPTemplate)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-10">
+          <RefreshCw size={16} className="animate-spin text-text-muted" />
+        </div>
+      ) : servers.length === 0 ? (
+        <div className="p-8 rounded-2xl bg-surface-alt border border-border text-center">
+          <Terminal size={22} className="mx-auto mb-3 text-text-muted" />
+          <p className="text-sm font-medium text-text">No MCP servers configured</p>
+          <p className="mt-1 text-xs text-text-muted">Add a stdio or HTTP server to discover tools.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {servers.map((server) => (
+            <MCPServerCard
+              key={server.id}
+              server={server}
+              busyLabel={busyById[server.id]}
+              testTools={testTools[server.id] || []}
+              onEdit={() => startEditing(server)}
+              onDelete={() => deleteServer(server)}
+              onTest={() => handleTest(server.id)}
+              onStart={() => handleLifecycle(server.id, 'Starting', () => mcpApi.startServer(server.id), 'MCP server started')}
+              onStop={() => handleLifecycle(server.id, 'Stopping', () => mcpApi.stopServer(server.id), 'MCP server stopped')}
+              onRestart={() => handleLifecycle(server.id, 'Restarting', () => mcpApi.restartServer(server.id), 'MCP server restarted')}
+              onRefresh={() => handleRefreshTools(server)}
+              onPolicy={(toolName, policy) => handlePolicy(server.id, toolName, policy)}
+            />
+          ))}
+        </div>
+      )}
+
+      <MCPAuditPanel events={auditEvents} servers={servers} onRefresh={refreshAudit} />
+    </div>
+  );
+}
+
+function MCPAuditPanel({
+  events,
+  servers,
+  onRefresh,
+}: {
+  events: MCPAuditEvent[];
+  servers: MCPServer[];
+  onRefresh: () => void;
+}) {
+  const serverNameById = new Map(servers.map((server) => [server.id, server.name]));
+
+  return (
+    <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 flex items-center justify-center shadow-md shadow-emerald-500/10">
+            <ClipboardList size={18} className="text-emerald-300" />
           </div>
+          <div>
+            <h3 className="text-sm font-bold">MCP Activity</h3>
+            <p className="text-[11px] text-text-muted">Recent server and tool events</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="min-h-10 inline-flex items-center justify-center gap-1.5 rounded-xl border border-border px-3 text-xs text-text hover:bg-surface-hover transition-colors"
+        >
+          <RefreshCw size={13} />
+          Refresh
+        </button>
+      </div>
+
+      {events.length === 0 ? (
+        <p className="rounded-xl border border-border bg-surface p-3 text-xs text-text-muted">
+          No MCP activity recorded yet.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {events.map((event) => (
+            <div key={event.id} className="rounded-xl border border-border bg-surface p-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold text-text">{event.event_type}</span>
+                    <span className="text-[11px] text-text-muted">
+                      {serverNameById.get(event.server_id) || event.server_id}
+                    </span>
+                    {event.tool_name && (
+                      <span className="rounded-md border border-border bg-surface-alt px-1.5 py-0.5 text-[10px] text-text-muted">
+                        {event.tool_name}
+                      </span>
+                    )}
+                  </div>
+                  {event.error_msg && (
+                    <p className="mt-1 break-words text-[11px] text-danger">{event.error_msg}</p>
+                  )}
+                </div>
+                <div className="shrink-0 text-[11px] text-text-muted">
+                  {new Date(event.created_at).toLocaleString()}
+                  {typeof event.duration_ms === 'number' && (
+                    <span className="ml-2">{event.duration_ms} ms</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MCPServerForm({
+  form,
+  editing,
+  saving,
+  onChange,
+  onCancel,
+  onSave,
+  onUseFilesystemTemplate,
+}: {
+  form: MCPFormState;
+  editing: boolean;
+  saving: boolean;
+  onChange: (patch: Partial<MCPFormState>) => void;
+  onCancel: () => void;
+  onSave: () => void;
+  onUseFilesystemTemplate: () => void;
+}) {
+  return (
+    <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary/20 to-cyan-500/20 flex items-center justify-center shadow-md shadow-primary/10">
+            <Terminal size={18} className="text-primary" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold">{editing ? 'Edit MCP Server' : 'Add MCP Server'}</h3>
+            <p className="text-[11px] text-text-muted">Configure a local stdio or remote HTTP server</p>
+          </div>
+        </div>
+        {!editing && (
+          <button
+            type="button"
+            onClick={onUseFilesystemTemplate}
+            className="min-h-10 inline-flex items-center justify-center gap-1.5 px-3 rounded-xl border border-border hover:bg-surface-hover text-xs text-text transition-colors"
+          >
+            <ClipboardList size={13} />
+            Filesystem Template
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mb-3">
+        <div>
+          <label className="block text-xs text-text-muted mb-1 font-medium">Name</label>
+          <input
+            value={form.name}
+            onChange={(event) => onChange({ name: event.target.value })}
+            placeholder="my-server"
+            className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary transition-all input-glow"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-text-muted mb-1 font-medium">Transport</label>
+          <select
+            value={form.transport}
+            onChange={(event) => onChange({ transport: event.target.value as MCPTransport })}
+            className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary transition-all input-glow appearance-none"
+            style={{
+              backgroundImage: 'url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%239ca3af%22%20d%3D%22M2.22%204.22a.75.75%200%200%201%201.06%200L6%206.94l2.72-2.72a.75.75%200%201%201%201.06%201.06l-3.25%203.25a.75.75%200%200%201-1.06%200L2.22%205.28a.75.75%200%200%201%200-1.06Z%22%2F%3E%3C%2Fsvg%3E")',
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 12px center',
+              paddingRight: '32px'
+            }}
+          >
+            <option value="stdio">stdio (Local Command)</option>
+            <option value="http">http (Streamable Remote)</option>
+          </select>
+        </div>
+      </div>
+
+      {form.transport === 'stdio' ? (
+        <>
+          <div className="mb-3">
+            <label className="block text-xs text-text-muted mb-1 font-medium">Command</label>
+            <input
+              value={form.command}
+              onChange={(event) => onChange({ command: event.target.value })}
+              placeholder="npx.cmd or python"
+              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary transition-all input-glow"
+            />
+          </div>
+
+          <div className="mb-3">
+            <label className="block text-xs text-text-muted mb-1 font-medium">Arguments (one per line)</label>
+            <textarea
+              value={form.argsText}
+              onChange={(event) => onChange({ argsText: event.target.value })}
+              rows={4}
+              placeholder={"-y\n@modelcontextprotocol/server-filesystem@2025.8.21\nC:\\Users\\you\\Documents"}
+              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary transition-all input-glow font-mono resize-y"
+            />
+          </div>
+
+          <div className="mb-3">
+            <label className="block text-xs text-text-muted mb-1 font-medium">Environment (KEY=value)</label>
+            <textarea
+              value={form.envText}
+              onChange={(event) => onChange({ envText: event.target.value })}
+              rows={3}
+              placeholder={editing ? 'Leave blank to keep existing secret values' : 'GITHUB_TOKEN=...'}
+              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary transition-all input-glow font-mono resize-y"
+            />
+            <p className="mt-1 text-[11px] text-text-muted">
+              Environment values are encrypted at rest. Saving env lines replaces stored values.
+            </p>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="mb-3">
+            <label className="block text-xs text-text-muted mb-1 font-medium">Server URL</label>
+            <input
+              value={form.url}
+              onChange={(event) => onChange({ url: event.target.value })}
+              placeholder="http://localhost:8000/mcp"
+              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary transition-all input-glow"
+            />
+          </div>
+
+          <div className="mb-3">
+            <label className="block text-xs text-text-muted mb-1 font-medium">Custom Headers (KEY=value)</label>
+            <textarea
+              value={form.headersText}
+              onChange={(event) => onChange({ headersText: event.target.value })}
+              rows={3}
+              placeholder={editing ? 'Leave blank to keep existing secret headers' : 'Authorization=Bearer xyz...'}
+              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary transition-all input-glow font-mono resize-y"
+            />
+            <p className="mt-1 text-[11px] text-text-muted">
+              Headers are encrypted at rest. Use for authentication (e.g. Authorization, X-API-Key).
+            </p>
+          </div>
+        </>
+      )}
+
+      <label className="mt-4 flex items-center gap-2 text-xs text-text">
+        <input
+          type="checkbox"
+          checked={form.enabled}
+          onChange={(event) => onChange({ enabled: event.target.checked })}
+          className="accent-primary"
+        />
+        Start this server automatically
+      </label>
+
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="min-h-10 px-4 text-sm rounded-xl border border-border hover:bg-surface-hover text-text transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={saving}
+          className="btn-primary min-h-10 inline-flex items-center justify-center gap-1.5 px-4 text-sm rounded-xl font-medium disabled:opacity-50"
+        >
+          {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MCPServerCard({
+  server,
+  busyLabel,
+  testTools,
+  onEdit,
+  onDelete,
+  onTest,
+  onStart,
+  onStop,
+  onRestart,
+  onRefresh,
+  onPolicy,
+}: {
+  server: MCPServer;
+  busyLabel?: string;
+  testTools: MCPTool[];
+  onEdit: () => void;
+  onDelete: () => void;
+  onTest: () => void;
+  onStart: () => void;
+  onStop: () => void;
+  onRestart: () => void;
+  onRefresh: () => void;
+  onPolicy: (toolName: string, policy: ToolPolicy) => void;
+}) {
+  const tools = server.tools || [];
+  const commandLine = server.transport === 'http' 
+    ? server.url || 'No URL configured'
+    : [server.command, ...(server.args || [])].filter(Boolean).join(' ');
+
+  return (
+    <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-bold text-text">{server.name}</h3>
+            <span className={clsx('rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase', statusBadgeClass(server.status))}>
+              {server.status}
+            </span>
+            <span className="rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold uppercase text-text-muted">
+              {server.transport}
+            </span>
+          </div>
+          <p className="mt-1 truncate font-mono text-[11px] text-text-muted">{commandLine || 'No command configured'}</p>
+          {server.env_keys && server.env_keys.length > 0 && (
+            <p className="mt-1 text-[11px] text-text-muted">
+              Env: {server.env_keys.join(', ')}
+            </p>
+          )}
+          {server.header_keys && server.header_keys.length > 0 && (
+            <p className="mt-1 text-[11px] text-text-muted">
+              Headers: {server.header_keys.join(', ')}
+            </p>
+          )}
+          {server.last_error && (
+            <div className="mt-2 flex gap-2 rounded-xl border border-danger/20 bg-danger-soft/40 p-2 text-[11px] text-danger">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span className="min-w-0 break-words">{server.last_error}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2 sm:justify-end">
+          <MCPActionButton label="Test" title="Test connection" busy={busyLabel === 'Testing'} onClick={onTest}>
+            <CheckCircle2 size={13} />
+          </MCPActionButton>
+          {server.status === 'connected' ? (
+            <MCPActionButton label="Stop" title="Stop server" busy={busyLabel === 'Stopping'} onClick={onStop}>
+              <Square size={13} />
+            </MCPActionButton>
+          ) : (
+            <MCPActionButton label="Start" title="Start server" busy={busyLabel === 'Starting'} onClick={onStart}>
+              <Play size={13} />
+            </MCPActionButton>
+          )}
+          <MCPActionButton label="Restart" title="Restart server" busy={busyLabel === 'Restarting'} onClick={onRestart}>
+            <RefreshCw size={13} />
+          </MCPActionButton>
+          <MCPActionButton label="Tools" title="Refresh tools" busy={busyLabel === 'Refreshing'} onClick={onRefresh}>
+            <Wrench size={13} />
+          </MCPActionButton>
+          <MCPActionButton label="Edit" title="Edit server" onClick={onEdit}>
+            <Pencil size={13} />
+          </MCPActionButton>
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Delete server"
+            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl hover:bg-danger-soft text-text-muted hover:text-danger transition-colors"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+
+      {busyLabel && (
+        <div className="mt-3 flex items-center gap-2 text-xs text-text-muted">
+          <RefreshCw size={13} className="animate-spin" />
+          {busyLabel}
+        </div>
+      )}
+
+      {testTools.length > 0 && (
+        <div className="mt-3 rounded-xl border border-success/20 bg-success/5 p-3">
+          <p className="text-[11px] font-semibold uppercase text-success">Last test discovered {testTools.length} tool{testTools.length === 1 ? '' : 's'}</p>
+          <p className="mt-1 truncate text-[11px] text-text-muted">{testTools.map((tool) => tool.name).join(', ')}</p>
+        </div>
+      )}
+
+      <div className="mt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold text-text">Discovered Tools</p>
+          <span className="text-[11px] text-text-muted">{tools.length}</span>
+        </div>
+        {tools.length === 0 ? (
+          <p className="rounded-xl border border-border bg-surface p-3 text-xs text-text-muted">
+            Start or refresh this server to load tools.
+          </p>
         ) : (
           <div className="space-y-2">
             {tools.map((tool) => (
-              <div
-                key={tool.name}
-                className="flex items-center justify-between p-3 rounded-xl bg-surface border border-border"
-              >
-                <div className="flex-1 min-w-0 mr-3">
-                  <span className="text-sm font-medium text-text block truncate">{tool.name}</span>
-                  {tool.description && (
-                    <span className="text-[11px] text-text-muted block truncate">{tool.description}</span>
-                  )}
-                </div>
-                <select
-                  value={tool.policy || 'allow'}
-                  onChange={(e) => updatePermission(tool.name, e.target.value)}
-                  className="px-2 py-1.5 text-xs bg-surface-alt border border-border rounded-lg
-                             text-text focus:outline-none focus:border-primary/50 transition-colors"
-                >
-                  <option value="allow">Allow</option>
-                  <option value="deny">Deny</option>
-                  <option value="ask">Ask</option>
-                </select>
-              </div>
+              <MCPToolRow
+                key={tool.internal_name}
+                tool={tool}
+                onPolicy={(policy) => onPolicy(tool.internal_name, policy)}
+              />
             ))}
           </div>
         )}
       </div>
+    </div>
+  );
+}
 
-      {/* Document Generation */}
-      <WordDocGenerationCard />
+function MCPActionButton({
+  label,
+  title,
+  busy = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  title: string;
+  busy?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      disabled={busy}
+      className="min-h-10 inline-flex items-center justify-center gap-1.5 rounded-xl border border-border px-3 text-xs text-text hover:bg-surface-hover disabled:opacity-50 transition-colors"
+    >
+      {busy ? <RefreshCw size={13} className="animate-spin" /> : children}
+      {label}
+    </button>
+  );
+}
 
-      {/* News Lookup */}
-      <NewsLookupCard />
+function MCPToolRow({ tool, onPolicy }: { tool: MCPTool; onPolicy: (policy: ToolPolicy) => void }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-text">{tool.internal_name}</span>
+          {tool.title && (
+            <span className="rounded-md border border-border bg-surface-alt px-1.5 py-0.5 text-[10px] text-text-muted">
+              {tool.title}
+            </span>
+          )}
+        </div>
+        {tool.description && (
+          <p className="mt-1 line-clamp-2 text-[11px] text-text-muted">{tool.description}</p>
+        )}
+        <p className="mt-1 text-[11px] text-text-muted">MCP name: {tool.name}</p>
+      </div>
+      <select
+        value={tool.policy}
+        onChange={(event) => onPolicy(event.target.value as ToolPolicy)}
+        className="min-h-10 px-2 py-1.5 text-xs bg-surface-alt border border-border rounded-lg text-text focus:outline-none focus:border-primary/50 transition-colors"
+      >
+        <option value="allow">Allow</option>
+        <option value="ask">Ask</option>
+        <option value="deny">Deny</option>
+      </select>
     </div>
   );
 }

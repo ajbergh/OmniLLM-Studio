@@ -1,3 +1,7 @@
+// Package llm provides an abstraction layer over various LLM providers.
+// It normalizes Chat, Embedding, and Image generation requests across OpenAI,
+// Anthropic, Gemini, Ollama, OpenRouter, and others, including support for
+// native tool-calling and Server-Sent Events (SSE) streaming.
 package llm
 
 import (
@@ -20,10 +24,34 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 )
 
+// ToolCall represents a tool call made by the LLM.
+type ToolCall struct {
+	Index    int    `json:"index,omitempty"`
+	ID       string `json:"id"`
+	Type     string `json:"type"` // "function"
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// Tool represents a tool that the LLM can call.
+type Tool struct {
+	Type     string `json:"type"` // "function"
+	Function struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description,omitempty"`
+		Parameters  json.RawMessage `json:"parameters,omitempty"`
+	} `json:"function"`
+}
+
 // ChatMessage represents a single message in a chat request.
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"` // populated when role="tool"
+	Name       string     `json:"name,omitempty"`         // populated when role="tool"
 }
 
 // TitleTimeout is the max time allowed for generating a conversation title.
@@ -84,27 +112,30 @@ type ChatRequest struct {
 	Model           string        `json:"model"`
 	Messages        []ChatMessage `json:"messages"`
 	Think           *bool         `json:"think,omitempty"`            // Ollama-only: enable/disable thinking
-	ReasoningEffort string        `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" — for OpenAI o-series, gpt-5.x, and Anthropic extended thinking
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high"
+	Tools           []Tool        `json:"tools,omitempty"`
 }
 
 // ChatResponse holds the result of a non-streaming chat completion.
 type ChatResponse struct {
-	Content     string `json:"content"`
-	Thinking    string `json:"thinking,omitempty"` // Ollama-only: model's thinking content
-	Provider    string `json:"provider"`
-	Model       string `json:"model"`
-	TokenInput  *int   `json:"token_input,omitempty"`
-	TokenOutput *int   `json:"token_output,omitempty"`
+	Content     string     `json:"content"`
+	Thinking    string     `json:"thinking,omitempty"` // Ollama-only: model's thinking content
+	ToolCalls   []ToolCall `json:"tool_calls,omitempty"`
+	Provider    string     `json:"provider"`
+	Model       string     `json:"model"`
+	TokenInput  *int       `json:"token_input,omitempty"`
+	TokenOutput *int       `json:"token_output,omitempty"`
 }
 
 // StreamChunk represents a single token/chunk from a streaming response.
 type StreamChunk struct {
-	Content     string `json:"content"`
-	Thinking    string `json:"thinking,omitempty"` // Ollama-only: thinking content
-	Provider    string `json:"provider"`
-	Model       string `json:"model"`
-	TokenInput  int    `json:"token_input,omitempty"`  // populated in the final usage chunk
-	TokenOutput int    `json:"token_output,omitempty"` // populated in the final usage chunk
+	Content     string     `json:"content"`
+	Thinking    string     `json:"thinking,omitempty"` // Ollama-only: thinking content
+	ToolCalls   []ToolCall `json:"tool_calls,omitempty"`
+	Provider    string     `json:"provider"`
+	Model       string     `json:"model"`
+	TokenInput  int        `json:"token_input,omitempty"`  // populated in the final usage chunk
+	TokenOutput int        `json:"token_output,omitempty"` // populated in the final usage chunk
 }
 
 // Service orchestrates LLM calls using configured provider profiles.
@@ -492,6 +523,10 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 		"stream":   false,
 	}
 
+	if len(req.Tools) > 0 {
+		body["tools"] = req.Tools
+	}
+
 	// Ollama-only: pass think parameter when explicitly set
 	if strings.ToLower(providerType) == "ollama" && req.Think != nil {
 		body["think"] = *req.Think
@@ -551,7 +586,8 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 	var result struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content   string     `json:"content"`
+				ToolCalls []ToolCall `json:"tool_calls"`
 			} `json:"message"`
 		} `json:"choices"`
 		Usage struct {
@@ -565,8 +601,10 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 	}
 
 	content := ""
+	var toolCalls []ToolCall
 	if len(result.Choices) > 0 {
 		content = result.Choices[0].Message.Content
+		toolCalls = result.Choices[0].Message.ToolCalls
 	}
 
 	tokenIn := result.Usage.PromptTokens
@@ -574,6 +612,7 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 
 	return &ChatResponse{
 		Content:     content,
+		ToolCalls:   toolCalls,
 		Provider:    providerType,
 		Model:       model,
 		TokenInput:  &tokenIn,
@@ -600,6 +639,10 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 		"model":    model,
 		"messages": req.Messages,
 		"stream":   true,
+	}
+
+	if len(req.Tools) > 0 {
+		body["tools"] = req.Tools
 	}
 
 	// Request usage stats in the final streaming chunk (OpenAI-compatible providers).
@@ -699,8 +742,17 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 					var chunk struct {
 						Choices []struct {
 							Delta struct {
-								Content  string `json:"content"`
-								Thinking string `json:"thinking"`
+								Content   string `json:"content"`
+								Thinking  string `json:"thinking"`
+								ToolCalls []struct {
+									Index    int    `json:"index"`
+									ID       string `json:"id"`
+									Type     string `json:"type"`
+									Function struct {
+										Name      string `json:"name"`
+										Arguments string `json:"arguments"`
+									} `json:"function"`
+								} `json:"tool_calls"`
 							} `json:"delta"`
 						} `json:"choices"`
 						Usage *struct {
@@ -715,12 +767,29 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 
 					if len(chunk.Choices) > 0 {
 						delta := chunk.Choices[0].Delta
-						if delta.Content != "" || delta.Thinking != "" {
+						var parsedToolCalls []ToolCall
+						for _, tc := range delta.ToolCalls {
+							parsedToolCalls = append(parsedToolCalls, ToolCall{
+								Index: tc.Index,
+								ID:    tc.ID,
+								Type:  tc.Type,
+								Function: struct {
+									Name      string `json:"name"`
+									Arguments string `json:"arguments"`
+								}{
+									Name:      tc.Function.Name,
+									Arguments: tc.Function.Arguments,
+								},
+							})
+						}
+
+						if delta.Content != "" || delta.Thinking != "" || len(parsedToolCalls) > 0 {
 							onChunk(StreamChunk{
-								Content:  delta.Content,
-								Thinking: delta.Thinking,
-								Provider: providerType,
-								Model:    model,
+								Content:   delta.Content,
+								Thinking:  delta.Thinking,
+								ToolCalls: parsedToolCalls,
+								Provider:  providerType,
+								Model:     model,
 							})
 						}
 					}

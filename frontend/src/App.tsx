@@ -1,3 +1,7 @@
+// App.tsx is the root component of the OmniLLM-Studio frontend.
+// It manages the main layout, sidebar navigation, and conditional rendering
+// of the various modals and UI panels (Chat, Settings, Image Studio, etc).
+
 import { useEffect, useCallback, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/ChatView';

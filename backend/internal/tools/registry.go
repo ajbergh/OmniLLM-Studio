@@ -39,6 +39,18 @@ func (r *Registry) MustRegister(tool Tool) {
 	}
 }
 
+// Remove unregisters a tool by name. It returns true when a tool was removed.
+func (r *Registry) Remove(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.tools[name]; !exists {
+		return false
+	}
+	delete(r.tools, name)
+	return true
+}
+
 // Get returns a tool by name. The second return value indicates whether the
 // tool was found.
 func (r *Registry) Get(name string) (Tool, bool) {

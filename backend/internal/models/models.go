@@ -243,6 +243,70 @@ type ToolPermission struct {
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
+// MCPServer stores one configured Model Context Protocol server.
+type MCPServer struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Transport   string            `json:"transport"`
+	Command     *string           `json:"command,omitempty"`
+	Args        []string          `json:"args"`
+	URL         *string           `json:"url,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	EnvKeys     []string          `json:"env_keys,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	HeaderKeys  []string          `json:"header_keys,omitempty"`
+	Enabled     bool              `json:"enabled"`
+	WorkspaceID *string           `json:"workspace_id,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+}
+
+// MCPServerStatus is the runtime connection state for an MCP server.
+type MCPServerStatus string
+
+const (
+	MCPServerStatusDisabled     MCPServerStatus = "disabled"
+	MCPServerStatusDisconnected MCPServerStatus = "disconnected"
+	MCPServerStatusConnecting   MCPServerStatus = "connecting"
+	MCPServerStatusConnected    MCPServerStatus = "connected"
+	MCPServerStatusError        MCPServerStatus = "error"
+)
+
+// MCPTool describes a discovered MCP tool after internal name mapping.
+type MCPTool struct {
+	ServerID     string          `json:"server_id"`
+	InternalName string          `json:"internal_name"`
+	Name         string          `json:"name"`
+	Title        string          `json:"title,omitempty"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"input_schema,omitempty"`
+	Policy       string          `json:"policy"`
+	Enabled      bool            `json:"enabled"`
+}
+
+// MCPServerWithStatus is returned by the MCP management API.
+type MCPServerWithStatus struct {
+	MCPServer
+	Status    MCPServerStatus `json:"status"`
+	LastError string          `json:"last_error,omitempty"`
+	Tools     []MCPTool       `json:"tools,omitempty"`
+}
+
+// MCPAuditEvent records server lifecycle and tool execution events.
+type MCPAuditEvent struct {
+	ID          string    `json:"id"`
+	ServerID    string    `json:"server_id"`
+	EventType   string    `json:"event_type"`
+	ToolName    *string   `json:"tool_name,omitempty"`
+	InputJSON   *string   `json:"input_json,omitempty"`
+	OutputJSON  *string   `json:"output_json,omitempty"`
+	DurationMs  *int      `json:"duration_ms,omitempty"`
+	ErrorMsg    *string   `json:"error_msg,omitempty"`
+	UserID      *string   `json:"user_id,omitempty"`
+	WorkspaceID *string   `json:"workspace_id,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 // PricingRule defines cost per token for a provider/model combination.
 type PricingRule struct {
 	ID                string     `json:"id"`

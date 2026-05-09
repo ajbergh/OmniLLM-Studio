@@ -72,7 +72,7 @@ func main() {
 		log.Fatalf("migrations: %v", err)
 	}
 
-	router := api.NewRouter(database, cfg, version, commit)
+	router, shutdownAPI := api.NewRouterWithShutdown(database, cfg, version, commit)
 
 	// Start a real HTTP server on a random local port so that SSE streaming
 	// works (the Wails AssetServer handler does not support http.Flusher).
@@ -137,6 +137,9 @@ func main() {
 		OnStartup: app.startup,
 		OnShutdown: func(ctx context.Context) {
 			close(stopCleanup)
+			if err := shutdownAPI(ctx); err != nil {
+				log.Printf("[desktop] API runtime shutdown: %v", err)
+			}
 			srv.Shutdown(ctx)
 		},
 	})

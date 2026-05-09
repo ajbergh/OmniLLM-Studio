@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -26,6 +27,8 @@ const (
 	EventComplete         EventType = "agent_complete"
 	EventError            EventType = "agent_error"
 )
+
+var errToolApprovalRejected = errors.New("tool approval rejected")
 
 // Event is emitted during agent run execution.
 type Event struct {
@@ -286,10 +289,29 @@ func (r *Runner) StartRun(ctx context.Context, conversationID, goal, provider, m
 
 		// --- Normal step execution ---
 		start := time.Now()
-		output, err := r.executeStep(ctx, run, step, provider, model, history)
+		output, err := r.executeStep(ctx, rc, run, step, provider, model, history, onEvent)
 		durationMs := int(time.Since(start).Milliseconds())
 
 		if err != nil {
+			if errors.Is(err, errToolApprovalRejected) {
+				outputJSON, _ := json.Marshal(map[string]string{"output": "Tool approval rejected"})
+				if err2 := r.stepRepo.UpdateOutput(step.ID, string(outputJSON), durationMs); err2 != nil {
+					log.Printf("[agent] failed to store rejected approval output: %v", err2)
+				}
+				if err2 := r.stepRepo.UpdateStatus(step.ID, StepStatusSkipped); err2 != nil {
+					log.Printf("[agent] failed to mark rejected tool step skipped: %v", err2)
+				}
+				if err2 := r.runRepo.UpdateStatus(run.ID, RunStatusCancelled); err2 != nil {
+					log.Printf("[agent] failed to cancel run after rejected tool approval: %v", err2)
+				}
+				onEvent(Event{Type: EventStepComplete, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{
+					"output":      "Tool approval rejected",
+					"duration_ms": durationMs,
+				}})
+				final, _ := r.runRepo.GetByID(run.ID)
+				return final, nil
+			}
+
 			outputJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
 			if err2 := r.stepRepo.UpdateOutput(step.ID, string(outputJSON), durationMs); err2 != nil {
 				log.Printf("[agent] failed to store step error output: %v", err2)
@@ -405,12 +427,12 @@ func (r *Runner) CancelRun(runID string) error {
 
 // executeStep runs a single step based on its type (excluding approval which
 // is handled directly in the step loop).
-func (r *Runner) executeStep(ctx context.Context, run *models.AgentRun, step *models.AgentStep, provider, model string, history []llm.ChatMessage) (string, error) {
+func (r *Runner) executeStep(ctx context.Context, rc *runContext, run *models.AgentRun, step *models.AgentStep, provider, model string, history []llm.ChatMessage, onEvent func(Event)) (string, error) {
 	switch step.Type {
 	case StepTypeThink:
 		return r.executeThink(ctx, provider, model, step.Description, history)
 	case StepTypeToolCall:
-		return r.executeToolCall(ctx, step)
+		return r.executeToolCall(ctx, rc, run, step, onEvent)
 	case StepTypeMessage:
 		return r.executeMessage(ctx, run, provider, model, step.Description, history)
 	default:
@@ -443,7 +465,7 @@ func (r *Runner) executeThink(ctx context.Context, provider, model, description 
 }
 
 // executeToolCall executes a tool via the tool executor.
-func (r *Runner) executeToolCall(ctx context.Context, step *models.AgentStep) (string, error) {
+func (r *Runner) executeToolCall(ctx context.Context, rc *runContext, run *models.AgentRun, step *models.AgentStep, onEvent func(Event)) (string, error) {
 	toolName := ""
 	if step.ToolName != nil {
 		toolName = *step.ToolName
@@ -459,16 +481,70 @@ func (r *Runner) executeToolCall(ctx context.Context, step *models.AgentStep) (s
 		args = json.RawMessage(`{}`)
 	}
 
-	result := r.toolExecutor.Execute(ctx, tools.ToolCall{
+	execCtx := tools.ContextWithApprovalHandler(ctx, func(approvalCtx context.Context, req tools.ApprovalRequest) (bool, error) {
+		return r.requestToolApproval(approvalCtx, run, step, rc, req, onEvent)
+	})
+
+	result := r.toolExecutor.Execute(execCtx, tools.ToolCall{
 		ID:        step.ID,
 		Name:      toolName,
 		Arguments: args,
 	})
 
 	if result.IsError {
+		if status, _ := result.Metadata[tools.ApprovalStatusMetadataKey].(string); status == "rejected" {
+			return "", errToolApprovalRejected
+		}
 		return "", fmt.Errorf("tool error: %s", result.Content)
 	}
 	return result.Content, nil
+}
+
+func (r *Runner) requestToolApproval(ctx context.Context, run *models.AgentRun, step *models.AgentStep, rc *runContext, req tools.ApprovalRequest, onEvent func(Event)) (bool, error) {
+	if err := r.stepRepo.UpdateStatus(step.ID, StepStatusAwaitingApproval); err != nil {
+		log.Printf("[agent] failed to set tool step awaiting_approval: %v", err)
+	}
+	if err := r.runRepo.UpdateStatus(run.ID, RunStatusAwaitingApproval); err != nil {
+		log.Printf("[agent] failed to set run awaiting_approval for tool: %v", err)
+	}
+
+	arguments := string(req.Arguments)
+	if arguments == "" {
+		arguments = "{}"
+	}
+	description := fmt.Sprintf("Approve tool %s", req.ToolName)
+	if req.Description != "" {
+		description = fmt.Sprintf("Approve tool %s: %s", req.ToolName, req.Description)
+	}
+
+	onEvent(Event{Type: EventApprovalRequired, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{
+		"description": description,
+		"tool_name":   req.ToolName,
+		"arguments":   arguments,
+		"step_index":  step.StepIndex,
+	}})
+
+	approved, err := r.waitForApproval(ctx, rc)
+	if err != nil {
+		return false, err
+	}
+	if !approved {
+		if err := r.stepRepo.UpdateStatus(step.ID, StepStatusSkipped); err != nil {
+			log.Printf("[agent] failed to mark rejected tool step skipped: %v", err)
+		}
+		if err := r.runRepo.UpdateStatus(run.ID, RunStatusCancelled); err != nil {
+			log.Printf("[agent] failed to cancel run after tool rejection: %v", err)
+		}
+		return false, nil
+	}
+
+	if err := r.stepRepo.UpdateStatus(step.ID, StepStatusRunning); err != nil {
+		log.Printf("[agent] failed to resume tool step after approval: %v", err)
+	}
+	if err := r.runRepo.UpdateStatus(run.ID, RunStatusRunning); err != nil {
+		log.Printf("[agent] failed to resume run after tool approval: %v", err)
+	}
+	return true, nil
 }
 
 // executeMessage generates a response message to the user.

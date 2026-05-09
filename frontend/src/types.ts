@@ -279,6 +279,77 @@ export interface ToolPermission {
   updated_at?: string;
 }
 
+// ---- MCP Types ----
+
+export type MCPTransport = 'stdio' | 'http';
+export type MCPServerStatus = 'disabled' | 'disconnected' | 'connecting' | 'connected' | 'error';
+export type ToolPolicy = 'allow' | 'deny' | 'ask';
+
+export interface MCPTool {
+  server_id: string;
+  internal_name: string;
+  name: string;
+  title?: string;
+  description?: string;
+  input_schema?: Record<string, unknown>;
+  policy: ToolPolicy;
+  enabled: boolean;
+}
+
+export interface MCPServer {
+  id: string;
+  name: string;
+  transport: MCPTransport;
+  command?: string;
+  args: string[];
+  url?: string;
+  env_keys?: string[];
+  header_keys?: string[];
+  enabled: boolean;
+  workspace_id?: string;
+  created_at: string;
+  updated_at: string;
+  status: MCPServerStatus;
+  last_error?: string;
+  tools?: MCPTool[];
+}
+
+export interface MCPAuditEvent {
+  id: string;
+  server_id: string;
+  event_type: string;
+  tool_name?: string;
+  input_json?: string;
+  output_json?: string;
+  duration_ms?: number;
+  error_msg?: string;
+  user_id?: string;
+  workspace_id?: string;
+  created_at: string;
+}
+
+export interface CreateMCPServerRequest {
+  name: string;
+  transport?: MCPTransport;
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+  enabled?: boolean;
+}
+
+export interface UpdateMCPServerRequest {
+  name?: string;
+  transport?: MCPTransport;
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+  enabled?: boolean;
+}
+
 // ---- Analytics / Usage Types ----
 
 export interface PricingRule {

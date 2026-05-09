@@ -1,3 +1,4 @@
+// Package api provides HTTP handlers and routing for OmniLLM-Studio.
 package api
 
 import (
@@ -17,6 +18,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/ajbergh/omnillm-studio/internal/sports"
+	"github.com/ajbergh/omnillm-studio/internal/tools"
 	"github.com/ajbergh/omnillm-studio/internal/urlcontext"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
 	"github.com/ajbergh/omnillm-studio/internal/wordgen"
@@ -42,6 +44,8 @@ type MessageHandler struct {
 	featureFlagRepo *repository.FeatureFlagRepo
 	newsSvc         *news.Service
 	urlContextSvc   *urlcontext.Service
+	toolRegistry    *tools.Registry
+	toolExecutor    *tools.Executor
 }
 
 // NewMessageHandler creates a new MessageHandler.
@@ -62,6 +66,8 @@ func NewMessageHandler(
 	featureFlagRepo *repository.FeatureFlagRepo,
 	newsSvc *news.Service,
 	urlContextSvc *urlcontext.Service,
+	toolRegistry *tools.Registry,
+	toolExecutor *tools.Executor,
 ) *MessageHandler {
 	return &MessageHandler{
 		msgRepo:         msgRepo,
@@ -80,6 +86,8 @@ func NewMessageHandler(
 		featureFlagRepo: featureFlagRepo,
 		newsSvc:         newsSvc,
 		urlContextSvc:   urlContextSvc,
+		toolRegistry:    toolRegistry,
+		toolExecutor:    toolExecutor,
 	}
 }
 
@@ -720,6 +728,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var wsLLMReq *llm.ChatRequest
 	var toolCall *websearch.ToolCall
 	var wsErr error
+	var allToolCalls []llm.ToolCall
 	if webSearchEnabled {
 		searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
 			r.Context(), req.Content, providerName, modelName,
@@ -790,29 +799,116 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			}}, llmReq.Messages...)
 		}
 
-		err = h.llmSvc.ChatStream(r.Context(), llmReq, func(chunk llm.StreamChunk) {
-			fullContent += chunk.Content
-			provider = chunk.Provider
-			model = chunk.Model
-			if chunk.TokenInput > 0 {
-				tokenIn = chunk.TokenInput
-			}
-			if chunk.TokenOutput > 0 {
-				tokenOut = chunk.TokenOutput
+		// Inject tools from registry
+		var llmTools []llm.Tool
+		for _, def := range h.toolRegistry.ListEnabled() {
+			llmTools = append(llmTools, llm.Tool{
+				Type: "function",
+				Function: struct {
+					Name        string          `json:"name"`
+					Description string          `json:"description,omitempty"`
+					Parameters  json.RawMessage `json:"parameters,omitempty"`
+				}{
+					Name:        def.Name,
+					Description: def.Description,
+					Parameters:  def.Parameters,
+				},
+			})
+		}
+		llmReq.Tools = llmTools
+
+		const maxToolLoops = 10
+		for loopIndex := 0; loopIndex < maxToolLoops; loopIndex++ {
+			var chunkToolCalls = make(map[int]*llm.ToolCall)
+			var loopContent string
+			var loopThinking string
+
+			err = h.llmSvc.ChatStream(r.Context(), llmReq, func(chunk llm.StreamChunk) {
+				loopContent += chunk.Content
+				fullContent += chunk.Content
+				provider = chunk.Provider
+				model = chunk.Model
+				if chunk.TokenInput > 0 {
+					tokenIn += chunk.TokenInput
+				}
+				if chunk.TokenOutput > 0 {
+					tokenOut += chunk.TokenOutput
+				}
+
+				if chunk.Thinking != "" {
+					loopThinking += chunk.Thinking
+					fullThinking += chunk.Thinking
+					sendSSE(w, flusher, "thinking", map[string]string{
+						"content": chunk.Thinking,
+					})
+				}
+				if chunk.Content != "" {
+					sendSSE(w, flusher, "token", map[string]string{
+						"content": chunk.Content,
+					})
+				}
+
+				// Accumulate tool calls
+				for _, tc := range chunk.ToolCalls {
+					if existing, ok := chunkToolCalls[tc.Index]; ok {
+						existing.Function.Arguments += tc.Function.Arguments
+					} else {
+						newTC := tc
+						chunkToolCalls[tc.Index] = &newTC
+					}
+				}
+			})
+
+			if err != nil {
+				break
 			}
 
-			if chunk.Thinking != "" {
-				fullThinking += chunk.Thinking
-				sendSSE(w, flusher, "thinking", map[string]string{
-					"content": chunk.Thinking,
+			if len(chunkToolCalls) == 0 {
+				// Model did not request any tools, conversation turn is complete.
+				break
+			}
+
+			// Flatten tool calls (ordered by index)
+			var finalToolCalls []llm.ToolCall
+			for i := 0; i < len(chunkToolCalls); i++ {
+				if tc, ok := chunkToolCalls[i]; ok {
+					finalToolCalls = append(finalToolCalls, *tc)
+				}
+			}
+
+			// Append the Assistant's message with tool calls to context
+			llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
+				Role:      "assistant",
+				Content:   loopContent,
+				ToolCalls: finalToolCalls,
+			})
+			allToolCalls = append(allToolCalls, finalToolCalls...)
+
+			// Execute each tool and append the results
+			for _, tc := range finalToolCalls {
+				msg := fmt.Sprintf("\n\n> 🛠️ **Using tool:** `%s`\n\n", tc.Function.Name)
+				fullContent += msg
+				sendSSE(w, flusher, "token", map[string]string{"content": msg})
+
+				res := h.toolExecutor.Execute(r.Context(), tools.ToolCall{
+					ID:        tc.ID,
+					Name:      tc.Function.Name,
+					Arguments: []byte(tc.Function.Arguments),
+				})
+
+				toolOutput := ""
+				if res != nil {
+					toolOutput = res.Content
+				}
+
+				llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
+					Role:       "tool",
+					Content:    toolOutput,
+					ToolCallID: tc.ID,
+					Name:       tc.Function.Name,
 				})
 			}
-			if chunk.Content != "" {
-				sendSSE(w, flusher, "token", map[string]string{
-					"content": chunk.Content,
-				})
-			}
-		})
+		}
 	}
 
 	latency := int(time.Since(start).Milliseconds())
@@ -905,6 +1001,9 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		for k, v := range urlcontext.BuildMetadata(urlCtxResult) {
 			metaMap[k] = v
 		}
+	}
+	if len(allToolCalls) > 0 {
+		metaMap["tool_calls"] = allToolCalls
 	}
 
 	var metaJSON string
