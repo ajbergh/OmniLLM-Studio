@@ -232,6 +232,7 @@ export const api = {
       onError?: (error: string) => void;
       onWebSearch?: (data: { tool_call: ToolCall; status: string }) => void;
       onWebSearchResults?: (data: { query: string; results: WebSearchResult[] }) => void;
+      onURLContext?: (data: { status: string; url?: string; kind?: string; url_count?: number; source_count?: number; used_rag?: boolean }) => void;
     }
   ) => {
     const controller = new AbortController();
@@ -296,6 +297,9 @@ export const api = {
                 break;
               case 'web_search_results':
                 callbacks.onWebSearchResults?.(payload);
+                break;
+              case 'url_context':
+                callbacks.onURLContext?.(payload);
                 break;
               case 'error':
                 receivedTerminal = true;

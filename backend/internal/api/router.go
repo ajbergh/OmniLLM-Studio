@@ -24,6 +24,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/sports"
 	"github.com/ajbergh/omnillm-studio/internal/templates"
 	"github.com/ajbergh/omnillm-studio/internal/tools"
+	"github.com/ajbergh/omnillm-studio/internal/urlcontext"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
 	"github.com/ajbergh/omnillm-studio/internal/wordgen"
 	"github.com/go-chi/chi/v5"
@@ -94,11 +95,15 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	newsCfg := news.LoadConfigFromEnv()
 	newsSvc := news.NewService(newsCfg)
 
+	// URL Context Resolver
+	urlCtxCfg := urlcontext.ConfigFromEnv()
+	urlCtxSvc := urlcontext.NewService(urlCtxCfg)
+
 	// Handlers
 	convoHandler := NewConversationHandler(convoRepo, vectorStore)
 	wordGen := wordgen.NewGenerator(cfg.AttachmentsDir)
 	artifactGen := artifacts.NewGenerator(cfg.AttachmentsDir)
-	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo, newsSvc)
+	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo, newsSvc, urlCtxSvc)
 	providerHandler := NewProviderHandler(providerRepo)
 	settingsHandler := NewSettingsHandler(settingsRepo, orchestrator)
 	wsHandler := NewWebSearchHandler(orchestrator)
@@ -116,6 +121,8 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 	toolRegistry.MustRegister(tools.NewURLFetchTool())
 	toolRegistry.MustRegister(tools.NewWordDocTool(wordGen, attachRepo))
 	toolRegistry.MustRegister(sports.NewSportsLookupTool(sports.NewESPNClient()))
+	toolRegistry.MustRegister(tools.NewFetchURLContextTool(urlCtxSvc))
+	toolRegistry.MustRegister(tools.NewGitHubRepoInspectTool(urlCtxSvc))
 	toolExecutor := tools.NewExecutor(toolRegistry, toolPermRepo.PolicyResolver(), 0)
 	toolHandler := NewToolHandler(toolRegistry, toolExecutor, toolPermRepo)
 

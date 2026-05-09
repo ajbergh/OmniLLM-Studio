@@ -113,6 +113,8 @@ interface MessageState {
   webSearching: boolean;
   webSearchResults: WebSearchResult[] | null;
   webSearchQuery: string | null;
+  urlContextStatus: string | null;
+  urlContextKind: string | null;
 
   fetchMessages: (conversationId: string) => Promise<void>;
   sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string) => void;
@@ -136,6 +138,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   webSearching: false,
   webSearchResults: null,
   webSearchQuery: null,
+  urlContextStatus: null,
+  urlContextKind: null,
 
   fetchMessages: async (conversationId: string) => {
     // Increment counter to detect stale responses from rapid switching
@@ -155,7 +159,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string) => {
-    set({ streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null });
+    set({ streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null });
 
     const reqBody: { content: string; override?: { provider?: string; model?: string }; attachment_ids?: string[]; web_search?: boolean; think?: boolean; reasoning_effort?: string } = { content };
     if (override) reqBody.override = override;
@@ -180,7 +184,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           set((s) => ({ messages: [...s.messages, userMsg] }));
         },
         onToken: (tokenContent) => {
-          set((s) => ({ streamingContent: s.streamingContent + tokenContent, webSearching: false }));
+          set((s) => ({ streamingContent: s.streamingContent + tokenContent, webSearching: false, urlContextStatus: null }));
         },
         onThinking: (thinkingContent) => {
           set((s) => ({ streamingThinking: s.streamingThinking + thinkingContent }));
@@ -191,10 +195,17 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         onWebSearchResults: (data) => {
           set({ webSearchResults: data.results, webSearching: false, webSearchQuery: data.query || null });
         },
+        onURLContext: (data) => {
+          if (data.status === 'complete') {
+            set({ urlContextStatus: null, urlContextKind: null });
+          } else {
+            set({ urlContextStatus: data.status, urlContextKind: data.kind || null });
+          }
+        },
         onDone: (data) => {
           // Guard: skip if no valid message_id (phantom prevention)
           if (!data.message_id) {
-            set({ streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false });
+            set({ streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false, urlContextStatus: null, urlContextKind: null });
             return;
           }
           const metadata: Record<string, unknown> = {};
@@ -225,10 +236,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             streamingConversationId: null,
             abortStream: null,
             webSearching: false,
+            urlContextStatus: null,
+            urlContextKind: null,
           }));
         },
         onError: (error) => {
-          set({ error, streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false, webSearchResults: null, webSearchQuery: null });
+          set({ error, streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null });
         },
       }
     );

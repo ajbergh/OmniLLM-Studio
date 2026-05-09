@@ -4,7 +4,7 @@ import {
   Send, Square, Bot, User, Copy, Check, Clock, Cpu, Globe,
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Pencil,
   Download, FileText, ArrowDown, Sparkles, Paperclip, X, Image,
-  GitBranch, Layout, Zap, Brain,
+  GitBranch, Layout, Zap, Brain, Link as LinkIcon,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -13,13 +13,14 @@ import { WelcomeScreen } from './WelcomeScreen';
 import { MarkdownContent } from './MarkdownContent';
 import { BranchSwitcher } from './BranchSwitcher';
 import { RAGSourcePanel } from './RAGSourcePanel';
+import { URLContextSourcePanel } from './URLContextSourcePanel';
 import { ToolCallCard } from './ToolCallCard';
 import { AgentRunView } from './AgentRunView';
 import { AttachmentPanel } from './AttachmentPanel';
 import { toast } from 'sonner';
 import { api, templateApi, branchApi, agentApi } from '../api';
 import { matchesShortcut } from '../shortcuts';
-import type { Message, WebSearchResult, MessageMetadata, PromptTemplate, UsageSummary } from '../types';
+import type { Message, WebSearchResult, MessageMetadata, URLContextSourceRef, PromptTemplate, UsageSummary } from '../types';
 import { AgentEventType } from '../types';
 import { getModelReasoningLevels, isFreeModel, type ReasoningEffortLevel } from '../models';
 
@@ -97,8 +98,8 @@ export function ChatView() {
   const {
     messages, streaming, streamingContent, streamingThinking, error,
     sendMessage, clearMessages, stopStreaming,
-    webSearching, webSearchQuery, regenerateLastMessage,
-    editAndResend, generateImage,
+    webSearching, webSearchQuery, urlContextStatus, urlContextKind,
+    regenerateLastMessage, editAndResend, generateImage,
   } = useMessageStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -628,6 +629,35 @@ export function ChatView() {
             ))}
           </AnimatePresence>
 
+          {/* URL context indicator */}
+          {streaming && urlContextStatus && urlContextStatus !== 'complete' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-start gap-3 max-w-3xl xl:max-w-4xl 2xl:max-w-5xl min-w-0"
+            >
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                <LinkIcon size={15} className="text-amber-400 animate-pulse" />
+              </div>
+              <div className="flex min-w-0 flex-col gap-1 px-4 py-3 rounded-2xl bg-surface-alt border border-amber-500/20 rounded-bl-md">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                  </div>
+                  <span className="text-xs text-amber-400">
+                    {urlContextStatus === 'detected' ? 'URL detected, reading source…' :
+                     urlContextStatus === 'fetching' && urlContextKind === 'github_repo' ? 'Inspecting GitHub repository…' :
+                     urlContextStatus === 'fetching' ? 'Reading linked source…' :
+                     urlContextStatus === 'indexed' ? 'Indexing source context…' :
+                     'Reading linked source…'}
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {/* Web search indicator */}
           {streaming && webSearching && (
             <motion.div
@@ -688,7 +718,7 @@ export function ChatView() {
           )}
 
           {/* Thinking indicator */}
-          {streaming && !streamingContent && !webSearching && (
+          {streaming && !streamingContent && !webSearching && !urlContextStatus && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1521,6 +1551,17 @@ function MessageBubble({
                 </motion.div>
               )}
             </AnimatePresence>
+          </div>
+        )}
+
+        {/* URL Context Source Panel — shows fetched URL sources under assistant messages */}
+        {!isUser && metadata?.url_context && metadata.url_context_sources && metadata.url_context_sources.length > 0 && (
+          <div className="mt-2 border-t border-border/30 pt-2">
+            <URLContextSourcePanel
+              sources={metadata.url_context_sources as URLContextSourceRef[]}
+              usedRag={metadata.url_context_used_rag}
+              warnings={metadata.url_context_warnings}
+            />
           </div>
         )}
 
