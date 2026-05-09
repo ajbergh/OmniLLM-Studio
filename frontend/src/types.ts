@@ -154,6 +154,17 @@ export interface ToolCall {
   };
 }
 
+export interface URLContextSourceRef {
+  id: string;
+  url: string;
+  final_url?: string;
+  title?: string;
+  kind: string;
+  path?: string;
+  fetched_at: string;
+  content_hash?: string;
+}
+
 export interface MessageMetadata {
   web_search?: boolean;
   tool?: string;
@@ -161,6 +172,10 @@ export interface MessageMetadata {
   tool_call?: ToolCall;
   rag_sources?: RAGSourceRef[];
   thinking?: string;
+  url_context?: boolean;
+  url_context_sources?: URLContextSourceRef[];
+  url_context_used_rag?: boolean;
+  url_context_warnings?: string[];
 }
 
 // Typed application settings (mirrors backend AppSettings).

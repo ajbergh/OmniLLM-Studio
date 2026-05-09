@@ -17,6 +17,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/ajbergh/omnillm-studio/internal/sports"
+	"github.com/ajbergh/omnillm-studio/internal/urlcontext"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
 	"github.com/ajbergh/omnillm-studio/internal/wordgen"
 	"github.com/go-chi/chi/v5"
@@ -40,6 +41,7 @@ type MessageHandler struct {
 	artifactGen     *artifacts.Generator
 	featureFlagRepo *repository.FeatureFlagRepo
 	newsSvc         *news.Service
+	urlContextSvc   *urlcontext.Service
 }
 
 // NewMessageHandler creates a new MessageHandler.
@@ -59,6 +61,7 @@ func NewMessageHandler(
 	artifactGen *artifacts.Generator,
 	featureFlagRepo *repository.FeatureFlagRepo,
 	newsSvc *news.Service,
+	urlContextSvc *urlcontext.Service,
 ) *MessageHandler {
 	return &MessageHandler{
 		msgRepo:         msgRepo,
@@ -76,6 +79,7 @@ func NewMessageHandler(
 		artifactGen:     artifactGen,
 		featureFlagRepo: featureFlagRepo,
 		newsSvc:         newsSvc,
+		urlContextSvc:   urlContextSvc,
 	}
 }
 
@@ -219,25 +223,73 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		go h.autoIndexForRAG(aids, cid)
 	}
 
-	if assistantMsg, handled := h.handleSportsLookupMessage(r.Context(), convoID, uuid.New().String(), req.Content); handled {
-		if _, err := h.msgRepo.Create(assistantMsg); err != nil {
-			respondInternalError(w, err)
-			return
+	// ----- URL context preflight -----
+	// Run before sports/news so user-provided URLs take precedence.
+	var urlCtxResult *urlcontext.ResolveResult
+	var urlCtxWebSearchBypass bool
+	if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() {
+		var urlErr error
+		urlCtxResult, urlErr = h.urlContextSvc.Resolve(r.Context(), urlcontext.ResolveRequest{
+			ConversationID: convoID,
+			UserMessage:    req.Content,
+		})
+		if urlErr != nil {
+			if urlcontext.IsRequiredContextError(urlErr) {
+				msg := urlcontext.UserFacingErrorMessage(urlErr)
+				provider := "url_context"
+				model := "preflight"
+				metaBytes, _ := json.Marshal(map[string]any{"url_context": true, "url_context_error": urlErr.Error()})
+				assistantMsg := &models.Message{
+					ID:             uuid.New().String(),
+					ConversationID: convoID,
+					Role:           "assistant",
+					Content:        msg,
+					CreatedAt:      time.Now().UTC(),
+					Provider:       &provider,
+					Model:          &model,
+					MetadataJSON:   string(metaBytes),
+				}
+				if _, saveErr := h.msgRepo.Create(assistantMsg); saveErr != nil {
+					respondInternalError(w, saveErr)
+					return
+				}
+				_ = h.convoRepo.TouchUpdatedAt(convoID)
+				respondJSON(w, http.StatusOK, assistantMsg)
+				return
+			}
+			log.Printf("WARN: url context resolver (create): %v", urlErr)
 		}
-		_ = h.convoRepo.TouchUpdatedAt(convoID)
-		respondJSON(w, http.StatusOK, assistantMsg)
-		return
+		if urlCtxResult != nil && urlCtxResult.Handled {
+			urlcontext.ApplyPromptContext(&llmReq, urlCtxResult)
+			urlCtxWebSearchBypass = urlCtxResult.ShouldBypassWebSearch
+			if urlCtxResult.UsedRAG {
+				go h.ingestURLContextSourcesToRAG(r.Context(), convoID, urlCtxResult)
+			}
+		}
 	}
 
-	// News lookup (non-sports current-events)
-	if assistantMsg, handled := h.handleNewsLookupMessage(r.Context(), convoID, uuid.New().String(), req.Content); handled {
-		if _, err := h.msgRepo.Create(assistantMsg); err != nil {
-			respondInternalError(w, err)
+	// Sports / news direct lookup only when URL context did not handle the request.
+	if urlCtxResult == nil || !urlCtxResult.Handled {
+		if assistantMsg, handled := h.handleSportsLookupMessage(r.Context(), convoID, uuid.New().String(), req.Content); handled {
+			if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+				respondInternalError(w, err)
+				return
+			}
+			_ = h.convoRepo.TouchUpdatedAt(convoID)
+			respondJSON(w, http.StatusOK, assistantMsg)
 			return
 		}
-		_ = h.convoRepo.TouchUpdatedAt(convoID)
-		respondJSON(w, http.StatusOK, assistantMsg)
-		return
+
+		// News lookup (non-sports current-events)
+		if assistantMsg, handled := h.handleNewsLookupMessage(r.Context(), convoID, uuid.New().String(), req.Content); handled {
+			if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+				respondInternalError(w, err)
+				return
+			}
+			_ = h.convoRepo.TouchUpdatedAt(convoID)
+			respondJSON(w, http.StatusOK, assistantMsg)
+			return
+		}
 	}
 
 	// ----- RAG context injection -----
@@ -265,7 +317,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	providerName := llmReq.Provider
 	modelName := llmReq.Model
 
-	webSearchEnabled := req.WebSearch == nil || *req.WebSearch
+	webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass
 
 	var orchResult *websearch.OrchestratorResult
 	if webSearchEnabled {
@@ -399,13 +451,21 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		LatencyMs:      &latency,
 	}
 
-	// Attach RAG metadata if sources were used
-	if len(ragSources) > 0 {
-		metaMap := map[string]interface{}{
-			"rag_sources": ragSources,
+	// Attach RAG and URL context metadata
+	{
+		metaMap := map[string]interface{}{}
+		if len(ragSources) > 0 {
+			metaMap["rag_sources"] = ragSources
 		}
-		metaBytes, _ := json.Marshal(metaMap)
-		assistantMsg.MetadataJSON = string(metaBytes)
+		if urlCtxResult != nil && urlCtxResult.Handled {
+			for k, v := range urlcontext.BuildMetadata(urlCtxResult) {
+				metaMap[k] = v
+			}
+		}
+		if len(metaMap) > 0 {
+			metaBytes, _ := json.Marshal(metaMap)
+			assistantMsg.MetadataJSON = string(metaBytes)
+		}
 	}
 
 	if _, err := h.msgRepo.Create(assistantMsg); err != nil {
@@ -536,61 +596,117 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		"user_message_id": userMsg.ID,
 	})
 
-	if assistantMsg, handled := h.handleSportsLookupMessage(r.Context(), convoID, msgID, req.Content); handled {
-		sendSSE(w, flusher, "sports_lookup", map[string]interface{}{
-			"status": "complete",
-			"source": sports.SourceESPN,
+	// ----- URL context preflight (streaming) -----
+	var urlCtxResult *urlcontext.ResolveResult
+	var urlCtxWebSearchBypass bool
+	if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() {
+		var urlErr error
+		urlCtxResult, urlErr = h.urlContextSvc.Resolve(r.Context(), urlcontext.ResolveRequest{
+			ConversationID: convoID,
+			UserMessage:    req.Content,
+			StreamStatus: func(event string, payload any) {
+				sendSSE(w, flusher, event, payload)
+			},
 		})
-		sendSSE(w, flusher, "token", map[string]string{
-			"content": assistantMsg.Content,
-		})
-		if _, err := h.msgRepo.Create(assistantMsg); err != nil {
-			log.Printf("error saving sports lookup message: %v", err)
+		if urlErr != nil {
+			if urlcontext.IsRequiredContextError(urlErr) {
+				msg := urlcontext.UserFacingErrorMessage(urlErr)
+				sendSSE(w, flusher, "token", map[string]string{"content": msg})
+				provider := "url_context"
+				model := "preflight"
+				metaBytes, _ := json.Marshal(map[string]any{"url_context": true, "url_context_error": urlErr.Error()})
+				assistantMsg := &models.Message{
+					ID:             msgID,
+					ConversationID: convoID,
+					Role:           "assistant",
+					Content:        msg,
+					CreatedAt:      time.Now().UTC(),
+					Provider:       &provider,
+					Model:          &model,
+					MetadataJSON:   string(metaBytes),
+				}
+				if _, saveErr := h.msgRepo.Create(assistantMsg); saveErr != nil {
+					log.Printf("error saving url context error message: %v", saveErr)
+				}
+				_ = h.convoRepo.TouchUpdatedAt(convoID)
+				latencyMS := int(time.Since(start).Milliseconds())
+				sendSSE(w, flusher, "done", map[string]any{
+					"message_id": msgID,
+					"provider":   provider,
+					"model":      model,
+					"latency_ms": latencyMS,
+				})
+				return
+			}
+			log.Printf("WARN: url context resolver (stream): %v", urlErr)
 		}
-		_ = h.convoRepo.TouchUpdatedAt(convoID)
-		latencyMS := 0
-		if assistantMsg.LatencyMs != nil {
-			latencyMS = *assistantMsg.LatencyMs
+		if urlCtxResult != nil && urlCtxResult.Handled {
+			urlcontext.ApplyPromptContext(&llmReq, urlCtxResult)
+			urlCtxWebSearchBypass = urlCtxResult.ShouldBypassWebSearch
+			if urlCtxResult.UsedRAG {
+				go h.ingestURLContextSourcesToRAG(r.Context(), convoID, urlCtxResult)
+			}
 		}
-		donePayload := map[string]interface{}{
-			"message_id":    msgID,
-			"provider":      "sports_lookup",
-			"model":         "espn-go",
-			"latency_ms":    latencyMS,
-			"sports_lookup": true,
-			"source":        sports.SourceESPN,
-		}
-		sendSSE(w, flusher, "done", donePayload)
-		return
 	}
 
-	// News lookup (non-sports current-events, streaming path)
-	if assistantMsg, handled := h.handleNewsLookupMessage(r.Context(), convoID, msgID, req.Content); handled {
-		sendSSE(w, flusher, "news_lookup", map[string]interface{}{
-			"status": "complete",
-			"source": news.SourceName,
-		})
-		sendSSE(w, flusher, "token", map[string]string{
-			"content": assistantMsg.Content,
-		})
-		if _, err := h.msgRepo.Create(assistantMsg); err != nil {
-			log.Printf("error saving news lookup message: %v", err)
+	// Sports / news direct lookup only when URL context did not handle the request.
+	if urlCtxResult == nil || !urlCtxResult.Handled {
+		if assistantMsg, handled := h.handleSportsLookupMessage(r.Context(), convoID, msgID, req.Content); handled {
+			sendSSE(w, flusher, "sports_lookup", map[string]interface{}{
+				"status": "complete",
+				"source": sports.SourceESPN,
+			})
+			sendSSE(w, flusher, "token", map[string]string{
+				"content": assistantMsg.Content,
+			})
+			if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+				log.Printf("error saving sports lookup message: %v", err)
+			}
+			_ = h.convoRepo.TouchUpdatedAt(convoID)
+			latencyMS := 0
+			if assistantMsg.LatencyMs != nil {
+				latencyMS = *assistantMsg.LatencyMs
+			}
+			donePayload := map[string]interface{}{
+				"message_id":    msgID,
+				"provider":      "sports_lookup",
+				"model":         "espn-go",
+				"latency_ms":    latencyMS,
+				"sports_lookup": true,
+				"source":        sports.SourceESPN,
+			}
+			sendSSE(w, flusher, "done", donePayload)
+			return
 		}
-		_ = h.convoRepo.TouchUpdatedAt(convoID)
-		latencyMS := 0
-		if assistantMsg.LatencyMs != nil {
-			latencyMS = *assistantMsg.LatencyMs
+
+		// News lookup (non-sports current-events, streaming path)
+		if assistantMsg, handled := h.handleNewsLookupMessage(r.Context(), convoID, msgID, req.Content); handled {
+			sendSSE(w, flusher, "news_lookup", map[string]interface{}{
+				"status": "complete",
+				"source": news.SourceName,
+			})
+			sendSSE(w, flusher, "token", map[string]string{
+				"content": assistantMsg.Content,
+			})
+			if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+				log.Printf("error saving news lookup message: %v", err)
+			}
+			_ = h.convoRepo.TouchUpdatedAt(convoID)
+			latencyMS := 0
+			if assistantMsg.LatencyMs != nil {
+				latencyMS = *assistantMsg.LatencyMs
+			}
+			donePayload := map[string]interface{}{
+				"message_id":  msgID,
+				"provider":    "news_lookup",
+				"model":       "actually_relevant",
+				"latency_ms":  latencyMS,
+				"news_lookup": true,
+				"source":      news.SourceName,
+			}
+			sendSSE(w, flusher, "done", donePayload)
+			return
 		}
-		donePayload := map[string]interface{}{
-			"message_id":  msgID,
-			"provider":    "news_lookup",
-			"model":       "actually_relevant",
-			"latency_ms":  latencyMS,
-			"news_lookup": true,
-			"source":      news.SourceName,
-		}
-		sendSSE(w, flusher, "done", donePayload)
-		return
 	}
 
 	// ----- Web search orchestration for streaming -----
@@ -598,7 +714,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	modelName := llmReq.Model
 
 	// Web search: skip entirely when the client explicitly disables it.
-	webSearchEnabled := req.WebSearch == nil || *req.WebSearch // default true
+	webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass
 
 	var searchResp *websearch.SearchResponse
 	var wsLLMReq *llm.ChatRequest
@@ -784,6 +900,11 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	if fullThinking != "" {
 		metaMap["thinking"] = fullThinking
+	}
+	if urlCtxResult != nil && urlCtxResult.Handled {
+		for k, v := range urlcontext.BuildMetadata(urlCtxResult) {
+			metaMap[k] = v
+		}
 	}
 
 	var metaJSON string
@@ -1090,6 +1211,75 @@ func (h *MessageHandler) autoIndexForRAG(attachmentIDs []string, conversationID 
 		}
 
 		log.Printf("[rag-auto] indexed attachment %s: %d chunks (%s/%s)", aid, len(dbChunks), embedProvider, embedModel)
+	}
+}
+
+// ingestURLContextSourcesToRAG indexes URL context sources into the conversation's
+// RAG collection so follow-up questions can retrieve content without re-fetching.
+// Intended to be called in a background goroutine after the compact prompt context
+// has already been applied for the current message.
+func (h *MessageHandler) ingestURLContextSourcesToRAG(ctx context.Context, conversationID string, result *urlcontext.ResolveResult) {
+	if h.chunkRepo == nil || h.vectorStore == nil || h.settingsRepo == nil || h.llmSvc == nil {
+		return
+	}
+	settings, err := h.settingsRepo.GetTyped()
+	if err != nil || !settings.RAGEnabled {
+		return
+	}
+
+	activeProvider := ""
+	if convo, cerr := h.convoRepo.GetByID(conversationID); cerr == nil && convo != nil && convo.DefaultProvider != nil {
+		activeProvider = *convo.DefaultProvider
+	}
+
+	embedProvider, embedModel, err := rag.ResolveEmbeddingProvider(activeProvider, settings, h.providerRepo)
+	if err != nil {
+		log.Printf("[url-rag] embedding provider resolution error: %v", err)
+		return
+	}
+
+	embedFunc := rag.NewLLMEmbeddingFunc(h.llmSvc, embedProvider, embedModel)
+	providerType := h.providerTypeFor(embedProvider)
+
+	chunkOpts := rag.ChunkOptions{
+		ChunkSize: settings.RAGChunkSize,
+		Overlap:   settings.RAGChunkOverlap,
+	}
+	if chunkOpts.ChunkSize <= 0 {
+		chunkOpts = rag.DefaultChunkOptions()
+	}
+
+	for _, src := range result.ResolvedSources {
+		// Skip if already indexed for this source ID (cache hit re-uses same ID).
+		existing, _ := h.chunkRepo.ListByAttachment(src.ID)
+		if len(existing) > 0 {
+			continue
+		}
+
+		text := urlcontext.SourceToRAGText(src)
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+
+		dbChunks := rag.ChunkText(text, src.ID, conversationID, chunkOpts)
+		if len(dbChunks) == 0 {
+			continue
+		}
+
+		if err := h.chunkRepo.CreateBatch(dbChunks); err != nil {
+			log.Printf("[url-rag] chunk creation failed for %s: %v", src.ID, err)
+			continue
+		}
+
+		indexCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		idxErr := h.vectorStore.IndexChunks(indexCtx, conversationID, dbChunks, providerType, embedFunc)
+		cancel()
+		if idxErr != nil {
+			log.Printf("[url-rag] indexing failed for %s: %v", src.ID, idxErr)
+			continue
+		}
+
+		log.Printf("[url-rag] indexed source %s: %d chunks (%s/%s)", src.ID, len(dbChunks), embedProvider, embedModel)
 	}
 }
 
