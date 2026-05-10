@@ -99,6 +99,7 @@ func (s *LibraryService) IngestFile(ctx context.Context, req IngestFileRequest) 
 	if att == nil {
 		return nil, fmt.Errorf("attachment not found")
 	}
+	originalFilename := attachmentOriginalFilename(att)
 
 	conversationID := strings.TrimSpace(req.ConversationID)
 	if conversationID == "" {
@@ -126,7 +127,7 @@ func (s *LibraryService) IngestFile(ctx context.Context, req IngestFileRequest) 
 
 	displayName := strings.TrimSpace(req.DisplayName)
 	if displayName == "" {
-		displayName = filepath.Base(att.StoragePath)
+		displayName = originalFilename
 	}
 	metaJSON := "{}"
 	if len(req.Metadata) > 0 {
@@ -142,7 +143,7 @@ func (s *LibraryService) IngestFile(ctx context.Context, req IngestFileRequest) 
 		SourceType:       "attachment",
 		Scope:            scope,
 		DisplayName:      displayName,
-		OriginalFilename: stringPtrOrNil(filepath.Base(att.StoragePath)),
+		OriginalFilename: stringPtrOrNil(originalFilename),
 		MimeType:         &att.MimeType,
 		FileExt:          fileExtPtr(att.StoragePath),
 		StoragePath:      &att.StoragePath,
@@ -276,6 +277,26 @@ func fileExtPtr(path string) *string {
 		return nil
 	}
 	return &ext
+}
+
+func attachmentOriginalFilename(att *models.Attachment) string {
+	if att == nil {
+		return ""
+	}
+
+	if strings.TrimSpace(att.MetadataJSON) != "" {
+		var metadata map[string]interface{}
+		if err := json.Unmarshal([]byte(att.MetadataJSON), &metadata); err == nil {
+			if name, ok := metadata["original_name"].(string); ok {
+				name = strings.TrimSpace(name)
+				if name != "" {
+					return name
+				}
+			}
+		}
+	}
+
+	return filepath.Base(att.StoragePath)
 }
 
 func (s *LibraryService) resolveEmbeddingProvider(conversationID string, settings models.AppSettings) (string, string, error) {

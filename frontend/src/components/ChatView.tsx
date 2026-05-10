@@ -18,7 +18,7 @@ import { ToolCallCard } from './ToolCallCard';
 import { AgentRunView } from './AgentRunView';
 import { AttachmentPanel } from './AttachmentPanel';
 import { toast } from 'sonner';
-import { api, templateApi, branchApi, agentApi } from '../api';
+import { api, templateApi, branchApi, agentApi, workspaceApi } from '../api';
 import { matchesShortcut } from '../shortcuts';
 import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary } from '../types';
 import { AgentEventType } from '../types';
@@ -125,6 +125,7 @@ export function ChatView() {
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [thinkEnabled, setThinkEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortLevel | undefined>(undefined);
+  const [activeWorkspaceName, setActiveWorkspaceName] = useState<string | null>(null);
 
   // Detect if the active conversation is using an Ollama provider
   const activeConvo = conversations.find((c) => c.id === activeId);
@@ -190,6 +191,16 @@ export function ChatView() {
     setAgentMode(mode === 'agent');
     if (mode !== 'image') setEditPreviousImage(false);
   };
+
+  // Fetch workspace name for the active conversation's project badge
+  useEffect(() => {
+    const wsId = activeConvo?.workspace_id;
+    if (!wsId) { setActiveWorkspaceName(null); return; }
+    workspaceApi.list().then((list) => {
+      const ws = list?.find((w) => w.id === wsId);
+      setActiveWorkspaceName(ws?.name || null);
+    }).catch(() => setActiveWorkspaceName(null));
+  }, [activeConvo?.workspace_id]);
 
   // Ctrl+E export shortcut
   useEffect(() => {
@@ -495,7 +506,12 @@ export function ChatView() {
 
   const openProjectFiles = () => {
     const preferredScope = activeConvo?.workspace_id ? 'workspace' : 'conversation';
-    window.dispatchEvent(new CustomEvent('omnillm:open-file-library', { detail: { preferredScope } }));
+    window.dispatchEvent(new CustomEvent('omnillm:open-file-library', {
+      detail: {
+        preferredScope,
+        preferredWorkspaceId: activeConvo?.workspace_id || null,
+      },
+    }));
   };
 
   if (!activeId) {
@@ -522,6 +538,11 @@ export function ChatView() {
             <h2 className="text-sm font-medium text-text leading-tight truncate">
               {activeConvo?.title || 'Chat'}
             </h2>
+            {activeWorkspaceName && (
+              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary font-medium mr-1">
+                <Files size={9} /> {activeWorkspaceName}
+              </span>
+            )}
             <p className="text-[11px] text-text-muted truncate">
               {messageCount} message{messageCount !== 1 ? 's' : ''} · {wordCount.toLocaleString()} words
               {conversationUsage && conversationUsage.estimated_cost > 0 && (

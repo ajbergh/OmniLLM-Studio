@@ -126,6 +126,7 @@ func versionedMigrations() []Migration {
 		{Version: 31, Name: "mcp_audit_log", SQL: migrationMCPAuditLog},
 		{Version: 32, Name: "mcp_servers_headers", SQL: migrationMCPServersHeaders},
 		{Version: 33, Name: "file_library_foundation", SQL: migrationFileLibraryFoundation},
+		{Version: 34, Name: "workspace_project_context", SQL: migrationWorkspaceProjectContext},
 	}
 }
 
@@ -529,6 +530,12 @@ CREATE TABLE IF NOT EXISTS workspaces (
 	created_at  DATETIME NOT NULL DEFAULT (datetime('now')),
 	updated_at  DATETIME NOT NULL DEFAULT (datetime('now'))
 );
+`
+
+// V34: Workspace project context fields
+const migrationWorkspaceProjectContext = `
+ALTER TABLE workspaces ADD COLUMN project_instructions TEXT DEFAULT '';
+ALTER TABLE workspaces ADD COLUMN memory_mode TEXT DEFAULT 'default';
 `
 
 // V14: Add workspace_id to conversations

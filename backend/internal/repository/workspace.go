@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/models"
@@ -22,7 +23,7 @@ func NewWorkspaceRepo(db *sql.DB) *WorkspaceRepo {
 // List returns all workspaces ordered by sort_order, then name.
 func (r *WorkspaceRepo) List() ([]models.Workspace, error) {
 	rows, err := r.db.Query(`
-		SELECT id, name, description, color, icon, sort_order, created_at, updated_at
+		SELECT id, name, description, color, icon, project_instructions, memory_mode, sort_order, created_at, updated_at
 		FROM workspaces
 		ORDER BY sort_order ASC, name ASC`)
 	if err != nil {
@@ -35,7 +36,7 @@ func (r *WorkspaceRepo) List() ([]models.Workspace, error) {
 		var w models.Workspace
 		if err := rows.Scan(
 			&w.ID, &w.Name, &w.Description, &w.Color, &w.Icon,
-			&w.SortOrder, &w.CreatedAt, &w.UpdatedAt,
+			&w.ProjectInstructions, &w.MemoryMode, &w.SortOrder, &w.CreatedAt, &w.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan workspace: %w", err)
 		}
@@ -48,10 +49,10 @@ func (r *WorkspaceRepo) List() ([]models.Workspace, error) {
 func (r *WorkspaceRepo) GetByID(id string) (*models.Workspace, error) {
 	var w models.Workspace
 	err := r.db.QueryRow(`
-		SELECT id, name, description, color, icon, sort_order, created_at, updated_at
+		SELECT id, name, description, color, icon, project_instructions, memory_mode, sort_order, created_at, updated_at
 		FROM workspaces WHERE id = ?`, id).Scan(
 		&w.ID, &w.Name, &w.Description, &w.Color, &w.Icon,
-		&w.SortOrder, &w.CreatedAt, &w.UpdatedAt,
+		&w.ProjectInstructions, &w.MemoryMode, &w.SortOrder, &w.CreatedAt, &w.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -64,10 +65,12 @@ func (r *WorkspaceRepo) GetByID(id string) (*models.Workspace, error) {
 
 // CreateWorkspaceInput holds the fields for creating a workspace.
 type CreateWorkspaceInput struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Color       string `json:"color"`
-	Icon        string `json:"icon"`
+	Name                string `json:"name"`
+	Description         string `json:"description"`
+	Color               string `json:"color"`
+	Icon                string `json:"icon"`
+	ProjectInstructions string `json:"project_instructions"`
+	MemoryMode          string `json:"memory_mode"`
 }
 
 // Create inserts a new workspace.
@@ -83,11 +86,16 @@ func (r *WorkspaceRepo) Create(input CreateWorkspaceInput) (*models.Workspace, e
 	if icon == "" {
 		icon = "folder"
 	}
+	memoryMode := input.MemoryMode
+	if memoryMode == "" {
+		memoryMode = "default"
+	}
+	memoryMode = normalizeWorkspaceMemoryMode(memoryMode)
 
 	_, err := r.db.Exec(`
-		INSERT INTO workspaces (id, name, description, color, icon, sort_order, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
-		id, input.Name, input.Description, color, icon, now, now)
+		INSERT INTO workspaces (id, name, description, color, icon, project_instructions, memory_mode, sort_order, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+		id, input.Name, input.Description, color, icon, input.ProjectInstructions, memoryMode, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("create workspace: %w", err)
 	}
@@ -96,11 +104,13 @@ func (r *WorkspaceRepo) Create(input CreateWorkspaceInput) (*models.Workspace, e
 
 // UpdateWorkspaceInput holds the fields for updating a workspace.
 type UpdateWorkspaceInput struct {
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
-	Color       *string `json:"color,omitempty"`
-	Icon        *string `json:"icon,omitempty"`
-	SortOrder   *int    `json:"sort_order,omitempty"`
+	Name                *string `json:"name,omitempty"`
+	Description         *string `json:"description,omitempty"`
+	Color               *string `json:"color,omitempty"`
+	Icon                *string `json:"icon,omitempty"`
+	ProjectInstructions *string `json:"project_instructions,omitempty"`
+	MemoryMode          *string `json:"memory_mode,omitempty"`
+	SortOrder           *int    `json:"sort_order,omitempty"`
 }
 
 // Update modifies an existing workspace.
@@ -123,6 +133,14 @@ func (r *WorkspaceRepo) Update(id string, input UpdateWorkspaceInput) (*models.W
 	if input.Icon != nil {
 		sets = append(sets, "icon = ?")
 		args = append(args, *input.Icon)
+	}
+	if input.ProjectInstructions != nil {
+		sets = append(sets, "project_instructions = ?")
+		args = append(args, *input.ProjectInstructions)
+	}
+	if input.MemoryMode != nil {
+		sets = append(sets, "memory_mode = ?")
+		args = append(args, normalizeWorkspaceMemoryMode(*input.MemoryMode))
 	}
 	if input.SortOrder != nil {
 		sets = append(sets, "sort_order = ?")
@@ -190,4 +208,13 @@ func (r *WorkspaceRepo) GetStats(id string) (*models.WorkspaceStats, error) {
 	}
 
 	return &stats, nil
+}
+
+func normalizeWorkspaceMemoryMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "project_only":
+		return "project_only"
+	default:
+		return "default"
+	}
 }

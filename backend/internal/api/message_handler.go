@@ -31,6 +31,7 @@ import (
 type MessageHandler struct {
 	msgRepo         *repository.MessageRepo
 	convoRepo       *repository.ConversationRepo
+	workspaceRepo   *repository.WorkspaceRepo
 	attachRepo      *repository.AttachmentRepo
 	storageDir      string
 	llmSvc          *llm.Service
@@ -54,6 +55,7 @@ type MessageHandler struct {
 func NewMessageHandler(
 	msgRepo *repository.MessageRepo,
 	convoRepo *repository.ConversationRepo,
+	workspaceRepo *repository.WorkspaceRepo,
 	attachRepo *repository.AttachmentRepo,
 	storageDir string,
 	llmSvc *llm.Service,
@@ -75,6 +77,7 @@ func NewMessageHandler(
 	return &MessageHandler{
 		msgRepo:         msgRepo,
 		convoRepo:       convoRepo,
+		workspaceRepo:   workspaceRepo,
 		attachRepo:      attachRepo,
 		storageDir:      storageDir,
 		llmSvc:          llmSvc,
@@ -1347,12 +1350,36 @@ func (h *MessageHandler) buildLLMRequest(
 
 	// System prompt: always include the markdown formatting directive so every
 	// response is rendered with rich structure. Layer any user/conversation
-	// prompt on top.
+	// prompt on top, plus project-level instructions when the conversation is
+	// assigned to a project workspace.
 	var userSystemPrompt string
 	if override != nil && override.SystemPrompt != nil {
 		userSystemPrompt = strings.TrimSpace(*override.SystemPrompt)
 	} else if convo.SystemPrompt != nil {
 		userSystemPrompt = strings.TrimSpace(*convo.SystemPrompt)
+	}
+
+	if h.workspaceRepo != nil && convo.WorkspaceID != nil && *convo.WorkspaceID != "" {
+		if ws, err := h.workspaceRepo.GetByID(*convo.WorkspaceID); err == nil && ws != nil {
+			projectInstructions := strings.TrimSpace(ws.ProjectInstructions)
+			if projectInstructions != "" {
+				if userSystemPrompt == "" {
+					userSystemPrompt = projectInstructions
+				} else {
+					userSystemPrompt = projectInstructions + "\n\n" + userSystemPrompt
+				}
+			}
+			if strings.EqualFold(strings.TrimSpace(ws.MemoryMode), "project_only") {
+				projectOnlyDirective := "Project-only memory mode is enabled for this conversation. Use only context from this project conversation, this project's files, and the current user request. Do not rely on memory or assumptions from outside this project."
+				if userSystemPrompt == "" {
+					userSystemPrompt = projectOnlyDirective
+				} else {
+					userSystemPrompt = userSystemPrompt + "\n\n" + projectOnlyDirective
+				}
+			}
+		} else if err != nil {
+			log.Printf("warning: failed to load workspace %s for prompt composition: %v", *convo.WorkspaceID, err)
+		}
 	}
 
 	systemPrompt := composeSystemPrompt(userSystemPrompt)

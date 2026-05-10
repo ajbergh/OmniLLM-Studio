@@ -78,6 +78,7 @@ function App() {
   const { createSession: createImageSession, loadAllSessions, loadSession: loadImageSession } = useImageEditorStore();
   const [activePanel, setActivePanel] = useState<OverlayPanel | null>(null);
   const [fileLibraryPreferredScope, setFileLibraryPreferredScope] = useState<'workspace' | 'conversation' | 'global' | 'all'>('all');
+  const [fileLibraryPreferredWorkspaceId, setFileLibraryPreferredWorkspaceId] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(true); // Default true (solo mode)
   const [authChecked, setAuthChecked] = useState(false);
   const isMobile = useIsMobile();
@@ -98,10 +99,14 @@ function App() {
 
   useEffect(() => {
     const handler = (evt: Event) => {
-      const customEvt = evt as CustomEvent<{ preferredScope?: 'workspace' | 'conversation' | 'global' | 'all' }>;
+      const customEvt = evt as CustomEvent<{
+        preferredScope?: 'workspace' | 'conversation' | 'global' | 'all';
+        preferredWorkspaceId?: string | null;
+      }>;
       if (customEvt.detail?.preferredScope) {
         setFileLibraryPreferredScope(customEvt.detail.preferredScope);
       }
+      setFileLibraryPreferredWorkspaceId(customEvt.detail?.preferredWorkspaceId || null);
       setActivePanel('fileLibrary');
     };
     window.addEventListener('omnillm:open-file-library', handler as EventListener);
@@ -443,6 +448,7 @@ function App() {
           open={fileLibraryOpen}
           onClose={closePanels}
           preferredScope={fileLibraryPreferredScope}
+          preferredWorkspaceId={fileLibraryPreferredWorkspaceId}
         />
         <ImportExportPanel open={importExportOpen} onClose={closePanels} />
       </div>

@@ -477,14 +477,16 @@ type MessageEmbedding struct {
 
 // Workspace represents a project workspace for organizing conversations and templates.
 type Workspace struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Color       string    `json:"color"`
-	Icon        string    `json:"icon"`
-	SortOrder   int       `json:"sort_order"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	Description         string    `json:"description"`
+	Color               string    `json:"color"`
+	Icon                string    `json:"icon"`
+	ProjectInstructions string    `json:"project_instructions"`
+	MemoryMode          string    `json:"memory_mode"`
+	SortOrder           int       `json:"sort_order"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // WorkspaceStats holds aggregate statistics for a workspace.

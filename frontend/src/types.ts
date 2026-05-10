@@ -69,6 +69,7 @@ export interface CreateConversationRequest {
   default_model?: string;
   system_prompt?: string;
   kind?: ConversationKind;
+  workspace_id?: string;
 }
 
 export interface UpdateConversationRequest {
@@ -718,6 +719,8 @@ export interface Workspace {
   description: string;
   color: string;
   icon: string;
+  project_instructions: string;
+  memory_mode: 'default' | 'project_only';
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -728,6 +731,8 @@ export interface CreateWorkspaceRequest {
   description?: string;
   color?: string;
   icon?: string;
+  project_instructions?: string;
+  memory_mode?: 'default' | 'project_only';
 }
 
 export interface UpdateWorkspaceRequest {
@@ -735,6 +740,8 @@ export interface UpdateWorkspaceRequest {
   description?: string;
   color?: string;
   icon?: string;
+  project_instructions?: string;
+  memory_mode?: 'default' | 'project_only';
   sort_order?: number;
 }
 

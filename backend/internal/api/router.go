@@ -146,15 +146,16 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	toolRegistry.MustRegister(tools.NewFileReindexTool(fileLibrarySvc, ""))
 	toolExecutor := tools.NewExecutor(toolRegistry, toolPermRepo.PolicyResolver(), 0)
 	toolHandler := NewToolHandler(toolRegistry, toolExecutor, toolPermRepo)
+	workspaceRepo := repository.NewWorkspaceRepo(database)
 
 	// Handlers
 	convoHandler := NewConversationHandler(convoRepo, vectorStore)
-	msgHandler := NewMessageHandler(msgRepo, convoRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo, newsSvc, urlCtxSvc, toolRegistry, toolExecutor, fileLibrarySvc)
+	msgHandler := NewMessageHandler(msgRepo, convoRepo, workspaceRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo, newsSvc, urlCtxSvc, toolRegistry, toolExecutor, fileLibrarySvc)
 	providerHandler := NewProviderHandler(providerRepo)
 	settingsHandler := NewSettingsHandler(settingsRepo, orchestrator)
 	wsHandler := NewWebSearchHandler(orchestrator)
 	titleHandler := NewTitleHandler(convoRepo, msgRepo, llmService)
-	attachHandler := NewAttachmentHandler(attachRepo, convoRepo, cfg.AttachmentsDir)
+	attachHandler := NewAttachmentHandler(attachRepo, convoRepo, fileLibrarySvc, cfg.AttachmentsDir)
 	imageHandler := NewImageHandler(msgRepo, convoRepo, attachRepo, llmService, cfg.AttachmentsDir)
 	featureFlagHandler := NewFeatureFlagHandler(featureFlagRepo)
 	ragHandler := NewRAGHandler(chunkRepo, vectorStore, attachRepo, convoRepo, settingsRepo, providerRepo, llmService, cfg.AttachmentsDir)
@@ -211,7 +212,6 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	searchHandler := NewSearchHandler(searchService, convoRepo)
 
 	// Workspaces
-	workspaceRepo := repository.NewWorkspaceRepo(database)
 	workspaceHandler := NewWorkspaceHandler(workspaceRepo)
 
 	// Users & Auth (Local Collaboration)

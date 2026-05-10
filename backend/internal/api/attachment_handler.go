@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ajbergh/omnillm-studio/internal/auth"
+	"github.com/ajbergh/omnillm-studio/internal/filelibrary"
 	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/go-chi/chi/v5"
@@ -53,16 +55,17 @@ func isAllowedMIME(mimeType string) bool {
 type AttachmentHandler struct {
 	repo       *repository.AttachmentRepo
 	convoRepo  *repository.ConversationRepo
+	fileSvc    *filelibrary.LibraryService
 	storageDir string
 }
 
 // NewAttachmentHandler creates a new AttachmentHandler.
-func NewAttachmentHandler(repo *repository.AttachmentRepo, convoRepo *repository.ConversationRepo, storageDir string) *AttachmentHandler {
+func NewAttachmentHandler(repo *repository.AttachmentRepo, convoRepo *repository.ConversationRepo, fileSvc *filelibrary.LibraryService, storageDir string) *AttachmentHandler {
 	// Ensure storage directory exists.
 	if err := os.MkdirAll(storageDir, 0o755); err != nil {
 		log.Printf("[attachments] warning: could not create storage dir %s: %v", storageDir, err)
 	}
-	return &AttachmentHandler{repo: repo, convoRepo: convoRepo, storageDir: storageDir}
+	return &AttachmentHandler{repo: repo, convoRepo: convoRepo, fileSvc: fileSvc, storageDir: storageDir}
 }
 
 // Upload handles multipart file upload.
@@ -146,6 +149,30 @@ func (h *AttachmentHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		os.Remove(storagePath)
 		respondInternalError(w, err)
 		return
+	}
+
+	// Project conversations auto-index newly uploaded files into workspace scope.
+	if attachType == "file" && h.fileSvc != nil {
+		if convo, err := h.convoRepo.GetByID(conversationID); err != nil {
+			_ = h.repo.Delete(attachment.ID)
+			_ = os.Remove(storagePath)
+			respondError(w, http.StatusInternalServerError, "failed to load conversation for project indexing")
+			return
+		} else if convo != nil && convo.WorkspaceID != nil && strings.TrimSpace(*convo.WorkspaceID) != "" {
+			userID := auth.UserIDFromContext(r.Context())
+			if _, err := h.fileSvc.IngestFile(r.Context(), filelibrary.IngestFileRequest{
+				OwnerUserID:    userID,
+				AttachmentID:   attachment.ID,
+				Scope:          "workspace",
+				ConversationID: conversationID,
+				WorkspaceID:    *convo.WorkspaceID,
+			}); err != nil {
+				_ = h.repo.Delete(attachment.ID)
+				_ = os.Remove(storagePath)
+				respondError(w, http.StatusInternalServerError, "failed to index project file")
+				return
+			}
+		}
 	}
 
 	respondJSON(w, http.StatusCreated, attachment)
