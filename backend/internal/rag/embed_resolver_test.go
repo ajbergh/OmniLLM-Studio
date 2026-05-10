@@ -79,7 +79,7 @@ func TestResolveEmbeddingProvider_IncompatiblePinnedUsesActiveCanonical(t *testi
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p != "Gemini" || m != "text-embedding-004" {
+	if p != "Gemini" || m != "gemini-embedding-001" {
 		t.Fatalf("expected gemini canonical fallback, got %s/%s", p, m)
 	}
 }

@@ -115,6 +115,8 @@ interface MessageState {
   webSearchQuery: string | null;
   urlContextStatus: string | null;
   urlContextKind: string | null;
+  ragIndexingStatus: string | null;
+  ragIndexingDetail: string | null;
 
   fetchMessages: (conversationId: string) => Promise<void>;
   sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string) => void;
@@ -140,6 +142,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   webSearchQuery: null,
   urlContextStatus: null,
   urlContextKind: null,
+  ragIndexingStatus: null,
+  ragIndexingDetail: null,
 
   fetchMessages: async (conversationId: string) => {
     // Increment counter to detect stale responses from rapid switching
@@ -159,7 +163,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string) => {
-    set({ streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null });
+    set({ streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, ragIndexingStatus: null, ragIndexingDetail: null });
 
     const reqBody: { content: string; override?: { provider?: string; model?: string }; attachment_ids?: string[]; web_search?: boolean; think?: boolean; reasoning_effort?: string } = { content };
     if (override) reqBody.override = override;
@@ -212,6 +216,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           } else {
             set({ urlContextStatus: data.status, urlContextKind: data.kind || null });
           }
+        },
+        onRAGIndexing: (data) => {
+          set({ ragIndexingStatus: data.status, ragIndexingDetail: data.detail || null });
         },
         onDone: (data) => {
           // Guard: skip if no valid message_id (phantom prevention)

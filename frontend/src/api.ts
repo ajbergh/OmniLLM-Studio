@@ -248,6 +248,7 @@ export const api = {
       onWebSearchResults?: (data: { query: string; results: WebSearchResult[] }) => void;
       onFileSearch?: (data: { status: string; scope?: string; query?: string; count?: number }) => void;
       onFileSearchResults?: (data: { results: FileSearchResult[] }) => void;
+      onRAGIndexing?: (data: { status: string; detail?: string }) => void;
       onURLContext?: (data: { status: string; url?: string; kind?: string; url_count?: number; source_count?: number; used_rag?: boolean }) => void;
     }
   ) => {
@@ -322,6 +323,9 @@ export const api = {
                 break;
               case 'url_context':
                 callbacks.onURLContext?.(payload);
+                break;
+              case 'rag_indexing':
+                callbacks.onRAGIndexing?.(payload);
                 break;
               case 'error':
                 receivedTerminal = true;

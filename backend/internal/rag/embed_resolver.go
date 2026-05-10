@@ -20,7 +20,7 @@ var embedCapableTypes = map[string]string{
 	"mistral":    "mistral-embed",
 	"together":   "togethercomputer/m2-bert-80M-8k-base",
 	"ollama":     "nomic-embed-text",
-	"gemini":     "text-embedding-004",
+	"gemini":     "gemini-embedding-001",
 }
 
 // modelCompatibleWithProvider returns true when the pinned embedding model
@@ -36,7 +36,7 @@ func modelCompatibleWithProvider(providerType, model string) bool {
 	case "openai":
 		return strings.HasPrefix(m, "text-embedding-")
 	case "gemini":
-		return strings.Contains(m, "text-embedding-004")
+		return strings.Contains(m, "gemini-embedding")
 	case "mistral":
 		return strings.HasPrefix(m, "mistral-embed")
 	case "together":

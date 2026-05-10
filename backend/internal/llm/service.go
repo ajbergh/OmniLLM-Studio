@@ -26,10 +26,11 @@ import (
 
 // ToolCall represents a tool call made by the LLM.
 type ToolCall struct {
-	Index    int    `json:"index,omitempty"`
-	ID       string `json:"id"`
-	Type     string `json:"type"` // "function"
-	Function struct {
+	Index            int    `json:"index,omitempty"`
+	ID               string `json:"id"`
+	Type             string `json:"type"`                        // "function"
+	ThoughtSignature string `json:"thought_signature,omitempty"` // Gemini 3.1+ requires this
+	Function         struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
@@ -306,6 +307,8 @@ func getDefaultEmbeddingModel(providerType string) string {
 	switch strings.ToLower(providerType) {
 	case "ollama":
 		return "nomic-embed-text"
+	case "gemini":
+		return "gemini-embedding-001"
 	default:
 		return "text-embedding-3-small"
 	}
@@ -331,12 +334,19 @@ func normalizeEmbeddingModel(providerType, requestedModel string) string {
 		return getDefaultEmbeddingModel(providerType)
 	}
 
-	if strings.ToLower(providerType) == "ollama" {
+	pt := strings.ToLower(providerType)
+	if pt == "ollama" {
 		switch strings.ToLower(model) {
 		case "text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002":
 			// OpenAI embedding names are a common default, but Ollama requires local models.
 			return "nomic-embed-text"
 		}
+	}
+
+	if pt == "gemini" {
+		// Gemini uses its own model names for embeddings.
+		// Strip any "models/" prefix the user may have included.
+		model = strings.TrimPrefix(model, "models/")
 	}
 
 	return model
@@ -745,10 +755,11 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 								Content   string `json:"content"`
 								Thinking  string `json:"thinking"`
 								ToolCalls []struct {
-									Index    int    `json:"index"`
-									ID       string `json:"id"`
-									Type     string `json:"type"`
-									Function struct {
+									Index            int    `json:"index"`
+									ID               string `json:"id"`
+									Type             string `json:"type"`
+									ThoughtSignature string `json:"thought_signature,omitempty"`
+									Function         struct {
 										Name      string `json:"name"`
 										Arguments string `json:"arguments"`
 									} `json:"function"`
@@ -770,9 +781,10 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 						var parsedToolCalls []ToolCall
 						for _, tc := range delta.ToolCalls {
 							parsedToolCalls = append(parsedToolCalls, ToolCall{
-								Index: tc.Index,
-								ID:    tc.ID,
-								Type:  tc.Type,
+								Index:            tc.Index,
+								ID:               tc.ID,
+								Type:             tc.Type,
+								ThoughtSignature: tc.ThoughtSignature,
 								Function: struct {
 									Name      string `json:"name"`
 									Arguments string `json:"arguments"`
@@ -1603,10 +1615,17 @@ func (s *Service) Embed(ctx context.Context, req EmbeddingRequest) (*EmbeddingRe
 	}
 
 	model := normalizeEmbeddingModel(providerType, req.Model)
+
 	if strings.EqualFold(providerType, "ollama") {
 		if err := s.ensureOllamaEmbeddingModel(ctx, baseURL, model); err != nil {
 			return nil, err
 		}
+	}
+
+	// Gemini uses its native batchEmbedContents API — the OpenAI-compatible
+	// endpoint does not support embeddings.
+	if strings.EqualFold(providerType, "gemini") {
+		return s.embedGemini(ctx, baseURL, apiKey, model, req.Input)
 	}
 
 	body := map[string]interface{}{
@@ -1681,6 +1700,95 @@ func (s *Service) Embed(ctx context.Context, req EmbeddingRequest) (*EmbeddingRe
 	return &EmbeddingResponse{
 		Embeddings: embeddings,
 		Model:      result.Model,
+		Dimensions: dims,
+	}, nil
+}
+
+// embedGemini calls the Gemini native batchEmbedContents API.
+// The baseURL is the OpenAI-compatible endpoint; we derive the native root
+// from it by stripping the "/openai" suffix.
+func (s *Service) embedGemini(ctx context.Context, baseURL, apiKey, model string, inputs []string) (*EmbeddingResponse, error) {
+	// Derive the native API root from the OpenAI-compatible base URL.
+	// e.g. "https://generativelanguage.googleapis.com/v1beta/openai" -> "https://generativelanguage.googleapis.com/v1beta"
+	nativeRoot := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/openai")
+
+	// Build batchEmbedContents request
+	type content struct {
+		Parts []map[string]string `json:"parts"`
+	}
+	type embedRequest struct {
+		Requests []struct {
+			Model   string  `json:"model"`
+			Content content `json:"content"`
+		} `json:"requests"`
+	}
+
+	req := embedRequest{}
+	for _, text := range inputs {
+		req.Requests = append(req.Requests, struct {
+			Model   string  `json:"model"`
+			Content content `json:"content"`
+		}{
+			Model:   "models/" + model,
+			Content: content{Parts: []map[string]string{{"text": text}}},
+		})
+	}
+
+	jsonBody, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal gemini embed request: %w", err)
+	}
+
+	// Gemini native API expects the API key as a query parameter.
+	// URL format: POST https://generativelanguage.googleapis.com/v1beta/models/{model}:batchEmbedContents
+	apiURL := nativeRoot + "/models/" + model + ":batchEmbedContents"
+	if apiKey != "" {
+		apiURL += "?key=" + apiKey
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create gemini embed request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("gemini embed http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("gemini embed returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result struct {
+		Embeddings []struct {
+			Values []float32 `json:"values"`
+		} `json:"embeddings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode gemini embed response: %w", err)
+	}
+
+	if len(result.Embeddings) == 0 {
+		return nil, fmt.Errorf("no embeddings returned by Gemini")
+	}
+
+	embeddings := make([][]float32, len(result.Embeddings))
+	for i, e := range result.Embeddings {
+		embeddings[i] = e.Values
+	}
+
+	dims := 0
+	if len(embeddings) > 0 {
+		dims = len(embeddings[0])
+	}
+
+	return &EmbeddingResponse{
+		Embeddings: embeddings,
+		Model:      model,
 		Dimensions: dims,
 	}, nil
 }

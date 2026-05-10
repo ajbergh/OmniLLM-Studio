@@ -228,11 +228,10 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Auto-index attachments for RAG in the background
+	// Auto-index attachments for RAG — runs synchronously so chunks are
+	// available when injectRAGContext retrieves them moments later.
 	if len(req.AttachmentIDs) > 0 {
-		aids := req.AttachmentIDs
-		cid := convoID
-		go h.autoIndexForRAG(aids, cid)
+		h.autoIndexForRAG(r.Context(), req.AttachmentIDs, convoID)
 	}
 
 	// ----- URL context preflight -----
@@ -583,6 +582,31 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	llmReq.Think = req.Think
 	llmReq.ReasoningEffort = req.ReasoningEffort
 
+	// Set SSE headers early so the frontend can show status before
+	// potentially slow operations (RAG indexing, file extraction).
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		respondError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+	rc := http.NewResponseController(w)
+	rc.SetWriteDeadline(time.Time{})
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	msgID := uuid.New().String()
+	var fullContent string
+	var fullThinking string
+	var provider, model string
+
+	// Emit start event immediately so the frontend knows the stream is alive.
+	sendSSE(w, flusher, "start", map[string]string{
+		"message_id":      msgID,
+		"user_message_id": userMsg.ID,
+	})
+
 	// Inject attachment context into the last user message if applicable
 	if attachCtx := h.linkAndBuildAttachmentContext(req.AttachmentIDs, userMsg.ID, convoID); attachCtx != "" {
 		if len(llmReq.Messages) > 0 {
@@ -591,11 +615,18 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Auto-index attachments for RAG in the background
+	// Auto-index attachments for RAG — runs synchronously so chunks are
+	// available when injectRAGContext retrieves them moments later.
 	if len(req.AttachmentIDs) > 0 {
-		aids := req.AttachmentIDs
-		cid := convoID
-		go h.autoIndexForRAG(aids, cid)
+		sendSSE(w, flusher, "rag_indexing", map[string]interface{}{
+			"status": "extracting",
+			"detail": "Reading and understanding the document…",
+		})
+		h.autoIndexForRAG(r.Context(), req.AttachmentIDs, convoID)
+		sendSSE(w, flusher, "rag_indexing", map[string]interface{}{
+			"status": "complete",
+			"detail": "Document indexed successfully.",
+		})
 	}
 
 	// ----- RAG context injection (streaming) -----
@@ -619,27 +650,6 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			appendToBaseSystemPrompt(&llmReq, artifacts.ArtifactSystemDirective(f))
 		}
 	}
-
-	// Set SSE headers
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		respondError(w, http.StatusInternalServerError, "streaming not supported")
-		return
-	}
-
-	// Disable write deadline for this SSE connection (server has WriteTimeout set).
-	rc := http.NewResponseController(w)
-	rc.SetWriteDeadline(time.Time{})
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	msgID := uuid.New().String()
-	var fullContent string
-	var fullThinking string
-	var provider, model string
 	var tokenIn, tokenOut int
 
 	start := time.Now()
@@ -899,21 +909,26 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			}}, llmReq.Messages...)
 		}
 
-		// Inject tools from registry
+		// Inject tools from registry (skip for Gemini 3.1+ which requires
+		// thought_signature in function call parts — the preflight file search
+		// and RAG paths already handle file queries without tool calling).
+		providerType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
 		var llmTools []llm.Tool
-		for _, def := range h.toolRegistry.ListEnabled() {
-			llmTools = append(llmTools, llm.Tool{
-				Type: "function",
-				Function: struct {
-					Name        string          `json:"name"`
-					Description string          `json:"description,omitempty"`
-					Parameters  json.RawMessage `json:"parameters,omitempty"`
-				}{
-					Name:        def.Name,
-					Description: def.Description,
-					Parameters:  def.Parameters,
-				},
-			})
+		if !strings.EqualFold(providerType, "gemini") {
+			for _, def := range h.toolRegistry.ListEnabled() {
+				llmTools = append(llmTools, llm.Tool{
+					Type: "function",
+					Function: struct {
+						Name        string          `json:"name"`
+						Description string          `json:"description,omitempty"`
+						Parameters  json.RawMessage `json:"parameters,omitempty"`
+					}{
+						Name:        def.Name,
+						Description: def.Description,
+						Parameters:  def.Parameters,
+					},
+				})
+			}
 		}
 		llmReq.Tools = llmTools
 
@@ -1389,7 +1404,7 @@ func (h *MessageHandler) linkAndBuildAttachmentContext(attachmentIDs []string, m
 
 // autoIndexForRAG asynchronously indexes text-extractable attachments for RAG
 // retrieval. Runs in a background goroutine so it doesn't block the response.
-func (h *MessageHandler) autoIndexForRAG(attachmentIDs []string, conversationID string) {
+func (h *MessageHandler) autoIndexForRAG(ctx context.Context, attachmentIDs []string, conversationID string) {
 	if h.chunkRepo == nil || h.vectorStore == nil || h.settingsRepo == nil || h.llmSvc == nil {
 		return
 	}
@@ -1454,9 +1469,9 @@ func (h *MessageHandler) autoIndexForRAG(attachmentIDs []string, conversationID 
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		err = h.vectorStore.IndexChunks(ctx, conversationID, dbChunks, providerType, embedFunc)
-		cancel()
+		idxCtx, idxCancel := context.WithTimeout(ctx, 5*time.Minute)
+		err = h.vectorStore.IndexChunks(idxCtx, conversationID, dbChunks, providerType, embedFunc)
+		idxCancel()
 		if err != nil {
 			log.Printf("[rag-auto] indexing failed for %s: %v", aid, err)
 			continue
