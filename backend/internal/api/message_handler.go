@@ -166,6 +166,12 @@ type sendMessageRequest struct {
 	WebSearch       *bool  `json:"web_search,omitempty"`
 	Think           *bool  `json:"think,omitempty"`            // Ollama-only: enable/disable thinking
 	ReasoningEffort string `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high"
+
+	// OpenRouter-specific request fields
+	ProviderPrefs  *llm.ProviderPreferences `json:"provider_prefs,omitempty"`
+	ModelFallbacks []string                 `json:"model_fallbacks,omitempty"`
+	Route          string                   `json:"route,omitempty"`
+	Plugins        []llm.Plugin             `json:"plugins,omitempty"`
 }
 
 // Create handles non-streaming message creation + LLM response.
@@ -218,6 +224,12 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	llmReq := h.buildLLMRequest(convo, history, req.Override)
 	llmReq.Think = req.Think
 	llmReq.ReasoningEffort = req.ReasoningEffort
+	if providerType, err := h.llmSvc.ResolveProviderType(llmReq.Provider); err == nil && strings.EqualFold(providerType, "openrouter") {
+		llmReq.ProviderPrefs = req.ProviderPrefs
+		llmReq.ModelFallbacks = req.ModelFallbacks
+		llmReq.Route = req.Route
+		llmReq.Plugins = req.Plugins
+	}
 
 	// Inject attachment context into the last user message if applicable
 	if attachCtx := h.linkAndBuildAttachmentContext(req.AttachmentIDs, userMsg.ID, convoID); attachCtx != "" {
@@ -500,6 +512,9 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Attach RAG and URL context metadata
 	{
 		metaMap := map[string]interface{}{}
+		if resp.Cost != nil && *resp.Cost > 0 {
+			metaMap["cost"] = *resp.Cost
+		}
 		if len(ragSources) > 0 {
 			metaMap["rag_sources"] = ragSources
 		}
@@ -581,6 +596,12 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	llmReq := h.buildLLMRequest(convo, history, req.Override)
 	llmReq.Think = req.Think
 	llmReq.ReasoningEffort = req.ReasoningEffort
+	if providerType, err := h.llmSvc.ResolveProviderType(llmReq.Provider); err == nil && strings.EqualFold(providerType, "openrouter") {
+		llmReq.ProviderPrefs = req.ProviderPrefs
+		llmReq.ModelFallbacks = req.ModelFallbacks
+		llmReq.Route = req.Route
+		llmReq.Plugins = req.Plugins
+	}
 
 	// Set SSE headers early so the frontend can show status before
 	// potentially slow operations (RAG indexing, file extraction).
@@ -599,6 +620,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	msgID := uuid.New().String()
 	var fullContent string
 	var fullThinking string
+	var cost float64
 	var provider, model string
 
 	// Emit start event immediately so the frontend knows the stream is alive.
@@ -882,13 +904,13 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if chunk.TokenOutput > 0 {
 				tokenOut = chunk.TokenOutput
 			}
-
 			if chunk.Thinking != "" {
 				fullThinking += chunk.Thinking
-				sendSSE(w, flusher, "thinking", map[string]string{
-					"content": chunk.Thinking,
-				})
 			}
+			if chunk.Cost != nil {
+				cost = *chunk.Cost
+			}
+
 			if chunk.Content != "" {
 				sendSSE(w, flusher, "token", map[string]string{
 					"content": chunk.Content,
@@ -936,7 +958,6 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		for loopIndex := 0; loopIndex < maxToolLoops; loopIndex++ {
 			var chunkToolCalls = make(map[int]*llm.ToolCall)
 			var loopContent string
-			var loopThinking string
 
 			err = h.llmSvc.ChatStream(r.Context(), llmReq, func(chunk llm.StreamChunk) {
 				loopContent += chunk.Content
@@ -949,18 +970,12 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				if chunk.TokenOutput > 0 {
 					tokenOut += chunk.TokenOutput
 				}
-
 				if chunk.Thinking != "" {
-					loopThinking += chunk.Thinking
 					fullThinking += chunk.Thinking
-					sendSSE(w, flusher, "thinking", map[string]string{
-						"content": chunk.Thinking,
-					})
 				}
-				if chunk.Content != "" {
-					sendSSE(w, flusher, "token", map[string]string{
-						"content": chunk.Content,
-					})
+				// Capture OpenRouter credit cost
+				if chunk.Cost != nil {
+					cost = *chunk.Cost
 				}
 
 				// Accumulate tool calls
@@ -1127,6 +1142,10 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if len(allToolCalls) > 0 {
 		metaMap["tool_calls"] = allToolCalls
 	}
+	// OpenRouter: include credit cost in metadata
+	if cost > 0 {
+		metaMap["cost"] = cost
+	}
 
 	var metaJSON string
 	if len(metaMap) > 0 {
@@ -1185,6 +1204,13 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	if fullThinking != "" {
 		donePayload["thinking"] = fullThinking
+	}
+	// Include the final assistant text so the frontend can render a body even
+	// when a provider doesn't emit token chunks reliably.
+	donePayload["content"] = fullContent
+	// OpenRouter: include credit cost in done event
+	if cost > 0 {
+		donePayload["cost"] = cost
 	}
 	sendSSE(w, flusher, "done", donePayload)
 }

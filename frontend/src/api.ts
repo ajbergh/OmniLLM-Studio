@@ -242,7 +242,7 @@ export const api = {
       onToken: (content: string) => void;
       onThinking?: (content: string) => void;
       onStart?: (data: { message_id: string; user_message_id: string }) => void;
-      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; thinking?: string }) => void;
+      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; content?: string; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; thinking?: string; cost?: number }) => void;
       onError?: (error: string) => void;
       onWebSearch?: (data: { tool_call: ToolCall; status: string }) => void;
       onWebSearchResults?: (data: { query: string; results: WebSearchResult[] }) => void;
@@ -447,6 +447,14 @@ export const api = {
     const url = (baseUrl || 'http://localhost:11434').replace(/\/+$/, '');
     try {
       return await apiFetch<string[]>(`/providers/ollama/models?base_url=${encodeURIComponent(url)}`);
+    } catch {
+      return [];
+    }
+  },
+
+  fetchOpenRouterModels: async (providerId: string): Promise<Array<{ id: string; name: string }>> => {
+    try {
+      return await apiFetch<Array<{ id: string; name: string }>>(`/providers/openrouter/models?provider_id=${encodeURIComponent(providerId)}`);
     } catch {
       return [];
     }

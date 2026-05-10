@@ -35,10 +35,11 @@ RAG (Retrieval-Augmented Generation) allows the LLM to answer questions grounded
 ### How does it work?
 
 1. **Upload a document** (PDF, text, markdown) to a conversation via the attachment feature.
-2. OmniLLM-Studio **automatically chunks** the document into manageable segments (default ~1000 characters with 200-character overlap).
+2. OmniLLM-Studio **automatically chunks** the document into manageable segments (default ~1000 characters with 200-character overlap). Indexing runs **synchronously** so chunks are available immediately when the LLM queries.
 3. Each chunk is **embedded** using an embed-capable provider (resolved automatically — see "Provider fallback" below) and stored in a per-conversation collection inside the embedded [chromem-go](https://github.com/philippgille/chromem-go) vector database.
 4. When you send a message, OmniLLM-Studio **retrieves the top-k most relevant chunks** (default 5) via chromem-go's multi-threaded nearest-neighbor search.
 5. The relevant chunks are **injected into the prompt** as cited context, and the AI responds with `[Source N]` citations pointing back to your documents.
+6. During indexing, the UI shows a **"Reading and understanding the document…"** status indicator so you know what's happening.
 
 ### How do I use it?
 
@@ -83,6 +84,74 @@ A: No. The first time you query a conversation after upgrading, its existing SQL
 
 **Q: My active provider is Anthropic / Groq — does RAG still work?**
 A: Yes. OmniLLM-Studio detects that the active provider has no embeddings API and automatically routes embedding calls to the first available provider that does (OpenAI, Mistral, Together, Ollama, or Gemini). If none are configured, RAG returns a clear error asking you to add one.
+
+---
+
+## 1b. File Library
+
+**Availability:** Built in; accessible via the File Library button in the toolbar or the Project Files button in the sidebar.
+
+### What is the File Library?
+
+The File Library is a durable, searchable storage system for your uploaded documents. Unlike conversation-scoped attachments (which are tied to a single chat), the File Library lets you index files once and reuse them across conversations and workspaces. It supports three scopes:
+
+| Scope | Description |
+|-------|-------------|
+| **Conversation** | Files tied to a specific conversation — similar to existing attachments |
+| **Workspace** | Files reusable across all conversations in a workspace — ideal for project docs, partner briefs, playbooks |
+| **Global** | Files reusable across the entire OmniLLM-Studio instance — good for personal reference material |
+
+### How does it work?
+
+1. **Upload a file** to any conversation (PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, code files, etc.).
+2. **Ingest it into the File Library** via the File Library panel — select the attachment and choose a scope.
+3. OmniLLM-Studio **extracts text**, **chunks** it, **embeds** it, and **indexes** it into the vector store.
+4. When you ask a question, **file intent detection** runs automatically — if your prompt references uploaded files, the File Library is searched before web search.
+5. Relevant results are **injected into the prompt** with citation labels (`[F1]`, `[F2]`, etc.).
+6. The assistant response includes **inline citations** and a collapsible **file sources** panel.
+
+### How do I use it?
+
+- **Open the File Library** — click the File Library button in the toolbar or the Project Files button in the sidebar.
+- **Ingest a file** — select an attachment from the active conversation and click "Ingest Attachment".
+- **Search** — use the search bar to find files by name or metadata content.
+- **Filter by scope** — use the scope dropdown to show conversation, workspace, or global files.
+- **Summarize** — select one or more files and click "Summarize Selected" for a citation-aware summary.
+- **Compare** — select two or more files and click "Compare Selected" for a side-by-side comparison.
+- **Reindex** — click the refresh icon on any file to re-extract and re-embed it.
+- **Delete** — click the trash icon to remove a file from the library.
+
+### What file types are supported?
+
+| Type | Extensions |
+|------|------------|
+| Text / Markdown | `.txt`, `.md` |
+| Code | `.go`, `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.java`, `.cs`, `.cpp`, `.c`, `.rs`, `.sql`, `.xml` |
+| Data | `.csv`, `.tsv`, `.json`, `.yaml`, `.yml` |
+| Documents | `.pdf`, `.docx`, `.xlsx`, `.pptx` |
+| Web | `.html` |
+
+### What are the benefits?
+
+- **Reusable** — index a file once in workspace scope and every chat in that workspace can reference it.
+- **Citation-grounded** — every answer includes source citations with file name, page number, and section.
+- **Hybrid search** — combines vector semantic search with keyword matching for better retrieval.
+- **Deduplication** — files are checksum-deduplicated so the same file isn't indexed twice.
+- **Status tracking** — each file has a visible indexing status (queued, extracting, chunking, embedding, indexed, failed).
+
+### FAQ
+
+**Q: How is File Library different from regular RAG?**
+A: Regular RAG indexes attachments per-conversation and is invisible to the user. The File Library gives you explicit control — you choose the scope, see indexed files, search them, and manage them through a dedicated UI.
+
+**Q: Can I promote a conversation attachment to workspace scope?**
+A: Yes — open the File Library, select the attachment, and choose "workspace" scope when ingesting.
+
+**Q: What happens if I upload the same file twice?**
+A: The File Library detects duplicate files by SHA-256 checksum and reuses the existing index entry.
+
+**Q: Do I need RAG enabled for File Library to work?**
+A: Yes — the File Library uses the same embedding pipeline as RAG. Enable RAG in Settings and ensure at least one embed-capable provider is configured.
 
 ---
 

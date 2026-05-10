@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
 import { api, authApi, mcpApi, setAuthToken } from '../api';
 import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, Github, Calculator, Link2, Search } from 'lucide-react';
-import type { CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, ToolPolicy, UpdateMCPServerRequest } from '../types';
+import type { CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, ToolPolicy, UpdateMCPServerRequest } from '../types';
 import { useTheme, THEMES } from '../theme';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -751,6 +751,272 @@ function ProviderCard({
           {saved ? <Check size={14} /> : <Save size={14} />}
         </motion.button>
       </div>
+
+      {/* OpenRouter-specific settings */}
+      {provider.type === 'openrouter' && <OpenRouterSettings provider={provider} onUpdate={onUpdate} />}
+
+      {/* OpenRouter: Fetch models dynamically */}
+      {provider.type === 'openrouter' && (
+        <OpenRouterModelsButton provider={provider} />
+      )}
+    </div>
+  );
+}
+
+function OpenRouterModelsButton({
+  provider,
+}: {
+  provider: ReturnType<typeof useProviderStore.getState>['providers'][0];
+}) {
+  const [loading, setLoading] = useState(false);
+  const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [expanded, setExpanded] = useState(false);
+
+  const fetchModels = async () => {
+    setLoading(true);
+    try {
+      const result = await api.fetchOpenRouterModels(provider.id);
+      setModels(result);
+      setExpanded(true);
+      toast.success(`Fetched ${result.length} models`);
+    } catch (err) {
+      toast.error('Failed to fetch OpenRouter models');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="border-t border-border pt-3 mt-3">
+      <button
+        type="button"
+        onClick={models.length === 0 ? fetchModels : () => setExpanded(!expanded)}
+        disabled={loading}
+        className="flex items-center gap-2 text-xs font-medium text-text-muted hover:text-text transition-colors"
+      >
+        <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+        <span>{loading ? 'Fetching...' : models.length > 0 ? 'OpenRouter Models' : 'Fetch OpenRouter Models'}</span>
+        {models.length > 0 && (
+          <ChevronDown
+            size={12}
+            className={`transition-transform ${expanded ? 'rotate-180' : ''}`}
+          />
+        )}
+      </button>
+
+      {expanded && models.length > 0 && (
+        <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
+          {models.map((m) => (
+            <div
+              key={m.id}
+              className="flex items-center justify-between text-xs px-2 py-1.5 rounded-lg bg-surface-hover/50"
+            >
+              <span className="truncate flex-1">{m.name || m.id}</span>
+              <span className="text-text-muted/60 ml-2 font-mono text-[10px]">{m.id}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OpenRouterSettings({
+  provider,
+  onUpdate,
+}: {
+  provider: ReturnType<typeof useProviderStore.getState>['providers'][0];
+  onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const initialMeta: OpenRouterMetadata = (() => {
+    try {
+      return JSON.parse(provider.metadata_json || '{}') as OpenRouterMetadata;
+    } catch {
+      return {};
+    }
+  })();
+
+  const [showCost, setShowCost] = useState(initialMeta.show_cost ?? false);
+  const [route, setRoute] = useState(initialMeta.route || '');
+  const [allowFallbacks, setAllowFallbacks] = useState(initialMeta.provider_prefs?.allow_fallbacks ?? true);
+  const [providerOrder, setProviderOrder] = useState((initialMeta.provider_prefs?.order || []).join(', '));
+  const [providerOnly, setProviderOnly] = useState((initialMeta.provider_prefs?.only || []).join(', '));
+  const [providerIgnore, setProviderIgnore] = useState((initialMeta.provider_prefs?.ignore || []).join(', '));
+  const [modelFallbacks, setModelFallbacks] = useState((initialMeta.model_fallbacks || []).join(', '));
+  const [plugins, setPlugins] = useState<Record<string, boolean>>(() => {
+    const defaults: Record<string, boolean> = {
+      web: false,
+      'file-parser': false,
+      'response-healing': false,
+      'context-compression': false,
+    };
+    for (const p of initialMeta.plugins || []) {
+      if (p.id in defaults) defaults[p.id] = p.enabled ?? true;
+    }
+    return defaults;
+  });
+  const [saving, setSaving] = useState(false);
+
+  const parseCSV = (value: string): string[] =>
+    value
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+  const handleSave = async () => {
+    const meta: OpenRouterMetadata = {
+      show_cost: showCost,
+      route: route || undefined,
+      model_fallbacks: parseCSV(modelFallbacks),
+      provider_prefs: {
+        order: parseCSV(providerOrder),
+        only: parseCSV(providerOnly),
+        ignore: parseCSV(providerIgnore),
+        allow_fallbacks: allowFallbacks,
+      },
+      plugins: Object.entries(plugins).map(([id, enabled]) => ({ id, enabled })),
+    };
+
+    setSaving(true);
+    try {
+      await onUpdate(provider.id, { metadata_json: JSON.stringify(meta) });
+      toast.success('OpenRouter settings saved');
+    } catch {
+      toast.error('Failed to save OpenRouter settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="border-t border-border pt-3 mt-3">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-xs font-medium text-text-muted hover:text-text transition-colors w-full"
+      >
+        <Cloud size={12} />
+        <span>OpenRouter Settings</span>
+        <ChevronDown
+          size={12}
+          className={`ml-auto transition-transform ${expanded ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          <div className="flex items-center justify-between py-2">
+            <div>
+              <label className="text-xs font-medium text-text-secondary block">Show Credit Cost</label>
+              <p className="text-[10px] text-text-muted mt-0.5">
+                Display OpenRouter credit cost in chat messages
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowCost((v) => !v)}
+              className={`relative w-10 h-5 rounded-full transition-colors ${
+                showCost ? 'bg-primary' : 'bg-border'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                  showCost ? 'translate-x-5' : ''
+                }`}
+              />
+            </button>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-text-secondary block mb-1">Routing Strategy</label>
+            <select
+              value={route}
+              onChange={(e) => setRoute(e.target.value)}
+              className="w-full px-3 py-2 text-xs bg-surface border border-border rounded-lg text-text"
+            >
+              <option value="">Default</option>
+              <option value="fallback">Fallback</option>
+            </select>
+          </div>
+
+          <div className="flex items-center justify-between py-1">
+            <label className="text-xs font-medium text-text-secondary">Allow Provider Fallbacks</label>
+            <button
+              type="button"
+              onClick={() => setAllowFallbacks((v) => !v)}
+              className={`relative w-10 h-5 rounded-full transition-colors ${allowFallbacks ? 'bg-primary' : 'bg-border'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${allowFallbacks ? 'translate-x-5' : ''}`} />
+            </button>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-text-secondary block mb-1">Preferred Providers (order)</label>
+            <input
+              value={providerOrder}
+              onChange={(e) => setProviderOrder(e.target.value)}
+              placeholder="openai, anthropic"
+              className="w-full px-3 py-2 text-xs bg-surface border border-border rounded-lg text-text"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-text-secondary block mb-1">Only Providers</label>
+            <input
+              value={providerOnly}
+              onChange={(e) => setProviderOnly(e.target.value)}
+              placeholder="openai, mistral"
+              className="w-full px-3 py-2 text-xs bg-surface border border-border rounded-lg text-text"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-text-secondary block mb-1">Ignore Providers</label>
+            <input
+              value={providerIgnore}
+              onChange={(e) => setProviderIgnore(e.target.value)}
+              placeholder="google, together"
+              className="w-full px-3 py-2 text-xs bg-surface border border-border rounded-lg text-text"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-text-secondary block mb-1">Model Fallbacks</label>
+            <input
+              value={modelFallbacks}
+              onChange={(e) => setModelFallbacks(e.target.value)}
+              placeholder="openai/gpt-5.4-mini, anthropic/claude-sonnet-4.6"
+              className="w-full px-3 py-2 text-xs bg-surface border border-border rounded-lg text-text"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-text-secondary block mb-1">OpenRouter Plugins</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['web', 'file-parser', 'response-healing', 'context-compression'] as const).map((pluginId) => (
+                <label key={pluginId} className="flex items-center gap-2 text-xs text-text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={plugins[pluginId]}
+                    onChange={(e) => setPlugins((prev) => ({ ...prev, [pluginId]: e.target.checked }))}
+                  />
+                  <span>{pluginId}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full mt-1 px-3 py-2 text-xs rounded-lg bg-primary text-white disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save OpenRouter Settings'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

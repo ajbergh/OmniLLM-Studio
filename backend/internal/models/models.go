@@ -99,7 +99,25 @@ type ProviderProfile struct {
 	Enabled           bool      `json:"enabled"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
-	MetadataJSON      string    `json:"metadata_json,omitempty"`
+
+	// OpenRouter-specific settings (stored as JSON in metadata_json)
+	MetadataJSON string `json:"metadata_json,omitempty"`
+}
+
+// OpenRouterMetadata holds OpenRouter-specific provider settings.
+type OpenRouterMetadata struct {
+	ProviderPrefs  *OpenRouterProviderPrefs `json:"provider_prefs,omitempty"`
+	ModelFallbacks []string                 `json:"model_fallbacks,omitempty"`
+	Route          string                   `json:"route,omitempty"`
+	ShowCost       bool                     `json:"show_cost,omitempty"`
+}
+
+// OpenRouterProviderPrefs represents OpenRouter provider routing preferences.
+type OpenRouterProviderPrefs struct {
+	Order          []string `json:"order,omitempty"`
+	Only           []string `json:"only,omitempty"`
+	Ignore         []string `json:"ignore,omitempty"`
+	AllowFallbacks *bool    `json:"allow_fallbacks,omitempty"`
 }
 
 // Setting represents a key-value application setting.

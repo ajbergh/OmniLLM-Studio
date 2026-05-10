@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { api } from '../api';
-import type { Conversation, Message, ProviderProfile, WebSearchResult, FeatureFlag } from '../types';
+import type { Conversation, Message, ProviderProfile, SendMessageRequest, WebSearchResult, FeatureFlag } from '../types';
 
 // ---- Conversation Store ----
 
@@ -101,6 +101,19 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 // Counter to prevent stale fetchMessages responses from overwriting state on rapid conversation switching
 let fetchMessageCounter = 0;
 
+function dedupeMessages(messages: Message[]): Message[] {
+  const seen = new Set<string>();
+  const deduped: Message[] = [];
+
+  for (const message of messages) {
+    if (seen.has(message.id)) continue;
+    seen.add(message.id);
+    deduped.push(message);
+  }
+
+  return deduped;
+}
+
 interface MessageState {
   messages: Message[];
   streaming: boolean;
@@ -119,7 +132,7 @@ interface MessageState {
   ragIndexingDetail: string | null;
 
   fetchMessages: (conversationId: string) => Promise<void>;
-  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string) => void;
+  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }) => void;
   generateImage: (conversationId: string, prompt: string, override?: { provider?: string; model?: string }, options?: { size?: string; quality?: string; referenceImageId?: string }) => Promise<void>;
   regenerateLastMessage: (conversationId: string) => Promise<void>;
   editAndResend: (conversationId: string, messageId: string, newContent: string) => Promise<void>;
@@ -153,7 +166,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       const messages = await api.listMessages(conversationId);
       // Only commit if this is still the latest fetch request
       if (fetchToken === fetchMessageCounter) {
-        set({ messages, loading: false });
+        set({ messages: dedupeMessages(messages), loading: false });
       }
     } catch (err) {
       if (fetchToken === fetchMessageCounter) {
@@ -162,15 +175,19 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
   },
 
-  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string) => {
+  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }) => {
     set({ streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, ragIndexingStatus: null, ragIndexingDetail: null });
 
-    const reqBody: { content: string; override?: { provider?: string; model?: string }; attachment_ids?: string[]; web_search?: boolean; think?: boolean; reasoning_effort?: string } = { content };
+    const reqBody: SendMessageRequest = { content };
     if (override) reqBody.override = override;
     if (attachmentIds && attachmentIds.length > 0) reqBody.attachment_ids = attachmentIds;
     if (webSearch !== undefined) reqBody.web_search = webSearch;
     if (think !== undefined) reqBody.think = think;
     if (reasoningEffort) reqBody.reasoning_effort = reasoningEffort;
+    if (openRouterOptions?.provider_prefs) reqBody.provider_prefs = openRouterOptions.provider_prefs;
+    if (openRouterOptions?.model_fallbacks && openRouterOptions.model_fallbacks.length > 0) reqBody.model_fallbacks = openRouterOptions.model_fallbacks;
+    if (openRouterOptions?.route) reqBody.route = openRouterOptions.route;
+    if (openRouterOptions?.plugins && openRouterOptions.plugins.length > 0) reqBody.plugins = openRouterOptions.plugins;
 
     const { abort } = api.streamMessage(
       conversationId,
@@ -185,7 +202,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             content,
             created_at: new Date().toISOString(),
           };
-          set((s) => ({ messages: [...s.messages, userMsg] }));
+          set((s) => ({ messages: dedupeMessages([...s.messages, userMsg]) }));
         },
         onToken: (tokenContent) => {
           set((s) => ({ streamingContent: s.streamingContent + tokenContent, webSearching: false, urlContextStatus: null }));
@@ -240,11 +257,15 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           if (data.thinking) {
             metadata.thinking = data.thinking;
           }
+          if (data.cost !== undefined && data.cost > 0) {
+            metadata.cost = data.cost;
+          }
+          const assistantContent = (data.content || '').trim() || get().streamingContent;
           const assistantMsg: Message = {
             id: data.message_id,
             conversation_id: conversationId,
             role: 'assistant',
-            content: get().streamingContent,
+            content: assistantContent,
             created_at: new Date().toISOString(),
             provider: data.provider,
             model: data.model,
@@ -252,7 +273,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             metadata_json: Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : undefined,
           };
           set((s) => ({
-            messages: [...s.messages, assistantMsg],
+            messages: dedupeMessages([...s.messages, assistantMsg]),
             streaming: false,
             streamingContent: '',
             streamingThinking: '',
@@ -287,7 +308,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         created_at: new Date().toISOString(),
       };
       set((s) => ({
-        messages: [...s.messages, partialMsg],
+        messages: dedupeMessages([...s.messages, partialMsg]),
         streaming: false,
         streamingContent: '',
         streamingConversationId: null,
@@ -320,7 +341,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
       });
       // Add both messages to state
       set((s) => ({
-        messages: [...s.messages, result.user_message, result.assistant_message],
+        messages: dedupeMessages([...s.messages, result.user_message, result.assistant_message]),
         streaming: false,
         streamingContent: '',
       }));

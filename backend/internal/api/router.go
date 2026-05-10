@@ -364,6 +364,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Route("/providers", func(r chi.Router) {
 				r.Get("/", providerHandler.List)
 				r.Get("/ollama/models", providerHandler.FetchOllamaModels)
+				r.Get("/openrouter/models", providerHandler.FetchOpenRouterModels)
 				r.Get("/{providerId}/image-capabilities", providerHandler.GetImageCapabilities)
 				r.Group(func(r chi.Router) {
 					r.Use(auth.RequireRole("admin"))

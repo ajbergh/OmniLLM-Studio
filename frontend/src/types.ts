@@ -91,6 +91,20 @@ export interface SendMessageRequest {
     model?: string;
     system_prompt?: string;
   };
+
+  // OpenRouter-specific options (optional)
+  provider_prefs?: {
+    order?: string[];          // Preferred provider order
+    only?: string[];            // Restrict to these providers
+    ignore?: string[];          // Exclude these providers
+    allow_fallbacks?: boolean;  // Enable/disable fallbacks
+  };
+  model_fallbacks?: string[];  // Fallback models for OpenRouter
+  route?: string;              // Routing strategy (e.g., "fallback")
+  plugins?: Array<{
+    id: string;              // "web", "file-parser", "response-healing", "context-compression"
+    enabled?: boolean;         // nil = use default
+  }>;
 }
 
 export interface CreateProviderRequest {
@@ -100,6 +114,7 @@ export interface CreateProviderRequest {
   default_model?: string;
   default_image_model?: string;
   api_key?: string;
+  metadata_json?: string; // JSON string for provider-specific settings (e.g., OpenRouter)
 }
 
 export interface UpdateProviderRequest {
@@ -110,6 +125,24 @@ export interface UpdateProviderRequest {
   default_image_model?: string;
   enabled?: boolean;
   api_key?: string;
+  metadata_json?: string; // JSON string for provider-specific settings (e.g., OpenRouter)
+}
+
+// OpenRouter-specific metadata
+export interface OpenRouterMetadata {
+  provider_prefs?: {
+    order?: string[];
+    only?: string[];
+    ignore?: string[];
+    allow_fallbacks?: boolean;
+  };
+  model_fallbacks?: string[];
+  route?: string;
+  show_cost?: boolean;
+  plugins?: Array<{
+    id: string;
+    enabled?: boolean;
+  }>;
 }
 
 export interface SSEEvent {
@@ -178,6 +211,7 @@ export interface MessageMetadata {
   url_context_sources?: URLContextSourceRef[];
   url_context_used_rag?: boolean;
   url_context_warnings?: string[];
+  cost?: number; // OpenRouter credit cost
 }
 
 // Typed application settings (mirrors backend AppSettings).

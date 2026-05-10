@@ -127,6 +127,7 @@ type ProviderUpdate struct {
 	DefaultImageModel *string `json:"default_image_model,omitempty"`
 	Enabled           *bool   `json:"enabled,omitempty"`
 	APIKey            *string `json:"api_key,omitempty"`
+	MetadataJSON      *string `json:"metadata_json,omitempty"`
 }
 
 // Update modifies an existing provider profile.
@@ -167,6 +168,10 @@ func (r *ProviderRepo) Update(id string, upd ProviderUpdate) (*models.ProviderPr
 		} else {
 			args = append(args, 0)
 		}
+	}
+	if upd.MetadataJSON != nil {
+		sets = append(sets, "metadata_json = ?")
+		args = append(args, *upd.MetadataJSON)
 	}
 
 	if len(sets) > 0 {

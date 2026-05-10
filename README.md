@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Local-first LLM chat application</strong> — Go backend + React frontend<br/>
-  Multi-provider streaming · Image Studio · RAG · Agent mode · Branching · Web search · Live sports lookup · News lookup · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
+  Multi-provider streaming · Image Studio · RAG · File Library · Agent mode · Branching · Web search · Live sports lookup · News lookup · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
 </p>
 
 <p align="center">
@@ -41,10 +41,11 @@
 | Feature | Description |
 |---------|-------------|
 | **Agent Mode** | Autonomous multi-step task execution with planning, tool calling, and step approval |
-| **RAG Pipeline** | Document chunking, embedding generation, and persistent vector retrieval (chromem-go) over uploaded files |
+| **RAG Pipeline** | Document chunking, embedding generation, and persistent vector retrieval (chromem-go) over uploaded files — auto-indexes attachments synchronously so context is available immediately |
+| **File Library** | Durable file storage with conversation, workspace, and global scopes — hybrid vector + keyword search, citation-aware summarization and comparison, and a dedicated UI panel |
 | **Conversation Branching** | Fork any message into parallel branches — explore different response paths |
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
-| **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction |
+| **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction — runs after file search so private documents take priority |
 | **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, IPL cricket, and broad sports headlines |
 | **News Lookup** | Actually Relevant News API-backed newspaper-style editions for non-sports current events — no API key required |
 | **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, and document generation |
@@ -163,8 +164,9 @@ Frontend (React/TS)  ──SSE/REST──▶  Backend (Go/Chi)  ──SQL──�
 
 - **Frontend** — Single-page React app with Zustand state management, Tailwind v4 styling, and Framer Motion animations. Includes a full-featured Image Studio with canvas editor.
 - **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image generation routed through provider-specific adapters (OpenAI, Gemini, Stable Diffusion, Together), with ESPN-backed sports lookup and Actually Relevant News lookup handled locally before LLM fallback.
-- **Database** — SQLite with WAL mode, 28 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions, nodes, assets, masks, and references stored relationally.
-- **Vector store (RAG)** — [`chromem-go`](https://github.com/philippgille/chromem-go) embedded vector DB with one persistent collection per conversation under `<OMNILLM_CHROMEM_DIR>/<conversation_id>/`. Multi-threaded NN search; zero third-party Go dependencies. Chunk text stays in SQLite (`document_chunks`); chromem stores vectors only. Legacy `document_embeddings` rows lazy-migrate on first retrieval after upgrade.
+- **Database** — SQLite with WAL mode, 33 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions, nodes, assets, masks, and references stored relationally.
+- **Vector store (RAG)** — [`chromem-go`](https://github.com/philippgille/chromem-go) embedded vector DB with collections per conversation, workspace, and global scope. Multi-threaded NN search; zero third-party Go dependencies. Chunk text stays in SQLite (`document_chunks`); chromem stores vectors only. Legacy `document_embeddings` rows lazy-migrate on first retrieval after upgrade.
+- **File Library** — Durable file storage with conversation, workspace, and global scopes. Hybrid retrieval (vector + keyword) with citation-aware results. Dedicated UI panel for managing indexed files.
 
 ## Request Lifecycle
 
@@ -178,8 +180,9 @@ From a single chat prompt to streamed tokens back in the UI:
 2. Backend validates auth/ownership, loads context, and applies local preflight checks
 3. High-confidence ESPN-backed sports data prompts are answered directly through `sports_lookup`
 4. High-confidence non-sports news prompts are answered directly through `news_lookup`
-5. If not handled locally, optional enrichments run (RAG retrieval, tools, web search) based on settings and model behavior
-6. SSE events stream tokens and metadata back to the client in real time
+5. File intent detection runs — if the user asks about uploaded files, file search runs before web search so private documents take priority
+6. If not handled locally, optional enrichments run (RAG retrieval, tools, web search) based on settings and model behavior
+7. SSE events stream tokens and metadata back to the client in real time — including `rag_indexing`, `file_search`, `web_search`, and `url_context` status events
 
 ---
 

@@ -9,9 +9,9 @@ Local-first LLM chat app: **Go backend** (API + SQLite) + **React/TypeScript fro
 - **Entry point:** `cmd/server/main.go` — opens SQLite DB, runs migrations, builds router, starts HTTP server with graceful shutdown.
 - **Router:** `internal/api/router.go` — single `NewRouter()` function wires ALL repos → services → handlers → chi routes. This is the composition root; understand it first when tracing any feature.
 - **Layered architecture:** `api/` handlers → domain services (`llm/`, `agent/`, `search/`, `analytics/`, `bundle/`, `rag/`, `tools/`, `templates/`, `plugins/`, `eval/`, `websearch/`, `auth/`) → `repository/` → `models/` → `db/`.
-- **Database:** SQLite with WAL mode, `MaxOpenConns(1)`. Versioned migrations in `internal/db/db.go` (V1–V27). New tables always use `CREATE TABLE IF NOT EXISTS` with defaults on new columns. Migration versions are tracked in a `schema_versions` table.
+- **Database:** SQLite with WAL mode, `MaxOpenConns(1)`. Versioned migrations in `internal/db/db.go` (V1–V33). New tables always use `CREATE TABLE IF NOT EXISTS` with defaults on new columns. Migration versions are tracked in a `schema_versions` table.
 - **Auth:** Solo-mode by default (no users = middleware passthrough). Multi-user mode activates when first user registers. Auth middleware in `auth/auth.go` uses Bearer tokens (`Authorization` header).
-- **Streaming:** SSE (Server-Sent Events) for LLM responses. `WriteTimeout: 0` on the HTTP server. SSE events use `event:` + `data:` format (e.g., `token`, `done`, `web_search_*`, `tool_start`, `agent_*`).
+- **Streaming:** SSE (Server-Sent Events) for LLM responses. `WriteTimeout: 0` on the HTTP server. SSE events use `event:` + `data:` format (e.g., `token`, `done`, `web_search_*`, `file_search`, `file_search_results`, `rag_indexing`, `url_context`, `tool_start`, `agent_*`).
 
 ### Frontend (`frontend/src/`)
 
@@ -68,6 +68,7 @@ The SQLite database file (`omnillm-studio.db`) is created in the `backend/` work
 8. **Frontend API:** Add typed functions to `api.ts`.
 9. **Component:** Create `components/XxxPanel.tsx`, integrate in `App.tsx`.
 10. **Feature flag:** If gated, add flag check in both backend handler and frontend.
+11. **SSE events:** If the feature involves long-running operations (indexing, search), add SSE events so the frontend can show meaningful status.
 
 ## Testing
 
@@ -79,6 +80,7 @@ The SQLite database file (`omnillm-studio.db`) is created in the `backend/` work
 
 - **LLM providers:** OpenAI-compatible API format. `llm/service.go` handles provider routing, streaming, embeddings, and image generation.
 - **Web search:** Brave Search API (key in settings) or DuckDuckGo (zero-config fallback). Jina Reader for URL content extraction.
-- **RAG vector store:** [`chromem-go`](https://github.com/philippgille/chromem-go) v0.7.0 — embedded, persistent, zero-deps Go vector DB. One collection per conversation, persisted under `<OMNILLM_CHROMEM_DIR>/<conversation_id>/`. The wrapper lives at `internal/rag/store.go` (`VectorStore`); call sites never import chromem directly. Chunk text + metadata still live in the SQLite `document_chunks` table (chromem stores vectors only). Legacy `document_embeddings` rows lazy-migrate into chromem on first retrieve via `ChromemRetriever.tryLazyMigrate`.
+- **RAG vector store:** [`chromem-go`](https://github.com/philippgille/chromem-go) v0.7.0 — embedded, persistent, zero-deps Go vector DB. Collections per conversation, workspace, and global scope, persisted under `<OMNILLM_CHROMEM_DIR>/<scope_id>/`. The wrapper lives at `internal/rag/store.go` (`VectorStore`); call sites never import chromem directly. Chunk text + metadata still live in the SQLite `document_chunks` table (chromem stores vectors only). Legacy `document_embeddings` rows lazy-migrate into chromem on first retrieve via `ChromemRetriever.tryLazyMigrate`.
+- **File Library:** Durable file storage with conversation, workspace, and global scopes. Package at `internal/filelibrary/`. Hybrid vector + keyword search with citation formatting. SSE events (`file_search`, `file_search_results`, `rag_indexing`) stream status to the frontend. API routes under `/v1/file-library/`. Frontend panel at `frontend/src/components/FileLibraryPanel.tsx`.
 - **Plugins:** JSON-RPC subprocess model. Plugin directory: `~/.omnillm-studio/plugins/` (override with `OMNILLM_PLUGIN_DIR`).
 - **Encryption:** AES-256-GCM for API keys at rest (`internal/crypto/`). Derived from a machine-specific key.

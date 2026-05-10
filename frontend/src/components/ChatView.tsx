@@ -4,7 +4,7 @@ import {
   Send, Square, Bot, User, Copy, Check, Clock, Cpu, Globe,
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Pencil,
   Download, FileText, ArrowDown, Sparkles, Paperclip, X, Image,
-  GitBranch, Layout, Zap, Brain, Link as LinkIcon, Files,
+  GitBranch, Layout, Zap, Brain, Link as LinkIcon, Files, DollarSign,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -20,7 +20,7 @@ import { AttachmentPanel } from './AttachmentPanel';
 import { toast } from 'sonner';
 import { api, templateApi, branchApi, agentApi } from '../api';
 import { matchesShortcut } from '../shortcuts';
-import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, URLContextSourceRef, PromptTemplate, UsageSummary } from '../types';
+import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary } from '../types';
 import { AgentEventType } from '../types';
 import { getModelReasoningLevels, isFreeModel, type ReasoningEffortLevel } from '../models';
 
@@ -144,6 +144,22 @@ export function ChatView() {
 
     if (activeProvider) return isOllamaType(activeProvider);
     return false;
+  })();
+  const isOpenRouterProvider = activeProvider?.type?.toLowerCase() === 'openrouter';
+
+  const openRouterOptions = (() => {
+    if (!isOpenRouterProvider) return undefined;
+    try {
+      const meta = JSON.parse(activeProvider?.metadata_json || '{}') as OpenRouterMetadata;
+      return {
+        provider_prefs: meta.provider_prefs,
+        model_fallbacks: meta.model_fallbacks,
+        route: meta.route,
+        plugins: meta.plugins,
+      };
+    } catch {
+      return undefined;
+    }
   })();
 
   // Check if the active provider supports image generation (from backend capability field)
@@ -400,13 +416,22 @@ export function ChatView() {
 
     if (input.trim() || attachmentIds.length > 0) {
       const content = input.trim() || 'Please analyze the attached files.';
-      sendMessage(currentId!, content, undefined, attachmentIds.length > 0 ? attachmentIds : undefined, webSearchEnabled, isOllamaProvider && thinkEnabled ? true : undefined, reasoningLevels ? reasoningEffort : undefined);
+      sendMessage(
+        currentId!,
+        content,
+        undefined,
+        attachmentIds.length > 0 ? attachmentIds : undefined,
+        webSearchEnabled,
+        isOllamaProvider && thinkEnabled ? true : undefined,
+        reasoningLevels ? reasoningEffort : undefined,
+        openRouterOptions,
+      );
       setInput('');
       if (inputRef.current) {
         inputRef.current.style.height = 'auto';
       }
     }
-  }, [input, activeId, streaming, pendingFiles, imageMode, editPreviousImage, lastImageAttachmentId, agentMode, activeConvo, webSearchEnabled, thinkEnabled, isOllamaProvider, reasoningEffort, reasoningLevels, sendMessage, generateImage, createConversation, clearMessages, selectConversation]);
+  }, [input, activeId, streaming, pendingFiles, imageMode, editPreviousImage, lastImageAttachmentId, agentMode, activeConvo, webSearchEnabled, thinkEnabled, isOllamaProvider, openRouterOptions, reasoningEffort, reasoningLevels, sendMessage, generateImage, createConversation, clearMessages, selectConversation]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (matchesShortcut(e as unknown as KeyboardEvent, 'sendMessage')) {
@@ -1494,6 +1519,12 @@ function MessageBubble({
                 <span className="flex items-center gap-1 text-emerald-400">
                   <FileText size={10} />
                   Files
+                </span>
+              )}
+              {metadata?.cost !== undefined && metadata.cost > 0 && (
+                <span className="flex items-center gap-1 text-yellow-400">
+                  <DollarSign size={10} />
+                  {metadata.cost.toFixed(6)}
                 </span>
               )}
               {metadata?.thinking && (

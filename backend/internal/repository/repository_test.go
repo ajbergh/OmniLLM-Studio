@@ -228,6 +228,47 @@ func TestSettingsTyped(t *testing.T) {
 	}
 }
 
+func TestProviderMetadataUpdateRoundTrip(t *testing.T) {
+	database := newTestDB(t)
+	repo := repository.NewProviderRepo(database)
+
+	provider, err := repo.Create(repository.CreateProviderInput{
+		Name: "OpenRouter",
+		Type: "openrouter",
+	})
+	if err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+
+	metadata := `{"show_cost":true,"route":"fallback","provider_prefs":{"allow_fallbacks":false},"model_fallbacks":["openai/gpt-5.4-mini"],"plugins":[{"id":"response-healing","enabled":true}]}`
+	updated, err := repo.Update(provider.ID, repository.ProviderUpdate{MetadataJSON: &metadata})
+	if err != nil {
+		t.Fatalf("update provider metadata: %v", err)
+	}
+	if updated.MetadataJSON != metadata {
+		t.Fatalf("updated metadata: got %q, want %q", updated.MetadataJSON, metadata)
+	}
+
+	fetched, err := repo.GetByID(provider.ID)
+	if err != nil {
+		t.Fatalf("get provider: %v", err)
+	}
+	if fetched.MetadataJSON != metadata {
+		t.Fatalf("fetched metadata: got %q, want %q", fetched.MetadataJSON, metadata)
+	}
+
+	providers, err := repo.List()
+	if err != nil {
+		t.Fatalf("list providers: %v", err)
+	}
+	if len(providers) != 1 {
+		t.Fatalf("provider count: got %d, want 1", len(providers))
+	}
+	if providers[0].MetadataJSON != metadata {
+		t.Fatalf("listed metadata: got %q, want %q", providers[0].MetadataJSON, metadata)
+	}
+}
+
 // ---------- Message Repo ----------
 
 func TestMessageCRUD(t *testing.T) {
