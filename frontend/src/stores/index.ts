@@ -195,6 +195,17 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         onWebSearchResults: (data) => {
           set({ webSearchResults: data.results, webSearching: false, webSearchQuery: data.query || null });
         },
+        onFileSearch: (data) => {
+          if (data.status === 'searching') {
+            set({ webSearching: true, webSearchQuery: data.query || content });
+          }
+          if (data.status === 'complete' || data.status === 'no_results') {
+            set({ webSearching: false });
+          }
+        },
+        onFileSearchResults: () => {
+          set({ webSearching: false });
+        },
         onURLContext: (data) => {
           if (data.status === 'complete') {
             set({ urlContextStatus: null, urlContextKind: null });
@@ -213,6 +224,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             metadata.web_search = true;
             metadata.tool = 'web_search';
             metadata.sources = data.sources || get().webSearchResults;
+          }
+          if (data.file_search) {
+            metadata.file_search = true;
+            metadata.tool = 'file_search';
+            metadata.file_sources = data.file_sources || [];
           }
           if (data.thinking) {
             metadata.thinking = data.thinking;
@@ -433,7 +449,7 @@ const defaultSettings: import('../types').AppSettings = {
   jina_reader_enabled: true,
   jina_reader_max_len: 3000,
   rag_enabled: false,
-  rag_embedding_model: 'text-embedding-3-small',
+  rag_embedding_model: '',
   rag_chunk_size: 512,
   rag_chunk_overlap: 64,
   rag_top_k: 5,

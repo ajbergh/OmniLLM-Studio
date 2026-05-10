@@ -167,8 +167,10 @@ export interface URLContextSourceRef {
 
 export interface MessageMetadata {
   web_search?: boolean;
+  file_search?: boolean;
   tool?: string;
   sources?: WebSearchResult[];
+  file_sources?: FileSearchResult[];
   tool_call?: ToolCall;
   rag_sources?: RAGSourceRef[];
   thinking?: string;
@@ -251,6 +253,78 @@ export interface ReindexResponse {
 
 export interface IndexAttachmentResponse {
   attachment_id: string;
+  chunks_created: number;
+  embeddings_stored: number;
+}
+
+// ---- File Library Types ----
+
+export interface FileCitation {
+  label: string;
+  file_id: string;
+  chunk_id: string;
+  page_number?: number;
+  section_title?: string;
+}
+
+export interface FileSearchResult {
+  chunk_id: string;
+  library_file_id: string;
+  file_name: string;
+  display_name: string;
+  mime_type: string;
+  scope: string;
+  source_type: string;
+  source_url?: string;
+  page_number?: number;
+  section_title?: string;
+  snippet: string;
+  score: number;
+  citation: FileCitation;
+}
+
+export interface FileSearchResponse {
+  query: string;
+  scope: string;
+  results: FileSearchResult[];
+}
+
+export interface LibraryFile {
+  id: string;
+  owner_user_id?: string;
+  workspace_id?: string;
+  conversation_id?: string;
+  attachment_id?: string;
+  source_type: string;
+  scope: 'conversation' | 'workspace' | 'global';
+  display_name: string;
+  original_filename?: string;
+  mime_type?: string;
+  file_ext?: string;
+  storage_path?: string;
+  source_url?: string;
+  size_bytes: number;
+  checksum_sha256?: string;
+  status: string;
+  error_message?: string;
+  indexed_at?: string;
+  created_at: string;
+  updated_at: string;
+  metadata_json?: string;
+}
+
+export interface FileLibrarySummaryResponse {
+  summary: string;
+  sources?: FileCitation[];
+}
+
+export interface FileLibraryCompareResponse {
+  comparison: string;
+  sources?: FileCitation[];
+}
+
+export interface FileLibraryReindexResponse {
+  library_file_id: string;
   chunks_created: number;
   embeddings_stored: number;
 }

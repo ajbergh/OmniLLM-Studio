@@ -23,6 +23,12 @@ type VectorStore struct {
 	compress bool
 }
 
+// QueryResult is a normalized vector query hit from chromem.
+type QueryResult struct {
+	ID         string
+	Similarity float64
+}
+
 // NewVectorStore opens (or creates) a persistent chromem-go database at the
 // given directory.
 func NewVectorStore(dataDir string, compress bool) (*VectorStore, error) {
@@ -159,4 +165,46 @@ func (s *VectorStore) DeleteDocuments(ctx context.Context, conversationID string
 		return fmt.Errorf("delete documents from %s: %w", conversationID, err)
 	}
 	return nil
+}
+
+// QuerySimilar runs semantic search against a collection and returns chunk IDs
+// with similarity scores. Returns an empty slice when the collection is missing
+// or has no documents.
+func (s *VectorStore) QuerySimilar(
+	ctx context.Context,
+	collectionName string,
+	query string,
+	topK int,
+	embedFunc chromem.EmbeddingFunc,
+) ([]QueryResult, error) {
+	if strings.TrimSpace(collectionName) == "" {
+		return nil, fmt.Errorf("collection name is required")
+	}
+	if strings.TrimSpace(query) == "" {
+		return nil, nil
+	}
+	if topK <= 0 {
+		topK = 5
+	}
+
+	coll, err := s.Collection(ctx, collectionName, embedFunc)
+	if err != nil {
+		return nil, err
+	}
+	if coll.Count() == 0 {
+		return nil, nil
+	}
+	if topK > coll.Count() {
+		topK = coll.Count()
+	}
+
+	results, err := coll.Query(ctx, query, topK, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("query collection %s: %w", collectionName, err)
+	}
+	out := make([]QueryResult, 0, len(results))
+	for _, r := range results {
+		out = append(out, QueryResult{ID: r.ID, Similarity: float64(r.Similarity)})
+	}
+	return out, nil
 }

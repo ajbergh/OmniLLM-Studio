@@ -4,7 +4,7 @@ import {
   Send, Square, Bot, User, Copy, Check, Clock, Cpu, Globe,
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Pencil,
   Download, FileText, ArrowDown, Sparkles, Paperclip, X, Image,
-  GitBranch, Layout, Zap, Brain, Link as LinkIcon,
+  GitBranch, Layout, Zap, Brain, Link as LinkIcon, Files,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -20,7 +20,7 @@ import { AttachmentPanel } from './AttachmentPanel';
 import { toast } from 'sonner';
 import { api, templateApi, branchApi, agentApi } from '../api';
 import { matchesShortcut } from '../shortcuts';
-import type { Message, WebSearchResult, MessageMetadata, URLContextSourceRef, PromptTemplate, UsageSummary } from '../types';
+import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, URLContextSourceRef, PromptTemplate, UsageSummary } from '../types';
 import { AgentEventType } from '../types';
 import { getModelReasoningLevels, isFreeModel, type ReasoningEffortLevel } from '../models';
 
@@ -33,7 +33,7 @@ interface PendingUploadFile {
   error?: string;
 }
 
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
 // MIME types whose text content the backend can extract for LLM context / RAG.
 // Kept in sync with isTextMIME + canExtractAttachmentText in attachment_text.go.
@@ -467,6 +467,11 @@ export function ChatView() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const openProjectFiles = () => {
+    const preferredScope = activeConvo?.workspace_id ? 'workspace' : 'conversation';
+    window.dispatchEvent(new CustomEvent('omnillm:open-file-library', { detail: { preferredScope } }));
+  };
+
   if (!activeId) {
     return <WelcomeScreen onNewChat={handleNewChat} onOpenSettings={toggleSettings} />;
   }
@@ -583,6 +588,28 @@ export function ChatView() {
       {/* Messages */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto relative">
         <div className="max-w-3xl xl:max-w-4xl 2xl:max-w-5xl mx-auto px-4 py-6 space-y-6">
+          <div className="rounded-xl border border-border bg-surface-alt/60 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-text flex items-center gap-2">
+                  <Files size={13} className="text-primary" />
+                  {activeConvo?.workspace_id ? 'Project Files are enabled for this workspace' : 'Use File Library for this chat'}
+                </p>
+                <p className="mt-1 text-xs text-text-muted">
+                  {activeConvo?.workspace_id
+                    ? 'Upload docs once and all chats in this workspace can reference them automatically.'
+                    : 'Upload and index docs to ground answers with citations.'}
+                </p>
+              </div>
+              <button
+                onClick={openProjectFiles}
+                className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+              >
+                Open Project Files
+              </button>
+            </div>
+          </div>
+
           {messages.length === 0 && !streaming && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -1253,6 +1280,7 @@ function MessageBubble({
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [fileSourcesOpen, setFileSourcesOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -1267,6 +1295,7 @@ function MessageBubble({
     }
   }
   const sources: WebSearchResult[] = metadata?.sources ?? [];
+  const fileSources: FileSearchResult[] = metadata?.file_sources ?? [];
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -1435,6 +1464,12 @@ function MessageBubble({
                   Web
                 </span>
               )}
+              {metadata?.file_search && (
+                <span className="flex items-center gap-1 text-emerald-400">
+                  <FileText size={10} />
+                  Files
+                </span>
+              )}
               {metadata?.thinking && (
                 <span className="flex items-center gap-1 text-purple-400">
                   <Brain size={10} />
@@ -1546,6 +1581,50 @@ function MessageBubble({
                           )}
                         </div>
                       </a>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {!isUser && fileSources.length > 0 && (
+          <div className="mt-2">
+            <button
+              onClick={() => setFileSourcesOpen(!fileSourcesOpen)}
+              className="flex items-center gap-1.5 text-[11px] text-text-muted hover:text-text transition-colors"
+            >
+              <FileText size={10} className="text-emerald-400" />
+              <span>{fileSources.length} file source{fileSources.length !== 1 ? 's' : ''} cited</span>
+              {fileSourcesOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+            </button>
+
+            <AnimatePresence>
+              {fileSourcesOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-2 space-y-1.5">
+                    {fileSources.map((src, idx) => (
+                      <div
+                        key={`${src.chunk_id}-${idx}`}
+                        className="p-2.5 rounded-lg bg-surface-hover/50 border border-border/30"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-medium text-text truncate">
+                            {src.display_name || src.file_name}
+                          </span>
+                          <span className="text-[10px] text-emerald-400 shrink-0">{src.scope}</span>
+                        </div>
+                        <div className="text-[10px] text-text-muted mt-1 line-clamp-3 leading-relaxed">
+                          {src.snippet}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </motion.div>

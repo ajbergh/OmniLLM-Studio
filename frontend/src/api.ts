@@ -15,6 +15,12 @@ import type {
   WebSearchRequest,
   WebSearchResponse,
   WebSearchResult,
+  FileSearchResult,
+  FileSearchResponse,
+  LibraryFile,
+  FileLibrarySummaryResponse,
+  FileLibraryCompareResponse,
+  FileLibraryReindexResponse,
   ToolCall,
   AppSettings,
   ImageGenerateRequest,
@@ -236,10 +242,12 @@ export const api = {
       onToken: (content: string) => void;
       onThinking?: (content: string) => void;
       onStart?: (data: { message_id: string; user_message_id: string }) => void;
-      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; web_search?: boolean; sources?: WebSearchResult[]; thinking?: string }) => void;
+      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; thinking?: string }) => void;
       onError?: (error: string) => void;
       onWebSearch?: (data: { tool_call: ToolCall; status: string }) => void;
       onWebSearchResults?: (data: { query: string; results: WebSearchResult[] }) => void;
+      onFileSearch?: (data: { status: string; scope?: string; query?: string; count?: number }) => void;
+      onFileSearchResults?: (data: { results: FileSearchResult[] }) => void;
       onURLContext?: (data: { status: string; url?: string; kind?: string; url_count?: number; source_count?: number; used_rag?: boolean }) => void;
     }
   ) => {
@@ -305,6 +313,12 @@ export const api = {
                 break;
               case 'web_search_results':
                 callbacks.onWebSearchResults?.(payload);
+                break;
+              case 'file_search':
+                callbacks.onFileSearch?.(payload);
+                break;
+              case 'file_search_results':
+                callbacks.onFileSearchResults?.(payload);
                 break;
               case 'url_context':
                 callbacks.onURLContext?.(payload);
@@ -751,6 +765,88 @@ export const searchApi = {
 
   reindex: () =>
     apiFetch<{ status: import('./types').ReindexStatus; error?: string }>('/search/reindex', {
+      method: 'POST',
+    }),
+};
+
+// ── File Library ──────────────────────────────────────────────────────────
+
+export const fileLibraryApi = {
+  list: (scope: 'conversation' | 'workspace' | 'global' | 'all' = 'all', query?: string) => {
+    const params = new URLSearchParams();
+    params.set('scope', scope);
+    if (query && query.trim()) params.set('query', query.trim());
+    return apiFetch<LibraryFile[]>(`/file-library/files?${params.toString()}`);
+  },
+
+  fetch: (fileId: string, includeFullText = false) =>
+    apiFetch<{ file?: LibraryFile; full_text?: string }>(`/file-library/files/${fileId}?include_full_text=${includeFullText ? 'true' : 'false'}`),
+
+  ingest: (data: {
+    attachment_id: string;
+    display_name?: string;
+    scope?: 'conversation' | 'workspace' | 'global';
+    conversation_id?: string;
+    workspace_id?: string;
+    metadata?: Record<string, unknown>;
+  }) =>
+    apiFetch<LibraryFile>('/file-library/files/ingest', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  search: (data: {
+    query: string;
+    scope?: 'auto' | 'conversation' | 'workspace' | 'global' | 'all';
+    conversation_id?: string;
+    workspace_id?: string;
+    top_k?: number;
+    file_type_filter?: string[];
+    source_filter?: string[];
+    require_citations?: boolean;
+  }) =>
+    apiFetch<FileSearchResponse>('/file-library/search', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  summarize: (data: {
+    library_file_ids: string[];
+    query?: string;
+    summary_style?: 'brief' | 'detailed' | 'executive' | 'technical' | 'qa';
+    max_chars_per_file?: number;
+    conversation_id?: string;
+  }) =>
+    apiFetch<FileLibrarySummaryResponse>('/file-library/summarize', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  compare: (data: {
+    library_file_ids: string[];
+    comparison_goal?: string;
+    output_format?: 'markdown' | 'table' | 'executive_summary';
+    max_chars_per_file?: number;
+    conversation_id?: string;
+  }) =>
+    apiFetch<FileLibraryCompareResponse>('/file-library/compare', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (fileId: string, data: { display_name?: string; scope?: 'conversation' | 'workspace' | 'global'; metadata?: Record<string, unknown> }) =>
+    apiFetch<LibraryFile>(`/file-library/files/${fileId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (fileId: string, hard = false) =>
+    apiFetch<{ deleted: boolean; hard: boolean }>(`/file-library/files/${fileId}?hard=${hard ? 'true' : 'false'}`, {
+      method: 'DELETE',
+    }),
+
+  reindex: (fileId: string) =>
+    apiFetch<FileLibraryReindexResponse>(`/file-library/files/${fileId}/reindex`, {
       method: 'POST',
     }),
 };

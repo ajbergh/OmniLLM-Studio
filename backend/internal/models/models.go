@@ -63,6 +63,31 @@ type Attachment struct {
 	MetadataJSON   string    `json:"metadata_json,omitempty"`
 }
 
+// LibraryFile represents a durable file entry in the file library.
+type LibraryFile struct {
+	ID               string     `json:"id"`
+	OwnerUserID      *string    `json:"owner_user_id,omitempty"`
+	WorkspaceID      *string    `json:"workspace_id,omitempty"`
+	ConversationID   *string    `json:"conversation_id,omitempty"`
+	AttachmentID     *string    `json:"attachment_id,omitempty"`
+	SourceType       string     `json:"source_type"`
+	Scope            string     `json:"scope"`
+	DisplayName      string     `json:"display_name"`
+	OriginalFilename *string    `json:"original_filename,omitempty"`
+	MimeType         *string    `json:"mime_type,omitempty"`
+	FileExt          *string    `json:"file_ext,omitempty"`
+	StoragePath      *string    `json:"storage_path,omitempty"`
+	SourceURL        *string    `json:"source_url,omitempty"`
+	SizeBytes        int64      `json:"size_bytes"`
+	ChecksumSHA256   *string    `json:"checksum_sha256,omitempty"`
+	Status           string     `json:"status"`
+	ErrorMessage     *string    `json:"error_message,omitempty"`
+	IndexedAt        *time.Time `json:"indexed_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	MetadataJSON     string     `json:"metadata_json,omitempty"`
+}
+
 // ProviderProfile represents a configured LLM provider.
 type ProviderProfile struct {
 	ID                string    `json:"id"`
@@ -218,11 +243,18 @@ type DocumentChunk struct {
 	ID             string    `json:"id"`
 	AttachmentID   string    `json:"attachment_id"`
 	ConversationID string    `json:"conversation_id"`
+	LibraryFileID  *string   `json:"library_file_id,omitempty"`
+	Scope          *string   `json:"scope,omitempty"`
+	WorkspaceID    *string   `json:"workspace_id,omitempty"`
+	SourceType     *string   `json:"source_type,omitempty"`
 	ChunkIndex     int       `json:"chunk_index"`
 	Content        string    `json:"content"`
 	CharOffset     int       `json:"char_offset"`
 	CharLength     int       `json:"char_length"`
 	TokenCount     *int      `json:"token_count,omitempty"`
+	PageNumber     *int      `json:"page_number,omitempty"`
+	SectionTitle   *string   `json:"section_title,omitempty"`
+	ChunkMetaJSON  string    `json:"chunk_metadata_json,omitempty"`
 	MetadataJSON   string    `json:"metadata_json,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 }

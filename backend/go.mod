@@ -3,6 +3,7 @@ module github.com/ajbergh/omnillm-studio
 go 1.24.1
 
 require (
+	codeberg.org/readeck/go-readability/v2 v2.1.1
 	github.com/chinmaykhachane/espn-go v0.1.1
 	github.com/drumkitai/go-word v1.0.1
 	github.com/go-chi/chi/v5 v5.2.1
@@ -20,7 +21,6 @@ require (
 )
 
 require (
-	codeberg.org/readeck/go-readability/v2 v2.1.1 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de // indirect
 	github.com/bep/debounce v1.2.1 // indirect

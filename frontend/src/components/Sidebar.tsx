@@ -17,6 +17,7 @@ import {
   LogOut,
   User,
   ImageIcon,
+  Files,
 } from 'lucide-react';
 import { AppIcon } from './AppIcon';
 import { clsx } from 'clsx';
@@ -243,6 +244,11 @@ export function Sidebar() {
     searchConversations(q);
   };
 
+  const openProjectFiles = () => {
+    const preferredScope = activeWorkspaceId ? 'workspace' : 'conversation';
+    window.dispatchEvent(new CustomEvent('omnillm:open-file-library', { detail: { preferredScope } }));
+  };
+
   const groups = useMemo(() => groupConversationsByDate(conversations), [conversations]);
   const sessionGroups = useMemo(() => groupSessionsByDate(imageSessions), [imageSessions]);
 
@@ -395,6 +401,23 @@ export function Sidebar() {
               fetchConversations(undefined, id);
             }}
           />
+        </div>
+      )}
+
+      {appMode === 'chat' && (
+        <div className="px-3 pb-2">
+          <button
+            onClick={openProjectFiles}
+            className="w-full rounded-xl border border-border bg-surface-alt px-3 py-2 text-left hover:bg-surface-hover transition-colors"
+          >
+            <div className="flex items-center gap-2 text-sm text-text">
+              <Files size={14} className="text-primary" />
+              <span>Project Files</span>
+            </div>
+            <p className="mt-1 text-[11px] text-text-muted">
+              Upload docs once and reuse across chats in this workspace.
+            </p>
+          </button>
         </div>
       )}
 

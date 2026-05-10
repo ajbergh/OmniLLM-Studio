@@ -125,6 +125,7 @@ func versionedMigrations() []Migration {
 		{Version: 30, Name: "mcp_servers", SQL: migrationMCPServers},
 		{Version: 31, Name: "mcp_audit_log", SQL: migrationMCPAuditLog},
 		{Version: 32, Name: "mcp_servers_headers", SQL: migrationMCPServersHeaders},
+		{Version: 33, Name: "file_library_foundation", SQL: migrationFileLibraryFoundation},
 	}
 }
 
@@ -797,6 +798,57 @@ CREATE INDEX IF NOT EXISTS idx_mcp_audit_tool ON mcp_audit_log(tool_name);
 // V32: Add encrypted HTTP request headers to MCP server config.
 const migrationMCPServersHeaders = `
 ALTER TABLE mcp_servers ADD COLUMN headers_json TEXT NOT NULL DEFAULT '{}';
+`
+
+// V33: Initial file-library schema and chunk metadata extensions.
+const migrationFileLibraryFoundation = `
+CREATE TABLE IF NOT EXISTS library_files (
+	id TEXT PRIMARY KEY,
+	owner_user_id TEXT,
+	workspace_id TEXT,
+	conversation_id TEXT,
+	attachment_id TEXT,
+	source_type TEXT NOT NULL,
+	scope TEXT NOT NULL CHECK(scope IN ('conversation','workspace','global')),
+	display_name TEXT NOT NULL,
+	original_filename TEXT,
+	mime_type TEXT,
+	file_ext TEXT,
+	storage_path TEXT,
+	source_url TEXT,
+	size_bytes INTEGER NOT NULL DEFAULT 0,
+	checksum_sha256 TEXT,
+	status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','extracting','chunking','embedding','indexed','failed','deleted')),
+	error_message TEXT,
+	indexed_at DATETIME,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL,
+	FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL,
+	FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL,
+	FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_library_files_owner ON library_files(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_library_files_workspace ON library_files(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_library_files_conversation ON library_files(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_library_files_scope ON library_files(scope);
+CREATE INDEX IF NOT EXISTS idx_library_files_status ON library_files(status);
+CREATE INDEX IF NOT EXISTS idx_library_files_checksum ON library_files(checksum_sha256);
+CREATE INDEX IF NOT EXISTS idx_library_files_created_at ON library_files(created_at);
+CREATE INDEX IF NOT EXISTS idx_library_files_updated_at ON library_files(updated_at);
+
+ALTER TABLE document_chunks ADD COLUMN library_file_id TEXT;
+ALTER TABLE document_chunks ADD COLUMN scope TEXT NOT NULL DEFAULT 'conversation';
+ALTER TABLE document_chunks ADD COLUMN workspace_id TEXT;
+ALTER TABLE document_chunks ADD COLUMN source_type TEXT;
+ALTER TABLE document_chunks ADD COLUMN page_number INTEGER;
+ALTER TABLE document_chunks ADD COLUMN section_title TEXT;
+ALTER TABLE document_chunks ADD COLUMN chunk_metadata_json TEXT NOT NULL DEFAULT '{}';
+
+CREATE INDEX IF NOT EXISTS idx_document_chunks_library_file ON document_chunks(library_file_id);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_workspace_scope ON document_chunks(workspace_id, scope);
 `
 
 // V26: Distinguish chat conversations from image-studio backing conversations.

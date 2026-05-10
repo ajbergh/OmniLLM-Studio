@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	maxUploadSize = 10 << 20 // 10 MB
+	maxUploadSize = 50 << 20 // 50 MB
 )
 
 // allowedMIMEPrefixes defines MIME types accepted for upload.
