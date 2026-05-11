@@ -69,6 +69,7 @@ export interface CreateConversationRequest {
   default_model?: string;
   system_prompt?: string;
   kind?: ConversationKind;
+  workspace_id?: string;
 }
 
 export interface UpdateConversationRequest {
@@ -91,6 +92,20 @@ export interface SendMessageRequest {
     model?: string;
     system_prompt?: string;
   };
+
+  // OpenRouter-specific options (optional)
+  provider_prefs?: {
+    order?: string[];          // Preferred provider order
+    only?: string[];            // Restrict to these providers
+    ignore?: string[];          // Exclude these providers
+    allow_fallbacks?: boolean;  // Enable/disable fallbacks
+  };
+  model_fallbacks?: string[];  // Fallback models for OpenRouter
+  route?: string;              // Routing strategy (e.g., "fallback")
+  plugins?: Array<{
+    id: string;              // "web", "file-parser", "response-healing", "context-compression"
+    enabled?: boolean;         // nil = use default
+  }>;
 }
 
 export interface CreateProviderRequest {
@@ -100,6 +115,7 @@ export interface CreateProviderRequest {
   default_model?: string;
   default_image_model?: string;
   api_key?: string;
+  metadata_json?: string; // JSON string for provider-specific settings (e.g., OpenRouter)
 }
 
 export interface UpdateProviderRequest {
@@ -110,6 +126,24 @@ export interface UpdateProviderRequest {
   default_image_model?: string;
   enabled?: boolean;
   api_key?: string;
+  metadata_json?: string; // JSON string for provider-specific settings (e.g., OpenRouter)
+}
+
+// OpenRouter-specific metadata
+export interface OpenRouterMetadata {
+  provider_prefs?: {
+    order?: string[];
+    only?: string[];
+    ignore?: string[];
+    allow_fallbacks?: boolean;
+  };
+  model_fallbacks?: string[];
+  route?: string;
+  show_cost?: boolean;
+  plugins?: Array<{
+    id: string;
+    enabled?: boolean;
+  }>;
 }
 
 export interface SSEEvent {
@@ -167,8 +201,10 @@ export interface URLContextSourceRef {
 
 export interface MessageMetadata {
   web_search?: boolean;
+  file_search?: boolean;
   tool?: string;
   sources?: WebSearchResult[];
+  file_sources?: FileSearchResult[];
   tool_call?: ToolCall;
   rag_sources?: RAGSourceRef[];
   thinking?: string;
@@ -176,6 +212,7 @@ export interface MessageMetadata {
   url_context_sources?: URLContextSourceRef[];
   url_context_used_rag?: boolean;
   url_context_warnings?: string[];
+  cost?: number; // OpenRouter credit cost
 }
 
 // Typed application settings (mirrors backend AppSettings).
@@ -251,6 +288,78 @@ export interface ReindexResponse {
 
 export interface IndexAttachmentResponse {
   attachment_id: string;
+  chunks_created: number;
+  embeddings_stored: number;
+}
+
+// ---- File Library Types ----
+
+export interface FileCitation {
+  label: string;
+  file_id: string;
+  chunk_id: string;
+  page_number?: number;
+  section_title?: string;
+}
+
+export interface FileSearchResult {
+  chunk_id: string;
+  library_file_id: string;
+  file_name: string;
+  display_name: string;
+  mime_type: string;
+  scope: string;
+  source_type: string;
+  source_url?: string;
+  page_number?: number;
+  section_title?: string;
+  snippet: string;
+  score: number;
+  citation: FileCitation;
+}
+
+export interface FileSearchResponse {
+  query: string;
+  scope: string;
+  results: FileSearchResult[];
+}
+
+export interface LibraryFile {
+  id: string;
+  owner_user_id?: string;
+  workspace_id?: string;
+  conversation_id?: string;
+  attachment_id?: string;
+  source_type: string;
+  scope: 'conversation' | 'workspace' | 'global';
+  display_name: string;
+  original_filename?: string;
+  mime_type?: string;
+  file_ext?: string;
+  storage_path?: string;
+  source_url?: string;
+  size_bytes: number;
+  checksum_sha256?: string;
+  status: string;
+  error_message?: string;
+  indexed_at?: string;
+  created_at: string;
+  updated_at: string;
+  metadata_json?: string;
+}
+
+export interface FileLibrarySummaryResponse {
+  summary: string;
+  sources?: FileCitation[];
+}
+
+export interface FileLibraryCompareResponse {
+  comparison: string;
+  sources?: FileCitation[];
+}
+
+export interface FileLibraryReindexResponse {
+  library_file_id: string;
   chunks_created: number;
   embeddings_stored: number;
 }
@@ -610,6 +719,8 @@ export interface Workspace {
   description: string;
   color: string;
   icon: string;
+  project_instructions: string;
+  memory_mode: 'default' | 'project_only';
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -620,6 +731,8 @@ export interface CreateWorkspaceRequest {
   description?: string;
   color?: string;
   icon?: string;
+  project_instructions?: string;
+  memory_mode?: 'default' | 'project_only';
 }
 
 export interface UpdateWorkspaceRequest {
@@ -627,6 +740,8 @@ export interface UpdateWorkspaceRequest {
   description?: string;
   color?: string;
   icon?: string;
+  project_instructions?: string;
+  memory_mode?: 'default' | 'project_only';
   sort_order?: number;
 }
 

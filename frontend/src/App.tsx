@@ -15,6 +15,7 @@ import { PluginManager } from './components/PluginManager';
 import { EvalDashboard } from './components/EvalDashboard';
 import { SearchPanel } from './components/SearchPanel';
 import { ImportExportPanel } from './components/ImportExportPanel';
+import { FileLibraryPanel } from './components/FileLibraryPanel';
 import { DialogShell } from './components/DialogShell';
 import { useSettingsStore, useConversationStore, useMessageStore, useProviderStore } from './stores';
 import { useImageEditorStore } from './stores/imageEditor';
@@ -22,7 +23,7 @@ import { authApi } from './api';
 import { matchesShortcut } from './shortcuts';
 import {
   Settings, Keyboard, BarChart3, Layout, Puzzle, FlaskConical,
-  Search, FileArchive, SlidersHorizontal,
+  Search, FileArchive, SlidersHorizontal, Files,
   type LucideIcon,
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
@@ -42,7 +43,7 @@ function useIsMobile(breakpoint = 768) {
   return isMobile;
 }
 
-type OverlayPanel = 'shortcuts' | 'usage' | 'templates' | 'plugins' | 'eval' | 'search' | 'importExport' | 'tools';
+type OverlayPanel = 'shortcuts' | 'usage' | 'templates' | 'plugins' | 'eval' | 'search' | 'importExport' | 'fileLibrary' | 'tools';
 type ToolPanel = Exclude<OverlayPanel, 'tools'>;
 
 const GLOBAL_TOOL_ACTIONS: Array<{
@@ -56,6 +57,7 @@ const GLOBAL_TOOL_ACTIONS: Array<{
   { panel: 'templates', label: 'Templates', ariaLabel: 'Prompt Templates', Icon: Layout },
   { panel: 'plugins', label: 'Plugins', ariaLabel: 'Plugins', Icon: Puzzle },
   { panel: 'eval', label: 'Eval', ariaLabel: 'Evaluation Harness', Icon: FlaskConical },
+  { panel: 'fileLibrary', label: 'File Library', ariaLabel: 'File Library', Icon: Files },
   { panel: 'importExport', label: 'Import/Export', ariaLabel: 'Import and export data', Icon: FileArchive },
   { panel: 'shortcuts', label: 'Shortcuts', ariaLabel: 'Keyboard shortcuts', Icon: Keyboard },
 ];
@@ -75,6 +77,8 @@ function App() {
   const providers = useProviderStore((s) => s.providers);
   const { createSession: createImageSession, loadAllSessions, loadSession: loadImageSession } = useImageEditorStore();
   const [activePanel, setActivePanel] = useState<OverlayPanel | null>(null);
+  const [fileLibraryPreferredScope, setFileLibraryPreferredScope] = useState<'workspace' | 'conversation' | 'global' | 'all'>('all');
+  const [fileLibraryPreferredWorkspaceId, setFileLibraryPreferredWorkspaceId] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(true); // Default true (solo mode)
   const [authChecked, setAuthChecked] = useState(false);
   const isMobile = useIsMobile();
@@ -85,11 +89,28 @@ function App() {
   const pluginsOpen = activePanel === 'plugins';
   const evalOpen = activePanel === 'eval';
   const searchOpen = activePanel === 'search';
+  const fileLibraryOpen = activePanel === 'fileLibrary';
   const importExportOpen = activePanel === 'importExport';
   const toolsOpen = activePanel === 'tools';
 
   const openPanel = useCallback((panel: OverlayPanel) => {
     setActivePanel(panel);
+  }, []);
+
+  useEffect(() => {
+    const handler = (evt: Event) => {
+      const customEvt = evt as CustomEvent<{
+        preferredScope?: 'workspace' | 'conversation' | 'global' | 'all';
+        preferredWorkspaceId?: string | null;
+      }>;
+      if (customEvt.detail?.preferredScope) {
+        setFileLibraryPreferredScope(customEvt.detail.preferredScope);
+      }
+      setFileLibraryPreferredWorkspaceId(customEvt.detail?.preferredWorkspaceId || null);
+      setActivePanel('fileLibrary');
+    };
+    window.addEventListener('omnillm:open-file-library', handler as EventListener);
+    return () => window.removeEventListener('omnillm:open-file-library', handler as EventListener);
   }, []);
 
   const togglePanel = useCallback((panel: OverlayPanel) => {
@@ -422,6 +443,12 @@ function App() {
             selectConversation(conversationId);
             fetchMessages(conversationId);
           }}
+        />
+        <FileLibraryPanel
+          open={fileLibraryOpen}
+          onClose={closePanels}
+          preferredScope={fileLibraryPreferredScope}
+          preferredWorkspaceId={fileLibraryPreferredWorkspaceId}
         />
         <ImportExportPanel open={importExportOpen} onClose={closePanels} />
       </div>

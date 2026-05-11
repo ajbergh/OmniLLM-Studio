@@ -4,7 +4,7 @@ import {
   Send, Square, Bot, User, Copy, Check, Clock, Cpu, Globe,
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Pencil,
   Download, FileText, ArrowDown, Sparkles, Paperclip, X, Image,
-  GitBranch, Layout, Zap, Brain, Link as LinkIcon,
+  GitBranch, Layout, Zap, Brain, Link as LinkIcon, Files, DollarSign,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,9 +18,9 @@ import { ToolCallCard } from './ToolCallCard';
 import { AgentRunView } from './AgentRunView';
 import { AttachmentPanel } from './AttachmentPanel';
 import { toast } from 'sonner';
-import { api, templateApi, branchApi, agentApi } from '../api';
+import { api, templateApi, branchApi, agentApi, workspaceApi } from '../api';
 import { matchesShortcut } from '../shortcuts';
-import type { Message, WebSearchResult, MessageMetadata, URLContextSourceRef, PromptTemplate, UsageSummary } from '../types';
+import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary } from '../types';
 import { AgentEventType } from '../types';
 import { getModelReasoningLevels, isFreeModel, type ReasoningEffortLevel } from '../models';
 
@@ -33,7 +33,7 @@ interface PendingUploadFile {
   error?: string;
 }
 
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
 // MIME types whose text content the backend can extract for LLM context / RAG.
 // Kept in sync with isTextMIME + canExtractAttachmentText in attachment_text.go.
@@ -99,6 +99,7 @@ export function ChatView() {
     messages, streaming, streamingContent, streamingThinking, error,
     sendMessage, clearMessages, stopStreaming,
     webSearching, webSearchQuery, urlContextStatus, urlContextKind,
+    ragIndexingStatus, ragIndexingDetail,
     regenerateLastMessage, editAndResend, generateImage,
   } = useMessageStore();
   const [input, setInput] = useState('');
@@ -124,6 +125,7 @@ export function ChatView() {
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [thinkEnabled, setThinkEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortLevel | undefined>(undefined);
+  const [activeWorkspaceName, setActiveWorkspaceName] = useState<string | null>(null);
 
   // Detect if the active conversation is using an Ollama provider
   const activeConvo = conversations.find((c) => c.id === activeId);
@@ -143,6 +145,22 @@ export function ChatView() {
 
     if (activeProvider) return isOllamaType(activeProvider);
     return false;
+  })();
+  const isOpenRouterProvider = activeProvider?.type?.toLowerCase() === 'openrouter';
+
+  const openRouterOptions = (() => {
+    if (!isOpenRouterProvider) return undefined;
+    try {
+      const meta = JSON.parse(activeProvider?.metadata_json || '{}') as OpenRouterMetadata;
+      return {
+        provider_prefs: meta.provider_prefs,
+        model_fallbacks: meta.model_fallbacks,
+        route: meta.route,
+        plugins: meta.plugins,
+      };
+    } catch {
+      return undefined;
+    }
   })();
 
   // Check if the active provider supports image generation (from backend capability field)
@@ -173,6 +191,16 @@ export function ChatView() {
     setAgentMode(mode === 'agent');
     if (mode !== 'image') setEditPreviousImage(false);
   };
+
+  // Fetch workspace name for the active conversation's project badge
+  useEffect(() => {
+    const wsId = activeConvo?.workspace_id;
+    if (!wsId) { setActiveWorkspaceName(null); return; }
+    workspaceApi.list().then((list) => {
+      const ws = list?.find((w) => w.id === wsId);
+      setActiveWorkspaceName(ws?.name || null);
+    }).catch(() => setActiveWorkspaceName(null));
+  }, [activeConvo?.workspace_id]);
 
   // Ctrl+E export shortcut
   useEffect(() => {
@@ -399,13 +427,22 @@ export function ChatView() {
 
     if (input.trim() || attachmentIds.length > 0) {
       const content = input.trim() || 'Please analyze the attached files.';
-      sendMessage(currentId!, content, undefined, attachmentIds.length > 0 ? attachmentIds : undefined, webSearchEnabled, isOllamaProvider && thinkEnabled ? true : undefined, reasoningLevels ? reasoningEffort : undefined);
+      sendMessage(
+        currentId!,
+        content,
+        undefined,
+        attachmentIds.length > 0 ? attachmentIds : undefined,
+        webSearchEnabled,
+        isOllamaProvider && thinkEnabled ? true : undefined,
+        reasoningLevels ? reasoningEffort : undefined,
+        openRouterOptions,
+      );
       setInput('');
       if (inputRef.current) {
         inputRef.current.style.height = 'auto';
       }
     }
-  }, [input, activeId, streaming, pendingFiles, imageMode, editPreviousImage, lastImageAttachmentId, agentMode, activeConvo, webSearchEnabled, thinkEnabled, isOllamaProvider, reasoningEffort, reasoningLevels, sendMessage, generateImage, createConversation, clearMessages, selectConversation]);
+  }, [input, activeId, streaming, pendingFiles, imageMode, editPreviousImage, lastImageAttachmentId, agentMode, activeConvo, webSearchEnabled, thinkEnabled, isOllamaProvider, openRouterOptions, reasoningEffort, reasoningLevels, sendMessage, generateImage, createConversation, clearMessages, selectConversation]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (matchesShortcut(e as unknown as KeyboardEvent, 'sendMessage')) {
@@ -467,6 +504,16 @@ export function ChatView() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const openProjectFiles = () => {
+    const preferredScope = activeConvo?.workspace_id ? 'workspace' : 'conversation';
+    window.dispatchEvent(new CustomEvent('omnillm:open-file-library', {
+      detail: {
+        preferredScope,
+        preferredWorkspaceId: activeConvo?.workspace_id || null,
+      },
+    }));
+  };
+
   if (!activeId) {
     return <WelcomeScreen onNewChat={handleNewChat} onOpenSettings={toggleSettings} />;
   }
@@ -491,6 +538,11 @@ export function ChatView() {
             <h2 className="text-sm font-medium text-text leading-tight truncate">
               {activeConvo?.title || 'Chat'}
             </h2>
+            {activeWorkspaceName && (
+              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary font-medium mr-1">
+                <Files size={9} /> {activeWorkspaceName}
+              </span>
+            )}
             <p className="text-[11px] text-text-muted truncate">
               {messageCount} message{messageCount !== 1 ? 's' : ''} · {wordCount.toLocaleString()} words
               {conversationUsage && conversationUsage.estimated_cost > 0 && (
@@ -583,6 +635,28 @@ export function ChatView() {
       {/* Messages */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto relative">
         <div className="max-w-3xl xl:max-w-4xl 2xl:max-w-5xl mx-auto px-4 py-6 space-y-6">
+          <div className="rounded-xl border border-border bg-surface-alt/60 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-text flex items-center gap-2">
+                  <Files size={13} className="text-primary" />
+                  {activeConvo?.workspace_id ? 'Project Files are enabled for this workspace' : 'Use File Library for this chat'}
+                </p>
+                <p className="mt-1 text-xs text-text-muted">
+                  {activeConvo?.workspace_id
+                    ? 'Upload docs once and all chats in this workspace can reference them automatically.'
+                    : 'Upload and index docs to ground answers with citations.'}
+                </p>
+              </div>
+              <button
+                onClick={openProjectFiles}
+                className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+              >
+                Open Project Files
+              </button>
+            </div>
+          </div>
+
           {messages.length === 0 && !streaming && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -652,6 +726,31 @@ export function ChatView() {
                      urlContextStatus === 'fetching' ? 'Reading linked source…' :
                      urlContextStatus === 'indexed' ? 'Indexing source context…' :
                      'Reading linked source…'}
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* RAG indexing indicator */}
+          {streaming && ragIndexingStatus && ragIndexingStatus !== 'complete' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-start gap-3 max-w-3xl xl:max-w-4xl 2xl:max-w-5xl min-w-0"
+            >
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                <FileText size={15} className="text-emerald-400 animate-pulse" />
+              </div>
+              <div className="flex min-w-0 flex-col gap-1 px-4 py-3 rounded-2xl bg-surface-alt border border-emerald-500/20 rounded-bl-md">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                  </div>
+                  <span className="text-xs text-emerald-400">
+                    {ragIndexingDetail || 'Reading and understanding the document…'}
                   </span>
                 </div>
               </div>
@@ -1253,6 +1352,7 @@ function MessageBubble({
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [fileSourcesOpen, setFileSourcesOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -1267,6 +1367,7 @@ function MessageBubble({
     }
   }
   const sources: WebSearchResult[] = metadata?.sources ?? [];
+  const fileSources: FileSearchResult[] = metadata?.file_sources ?? [];
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -1435,6 +1536,18 @@ function MessageBubble({
                   Web
                 </span>
               )}
+              {metadata?.file_search && (
+                <span className="flex items-center gap-1 text-emerald-400">
+                  <FileText size={10} />
+                  Files
+                </span>
+              )}
+              {metadata?.cost !== undefined && metadata.cost > 0 && (
+                <span className="flex items-center gap-1 text-yellow-400">
+                  <DollarSign size={10} />
+                  {metadata.cost.toFixed(6)}
+                </span>
+              )}
               {metadata?.thinking && (
                 <span className="flex items-center gap-1 text-purple-400">
                   <Brain size={10} />
@@ -1546,6 +1659,50 @@ function MessageBubble({
                           )}
                         </div>
                       </a>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {!isUser && fileSources.length > 0 && (
+          <div className="mt-2">
+            <button
+              onClick={() => setFileSourcesOpen(!fileSourcesOpen)}
+              className="flex items-center gap-1.5 text-[11px] text-text-muted hover:text-text transition-colors"
+            >
+              <FileText size={10} className="text-emerald-400" />
+              <span>{fileSources.length} file source{fileSources.length !== 1 ? 's' : ''} cited</span>
+              {fileSourcesOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+            </button>
+
+            <AnimatePresence>
+              {fileSourcesOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-2 space-y-1.5">
+                    {fileSources.map((src, idx) => (
+                      <div
+                        key={`${src.chunk_id}-${idx}`}
+                        className="p-2.5 rounded-lg bg-surface-hover/50 border border-border/30"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-medium text-text truncate">
+                            {src.display_name || src.file_name}
+                          </span>
+                          <span className="text-[10px] text-emerald-400 shrink-0">{src.scope}</span>
+                        </div>
+                        <div className="text-[10px] text-text-muted mt-1 line-clamp-3 leading-relaxed">
+                          {src.snippet}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </motion.div>

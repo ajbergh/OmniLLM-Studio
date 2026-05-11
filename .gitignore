@@ -48,3 +48,4 @@ playright.config.ts
 output/*
 *.exe
 build/*
+backend/chromem/*

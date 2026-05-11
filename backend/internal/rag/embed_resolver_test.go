@@ -69,6 +69,37 @@ func TestResolveEmbeddingProvider_DisabledActiveFallsBack(t *testing.T) {
 	}
 }
 
+func TestResolveEmbeddingProvider_IncompatiblePinnedUsesActiveCanonical(t *testing.T) {
+	repo := &fakeProviderRepo{providers: []models.ProviderProfile{
+		{Name: "Gemini", Type: "gemini", Enabled: true},
+	}}
+	settings := models.AppSettings{RAGEmbeddingModel: "text-embedding-3-small"}
+
+	p, m, err := ResolveEmbeddingProvider("Gemini", settings, repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p != "Gemini" || m != "gemini-embedding-001" {
+		t.Fatalf("expected gemini canonical fallback, got %s/%s", p, m)
+	}
+}
+
+func TestResolveEmbeddingProvider_PinnedModelFindsCompatibleProvider(t *testing.T) {
+	repo := &fakeProviderRepo{providers: []models.ProviderProfile{
+		{Name: "Claude", Type: "anthropic", Enabled: true},
+		{Name: "OpenAI", Type: "openai", Enabled: true},
+	}}
+	settings := models.AppSettings{RAGEmbeddingModel: "text-embedding-3-small"}
+
+	p, m, err := ResolveEmbeddingProvider("Claude", settings, repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p != "OpenAI" || m != "text-embedding-3-small" {
+		t.Fatalf("expected OpenAI pinned model routing, got %s/%s", p, m)
+	}
+}
+
 func TestProviderHasEmbeddings(t *testing.T) {
 	cases := map[string]bool{
 		"openai":     true,

@@ -26,10 +26,11 @@ import (
 
 // ToolCall represents a tool call made by the LLM.
 type ToolCall struct {
-	Index    int    `json:"index,omitempty"`
-	ID       string `json:"id"`
-	Type     string `json:"type"` // "function"
-	Function struct {
+	Index            int    `json:"index,omitempty"`
+	ID               string `json:"id"`
+	Type             string `json:"type"`                        // "function"
+	ThoughtSignature string `json:"thought_signature,omitempty"` // Gemini 3.1+ requires this
+	Function         struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
@@ -114,6 +115,28 @@ type ChatRequest struct {
 	Think           *bool         `json:"think,omitempty"`            // Ollama-only: enable/disable thinking
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high"
 	Tools           []Tool        `json:"tools,omitempty"`
+
+	// OpenRouter-specific fields (ignored by other providers)
+	ProviderPrefs  *ProviderPreferences `json:"provider,omitempty"` // Provider routing preferences
+	ModelFallbacks []string             `json:"models,omitempty"`   // Fallback models for OpenRouter
+	Route          string               `json:"route,omitempty"`    // "fallback" for automatic fallbacks
+	Plugins        []Plugin             `json:"plugins,omitempty"`  // OpenRouter plugins (web, file-parser, etc.)
+}
+
+// Plugin represents an OpenRouter plugin configuration.
+// See: https://openrouter.ai/docs/guides/features/plugins
+type Plugin struct {
+	ID      string `json:"id"`                // "web", "file-parser", "response-healing", "context-compression"
+	Enabled *bool  `json:"enabled,omitempty"` // nil = use default
+}
+
+// ProviderPreferences represents OpenRouter's provider routing preferences.
+// See: https://openrouter.ai/docs/guides/routing/provider-selection
+type ProviderPreferences struct {
+	Order          []string `json:"order,omitempty"`           // Preferred provider order
+	Only           []string `json:"only,omitempty"`            // Restrict to these providers
+	Ignore         []string `json:"ignore,omitempty"`          // Exclude these providers
+	AllowFallbacks *bool    `json:"allow_fallbacks,omitempty"` // Enable/disable fallbacks
 }
 
 // ChatResponse holds the result of a non-streaming chat completion.
@@ -125,6 +148,10 @@ type ChatResponse struct {
 	Model       string     `json:"model"`
 	TokenInput  *int       `json:"token_input,omitempty"`
 	TokenOutput *int       `json:"token_output,omitempty"`
+
+	// OpenRouter-specific response fields
+	Cost               *float64 `json:"cost,omitempty"`                 // Credit cost of the request
+	NativeFinishReason string   `json:"native_finish_reason,omitempty"` // Raw finish_reason from provider
 }
 
 // StreamChunk represents a single token/chunk from a streaming response.
@@ -136,6 +163,10 @@ type StreamChunk struct {
 	Model       string     `json:"model"`
 	TokenInput  int        `json:"token_input,omitempty"`  // populated in the final usage chunk
 	TokenOutput int        `json:"token_output,omitempty"` // populated in the final usage chunk
+
+	// OpenRouter-specific response fields
+	Cost               *float64 `json:"cost,omitempty"`                 // Credit cost of the request
+	NativeFinishReason string   `json:"native_finish_reason,omitempty"` // Raw finish_reason from provider
 }
 
 // Service orchestrates LLM calls using configured provider profiles.
@@ -306,6 +337,11 @@ func getDefaultEmbeddingModel(providerType string) string {
 	switch strings.ToLower(providerType) {
 	case "ollama":
 		return "nomic-embed-text"
+	case "gemini":
+		return "gemini-embedding-001"
+	case "openrouter":
+		// OpenRouter uses provider-prefixed model IDs for embeddings
+		return "openai/text-embedding-3-small"
 	default:
 		return "text-embedding-3-small"
 	}
@@ -331,12 +367,19 @@ func normalizeEmbeddingModel(providerType, requestedModel string) string {
 		return getDefaultEmbeddingModel(providerType)
 	}
 
-	if strings.ToLower(providerType) == "ollama" {
+	pt := strings.ToLower(providerType)
+	if pt == "ollama" {
 		switch strings.ToLower(model) {
 		case "text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002":
 			// OpenAI embedding names are a common default, but Ollama requires local models.
 			return "nomic-embed-text"
 		}
+	}
+
+	if pt == "gemini" {
+		// Gemini uses its own model names for embeddings.
+		// Strip any "models/" prefix the user may have included.
+		model = strings.TrimPrefix(model, "models/")
 	}
 
 	return model
@@ -527,6 +570,23 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 		body["tools"] = req.Tools
 	}
 
+	// OpenRouter-specific: provider routing preferences
+	if req.ProviderPrefs != nil {
+		body["provider"] = req.ProviderPrefs
+	}
+	// OpenRouter-specific: model fallbacks
+	if len(req.ModelFallbacks) > 0 {
+		body["models"] = req.ModelFallbacks
+	}
+	// OpenRouter-specific: routing strategy
+	if req.Route != "" {
+		body["route"] = req.Route
+	}
+	// OpenRouter-specific: plugins (web, file-parser, response-healing, context-compression)
+	if len(req.Plugins) > 0 {
+		body["plugins"] = req.Plugins
+	}
+
 	// Ollama-only: pass think parameter when explicitly set
 	if strings.ToLower(providerType) == "ollama" && req.Think != nil {
 		body["think"] = *req.Think
@@ -571,6 +631,11 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 			httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 		}
 	}
+	// OpenRouter-specific headers for app attribution (optional but recommended)
+	if strings.ToLower(providerType) == "openrouter" {
+		httpReq.Header.Set("HTTP-Referer", "https://github.com/ajbergh/OmniLLM-Studio")
+		httpReq.Header.Set("X-Title", "OmniLLM-Studio")
+	}
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
@@ -591,8 +656,9 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 			} `json:"message"`
 		} `json:"choices"`
 		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
+			PromptTokens     int     `json:"prompt_tokens"`
+			CompletionTokens int     `json:"completion_tokens"`
+			Cost             float64 `json:"cost"`
 		} `json:"usage"`
 	}
 
@@ -609,6 +675,11 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 
 	tokenIn := result.Usage.PromptTokens
 	tokenOut := result.Usage.CompletionTokens
+	var cost *float64
+	if result.Usage.Cost > 0 {
+		c := result.Usage.Cost
+		cost = &c
+	}
 
 	return &ChatResponse{
 		Content:     content,
@@ -617,6 +688,7 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 		Model:       model,
 		TokenInput:  &tokenIn,
 		TokenOutput: &tokenOut,
+		Cost:        cost,
 	}, nil
 }
 
@@ -643,6 +715,23 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 
 	if len(req.Tools) > 0 {
 		body["tools"] = req.Tools
+	}
+
+	// OpenRouter-specific: provider routing preferences
+	if req.ProviderPrefs != nil {
+		body["provider"] = req.ProviderPrefs
+	}
+	// OpenRouter-specific: model fallbacks
+	if len(req.ModelFallbacks) > 0 {
+		body["models"] = req.ModelFallbacks
+	}
+	// OpenRouter-specific: routing strategy
+	if req.Route != "" {
+		body["route"] = req.Route
+	}
+	// OpenRouter-specific: plugins (web, file-parser, response-healing, context-compression)
+	if len(req.Plugins) > 0 {
+		body["plugins"] = req.Plugins
 	}
 
 	// Request usage stats in the final streaming chunk (OpenAI-compatible providers).
@@ -697,6 +786,11 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 			httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 		}
 	}
+	// OpenRouter-specific headers for app attribution (optional but recommended)
+	if strings.ToLower(providerType) == "openrouter" {
+		httpReq.Header.Set("HTTP-Referer", "https://github.com/ajbergh/OmniLLM-Studio")
+		httpReq.Header.Set("X-Title", "OmniLLM-Studio")
+	}
 
 	resp, err := streamClient.Do(httpReq)
 	if err != nil {
@@ -745,10 +839,11 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 								Content   string `json:"content"`
 								Thinking  string `json:"thinking"`
 								ToolCalls []struct {
-									Index    int    `json:"index"`
-									ID       string `json:"id"`
-									Type     string `json:"type"`
-									Function struct {
+									Index            int    `json:"index"`
+									ID               string `json:"id"`
+									Type             string `json:"type"`
+									ThoughtSignature string `json:"thought_signature,omitempty"`
+									Function         struct {
 										Name      string `json:"name"`
 										Arguments string `json:"arguments"`
 									} `json:"function"`
@@ -756,8 +851,9 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 							} `json:"delta"`
 						} `json:"choices"`
 						Usage *struct {
-							PromptTokens     int `json:"prompt_tokens"`
-							CompletionTokens int `json:"completion_tokens"`
+							PromptTokens     int     `json:"prompt_tokens"`
+							CompletionTokens int     `json:"completion_tokens"`
+							Cost             float64 `json:"cost"`
 						} `json:"usage"`
 					}
 
@@ -770,9 +866,10 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 						var parsedToolCalls []ToolCall
 						for _, tc := range delta.ToolCalls {
 							parsedToolCalls = append(parsedToolCalls, ToolCall{
-								Index: tc.Index,
-								ID:    tc.ID,
-								Type:  tc.Type,
+								Index:            tc.Index,
+								ID:               tc.ID,
+								Type:             tc.Type,
+								ThoughtSignature: tc.ThoughtSignature,
 								Function: struct {
 									Name      string `json:"name"`
 									Arguments string `json:"arguments"`
@@ -795,11 +892,17 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 					}
 					// Emit token counts from usage chunk (sent at end of stream)
 					if chunk.Usage != nil && (chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0) {
+						var cost *float64
+						if chunk.Usage.Cost > 0 {
+							c := chunk.Usage.Cost
+							cost = &c
+						}
 						onChunk(StreamChunk{
 							Provider:    providerType,
 							Model:       model,
 							TokenInput:  chunk.Usage.PromptTokens,
 							TokenOutput: chunk.Usage.CompletionTokens,
+							Cost:        cost,
 						})
 					}
 				}
@@ -1603,10 +1706,17 @@ func (s *Service) Embed(ctx context.Context, req EmbeddingRequest) (*EmbeddingRe
 	}
 
 	model := normalizeEmbeddingModel(providerType, req.Model)
+
 	if strings.EqualFold(providerType, "ollama") {
 		if err := s.ensureOllamaEmbeddingModel(ctx, baseURL, model); err != nil {
 			return nil, err
 		}
+	}
+
+	// Gemini uses its native batchEmbedContents API — the OpenAI-compatible
+	// endpoint does not support embeddings.
+	if strings.EqualFold(providerType, "gemini") {
+		return s.embedGemini(ctx, baseURL, apiKey, model, req.Input)
 	}
 
 	body := map[string]interface{}{
@@ -1631,6 +1741,11 @@ func (s *Service) Embed(ctx context.Context, req EmbeddingRequest) (*EmbeddingRe
 		} else {
 			httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 		}
+	}
+	// OpenRouter-specific headers for app attribution (optional but recommended)
+	if strings.ToLower(providerType) == "openrouter" {
+		httpReq.Header.Set("HTTP-Referer", "https://github.com/ajbergh/OmniLLM-Studio")
+		httpReq.Header.Set("X-Title", "OmniLLM-Studio")
 	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
@@ -1681,6 +1796,95 @@ func (s *Service) Embed(ctx context.Context, req EmbeddingRequest) (*EmbeddingRe
 	return &EmbeddingResponse{
 		Embeddings: embeddings,
 		Model:      result.Model,
+		Dimensions: dims,
+	}, nil
+}
+
+// embedGemini calls the Gemini native batchEmbedContents API.
+// The baseURL is the OpenAI-compatible endpoint; we derive the native root
+// from it by stripping the "/openai" suffix.
+func (s *Service) embedGemini(ctx context.Context, baseURL, apiKey, model string, inputs []string) (*EmbeddingResponse, error) {
+	// Derive the native API root from the OpenAI-compatible base URL.
+	// e.g. "https://generativelanguage.googleapis.com/v1beta/openai" -> "https://generativelanguage.googleapis.com/v1beta"
+	nativeRoot := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/openai")
+
+	// Build batchEmbedContents request
+	type content struct {
+		Parts []map[string]string `json:"parts"`
+	}
+	type embedRequest struct {
+		Requests []struct {
+			Model   string  `json:"model"`
+			Content content `json:"content"`
+		} `json:"requests"`
+	}
+
+	req := embedRequest{}
+	for _, text := range inputs {
+		req.Requests = append(req.Requests, struct {
+			Model   string  `json:"model"`
+			Content content `json:"content"`
+		}{
+			Model:   "models/" + model,
+			Content: content{Parts: []map[string]string{{"text": text}}},
+		})
+	}
+
+	jsonBody, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal gemini embed request: %w", err)
+	}
+
+	// Gemini native API expects the API key as a query parameter.
+	// URL format: POST https://generativelanguage.googleapis.com/v1beta/models/{model}:batchEmbedContents
+	apiURL := nativeRoot + "/models/" + model + ":batchEmbedContents"
+	if apiKey != "" {
+		apiURL += "?key=" + apiKey
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create gemini embed request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("gemini embed http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("gemini embed returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result struct {
+		Embeddings []struct {
+			Values []float32 `json:"values"`
+		} `json:"embeddings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode gemini embed response: %w", err)
+	}
+
+	if len(result.Embeddings) == 0 {
+		return nil, fmt.Errorf("no embeddings returned by Gemini")
+	}
+
+	embeddings := make([][]float32, len(result.Embeddings))
+	for i, e := range result.Embeddings {
+		embeddings[i] = e.Values
+	}
+
+	dims := 0
+	if len(embeddings) > 0 {
+		dims = len(embeddings[0])
+	}
+
+	return &EmbeddingResponse{
+		Embeddings: embeddings,
+		Model:      model,
 		Dimensions: dims,
 	}, nil
 }

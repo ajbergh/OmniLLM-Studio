@@ -17,6 +17,7 @@ import {
   LogOut,
   User,
   ImageIcon,
+  Files,
 } from 'lucide-react';
 import { AppIcon } from './AppIcon';
 import { clsx } from 'clsx';
@@ -184,7 +185,7 @@ export function Sidebar() {
     const convo = await createConversation(undefined, {
       provider: defaultProvider?.id,
       model: defaultProvider?.default_model || undefined,
-    });
+    }, activeWorkspaceId);
     clearMessages();
     selectConversation(convo.id);
     toast.success('New conversation created');
@@ -237,13 +238,42 @@ export function Sidebar() {
     });
   };
 
+  const handleMoveToActiveProject = async (id: string) => {
+    if (!activeWorkspaceId) return;
+    await updateConversation(id, { workspace_id: activeWorkspaceId });
+    toast.success('Conversation moved to selected project');
+    setContextMenuId(null);
+    await fetchConversations(undefined, activeWorkspaceId);
+  };
+
+  const handleRemoveFromProject = async (id: string) => {
+    await updateConversation(id, { workspace_id: null } as never);
+    toast.success('Moved to one-off chats');
+    setContextMenuId(null);
+    await fetchConversations();
+  };
+
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     const q = e.target.value;
     setSearchQuery(q);
     searchConversations(q);
   };
 
-  const groups = useMemo(() => groupConversationsByDate(conversations), [conversations]);
+  const openProjectFiles = () => {
+    const preferredScope = activeWorkspaceId ? 'workspace' : 'conversation';
+    window.dispatchEvent(new CustomEvent('omnillm:open-file-library', {
+      detail: {
+        preferredScope,
+        preferredWorkspaceId: activeWorkspaceId,
+      },
+    }));
+  };
+
+  const visibleConversations = useMemo(
+    () => (activeWorkspaceId ? conversations : conversations.filter((c) => !c.workspace_id)),
+    [conversations, activeWorkspaceId]
+  );
+  const groups = useMemo(() => groupConversationsByDate(visibleConversations), [visibleConversations]);
   const sessionGroups = useMemo(() => groupSessionsByDate(imageSessions), [imageSessions]);
 
   const handleNewSession = async () => {
@@ -388,6 +418,20 @@ export function Sidebar() {
       {/* Workspace Switcher (chat mode only) */}
       {appMode === 'chat' && (
         <div className="px-3 pb-2">
+          <button
+            onClick={() => {
+              setActiveWorkspaceId(null);
+              fetchConversations();
+            }}
+            className={clsx(
+              'w-full mb-2 px-3 py-2 rounded-xl border text-left text-sm transition-colors',
+              !activeWorkspaceId
+                ? 'border-primary/30 bg-primary/10 text-primary'
+                : 'border-border bg-surface-alt text-text hover:bg-surface-hover'
+            )}
+          >
+            One-Off Chats
+          </button>
           <WorkspaceSwitcher
             activeWorkspaceId={activeWorkspaceId}
             onSelectWorkspace={(id) => {
@@ -395,6 +439,25 @@ export function Sidebar() {
               fetchConversations(undefined, id);
             }}
           />
+        </div>
+      )}
+
+      {appMode === 'chat' && (
+        <div className="px-3 pb-2">
+          <button
+            onClick={openProjectFiles}
+            className="w-full rounded-xl border border-border bg-surface-alt px-3 py-2 text-left hover:bg-surface-hover transition-colors"
+          >
+            <div className="flex items-center gap-2 text-sm text-text">
+              <Files size={14} className="text-primary" />
+              <span>Project Files</span>
+            </div>
+            <p className="mt-1 text-[11px] text-text-muted">
+              {activeWorkspaceId
+                ? 'Files in this project are reusable across all chats in this project.'
+                : 'Select a project to work with project-scoped files, or use one-off chat attachments.'}
+            </p>
+          </button>
         </div>
       )}
 
@@ -474,7 +537,7 @@ export function Sidebar() {
           )
         ) : (
           // ── Conversation List ──
-          conversations.length === 0 ? (
+          visibleConversations.length === 0 ? (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -483,16 +546,18 @@ export function Sidebar() {
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mx-auto mb-4">
                 <Sparkles size={20} className="text-primary" />
               </div>
-              <p className="text-text-muted text-sm mb-3">No conversations yet</p>
+              <p className="text-text-muted text-sm mb-3">
+                {activeWorkspaceId ? 'No chats in this project yet' : 'No one-off chats yet'}
+              </p>
               <button
                 onClick={handleNew}
                 className="btn-primary px-4 py-2 rounded-xl text-xs font-medium inline-flex items-center gap-1.5"
               >
-                <Plus size={13} /> Start your first chat
+                <Plus size={13} /> {activeWorkspaceId ? 'Start chat in this project' : 'Start your first chat'}
               </button>
             </motion.div>
           ) : searchQuery ? (
-            conversations.map((convo, i) => (
+            visibleConversations.map((convo, i) => (
               <ConversationItem
                 key={convo.id}
                 convo={convo}
@@ -510,6 +575,9 @@ export function Sidebar() {
                 onArchive={handleArchive}
                 onUnarchive={handleUnarchive}
                 onDelete={handleDelete}
+                onMoveToActiveProject={handleMoveToActiveProject}
+                onRemoveFromProject={handleRemoveFromProject}
+                activeWorkspaceId={activeWorkspaceId}
                 index={i}
               />
             ))
@@ -517,7 +585,7 @@ export function Sidebar() {
             groups.map((group) => (
               <div key={group.label} className="mb-2">
                 <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-text-muted/60">
-                  {group.label}
+                  {activeWorkspaceId ? `Project · ${group.label}` : `Recents · ${group.label}`}
                 </div>
                 {group.conversations.map((convo, i) => (
                   <ConversationItem
@@ -537,6 +605,9 @@ export function Sidebar() {
                     onArchive={handleArchive}
                     onUnarchive={handleUnarchive}
                     onDelete={handleDelete}
+                    onMoveToActiveProject={handleMoveToActiveProject}
+                    onRemoveFromProject={handleRemoveFromProject}
+                    activeWorkspaceId={activeWorkspaceId}
                     index={i}
                   />
                 ))}
@@ -607,6 +678,9 @@ function ConversationItem({
   onArchive,
   onUnarchive,
   onDelete,
+  onMoveToActiveProject,
+  onRemoveFromProject,
+  activeWorkspaceId,
   index,
 }: {
   convo: Conversation;
@@ -624,6 +698,9 @@ function ConversationItem({
   onArchive: (id: string) => void;
   onUnarchive: (id: string) => void;
   onDelete: (id: string) => void;
+  onMoveToActiveProject: (id: string) => void;
+  onRemoveFromProject: (id: string) => void;
+  activeWorkspaceId: string | null;
   index: number;
 }) {
   return (
@@ -716,6 +793,16 @@ function ConversationItem({
             ) : (
               <ContextMenuItem onClick={() => onArchive(convo.id)} icon={<Archive size={12} />}>
                 Archive
+              </ContextMenuItem>
+            )}
+            {activeWorkspaceId && convo.workspace_id !== activeWorkspaceId && (
+              <ContextMenuItem onClick={() => onMoveToActiveProject(convo.id)} icon={<Files size={12} />}>
+                Move To This Project
+              </ContextMenuItem>
+            )}
+            {convo.workspace_id && (
+              <ContextMenuItem onClick={() => onRemoveFromProject(convo.id)} icon={<Files size={12} />}>
+                Remove From Project
               </ContextMenuItem>
             )}
             <div className="my-1 mx-2 border-t border-border" />

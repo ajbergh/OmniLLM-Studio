@@ -159,6 +159,78 @@ func (h *ProviderHandler) FetchOllamaModels(w http.ResponseWriter, r *http.Reque
 	respondJSON(w, http.StatusOK, names)
 }
 
+// FetchOpenRouterModels fetches available models from OpenRouter API.
+// GET /v1/providers/openrouter/models?provider_id=...
+func (h *ProviderHandler) FetchOpenRouterModels(w http.ResponseWriter, r *http.Request) {
+	apiKey := strings.TrimSpace(r.URL.Query().Get("api_key")) // fallback for compatibility
+	providerID := strings.TrimSpace(r.URL.Query().Get("provider_id"))
+	if apiKey == "" && providerID != "" {
+		key, err := h.repo.GetAPIKey(providerID)
+		if err != nil {
+			respondInternalError(w, err)
+			return
+		}
+		apiKey = strings.TrimSpace(key)
+	}
+	if apiKey == "" {
+		respondError(w, http.StatusBadRequest, "provider_id (or api_key) is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://openrouter.ai/api/v1/models", nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to create request")
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "cannot reach OpenRouter API")
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20)) // 2 MB limit
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "error reading OpenRouter response")
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		respondError(w, http.StatusBadGateway, "OpenRouter returned status "+resp.Status)
+		return
+	}
+
+	var modelsResp struct {
+		Data []struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			Created int64  `json:"created"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &modelsResp); err != nil {
+		respondError(w, http.StatusBadGateway, "invalid response from OpenRouter")
+		return
+	}
+
+	// Return simplified model list (id and name)
+	type modelInfo struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	models := make([]modelInfo, 0, len(modelsResp.Data))
+	for _, m := range modelsResp.Data {
+		models = append(models, modelInfo{ID: m.ID, Name: m.Name})
+	}
+
+	respondJSON(w, http.StatusOK, models)
+}
+
 // GetImageCapabilities returns the image capabilities for a provider.
 // GET /v1/providers/{providerId}/image-capabilities
 func (h *ProviderHandler) GetImageCapabilities(w http.ResponseWriter, r *http.Request) {

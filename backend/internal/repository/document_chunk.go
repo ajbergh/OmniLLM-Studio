@@ -26,12 +26,20 @@ func (r *ChunkRepo) Create(c *models.DocumentChunk) error {
 		c.ID = uuid.New().String()
 	}
 	c.CreatedAt = time.Now().UTC()
+	if c.MetadataJSON == "" {
+		c.MetadataJSON = "{}"
+	}
 
 	_, err := r.db.Exec(`
-		INSERT INTO document_chunks (id, attachment_id, conversation_id, chunk_index, content, char_offset, char_length, token_count, metadata_json, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.AttachmentID, c.ConversationID, c.ChunkIndex, c.Content,
-		c.CharOffset, c.CharLength, c.TokenCount, c.MetadataJSON, c.CreatedAt,
+		INSERT INTO document_chunks (
+			id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+			chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+			chunk_metadata_json, metadata_json, created_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.AttachmentID, c.ConversationID, c.LibraryFileID, chunkScopeOrDefault(c.Scope), c.WorkspaceID, c.SourceType,
+		c.ChunkIndex, c.Content, c.CharOffset, c.CharLength, c.TokenCount, c.PageNumber, c.SectionTitle,
+		chunkMetaOrDefault(c.ChunkMetaJSON), c.MetadataJSON, c.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create chunk: %w", err)
@@ -52,8 +60,12 @@ func (r *ChunkRepo) CreateBatch(chunks []models.DocumentChunk) error {
 	defer tx.Rollback()
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO document_chunks (id, attachment_id, conversation_id, chunk_index, content, char_offset, char_length, token_count, metadata_json, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO document_chunks (
+			id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+			chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+			chunk_metadata_json, metadata_json, created_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare stmt: %w", err)
 	}
@@ -69,9 +81,13 @@ func (r *ChunkRepo) CreateBatch(chunks []models.DocumentChunk) error {
 		if c.MetadataJSON == "" {
 			c.MetadataJSON = "{}"
 		}
+		if c.ChunkMetaJSON == "" {
+			c.ChunkMetaJSON = "{}"
+		}
 		if _, err := stmt.Exec(
-			c.ID, c.AttachmentID, c.ConversationID, c.ChunkIndex, c.Content,
-			c.CharOffset, c.CharLength, c.TokenCount, c.MetadataJSON, c.CreatedAt,
+			c.ID, c.AttachmentID, c.ConversationID, c.LibraryFileID, chunkScopeOrDefault(c.Scope), c.WorkspaceID, c.SourceType,
+			c.ChunkIndex, c.Content, c.CharOffset, c.CharLength, c.TokenCount, c.PageNumber, c.SectionTitle,
+			c.ChunkMetaJSON, c.MetadataJSON, c.CreatedAt,
 		); err != nil {
 			return fmt.Errorf("insert chunk %d: %w", i, err)
 		}
@@ -83,7 +99,9 @@ func (r *ChunkRepo) CreateBatch(chunks []models.DocumentChunk) error {
 // ListByAttachment returns all chunks for a given attachment.
 func (r *ChunkRepo) ListByAttachment(attachmentID string) ([]models.DocumentChunk, error) {
 	rows, err := r.db.Query(`
-		SELECT id, attachment_id, conversation_id, chunk_index, content, char_offset, char_length, token_count, metadata_json, created_at
+		SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+		       chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+		       chunk_metadata_json, metadata_json, created_at
 		FROM document_chunks WHERE attachment_id = ? ORDER BY chunk_index ASC`, attachmentID)
 	if err != nil {
 		return nil, fmt.Errorf("list chunks by attachment: %w", err)
@@ -95,10 +113,58 @@ func (r *ChunkRepo) ListByAttachment(attachmentID string) ([]models.DocumentChun
 // ListByConversation returns all chunks for a given conversation.
 func (r *ChunkRepo) ListByConversation(conversationID string) ([]models.DocumentChunk, error) {
 	rows, err := r.db.Query(`
-		SELECT id, attachment_id, conversation_id, chunk_index, content, char_offset, char_length, token_count, metadata_json, created_at
+		SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+		       chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+		       chunk_metadata_json, metadata_json, created_at
 		FROM document_chunks WHERE conversation_id = ? ORDER BY attachment_id, chunk_index ASC`, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("list chunks by conversation: %w", err)
+	}
+	defer rows.Close()
+	return scanChunks(rows)
+}
+
+// ListByLibraryFileID returns chunks linked to a library file in chunk order.
+func (r *ChunkRepo) ListByLibraryFileID(libraryFileID string) ([]models.DocumentChunk, error) {
+	rows, err := r.db.Query(`
+		SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+		       chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+		       chunk_metadata_json, metadata_json, created_at
+		FROM document_chunks WHERE library_file_id = ? ORDER BY chunk_index ASC`, libraryFileID)
+	if err != nil {
+		return nil, fmt.Errorf("list chunks by library file id: %w", err)
+	}
+	defer rows.Close()
+	return scanChunks(rows)
+}
+
+// SearchByLibraryFileIDs performs keyword search over chunk content for a set
+// of library file IDs and returns best matches ordered by newest then chunk.
+func (r *ChunkRepo) SearchByLibraryFileIDs(libraryFileIDs []string, queryText string, limit int) ([]models.DocumentChunk, error) {
+	if len(libraryFileIDs) == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 8
+	}
+
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(libraryFileIDs)), ",")
+	args := make([]interface{}, 0, len(libraryFileIDs)+2)
+	for _, id := range libraryFileIDs {
+		args = append(args, id)
+	}
+	args = append(args, "%"+strings.TrimSpace(queryText)+"%", limit)
+
+	rows, err := r.db.Query(fmt.Sprintf(`
+		SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+		       chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+		       chunk_metadata_json, metadata_json, created_at
+		FROM document_chunks
+		WHERE library_file_id IN (%s) AND content LIKE ?
+		ORDER BY created_at DESC, chunk_index ASC
+		LIMIT ?`, placeholders), args...)
+	if err != nil {
+		return nil, fmt.Errorf("search chunks by library file ids: %w", err)
 	}
 	defer rows.Close()
 	return scanChunks(rows)
@@ -132,7 +198,9 @@ func (r *ChunkRepo) GetByIDs(ids []string) ([]models.DocumentChunk, error) {
 		}
 
 		rows, err := r.db.Query(fmt.Sprintf(`
-		SELECT id, attachment_id, conversation_id, chunk_index, content, char_offset, char_length, token_count, metadata_json, created_at
+		SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+		       chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+		       chunk_metadata_json, metadata_json, created_at
 		FROM document_chunks WHERE id IN (%s) ORDER BY chunk_index ASC`, placeholders), args...)
 		if err != nil {
 			return nil, fmt.Errorf("get chunks by ids: %w", err)
@@ -161,6 +229,15 @@ func (r *ChunkRepo) DeleteByConversation(conversationID string) error {
 	_, err := r.db.Exec("DELETE FROM document_chunks WHERE conversation_id = ?", conversationID)
 	if err != nil {
 		return fmt.Errorf("delete chunks by conversation: %w", err)
+	}
+	return nil
+}
+
+// DeleteByLibraryFileID removes all chunks for a library file.
+func (r *ChunkRepo) DeleteByLibraryFileID(libraryFileID string) error {
+	_, err := r.db.Exec("DELETE FROM document_chunks WHERE library_file_id = ?", libraryFileID)
+	if err != nil {
+		return fmt.Errorf("delete chunks by library file id: %w", err)
 	}
 	return nil
 }
@@ -195,13 +272,57 @@ func scanChunks(rows *sql.Rows) ([]models.DocumentChunk, error) {
 	var chunks []models.DocumentChunk
 	for rows.Next() {
 		var c models.DocumentChunk
+		var libraryFileID sql.NullString
+		var scope sql.NullString
+		var workspaceID sql.NullString
+		var sourceType sql.NullString
+		var pageNumber sql.NullInt64
+		var sectionTitle sql.NullString
+		var chunkMetaJSON sql.NullString
 		if err := rows.Scan(
-			&c.ID, &c.AttachmentID, &c.ConversationID, &c.ChunkIndex, &c.Content,
-			&c.CharOffset, &c.CharLength, &c.TokenCount, &c.MetadataJSON, &c.CreatedAt,
+			&c.ID, &c.AttachmentID, &c.ConversationID, &libraryFileID, &scope, &workspaceID, &sourceType,
+			&c.ChunkIndex, &c.Content, &c.CharOffset, &c.CharLength, &c.TokenCount, &pageNumber, &sectionTitle,
+			&chunkMetaJSON, &c.MetadataJSON, &c.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan chunk: %w", err)
+		}
+		if libraryFileID.Valid {
+			c.LibraryFileID = &libraryFileID.String
+		}
+		if scope.Valid {
+			c.Scope = &scope.String
+		}
+		if workspaceID.Valid {
+			c.WorkspaceID = &workspaceID.String
+		}
+		if sourceType.Valid {
+			c.SourceType = &sourceType.String
+		}
+		if pageNumber.Valid {
+			v := int(pageNumber.Int64)
+			c.PageNumber = &v
+		}
+		if sectionTitle.Valid {
+			c.SectionTitle = &sectionTitle.String
+		}
+		if chunkMetaJSON.Valid {
+			c.ChunkMetaJSON = chunkMetaJSON.String
 		}
 		chunks = append(chunks, c)
 	}
 	return chunks, rows.Err()
+}
+
+func chunkMetaOrDefault(meta string) string {
+	if strings.TrimSpace(meta) == "" {
+		return "{}"
+	}
+	return meta
+}
+
+func chunkScopeOrDefault(scope *string) string {
+	if scope == nil || strings.TrimSpace(*scope) == "" {
+		return "conversation"
+	}
+	return *scope
 }
