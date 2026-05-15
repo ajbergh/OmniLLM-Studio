@@ -169,6 +169,7 @@ The Tool Calling Framework provides a generic, extensible system for the AI to i
 |---|---|
 | **Web Search** | Searches the web using Brave Search API or DuckDuckGo fallback, with Jina Reader for content extraction. |
 | **Sports Lookup** | Fetches ESPN-backed sports scores, schedules, standings, betting odds, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards, including IPL cricket, then returns a Markdown table. |
+| **Headless Browser** | Loads URLs in a real Chromium browser (via go-rod) to render JS-heavy pages, capture screenshots, interact with forms, export PDFs, and maintain stateful sessions across multi-step tasks. Auto-downloads Chromium on first use. Stealth mode bypasses common anti-bot measures. |
 | **Calculator** | Evaluates mathematical expressions safely using Go's AST parser. |
 | **URL Fetch** | Fetches and extracts readable text content from any URL. |
 | **Word Document Generation** | Converts Markdown content into a downloadable `.docx` file. |
@@ -250,6 +251,43 @@ For sports news, use `"intent": "news"` with an optional league or a team-specif
 
 The result includes `intent`, `league`, `league_name`, `markdown`, `source`, and `retrieved_at` metadata. Chat messages answered through this preflight path are marked with `sports_lookup: true` metadata and use provider/model labels of `sports_lookup` / `espn-go`.
 
+### Headless Browser
+
+**Feature Flag:** `headless_browser` (enabled by default)
+**Runtime requirement:** `OMNILLM_BROWSER_ENABLED=true` environment variable
+
+OmniLLM-Studio includes a full headless browser capability powered by [go-rod](https://github.com/go-rod/rod). When the browser tools are enabled, the LLM can navigate real Chromium-rendered pages, interact with dynamic JS-heavy sites, capture screenshots, and maintain stateful sessions across multiple steps — all as first-class LLM tools.
+
+On first use, go-rod automatically downloads a compatible Chromium build to `OMNILLM_BROWSER_CACHE_DIR` (default: `~/.omnillm-studio/chromium-cache`). No manual browser installation is required.
+
+**Available tools:**
+
+| Tool | What it does |
+|---|---|
+| `browser_navigate` | Load a URL and extract the fully rendered page text — works on SPAs, JS-rendered content, and pages that block plain HTTP fetches |
+| `browser_screenshot` | Capture a full-page or viewport PNG screenshot |
+| `browser_interact` | Click buttons, fill forms, scroll, hover, and interact with page elements |
+| `browser_pdf` | Export the current page as a PDF document |
+| `browser_session` | Open a persistent named browser session for multi-step workflows; the session retains cookies and state across subsequent tool calls |
+
+**Stealth mode:** The browser manager injects `github.com/go-rod/stealth` JavaScript patches on every page load to avoid common fingerprinting and bot-detection techniques.
+
+**Example prompts:**
+- *"Go to github.com/ajbergh/OmniLLM-Studio and summarize the README."*
+- *"Take a screenshot of news.ycombinator.com"*
+- *"Browse to the React docs and explain the useState hook."*
+- *"Find the most recent blog posts about Red Hat Summit 2026."*
+
+**Configuration:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `OMNILLM_BROWSER_ENABLED` | `false` | Activate the Chromium runtime |
+| `OMNILLM_BROWSER_CACHE_DIR` | `~/.omnillm-studio/chromium-cache` | Where Chromium is downloaded and cached |
+| `OMNILLM_BROWSER_EXEC` | *(auto)* | Path to an existing Chromium/Chrome binary — skips the auto-download |
+
+**Two-level gating:** The `headless_browser` feature flag controls whether the browser tools appear in the LLM's tool list (Settings → Tools). The `OMNILLM_BROWSER_ENABLED` env var controls whether the backend will actually run Chromium. Both must be active for the tools to work end-to-end.
+
 ### What are the benefits?
 
 - **Extensible** — new first-party tools can be registered in the backend without changing the chat pipeline.
@@ -257,10 +295,7 @@ The result includes `intent`, `league`, `league_name`, `markdown`, `source`, and
 - **Transparent** — every tool call is visible in the conversation with full input/output details.
 - **Timeout protection** — tools have configurable execution timeouts to prevent hung operations.
 - **Current sports answers** — live scores, schedules, standings, betting odds, headlines, rosters, injuries, transactions, rankings, and stats come from ESPN instead of model memory, including IPL cricket where ESPN exposes the data.
-
-### FAQ
-
-**Q: Can I disable a specific tool?**
+- **Real browser rendering** — JS-heavy pages, SPAs, and dynamic sites are accessible through Chromium instead of being limited to plain HTTP fetches.
 A: Yes. Set the tool's permission to `deny` in the Tools settings, and the AI will never invoke it.
 
 **Q: Can I invoke a tool manually without the AI?**
@@ -943,8 +978,9 @@ Feature flags let selected backend capabilities be enabled or disabled without r
 |---|---|
 | `word_doc_generation` | Word Document Generation (.docx) |
 | `sports_lookup_enabled` | ESPN-backed sports scores, schedules, standings, betting odds, news, rosters, injuries, transactions, rankings, and stats, including IPL cricket |
+| `headless_browser` | Headless Chromium browser tools (`browser_navigate`, `browser_screenshot`, `browser_interact`, `browser_pdf`, `browser_session`) — enabled by default; also requires `OMNILLM_BROWSER_ENABLED=true` on the backend to activate the Chromium runtime |
 
-> **Note:** The multi-format artifact export system (`.xlsx`, `.csv`, `.pdf`, `.md`, `.html`, `.json`, `.yaml`) does not have a separate feature flag — it is always active in a standard deployment. `.docx` generation is gated behind `word_doc_generation`; ESPN-backed sports lookup is gated behind `sports_lookup_enabled`.
+> **Note:** The multi-format artifact export system (`.xlsx`, `.csv`, `.pdf`, `.md`, `.html`, `.json`, `.yaml`) does not have a separate feature flag — it is always active in a standard deployment. `.docx` generation is gated behind `word_doc_generation`; ESPN-backed sports lookup is gated behind `sports_lookup_enabled`; headless browser tools are gated behind `headless_browser` (enabled by default) and also require `OMNILLM_BROWSER_ENABLED=true`.
 
 ### How do I manage them?
 
@@ -955,7 +991,7 @@ Feature flags let selected backend capabilities be enabled or disabled without r
 ### FAQ
 
 **Q: Are feature flags enabled by default?**
-A: The two currently seeded feature flags, `word_doc_generation` and `sports_lookup_enabled`, are enabled by default because they are local backend capabilities with clear deterministic triggers. Additional flags can be created through the API, but the current frontend only exposes the Word document toggle.
+A: The currently seeded feature flags, `word_doc_generation`, `sports_lookup_enabled`, and `headless_browser`, are enabled by default because they are local backend capabilities with clear deterministic triggers. `headless_browser` also requires the `OMNILLM_BROWSER_ENABLED=true` environment variable on the backend process to activate the Chromium runtime. Additional flags can be created through the API.
 
 **Q: Can I enable features without restarting?**
 A: Yes. Feature flag changes take effect immediately via the API.
