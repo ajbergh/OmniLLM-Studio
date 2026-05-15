@@ -88,6 +88,16 @@ type LibraryFile struct {
 	MetadataJSON     string     `json:"metadata_json,omitempty"`
 }
 
+// BrowserSession tracks a persistent headless-browser page session.
+type BrowserSession struct {
+	ID         string    `json:"id"`
+	UserID     string    `json:"user_id"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastUsedAt time.Time `json:"last_used_at"`
+	CurrentURL string    `json:"current_url"`
+	Metadata   string    `json:"metadata"`
+}
+
 // ProviderProfile represents a configured LLM provider.
 type ProviderProfile struct {
 	ID                string    `json:"id"`

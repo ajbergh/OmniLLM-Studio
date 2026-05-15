@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link, ChevronDown, ChevronUp, ExternalLink, AlertTriangle, Database } from 'lucide-react';
+import { Link, ChevronDown, ChevronUp, ExternalLink, AlertTriangle, Database, Globe } from 'lucide-react';
 import type { URLContextSourceRef } from '../types';
 
 const KIND_LABELS: Record<string, string> = {
@@ -85,6 +85,12 @@ export function URLContextSourcePanel({ sources, usedRag, warnings }: URLContext
                         <span className="px-1 py-0.5 rounded bg-surface text-text-muted text-[10px] shrink-0">
                           {KIND_LABELS[src.kind] ?? src.kind}
                         </span>
+                        {src.loaded_via_browser && (
+                          <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded bg-cyan-400/10 text-cyan-300 text-[10px] shrink-0">
+                            <Globe size={9} />
+                            via browser
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1 mt-0.5 text-text-muted">
                         <span className="truncate max-w-sm">{src.final_url || src.url}</span>

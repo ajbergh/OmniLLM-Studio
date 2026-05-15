@@ -7,15 +7,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/artifacts"
 	"github.com/ajbergh/omnillm-studio/internal/auth"
+	"github.com/ajbergh/omnillm-studio/internal/browser"
 	"github.com/ajbergh/omnillm-studio/internal/filelibrary"
 	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/models"
-	"github.com/ajbergh/omnillm-studio/internal/news"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/ajbergh/omnillm-studio/internal/sports"
@@ -44,7 +45,6 @@ type MessageHandler struct {
 	wordGen         *wordgen.Generator
 	artifactGen     *artifacts.Generator
 	featureFlagRepo *repository.FeatureFlagRepo
-	newsSvc         *news.Service
 	urlContextSvc   *urlcontext.Service
 	toolRegistry    *tools.Registry
 	toolExecutor    *tools.Executor
@@ -68,7 +68,6 @@ func NewMessageHandler(
 	wordGen *wordgen.Generator,
 	artifactGen *artifacts.Generator,
 	featureFlagRepo *repository.FeatureFlagRepo,
-	newsSvc *news.Service,
 	urlContextSvc *urlcontext.Service,
 	toolRegistry *tools.Registry,
 	toolExecutor *tools.Executor,
@@ -90,7 +89,6 @@ func NewMessageHandler(
 		wordGen:         wordGen,
 		artifactGen:     artifactGen,
 		featureFlagRepo: featureFlagRepo,
-		newsSvc:         newsSvc,
 		urlContextSvc:   urlContextSvc,
 		toolRegistry:    toolRegistry,
 		toolExecutor:    toolExecutor,
@@ -294,7 +292,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Sports / news direct lookup only when URL context did not handle the request.
+	// Sports direct lookup only when URL context did not handle the request.
 	if urlCtxResult == nil || !urlCtxResult.Handled {
 		if assistantMsg, handled := h.handleSportsLookupMessage(r.Context(), convoID, uuid.New().String(), req.Content); handled {
 			if _, err := h.msgRepo.Create(assistantMsg); err != nil {
@@ -306,16 +304,6 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// News lookup (non-sports current-events)
-		if assistantMsg, handled := h.handleNewsLookupMessage(r.Context(), convoID, uuid.New().String(), req.Content); handled {
-			if _, err := h.msgRepo.Create(assistantMsg); err != nil {
-				respondInternalError(w, err)
-				return
-			}
-			_ = h.convoRepo.TouchUpdatedAt(convoID)
-			respondJSON(w, http.StatusOK, assistantMsg)
-			return
-		}
 	}
 
 	// ----- File library preflight -----
@@ -738,7 +726,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Sports / news direct lookup only when URL context did not handle the request.
+	// Sports direct lookup only when URL context did not handle the request.
 	if urlCtxResult == nil || !urlCtxResult.Handled {
 		if assistantMsg, handled := h.handleSportsLookupMessage(r.Context(), convoID, msgID, req.Content); handled {
 			sendSSE(w, flusher, "sports_lookup", map[string]interface{}{
@@ -768,34 +756,6 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// News lookup (non-sports current-events, streaming path)
-		if assistantMsg, handled := h.handleNewsLookupMessage(r.Context(), convoID, msgID, req.Content); handled {
-			sendSSE(w, flusher, "news_lookup", map[string]interface{}{
-				"status": "complete",
-				"source": news.SourceName,
-			})
-			sendSSE(w, flusher, "token", map[string]string{
-				"content": assistantMsg.Content,
-			})
-			if _, err := h.msgRepo.Create(assistantMsg); err != nil {
-				log.Printf("error saving news lookup message: %v", err)
-			}
-			_ = h.convoRepo.TouchUpdatedAt(convoID)
-			latencyMS := 0
-			if assistantMsg.LatencyMs != nil {
-				latencyMS = *assistantMsg.LatencyMs
-			}
-			donePayload := map[string]interface{}{
-				"message_id":  msgID,
-				"provider":    "news_lookup",
-				"model":       "actually_relevant",
-				"latency_ms":  latencyMS,
-				"news_lookup": true,
-				"source":      news.SourceName,
-			}
-			sendSSE(w, flusher, "done", donePayload)
-			return
-		}
 	}
 
 	// ----- File library preflight (streaming) -----
@@ -864,6 +824,8 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var toolCall *websearch.ToolCall
 	var wsErr error
 	var allToolCalls []llm.ToolCall
+	var browserToolResults []tools.ToolResult
+	var browserNavigatedURLs []string
 	if webSearchEnabled {
 		searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
 			r.Context(), req.Content, providerName, modelName,
@@ -955,10 +917,20 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
-		llmReq.Tools = llmTools
-
 		const maxToolLoops = 10
+		const maxBrowserNavsPerTurn = 3
+		const maxToolResultCharsPerTurn = 150000
+		browserNavCount := 0
+		totalToolResultChars := 0
+		visitedURLs := map[string]string{}
+
 		for loopIndex := 0; loopIndex < maxToolLoops; loopIndex++ {
+			if browserNavCount >= maxBrowserNavsPerTurn {
+				llmReq.Tools = filterOutTool(llmTools, "browser_navigate")
+			} else {
+				llmReq.Tools = llmTools
+			}
+
 			var chunkToolCalls = make(map[int]*llm.ToolCall)
 			var loopContent string
 
@@ -1018,21 +990,55 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			allToolCalls = append(allToolCalls, finalToolCalls...)
 
 			// Execute each tool and append the results
+			stopToolExecution := false
 			for _, tc := range finalToolCalls {
 				msg := fmt.Sprintf("\n\n> 🛠️ **Using tool:** `%s`\n\n", tc.Function.Name)
 				fullContent += msg
 				sendSSE(w, flusher, "token", map[string]string{"content": msg})
 
-				res := h.toolExecutor.Execute(r.Context(), tools.ToolCall{
-					ID:        tc.ID,
-					Name:      tc.Function.Name,
-					Arguments: []byte(tc.Function.Arguments),
+				toolCtx := browser.WithProviderType(r.Context(), providerType)
+				toolCtx = browser.WithProgress(toolCtx, func(event string, payload any) {
+					sendSSE(w, flusher, event, payload)
 				})
+
+				var res *tools.ToolResult
+				toolURL := ""
+				if tc.Function.Name == "browser_navigate" {
+					toolURL = extractToolArgString([]byte(tc.Function.Arguments), "url")
+					if cached, ok := visitedURLs[normalizeVisitedURL(toolURL)]; ok {
+						res = &tools.ToolResult{
+							ToolCallID: tc.ID,
+							Content:    cached,
+							Metadata: map[string]interface{}{
+								"url":    toolURL,
+								"cached": true,
+							},
+						}
+					}
+				}
+				if res == nil {
+					res = h.toolExecutor.Execute(toolCtx, tools.ToolCall{
+						ID:        tc.ID,
+						Name:      tc.Function.Name,
+						Arguments: []byte(tc.Function.Arguments),
+					})
+				}
+				if res != nil && strings.HasPrefix(tc.Function.Name, "browser_") {
+					browserToolResults = append(browserToolResults, browserToolResultForMetadata(tc.Function.Name, res))
+				}
 
 				toolOutput := ""
 				if res != nil {
 					toolOutput = res.Content
 				}
+				if tc.Function.Name == "browser_navigate" {
+					browserNavCount++
+					if toolURL != "" && (res == nil || !res.IsError) {
+						visitedURLs[normalizeVisitedURL(toolURL)] = toolOutput
+						browserNavigatedURLs = append(browserNavigatedURLs, toolURL)
+					}
+				}
+				totalToolResultChars += len(toolOutput)
 
 				llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
 					Role:       "tool",
@@ -1040,6 +1046,19 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 					ToolCallID: tc.ID,
 					Name:       tc.Function.Name,
 				})
+				if totalToolResultChars > maxToolResultCharsPerTurn {
+					llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
+						Role:       "tool",
+						Content:    "Tool result context limit reached for this turn. Stop calling tools and answer using the gathered results.",
+						ToolCallID: tc.ID,
+						Name:       tc.Function.Name,
+					})
+					stopToolExecution = true
+					break
+				}
+			}
+			if stopToolExecution {
+				continue
 			}
 		}
 	}
@@ -1145,6 +1164,15 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if len(allToolCalls) > 0 {
 		metaMap["tool_calls"] = allToolCalls
 	}
+	if len(browserToolResults) > 0 {
+		metaMap["browser_tool_results"] = browserToolResults
+	}
+	if browserToolUsed(allToolCalls) {
+		metaMap["browser_tool"] = true
+		if len(browserNavigatedURLs) > 0 {
+			metaMap["browser_navigated_urls"] = browserNavigatedURLs
+		}
+	}
 	// OpenRouter: include credit cost in metadata
 	if cost > 0 {
 		metaMap["cost"] = cost
@@ -1205,6 +1233,18 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			donePayload["file_sources"] = fileSearchResults
 		}
 	}
+	if browserToolUsed(allToolCalls) {
+		donePayload["browser_tool"] = true
+		if len(browserNavigatedURLs) > 0 {
+			donePayload["browser_navigated_urls"] = browserNavigatedURLs
+		}
+	}
+	if len(allToolCalls) > 0 {
+		donePayload["tool_calls"] = allToolCalls
+	}
+	if len(browserToolResults) > 0 {
+		donePayload["browser_tool_results"] = browserToolResults
+	}
 	if fullThinking != "" {
 		donePayload["thinking"] = fullThinking
 	}
@@ -1222,6 +1262,89 @@ func sendSSE(w http.ResponseWriter, flusher http.Flusher, event string, data int
 	jsonData, _ := json.Marshal(data)
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, string(jsonData))
 	flusher.Flush()
+}
+
+func filterOutTool(toolsList []llm.Tool, name string) []llm.Tool {
+	filtered := make([]llm.Tool, 0, len(toolsList))
+	for _, tool := range toolsList {
+		if tool.Function.Name == name {
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
+}
+
+func extractToolArgString(args []byte, key string) string {
+	var payload map[string]interface{}
+	if err := json.Unmarshal(args, &payload); err != nil {
+		return ""
+	}
+	value, _ := payload[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func normalizeVisitedURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return strings.ToLower(trimmed)
+	}
+	parsed.Fragment = ""
+	parsed.Host = strings.ToLower(parsed.Host)
+	return parsed.String()
+}
+
+func browserToolResultForMetadata(toolName string, res *tools.ToolResult) tools.ToolResult {
+	out := tools.ToolResult{
+		ToolCallID: res.ToolCallID,
+		IsError:    res.IsError,
+		Metadata:   map[string]interface{}{},
+	}
+	for key, value := range res.Metadata {
+		if key == "pdf_base64" {
+			continue
+		}
+		if key == "screenshot_base64" && toolName != "browser_screenshot" {
+			continue
+		}
+		out.Metadata[key] = value
+	}
+	if len(out.Metadata) == 0 {
+		out.Metadata = nil
+	}
+	if res.IsError {
+		out.Content = res.Content
+		return out
+	}
+	switch toolName {
+	case "browser_screenshot":
+		out.Content = "Browser screenshot captured."
+	case "browser_pdf":
+		out.Content = "Browser PDF captured."
+	default:
+		if out.Metadata != nil {
+			if content, err := json.Marshal(out.Metadata); err == nil {
+				out.Content = string(content)
+			}
+		}
+		if out.Content == "" {
+			out.Content = res.Content
+			if len(out.Content) > 2000 {
+				out.Content = out.Content[:2000] + "...[truncated]"
+			}
+		}
+	}
+	return out
+}
+
+func browserToolUsed(calls []llm.ToolCall) bool {
+	for _, call := range calls {
+		if strings.HasPrefix(call.Function.Name, "browser_") {
+			return true
+		}
+	}
+	return false
 }
 
 const fileSearchSystemDirective = `You have access to a file search tool that can search the user's indexed files and uploaded documents.
@@ -1755,60 +1878,6 @@ func (h *MessageHandler) sportsLookupEnabled() bool {
 		return true
 	}
 	enabled, ok := flags[sportsLookupFeatureFlag]
-	if !ok {
-		return true
-	}
-	return enabled
-}
-
-const newsLookupFeatureFlag = "news_lookup_enabled"
-
-func (h *MessageHandler) handleNewsLookupMessage(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool) {
-	if !h.newsLookupEnabled() {
-		return nil, false
-	}
-
-	start := time.Now()
-	result, err := h.newsSvc.TryAnswer(ctx, query)
-	if err != nil {
-		log.Printf("[news] lookup failed query=%q: %v", query, err)
-	}
-	latency := int(time.Since(start).Milliseconds())
-
-	if result == nil || !result.Handled {
-		return nil, false
-	}
-
-	metaJSON, _ := json.Marshal(result.Metadata)
-	provider := "news_lookup"
-	model := "actually_relevant"
-
-	return &models.Message{
-		ID:             messageID,
-		ConversationID: conversationID,
-		Role:           "assistant",
-		Content:        result.Content,
-		CreatedAt:      time.Now().UTC(),
-		Provider:       &provider,
-		Model:          &model,
-		LatencyMs:      &latency,
-		MetadataJSON:   string(metaJSON),
-	}, true
-}
-
-func (h *MessageHandler) newsLookupEnabled() bool {
-	if h.newsSvc == nil {
-		return false
-	}
-	if h.featureFlagRepo == nil {
-		return true
-	}
-	flags, err := h.featureFlagRepo.AsMap()
-	if err != nil {
-		log.Printf("[news] feature flag lookup failed: %v", err)
-		return true
-	}
-	enabled, ok := flags[newsLookupFeatureFlag]
 	if !ok {
 		return true
 	}

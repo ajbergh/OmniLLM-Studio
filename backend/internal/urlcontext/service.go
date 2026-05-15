@@ -3,6 +3,7 @@ package urlcontext
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -14,11 +15,19 @@ import (
 // Service is the URL context resolver. It detects URLs in user messages,
 // fetches source context, and prepares prompt packs for the LLM.
 type Service struct {
-	cfg       *Config
-	fetcher   *Fetcher
-	inspector *GitHubInspector
-	cache     *Cache
+	cfg        *Config
+	fetcher    *Fetcher
+	inspector  *GitHubInspector
+	cache      *Cache
+	browserMgr BrowserNavigator
 }
+
+// BrowserNavigator is the minimum interface needed for browser fallback.
+type BrowserNavigator interface {
+	Navigate(ctx context.Context, url string) (text string, title string, err error)
+}
+
+const minUsableChars = 100
 
 // NewService creates a URL context service with the given configuration.
 func NewService(cfg *Config) *Service {
@@ -32,6 +41,11 @@ func NewService(cfg *Config) *Service {
 		inspector: NewGitHubInspector(fetcher, cfg),
 		cache:     NewCache(cfg.CacheTTL),
 	}
+}
+
+// SetBrowserManager enables browser fallback for JS-rendered pages.
+func (s *Service) SetBrowserManager(m BrowserNavigator) {
+	s.browserMgr = m
 }
 
 // Resolve is the main entry point. It extracts URLs from the user message,
@@ -147,10 +161,51 @@ func (s *Service) resolveOne(
 		// Treat directory URLs as repo with a path filter
 		return s.resolveGitHubRepo(ctx, rawURL, goal, streamStatus)
 	case URLKindPDF:
-		return s.resolveWebPage(ctx, rawURL) // Phase 1: treat PDF as web page
+		return s.resolveWebPageWithBrowserFallback(ctx, rawURL, streamStatus)
 	default:
-		return s.resolveWebPage(ctx, rawURL)
+		return s.resolveWebPageWithBrowserFallback(ctx, rawURL, streamStatus)
 	}
+}
+
+func (s *Service) resolveWebPageWithBrowserFallback(
+	ctx context.Context,
+	rawURL string,
+	streamStatus func(string, any),
+) (*ResolvedSource, error) {
+	src, err := s.resolveWebPage(ctx, rawURL)
+	if !errors.Is(err, ErrInsufficientContent) || s.browserMgr == nil {
+		return src, err
+	}
+
+	if streamStatus != nil {
+		streamStatus("url_context_browser_fallback", map[string]any{"url": rawURL})
+	}
+	text, title, browserErr := s.browserMgr.Navigate(ctx, rawURL)
+	if browserErr != nil {
+		return src, err
+	}
+	if len(text) < minUsableChars {
+		return src, err
+	}
+
+	if title == "" {
+		title = rawURL
+	}
+	resolved := &ResolvedSource{
+		SourceRef: SourceRef{
+			ID:               "urlsrc_" + uuid.New().String(),
+			URL:              rawURL,
+			FinalURL:         rawURL,
+			Title:            title,
+			Kind:             URLKindWebPage,
+			FetchedAt:        time.Now().UTC(),
+			LoadedViaBrowser: true,
+		},
+		ContentText:     text,
+		ContentMarkdown: text,
+	}
+	s.cache.Set(URLKey(rawURL, GoalUnknown), resolved)
+	return resolved, nil
 }
 
 func (s *Service) resolveGitHubRepo(
@@ -306,7 +361,6 @@ func (s *Service) resolveWebPage(ctx context.Context, rawURL string) (*ResolvedS
 
 	// Reject pages that returned no usable text — almost always JS-rendered.
 	// Returning an empty source would let the LLM hallucinate from memory.
-	const minUsableChars = 100
 	if len(doc.Text) < minUsableChars {
 		return nil, fmt.Errorf("%w: only %d chars extracted from %s (likely JavaScript-rendered or bot-protected)",
 			ErrInsufficientContent, len(doc.Text), rawURL)

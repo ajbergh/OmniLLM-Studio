@@ -69,6 +69,8 @@ import type {
   CreateMCPServerRequest,
   UpdateMCPServerRequest,
   ToolPolicy,
+  BrowserSession,
+  BrowserStatus,
 } from './types';
 
 // In the Wails desktop build the API runs on a real local HTTP server
@@ -242,7 +244,7 @@ export const api = {
       onToken: (content: string) => void;
       onThinking?: (content: string) => void;
       onStart?: (data: { message_id: string; user_message_id: string }) => void;
-      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; content?: string; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; thinking?: string; cost?: number }) => void;
+      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; content?: string; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; browser_tool?: boolean; browser_navigated_urls?: string[]; tool_calls?: ToolCall[]; browser_tool_results?: ToolResult[]; thinking?: string; cost?: number }) => void;
       onError?: (error: string) => void;
       onWebSearch?: (data: { tool_call: ToolCall; status: string }) => void;
       onWebSearchResults?: (data: { query: string; results: WebSearchResult[] }) => void;
@@ -250,6 +252,11 @@ export const api = {
       onFileSearchResults?: (data: { results: FileSearchResult[] }) => void;
       onRAGIndexing?: (data: { status: string; detail?: string }) => void;
       onURLContext?: (data: { status: string; url?: string; kind?: string; url_count?: number; source_count?: number; used_rag?: boolean }) => void;
+      onBrowserDownloading?: (data: { progress_percent: number }) => void;
+      onBrowserNavigating?: (data: { url: string; session_id?: string }) => void;
+      onBrowserScreenshotDone?: (data: { url: string; session_id?: string }) => void;
+      onBrowserInteractDone?: (data: { action: string; selector: string; session_id?: string }) => void;
+      onURLContextBrowserFallback?: (data: { url: string }) => void;
     }
   ) => {
     const controller = new AbortController();
@@ -323,6 +330,21 @@ export const api = {
                 break;
               case 'url_context':
                 callbacks.onURLContext?.(payload);
+                break;
+              case 'url_context_browser_fallback':
+                callbacks.onURLContextBrowserFallback?.(payload);
+                break;
+              case 'browser_downloading':
+                callbacks.onBrowserDownloading?.(payload);
+                break;
+              case 'browser_navigating':
+                callbacks.onBrowserNavigating?.(payload);
+                break;
+              case 'browser_screenshot_done':
+                callbacks.onBrowserScreenshotDone?.(payload);
+                break;
+              case 'browser_interact_done':
+                callbacks.onBrowserInteractDone?.(payload);
                 break;
               case 'rag_indexing':
                 callbacks.onRAGIndexing?.(payload);
@@ -860,6 +882,19 @@ export const fileLibraryApi = {
   reindex: (fileId: string) =>
     apiFetch<FileLibraryReindexResponse>(`/file-library/files/${fileId}/reindex`, {
       method: 'POST',
+    }),
+};
+
+// ── Browser ───────────────────────────────────────────────────────────────
+
+export const browserApi = {
+  status: () => apiFetch<BrowserStatus>('/browser/status'),
+
+  listSessions: () => apiFetch<BrowserSession[]>('/browser/sessions'),
+
+  closeSession: (id: string) =>
+    apiFetch<void>(`/browser/sessions/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
     }),
 };
 

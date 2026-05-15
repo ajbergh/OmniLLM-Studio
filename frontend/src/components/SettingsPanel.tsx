@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
-import { api, authApi, mcpApi, setAuthToken } from '../api';
+import { api, authApi, browserApi, mcpApi, setAuthToken } from '../api';
 import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, Github, Calculator, Link2, Search } from 'lucide-react';
-import type { CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, ToolPolicy, UpdateMCPServerRequest } from '../types';
+import type { BrowserSession, BrowserStatus, CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, ToolPolicy, UpdateMCPServerRequest } from '../types';
 import { useTheme, THEMES } from '../theme';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -1128,60 +1128,6 @@ function AppearanceTab() {
 }
 
 // ============================================
-// News Lookup Card (used in General Tab)
-// ============================================
-
-function NewsLookupCard() {
-  const { isEnabled, updateFeature } = useFeatureFlagStore();
-  const enabled = isEnabled('news_lookup_enabled');
-
-  const toggle = async () => {
-    await updateFeature('news_lookup_enabled', !enabled);
-  };
-
-  return (
-    <div className="p-5 rounded-2xl bg-surface-alt border border-border">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center shadow-md shadow-amber-500/10">
-          <svg className="text-amber-400" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0v-9" />
-            <path d="M10 7h6" />
-            <path d="M10 11h6" />
-            <path d="M10 15h4" />
-          </svg>
-        </div>
-        <div>
-          <h3 className="text-sm font-bold">News Lookup</h3>
-          <p className="text-[11px] text-text-muted">Curated non-sports news via Actually Relevant API</p>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between py-2">
-        <div>
-          <label className="text-xs font-medium text-text-secondary block">News Lookup Enabled</label>
-          <p className="text-[10px] text-text-muted mt-0.5">
-            When you ask about current events, headlines, or news topics, the response is generated from the Actually Relevant public news API — no API key required
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={toggle}
-          className={`shrink-0 relative w-10 h-5 rounded-full transition-colors ${
-            enabled ? 'bg-primary' : 'bg-border'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-              enabled ? 'translate-x-5' : ''
-            }`}
-          />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ============================================
 // General Tab
 // ============================================
 
@@ -1756,9 +1702,175 @@ function RAGTab() {
 // Tools Settings Tab
 // ============================================
 
+function BrowserSettingsCard({
+  toolsLoaded,
+  browserToolsRegistered,
+}: {
+  toolsLoaded: boolean;
+  browserToolsRegistered: boolean;
+}) {
+  const { isEnabled, updateFeature } = useFeatureFlagStore();
+  const enabled = isEnabled('headless_browser');
+  const [status, setStatus] = useState<BrowserStatus | null>(null);
+  const [sessions, setSessions] = useState<BrowserSession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [closingId, setClosingId] = useState<string | null>(null);
+
+  const loadBrowserState = useCallback(async () => {
+    if (!enabled || !toolsLoaded || !browserToolsRegistered) {
+      setStatus(null);
+      setSessions([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const [nextStatus, nextSessions] = await Promise.all([
+        browserApi.status(),
+        browserApi.listSessions(),
+      ]);
+      setStatus(nextStatus);
+      setSessions(nextSessions || []);
+    } catch {
+      toast.error('Failed to load browser status');
+    } finally {
+      setLoading(false);
+    }
+  }, [browserToolsRegistered, enabled, toolsLoaded]);
+
+  useEffect(() => {
+    loadBrowserState();
+  }, [loadBrowserState]);
+
+  const toggleFeature = async () => {
+    const nextEnabled = !enabled;
+    await updateFeature('headless_browser', nextEnabled);
+    if (!nextEnabled) {
+      setStatus(null);
+      setSessions([]);
+    }
+  };
+
+  const closeSession = async (id: string) => {
+    setClosingId(id);
+    try {
+      await browserApi.closeSession(id);
+      setSessions((prev) => prev.filter((session) => session.id !== id));
+      setStatus((prev) => prev ? { ...prev, active_sessions: Math.max(0, prev.active_sessions - 1) } : prev);
+      toast.success('Browser session closed');
+    } catch {
+      toast.error('Failed to close browser session');
+    } finally {
+      setClosingId(null);
+    }
+  };
+
+  const runtimeReady = status?.enabled === true;
+  const activeCount = status?.active_sessions ?? sessions.length;
+  const browserUnavailable = enabled && toolsLoaded && !browserToolsRegistered;
+
+  return (
+    <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 flex items-center justify-center shadow-md shadow-cyan-500/10">
+          <Globe size={18} className="text-cyan-400" />
+        </div>
+        <div className="min-w-0">
+          <h3 className="text-sm font-bold">Headless Browser</h3>
+          <p className="text-[11px] text-text-muted">JavaScript page reading, screenshots, and stateful browser sessions</p>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex items-center justify-between py-2">
+          <div className="mr-4">
+            <label className="text-xs font-medium text-text-secondary block">Browser Tools Enabled</label>
+            <p className="text-[10px] text-text-muted mt-0.5">
+              Tool visibility is controlled here; the runtime also requires OMNILLM_BROWSER_ENABLED on the backend.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={toggleFeature}
+            className={`shrink-0 relative w-10 h-5 rounded-full transition-colors ${
+              enabled ? 'bg-primary' : 'bg-border'
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                enabled ? 'translate-x-5' : ''
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <InfoRow label="Runtime" value={browserUnavailable ? 'Unavailable' : loading ? 'Loading...' : runtimeReady ? 'Ready' : 'Disabled'} />
+          <InfoRow label="Process" value={status?.browser_running ? 'Running' : 'Stopped'} />
+          <InfoRow label="Sessions" value={String(activeCount)} />
+        </div>
+
+        {status?.cache_dir && (
+          <div className="text-[10px] text-text-muted truncate">
+            Cache: <span className="font-mono">{status.cache_dir}</span>
+          </div>
+        )}
+
+        {browserUnavailable && (
+          <p className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">
+            Browser feature flag is enabled, but this backend has not registered the browser tools yet. Restart the backend after applying the browser implementation.
+          </p>
+        )}
+
+        {sessions.length > 0 && (
+          <div className="rounded-xl border border-border bg-surface/50 overflow-hidden">
+            <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted border-b border-border">
+              Active sessions
+            </div>
+            <div className="divide-y divide-border/70">
+              {sessions.map((session) => (
+                <div key={session.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-mono text-text truncate">{session.id.slice(0, 12)}</div>
+                    <div className="text-[10px] text-text-muted truncate">{session.current_url || 'No page loaded'}</div>
+                    <div className="text-[10px] text-text-muted/70">
+                      Last used {new Date(session.last_used_at).toLocaleString()}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => closeSession(session.id)}
+                    disabled={closingId === session.id}
+                    className="shrink-0 p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                    aria-label="Close browser session"
+                    title="Close browser session"
+                  >
+                    {closingId === session.id ? <RefreshCw size={13} className="animate-spin" /> : <X size={13} />}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={loadBrowserState}
+          disabled={loading}
+          className="flex items-center gap-2 text-[11px] text-text-muted hover:text-text transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+          Refresh browser status
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ToolsTab() {
   const [tools, setTools] = useState<import('../types').ToolDefinition[]>([]);
   const [loading, setLoading] = useState(true);
+  const browserToolsRegistered = tools.some((tool) => tool.name.startsWith('browser_'));
 
   useEffect(() => {
     api.listTools()
@@ -1781,6 +1893,8 @@ function ToolsTab() {
 
   return (
     <div className="space-y-6">
+      <BrowserSettingsCard toolsLoaded={!loading} browserToolsRegistered={browserToolsRegistered} />
+
       {loading ? (
         <div className="flex items-center justify-center py-8">
           <RefreshCw size={16} className="animate-spin text-text-muted" />
@@ -1870,8 +1984,6 @@ function ToolsTab() {
         </>
       )}
 
-      {/* News Lookup */}
-      <NewsLookupCard />
     </div>
   );
 }

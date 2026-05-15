@@ -127,6 +127,7 @@ func versionedMigrations() []Migration {
 		{Version: 32, Name: "mcp_servers_headers", SQL: migrationMCPServersHeaders},
 		{Version: 33, Name: "file_library_foundation", SQL: migrationFileLibraryFoundation},
 		{Version: 34, Name: "workspace_project_context", SQL: migrationWorkspaceProjectContext},
+		{Version: 35, Name: "browser_sessions_and_flag", SQL: migrationBrowserSessionsAndFlag},
 	}
 }
 
@@ -536,6 +537,24 @@ CREATE TABLE IF NOT EXISTS workspaces (
 const migrationWorkspaceProjectContext = `
 ALTER TABLE workspaces ADD COLUMN project_instructions TEXT DEFAULT '';
 ALTER TABLE workspaces ADD COLUMN memory_mode TEXT DEFAULT 'default';
+`
+
+// V35: Browser sessions and disabled-by-default headless browser feature flag.
+const migrationBrowserSessionsAndFlag = `
+CREATE TABLE IF NOT EXISTS browser_sessions (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	last_used_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	current_url TEXT NOT NULL DEFAULT '',
+	metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_browser_sessions_user ON browser_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_browser_sessions_last_used ON browser_sessions(last_used_at);
+
+INSERT INTO feature_flags (key, enabled, metadata)
+VALUES ('headless_browser', 0, '{}')
+ON CONFLICT(key) DO NOTHING;
 `
 
 // V14: Add workspace_id to conversations

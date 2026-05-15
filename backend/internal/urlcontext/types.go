@@ -34,35 +34,36 @@ const (
 type ResolveRequest struct {
 	ConversationID string
 	UserMessage    string
-	URLs           []string        // if nil, URLs are extracted from UserMessage
-	Force          bool            // bypass intent check
+	URLs           []string // if nil, URLs are extracted from UserMessage
+	Force          bool     // bypass intent check
 	StreamStatus   func(event string, payload any)
 }
 
 // ResolveResult is the output from Service.Resolve.
 type ResolveResult struct {
-	Handled             bool
-	RequiresLLM         bool
-	UsedDirectContext   bool
-	UsedRAG             bool
-	PromptContext       string
-	Sources             []SourceRef
-	ResolvedSources     []ResolvedSource
-	Warnings            []string
-	Metadata            map[string]any
+	Handled               bool
+	RequiresLLM           bool
+	UsedDirectContext     bool
+	UsedRAG               bool
+	PromptContext         string
+	Sources               []SourceRef
+	ResolvedSources       []ResolvedSource
+	Warnings              []string
+	Metadata              map[string]any
 	ShouldBypassWebSearch bool
 }
 
 // SourceRef is minimal source attribution stored in message metadata.
 type SourceRef struct {
-	ID          string    `json:"id"`
-	URL         string    `json:"url"`
-	FinalURL    string    `json:"final_url,omitempty"`
-	Title       string    `json:"title,omitempty"`
-	Kind        URLKind   `json:"kind"`
-	Path        string    `json:"path,omitempty"`
-	FetchedAt   time.Time `json:"fetched_at"`
-	ContentHash string    `json:"content_hash,omitempty"`
+	ID               string    `json:"id"`
+	URL              string    `json:"url"`
+	FinalURL         string    `json:"final_url,omitempty"`
+	Title            string    `json:"title,omitempty"`
+	Kind             URLKind   `json:"kind"`
+	Path             string    `json:"path,omitempty"`
+	FetchedAt        time.Time `json:"fetched_at"`
+	ContentHash      string    `json:"content_hash,omitempty"`
+	LoadedViaBrowser bool      `json:"loaded_via_browser,omitempty"`
 }
 
 // ResolvedSource contains the full resolved content for a single URL.
@@ -113,11 +114,11 @@ type GitHubFileContext struct {
 
 // GitHubParseResult holds the parsed components of a GitHub URL.
 type GitHubParseResult struct {
-	Owner  string
-	Repo   string
-	Ref    string // branch or tag
-	Path   string // file or directory path within the repo
-	Kind   URLKind
+	Owner string
+	Repo  string
+	Ref   string // branch or tag
+	Path  string // file or directory path within the repo
+	Kind  URLKind
 }
 
 // ReadableDocument holds extracted content from a web page.

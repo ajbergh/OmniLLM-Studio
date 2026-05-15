@@ -16,12 +16,12 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/analytics"
 	"github.com/ajbergh/omnillm-studio/internal/artifacts"
 	"github.com/ajbergh/omnillm-studio/internal/auth"
+	"github.com/ajbergh/omnillm-studio/internal/browser"
 	"github.com/ajbergh/omnillm-studio/internal/bundle"
 	"github.com/ajbergh/omnillm-studio/internal/config"
 	"github.com/ajbergh/omnillm-studio/internal/filelibrary"
 	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/mcpclient"
-	"github.com/ajbergh/omnillm-studio/internal/news"
 	"github.com/ajbergh/omnillm-studio/internal/plugins"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
@@ -85,6 +85,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	chunkRepo := repository.NewChunkRepo(database)
 	embeddingRepo := repository.NewEmbeddingRepo(database) // legacy SQL embeddings, used only for lazy migration
 	libraryFileRepo := repository.NewLibraryFileRepo(database)
+	browserSessionRepo := repository.NewBrowserSessionRepo(database)
 
 	// Services
 	llmService := llm.NewService(providerRepo, settingsRepo)
@@ -116,13 +117,18 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	jinaReader := websearch.NewJinaReaderFromSettings(settingsRepo)
 	orchestrator := websearch.NewOrchestrator(wsProvider, llmService, jinaReader)
 
-	// News Lookup Service (Actually Relevant API, no key required)
-	newsCfg := news.LoadConfigFromEnv()
-	newsSvc := news.NewService(newsCfg)
-
 	// URL Context Resolver
 	urlCtxCfg := urlcontext.ConfigFromEnv()
 	urlCtxSvc := urlcontext.NewService(urlCtxCfg)
+
+	// Headless browser manager. Init only purges stale rows and starts the
+	// eviction loop; Chromium still launches lazily on first tool use.
+	browserMgr := browser.NewManager(cfg, browserSessionRepo)
+	if err := browserMgr.Init(); err != nil {
+		log.Printf("WARN: init browser manager: %v", err)
+	}
+	urlCtxSvc.SetBrowserManager(newBrowserFallbackNavigator(browserMgr, featureFlagRepo))
+	shutdownFns = append(shutdownFns, browserMgr.Shutdown)
 
 	wordGen := wordgen.NewGenerator(cfg.AttachmentsDir)
 	artifactGen := artifacts.NewGenerator(cfg.AttachmentsDir)
@@ -144,13 +150,25 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	toolRegistry.MustRegister(tools.NewFileCompareTool(fileLibrarySvc, ""))
 	toolRegistry.MustRegister(tools.NewFileDeleteTool(fileLibrarySvc, ""))
 	toolRegistry.MustRegister(tools.NewFileReindexTool(fileLibrarySvc, ""))
+	toolRegistry.MustRegister(tools.NewBrowserNavigateTool(browserMgr, featureFlagRepo))
+	toolRegistry.MustRegister(tools.NewBrowserScreenshotTool(browserMgr, featureFlagRepo))
+	toolRegistry.MustRegister(tools.NewBrowserInteractTool(browserMgr, featureFlagRepo))
+	toolRegistry.MustRegister(tools.NewBrowserPDFTool(browserMgr, featureFlagRepo))
+	toolRegistry.MustRegister(tools.NewBrowserSessionTool(browserMgr, featureFlagRepo))
+	seedDefaultToolPermissions(database, []string{
+		"browser_navigate",
+		"browser_screenshot",
+		"browser_interact",
+		"browser_pdf",
+		"browser_session",
+	})
 	toolExecutor := tools.NewExecutor(toolRegistry, toolPermRepo.PolicyResolver(), 0)
 	toolHandler := NewToolHandler(toolRegistry, toolExecutor, toolPermRepo)
 	workspaceRepo := repository.NewWorkspaceRepo(database)
 
 	// Handlers
 	convoHandler := NewConversationHandler(convoRepo, vectorStore)
-	msgHandler := NewMessageHandler(msgRepo, convoRepo, workspaceRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo, newsSvc, urlCtxSvc, toolRegistry, toolExecutor, fileLibrarySvc)
+	msgHandler := NewMessageHandler(msgRepo, convoRepo, workspaceRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo, urlCtxSvc, toolRegistry, toolExecutor, fileLibrarySvc)
 	providerHandler := NewProviderHandler(providerRepo)
 	settingsHandler := NewSettingsHandler(settingsRepo, orchestrator)
 	wsHandler := NewWebSearchHandler(orchestrator)
@@ -160,6 +178,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	featureFlagHandler := NewFeatureFlagHandler(featureFlagRepo)
 	ragHandler := NewRAGHandler(chunkRepo, vectorStore, attachRepo, convoRepo, settingsRepo, providerRepo, llmService, cfg.AttachmentsDir)
 	fileLibraryHandler := NewFileLibraryHandler(fileLibrarySvc, convoRepo)
+	browserHandler := NewBrowserHandler(browserMgr)
 
 	// Model Context Protocol
 	mcpRepo := repository.NewMCPServerRepo(database)
@@ -379,6 +398,13 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			// Web Search
 			r.Post("/websearch", wsHandler.Search)
 
+			// Browser sessions
+			r.Get("/browser/status", browserHandler.Status)
+			r.Route("/browser/sessions", func(r chi.Router) {
+				r.Get("/", browserHandler.ListSessions)
+				r.Delete("/{sessionId}", browserHandler.CloseSession)
+			})
+
 			// Settings (read: any user; write: admin only)
 			r.Get("/settings", settingsHandler.GetAll)
 			r.Group(func(r chi.Router) {
@@ -543,5 +569,16 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			}
 		}
 		return firstErr
+	}
+}
+
+func seedDefaultToolPermissions(db *sql.DB, toolNames []string) {
+	for _, name := range toolNames {
+		if _, err := db.Exec(`
+			INSERT OR IGNORE INTO tool_permissions (tool_name, policy, updated_at)
+			VALUES (?, 'allow', datetime('now'))
+		`, name); err != nil {
+			log.Printf("WARN: seed tool permission %s: %v", name, err)
+		}
 	}
 }
