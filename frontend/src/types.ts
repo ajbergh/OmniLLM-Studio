@@ -178,13 +178,14 @@ export interface WebSearchRequest {
 }
 
 export interface ToolCall {
-  name: 'web_search';
-  arguments: {
-    query: string;
-    timeRange: string;
-    region: string;
-    locale: string;
-    maxResults: number;
+  id?: string;
+  name?: string;
+  arguments?: Record<string, unknown> & {
+    query?: string;
+  };
+  function?: {
+    name?: string;
+    arguments?: string | Record<string, unknown>;
   };
 }
 
@@ -197,6 +198,24 @@ export interface URLContextSourceRef {
   path?: string;
   fetched_at: string;
   content_hash?: string;
+  loaded_via_browser?: boolean;
+}
+
+export interface BrowserSession {
+  id: string;
+  user_id: string;
+  created_at: string;
+  last_used_at: string;
+  current_url: string;
+  metadata: string;
+}
+
+export interface BrowserStatus {
+  enabled: boolean;
+  cache_dir: string;
+  exec_path?: string;
+  active_sessions: number;
+  browser_running: boolean;
 }
 
 export interface MessageMetadata {
@@ -212,6 +231,10 @@ export interface MessageMetadata {
   url_context_sources?: URLContextSourceRef[];
   url_context_used_rag?: boolean;
   url_context_warnings?: string[];
+  browser_tool?: boolean;
+  browser_navigated_urls?: string[];
+  tool_calls?: ToolCall[];
+  browser_tool_results?: ToolResult[];
   cost?: number; // OpenRouter credit cost
 }
 

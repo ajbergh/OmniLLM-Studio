@@ -9,6 +9,21 @@ interface ToolCallCardProps {
   status?: 'running' | 'success' | 'error';
 }
 
+function readStringField(source: unknown, key: string): string | undefined {
+  if (!source || typeof source !== 'object') return undefined;
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+function parseResultJSON(content: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
 export function ToolCallCard({ toolName, args, result, status = 'running' }: ToolCallCardProps) {
   const statusIcon = {
     running: <Loader2 size={14} className="animate-spin text-primary" />,
@@ -21,6 +36,13 @@ export function ToolCallCard({ toolName, args, result, status = 'running' }: Too
     success: 'border-emerald-500/30 bg-emerald-500/5',
     error: 'border-red-500/30 bg-red-500/5',
   }[status];
+  const parsedResult = result ? parseResultJSON(result.content) : null;
+  const screenshotBase64 = result
+    ? readStringField(result.metadata, 'screenshot_base64') || readStringField(parsedResult, 'screenshot_base64')
+    : undefined;
+  const screenshotURL = result
+    ? readStringField(result.metadata, 'url') || readStringField(parsedResult, 'url')
+    : undefined;
 
   return (
     <motion.div
@@ -54,6 +76,17 @@ export function ToolCallCard({ toolName, args, result, status = 'running' }: Too
           {result.is_error ? (
             <div className="text-xs p-2 rounded-lg bg-red-500/10 text-red-400">
               {result.content}
+            </div>
+          ) : screenshotBase64 ? (
+            <div className="space-y-2">
+              <img
+                src={`data:image/png;base64,${screenshotBase64}`}
+                alt={screenshotURL ? `Screenshot of ${screenshotURL}` : 'Browser screenshot'}
+                className="max-w-full rounded-lg border border-border"
+              />
+              {screenshotURL && (
+                <div className="text-[10px] text-text-muted truncate">{screenshotURL}</div>
+              )}
             </div>
           ) : (
             <pre className="text-xs p-2 rounded-lg bg-surface-light/50 overflow-x-auto max-h-32 text-text-muted">

@@ -20,7 +20,7 @@ import { AttachmentPanel } from './AttachmentPanel';
 import { toast } from 'sonner';
 import { api, templateApi, branchApi, agentApi, workspaceApi } from '../api';
 import { matchesShortcut } from '../shortcuts';
-import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary } from '../types';
+import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult } from '../types';
 import { AgentEventType } from '../types';
 import { getModelReasoningLevels, getModelToolCallingSupport, isFreeModel, type ReasoningEffortLevel } from '../models';
 
@@ -89,6 +89,31 @@ function toPendingUpload(file: File): PendingUploadFile {
   };
 }
 
+function formatBrowserDetail(value: string): string {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return value;
+  }
+}
+
+function getToolCallName(call: ToolCall): string {
+  return call.name || call.function?.name || 'tool';
+}
+
+function getToolCallArgs(call: ToolCall): Record<string, unknown> | undefined {
+  if (call.arguments) return call.arguments;
+  const rawArgs = call.function?.arguments;
+  if (!rawArgs) return undefined;
+  if (typeof rawArgs === 'object') return rawArgs;
+  try {
+    const parsed = JSON.parse(rawArgs);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : undefined;
+  } catch {
+    return { arguments: rawArgs };
+  }
+}
+
 export function ChatView() {
   const activeId = useConversationStore((s) => s.activeId);
   const conversations = useConversationStore((s) => s.conversations);
@@ -99,6 +124,7 @@ export function ChatView() {
     messages, streaming, streamingContent, streamingThinking, error,
     sendMessage, clearMessages, stopStreaming,
     webSearching, webSearchQuery, urlContextStatus, urlContextKind,
+    browserStatus, browserStatusDetail, browserProgress,
     ragIndexingStatus, ragIndexingDetail,
     regenerateLastMessage, editAndResend, generateImage,
   } = useMessageStore();
@@ -126,6 +152,7 @@ export function ChatView() {
   const [thinkEnabled, setThinkEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortLevel | undefined>(undefined);
   const [activeWorkspaceName, setActiveWorkspaceName] = useState<string | null>(null);
+  const browserStatusDetailLabel = browserStatusDetail ? formatBrowserDetail(browserStatusDetail) : null;
 
   // Detect if the active conversation is using an Ollama provider
   const activeConvo = conversations.find((c) => c.id === activeId);
@@ -728,10 +755,38 @@ export function ChatView() {
                   </div>
                   <span className="text-xs text-amber-400">
                     {urlContextStatus === 'detected' ? 'URL detected, reading source…' :
+                     urlContextStatus === 'browser_fallback' ? 'Reading linked source with browser…' :
                      urlContextStatus === 'fetching' && urlContextKind === 'github_repo' ? 'Inspecting GitHub repository…' :
                      urlContextStatus === 'fetching' ? 'Reading linked source…' :
                      urlContextStatus === 'indexed' ? 'Indexing source context…' :
                      'Reading linked source…'}
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Browser tool indicator */}
+          {streaming && browserStatus && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-start gap-3 max-w-3xl xl:max-w-4xl 2xl:max-w-5xl min-w-0"
+            >
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                <Globe size={15} className="text-cyan-400 animate-pulse" />
+              </div>
+              <div className="flex min-w-0 flex-col gap-1 px-4 py-3 rounded-2xl bg-surface-alt border border-cyan-500/20 rounded-bl-md">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                  </div>
+                  <span className="text-xs text-cyan-400">
+                    {browserStatus}
+                    {browserProgress !== null && browserProgress !== undefined ? ` ${browserProgress}%` : ''}
+                    {browserStatusDetailLabel ? `: ${browserStatusDetailLabel}` : ''}
                   </span>
                 </div>
               </div>
@@ -1385,6 +1440,12 @@ function MessageBubble({
   }
   const sources: WebSearchResult[] = metadata?.sources ?? [];
   const fileSources: FileSearchResult[] = metadata?.file_sources ?? [];
+  const toolCalls: ToolCall[] = metadata?.tool_calls && metadata.tool_calls.length > 0
+    ? metadata.tool_calls
+    : metadata?.tool_call
+      ? [metadata.tool_call]
+      : [];
+  const browserToolResults: ToolResult[] = metadata?.browser_tool_results ?? [];
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -1557,6 +1618,12 @@ function MessageBubble({
                 <span className="flex items-center gap-1 text-emerald-400">
                   <FileText size={10} />
                   Files
+                </span>
+              )}
+              {metadata?.browser_tool && (
+                <span className="flex items-center gap-1 text-cyan-400">
+                  <Globe size={10} />
+                  Browser
                 </span>
               )}
               {metadata?.cost !== undefined && metadata.cost > 0 && (
@@ -1748,13 +1815,22 @@ function MessageBubble({
           </div>
         )}
 
-        {/* Tool Call Card — shows inline tool execution result */}
-        {!isUser && metadata?.tool_call && (
+        {/* Tool Call Cards — shows inline tool execution results when available */}
+        {!isUser && toolCalls.length > 0 && (
           <div className="mt-2 space-y-1.5 border-t border-border/30 pt-2">
-            <ToolCallCard
-              toolName={metadata.tool_call.name}
-              args={metadata.tool_call.arguments as unknown as Record<string, unknown>}
-            />
+            {toolCalls.map((call, index) => {
+              const result = browserToolResults.find((item) => item.tool_call_id && call.id && item.tool_call_id === call.id)
+                || browserToolResults[index];
+              return (
+                <ToolCallCard
+                  key={call.id || `${getToolCallName(call)}-${index}`}
+                  toolName={getToolCallName(call)}
+                  args={getToolCallArgs(call)}
+                  result={result}
+                  status={result?.is_error ? 'error' : 'success'}
+                />
+              );
+            })}
           </div>
         )}
       </div>

@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Local-first LLM chat application</strong> — Go backend + React frontend<br/>
-  Multi-provider streaming · Image Studio · RAG · File Library · Agent mode · Branching · Web search · Live sports lookup · News lookup · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
+  Multi-provider streaming · Image Studio · RAG · File Library · Agent mode · Branching · Web search · Live sports lookup · Headless Browser · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
 </p>
 
 <p align="center">
@@ -47,7 +47,7 @@
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
 | **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction — runs after file search so private documents take priority |
 | **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, IPL cricket, and broad sports headlines |
-| **News Lookup** | Actually Relevant News API-backed newspaper-style editions for non-sports current events — no API key required |
+| **Headless Browser** | Full Chromium-powered browsing via go-rod — `browser_navigate`, `browser_screenshot`, `browser_interact`, `browser_pdf`, and `browser_session` tools for JS-heavy pages, research, and stateful multi-step browsing; auto-downloads Chromium on first use; stealth mode for anti-bot bypass |
 | **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, and document generation |
 | **Artifact Export** | Ask the LLM for any supported format and it generates a downloadable file automatically — `.docx` (Word), `.xlsx` (Excel), `.csv`, `.pdf`, `.md` (Markdown), `.html`, `.json`, `.yaml` — no copy-pasting required |
 
@@ -158,12 +158,12 @@ Frontend (React/TS)  ──SSE/REST──▶  Backend (Go/Chi)  ──SQL──�
                                           ├──▶  LLM Providers (OpenAI-compatible)
                                           ├──▶  Brave Search / DuckDuckGo
                                           ├──▶  Jina Reader
-                                          └──▶  ESPN public sports APIs
-                                          └──▶  Actually Relevant News API
+                                          ├──▶  ESPN public sports APIs
+                                          └──▶  go-rod/Chromium (headless browser)
 ```
 
 - **Frontend** — Single-page React app with Zustand state management, Tailwind v4 styling, and Framer Motion animations. Includes a full-featured Image Studio with canvas editor.
-- **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image generation routed through provider-specific adapters (OpenAI, Gemini, Stable Diffusion, Together), with ESPN-backed sports lookup and Actually Relevant News lookup handled locally before LLM fallback.
+- **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image generation routed through provider-specific adapters (OpenAI, Gemini, Stable Diffusion, Together), with ESPN-backed sports lookup handled locally before LLM fallback, and go-rod/Chromium available for JS-heavy page rendering and stateful browser sessions.
 - **Database** — SQLite with WAL mode, 33 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions, nodes, assets, masks, and references stored relationally.
 - **Vector store (RAG)** — [`chromem-go`](https://github.com/philippgille/chromem-go) embedded vector DB with collections per conversation, workspace, and global scope. Multi-threaded NN search; zero third-party Go dependencies. Chunk text stays in SQLite (`document_chunks`); chromem stores vectors only. Legacy `document_embeddings` rows lazy-migrate on first retrieval after upgrade.
 - **File Library** — Durable file storage with conversation, workspace, and global scopes. Hybrid retrieval (vector + keyword) with citation-aware results. Dedicated UI panel for managing indexed files.
@@ -179,10 +179,9 @@ From a single chat prompt to streamed tokens back in the UI:
 1. Frontend sends the prompt to `/v1/conversations/:conversationId/messages/stream`
 2. Backend validates auth/ownership, loads context, and applies local preflight checks
 3. High-confidence ESPN-backed sports data prompts are answered directly through `sports_lookup`
-4. High-confidence non-sports news prompts are answered directly through `news_lookup`
-5. File intent detection runs — if the user asks about uploaded files, file search runs before web search so private documents take priority
-6. If not handled locally, optional enrichments run (RAG retrieval, tools, web search) based on settings and model behavior
-7. SSE events stream tokens and metadata back to the client in real time — including `rag_indexing`, `file_search`, `web_search`, and `url_context` status events
+4. File intent detection runs — if the user asks about uploaded files, file search runs before web search so private documents take priority
+5. If not handled locally, optional enrichments run (RAG retrieval, tools, web search, headless browser) based on settings and model behavior
+6. SSE events stream tokens and metadata back to the client in real time — including `rag_indexing`, `file_search`, `web_search`, `url_context`, and `browser_navigate` status events
 
 ---
 
@@ -296,30 +295,43 @@ Sports lookup is enabled by default and does not require an API key. Ask natural
 
 The backend detects high-confidence sports intent, calls ESPN public APIs through `github.com/chinmaykhachane/espn-go`, and returns a Markdown table directly instead of letting the LLM answer from memory. It supports scores, schedules, standings, betting odds, league news, team news, broad sports headlines, rosters, injuries, transactions, team records, rankings, player stats, league stats, and player leaderboards such as home runs, RBI, passing yards, points per game, and goals. IPL cricket uses ESPN's Indian Premier League cricket series (`8048`) and renders cricket standings with M/W/L/T/N/R/PT/NRR columns. Odds prompts return ESPN-provided moneylines, spreads, totals, and provider names when ESPN includes them. Leaderboard/stat prompts are routed before standings so wording like "in a table" does not accidentally become a standings lookup. Toggle it with `sports_lookup_enabled` via the feature flags API.
 
-### 6. Ask Current News Questions (optional)
+### 6. Enable Headless Browser Tools (optional)
 
-News lookup is enabled by default and does not require an API key. OmniLLM-Studio detects high-confidence non-sports news prompts, calls the Actually Relevant public API, and returns a newspaper-style Markdown edition. Ask naturally:
+The headless browser feature is **enabled by default** for new installations. It requires one additional environment variable to activate the runtime:
 
-- *"What are the latest headlines?"*
-- *"Show me today's AI news."*
-- *"Latest climate headlines."*
-- *"Give me a front page of important global stories."*
-- *"What's happening with nuclear risk?"*
-- *"Show me the latest public health news."*
-- *"What are the top global news stories that matter?"*
+```bash
+export OMNILLM_BROWSER_ENABLED=true   # Linux / macOS
+set OMNILLM_BROWSER_ENABLED=true      # Windows CMD
+$env:OMNILLM_BROWSER_ENABLED="true"   # Windows PowerShell
+```
 
-The backend detects high-confidence non-sports news intent, calls the Actually Relevant News API (free, no key required), and returns a formatted newspaper-style response with lead story, headlines, and news briefs. Sports prompts continue to route to the ESPN-backed sports lookup. Toggle it with `news_lookup_enabled` via the feature flags API.
+On first use, go-rod automatically downloads a compatible Chromium build to the cache directory (default: `~/.omnillm-studio/chromium-cache` on macOS/Linux, `%AppData%\OmniLLM-Studio\chromium-cache` on Windows). No manual browser installation is needed.
+
+**What the browser tools can do:**
+
+| Tool | Description |
+|---|---|
+| `browser_navigate` | Load a URL and extract rendered text — works on JS-heavy SPAs, paywalled summaries, and pages that block simple HTTP fetches |
+| `browser_screenshot` | Capture a full-page or viewport PNG screenshot |
+| `browser_interact` | Click buttons, fill forms, scroll, and interact with page elements |
+| `browser_pdf` | Export the current page as a PDF |
+| `browser_session` | Open a persistent named browser session for multi-step workflows |
+
+Example prompts:
+- *"Go to github.com/ajbergh/OmniLLM-Studio and summarize the README."*
+- *"Take a screenshot of news.ycombinator.com"*
+- *"Browse to the React docs and explain the useState hook."*
+- *"Find the most recent blog posts about Red Hat Summit 2026."*
 
 **Configuration (environment variables):**
 
 | Variable | Default | Description |
 |---|---|---|
-| `NEWS_LOOKUP_ENABLED` | `true` | Enable/disable news lookup |
-| `NEWS_LOOKUP_BASE_URL` | `https://actually-relevant-api.onrender.com/api` | Actually Relevant API base URL |
-| `NEWS_LOOKUP_TIMEOUT_SECONDS` | `8` | HTTP client timeout |
-| `NEWS_LOOKUP_CACHE_TTL_SECONDS` | `300` | In-memory cache TTL (5 min) |
-| `NEWS_LOOKUP_DEFAULT_PAGE_SIZE` | `8` | Default stories per request |
-| `NEWS_LOOKUP_MAX_PAGE_SIZE` | `15` | Maximum stories per request |
+| `OMNILLM_BROWSER_ENABLED` | `false` | Activate the Chromium runtime (feature flag controls tool visibility) |
+| `OMNILLM_BROWSER_CACHE_DIR` | `~/.omnillm-studio/chromium-cache` | Where go-rod downloads and caches Chromium |
+| `OMNILLM_BROWSER_EXEC` | *(auto)* | Path to an existing Chromium/Chrome binary — skips the auto-download |
+
+Toggle tool visibility with the `headless_browser` feature flag in **Settings → Tools**.
 
 ---
 
@@ -356,7 +368,7 @@ OmniLLM-Studio/
 │       ├── rag/                         # Chunker, retriever, context builder
 │       ├── repository/                  # Database CRUD layer
 │       ├── search/                      # Semantic search service
-│       ├── news/                       # Actually Relevant News API — newspaper-style current events lookup
+        ├── browser/                     # Headless Chromium via go-rod — session manager, tools, stealth mode
 │       ├── sports/                      # ESPN-backed scores, schedules, standings, odds, news, stats, and roster lookup
 │       ├── templates/                   # Prompt template seeding
 │       ├── tools/                       # Tool registry + executor (web search, sports, calculator, document gen)

@@ -50,6 +50,9 @@ func BuildPromptContext(sources []ResolvedSource) string {
 
 	for i, src := range sources {
 		fmt.Fprintf(&sb, "## Source %d\n", i+1)
+		if src.LoadedViaBrowser {
+			sb.WriteString("[URL Context - already fetched via headless browser, do not call browser/fetch tools for this URL]\n")
+		}
 		fmt.Fprintf(&sb, "Type: %s\n", src.Kind)
 		if src.Title != "" {
 			fmt.Fprintf(&sb, "Title: %s\n", src.Title)
@@ -218,6 +221,9 @@ func BuildCompactPromptContext(sources []ResolvedSource) string {
 
 	for i, src := range sources {
 		fmt.Fprintf(&sb, "## Source %d\n", i+1)
+		if src.LoadedViaBrowser {
+			sb.WriteString("[URL Context - already fetched via headless browser, do not call browser/fetch tools for this URL]\n")
+		}
 		fmt.Fprintf(&sb, "Type: %s\n", src.Kind)
 		if src.Title != "" {
 			fmt.Fprintf(&sb, "Title: %s\n", src.Title)
