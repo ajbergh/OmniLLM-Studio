@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import { toast } from 'sonner';
 import { api } from '../api';
-import { KNOWN_MODELS, getKnownChatModels, isFreeModel } from '../models';
+import { KNOWN_MODELS, getKnownChatModels, isFreeModel, getModelToolCallingSupport, getProviderToolCallingSupport } from '../models';
 
 interface Props {
   conversationId: string;
@@ -15,6 +15,17 @@ function FreeModelBadge() {
   return (
     <span className="shrink-0 rounded-md border border-success/30 bg-success/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-success">
       FREE
+    </span>
+  );
+}
+
+function NoToolsBadge({ title }: { title?: string }) {
+  return (
+    <span
+      title={title ?? 'This model does not support function calling — tools like web search and browser are unavailable'}
+      className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-500/70"
+    >
+      no tools
     </span>
   );
 }
@@ -200,6 +211,9 @@ export function ModelSelector({ conversationId }: Props) {
                           {isOllama && loadingOllama && (
                             <Loader2 size={10} className="animate-spin text-text-muted/40" />
                           )}
+                          {!getProviderToolCallingSupport(provider.type) && (
+                            <NoToolsBadge title={`${provider.name} models do not currently support function calling — web search, browser tools, and other tool use are unavailable`} />
+                          )}
                         </div>
 
                         {/* Dynamic/known models */}
@@ -221,6 +235,9 @@ export function ModelSelector({ conversationId }: Props) {
                               <span className="min-w-0 flex flex-1 items-center gap-1.5">
                                 <span className="truncate">{model}</span>
                                 {modelIsFree && <FreeModelBadge />}
+                                {getProviderToolCallingSupport(provider.type) && !getModelToolCallingSupport(provider.type, model) && (
+                                  <NoToolsBadge />
+                                )}
                               </span>
                               {isActive && <Check size={12} className="text-primary shrink-0" />}
                             </button>
@@ -245,6 +262,9 @@ export function ModelSelector({ conversationId }: Props) {
                               <span className="min-w-0 flex flex-1 items-center gap-1.5">
                                 <span className="truncate">{provider.default_model}</span>
                                 {isFreeModel(provider.type, provider.default_model) && <FreeModelBadge />}
+                                {getProviderToolCallingSupport(provider.type) && !getModelToolCallingSupport(provider.type, provider.default_model!) && (
+                                  <NoToolsBadge />
+                                )}
                               </span>
                               {effectiveModel === provider.default_model && effectiveProvider === provider.id && (
                                 <Check size={12} className="text-primary shrink-0" />

@@ -22,7 +22,7 @@ import { api, templateApi, branchApi, agentApi, workspaceApi } from '../api';
 import { matchesShortcut } from '../shortcuts';
 import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary } from '../types';
 import { AgentEventType } from '../types';
-import { getModelReasoningLevels, isFreeModel, type ReasoningEffortLevel } from '../models';
+import { getModelReasoningLevels, getModelToolCallingSupport, isFreeModel, type ReasoningEffortLevel } from '../models';
 
 type PendingUploadStatus = 'pending' | 'uploading' | 'failed';
 
@@ -168,6 +168,12 @@ export function ChatView() {
 
   // Reasoning effort levels supported by the current model (null = not supported)
   const reasoningLevels = getModelReasoningLevels(
+    activeProvider?.type || '',
+    activeConvo?.default_model || ''
+  );
+  // Whether the current provider+model supports structured function calling.
+  // false for Gemini (excluded in backend) and non-capable Ollama models.
+  const toolsSupported = getModelToolCallingSupport(
     activeProvider?.type || '',
     activeConvo?.default_model || ''
   );
@@ -1101,15 +1107,26 @@ export function ChatView() {
 
             {/* Web search toggle */}
             <button
-              onClick={() => setWebSearchEnabled((v) => !v)}
+              onClick={() => toolsSupported && setWebSearchEnabled((v) => !v)}
+              disabled={!toolsSupported}
               className={clsx(
                 'order-1 min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl transition-colors shrink-0',
-                webSearchEnabled
+                !toolsSupported
+                  ? 'opacity-30 cursor-not-allowed text-text-muted'
+                  : webSearchEnabled
                   ? 'bg-blue-500/20 text-blue-400'
                   : 'text-text-muted hover:text-text'
               )}
-              aria-label={webSearchEnabled ? 'Disable web search' : 'Enable web search'}
-              title={webSearchEnabled ? 'Web search ON (click to disable)' : 'Web search OFF (click to enable)'}
+              aria-label={
+                !toolsSupported
+                  ? 'Web search unavailable — current model does not support tool calling'
+                  : webSearchEnabled ? 'Disable web search' : 'Enable web search'
+              }
+              title={
+                !toolsSupported
+                  ? `Web search requires function calling. ${activeProvider?.type === 'gemini' ? 'Gemini models do not currently support tool use in this app.' : 'Switch to a model that supports tool calling (e.g. Claude, GPT-4o, or llama3.1 via Ollama).'}`
+                  : webSearchEnabled ? 'Web search ON (click to disable)' : 'Web search OFF (click to enable)'
+              }
             >
               <Globe size={16} />
             </button>

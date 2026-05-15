@@ -396,3 +396,48 @@ export function getModelReasoningLevels(
   if (supported.includes(model)) return [...REASONING_EFFORT_LEVELS];
   return null;
 }
+
+// Ollama models known to support structured function calling.
+// Matched as prefix — "llama3.1:8b" matches "llama3.1".
+const OLLAMA_TOOL_CALLING_MODELS = [
+  'llama3.1', 'llama3.2', 'llama3.3',
+  'qwen2.5', 'qwen2.5-coder',
+  'mistral-nemo', 'mistral-small',
+  'hermes3', 'hermes2pro',
+  'firefunction-v2',
+  'command-r', 'command-r-plus',
+];
+
+// Provider-level defaults. false = backend excludes this provider from all tool calling.
+const TOOL_CALLING_PROVIDER_DEFAULT: Record<string, boolean> = {
+  openai:      true,
+  anthropic:   true,
+  gemini:      false, // excluded in message_handler.go (thought_signature requirement)
+  groq:        true,
+  mistral:     true,
+  together:    true,
+  openrouter:  true,
+};
+
+/**
+ * Returns true if the provider supports tool calling at all (ignoring per-model variance).
+ * Used for provider-section-level UI indicators in the model selector.
+ */
+export function getProviderToolCallingSupport(providerType: string): boolean {
+  const pt = providerType.toLowerCase();
+  if (pt === 'ollama') return true; // some Ollama models do support tools
+  return TOOL_CALLING_PROVIDER_DEFAULT[pt] ?? true;
+}
+
+/**
+ * Returns true if this specific provider+model supports structured function calling.
+ * Used to gate tool-dependent UI controls (web search toggle, browser tools, etc.).
+ * Unknown provider/model combinations default to true (optimistic; backend handles gracefully).
+ */
+export function getModelToolCallingSupport(providerType: string, model: string): boolean {
+  const pt = providerType.toLowerCase();
+  if (pt === 'ollama') {
+    return OLLAMA_TOOL_CALLING_MODELS.some(m => model.toLowerCase().startsWith(m));
+  }
+  return TOOL_CALLING_PROVIDER_DEFAULT[pt] ?? true;
+}
