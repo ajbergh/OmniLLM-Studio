@@ -1804,22 +1804,46 @@ function BrowserSettingsCard({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <InfoRow label="Runtime" value={browserUnavailable ? 'Unavailable' : loading ? 'Loading...' : runtimeReady ? 'Ready' : 'Disabled'} />
-          <InfoRow label="Process" value={status?.browser_running ? 'Running' : 'Stopped'} />
-          <InfoRow label="Sessions" value={String(activeCount)} />
-        </div>
-
-        {status?.cache_dir && (
-          <div className="text-[10px] text-text-muted truncate">
-            Cache: <span className="font-mono">{status.cache_dir}</span>
+        {enabled && (
+          <div className="flex items-center gap-3 py-1">
+            {browserUnavailable ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                <div className="min-w-0">
+                  <span className="text-xs text-amber-300">Tools not registered</span>
+                  <p className="text-[10px] text-text-muted mt-0.5">Restart the backend to activate the browser implementation.</p>
+                </div>
+              </>
+            ) : loading ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-text-muted/40 shrink-0 animate-pulse" />
+                <span className="text-xs text-text-muted">Checking Chromium status…</span>
+              </>
+            ) : runtimeReady ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <span className="text-xs text-emerald-300">Chromium ready</span>
+                  {status?.cache_dir && (
+                    <p className="text-[10px] text-text-muted font-mono truncate mt-0.5">{status.cache_dir}</p>
+                  )}
+                </div>
+                {activeCount > 0 && (
+                  <span className="ml-auto shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400">
+                    {activeCount} session{activeCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                <div className="min-w-0">
+                  <span className="text-xs text-amber-300">Backend not configured</span>
+                  <p className="text-[10px] text-text-muted mt-0.5">Set <span className="font-mono">OMNILLM_BROWSER_ENABLED=true</span> and restart to enable Chromium.</p>
+                </div>
+              </>
+            )}
           </div>
-        )}
-
-        {browserUnavailable && (
-          <p className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">
-            Browser feature flag is enabled, but this backend has not registered the browser tools yet. Restart the backend after applying the browser implementation.
-          </p>
         )}
 
         {sessions.length > 0 && (

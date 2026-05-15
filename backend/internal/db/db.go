@@ -553,7 +553,7 @@ CREATE INDEX IF NOT EXISTS idx_browser_sessions_user ON browser_sessions(user_id
 CREATE INDEX IF NOT EXISTS idx_browser_sessions_last_used ON browser_sessions(last_used_at);
 
 INSERT INTO feature_flags (key, enabled, metadata)
-VALUES ('headless_browser', 0, '{}')
+VALUES ('headless_browser', 1, '{}')
 ON CONFLICT(key) DO NOTHING;
 `
 
