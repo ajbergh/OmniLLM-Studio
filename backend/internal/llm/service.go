@@ -248,6 +248,60 @@ func (s *Service) ResolveProviderType(providerName string) (string, error) {
 	return providerType, nil
 }
 
+// IsChatCapableProvider reports whether a provider type can serve
+// OpenAI-compatible chat completions in this service.
+func IsChatCapableProvider(providerType string) bool {
+	switch strings.ToLower(strings.TrimSpace(providerType)) {
+	case "openai", "anthropic", "ollama", "openrouter", "groq", "together", "mistral", "gemini":
+		return true
+	default:
+		return false
+	}
+}
+
+// ResolveChatProviderModel returns an enabled chat-capable provider ID and
+// concrete model. If providerName is empty, the first enabled chat-capable
+// provider is returned.
+func (s *Service) ResolveChatProviderModel(providerName, requestedModel string) (string, string, error) {
+	providers, err := s.providerRepo.List()
+	if err != nil {
+		return "", "", fmt.Errorf("list providers: %w", err)
+	}
+
+	modelForProvider := func(p models.ProviderProfile) string {
+		model := strings.TrimSpace(requestedModel)
+		if model == "" && p.DefaultModel != nil {
+			model = strings.TrimSpace(*p.DefaultModel)
+		}
+		if model == "" {
+			model = getDefaultModel(p.Type)
+		}
+		return model
+	}
+
+	if providerName != "" {
+		for i := range providers {
+			p := providers[i]
+			if !p.Enabled || !IsChatCapableProvider(p.Type) {
+				continue
+			}
+			if p.ID == providerName || p.Name == providerName || p.Type == providerName {
+				return p.ID, modelForProvider(p), nil
+			}
+		}
+		return "", "", fmt.Errorf("provider %q is not enabled or chat-capable", providerName)
+	}
+
+	for i := range providers {
+		p := providers[i]
+		if p.Enabled && IsChatCapableProvider(p.Type) {
+			return p.ID, modelForProvider(p), nil
+		}
+	}
+
+	return "", "", fmt.Errorf("no enabled chat-capable provider found")
+}
+
 // ResolveImageModel returns the concrete image model that would be used for an
 // image request, plus the provider type. It mirrors ImageGenerate's model
 // fallback without making a provider API request.

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -103,6 +104,29 @@ type imageSessionImportRequest struct {
 	Instruction  string `json:"instruction,omitempty"`
 }
 
+type imagePromptEnhanceRequest struct {
+	Prompt string `json:"prompt"`
+	Mode   string `json:"mode,omitempty"`
+	Size   string `json:"size,omitempty"`
+
+	ImageModel               string `json:"image_model,omitempty"`
+	ReferenceImageCount      int    `json:"reference_image_count,omitempty"`
+	StyleReferenceImageCount int    `json:"style_reference_image_count,omitempty"`
+	HasBaseImage             bool   `json:"has_base_image,omitempty"`
+
+	Override *struct {
+		Provider *string `json:"provider,omitempty"`
+		Model    *string `json:"model,omitempty"`
+	} `json:"override,omitempty"`
+}
+
+type imagePromptEnhanceResponse struct {
+	Prompt         string `json:"prompt"`
+	OriginalPrompt string `json:"original_prompt"`
+	Provider       string `json:"provider,omitempty"`
+	Model          string `json:"model,omitempty"`
+}
+
 type generateResponse struct {
 	Node   models.ImageNode        `json:"node"`
 	Assets []models.ImageNodeAsset `json:"assets"`
@@ -117,6 +141,24 @@ type nodeWithMask struct {
 	models.ImageNode
 	Mask *models.ImageMask `json:"mask,omitempty"`
 }
+
+const (
+	imagePromptEnhanceTimeout   = 45 * time.Second
+	maxPromptEnhanceInputChars  = 6000
+	maxPromptEnhanceOutputChars = 2000
+)
+
+const imagePromptEnhanceSystemPrompt = `You are an expert image prompt engineer for a multi-provider image studio.
+
+Rewrite the user's prompt into one stronger image-model-ready prompt.
+
+Rules:
+- Preserve all concrete user intent, subjects, quantities, exclusions, quoted text, aspect/orientation requests, and constraints.
+- Add useful visual specificity: subject detail, environment, composition, lighting, camera/framing, materials, color palette, and style/medium when helpful.
+- For edit mode, write an actionable edit instruction that keeps unchanged regions intact and describes only the requested change.
+- Do not add artist names, copyrighted characters, brand names, public figures, or sensitive details that the user did not provide.
+- Do not include labels, markdown, code fences, alternatives, commentary, or negative-prompt sections.
+- Return only the enhanced prompt, ideally 35-120 words.`
 
 // ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -207,7 +249,7 @@ func (h *ImageSessionHandler) GetSession(w http.ResponseWriter, r *http.Request)
 		respondInternalError(w, err)
 		return
 	}
-	if session.ConversationID != convoID {
+	if session == nil || session.ConversationID != convoID {
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
@@ -343,7 +385,7 @@ func (h *ImageSessionHandler) DeleteSession(w http.ResponseWriter, r *http.Reque
 		respondInternalError(w, err)
 		return
 	}
-	if session.ConversationID != convoID {
+	if session == nil || session.ConversationID != convoID {
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
@@ -670,6 +712,79 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusCreated, generateResponse{
 		Node:   *node,
 		Assets: assets,
+	})
+}
+
+// EnhancePrompt rewrites a user's Image Studio prompt or edit instruction using
+// the configured chat provider without generating an image.
+// POST /v1/conversations/{conversationId}/images/sessions/{sessionId}/enhance-prompt
+func (h *ImageSessionHandler) EnhancePrompt(w http.ResponseWriter, r *http.Request) {
+	convoID := chi.URLParam(r, "conversationId")
+	sessionID := chi.URLParam(r, "sessionId")
+	userID := auth.UserIDFromContext(r.Context())
+
+	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	if convo == nil {
+		respondError(w, http.StatusNotFound, "conversation not found")
+		return
+	}
+
+	session, err := h.sessionRepo.GetByID(sessionID)
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	if session == nil || session.ConversationID != convoID {
+		respondError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	var req imagePromptEnhanceRequest
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Prompt = strings.TrimSpace(req.Prompt)
+	if req.Prompt == "" {
+		respondError(w, http.StatusBadRequest, "prompt is required")
+		return
+	}
+
+	provider, model, err := h.resolvePromptEnhancementProvider(req.Override, convo)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "AI enhance requires an enabled chat-capable provider")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), imagePromptEnhanceTimeout)
+	defer cancel()
+
+	resp, err := h.llmSvc.ChatComplete(ctx, llm.ChatRequest{
+		Provider: provider,
+		Model:    model,
+		Messages: buildImagePromptEnhancementMessages(req),
+	})
+	if err != nil {
+		log.Printf("[image-session] prompt enhance failed: %v", err)
+		respondError(w, http.StatusBadGateway, "prompt enhancement failed: "+err.Error())
+		return
+	}
+
+	enhanced := cleanEnhancedImagePrompt(resp.Content)
+	if enhanced == "" {
+		respondError(w, http.StatusBadGateway, "prompt enhancement returned an empty prompt")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, imagePromptEnhanceResponse{
+		Prompt:         enhanced,
+		OriginalPrompt: req.Prompt,
+		Provider:       resp.Provider,
+		Model:          resp.Model,
 	})
 }
 
@@ -1038,6 +1153,139 @@ func (h *ImageSessionHandler) SelectVariant(w http.ResponseWriter, r *http.Reque
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+func (h *ImageSessionHandler) resolvePromptEnhancementProvider(override *struct {
+	Provider *string `json:"provider,omitempty"`
+	Model    *string `json:"model,omitempty"`
+}, convo *models.Conversation) (string, string, error) {
+	tryResolve := func(provider, model string) (string, string, bool) {
+		provider = strings.TrimSpace(provider)
+		model = strings.TrimSpace(model)
+		if provider == "" {
+			return "", "", false
+		}
+		resolvedProvider, resolvedModel, err := h.llmSvc.ResolveChatProviderModel(provider, model)
+		if err != nil {
+			return "", "", false
+		}
+		return resolvedProvider, resolvedModel, true
+	}
+
+	if override != nil {
+		provider := ""
+		model := ""
+		if override.Provider != nil {
+			provider = *override.Provider
+		}
+		if override.Model != nil {
+			model = *override.Model
+		}
+		if resolvedProvider, resolvedModel, ok := tryResolve(provider, model); ok {
+			return resolvedProvider, resolvedModel, nil
+		}
+	}
+
+	if convo.DefaultProvider != nil {
+		model := ""
+		if convo.DefaultModel != nil {
+			model = *convo.DefaultModel
+		}
+		if resolvedProvider, resolvedModel, ok := tryResolve(*convo.DefaultProvider, model); ok {
+			return resolvedProvider, resolvedModel, nil
+		}
+	}
+
+	return h.llmSvc.ResolveChatProviderModel("", "")
+}
+
+func buildImagePromptEnhancementMessages(req imagePromptEnhanceRequest) []llm.ChatMessage {
+	mode := normalizePromptEnhancementMode(req.Mode)
+	prompt := truncateRunes(strings.TrimSpace(req.Prompt), maxPromptEnhanceInputChars)
+
+	var contextLines []string
+	contextLines = append(contextLines,
+		"Mode: "+mode,
+		"User prompt:",
+		prompt,
+	)
+
+	var hints []string
+	if req.Size != "" {
+		hints = append(hints, "canvas size "+req.Size)
+	}
+	if req.ImageModel != "" {
+		hints = append(hints, "target image model "+req.ImageModel)
+	}
+	if req.ReferenceImageCount > 0 {
+		hints = append(hints, fmt.Sprintf("%d content reference image(s)", req.ReferenceImageCount))
+	}
+	if req.StyleReferenceImageCount > 0 {
+		hints = append(hints, fmt.Sprintf("%d style reference image(s)", req.StyleReferenceImageCount))
+	}
+	if req.HasBaseImage {
+		hints = append(hints, "base image is present")
+	}
+	if len(hints) > 0 {
+		contextLines = append(contextLines, "", "Studio context: "+strings.Join(hints, "; "))
+	}
+
+	return []llm.ChatMessage{
+		{Role: "system", Content: imagePromptEnhanceSystemPrompt},
+		{Role: "user", Content: strings.Join(contextLines, "\n")},
+	}
+}
+
+func normalizePromptEnhancementMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "edit", "instruction":
+		return "edit"
+	default:
+		return "generate"
+	}
+}
+
+func cleanEnhancedImagePrompt(raw string) string {
+	prompt := strings.TrimSpace(raw)
+	prompt = strings.TrimPrefix(prompt, "\ufeff")
+	prompt = strings.TrimSpace(prompt)
+
+	for {
+		lower := strings.ToLower(prompt)
+		switch {
+		case strings.HasPrefix(lower, "```text"):
+			prompt = strings.TrimSpace(prompt[len("```text"):])
+		case strings.HasPrefix(lower, "```"):
+			prompt = strings.TrimSpace(prompt[len("```"):])
+		case strings.HasPrefix(lower, "enhanced prompt:"):
+			prompt = strings.TrimSpace(prompt[len("enhanced prompt:"):])
+		case strings.HasPrefix(lower, "prompt:"):
+			prompt = strings.TrimSpace(prompt[len("prompt:"):])
+		case strings.HasPrefix(lower, "instruction:"):
+			prompt = strings.TrimSpace(prompt[len("instruction:"):])
+		default:
+			goto strippedPrefixes
+		}
+	}
+
+strippedPrefixes:
+	prompt = strings.TrimSpace(prompt)
+	prompt = strings.TrimSuffix(prompt, "```")
+	prompt = strings.TrimSpace(prompt)
+	prompt = strings.Trim(prompt, `"'`)
+	prompt = strings.TrimSpace(prompt)
+	return truncateRunes(prompt, maxPromptEnhanceOutputChars)
+}
+
+func truncateRunes(value string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:maxRunes]))
+}
 
 func (h *ImageSessionHandler) resolveProviderModel(override *struct {
 	Provider *string `json:"provider,omitempty"`

@@ -70,3 +70,50 @@ test('floating canvas toolbar responds in image edit mode', async ({ page, brows
   await maskButton.click();
   await expect(maskCanvas).toHaveCSS('opacity', '0');
 });
+
+test('AI enhance rewrites and can undo an image studio prompt', async ({ page, browserName }) => {
+  const sessionTitle = `Prompt Enhance ${browserName} ${Date.now()}`;
+  const fixture = seedImageSessionFixture(sessionTitle);
+  const originalPrompt = 'cozy cabin in the woods';
+  const enhancedPrompt = 'A cozy cedar cabin tucked into a misty pine forest, warm window light, textured snow, cinematic dusk composition, soft volumetric lighting, natural color palette, highly detailed.';
+  let requestBody: Record<string, unknown> | undefined;
+
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+  });
+
+  await page.route('**/v1/conversations/*/images/sessions/*/enhance-prompt', async (route) => {
+    requestBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        prompt: enhancedPrompt,
+        original_prompt: originalPrompt,
+        provider: 'test',
+        model: 'test-model',
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'Image Studio' }).click();
+  await expect(page.getByText(fixture.title)).toBeVisible();
+
+  await page.getByText(fixture.title).click();
+  await expect(page.getByText('Image Edit Studio')).toBeVisible();
+
+  const promptInput = page.getByPlaceholder('Describe the image you want to generate...');
+  await promptInput.fill(originalPrompt);
+  await page.getByRole('button', { name: /AI enhance prompt/i }).click();
+
+  await expect(promptInput).toHaveValue(enhancedPrompt);
+  expect(requestBody).toMatchObject({
+    prompt: originalPrompt,
+    mode: 'generate',
+  });
+
+  await page.getByRole('button', { name: 'Undo AI enhance' }).click();
+  await expect(promptInput).toHaveValue(originalPrompt);
+});

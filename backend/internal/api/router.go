@@ -345,6 +345,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 							r.Delete("/", imageSessionHandler.DeleteSession)
 							r.Post("/generate", imageSessionHandler.Generate)
 							r.Post("/edit", imageSessionHandler.Edit)
+							r.Post("/enhance-prompt", imageSessionHandler.EnhancePrompt)
 							r.Post("/import", imageSessionHandler.ImportAttachment)
 							r.Post("/mask", imageSessionHandler.UploadMask)
 							r.Get("/assets", imageSessionHandler.GetAssets)

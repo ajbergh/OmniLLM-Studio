@@ -24,6 +24,17 @@ interface ImageEditStudioProps {
 
 type MobileImagePanel = 'prompt' | 'canvas' | 'history';
 
+const CHAT_CAPABLE_PROVIDER_TYPES = new Set([
+  'openai',
+  'anthropic',
+  'ollama',
+  'openrouter',
+  'groq',
+  'together',
+  'mistral',
+  'gemini',
+]);
+
 export function ImageEditStudio({ conversationId: propConversationId, onClose }: ImageEditStudioProps = {}) {
   const providers = useProviderStore((s) => s.providers);
   const activeConversationId = useImageEditorStore((s) => s.activeConversationId);
@@ -89,9 +100,12 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [mobilePanel, setMobilePanel] = useState<MobileImagePanel>('prompt');
+  const [enhancingPrompt, setEnhancingPrompt] = useState(false);
+  const [lastPromptBeforeEnhance, setLastPromptBeforeEnhance] = useState<string | null>(null);
   const refInputRef = useRef<HTMLInputElement>(null);
   const pendingRefType = useRef<'content' | 'style'>('content');
   const canvasRef = useRef<ImageCanvasHandle>(null);
+  const promptInputRef = useRef<HTMLTextAreaElement>(null);
   const [capabilities, setCapabilities] = useState<ImageCapabilities | null>(null);
   const imageCapableProviders = useMemo(() => providers.filter((p) => p.image_capable && p.enabled), [providers]);
   const prevProviderRef = useRef<string | null>(null);
@@ -181,6 +195,21 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     };
   }, [capabilities, selectedImageModel]);
 
+  const selectedProviderProfile = useMemo(
+    () => providers.find((provider) => provider.id === selectedProvider || provider.name === selectedProvider),
+    [providers, selectedProvider]
+  );
+
+  const promptEnhanceOverride = useMemo(() => {
+    if (!selectedProviderProfile || !selectedProviderProfile.enabled) {
+      return undefined;
+    }
+    if (!CHAT_CAPABLE_PROVIDER_TYPES.has(selectedProviderProfile.type.toLowerCase())) {
+      return undefined;
+    }
+    return { provider: selectedProviderProfile.id };
+  }, [selectedProviderProfile]);
+
   // Keyboard shortcuts for canvas tools/zoom
   const handleShortcutDownload = useCallback(() => {
     // Trigger download of the current selected asset image
@@ -228,6 +257,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
       override: selectedProvider ? { provider: selectedProvider, model: selectedImageModel || undefined } : undefined,
     });
     setPrompt('');
+    setLastPromptBeforeEnhance(null);
   };
 
   const handleEdit = async () => {
@@ -283,9 +313,58 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
       override: selectedProvider ? { provider: selectedProvider, model: selectedImageModel || undefined } : undefined,
     });
     setPrompt('');
+    setLastPromptBeforeEnhance(null);
+  };
+
+  const handlePromptChange = (value: string) => {
+    setPrompt(value);
+    setLastPromptBeforeEnhance(null);
+  };
+
+  const handleEnhancePrompt = async () => {
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt || !activeSessionId || enhancingPrompt) return;
+
+    const selectedAssetForEdit = activeNodeAssets.find((a) => a.is_selected);
+    const sessionBaseImageIdForEdit = sessionBaseImage?.sessionId === activeSessionId ? sessionBaseImage.attachmentId : null;
+    const hasBaseImage = editMode === 'edit' && Boolean(selectedAssetForEdit?.attachment_id ?? sessionBaseImageIdForEdit);
+
+    setEnhancingPrompt(true);
+    try {
+      const result = await imageSessionApi.enhancePrompt(conversationId!, activeSessionId, {
+        prompt: trimmedPrompt,
+        mode: editMode,
+        size,
+        image_model: selectedImageModel || undefined,
+        reference_image_count: contentReferenceIds.length,
+        style_reference_image_count: styleReferenceIds.length,
+        has_base_image: hasBaseImage,
+        override: promptEnhanceOverride,
+      });
+      const enhancedPrompt = result.prompt.trim();
+      if (!enhancedPrompt) {
+        throw new Error('Prompt enhancement returned an empty prompt');
+      }
+      setLastPromptBeforeEnhance(prompt);
+      setPrompt(enhancedPrompt);
+      toast.success('Prompt enhanced');
+      requestAnimationFrame(() => promptInputRef.current?.focus());
+    } catch (err) {
+      toast.error(`Prompt enhancement failed: ${(err as Error).message}`);
+    } finally {
+      setEnhancingPrompt(false);
+    }
+  };
+
+  const handleUndoEnhance = () => {
+    if (lastPromptBeforeEnhance == null) return;
+    setPrompt(lastPromptBeforeEnhance);
+    setLastPromptBeforeEnhance(null);
+    requestAnimationFrame(() => promptInputRef.current?.focus());
   };
 
   const handleSubmit = () => {
+    if (enhancingPrompt) return;
     if (editMode === 'generate') {
       handleGenerate();
     } else {
@@ -581,12 +660,52 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
 
                 {/* Prompt / instruction */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-text-muted uppercase tracking-wide">
-                    {editMode === 'generate' ? 'Prompt' : 'Instruction'}
-                  </label>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-xs font-medium text-text-muted uppercase tracking-wide">
+                      {editMode === 'generate' ? 'Prompt' : 'Instruction'}
+                    </label>
+                    <div className="flex items-center gap-1">
+                      {lastPromptBeforeEnhance != null && (
+                        <button
+                          type="button"
+                          onClick={handleUndoEnhance}
+                          className="min-h-8 rounded-lg px-2 text-[10px] font-medium text-text-muted transition-colors hover:bg-surface-hover hover:text-text"
+                          aria-label="Undo AI enhance"
+                          title="Undo AI enhance"
+                        >
+                          Undo
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleEnhancePrompt}
+                        disabled={enhancingPrompt || generating || !prompt.trim()}
+                        className={clsx(
+                          'min-h-8 rounded-lg px-2.5 text-[10px] font-medium transition-colors inline-flex items-center gap-1.5',
+                          enhancingPrompt || generating || !prompt.trim()
+                            ? 'bg-surface-hover text-text-muted/40 cursor-not-allowed'
+                            : 'bg-primary/10 text-primary hover:bg-primary/20'
+                        )}
+                        aria-label="AI enhance prompt"
+                        title="AI enhance prompt"
+                      >
+                        {enhancingPrompt ? (
+                          <>
+                            <span className="h-3 w-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+                            Enhancing...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={12} /> AI Enhance
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
                   <textarea
+                    ref={promptInputRef}
                     value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
+                    onChange={(e) => handlePromptChange(e.target.value)}
                     placeholder={
                       editMode === 'generate'
                         ? 'Describe the image you want to generate...'
@@ -826,10 +945,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                 {/* Generate / Edit button */}
                 <button
                   onClick={handleSubmit}
-                  disabled={generating || !prompt.trim() || imageCapableProviders.length === 0}
+                  disabled={generating || enhancingPrompt || !prompt.trim() || imageCapableProviders.length === 0}
                   className={clsx(
                     'w-full py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2',
-                    generating || !prompt.trim() || imageCapableProviders.length === 0
+                    generating || enhancingPrompt || !prompt.trim() || imageCapableProviders.length === 0
                       ? 'bg-surface-hover text-text-muted cursor-not-allowed'
                       : 'bg-primary text-white hover:bg-primary-hover shadow-glow'
                   )}

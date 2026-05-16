@@ -62,6 +62,8 @@ import type {
   ImageEditGenerateRequest,
   ImageEditEditRequest,
   ImageEditGenerateResponse,
+  ImagePromptEnhanceRequest,
+  ImagePromptEnhanceResponse,
   ImageCapabilities,
   MCPServer,
   MCPAuditEvent,
@@ -1129,6 +1131,12 @@ export const imageSessionApi = {
   edit: (conversationId: string, sessionId: string, data: ImageEditEditRequest) =>
     apiFetch<ImageEditGenerateResponse>(
       `/conversations/${conversationId}/images/sessions/${sessionId}/edit`,
+      { method: 'POST', body: JSON.stringify(data) },
+    ),
+
+  enhancePrompt: (conversationId: string, sessionId: string, data: ImagePromptEnhanceRequest) =>
+    apiFetch<ImagePromptEnhanceResponse>(
+      `/conversations/${conversationId}/images/sessions/${sessionId}/enhance-prompt`,
       { method: 'POST', body: JSON.stringify(data) },
     ),
 

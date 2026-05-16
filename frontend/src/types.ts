@@ -999,6 +999,27 @@ export interface ImageEditGenerateResponse {
   assets: ImageNodeAsset[];
 }
 
+export interface ImagePromptEnhanceRequest {
+  prompt: string;
+  mode?: 'generate' | 'edit';
+  size?: string;
+  image_model?: string;
+  reference_image_count?: number;
+  style_reference_image_count?: number;
+  has_base_image?: boolean;
+  override?: {
+    provider?: string;
+    model?: string;
+  };
+}
+
+export interface ImagePromptEnhanceResponse {
+  prompt: string;
+  original_prompt: string;
+  provider?: string;
+  model?: string;
+}
+
 export interface ModelImageCapabilities {
   supports_editing?: boolean;
   supports_masking?: boolean;
