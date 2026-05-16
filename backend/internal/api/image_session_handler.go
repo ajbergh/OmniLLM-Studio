@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/auth"
@@ -95,6 +96,11 @@ type imageSessionEditRequest struct {
 		Provider *string `json:"provider,omitempty"`
 		Model    *string `json:"model,omitempty"`
 	} `json:"override,omitempty"`
+}
+
+type imageSessionImportRequest struct {
+	AttachmentID string `json:"attachment_id"`
+	Instruction  string `json:"instruction,omitempty"`
 }
 
 type generateResponse struct {
@@ -664,6 +670,100 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusCreated, generateResponse{
 		Node:   *node,
 		Assets: assets,
+	})
+}
+
+// ImportAttachment creates a new node/asset from an existing attachment.
+// POST /v1/conversations/{conversationId}/images/sessions/{sessionId}/import
+func (h *ImageSessionHandler) ImportAttachment(w http.ResponseWriter, r *http.Request) {
+	convoID := chi.URLParam(r, "conversationId")
+	sessionID := chi.URLParam(r, "sessionId")
+	userID := auth.UserIDFromContext(r.Context())
+
+	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	if convo == nil {
+		respondError(w, http.StatusNotFound, "conversation not found")
+		return
+	}
+
+	session, err := h.sessionRepo.GetByID(sessionID)
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	if session.ConversationID != convoID {
+		respondError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	var req imageSessionImportRequest
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.AttachmentID == "" {
+		respondError(w, http.StatusBadRequest, "attachment_id is required")
+		return
+	}
+
+	att, err := h.attachRepo.GetByID(req.AttachmentID)
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	if att == nil {
+		respondError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+	if att.ConversationID != convoID {
+		respondError(w, http.StatusBadRequest, "attachment does not belong to this conversation")
+		return
+	}
+	if !strings.HasPrefix(strings.ToLower(att.MimeType), "image/") {
+		respondError(w, http.StatusBadRequest, "attachment is not an image")
+		return
+	}
+
+	instruction := strings.TrimSpace(req.Instruction)
+	if instruction == "" {
+		instruction = "Imported from chat"
+	}
+
+	node := &models.ImageNode{
+		SessionID:     sessionID,
+		ParentNodeID:  nil,
+		OperationType: "generate",
+		Instruction:   instruction,
+		Provider:      "import",
+		Model:         "attachment",
+	}
+	if err := h.nodeRepo.Create(node); err != nil {
+		respondInternalError(w, err)
+		return
+	}
+
+	asset := &models.ImageNodeAsset{
+		NodeID:       node.ID,
+		AttachmentID: req.AttachmentID,
+		VariantIndex: 0,
+		IsSelected:   true,
+	}
+	if err := h.assetRepo.Create(asset); err != nil {
+		respondInternalError(w, err)
+		return
+	}
+
+	if err := h.sessionRepo.UpdateActiveNode(sessionID, node.ID); err != nil {
+		log.Printf("[image-session] failed to update active node after import: %v", err)
+	}
+
+	respondJSON(w, http.StatusCreated, generateResponse{
+		Node:   *node,
+		Assets: []models.ImageNodeAsset{*asset},
 	})
 }
 

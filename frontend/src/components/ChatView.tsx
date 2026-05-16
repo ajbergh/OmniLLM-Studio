@@ -3,7 +3,7 @@ import { useConversationStore, useMessageStore, useSettingsStore, useProviderSto
 import {
   Send, Square, Bot, User, Copy, Check, Clock, Cpu, Globe,
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Pencil,
-  Download, FileText, ArrowDown, Sparkles, Paperclip, X, Image,
+  Download, FileText, ArrowDown, Sparkles, Paperclip, X, Image, ImagePlus,
   GitBranch, Layout, Zap, Brain, Link as LinkIcon, Files, DollarSign,
 } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -18,7 +18,8 @@ import { ToolCallCard } from './ToolCallCard';
 import { AgentRunView } from './AgentRunView';
 import { AttachmentPanel } from './AttachmentPanel';
 import { toast } from 'sonner';
-import { api, templateApi, branchApi, agentApi, workspaceApi } from '../api';
+import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi } from '../api';
+import { useImageEditorStore } from '../stores/imageEditor';
 import { matchesShortcut } from '../shortcuts';
 import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult } from '../types';
 import { AgentEventType } from '../types';
@@ -118,7 +119,7 @@ export function ChatView() {
   const activeId = useConversationStore((s) => s.activeId);
   const conversations = useConversationStore((s) => s.conversations);
   const { createConversation, selectConversation, updateConversation, fetchConversations } = useConversationStore();
-  const { toggleSettings } = useSettingsStore();
+  const { toggleSettings, setAppMode } = useSettingsStore();
   const providers = useProviderStore((s) => s.providers);
   const {
     messages, streaming, streamingContent, streamingThinking, error,
@@ -720,6 +721,7 @@ export function ChatView() {
                     index === findLastIndex(messages, (m) => m.role === 'assistant')
                   }
                   conversationId={activeId}
+                  onSendToImageStudio={() => setAppMode('image')}
                   onRegenerate={() => regenerateLastMessage(activeId)}
                   onEdit={(newContent) => editAndResend(activeId, msg.id, newContent)}
                   onBranchFromHere={(messageId) => {
@@ -1431,6 +1433,7 @@ function MessageBubble({
   message,
   isLastAssistant,
   conversationId,
+  onSendToImageStudio,
   onRegenerate,
   onEdit,
   onBranchFromHere,
@@ -1439,6 +1442,7 @@ function MessageBubble({
   message: Message;
   isLastAssistant: boolean;
   conversationId: string;
+  onSendToImageStudio: () => void;
   onRegenerate: () => void;
   onEdit: (newContent: string) => void;
   onBranchFromHere: (messageId: string) => void;
@@ -1449,8 +1453,14 @@ function MessageBubble({
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [fileSourcesOpen, setFileSourcesOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [sendingToStudio, setSendingToStudio] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const editRef = useRef<HTMLTextAreaElement>(null);
+  const createImageSession = useImageEditorStore((s) => s.createSession);
+  const loadAllImageSessions = useImageEditorStore((s) => s.loadAllSessions);
+  const loadImageSession = useImageEditorStore((s) => s.loadSession);
+  const setImageEditMode = useImageEditorStore((s) => s.setEditMode);
+  const setSessionBaseImage = useImageEditorStore((s) => s.setSessionBaseImage);
 
   // Parse metadata for web search sources
   let metadata: MessageMetadata | null = null;
@@ -1469,6 +1479,53 @@ function MessageBubble({
       ? [metadata.tool_call]
       : [];
   const browserToolResults: ToolResult[] = metadata?.browser_tool_results ?? [];
+  const isImageGenerationMessage = Boolean(metadata?.image_generation) || message.metadata_json?.includes('image_generation') || false;
+  const generatedAttachmentIDs = Array.from(new Set(Array.from(
+    message.content.matchAll(/\/v1\/attachments\/([a-f0-9-]+)\/download/g)
+  ).map((m) => m[1])));
+  const primaryGeneratedAttachmentID = generatedAttachmentIDs[0] || null;
+
+  const handleSendToImageStudio = async () => {
+    if (!primaryGeneratedAttachmentID || sendingToStudio) return;
+    setSendingToStudio(true);
+    try {
+      const session = await createImageSession(`From chat - ${new Date().toLocaleString()}`);
+      if (!session) {
+        return;
+      }
+
+      const sourceRes = await fetch(`/v1/attachments/${encodeURIComponent(primaryGeneratedAttachmentID)}/download`, {
+        credentials: 'include',
+      });
+      if (!sourceRes.ok) {
+        throw new Error(`Failed to fetch image (${sourceRes.status})`);
+      }
+      const sourceBlob = await sourceRes.blob();
+      const sourceType = sourceBlob.type || 'image/png';
+      const uploaded = await api.uploadAttachment(
+        session.conversation_id,
+        new File([sourceBlob], `chat-image-${primaryGeneratedAttachmentID.slice(0, 8)}.png`, { type: sourceType }),
+      );
+
+      await imageSessionApi.importAttachment(session.conversation_id, session.id, {
+        attachment_id: uploaded.id,
+        instruction: 'Imported from chat',
+      });
+
+      setSessionBaseImage(session.id, uploaded.id);
+      setImageEditMode('edit');
+
+      await loadAllImageSessions();
+      await loadImageSession(session.conversation_id, session.id);
+
+      onSendToImageStudio();
+      toast.success('Opened in Image Studio');
+    } catch (err) {
+      toast.error(`Failed to send to Image Studio: ${(err as Error).message}`);
+    } finally {
+      setSendingToStudio(false);
+    }
+  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -1692,6 +1749,18 @@ function MessageBubble({
               >
                 {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
               </button>
+              {isImageGenerationMessage && primaryGeneratedAttachmentID && (
+                <button
+                  onClick={handleSendToImageStudio}
+                  disabled={sendingToStudio}
+                  className="p-1 rounded-md hover:bg-surface-hover text-text-muted hover:text-text
+                             transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label="Send to Image Studio"
+                  title="Send to Image Studio"
+                >
+                  <ImagePlus size={12} />
+                </button>
+              )}
               {isLastAssistant && !streaming && (
                 <button
                   onClick={onRegenerate}

@@ -55,6 +55,7 @@ interface ImageEditorState {
   // Content/style references for next generate/edit
   contentReferenceIds: string[];
   styleReferenceIds: string[];
+  sessionBaseImage: { sessionId: string; attachmentId: string } | null;
 
   // Loading state
   generating: boolean;
@@ -102,6 +103,8 @@ interface ImageEditorState {
   removeContentReference: (attachmentId: string) => void;
   addStyleReference: (attachmentId: string) => void;
   removeStyleReference: (attachmentId: string) => void;
+  setSessionBaseImage: (sessionId: string, attachmentId: string) => void;
+  clearSessionBaseImage: (sessionId?: string) => void;
 
   // Reset
   reset: () => void;
@@ -128,6 +131,7 @@ const initialState = {
   nodeRedoStack: [] as string[],
   contentReferenceIds: [] as string[],
   styleReferenceIds: [] as string[],
+  sessionBaseImage: null as { sessionId: string; attachmentId: string } | null,
   generating: false,
   loadingAssets: false,
   error: null as string | null,
@@ -438,6 +442,16 @@ export const useImageEditorStore = create<ImageEditorState>((set, get) => ({
     set((s) => ({
       styleReferenceIds: s.styleReferenceIds.filter((id) => id !== attachmentId),
     })),
+
+  setSessionBaseImage: (sessionId, attachmentId) =>
+    set({ sessionBaseImage: { sessionId, attachmentId } }),
+
+  clearSessionBaseImage: (sessionId) =>
+    set((s) => {
+      if (!s.sessionBaseImage) return s;
+      if (sessionId && s.sessionBaseImage.sessionId !== sessionId) return s;
+      return { sessionBaseImage: null };
+    }),
 
   reset: () => set(initialState),
 }));

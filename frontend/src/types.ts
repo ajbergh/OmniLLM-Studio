@@ -236,6 +236,7 @@ export interface MessageMetadata {
   tool_calls?: ToolCall[];
   browser_tool_results?: ToolResult[];
   cost?: number; // OpenRouter credit cost
+  image_generation?: boolean;
 }
 
 // Typed application settings (mirrors backend AppSettings).

@@ -302,6 +302,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           if (data.cost !== undefined && data.cost > 0) {
             metadata.cost = data.cost;
           }
+          if (data.image_generation) {
+            metadata.image_generation = true;
+            metadata.tool = 'image_generation';
+          }
           const assistantContent = (data.content || '').trim() || get().streamingContent;
           const assistantMsg: Message = {
             id: data.message_id,

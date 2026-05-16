@@ -64,10 +64,13 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     clearMask,
     contentReferenceIds,
     styleReferenceIds,
+    sessionBaseImage,
     addContentReference,
     removeContentReference,
     addStyleReference,
     removeStyleReference,
+    setSessionBaseImage,
+    clearSessionBaseImage,
     branchFromNode,
     undoNodeNavigation,
     redoNodeNavigation,
@@ -93,7 +96,6 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const imageCapableProviders = useMemo(() => providers.filter((p) => p.image_capable && p.enabled), [providers]);
   const prevProviderRef = useRef<string | null>(null);
   const baseImageInputRef = useRef<HTMLInputElement>(null);
-  const [uploadedBaseImageId, setUploadedBaseImageId] = useState<string | null>(null);
 
   const normalizeProviderId = useCallback((providerValue?: string) => {
     if (!providerValue) {
@@ -235,7 +237,8 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
       return;
     }
     const selectedAsset = activeNodeAssets.find((a) => a.is_selected);
-    const baseAttachmentId = selectedAsset?.attachment_id ?? uploadedBaseImageId;
+    const sessionBaseImageId = sessionBaseImage?.sessionId === activeSessionId ? sessionBaseImage.attachmentId : null;
+    const baseAttachmentId = selectedAsset?.attachment_id ?? sessionBaseImageId;
     if (!baseAttachmentId) {
       toast.error('No base image selected for editing');
       return;
@@ -291,6 +294,9 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   };
 
   const selectedAsset = activeNodeAssets.find((a) => a.is_selected) ?? activeNodeAssets[0];
+  const sessionBaseImageId = sessionBaseImage?.sessionId === activeSessionId ? sessionBaseImage.attachmentId : null;
+  const canvasAttachmentId = selectedAsset?.attachment_id ?? sessionBaseImageId;
+  const loadedFromChatActive = Boolean(sessionBaseImageId) && canvasAttachmentId === sessionBaseImageId;
 
   if (!conversationId) {
     return (
@@ -313,6 +319,11 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
           {activeSessionId && (
             <span className="min-w-0 truncate text-xs text-text-muted">
               - {sessions.find((s) => s.id === activeSessionId)?.title}
+            </span>
+          )}
+          {loadedFromChatActive && (
+            <span className="inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+              Loaded from chat
             </span>
           )}
           {/* Node-level undo/redo */}
@@ -462,13 +473,13 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                 {editMode === 'edit' && !selectedAsset && (
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-text-muted uppercase tracking-wide">Base Image</label>
-                    {uploadedBaseImageId ? (
+                    {sessionBaseImageId ? (
                       <div className="flex items-center gap-2">
                         <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-primary/40">
-                          <img src={attachmentUrl(uploadedBaseImageId)} alt="Base" className="w-full h-full object-cover" />
+                          <img src={attachmentUrl(sessionBaseImageId)} alt="Base" className="w-full h-full object-cover" />
                         </div>
                         <button
-                          onClick={() => setUploadedBaseImageId(null)}
+                          onClick={() => activeSessionId && clearSessionBaseImage(activeSessionId)}
                           className="text-[10px] text-danger hover:text-danger/80 transition-colors"
                         >
                           Remove
@@ -494,7 +505,9 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                         if (!file) return;
                         try {
                           const data = await uploadAttachment(conversationId!, file);
-                          setUploadedBaseImageId(data.id as string);
+                          if (activeSessionId) {
+                            setSessionBaseImage(activeSessionId, data.id as string);
+                          }
                         } catch {
                           toast.error('Failed to upload base image');
                         }
@@ -853,10 +866,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
           mobilePanel === 'canvas' ? 'flex' : 'hidden',
           'lg:flex'
         )}>
-          {activeSessionId && selectedAsset ? (
+          {activeSessionId && canvasAttachmentId ? (
             <ImageCanvas
               ref={canvasRef}
-              attachmentId={selectedAsset.attachment_id}
+              attachmentId={canvasAttachmentId}
               zoom={zoom}
               onZoomChange={setZoom}
             />

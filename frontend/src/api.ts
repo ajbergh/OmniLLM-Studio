@@ -244,7 +244,7 @@ export const api = {
       onToken: (content: string) => void;
       onThinking?: (content: string) => void;
       onStart?: (data: { message_id: string; user_message_id: string }) => void;
-      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; content?: string; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; browser_tool?: boolean; browser_navigated_urls?: string[]; tool_calls?: ToolCall[]; browser_tool_results?: ToolResult[]; thinking?: string; cost?: number }) => void;
+      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; content?: string; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; browser_tool?: boolean; browser_navigated_urls?: string[]; tool_calls?: ToolCall[]; browser_tool_results?: ToolResult[]; thinking?: string; cost?: number; image_generation?: boolean }) => void;
       onError?: (error: string) => void;
       onWebSearch?: (data: { tool_call: ToolCall; status: string }) => void;
       onWebSearchResults?: (data: { query: string; results: WebSearchResult[] }) => void;
@@ -1129,6 +1129,16 @@ export const imageSessionApi = {
   edit: (conversationId: string, sessionId: string, data: ImageEditEditRequest) =>
     apiFetch<ImageEditGenerateResponse>(
       `/conversations/${conversationId}/images/sessions/${sessionId}/edit`,
+      { method: 'POST', body: JSON.stringify(data) },
+    ),
+
+  importAttachment: (
+    conversationId: string,
+    sessionId: string,
+    data: { attachment_id: string; instruction?: string },
+  ) =>
+    apiFetch<ImageEditGenerateResponse>(
+      `/conversations/${conversationId}/images/sessions/${sessionId}/import`,
       { method: 'POST', body: JSON.stringify(data) },
     ),
 
