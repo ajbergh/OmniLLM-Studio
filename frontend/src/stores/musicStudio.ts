@@ -48,6 +48,38 @@ function cloneForm(): MusicPromptForm {
   };
 }
 
+function getNewMusicSessionTitle(): string {
+  const now = new Date();
+  return `Music Session - ${now.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })}`;
+}
+
+function hasAutoDateTimeTitleWithoutDescriptor(title: string): boolean {
+  if (!title.startsWith('Music Session - ')) {
+    return false;
+  }
+  const firstSeparator = title.indexOf(' - ');
+  const secondSeparator = title.indexOf(' - ', firstSeparator + 3);
+  return secondSeparator === -1;
+}
+
+function getGenerationDescriptor(generation: MusicGenerationDetail): string {
+  const source = (generation.title || generation.prompt || '').replace(/\s+/g, ' ').trim();
+  if (!source) {
+    return 'Generated Track';
+  }
+  const cleaned = source.replace(/[\\/:*?"<>|]/g, '').trim();
+  if (!cleaned) {
+    return 'Generated Track';
+  }
+  return cleaned.length > 48 ? `${cleaned.slice(0, 48).trimEnd()}...` : cleaned;
+}
+
 function enabledProviders(providers: MusicProvidersResponse): MusicProviderKey[] {
   const out: MusicProviderKey[] = [];
   if (providers.openrouter) out.push('openrouter');
@@ -63,6 +95,44 @@ function upsertGeneration(items: MusicGenerationDetail[], next: MusicGenerationD
   const copy = items.slice();
   copy[idx] = next;
   return copy;
+}
+
+function getSessionPromptForm(
+  generations: MusicGenerationDetail[],
+  activeGenerationId?: string | null,
+): MusicPromptForm {
+  const preferred = activeGenerationId
+    ? generations.find((generation) => generation.id === activeGenerationId)
+    : undefined;
+  const latest = generations[generations.length - 1];
+  const source = preferred || latest;
+  if (!source) {
+    return cloneForm();
+  }
+  return {
+    ...cloneForm(),
+    prompt: source.prompt || '',
+    lyrics: source.lyrics || '',
+    options: {
+      ...cloneForm().options,
+      structure: source.structure || '',
+    },
+  };
+}
+
+function getPromptFormFromGeneration(generation: MusicGenerationDetail | null | undefined): MusicPromptForm {
+  if (!generation) {
+    return cloneForm();
+  }
+  return {
+    ...cloneForm(),
+    prompt: generation.prompt || '',
+    lyrics: generation.lyrics || '',
+    options: {
+      ...cloneForm().options,
+      structure: generation.structure || '',
+    },
+  };
 }
 
 interface MusicStudioState {
@@ -84,7 +154,7 @@ interface MusicStudioState {
   loadProviders: () => Promise<void>;
   loadModels: (provider: MusicProviderKey, refresh?: boolean) => Promise<void>;
   loadSessions: () => Promise<void>;
-  createSession: () => Promise<MusicSession | null>;
+  createSession: (title?: string) => Promise<MusicSession | null>;
   selectSession: (sessionId: string) => Promise<void>;
   setProvider: (provider: MusicProviderKey) => Promise<void>;
   setModel: (model: string) => void;
@@ -157,17 +227,24 @@ export const useMusicStudioStore = create<MusicStudioState>((set, get) => ({
       set({ sessions, isLoading: false });
       if (!get().activeSessionId && sessions.length > 0) {
         await get().selectSession(sessions[0].id);
+      } else if (sessions.length === 0) {
+        set({
+          activeSessionId: null,
+          activeGenerationId: null,
+          generations: [],
+          promptForm: cloneForm(),
+        });
       }
     } catch (err) {
       set({ isLoading: false, error: (err as Error).message });
     }
   },
 
-  createSession: async () => {
+  createSession: async (title) => {
     const { selectedProvider, selectedModel } = get();
     try {
       const session = await musicApi.createSession({
-        title: 'Untitled Track Session',
+        title: title || getNewMusicSessionTitle(),
         provider: selectedProvider || undefined,
         model: selectedModel || undefined,
       });
@@ -176,6 +253,7 @@ export const useMusicStudioStore = create<MusicStudioState>((set, get) => ({
         activeSessionId: session.id,
         activeGenerationId: session.active_generation_id || null,
         generations: [],
+        promptForm: cloneForm(),
       }));
       return session;
     } catch (err) {
@@ -189,13 +267,15 @@ export const useMusicStudioStore = create<MusicStudioState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const detail = await musicApi.getSession(sessionId);
+      const nextActiveGenerationId = detail.session.active_generation_id || detail.generations[detail.generations.length - 1]?.id || null;
       set((state) => ({
         sessions: upsertSession(state.sessions, detail.session),
         activeSessionId: detail.session.id,
-        activeGenerationId: detail.session.active_generation_id || detail.generations[detail.generations.length - 1]?.id || null,
+        activeGenerationId: nextActiveGenerationId,
         generations: detail.generations,
         selectedProvider: detail.session.default_provider || state.selectedProvider,
         selectedModel: detail.session.default_model || state.selectedModel,
+        promptForm: getSessionPromptForm(detail.generations, nextActiveGenerationId),
         isLoading: false,
       }));
       const provider = detail.session.default_provider;
@@ -214,7 +294,13 @@ export const useMusicStudioStore = create<MusicStudioState>((set, get) => ({
 
   setModel: (model) => set({ selectedModel: model }),
 
-  setActiveGeneration: (generationId) => set({ activeGenerationId: generationId }),
+  setActiveGeneration: (generationId) => set((state) => {
+    const generation = state.generations.find((item) => item.id === generationId);
+    return {
+      activeGenerationId: generationId,
+      promptForm: getPromptFormFromGeneration(generation),
+    };
+  }),
 
   setPromptField: (key, value) => set((state) => ({
     promptForm: { ...state.promptForm, [key]: value },
@@ -258,6 +344,11 @@ export const useMusicStudioStore = create<MusicStudioState>((set, get) => ({
       onStarted: (progress) => set({ generationProgress: progress }),
       onProgress: (progress) => set({ generationProgress: progress }),
       onDone: (payload) => {
+        const stateBefore = get();
+        const currentSession = stateBefore.sessions.find((session) => session.id === payload.session.id);
+        const currentSessionTitle = currentSession?.title || payload.session.title;
+        const shouldAutoRename = stateBefore.generations.length === 0 && hasAutoDateTimeTitleWithoutDescriptor(currentSessionTitle);
+
         set((state) => ({
           sessions: upsertSession(state.sessions, payload.session),
           activeSessionId: payload.session.id,
@@ -267,6 +358,18 @@ export const useMusicStudioStore = create<MusicStudioState>((set, get) => ({
           generationProgress: { stage: 'done', message: 'Music generation complete' },
           abortGeneration: null,
         }));
+
+        if (shouldAutoRename) {
+          const nextTitle = `${currentSessionTitle} - ${getGenerationDescriptor(payload.generation)}`;
+          void musicApi.updateSession(payload.session.id, { title: nextTitle })
+            .then((updatedSession) => {
+              set((state) => ({ sessions: upsertSession(state.sessions, updatedSession) }));
+            })
+            .catch(() => {
+              // Non-fatal: keep generation success even if auto-rename fails.
+            });
+        }
+
         toast.success('Track generated');
       },
       onError: (payload) => {
@@ -327,6 +430,7 @@ export const useMusicStudioStore = create<MusicStudioState>((set, get) => ({
           activeSessionId: nextActive,
           activeGenerationId: state.activeSessionId === sessionId ? null : state.activeGenerationId,
           generations: state.activeSessionId === sessionId ? [] : state.generations,
+          promptForm: state.activeSessionId === sessionId ? cloneForm() : state.promptForm,
         };
       });
       toast.success('Music session deleted');

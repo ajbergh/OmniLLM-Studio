@@ -1672,27 +1672,7 @@ func collectOpenRouterContent(content interface{}, out *[]string) {
 func (s *Service) geminiMusicGenerate(ctx context.Context, baseURL, apiKey, model string, req MusicRequest) (*MusicResponse, error) {
 	nativeBase := geminiNativeBaseURL(baseURL)
 	endpoint := fmt.Sprintf("%s/models/%s:generateContent", nativeBase, model)
-	genConfig := map[string]interface{}{
-		"responseModalities": []string{"AUDIO", "TEXT"},
-	}
-	if req.Options.Temperature != nil {
-		genConfig["temperature"] = *req.Options.Temperature
-	}
-	if strings.Contains(strings.ToLower(model), "pro") {
-		genConfig["responseFormat"] = map[string]interface{}{
-			"audio": map[string]interface{}{"mimeType": "audio/mpeg"},
-		}
-	}
-	body := map[string]interface{}{
-		"contents": []map[string]interface{}{
-			{
-				"parts": []map[string]interface{}{
-					{"text": req.Prompt},
-				},
-			},
-		},
-		"generationConfig": genConfig,
-	}
+	body := geminiMusicRequestBody(req)
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -1793,6 +1773,25 @@ func (s *Service) geminiMusicGenerate(ctx context.Context, baseURL, apiKey, mode
 			"transport": "gemini_generate_content",
 		},
 	}, nil
+}
+
+func geminiMusicRequestBody(req MusicRequest) map[string]interface{} {
+	genConfig := map[string]interface{}{
+		"responseModalities": []string{"AUDIO", "TEXT"},
+	}
+	if req.Options.Temperature != nil {
+		genConfig["temperature"] = *req.Options.Temperature
+	}
+	return map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]interface{}{
+					{"text": req.Prompt},
+				},
+			},
+		},
+		"generationConfig": genConfig,
+	}
 }
 
 func extractPossibleStructure(text string) string {

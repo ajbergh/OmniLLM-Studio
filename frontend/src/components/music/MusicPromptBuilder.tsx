@@ -1,6 +1,98 @@
+import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { MusicModel, MusicPromptForm, MusicProviderKey, MusicProvidersResponse } from '../../types/music';
+
+const AUTO_VALUE = '__auto__';
+const CUSTOM_VALUE = '__custom__';
+
+const GENRE_OPTIONS = [
+  'Pop',
+  'Rock',
+  'Hip-Hop',
+  'R&B',
+  'EDM',
+  'House',
+  'Techno',
+  'Ambient',
+  'Cinematic',
+  'Jazz',
+  'Classical',
+  'Lo-fi',
+  'Country',
+  'Reggaeton',
+];
+
+const MOOD_OPTIONS = [
+  'Uplifting',
+  'Energetic',
+  'Melancholic',
+  'Dark',
+  'Dreamy',
+  'Romantic',
+  'Aggressive',
+  'Epic',
+  'Calm',
+  'Hopeful',
+  'Nostalgic',
+  'Groovy',
+];
+
+const ERA_OPTIONS = [
+  '1970s',
+  '1980s',
+  '1990s',
+  '2000s',
+  '2010s',
+  '2020s',
+  'Retro',
+  'Modern',
+  'Futuristic',
+  'Timeless',
+];
+
+const SCALE_OPTIONS = [
+  'C Major',
+  'G Major',
+  'D Major',
+  'A Minor',
+  'E Minor',
+  'D Minor',
+  'Pentatonic Major',
+  'Pentatonic Minor',
+  'Dorian',
+  'Mixolydian',
+  'Phrygian',
+  'Lydian',
+];
+
+const BPM_OPTIONS = ['70', '85', '100', '115', '128', '140', '160'];
+
+const DURATION_OPTIONS = [
+  '15s',
+  '30s',
+  '45s',
+  '60s',
+  '90s',
+  '120s',
+  '180s',
+  'Loop-friendly',
+];
+
+const INSTRUMENT_OPTIONS = [
+  'Piano',
+  'Electric Guitar',
+  'Acoustic Guitar',
+  'Synth Bass',
+  '808 Drums',
+  'Strings',
+  'Brass',
+  'Woodwinds',
+  'Pad Synths',
+  'Arpeggiator',
+  'Choir',
+  'Percussion',
+];
 
 const PROVIDER_LABELS: Record<MusicProviderKey, string> = {
   openrouter: 'OpenRouter',
@@ -134,18 +226,66 @@ export function MusicPromptBuilder({
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-          <TextInput label="Genre" value={promptForm.options.genre || ''} onChange={(value) => onOption('genre', value)} />
-          <TextInput label="Mood" value={promptForm.options.mood || ''} onChange={(value) => onOption('mood', value)} />
-          <TextInput label="Era" value={promptForm.options.era || ''} onChange={(value) => onOption('era', value)} />
-          <TextInput label="Key / scale" value={promptForm.options.scale || ''} onChange={(value) => onOption('scale', value)} />
-          <TextInput label="BPM" value={promptForm.options.bpm ? String(promptForm.options.bpm) : ''} type="number" onChange={(value) => onOption('bpm', value ? Number(value) : undefined)} />
-          <TextInput label="Duration" value={promptForm.options.duration || ''} onChange={(value) => onOption('duration', value)} />
+          <SelectWithCustom
+            label="Genre"
+            value={promptForm.options.genre || ''}
+            choices={GENRE_OPTIONS}
+            customPlaceholder="e.g. hyperpop, afrobeat"
+            onChange={(value) => onOption('genre', value || undefined)}
+          />
+          <SelectWithCustom
+            label="Mood"
+            value={promptForm.options.mood || ''}
+            choices={MOOD_OPTIONS}
+            customPlaceholder="e.g. bittersweet, triumphant"
+            onChange={(value) => onOption('mood', value || undefined)}
+          />
+          <SelectWithCustom
+            label="Era"
+            value={promptForm.options.era || ''}
+            choices={ERA_OPTIONS}
+            customPlaceholder="e.g. late 60s psych"
+            onChange={(value) => onOption('era', value || undefined)}
+          />
+          <SelectWithCustom
+            label="Key / scale"
+            value={promptForm.options.scale || ''}
+            choices={SCALE_OPTIONS}
+            customPlaceholder="e.g. B harmonic minor"
+            onChange={(value) => onOption('scale', value || undefined)}
+          />
+          <SelectWithCustom
+            label="BPM"
+            value={promptForm.options.bpm ? String(promptForm.options.bpm) : ''}
+            choices={BPM_OPTIONS}
+            customPlaceholder="e.g. 132"
+            customInputType="number"
+            onChange={(value) => {
+              const parsed = value ? Number(value) : undefined;
+              onOption('bpm', Number.isFinite(parsed) ? parsed : undefined);
+            }}
+          />
+          <SelectWithCustom
+            label="Duration"
+            value={promptForm.options.duration || ''}
+            choices={DURATION_OPTIONS}
+            customPlaceholder="e.g. 75s"
+            onChange={(value) => onOption('duration', value || undefined)}
+          />
         </div>
 
-        <TextInput
+        <SelectWithCustom
           label="Instruments"
           value={(promptForm.options.instruments || []).join(', ')}
-          onChange={(value) => onOption('instruments', value.split(',').map((item) => item.trim()).filter(Boolean))}
+          choices={INSTRUMENT_OPTIONS}
+          customPlaceholder="Comma separated, e.g. sitar, tabla, flute"
+          onChange={(value) => {
+            const list = value
+              .split(',')
+              .map((item) => item.trim())
+              .filter(Boolean);
+            onOption('instruments', list.length > 0 ? list : undefined);
+          }}
         />
 
         <div>
@@ -268,5 +408,79 @@ function TextArea({ label, value, onChange }: { label: string; value: string; on
         className="w-full resize-none rounded-xl border border-border bg-surface-alt px-3 py-2 text-sm text-text placeholder:text-text-muted/50 focus:outline-none focus:border-primary/50"
       />
     </label>
+  );
+}
+
+function SelectWithCustom({
+  label,
+  value,
+  choices,
+  onChange,
+  customPlaceholder,
+  customInputType = 'text',
+}: {
+  label: string;
+  value: string;
+  choices: string[];
+  onChange: (value: string) => void;
+  customPlaceholder?: string;
+  customInputType?: 'text' | 'number';
+}) {
+  const normalized = value.trim();
+  const normalizedChoices = useMemo(() => new Set(choices.map((choice) => choice.toLowerCase())), [choices]);
+  const [mode, setMode] = useState<string>(AUTO_VALUE);
+
+  useEffect(() => {
+    if (!normalized) {
+      setMode(AUTO_VALUE);
+      return;
+    }
+    if (normalizedChoices.has(normalized.toLowerCase())) {
+      setMode(normalized);
+      return;
+    }
+    setMode(CUSTOM_VALUE);
+  }, [normalized, normalizedChoices]);
+
+  return (
+    <div className="space-y-1.5">
+      <label className="mb-0 block text-xs font-medium text-text-muted">{label}</label>
+      <select
+        value={mode}
+        onChange={(event) => {
+          const next = event.target.value;
+          setMode(next);
+          if (next === AUTO_VALUE) {
+            onChange('');
+            return;
+          }
+          if (next === CUSTOM_VALUE) {
+            if (!normalizedChoices.has(normalized.toLowerCase())) {
+              onChange(normalized);
+            } else {
+              onChange('');
+            }
+            return;
+          }
+          onChange(next);
+        }}
+        className="w-full min-h-10 rounded-xl border border-border bg-surface-alt px-3 text-sm text-text focus:outline-none focus:border-primary/50"
+      >
+        <option value={AUTO_VALUE}>Auto</option>
+        {choices.map((choice) => (
+          <option key={choice} value={choice}>{choice}</option>
+        ))}
+        <option value={CUSTOM_VALUE}>Custom...</option>
+      </select>
+      {mode === CUSTOM_VALUE && (
+        <input
+          type={customInputType}
+          value={normalizedChoices.has(normalized.toLowerCase()) ? '' : value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={customPlaceholder || 'Enter custom value'}
+          className="w-full min-h-10 rounded-xl border border-border bg-surface-alt px-3 text-sm text-text placeholder:text-text-muted/50 focus:outline-none focus:border-primary/50"
+        />
+      )}
+    </div>
   );
 }
