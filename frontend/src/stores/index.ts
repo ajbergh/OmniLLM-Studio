@@ -597,6 +597,25 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   }),
 }));
 
+// ---- Crossover Context Store ----
+
+export type CrossoverContext =
+  | { type: 'to-music'; data: { prompt: string; genre?: string; mood?: string; instruments?: string[]; tempo?: string } }
+  | { type: 'to-image'; data: { prompt: string } }
+  | null;
+
+interface CrossoverState {
+  crossoverContext: CrossoverContext;
+  setCrossoverContext: (ctx: CrossoverContext) => void;
+  clearCrossoverContext: () => void;
+}
+
+export const useCrossoverStore = create<CrossoverState>((set) => ({
+  crossoverContext: null,
+  setCrossoverContext: (ctx) => set({ crossoverContext: ctx }),
+  clearCrossoverContext: () => set({ crossoverContext: null }),
+}));
+
 // ---- Feature Flag Store ----
 
 interface FeatureFlagState {

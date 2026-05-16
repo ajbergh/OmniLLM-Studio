@@ -913,6 +913,35 @@ export interface RunEvalRequest {
   suite: EvalSuite;
 }
 
+// ── Crossover Translation ──
+
+export interface CrossoverTranslateContentRequest {
+  prompt: string;
+  genre?: string;
+  mood?: string;
+  instruments?: string[];
+}
+
+export interface CrossoverTranslateRequest {
+  source: 'music' | 'image';
+  target: 'music' | 'image';
+  content: CrossoverTranslateContentRequest;
+}
+
+/** Response when source=music, target=image */
+export interface CrossoverMusicToImageResponse {
+  image_prompt: string;
+}
+
+/** Response when source=image, target=music */
+export interface CrossoverImageToMusicResponse {
+  prompt: string;
+  genre: string;
+  mood: string;
+  instruments: string[];
+  tempo?: string;
+}
+
 // ── Image Edit Mode ──
 
 export interface ImageSession {

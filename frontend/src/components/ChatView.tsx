@@ -1,10 +1,10 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { useConversationStore, useMessageStore, useSettingsStore, useProviderStore } from '../stores';
+import { useConversationStore, useMessageStore, useSettingsStore, useProviderStore, useCrossoverStore } from '../stores';
 import {
   Send, Square, Bot, User, Copy, Check, Clock, Cpu, Globe,
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Pencil,
   Download, FileText, ArrowDown, Sparkles, Paperclip, X, Image, ImagePlus,
-  GitBranch, Layout, Zap, Brain, Link as LinkIcon, Files, DollarSign,
+  GitBranch, Layout, Zap, Brain, Link as LinkIcon, Files, DollarSign, Music2,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,10 +18,10 @@ import { ToolCallCard } from './ToolCallCard';
 import { AgentRunView } from './AgentRunView';
 import { AttachmentPanel } from './AttachmentPanel';
 import { toast } from 'sonner';
-import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi } from '../api';
+import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi, attachmentUrl } from '../api';
 import { useImageEditorStore } from '../stores/imageEditor';
 import { matchesShortcut } from '../shortcuts';
-import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult } from '../types';
+import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult, Attachment } from '../types';
 import { AgentEventType } from '../types';
 import { getModelReasoningLevels, getModelToolCallingSupport, isFreeModel, type ReasoningEffortLevel } from '../models';
 
@@ -153,6 +153,8 @@ export function ChatView() {
   const [thinkEnabled, setThinkEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortLevel | undefined>(undefined);
   const [activeWorkspaceName, setActiveWorkspaceName] = useState<string | null>(null);
+  const [conversationAttachments, setConversationAttachments] = useState<Record<string, Attachment>>({});
+  const setCrossoverContext = useCrossoverStore((s) => s.setCrossoverContext);
   const browserStatusDetailLabel = browserStatusDetail ? formatBrowserDetail(browserStatusDetail) : null;
 
   // Detect if the active conversation is using an Ollama provider
@@ -272,6 +274,16 @@ export function ChatView() {
   useEffect(() => {
     if (!activeId || messages.length === 0) return;
     api.getConversationUsage(activeId).then(setConversationUsage).catch(() => {});
+  }, [activeId, messages.length]);
+
+  // Fetch conversation attachments for audio rendering
+  useEffect(() => {
+    if (!activeId) { setConversationAttachments({}); return; }
+    api.listAttachments(activeId).then((list) => {
+      const map: Record<string, Attachment> = {};
+      for (const a of list) map[a.id] = a;
+      setConversationAttachments(map);
+    }).catch(() => {});
   }, [activeId, messages.length]);
 
   // Auto-exit image mode if provider becomes non-capable
@@ -721,7 +733,12 @@ export function ChatView() {
                     index === findLastIndex(messages, (m) => m.role === 'assistant')
                   }
                   conversationId={activeId}
+                  attachments={conversationAttachments}
                   onSendToImageStudio={() => setAppMode('image')}
+                  onSendToMusicStudio={(content) => {
+                    setCrossoverContext({ type: 'to-music', data: { prompt: content } });
+                    setAppMode('music');
+                  }}
                   onRegenerate={() => regenerateLastMessage(activeId)}
                   onEdit={(newContent) => editAndResend(activeId, msg.id, newContent)}
                   onBranchFromHere={(messageId) => {
@@ -1433,7 +1450,9 @@ function MessageBubble({
   message,
   isLastAssistant,
   conversationId,
+  attachments,
   onSendToImageStudio,
+  onSendToMusicStudio,
   onRegenerate,
   onEdit,
   onBranchFromHere,
@@ -1442,7 +1461,9 @@ function MessageBubble({
   message: Message;
   isLastAssistant: boolean;
   conversationId: string;
+  attachments: Record<string, Attachment>;
   onSendToImageStudio: () => void;
+  onSendToMusicStudio: (content: string) => void;
   onRegenerate: () => void;
   onEdit: (newContent: string) => void;
   onBranchFromHere: (messageId: string) => void;
@@ -1618,6 +1639,26 @@ function MessageBubble({
               </details>
             )}
             <MarkdownContent content={message.content} />
+            {/* Audio players for any audio/* attachments referenced in the message */}
+            {(() => {
+              const audioIds = Array.from(
+                message.content.matchAll(/\/v1\/attachments\/([a-f0-9-]+)\/download/g)
+              ).map((m) => m[1]).filter((id) => attachments[id]?.mime_type?.startsWith('audio/'));
+              if (audioIds.length === 0) return null;
+              return (
+                <div className="mt-2 space-y-2">
+                  {audioIds.map((id) => (
+                    <audio
+                      key={id}
+                      controls
+                      preload="metadata"
+                      src={attachmentUrl(id)}
+                      className="w-full max-w-sm rounded-lg"
+                    />
+                  ))}
+                </div>
+              );
+            })()}
           </>
         )}
 
@@ -1759,6 +1800,17 @@ function MessageBubble({
                   title="Send to Image Studio"
                 >
                   <ImagePlus size={12} />
+                </button>
+              )}
+              {!isUser && !isImageGenerationMessage && message.content.trim().length >= 10 && (
+                <button
+                  onClick={() => onSendToMusicStudio(message.content.trim())}
+                  className="p-1 rounded-md hover:bg-surface-hover text-text-muted hover:text-text
+                             transition-all"
+                  aria-label="Send to Music Studio"
+                  title="Send to Music Studio"
+                >
+                  <Music2 size={12} />
                 </button>
               )}
               {isLastAssistant && !streaming && (

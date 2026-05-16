@@ -1,8 +1,9 @@
 import { useEffect, useMemo } from 'react';
 import { Music, PanelRight, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
-import { useConversationStore, useMessageStore, useSettingsStore } from '../../stores';
+import { useConversationStore, useMessageStore, useSettingsStore, useCrossoverStore } from '../../stores';
 import { useMusicStudioStore } from '../../stores/musicStudio';
+import { musicApi, api, crossoverApi } from '../../api';
 import { MusicPromptBuilder } from './MusicPromptBuilder';
 import { MusicResultCard } from './MusicResultCard';
 import { MusicHistoryPanel } from './MusicHistoryPanel';
@@ -41,12 +42,26 @@ export function MusicStudio() {
   const createConversation = useConversationStore((state) => state.createConversation);
   const selectConversation = useConversationStore((state) => state.selectConversation);
   const clearMessages = useMessageStore((state) => state.clearMessages);
+  const fetchMessages = useMessageStore((state) => state.fetchMessages);
   const setAppMode = useSettingsStore((state) => state.setAppMode);
+  const { crossoverContext, clearCrossoverContext, setCrossoverContext } = useCrossoverStore();
 
   useEffect(() => {
     loadProviders();
     loadSessions();
   }, [loadProviders, loadSessions]);
+
+  // Receive crossover context (from Chat → Music Studio or Image → Music Studio)
+  useEffect(() => {
+    if (!crossoverContext || crossoverContext.type !== 'to-music') return;
+    const { data } = crossoverContext;
+    setPromptField('prompt', data.prompt);
+    if (data.genre) setOption('genre', data.genre);
+    if (data.mood) setOption('mood', data.mood);
+    if (data.instruments) setOption('instruments', data.instruments);
+    clearCrossoverContext();
+    toast.success('Prompt pre-filled from studio');
+  }, [crossoverContext, clearCrossoverContext, setPromptField, setOption]);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId),
@@ -73,17 +88,42 @@ export function MusicStudio() {
   };
 
   const handleSendToChat = async (generation: MusicGenerationDetail) => {
-    const prompt = [
-      `Music prompt: ${generation.prompt}`,
-      generation.asset_url ? `Generated asset: ${generation.asset_url}` : '',
-      generation.assembled_prompt ? `Final Lyria prompt:\n${generation.assembled_prompt}` : '',
-    ].filter(Boolean).join('\n\n');
-    const convo = await createConversation(`Music: ${generation.title}`);
-    clearMessages();
-    selectConversation(convo.id);
-    await navigator.clipboard.writeText(prompt).catch(() => undefined);
-    setAppMode('chat');
-    toast.success('Chat opened and prompt copied');
+    if (!generation.asset_id) {
+      toast.error('No audio asset available to send');
+      return;
+    }
+    try {
+      const convo = await createConversation(`Music: ${generation.title}`);
+      const attachment = await musicApi.attachToConversation(generation.asset_id, convo.id);
+      const content = [
+        generation.prompt && `Music prompt: ${generation.prompt}`,
+        generation.assembled_prompt && `Final prompt:\n${generation.assembled_prompt}`,
+        `\n[🎵 ${generation.title}](/v1/attachments/${attachment.id}/download)`,
+      ].filter(Boolean).join('\n\n');
+      await api.sendMessage(convo.id, { content });
+      selectConversation(convo.id);
+      clearMessages();
+      await fetchMessages(convo.id);
+      setAppMode('chat');
+      toast.success('Audio sent to chat');
+    } catch (err) {
+      toast.error(`Failed to send to chat: ${(err as Error).message}`);
+    }
+  };
+
+  const handleGenerateAlbumArt = async (generation: MusicGenerationDetail) => {
+    if (!generation.prompt) return;
+    try {
+      const result = await crossoverApi.translate.musicToImage({
+        prompt: generation.prompt,
+        genre: generation.assembled_prompt ? undefined : undefined,
+      });
+      setCrossoverContext({ type: 'to-image', data: { prompt: result.image_prompt } });
+      setAppMode('image');
+      toast.success('Opening Image Studio with generated prompt');
+    } catch (err) {
+      toast.error(`Album art translation failed: ${(err as Error).message}`);
+    }
   };
 
   return (
@@ -147,6 +187,7 @@ export function MusicStudio() {
             onBranch={(generationId) => { void branchFromGeneration(generationId); }}
             onRegenerate={regenerateFromGeneration}
             onSendToChat={handleSendToChat}
+            onGenerateAlbumArt={handleGenerateAlbumArt}
           />
         </main>
 

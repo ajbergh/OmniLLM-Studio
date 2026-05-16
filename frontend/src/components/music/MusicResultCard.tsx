@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Copy, GitBranch, MessageSquare, Music2 } from 'lucide-react';
+import { Copy, GitBranch, MessageSquare, Music2, Image } from 'lucide-react';
 import { toast } from 'sonner';
 import { clsx } from 'clsx';
 import { musicAssetUrl } from '../../api';
@@ -16,6 +16,7 @@ interface MusicResultCardProps {
   onBranch: (generationId: string) => void;
   onRegenerate: (generationId: string) => void;
   onSendToChat: (generation: MusicGenerationDetail) => void;
+  onGenerateAlbumArt?: (generation: MusicGenerationDetail) => void;
 }
 
 const TABS: Array<{ key: ResultTab; label: string }> = [
@@ -32,6 +33,7 @@ export function MusicResultCard({
   onBranch,
   onRegenerate,
   onSendToChat,
+  onGenerateAlbumArt,
 }: MusicResultCardProps) {
   const [tab, setTab] = useState<ResultTab>('lyrics');
   const assetUrl = generation?.asset_id ? musicAssetUrl(generation.asset_id) : undefined;
@@ -116,6 +118,16 @@ export function MusicResultCard({
               <MessageSquare size={14} />
               Send to Chat
             </button>
+            {onGenerateAlbumArt && generation.status === 'completed' && (
+              <button
+                onClick={() => onGenerateAlbumArt(generation)}
+                className="min-h-10 inline-flex items-center gap-2 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:text-text hover:bg-surface-hover transition-colors"
+                title="Generate album art for this track"
+              >
+                <Image size={14} />
+                Album Art
+              </button>
+            )}
           </div>
         </div>
       </header>

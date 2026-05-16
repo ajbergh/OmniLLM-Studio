@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/music"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 type MusicHandler struct {
@@ -20,6 +22,8 @@ type MusicHandler struct {
 	sessionRepo *repository.MusicSessionRepo
 	genRepo     *repository.MusicGenerationRepo
 	assetRepo   *repository.MusicAssetRepo
+	attachRepo  *repository.AttachmentRepo
+	convoRepo   *repository.ConversationRepo
 	storageDir  string
 }
 
@@ -28,6 +32,8 @@ func NewMusicHandler(
 	sessionRepo *repository.MusicSessionRepo,
 	genRepo *repository.MusicGenerationRepo,
 	assetRepo *repository.MusicAssetRepo,
+	attachRepo *repository.AttachmentRepo,
+	convoRepo *repository.ConversationRepo,
 	storageDir string,
 ) *MusicHandler {
 	return &MusicHandler{
@@ -35,6 +41,8 @@ func NewMusicHandler(
 		sessionRepo: sessionRepo,
 		genRepo:     genRepo,
 		assetRepo:   assetRepo,
+		attachRepo:  attachRepo,
+		convoRepo:   convoRepo,
 		storageDir:  storageDir,
 	}
 }
@@ -396,4 +404,85 @@ func generationIDOrEmpty(generation *models.MusicGeneration) string {
 		return ""
 	}
 	return generation.ID
+}
+
+// AttachToConversation copies a music asset's bytes into a new attachment record
+// under the target conversation and returns the attachment JSON.
+// POST /v1/music/assets/{assetId}/attach-to-conversation
+func (h *MusicHandler) AttachToConversation(w http.ResponseWriter, r *http.Request) {
+	asset, ok := h.loadOwnedAsset(w, r, chi.URLParam(r, "assetId"))
+	if !ok {
+		return
+	}
+
+	var req struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.ConversationID == "" {
+		respondError(w, http.StatusBadRequest, "conversation_id is required")
+		return
+	}
+
+	// Verify the user owns the target conversation
+	if !verifyConversationAccessByID(w, r, h.convoRepo, req.ConversationID) {
+		return
+	}
+
+	// Resolve the asset's file on disk
+	srcPath, err := SafeJoin(h.storageDir, asset.FilePath)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid asset path")
+		return
+	}
+
+	srcFile, err := os.Open(srcPath) // #nosec G304 — srcPath validated by SafeJoin
+	if err != nil {
+		respondError(w, http.StatusNotFound, "asset file not found on disk")
+		return
+	}
+	defer srcFile.Close()
+
+	// Write to a new UUID-named file in the same storage dir
+	newFileName := uuid.New().String() + filepath.Ext(asset.FileName)
+	dstPath := filepath.Join(h.storageDir, newFileName)
+	dstFile, err := os.Create(dstPath) // #nosec G304
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		_ = os.Remove(dstPath)
+		respondInternalError(w, err)
+		return
+	}
+	_ = dstFile.Close()
+
+	// Determine attachment type
+	attachType := "file"
+	if len(asset.MimeType) >= 6 && asset.MimeType[:6] == "audio/" {
+		attachType = "audio"
+	}
+
+	attachment := &models.Attachment{
+		ID:             uuid.New().String(),
+		ConversationID: req.ConversationID,
+		Type:           attachType,
+		MimeType:       asset.MimeType,
+		StoragePath:    newFileName,
+		Bytes:          asset.SizeBytes,
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := h.attachRepo.Create(attachment); err != nil {
+		_ = os.Remove(dstPath)
+		respondInternalError(w, err)
+		return
+	}
+
+	respondJSON(w, http.StatusCreated, attachment)
 }

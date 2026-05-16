@@ -234,7 +234,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 		musicSessionRepo, musicGenerationRepo, musicAssetRepo,
 		providerRepo, settingsRepo, llmService, cfg.AttachmentsDir,
 	)
-	musicHandler := NewMusicHandler(musicService, musicSessionRepo, musicGenerationRepo, musicAssetRepo, cfg.AttachmentsDir)
+	musicHandler := NewMusicHandler(musicService, musicSessionRepo, musicGenerationRepo, musicAssetRepo, attachRepo, convoRepo, cfg.AttachmentsDir)
+	crossoverHandler := NewCrossoverHandler(llmService, providerRepo)
 
 	// Semantic Search
 	msgEmbeddingRepo := repository.NewMessageEmbeddingRepo(database)
@@ -391,6 +392,10 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Get("/music/assets/{assetId}", musicHandler.GetAsset)
 			r.Get("/music/assets/{assetId}/download", musicHandler.DownloadAsset)
 			r.Delete("/music/assets/{assetId}", musicHandler.DeleteAsset)
+			r.Post("/music/assets/{assetId}/attach-to-conversation", musicHandler.AttachToConversation)
+
+			// Cross-studio domain translation
+			r.Post("/crossover/translate", crossoverHandler.Translate)
 
 			// Attachment operations (global, by attachment ID)
 			r.Route("/attachments/{attachmentId}", func(r chi.Router) {

@@ -73,6 +73,10 @@ import type {
   ToolPolicy,
   BrowserSession,
   BrowserStatus,
+  CrossoverTranslateRequest,
+  CrossoverMusicToImageResponse,
+  CrossoverImageToMusicResponse,
+  Attachment,
 } from './types';
 import type {
   GenerateMusicRequest,
@@ -1359,5 +1363,31 @@ export const musicApi = {
       });
 
     return { abort: () => controller.abort() };
+  },
+
+  /** Copy a music asset's bytes into a new attachment under the target conversation. */
+  attachToConversation: (assetId: string, conversationId: string) =>
+    apiFetch<Attachment>(
+      `/music/assets/${encodeURIComponent(assetId)}/attach-to-conversation`,
+      { method: 'POST', body: JSON.stringify({ conversation_id: conversationId }) },
+    ),
+};
+
+// ── Crossover Translation ──────────────────────────────────────────────────
+
+export const crossoverApi = {
+  /** Translate a domain prompt between music and image studios via LLM. */
+  translate: {
+    musicToImage: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverMusicToImageResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'music', target: 'image', content } satisfies CrossoverTranslateRequest),
+      }),
+
+    imageToMusic: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverImageToMusicResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'image', target: 'music', content } satisfies CrossoverTranslateRequest),
+      }),
   },
 };
