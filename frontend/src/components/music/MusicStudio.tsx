@@ -51,16 +51,18 @@ export function MusicStudio() {
     loadSessions();
   }, [loadProviders, loadSessions]);
 
-  // Receive crossover context (from Chat → Music Studio or Image → Music Studio)
+  // Receive crossover context (from Chat → Music Studio or Image → Music Studio).
+  // The session is always pre-created by the caller before the context is set,
+  // so this effect only needs to apply the prompt fields — no async work, no duplicate sessions.
   useEffect(() => {
     if (!crossoverContext || crossoverContext.type !== 'to-music') return;
     const { data } = crossoverContext;
+    clearCrossoverContext();
     setPromptField('prompt', data.prompt);
     if (data.genre) setOption('genre', data.genre);
     if (data.mood) setOption('mood', data.mood);
     if (data.instruments) setOption('instruments', data.instruments);
-    clearCrossoverContext();
-    toast.success('Prompt pre-filled from studio');
+    toast.success('Prompt pre-filled in new session');
   }, [crossoverContext, clearCrossoverContext, setPromptField, setOption]);
 
   const activeSession = useMemo(

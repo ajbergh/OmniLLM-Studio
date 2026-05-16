@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useImageEditorStore } from '../../stores/imageEditor';
 import { useProviderStore, useConversationStore, useMessageStore, useSettingsStore, useCrossoverStore } from '../../stores';
+import { useMusicStudioStore } from '../../stores/musicStudio';
 import { ImageCanvas, type ImageCanvasHandle } from './ImageCanvas';
 import { ImageHistoryPanel } from './ImageHistoryPanel';
 import { ImageAdvancedControls } from './ImageAdvancedControls';
@@ -41,6 +42,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const clearMessages = useMessageStore((s) => s.clearMessages);
   const { setAppMode } = useSettingsStore();
   const { crossoverContext, clearCrossoverContext, setCrossoverContext } = useCrossoverStore();
+  const createMusicSession = useMusicStudioStore((s) => s.createSession);
   const activeConversationId = useImageEditorStore((s) => s.activeConversationId);
   const conversationId = propConversationId ?? activeConversationId;
   const [sessionConversation, setSessionConversation] = useState<Conversation | null>(null);
@@ -420,8 +422,15 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     if (!activeNode?.instruction) return;
     setGeneratingSoundtrack(true);
     try {
-      const result = await crossoverApi.translate.imageToMusic({ prompt: activeNode.instruction });
-      setCrossoverContext({ type: 'to-music', data: result });
+      const [result, session] = await Promise.all([
+        crossoverApi.translate.imageToMusic({ prompt: activeNode.instruction }),
+        createMusicSession(),
+      ]);
+      if (!session) {
+        toast.error('Could not create music session');
+        return;
+      }
+      setCrossoverContext({ type: 'to-music', data: { ...result, sessionId: session.id } });
       setAppMode('music');
       toast.success('Opening Music Studio with generated prompt');
     } catch (err) {

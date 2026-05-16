@@ -1389,5 +1389,12 @@ export const crossoverApi = {
         method: 'POST',
         body: JSON.stringify({ source: 'image', target: 'music', content } satisfies CrossoverTranslateRequest),
       }),
+
+    /** Distill a raw LLM chat response into a clean Lyria music prompt with genre/mood/instruments. */
+    chatToMusic: (content: { prompt: string }) =>
+      apiFetch<CrossoverImageToMusicResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'chat', target: 'music', content }),
+      }),
   },
 };

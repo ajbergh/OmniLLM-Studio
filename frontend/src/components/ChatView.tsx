@@ -18,8 +18,9 @@ import { ToolCallCard } from './ToolCallCard';
 import { AgentRunView } from './AgentRunView';
 import { AttachmentPanel } from './AttachmentPanel';
 import { toast } from 'sonner';
-import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi, attachmentUrl } from '../api';
+import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi, attachmentUrl, crossoverApi } from '../api';
 import { useImageEditorStore } from '../stores/imageEditor';
+import { useMusicStudioStore } from '../stores/musicStudio';
 import { matchesShortcut } from '../shortcuts';
 import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult, Attachment } from '../types';
 import { AgentEventType } from '../types';
@@ -735,8 +736,8 @@ export function ChatView() {
                   conversationId={activeId}
                   attachments={conversationAttachments}
                   onSendToImageStudio={() => setAppMode('image')}
-                  onSendToMusicStudio={(content) => {
-                    setCrossoverContext({ type: 'to-music', data: { prompt: content } });
+                  onSendToMusicStudio={(result) => {
+                    setCrossoverContext({ type: 'to-music', data: result });
                     setAppMode('music');
                   }}
                   onRegenerate={() => regenerateLastMessage(activeId)}
@@ -1463,7 +1464,7 @@ function MessageBubble({
   conversationId: string;
   attachments: Record<string, Attachment>;
   onSendToImageStudio: () => void;
-  onSendToMusicStudio: (content: string) => void;
+  onSendToMusicStudio: (result: { prompt: string; genre?: string; mood?: string; instruments?: string[]; tempo?: string; sessionId?: string }) => void;
   onRegenerate: () => void;
   onEdit: (newContent: string) => void;
   onBranchFromHere: (messageId: string) => void;
@@ -1471,6 +1472,8 @@ function MessageBubble({
 }) {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
+  const [sendingToMusic, setSendingToMusic] = useState(false);
+  const createMusicSession = useMusicStudioStore((s) => s.createSession);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [fileSourcesOpen, setFileSourcesOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -1804,13 +1807,34 @@ function MessageBubble({
               )}
               {!isUser && !isImageGenerationMessage && message.content.trim().length >= 10 && (
                 <button
-                  onClick={() => onSendToMusicStudio(message.content.trim())}
+                  onClick={async () => {
+                    setSendingToMusic(true);
+                    try {
+                      const prompt = message.content.trim();
+                      const [distilled, session] = await Promise.all([
+                        crossoverApi.translate.chatToMusic({ prompt }),
+                        createMusicSession(),
+                      ]);
+                      if (!session) {
+                        toast.error('Could not create music session');
+                        return;
+                      }
+                      onSendToMusicStudio({ ...distilled, sessionId: session.id });
+                    } catch {
+                      toast.error('Could not distill music prompt — check your provider settings');
+                    } finally {
+                      setSendingToMusic(false);
+                    }
+                  }}
+                  disabled={sendingToMusic}
                   className="p-1 rounded-md hover:bg-surface-hover text-text-muted hover:text-text
-                             transition-all"
+                             transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   aria-label="Send to Music Studio"
                   title="Send to Music Studio"
                 >
-                  <Music2 size={12} />
+                  {sendingToMusic
+                    ? <span className="block w-3 h-3 border-2 border-text-muted/30 border-t-text-muted rounded-full animate-spin" />
+                    : <Music2 size={12} />}
                 </button>
               )}
               {isLastAssistant && !streaming && (

@@ -52,9 +52,10 @@ func (h *CrossoverHandler) Translate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate source/target pair
-	valid := map[string]bool{"music": true, "image": true}
-	if !valid[req.Source] || !valid[req.Target] {
-		respondErrorWithCode(w, http.StatusBadRequest, "invalid_payload", "source and target must be 'music' or 'image'", nil)
+	validSources := map[string]bool{"music": true, "image": true, "chat": true}
+	validTargets := map[string]bool{"music": true, "image": true}
+	if !validSources[req.Source] || !validTargets[req.Target] {
+		respondErrorWithCode(w, http.StatusBadRequest, "invalid_payload", "source must be 'music', 'image', or 'chat'; target must be 'music' or 'image'", nil)
 		return
 	}
 	if req.Source == req.Target {
@@ -158,6 +159,14 @@ Your task: given an image prompt or visual description, output a single JSON obj
 {"prompt": "<string>", "genre": "<string>", "mood": "<string>", "instruments": ["<string>", ...], "tempo": "<string>"}
 The prompt should be a concise music prompt (50-100 words). genre should be a specific music genre. mood should be one word or short phrase. instruments should be an array of 3-6 instrument names. tempo should be one of: slow, moderate, upbeat, fast. Do NOT include explanations or markdown — output ONLY the JSON object.`
 		user = fmt.Sprintf("Image/visual description: %s", req.Content.Prompt)
+
+	case req.Source == "chat" && req.Target == "music":
+		system = `You are a Lyria music prompt specialist. Extract and distill only the musical description from the following text — which may be a full LLM chat response containing conversational preamble, explanations, and postscript.
+Remove ALL of the following: greetings, commentary, meta-commentary ("here's a prompt", "I'd suggest", "this captures..."), markdown headers, and any non-musical sentences.
+Return a single JSON object with exactly this schema:
+{"prompt": "<string>", "genre": "<string>", "mood": "<string>", "instruments": ["<string>", ...], "tempo": "<string>"}
+The prompt field must be a clean, self-contained Lyria music generation prompt (30-100 words) describing only sonic/musical qualities. genre should be a specific music genre. mood should be one word or short phrase. instruments should be an array of 3-6 instrument names inferred from the text. tempo should be one of: slow, moderate, upbeat, fast. If no clear musical content is found, infer a reasonable interpretation. Do NOT include explanations or markdown — output ONLY the JSON object.`
+		user = fmt.Sprintf("Chat response to distill:\n%s", req.Content.Prompt)
 
 	default:
 		// Shouldn't reach here due to earlier validation

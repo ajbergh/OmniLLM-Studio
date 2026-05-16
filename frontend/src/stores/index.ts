@@ -600,7 +600,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 // ---- Crossover Context Store ----
 
 export type CrossoverContext =
-  | { type: 'to-music'; data: { prompt: string; genre?: string; mood?: string; instruments?: string[]; tempo?: string } }
+  | { type: 'to-music'; data: { prompt: string; genre?: string; mood?: string; instruments?: string[]; tempo?: string; sessionId?: string } }
   | { type: 'to-image'; data: { prompt: string } }
   | null;
 
