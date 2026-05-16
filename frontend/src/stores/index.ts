@@ -514,13 +514,13 @@ interface SettingsState {
   loading: boolean;
   sidebarOpen: boolean;
   settingsOpen: boolean;
-  appMode: 'chat' | 'image';
+  appMode: 'chat' | 'image' | 'music';
 
   fetchSettings: () => Promise<void>;
   updateSettings: (data: Partial<import('../types').AppSettings>) => Promise<void>;
   toggleSidebar: () => void;
   toggleSettings: () => void;
-  setAppMode: (mode: 'chat' | 'image') => void;
+  setAppMode: (mode: 'chat' | 'image' | 'music') => void;
 }
 
 const defaultSettings: import('../types').AppSettings = {
@@ -529,6 +529,14 @@ const defaultSettings: import('../types').AppSettings = {
   jina_api_key: '',
   jina_reader_enabled: true,
   jina_reader_max_len: 3000,
+  default_music_provider: 'openrouter',
+  default_music_model_openrouter: 'google/lyria-3-clip-preview',
+  default_music_model_gemini: 'lyria-3-clip-preview',
+  default_music_model_elevenlabs: 'music_v1',
+  custom_gemini_lyria_model: '',
+  auto_enhance_music_prompts: false,
+  save_music_generation_metadata: true,
+  music_output_directory: '',
   rag_enabled: false,
   rag_embedding_model: '',
   rag_chunk_size: 512,
@@ -543,10 +551,11 @@ function getInitialSidebarOpen(): boolean {
   return saved === 'true';
 }
 
-function getInitialAppMode(): 'chat' | 'image' {
+function getInitialAppMode(): 'chat' | 'image' | 'music' {
   if (typeof window === 'undefined') return 'chat';
   const saved = window.localStorage.getItem('omnillm_app_mode');
   if (saved === 'image') return 'image';
+  if (saved === 'music') return 'music';
   return 'chat';
 }
 
@@ -587,6 +596,25 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     }
     return { appMode: mode };
   }),
+}));
+
+// ---- Crossover Context Store ----
+
+export type CrossoverContext =
+  | { type: 'to-music'; data: { prompt: string; genre?: string; mood?: string; instruments?: string[]; tempo?: string; sessionId?: string } }
+  | { type: 'to-image'; data: { prompt: string; autoGenerate?: boolean; nonce?: string } }
+  | null;
+
+interface CrossoverState {
+  crossoverContext: CrossoverContext;
+  setCrossoverContext: (ctx: CrossoverContext) => void;
+  clearCrossoverContext: () => void;
+}
+
+export const useCrossoverStore = create<CrossoverState>((set) => ({
+  crossoverContext: null,
+  setCrossoverContext: (ctx) => set({ crossoverContext: ctx }),
+  clearCrossoverContext: () => set({ crossoverContext: null }),
 }));
 
 // ---- Feature Flag Store ----

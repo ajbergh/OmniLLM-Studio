@@ -1,6 +1,6 @@
 // Types matching the backend data model
 
-export type ConversationKind = 'chat' | 'image';
+export type ConversationKind = 'chat' | 'image' | 'music';
 
 export interface Conversation {
   id: string;
@@ -87,6 +87,7 @@ export interface SendMessageRequest {
   web_search?: boolean;
   think?: boolean;
   reasoning_effort?: string;
+  no_reply?: boolean;
   override?: {
     provider?: string;
     model?: string;
@@ -246,6 +247,14 @@ export interface AppSettings {
   jina_api_key: string;
   jina_reader_enabled: boolean;
   jina_reader_max_len?: number;
+  default_music_provider?: string;
+  default_music_model_openrouter?: string;
+  default_music_model_gemini?: string;
+  default_music_model_elevenlabs?: string;
+  custom_gemini_lyria_model?: string;
+  auto_enhance_music_prompts?: boolean;
+  save_music_generation_metadata?: boolean;
+  music_output_directory?: string;
   rag_enabled: boolean;
   rag_embedding_model: string;
   rag_chunk_size: number;
@@ -904,6 +913,35 @@ export interface RunEvalRequest {
   provider: string;
   model: string;
   suite: EvalSuite;
+}
+
+// ── Crossover Translation ──
+
+export interface CrossoverTranslateContentRequest {
+  prompt: string;
+  genre?: string;
+  mood?: string;
+  instruments?: string[];
+}
+
+export interface CrossoverTranslateRequest {
+  source: 'music' | 'image';
+  target: 'music' | 'image';
+  content: CrossoverTranslateContentRequest;
+}
+
+/** Response when source=music, target=image */
+export interface CrossoverMusicToImageResponse {
+  image_prompt: string;
+}
+
+/** Response when source=image, target=music */
+export interface CrossoverImageToMusicResponse {
+  prompt: string;
+  genre: string;
+  mood: string;
+  instruments: string[];
+  tempo?: string;
 }
 
 // ── Image Edit Mode ──

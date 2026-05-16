@@ -135,3 +135,84 @@ func TestOpenRouterImageContentLeavesTextOnlyRequestsAsString(t *testing.T) {
 		t.Fatalf("content = %q, want %q", content, req.Prompt)
 	}
 }
+
+func TestGeminiMusicRequestBodyForProDoesNotForceResponseFormat(t *testing.T) {
+	temperature := 0.7
+	req := MusicRequest{
+		Prompt: "An atmospheric ambient track.",
+		Options: MusicOptions{
+			Temperature: &temperature,
+		},
+	}
+
+	body := geminiMusicRequestBody(req)
+	genConfig, ok := body["generationConfig"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("generationConfig = %T, want map[string]interface{}", body["generationConfig"])
+	}
+	if _, ok := genConfig["responseFormat"]; ok {
+		t.Fatal("expected responseFormat to be omitted for Gemini Lyria Pro payload")
+	}
+	modalities, ok := genConfig["responseModalities"].([]string)
+	if !ok {
+		t.Fatalf("responseModalities = %T, want []string", genConfig["responseModalities"])
+	}
+	if len(modalities) != 2 || modalities[0] != "AUDIO" || modalities[1] != "TEXT" {
+		t.Fatalf("responseModalities = %#v, want [AUDIO TEXT]", modalities)
+	}
+	if got := genConfig["temperature"]; got != temperature {
+		t.Fatalf("temperature = %#v, want %v", got, temperature)
+	}
+
+	contents, ok := body["contents"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("contents = %T, want []map[string]interface{}", body["contents"])
+	}
+	if len(contents) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(contents))
+	}
+	parts, ok := contents[0]["parts"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("parts = %T, want []map[string]interface{}", contents[0]["parts"])
+	}
+	if len(parts) != 1 || parts[0]["text"] != req.Prompt {
+		t.Fatalf("unexpected text payload: %#v", parts)
+	}
+}
+
+func TestGeminiMusicRequestBodyForClipDoesNotForceResponseFormat(t *testing.T) {
+	req := MusicRequest{
+		Prompt: "A bright 30-second lo-fi loop with mellow Rhodes and vinyl crackle.",
+	}
+
+	body := geminiMusicRequestBody(req)
+	genConfig, ok := body["generationConfig"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("generationConfig = %T, want map[string]interface{}", body["generationConfig"])
+	}
+	if _, ok := genConfig["responseFormat"]; ok {
+		t.Fatal("expected responseFormat to be omitted for Gemini Lyria Clip payload")
+	}
+	modalities, ok := genConfig["responseModalities"].([]string)
+	if !ok {
+		t.Fatalf("responseModalities = %T, want []string", genConfig["responseModalities"])
+	}
+	if len(modalities) != 2 || modalities[0] != "AUDIO" || modalities[1] != "TEXT" {
+		t.Fatalf("responseModalities = %#v, want [AUDIO TEXT]", modalities)
+	}
+
+	contents, ok := body["contents"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("contents = %T, want []map[string]interface{}", body["contents"])
+	}
+	if len(contents) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(contents))
+	}
+	parts, ok := contents[0]["parts"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("parts = %T, want []map[string]interface{}", contents[0]["parts"])
+	}
+	if len(parts) != 1 || parts[0]["text"] != req.Prompt {
+		t.Fatalf("unexpected text payload: %#v", parts)
+	}
+}

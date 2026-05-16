@@ -22,6 +22,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/filelibrary"
 	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/mcpclient"
+	"github.com/ajbergh/omnillm-studio/internal/music"
 	"github.com/ajbergh/omnillm-studio/internal/plugins"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
@@ -225,6 +226,17 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 		attachRepo, convoRepo, llmService, cfg.AttachmentsDir,
 	)
 
+	// Music Studio Sessions
+	musicSessionRepo := repository.NewMusicSessionRepo(database)
+	musicGenerationRepo := repository.NewMusicGenerationRepo(database)
+	musicAssetRepo := repository.NewMusicAssetRepo(database)
+	musicService := music.NewService(
+		musicSessionRepo, musicGenerationRepo, musicAssetRepo,
+		providerRepo, settingsRepo, llmService, cfg.AttachmentsDir,
+	)
+	musicHandler := NewMusicHandler(musicService, musicSessionRepo, musicGenerationRepo, musicAssetRepo, attachRepo, convoRepo, cfg.AttachmentsDir)
+	crossoverHandler := NewCrossoverHandler(llmService, providerRepo)
+
 	// Semantic Search
 	msgEmbeddingRepo := repository.NewMessageEmbeddingRepo(database)
 	searchService := search.NewService(database, llmService, msgRepo, msgEmbeddingRepo, settingsRepo)
@@ -359,6 +371,31 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			// Global Image Sessions (all sessions across conversations)
 			r.Post("/images/sessions", imageSessionHandler.CreateStandaloneSession)
 			r.Get("/images/sessions", imageSessionHandler.ListAllSessions)
+
+			// Music Studio
+			r.Get("/music/providers", musicHandler.Providers)
+			r.Get("/music/models", musicHandler.Models)
+			r.Post("/music/models/refresh", musicHandler.RefreshModels)
+			r.Route("/music/sessions", func(r chi.Router) {
+				r.Get("/", musicHandler.ListSessions)
+				r.Post("/", musicHandler.CreateSession)
+				r.Route("/{sessionId}", func(r chi.Router) {
+					r.Get("/", musicHandler.GetSession)
+					r.Patch("/", musicHandler.UpdateSession)
+					r.Delete("/", musicHandler.DeleteSession)
+					r.Get("/generations", musicHandler.ListGenerations)
+				})
+			})
+			r.Post("/music/generations", musicHandler.Generate)
+			r.Get("/music/generations/{generationId}", musicHandler.GetGeneration)
+			r.Post("/music/generations/{generationId}/branch", musicHandler.BranchGeneration)
+			r.Get("/music/assets/{assetId}", musicHandler.GetAsset)
+			r.Get("/music/assets/{assetId}/download", musicHandler.DownloadAsset)
+			r.Delete("/music/assets/{assetId}", musicHandler.DeleteAsset)
+			r.Post("/music/assets/{assetId}/attach-to-conversation", musicHandler.AttachToConversation)
+
+			// Cross-studio domain translation
+			r.Post("/crossover/translate", crossoverHandler.Translate)
 
 			// Attachment operations (global, by attachment ID)
 			r.Route("/attachments/{attachmentId}", func(r chi.Router) {

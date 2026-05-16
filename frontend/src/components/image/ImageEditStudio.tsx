@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useImageEditorStore } from '../../stores/imageEditor';
-import { useProviderStore } from '../../stores';
+import { useProviderStore, useConversationStore, useMessageStore, useSettingsStore, useCrossoverStore } from '../../stores';
+import { useMusicStudioStore } from '../../stores/musicStudio';
 import { ImageCanvas, type ImageCanvasHandle } from './ImageCanvas';
 import { ImageHistoryPanel } from './ImageHistoryPanel';
 import { ImageAdvancedControls } from './ImageAdvancedControls';
@@ -10,11 +11,11 @@ import { useImageEditorShortcuts } from './useImageEditorShortcuts';
 import {
   Image, Sparkles, Pencil, X, Undo2, Redo2, Trash2,
   Paintbrush, Eraser, Move, Eye, EyeOff, ImagePlus, XCircle, AlertTriangle,
-  PanelLeft, PanelRight, Upload,
+  PanelLeft, PanelRight, Upload, MessageSquare, Music2,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { toast } from 'sonner';
-import { imageSessionApi, api, attachmentUrl, uploadAttachment } from '../../api';
+import { imageSessionApi, api, attachmentUrl, uploadAttachment, crossoverApi } from '../../api';
 import type { Conversation, ImageCapabilities } from '../../types';
 
 interface ImageEditStudioProps {
@@ -37,6 +38,11 @@ const CHAT_CAPABLE_PROVIDER_TYPES = new Set([
 
 export function ImageEditStudio({ conversationId: propConversationId, onClose }: ImageEditStudioProps = {}) {
   const providers = useProviderStore((s) => s.providers);
+  const { createConversation, selectConversation } = useConversationStore();
+  const clearMessages = useMessageStore((s) => s.clearMessages);
+  const { setAppMode } = useSettingsStore();
+  const { crossoverContext, clearCrossoverContext, setCrossoverContext } = useCrossoverStore();
+  const createMusicSession = useMusicStudioStore((s) => s.createSession);
   const activeConversationId = useImageEditorStore((s) => s.activeConversationId);
   const conversationId = propConversationId ?? activeConversationId;
   const [sessionConversation, setSessionConversation] = useState<Conversation | null>(null);
@@ -102,10 +108,13 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const [mobilePanel, setMobilePanel] = useState<MobileImagePanel>('prompt');
   const [enhancingPrompt, setEnhancingPrompt] = useState(false);
   const [lastPromptBeforeEnhance, setLastPromptBeforeEnhance] = useState<string | null>(null);
+  const [sendingToChat, setSendingToChat] = useState(false);
+  const [generatingSoundtrack, setGeneratingSoundtrack] = useState(false);
   const refInputRef = useRef<HTMLInputElement>(null);
   const pendingRefType = useRef<'content' | 'style'>('content');
   const canvasRef = useRef<ImageCanvasHandle>(null);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
+  const autoGenerateNonceRef = useRef<string | null>(null);
   const [capabilities, setCapabilities] = useState<ImageCapabilities | null>(null);
   const imageCapableProviders = useMemo(() => providers.filter((p) => p.image_capable && p.enabled), [providers]);
   const prevProviderRef = useRef<string | null>(null);
@@ -220,6 +229,23 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     a.download = `image-${asset.attachment_id.slice(0, 8)}.png`;
     a.click();
   }, [activeNodeAssets]);
+
+  // Receive crossover context (from Music Studio → Image Studio)
+  useEffect(() => {
+    if (!crossoverContext || crossoverContext.type !== 'to-image') return;
+    const { prompt: ctxPrompt, autoGenerate, nonce } = crossoverContext.data;
+    setPrompt(ctxPrompt);
+    clearCrossoverContext();
+    if (autoGenerate && conversationId && activeSessionId) {
+      // Guard against StrictMode double-invocation via nonce
+      if (nonce && autoGenerateNonceRef.current === nonce) return;
+      if (nonce) autoGenerateNonceRef.current = nonce;
+      void generate(conversationId, { prompt: ctxPrompt, size: '1024x1024' });
+      toast.success('Generating album art…');
+    } else {
+      toast.success('Prompt pre-filled from Music Studio');
+    }
+  }, [crossoverContext, clearCrossoverContext, generate, conversationId, activeSessionId]);
 
   useImageEditorShortcuts({
     enabled: !!activeSessionId,
@@ -376,6 +402,53 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const sessionBaseImageId = sessionBaseImage?.sessionId === activeSessionId ? sessionBaseImage.attachmentId : null;
   const canvasAttachmentId = selectedAsset?.attachment_id ?? sessionBaseImageId;
   const loadedFromChatActive = Boolean(sessionBaseImageId) && canvasAttachmentId === sessionBaseImageId;
+  const activeNode = nodes.find((n) => n.id === activeNodeId);
+
+  const handleSendToChat = async () => {
+    if (!selectedAsset || !conversationId) return;
+    setSendingToChat(true);
+    try {
+      const resp = await fetch(attachmentUrl(selectedAsset.attachment_id));
+      const blob = await resp.blob();
+      const file = new File([blob], `image-${selectedAsset.attachment_id.slice(0, 8)}.png`, { type: blob.type || 'image/png' });
+      const convo = await createConversation(`Image: ${(activeNode?.instruction || 'Studio export').slice(0, 50)}`);
+      const uploaded = await uploadAttachment(convo.id, file);
+      const content = activeNode?.instruction
+        ? `${activeNode.instruction}\n\n![Generated image](/v1/attachments/${uploaded.id}/download)`
+        : `![Generated image](/v1/attachments/${uploaded.id}/download)`;
+      await api.sendMessage(convo.id, { content });
+      selectConversation(convo.id);
+      clearMessages();
+      setAppMode('chat');
+      toast.success('Image sent to chat');
+    } catch (err) {
+      toast.error(`Failed to send to chat: ${(err as Error).message}`);
+    } finally {
+      setSendingToChat(false);
+    }
+  };
+
+  const handleGenerateSoundtrack = async () => {
+    if (!activeNode?.instruction) return;
+    setGeneratingSoundtrack(true);
+    try {
+      const [result, session] = await Promise.all([
+        crossoverApi.translate.imageToMusic({ prompt: activeNode.instruction }),
+        createMusicSession(),
+      ]);
+      if (!session) {
+        toast.error('Could not create music session');
+        return;
+      }
+      setCrossoverContext({ type: 'to-music', data: { ...result, sessionId: session.id } });
+      setAppMode('music');
+      toast.success('Opening Music Studio with generated prompt');
+    } catch (err) {
+      toast.error(`Translation failed: ${(err as Error).message}`);
+    } finally {
+      setGeneratingSoundtrack(false);
+    }
+  };
 
   if (!conversationId) {
     return (
@@ -971,6 +1044,36 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
 
                 {error && (
                   <p className="text-xs text-danger bg-danger-soft rounded-lg px-3 py-2">{error}</p>
+                )}
+
+                {/* Cross-studio actions */}
+                {selectedAsset && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleSendToChat}
+                      disabled={sendingToChat}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl
+                                 text-xs font-medium text-text-muted bg-surface-hover border border-border
+                                 hover:text-text hover:border-primary/40 transition-colors
+                                 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Send current image to a new chat"
+                    >
+                      <MessageSquare size={12} />
+                      {sendingToChat ? 'Sending…' : 'Send to Chat'}
+                    </button>
+                    <button
+                      onClick={handleGenerateSoundtrack}
+                      disabled={generatingSoundtrack || !activeNode?.instruction}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl
+                                 text-xs font-medium text-text-muted bg-surface-hover border border-border
+                                 hover:text-text hover:border-primary/40 transition-colors
+                                 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={activeNode?.instruction ? 'Generate music from this image prompt' : 'Generate an image first'}
+                    >
+                      <Music2 size={12} />
+                      {generatingSoundtrack ? 'Translating…' : 'Soundtrack'}
+                    </button>
+                  </div>
                 )}
               </>
             )}

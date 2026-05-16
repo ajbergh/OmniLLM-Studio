@@ -167,6 +167,7 @@ type sendMessageRequest struct {
 	WebSearch       *bool  `json:"web_search,omitempty"`
 	Think           *bool  `json:"think,omitempty"`            // Ollama-only: enable/disable thinking
 	ReasoningEffort string `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high"
+	NoReply         bool   `json:"no_reply,omitempty"`         // save user message only, skip LLM generation
 
 	// OpenRouter-specific request fields
 	ProviderPrefs  *llm.ProviderPreferences `json:"provider_prefs,omitempty"`
@@ -212,6 +213,12 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := h.msgRepo.Create(userMsg); err != nil {
 		respondInternalError(w, err)
+		return
+	}
+
+	// no_reply: caller only wants to persist the user message (no LLM generation).
+	if req.NoReply {
+		respondJSON(w, http.StatusCreated, userMsg)
 		return
 	}
 

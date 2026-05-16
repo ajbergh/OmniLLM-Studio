@@ -1,10 +1,10 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { useConversationStore, useMessageStore, useSettingsStore, useProviderStore } from '../stores';
+import { useConversationStore, useMessageStore, useSettingsStore, useProviderStore, useCrossoverStore } from '../stores';
 import {
   Send, Square, Bot, User, Copy, Check, Clock, Cpu, Globe,
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Pencil,
   Download, FileText, ArrowDown, Sparkles, Paperclip, X, Image, ImagePlus,
-  GitBranch, Layout, Zap, Brain, Link as LinkIcon, Files, DollarSign,
+  GitBranch, Layout, Zap, Brain, Link as LinkIcon, Files, DollarSign, Music2,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,10 +18,11 @@ import { ToolCallCard } from './ToolCallCard';
 import { AgentRunView } from './AgentRunView';
 import { AttachmentPanel } from './AttachmentPanel';
 import { toast } from 'sonner';
-import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi } from '../api';
+import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi, attachmentUrl, crossoverApi } from '../api';
 import { useImageEditorStore } from '../stores/imageEditor';
+import { useMusicStudioStore } from '../stores/musicStudio';
 import { matchesShortcut } from '../shortcuts';
-import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult } from '../types';
+import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult, Attachment } from '../types';
 import { AgentEventType } from '../types';
 import { getModelReasoningLevels, getModelToolCallingSupport, isFreeModel, type ReasoningEffortLevel } from '../models';
 
@@ -153,6 +154,8 @@ export function ChatView() {
   const [thinkEnabled, setThinkEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortLevel | undefined>(undefined);
   const [activeWorkspaceName, setActiveWorkspaceName] = useState<string | null>(null);
+  const [conversationAttachments, setConversationAttachments] = useState<Record<string, Attachment>>({});
+  const setCrossoverContext = useCrossoverStore((s) => s.setCrossoverContext);
   const browserStatusDetailLabel = browserStatusDetail ? formatBrowserDetail(browserStatusDetail) : null;
 
   // Detect if the active conversation is using an Ollama provider
@@ -272,6 +275,16 @@ export function ChatView() {
   useEffect(() => {
     if (!activeId || messages.length === 0) return;
     api.getConversationUsage(activeId).then(setConversationUsage).catch(() => {});
+  }, [activeId, messages.length]);
+
+  // Fetch conversation attachments for audio rendering
+  useEffect(() => {
+    if (!activeId) { setConversationAttachments({}); return; }
+    api.listAttachments(activeId).then((list) => {
+      const map: Record<string, Attachment> = {};
+      for (const a of list) map[a.id] = a;
+      setConversationAttachments(map);
+    }).catch(() => {});
   }, [activeId, messages.length]);
 
   // Auto-exit image mode if provider becomes non-capable
@@ -721,7 +734,12 @@ export function ChatView() {
                     index === findLastIndex(messages, (m) => m.role === 'assistant')
                   }
                   conversationId={activeId}
+                  attachments={conversationAttachments}
                   onSendToImageStudio={() => setAppMode('image')}
+                  onSendToMusicStudio={(result) => {
+                    setCrossoverContext({ type: 'to-music', data: result });
+                    setAppMode('music');
+                  }}
                   onRegenerate={() => regenerateLastMessage(activeId)}
                   onEdit={(newContent) => editAndResend(activeId, msg.id, newContent)}
                   onBranchFromHere={(messageId) => {
@@ -1433,7 +1451,9 @@ function MessageBubble({
   message,
   isLastAssistant,
   conversationId,
+  attachments,
   onSendToImageStudio,
+  onSendToMusicStudio,
   onRegenerate,
   onEdit,
   onBranchFromHere,
@@ -1442,7 +1462,9 @@ function MessageBubble({
   message: Message;
   isLastAssistant: boolean;
   conversationId: string;
+  attachments: Record<string, Attachment>;
   onSendToImageStudio: () => void;
+  onSendToMusicStudio: (result: { prompt: string; genre?: string; mood?: string; instruments?: string[]; tempo?: string; sessionId?: string }) => void;
   onRegenerate: () => void;
   onEdit: (newContent: string) => void;
   onBranchFromHere: (messageId: string) => void;
@@ -1450,6 +1472,8 @@ function MessageBubble({
 }) {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
+  const [sendingToMusic, setSendingToMusic] = useState(false);
+  const createMusicSession = useMusicStudioStore((s) => s.createSession);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [fileSourcesOpen, setFileSourcesOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -1602,7 +1626,29 @@ function MessageBubble({
             </div>
           </div>
         ) : isUser ? (
-          <div className="whitespace-pre-wrap break-words">{message.content}</div>
+          <>
+            <div className="whitespace-pre-wrap break-words">{message.content}</div>
+            {/* Audio player for audio attachments embedded in user messages (e.g. Send to Chat from Music Studio) */}
+            {(() => {
+              const audioIds = Array.from(
+                message.content.matchAll(/\/v1\/attachments\/([a-f0-9-]+)\/download/g)
+              ).map((m) => m[1]).filter((id) => attachments[id]?.mime_type?.startsWith('audio/'));
+              if (audioIds.length === 0) return null;
+              return (
+                <div className="mt-2 space-y-2">
+                  {audioIds.map((id) => (
+                    <audio
+                      key={id}
+                      controls
+                      preload="metadata"
+                      src={attachmentUrl(id)}
+                      className="w-full max-w-sm rounded-lg"
+                    />
+                  ))}
+                </div>
+              );
+            })()}
+          </>
         ) : (
           <>
             {/* Saved thinking block (Ollama think mode) */}
@@ -1618,6 +1664,26 @@ function MessageBubble({
               </details>
             )}
             <MarkdownContent content={message.content} />
+            {/* Audio players for any audio/* attachments referenced in the message */}
+            {(() => {
+              const audioIds = Array.from(
+                message.content.matchAll(/\/v1\/attachments\/([a-f0-9-]+)\/download/g)
+              ).map((m) => m[1]).filter((id) => attachments[id]?.mime_type?.startsWith('audio/'));
+              if (audioIds.length === 0) return null;
+              return (
+                <div className="mt-2 space-y-2">
+                  {audioIds.map((id) => (
+                    <audio
+                      key={id}
+                      controls
+                      preload="metadata"
+                      src={attachmentUrl(id)}
+                      className="w-full max-w-sm rounded-lg"
+                    />
+                  ))}
+                </div>
+              );
+            })()}
           </>
         )}
 
@@ -1759,6 +1825,38 @@ function MessageBubble({
                   title="Send to Image Studio"
                 >
                   <ImagePlus size={12} />
+                </button>
+              )}
+              {!isUser && !isImageGenerationMessage && message.content.trim().length >= 10 && (
+                <button
+                  onClick={async () => {
+                    setSendingToMusic(true);
+                    try {
+                      const prompt = message.content.trim();
+                      const [distilled, session] = await Promise.all([
+                        crossoverApi.translate.chatToMusic({ prompt }),
+                        createMusicSession(),
+                      ]);
+                      if (!session) {
+                        toast.error('Could not create music session');
+                        return;
+                      }
+                      onSendToMusicStudio({ ...distilled, sessionId: session.id });
+                    } catch {
+                      toast.error('Could not distill music prompt — check your provider settings');
+                    } finally {
+                      setSendingToMusic(false);
+                    }
+                  }}
+                  disabled={sendingToMusic}
+                  className="p-1 rounded-md hover:bg-surface-hover text-text-muted hover:text-text
+                             transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label="Send to Music Studio"
+                  title="Send to Music Studio"
+                >
+                  {sendingToMusic
+                    ? <span className="block w-3 h-3 border-2 border-text-muted/30 border-t-text-muted rounded-full animate-spin" />
+                    : <Music2 size={12} />}
                 </button>
               )}
               {isLastAssistant && !streaming && (

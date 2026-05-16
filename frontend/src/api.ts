@@ -73,7 +73,24 @@ import type {
   ToolPolicy,
   BrowserSession,
   BrowserStatus,
+  CrossoverTranslateRequest,
+  CrossoverMusicToImageResponse,
+  CrossoverImageToMusicResponse,
+  Attachment,
 } from './types';
+import type {
+  GenerateMusicRequest,
+  MusicAsset,
+  MusicGenerationDetail,
+  MusicGenerationDone,
+  MusicGenerationError,
+  MusicGenerationProgress,
+  MusicModel,
+  MusicProviderKey,
+  MusicProvidersResponse,
+  MusicSession,
+  MusicSessionDetail,
+} from './types/music';
 
 // In the Wails desktop build the API runs on a real local HTTP server
 // (required for SSE streaming). The Go App.GetAPIBase() binding returns
@@ -124,6 +141,10 @@ export function getAuthToken(): string | null {
 // Returns the full URL for downloading an attachment, respecting desktop BASE_URL.
 export function attachmentUrl(attachmentId: string): string {
   return `${BASE_URL}/attachments/${attachmentId}/download`;
+}
+
+export function musicAssetUrl(assetId: string): string {
+  return `${BASE_URL}/music/assets/${encodeURIComponent(assetId)}/download`;
 }
 
 // Upload a file as an attachment scoped to a conversation.
@@ -1181,4 +1202,199 @@ export const imageSessionApi = {
       `/conversations/${conversationId}/images/sessions/${sessionId}/nodes/${nodeId}/select`,
       { method: 'PUT', body: JSON.stringify({ asset_id: assetId }) },
     ),
+};
+
+// ── Music Studio ──────────────────────────────────────────────────────────
+
+export const musicApi = {
+  providers: () =>
+    apiFetch<MusicProvidersResponse>('/music/providers'),
+
+  listModels: (provider: MusicProviderKey) =>
+    apiFetch<MusicModel[]>(`/music/models?provider=${encodeURIComponent(provider)}`),
+
+  refreshModels: (provider: MusicProviderKey) =>
+    apiFetch<MusicModel[]>(`/music/models/refresh?provider=${encodeURIComponent(provider)}`, {
+      method: 'POST',
+    }),
+
+  listSessions: () =>
+    apiFetch<MusicSession[]>('/music/sessions'),
+
+  createSession: (data: { title?: string; provider?: MusicProviderKey; model?: string } = {}) =>
+    apiFetch<MusicSession>('/music/sessions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getSession: (sessionId: string) =>
+    apiFetch<MusicSessionDetail>(`/music/sessions/${encodeURIComponent(sessionId)}`),
+
+  updateSession: (sessionId: string, data: { title?: string; provider?: MusicProviderKey; model?: string }) =>
+    apiFetch<MusicSession>(`/music/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  deleteSession: (sessionId: string) =>
+    apiFetch<{ deleted: boolean }>(`/music/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+    }),
+
+  listGenerations: (sessionId: string) =>
+    apiFetch<MusicGenerationDetail[]>(`/music/sessions/${encodeURIComponent(sessionId)}/generations`),
+
+  getGeneration: (generationId: string) =>
+    apiFetch<MusicGenerationDetail>(`/music/generations/${encodeURIComponent(generationId)}`),
+
+  branchGeneration: (generationId: string) =>
+    apiFetch<{
+      parent_id: string;
+      session_id: string;
+      prompt: string;
+      assembled_prompt: string;
+      provider: MusicProviderKey;
+      model: string;
+    }>(`/music/generations/${encodeURIComponent(generationId)}/branch`, {
+      method: 'POST',
+    }),
+
+  getAsset: (assetId: string) =>
+    apiFetch<MusicAsset>(`/music/assets/${encodeURIComponent(assetId)}`),
+
+  deleteAsset: (assetId: string) =>
+    apiFetch<{ deleted: boolean }>(`/music/assets/${encodeURIComponent(assetId)}`, {
+      method: 'DELETE',
+    }),
+
+  downloadUrl: (assetId: string) => musicAssetUrl(assetId),
+
+  generate: (
+    req: GenerateMusicRequest,
+    callbacks: {
+      onStarted?: (data: MusicGenerationProgress) => void;
+      onProgress?: (data: MusicGenerationProgress) => void;
+      onDone?: (data: MusicGenerationDone) => void;
+      onError?: (data: MusicGenerationError) => void;
+    },
+  ) => {
+    const controller = new AbortController();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (authToken) {
+      headers.Authorization = `Bearer ${authToken}`;
+    }
+
+    fetch(`${BASE_URL}/music/generations`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({ error: response.statusText }));
+          callbacks.onError?.({ error: body.error || `Music generation failed: ${response.status}` });
+          return;
+        }
+        const reader = response.body?.getReader();
+        if (!reader) {
+          callbacks.onError?.({ error: 'No readable stream returned' });
+          return;
+        }
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let currentEvent = 'music_generation_progress';
+        let pendingData = '';
+        let terminalReceived = false;
+
+        const dispatch = (eventType: string, dataStr: string) => {
+          try {
+            const payload = JSON.parse(dataStr);
+            if (eventType === 'music_generation_started') {
+              callbacks.onStarted?.(payload);
+            } else if (eventType === 'music_generation_done') {
+              terminalReceived = true;
+              callbacks.onDone?.(payload);
+            } else if (eventType === 'music_generation_error') {
+              terminalReceived = true;
+              callbacks.onError?.(payload);
+            } else {
+              callbacks.onProgress?.(payload);
+            }
+          } catch {
+            // Ignore malformed SSE frames.
+          }
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line) {
+              if (pendingData) {
+                dispatch(currentEvent, pendingData);
+                pendingData = '';
+                currentEvent = 'music_generation_progress';
+              }
+              continue;
+            }
+            if (line.startsWith('event:')) {
+              currentEvent = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              pendingData += line.slice(5).trim();
+            }
+          }
+        }
+        if (pendingData) {
+          dispatch(currentEvent, pendingData);
+        }
+        if (!terminalReceived) {
+          callbacks.onError?.({ error: 'Music generation stream closed unexpectedly' });
+        }
+      })
+      .catch((err) => {
+        if (err?.name !== 'AbortError') {
+          callbacks.onError?.({ error: err?.message || 'Music generation failed' });
+        }
+      });
+
+    return { abort: () => controller.abort() };
+  },
+
+  /** Copy a music asset's bytes into a new attachment under the target conversation. */
+  attachToConversation: (assetId: string, conversationId: string) =>
+    apiFetch<Attachment>(
+      `/music/assets/${encodeURIComponent(assetId)}/attach-to-conversation`,
+      { method: 'POST', body: JSON.stringify({ conversation_id: conversationId }) },
+    ),
+};
+
+// ── Crossover Translation ──────────────────────────────────────────────────
+
+export const crossoverApi = {
+  /** Translate a domain prompt between music and image studios via LLM. */
+  translate: {
+    musicToImage: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverMusicToImageResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'music', target: 'image', content } satisfies CrossoverTranslateRequest),
+      }),
+
+    imageToMusic: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverImageToMusicResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'image', target: 'music', content } satisfies CrossoverTranslateRequest),
+      }),
+
+    /** Distill a raw LLM chat response into a clean Lyria music prompt with genre/mood/instruments. */
+    chatToMusic: (content: { prompt: string }) =>
+      apiFetch<CrossoverImageToMusicResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'chat', target: 'music', content }),
+      }),
+  },
 };

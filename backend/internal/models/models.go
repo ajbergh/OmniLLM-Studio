@@ -143,6 +143,14 @@ type AppSettings struct {
 	JinaAPIKey        string `json:"jina_api_key"`
 	JinaReaderEnabled bool   `json:"jina_reader_enabled"`
 	JinaReaderMaxLen  int    `json:"jina_reader_max_len,omitempty"`
+	// Music Studio settings
+	DefaultMusicProvider        string `json:"default_music_provider,omitempty"`
+	DefaultMusicModelOpenRouter string `json:"default_music_model_openrouter,omitempty"`
+	DefaultMusicModelGemini     string `json:"default_music_model_gemini,omitempty"`
+	CustomGeminiLyriaModel      string `json:"custom_gemini_lyria_model,omitempty"`
+	AutoEnhanceMusicPrompts     bool   `json:"auto_enhance_music_prompts,omitempty"`
+	SaveMusicGenerationMetadata bool   `json:"save_music_generation_metadata,omitempty"`
+	MusicOutputDirectory        string `json:"music_output_directory,omitempty"`
 	// RAG settings
 	RAGEnabled        bool   `json:"rag_enabled"`
 	RAGEmbeddingModel string `json:"rag_embedding_model,omitempty"`
@@ -154,16 +162,23 @@ type AppSettings struct {
 // DefaultAppSettings returns the default settings.
 func DefaultAppSettings() AppSettings {
 	return AppSettings{
-		WebSearchProvider: "auto",
-		BraveAPIKey:       "",
-		JinaAPIKey:        "",
-		JinaReaderEnabled: true,
-		JinaReaderMaxLen:  10000,
-		RAGEnabled:        false,
-		RAGEmbeddingModel: "", // "" = Auto: ResolveEmbeddingProvider picks the canonical model per provider type.
-		RAGChunkSize:      1000,
-		RAGChunkOverlap:   200,
-		RAGTopK:           5,
+		WebSearchProvider:           "auto",
+		BraveAPIKey:                 "",
+		JinaAPIKey:                  "",
+		JinaReaderEnabled:           true,
+		JinaReaderMaxLen:            10000,
+		DefaultMusicProvider:        "openrouter",
+		DefaultMusicModelOpenRouter: "google/lyria-3-clip-preview",
+		DefaultMusicModelGemini:     "lyria-3-clip-preview",
+		CustomGeminiLyriaModel:      "",
+		AutoEnhanceMusicPrompts:     false,
+		SaveMusicGenerationMetadata: true,
+		MusicOutputDirectory:        "",
+		RAGEnabled:                  false,
+		RAGEmbeddingModel:           "", // "" = Auto: ResolveEmbeddingProvider picks the canonical model per provider type.
+		RAGChunkSize:                1000,
+		RAGChunkOverlap:             200,
+		RAGTopK:                     5,
 	}
 }
 
@@ -181,6 +196,21 @@ func (s AppSettings) ToMap() map[string]string {
 	if s.JinaReaderMaxLen > 0 {
 		m["jina_reader_max_len"] = fmt.Sprintf("%d", s.JinaReaderMaxLen)
 	}
+	m["default_music_provider"] = s.DefaultMusicProvider
+	m["default_music_model_openrouter"] = s.DefaultMusicModelOpenRouter
+	m["default_music_model_gemini"] = s.DefaultMusicModelGemini
+	m["custom_gemini_lyria_model"] = s.CustomGeminiLyriaModel
+	if s.AutoEnhanceMusicPrompts {
+		m["auto_enhance_music_prompts"] = "true"
+	} else {
+		m["auto_enhance_music_prompts"] = "false"
+	}
+	if s.SaveMusicGenerationMetadata {
+		m["save_music_generation_metadata"] = "true"
+	} else {
+		m["save_music_generation_metadata"] = "false"
+	}
+	m["music_output_directory"] = s.MusicOutputDirectory
 	// RAG settings
 	if s.RAGEnabled {
 		m["rag_enabled"] = "true"
@@ -227,6 +257,40 @@ func AppSettingsFromMap(m map[string]string) AppSettings {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			s.JinaReaderMaxLen = n
 		}
+	}
+
+	// Music Studio settings
+	if v, ok := m["default_music_provider"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		if v != "" {
+			s.DefaultMusicProvider = v
+		}
+	}
+	if v, ok := m["default_music_model_openrouter"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		if v != "" {
+			s.DefaultMusicModelOpenRouter = v
+		}
+	}
+	if v, ok := m["default_music_model_gemini"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		if v != "" {
+			s.DefaultMusicModelGemini = v
+		}
+	}
+	if v, ok := m["custom_gemini_lyria_model"]; ok {
+		s.CustomGeminiLyriaModel = strings.TrimSpace(strings.Trim(v, `"`))
+	}
+	if v, ok := m["auto_enhance_music_prompts"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		s.AutoEnhanceMusicPrompts = v == "true" || v == "1"
+	}
+	if v, ok := m["save_music_generation_metadata"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		s.SaveMusicGenerationMetadata = v != "false" && v != "0"
+	}
+	if v, ok := m["music_output_directory"]; ok {
+		s.MusicOutputDirectory = strings.TrimSpace(strings.Trim(v, `"`))
 	}
 
 	// RAG settings
@@ -667,4 +731,61 @@ type ImageReference struct {
 	AttachmentID string `json:"attachment_id"`
 	RefRole      string `json:"ref_role"`
 	SortOrder    int    `json:"sort_order"`
+}
+
+// ── Music Studio ────────────────────────────────────────────────────────
+
+type MusicSession struct {
+	ID                 string    `json:"id"`
+	UserID             *string   `json:"user_id,omitempty"`
+	Title              string    `json:"title"`
+	ActiveGenerationID *string   `json:"active_generation_id,omitempty"`
+	DefaultProvider    string    `json:"default_provider,omitempty"`
+	DefaultModel       string    `json:"default_model,omitempty"`
+	MetadataJSON       string    `json:"metadata_json,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type MusicGeneration struct {
+	ID              string     `json:"id"`
+	SessionID       string     `json:"session_id"`
+	ParentID        *string    `json:"parent_id,omitempty"`
+	Title           string     `json:"title"`
+	Status          string     `json:"status"`
+	Provider        string     `json:"provider"`
+	Model           string     `json:"model"`
+	Prompt          string     `json:"prompt"`
+	AssembledPrompt string     `json:"assembled_prompt"`
+	Lyrics          string     `json:"lyrics,omitempty"`
+	Structure       string     `json:"structure,omitempty"`
+	Error           *string    `json:"error,omitempty"`
+	UpstreamReqID   *string    `json:"upstream_request_id,omitempty"`
+	UsageJSON       *string    `json:"usage_json,omitempty"`
+	CostUSD         *float64   `json:"cost_usd,omitempty"`
+	DurationMS      *int64     `json:"duration_ms,omitempty"`
+	InputChars      int        `json:"input_chars"`
+	OutputBytes     int64      `json:"output_bytes"`
+	MetadataJSON    string     `json:"metadata_json,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+}
+
+type MusicAsset struct {
+	ID           string    `json:"id"`
+	SessionID    string    `json:"session_id"`
+	GenerationID string    `json:"generation_id,omitempty"`
+	Kind         string    `json:"kind"`
+	FileName     string    `json:"file_name"`
+	FilePath     string    `json:"file_path"`
+	MimeType     string    `json:"mime_type"`
+	SizeBytes    int64     `json:"size_bytes"`
+	DurationMS   int64     `json:"duration_ms,omitempty"`
+	SampleRateHz int       `json:"sample_rate_hz,omitempty"`
+	Channels     int       `json:"channels,omitempty"`
+	Provider     string    `json:"provider"`
+	Model        string    `json:"model"`
+	MetadataJSON string    `json:"metadata_json,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 }
