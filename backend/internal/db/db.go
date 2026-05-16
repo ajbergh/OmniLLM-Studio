@@ -128,6 +128,7 @@ func versionedMigrations() []Migration {
 		{Version: 33, Name: "file_library_foundation", SQL: migrationFileLibraryFoundation},
 		{Version: 34, Name: "workspace_project_context", SQL: migrationWorkspaceProjectContext},
 		{Version: 35, Name: "browser_sessions_and_flag", SQL: migrationBrowserSessionsAndFlag},
+		{Version: 36, Name: "music_studio", SQL: migrationMusicStudio},
 	}
 }
 
@@ -554,6 +555,91 @@ CREATE INDEX IF NOT EXISTS idx_browser_sessions_last_used ON browser_sessions(la
 
 INSERT INTO feature_flags (key, enabled, metadata)
 VALUES ('headless_browser', 1, '{}')
+ON CONFLICT(key) DO NOTHING;
+`
+
+// V36: Music Studio sessions, generations, assets, and feature flag.
+const migrationMusicStudio = `
+CREATE TABLE IF NOT EXISTS music_sessions (
+	id TEXT PRIMARY KEY,
+	user_id TEXT,
+	title TEXT NOT NULL DEFAULT 'Untitled Track Session',
+	active_generation_id TEXT,
+	default_provider TEXT NOT NULL DEFAULT '',
+	default_model TEXT NOT NULL DEFAULT '',
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_music_sessions_user_updated ON music_sessions(user_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS music_generations (
+	id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	parent_id TEXT,
+	title TEXT NOT NULL DEFAULT 'Untitled Track',
+	status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','completed','failed','cancelled')),
+	provider TEXT NOT NULL,
+	model TEXT NOT NULL,
+	prompt TEXT NOT NULL DEFAULT '',
+	assembled_prompt TEXT NOT NULL DEFAULT '',
+	lyrics TEXT NOT NULL DEFAULT '',
+	structure TEXT NOT NULL DEFAULT '',
+	error TEXT,
+	upstream_request_id TEXT,
+	usage_json TEXT,
+	cost_usd REAL,
+	duration_ms INTEGER,
+	input_chars INTEGER NOT NULL DEFAULT 0,
+	output_bytes INTEGER NOT NULL DEFAULT 0,
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	completed_at DATETIME,
+	FOREIGN KEY (session_id) REFERENCES music_sessions(id) ON DELETE CASCADE,
+	FOREIGN KEY (parent_id) REFERENCES music_generations(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_music_generations_session_created ON music_generations(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_music_generations_provider_model ON music_generations(provider, model);
+CREATE INDEX IF NOT EXISTS idx_music_generations_status ON music_generations(status);
+
+CREATE TABLE IF NOT EXISTS music_assets (
+	id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	generation_id TEXT NOT NULL,
+	kind TEXT NOT NULL DEFAULT 'music',
+	file_name TEXT NOT NULL,
+	file_path TEXT NOT NULL,
+	mime_type TEXT NOT NULL DEFAULT 'audio/mpeg',
+	size_bytes INTEGER NOT NULL DEFAULT 0,
+	duration_ms INTEGER NOT NULL DEFAULT 0,
+	sample_rate_hz INTEGER NOT NULL DEFAULT 0,
+	channels INTEGER NOT NULL DEFAULT 0,
+	provider TEXT NOT NULL,
+	model TEXT NOT NULL,
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	FOREIGN KEY (session_id) REFERENCES music_sessions(id) ON DELETE CASCADE,
+	FOREIGN KEY (generation_id) REFERENCES music_generations(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_music_assets_session ON music_assets(session_id);
+CREATE INDEX IF NOT EXISTS idx_music_assets_generation ON music_assets(generation_id);
+
+INSERT INTO feature_flags (key, enabled, metadata)
+VALUES ('music_studio', 1, '{"label":"Music Studio","description":"Generate Lyria music through OpenRouter or Gemini direct."}')
+ON CONFLICT(key) DO NOTHING;
+
+INSERT INTO settings (key, value_json) VALUES
+	('default_music_provider', 'openrouter'),
+	('default_music_model_openrouter', 'google/lyria-3-clip-preview'),
+	('default_music_model_gemini', 'lyria-3-clip-preview'),
+	('custom_gemini_lyria_model', ''),
+	('auto_enhance_music_prompts', 'false'),
+	('save_music_generation_metadata', 'true')
 ON CONFLICT(key) DO NOTHING;
 `
 

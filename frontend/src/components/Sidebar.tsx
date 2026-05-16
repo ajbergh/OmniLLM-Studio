@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useConversationStore, useSettingsStore, useMessageStore, useProviderStore } from '../stores';
+import { useConversationStore, useSettingsStore, useMessageStore, useProviderStore, useFeatureFlagStore } from '../stores';
 import { useImageEditorStore } from '../stores/imageEditor';
+import { useMusicStudioStore } from '../stores/musicStudio';
 import {
   Plus,
   Search,
@@ -18,12 +19,14 @@ import {
   User,
   ImageIcon,
   Files,
+  Music2,
 } from 'lucide-react';
 import { AppIcon } from './AppIcon';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import type { Conversation, ImageSession } from '../types';
+import type { MusicSession } from '../types/music';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { api, authApi, setAuthToken, imageSessionApi } from '../api';
 
@@ -64,14 +67,14 @@ function groupConversationsByDate(conversations: Conversation[]) {
   return groups.filter((g) => g.conversations.length > 0);
 }
 
-function groupSessionsByDate(sessions: ImageSession[]) {
+function groupSessionsByDate<T extends { created_at: string; updated_at: string }>(sessions: T[]) {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterday = new Date(today.getTime() - 86400000);
   const weekAgo = new Date(today.getTime() - 7 * 86400000);
   const monthAgo = new Date(today.getTime() - 30 * 86400000);
 
-  const groups: { label: string; sessions: ImageSession[] }[] = [
+  const groups: { label: string; sessions: T[] }[] = [
     { label: 'Today', sessions: [] },
     { label: 'Yesterday', sessions: [] },
     { label: 'This Week', sessions: [] },
@@ -109,6 +112,7 @@ export function Sidebar() {
   const { sidebarOpen, toggleSidebar, appMode, setAppMode } = useSettingsStore();
   const { fetchMessages, clearMessages } = useMessageStore();
   const providers = useProviderStore((s) => s.providers);
+  const { features, fetchFeatures, isEnabled } = useFeatureFlagStore();
   const {
     allSessions: imageSessions,
     activeSessionId,
@@ -118,6 +122,14 @@ export function Sidebar() {
     deleteSession: deleteImageSession,
     renameSession,
   } = useImageEditorStore();
+  const {
+    sessions: musicSessions,
+    activeSessionId: activeMusicSessionId,
+    loadSessions: loadMusicSessions,
+    selectSession: selectMusicSession,
+    createSession: createMusicSession,
+    deleteSession: deleteMusicSession,
+  } = useMusicStudioStore();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -126,10 +138,21 @@ export function Sidebar() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [authEnabled, setAuthEnabled] = useState(false);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const musicStudioEnabled = features.length === 0 || isEnabled('music_studio');
 
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
+
+  useEffect(() => {
+    fetchFeatures();
+  }, [fetchFeatures]);
+
+  useEffect(() => {
+    if (!musicStudioEnabled && appMode === 'music') {
+      setAppMode('chat');
+    }
+  }, [appMode, musicStudioEnabled, setAppMode]);
 
   // Load all image sessions when in image mode
   useEffect(() => {
@@ -137,6 +160,12 @@ export function Sidebar() {
       loadAllSessions();
     }
   }, [appMode, loadAllSessions]);
+
+  useEffect(() => {
+    if (appMode === 'music') {
+      loadMusicSessions();
+    }
+  }, [appMode, loadMusicSessions]);
 
   // Check if auth is enabled and get current user
   useEffect(() => {
@@ -275,6 +304,7 @@ export function Sidebar() {
   );
   const groups = useMemo(() => groupConversationsByDate(visibleConversations), [visibleConversations]);
   const sessionGroups = useMemo(() => groupSessionsByDate(imageSessions), [imageSessions]);
+  const musicSessionGroups = useMemo(() => groupSessionsByDate(musicSessions), [musicSessions]);
 
   const handleNewSession = async () => {
     const now = new Date();
@@ -290,6 +320,14 @@ export function Sidebar() {
     }
   };
 
+  const handleNewMusicSession = async () => {
+    const session = await createMusicSession();
+    if (session) {
+      await loadMusicSessions();
+      toast.success('New music session created');
+    }
+  };
+
   const handleSelectSession = useCallback(
     async (session: ImageSession) => {
       await loadSession(session.conversation_id, session.id);
@@ -299,6 +337,17 @@ export function Sidebar() {
       }
     },
     [loadSession, sidebarOpen, toggleSidebar]
+  );
+
+  const handleSelectMusicSession = useCallback(
+    async (session: MusicSession) => {
+      await selectMusicSession(session.id);
+      setContextMenuId(null);
+      if (window.innerWidth < 768 && sidebarOpen) {
+        toggleSidebar();
+      }
+    },
+    [selectMusicSession, sidebarOpen, toggleSidebar]
   );
 
   const handleDeleteSession = (session: ImageSession) => {
@@ -317,6 +366,20 @@ export function Sidebar() {
           } catch { /* ignore cleanup errors */ }
           await loadAllSessions();
           toast.success('Session deleted');
+        },
+      },
+      cancel: { label: 'Cancel', onClick: () => {} },
+      duration: 5000,
+    });
+  };
+
+  const handleDeleteMusicSession = (session: MusicSession) => {
+    setContextMenuId(null);
+    toast('Delete this music session?', {
+      action: {
+        label: 'Delete',
+        onClick: async () => {
+          await deleteMusicSession(session.id);
         },
       },
       cancel: { label: 'Cancel', onClick: () => {} },
@@ -367,9 +430,9 @@ export function Sidebar() {
           <motion.button
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
-            onClick={appMode === 'image' ? handleNewSession : handleNew}
+            onClick={appMode === 'image' ? handleNewSession : appMode === 'music' ? handleNewMusicSession : handleNew}
             className="p-2 rounded-xl hover:bg-surface-hover text-text-muted hover:text-primary transition-colors"
-            aria-label={appMode === 'image' ? 'New session' : 'New conversation (Ctrl+N)'}
+            aria-label={appMode === 'image' ? 'New image session' : appMode === 'music' ? 'New music session' : 'New conversation (Ctrl+N)'}
           >
             <Plus size={16} />
           </motion.button>
@@ -412,6 +475,20 @@ export function Sidebar() {
             <ImageIcon size={14} />
             Image Studio
           </button>
+          {musicStudioEnabled && (
+            <button
+              onClick={() => setAppMode('music')}
+              className={clsx(
+                'flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
+                appMode === 'music'
+                  ? 'bg-primary/20 text-primary shadow-sm'
+                  : 'text-text-muted hover:text-text hover:bg-surface-hover'
+              )}
+            >
+              <Music2 size={14} />
+              Music Studio
+            </button>
+          )}
         </div>
       </div>
 
@@ -529,6 +606,46 @@ export function Sidebar() {
                     onSelect={handleSelectSession}
                     onRename={handleRenameSession}
                     onDelete={handleDeleteSession}
+                    index={i}
+                  />
+                ))}
+              </div>
+            ))
+          )
+        ) : appMode === 'music' ? (
+          // ── Music Sessions List ──
+          musicSessions.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-center py-12 px-4"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mx-auto mb-4">
+                <Music2 size={20} className="text-primary" />
+              </div>
+              <p className="text-text-muted text-sm mb-3">No music sessions yet</p>
+              <button
+                onClick={handleNewMusicSession}
+                className="btn-primary px-4 py-2 rounded-xl text-xs font-medium inline-flex items-center gap-1.5"
+              >
+                <Plus size={13} /> Start your first session
+              </button>
+            </motion.div>
+          ) : (
+            musicSessionGroups.map((group) => (
+              <div key={group.label} className="mb-2">
+                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-text-muted/60">
+                  {group.label}
+                </div>
+                {group.sessions.map((session, i) => (
+                  <MusicSessionItem
+                    key={session.id}
+                    session={session}
+                    isActive={session.id === activeMusicSessionId}
+                    contextMenuId={contextMenuId}
+                    setContextMenuId={setContextMenuId}
+                    onSelect={handleSelectMusicSession}
+                    onDelete={handleDeleteMusicSession}
                     index={i}
                   />
                 ))}
@@ -918,6 +1035,89 @@ function SessionItem({
             >
               Rename
             </ContextMenuItem>
+            <ContextMenuItem
+              icon={<Trash2 size={13} />}
+              onClick={() => onDelete(session)}
+              danger
+            >
+              Delete
+            </ContextMenuItem>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+function MusicSessionItem({
+  session,
+  isActive,
+  contextMenuId,
+  setContextMenuId,
+  onSelect,
+  onDelete,
+  index,
+}: {
+  session: MusicSession;
+  isActive: boolean;
+  contextMenuId: string | null;
+  setContextMenuId: (id: string | null) => void;
+  onSelect: (session: MusicSession) => void;
+  onDelete: (session: MusicSession) => void;
+  index: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: index * 0.03, duration: 0.3 }}
+      onClick={() => onSelect(session)}
+      className={clsx(
+        'group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer text-sm mb-0.5',
+        'transition-all duration-200 relative',
+        isActive
+          ? 'bg-primary/10 text-text border border-primary/20'
+          : 'text-text-secondary hover:bg-surface-hover hover:text-text border border-transparent'
+      )}
+    >
+      {isActive && (
+        <motion.div
+          layoutId="active-music-session-indicator"
+          className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-full bg-gradient-to-b from-primary to-accent"
+          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+        />
+      )}
+
+      <Music2 size={14} className={clsx(
+        'shrink-0 transition-colors',
+        isActive ? 'text-primary' : 'opacity-40'
+      )} />
+
+      <span className="flex-1 truncate">{session.title}</span>
+
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setContextMenuId(contextMenuId === session.id ? null : session.id);
+        }}
+        className={clsx(
+          'p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all',
+          contextMenuId === session.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
+        )}
+      >
+        <MoreHorizontal size={14} />
+      </button>
+
+      <AnimatePresence>
+        {contextMenuId === session.id && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -4 }}
+            transition={{ duration: 0.15 }}
+            className="absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1.5 bg-surface-raised border border-border rounded-xl shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
             <ContextMenuItem
               icon={<Trash2 size={13} />}
               onClick={() => onDelete(session)}

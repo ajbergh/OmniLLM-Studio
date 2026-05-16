@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
-import { api, authApi, browserApi, mcpApi, setAuthToken } from '../api';
-import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, Github, Calculator, Link2, Search } from 'lucide-react';
+import { api, authApi, browserApi, mcpApi, musicApi, setAuthToken } from '../api';
+import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, Github, Calculator, Link2, Search, Music2 } from 'lucide-react';
 import type { BrowserSession, BrowserStatus, CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, ToolPolicy, UpdateMCPServerRequest } from '../types';
+import type { MusicModel, MusicProviderKey } from '../types/music';
 import { useTheme, THEMES } from '../theme';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -34,13 +35,14 @@ function FreeModelBadge() {
   );
 }
 
-type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'tools' | 'mcp' | 'pricing' | 'auth';
+type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'music' | 'tools' | 'mcp' | 'pricing' | 'auth';
 
 const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'providers', label: 'Providers' },
   { key: 'general', label: 'General' },
   { key: 'appearance', label: 'Appearance' },
   { key: 'rag', label: 'RAG' },
+  { key: 'music', label: 'Music' },
   { key: 'tools', label: 'Tools' },
   { key: 'mcp', label: 'MCP' },
   { key: 'pricing', label: 'Pricing' },
@@ -210,6 +212,16 @@ export function SettingsPanel() {
                     transition={{ duration: 0.2 }}
                   >
                     <RAGTab />
+                  </motion.div>
+                ) : tab === 'music' ? (
+                  <motion.div
+                    key="music"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <MusicTab />
                   </motion.div>
                 ) : tab === 'tools' ? (
                   <motion.div
@@ -779,7 +791,7 @@ function OpenRouterModelsButton({
       setModels(result);
       setExpanded(true);
       toast.success(`Fetched ${result.length} models`);
-    } catch (err) {
+    } catch {
       toast.error('Failed to fetch OpenRouter models');
     } finally {
       setLoading(false);
@@ -1694,6 +1706,250 @@ function RAGTab() {
           Reindex All Documents
         </motion.button>
       </div>
+    </div>
+  );
+}
+
+// ============================================
+// Music Studio Settings Tab
+// ============================================
+
+function MusicTab() {
+  const { settings, updateSettings } = useSettingsStore();
+  const { isEnabled, updateFeature } = useFeatureFlagStore();
+  const [enabled, setEnabled] = useState(isEnabled('music_studio'));
+  const [providers, setProviders] = useState({ openrouter: false, gemini: false });
+  const [defaultProvider, setDefaultProvider] = useState<MusicProviderKey>(
+    (settings.default_music_provider as MusicProviderKey) || 'openrouter'
+  );
+  const [openRouterModel, setOpenRouterModel] = useState(settings.default_music_model_openrouter || 'google/lyria-3-clip-preview');
+  const [geminiModel, setGeminiModel] = useState(settings.default_music_model_gemini || 'lyria-3-clip-preview');
+  const [customGeminiModel, setCustomGeminiModel] = useState(settings.custom_gemini_lyria_model || '');
+  const [autoEnhance, setAutoEnhance] = useState(settings.auto_enhance_music_prompts ?? false);
+  const [saveMetadata, setSaveMetadata] = useState(settings.save_music_generation_metadata ?? true);
+  const [models, setModels] = useState<Record<MusicProviderKey, MusicModel[]>>({ openrouter: [], gemini: [] });
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const loadMusicSettings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const providerStatus = await musicApi.providers();
+      const [openrouterModels, geminiModels] = await Promise.all([
+        musicApi.listModels('openrouter').catch(() => []),
+        musicApi.listModels('gemini').catch(() => []),
+      ]);
+      setProviders(providerStatus);
+      setModels({ openrouter: openrouterModels, gemini: geminiModels });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    setEnabled(isEnabled('music_studio'));
+  }, [isEnabled]);
+
+  useEffect(() => {
+    setDefaultProvider((settings.default_music_provider as MusicProviderKey) || 'openrouter');
+    setOpenRouterModel(settings.default_music_model_openrouter || 'google/lyria-3-clip-preview');
+    setGeminiModel(settings.default_music_model_gemini || 'lyria-3-clip-preview');
+    setCustomGeminiModel(settings.custom_gemini_lyria_model || '');
+    setAutoEnhance(settings.auto_enhance_music_prompts ?? false);
+    setSaveMetadata(settings.save_music_generation_metadata ?? true);
+  }, [settings]);
+
+  useEffect(() => {
+    loadMusicSettings();
+  }, [loadMusicSettings]);
+
+  const refreshModels = async () => {
+    setLoading(true);
+    try {
+      const [openrouterModels, geminiModels] = await Promise.all([
+        musicApi.refreshModels('openrouter').catch(() => []),
+        musicApi.refreshModels('gemini').catch(() => []),
+      ]);
+      setModels({ openrouter: openrouterModels, gemini: geminiModels });
+      toast.success('Lyria model lists refreshed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveMusicSettings = async () => {
+    if (customGeminiModel.trim() && !customGeminiModel.trim().startsWith('lyria-')) {
+      toast.error('Custom Gemini Lyria model must start with lyria-');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateFeature('music_studio', enabled);
+      await updateSettings({
+        default_music_provider: defaultProvider,
+        default_music_model_openrouter: openRouterModel,
+        default_music_model_gemini: geminiModel,
+        custom_gemini_lyria_model: customGeminiModel.trim(),
+        auto_enhance_music_prompts: autoEnhance,
+        save_music_generation_metadata: saveMetadata,
+      });
+      toast.success('Music Studio settings saved');
+    } catch {
+      toast.error('Failed to save Music Studio settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-fuchsia-500/20 to-indigo-500/20 flex items-center justify-center shadow-md shadow-fuchsia-500/10">
+            <Music2 size={18} className="text-fuchsia-300" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold">Music Studio</h3>
+            <p className="text-[11px] text-text-muted">Configure Gemini Lyria generation through OpenRouter or Gemini direct</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between py-2">
+            <div>
+              <label className="text-xs font-medium text-text-secondary block">Enable Music Studio</label>
+              <p className="text-[10px] text-text-muted mt-0.5">Shows Music Studio in the app sidebar</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEnabled((value) => !value)}
+              className={`relative w-10 h-5 rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-border'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : ''}`} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium text-text-secondary mb-1.5 block">Default provider</label>
+              <select
+                value={defaultProvider}
+                onChange={(event) => setDefaultProvider(event.target.value as MusicProviderKey)}
+                className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50"
+              >
+                <option value="openrouter">OpenRouter {providers.openrouter ? '' : '(not configured)'}</option>
+                <option value="gemini">Gemini {providers.gemini ? '' : '(not configured)'}</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-text-secondary mb-1.5 block">Output directory</label>
+              <div className="min-h-10 rounded-xl border border-border bg-surface px-3 py-2 text-xs text-text-muted">
+                {settings.music_output_directory || 'OMNILLM_ATTACHMENTS_DIR/music'}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <ModelSelect
+              label="OpenRouter Lyria model"
+              value={openRouterModel}
+              models={models.openrouter}
+              fallback="google/lyria-3-clip-preview"
+              onChange={setOpenRouterModel}
+            />
+            <ModelSelect
+              label="Gemini Lyria model"
+              value={geminiModel}
+              models={models.gemini}
+              fallback="lyria-3-clip-preview"
+              onChange={setGeminiModel}
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-text-secondary mb-1.5 block">Custom Gemini Lyria model override</label>
+            <input
+              value={customGeminiModel}
+              onChange={(event) => setCustomGeminiModel(event.target.value)}
+              placeholder="lyria-..."
+              className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text placeholder:text-text-muted/50 focus:outline-none focus:border-primary/50"
+            />
+          </div>
+
+          <div className="space-y-2 rounded-xl border border-border bg-surface p-3">
+            <ToggleRow label="Auto-enhance simple prompts before generation" checked={autoEnhance} onChange={setAutoEnhance} />
+            <ToggleRow label="Save prompt and response metadata with assets" checked={saveMetadata} onChange={setSaveMetadata} />
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={refreshModels}
+              disabled={loading}
+              className="min-h-10 flex items-center justify-center gap-2 px-4 rounded-xl border border-border bg-surface text-sm text-text-secondary hover:text-text hover:bg-surface-hover disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+              Refresh Lyria Models
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={saveMusicSettings}
+              disabled={saving}
+              className="min-h-10 flex items-center justify-center gap-2 px-4 rounded-xl btn-primary text-sm font-medium disabled:opacity-50"
+            >
+              {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+              Save Music Settings
+            </motion.button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModelSelect({
+  label,
+  value,
+  models,
+  fallback,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  models: MusicModel[];
+  fallback: string;
+  onChange: (value: string) => void;
+}) {
+  const options = models.length > 0 ? models : [{ id: fallback, name: fallback } as MusicModel];
+  return (
+    <div>
+      <label className="text-xs font-medium text-text-secondary mb-1.5 block">{label}</label>
+      <select
+        value={value || fallback}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50"
+      >
+        {options.map((model) => (
+          <option key={model.id} value={model.id}>{model.name || model.id}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-xs text-text-secondary">{label}</span>
+      <button
+        type="button"
+        onClick={() => onChange(!checked)}
+        className={`relative h-5 w-10 rounded-full transition-colors ${checked ? 'bg-primary' : 'bg-border'}`}
+      >
+        <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
+      </button>
     </div>
   );
 }

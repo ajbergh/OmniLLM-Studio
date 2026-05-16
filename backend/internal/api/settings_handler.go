@@ -72,6 +72,43 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Music Studio settings
+	if v, ok := raw["default_music_provider"]; ok {
+		if s, ok := v.(string); ok {
+			existing.DefaultMusicProvider = s
+		}
+	}
+	if v, ok := raw["default_music_model_openrouter"]; ok {
+		if s, ok := v.(string); ok {
+			existing.DefaultMusicModelOpenRouter = s
+		}
+	}
+	if v, ok := raw["default_music_model_gemini"]; ok {
+		if s, ok := v.(string); ok {
+			existing.DefaultMusicModelGemini = s
+		}
+	}
+	if v, ok := raw["custom_gemini_lyria_model"]; ok {
+		if s, ok := v.(string); ok {
+			existing.CustomGeminiLyriaModel = s
+		}
+	}
+	if v, ok := raw["auto_enhance_music_prompts"]; ok {
+		if b, ok := v.(bool); ok {
+			existing.AutoEnhanceMusicPrompts = b
+		}
+	}
+	if v, ok := raw["save_music_generation_metadata"]; ok {
+		if b, ok := v.(bool); ok {
+			existing.SaveMusicGenerationMetadata = b
+		}
+	}
+	if v, ok := raw["music_output_directory"]; ok {
+		if s, ok := v.(string); ok {
+			existing.MusicOutputDirectory = s
+		}
+	}
+
 	// RAG settings
 	if v, ok := raw["rag_enabled"]; ok {
 		if b, ok := v.(bool); ok {

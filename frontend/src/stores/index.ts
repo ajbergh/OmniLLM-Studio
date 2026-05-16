@@ -514,13 +514,13 @@ interface SettingsState {
   loading: boolean;
   sidebarOpen: boolean;
   settingsOpen: boolean;
-  appMode: 'chat' | 'image';
+  appMode: 'chat' | 'image' | 'music';
 
   fetchSettings: () => Promise<void>;
   updateSettings: (data: Partial<import('../types').AppSettings>) => Promise<void>;
   toggleSidebar: () => void;
   toggleSettings: () => void;
-  setAppMode: (mode: 'chat' | 'image') => void;
+  setAppMode: (mode: 'chat' | 'image' | 'music') => void;
 }
 
 const defaultSettings: import('../types').AppSettings = {
@@ -529,6 +529,13 @@ const defaultSettings: import('../types').AppSettings = {
   jina_api_key: '',
   jina_reader_enabled: true,
   jina_reader_max_len: 3000,
+  default_music_provider: 'openrouter',
+  default_music_model_openrouter: 'google/lyria-3-clip-preview',
+  default_music_model_gemini: 'lyria-3-clip-preview',
+  custom_gemini_lyria_model: '',
+  auto_enhance_music_prompts: false,
+  save_music_generation_metadata: true,
+  music_output_directory: '',
   rag_enabled: false,
   rag_embedding_model: '',
   rag_chunk_size: 512,
@@ -543,10 +550,11 @@ function getInitialSidebarOpen(): boolean {
   return saved === 'true';
 }
 
-function getInitialAppMode(): 'chat' | 'image' {
+function getInitialAppMode(): 'chat' | 'image' | 'music' {
   if (typeof window === 'undefined') return 'chat';
   const saved = window.localStorage.getItem('omnillm_app_mode');
   if (saved === 'image') return 'image';
+  if (saved === 'music') return 'music';
   return 'chat';
 }
 

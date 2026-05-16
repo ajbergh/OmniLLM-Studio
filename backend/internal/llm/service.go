@@ -5,6 +5,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -91,6 +92,33 @@ type ImageResponse struct {
 	Images   []ImageResult `json:"images"`
 	Provider string        `json:"provider"`
 	Model    string        `json:"model"`
+}
+
+// MusicRequest holds the parameters for a text-to-music generation request.
+type MusicRequest struct {
+	Provider string       `json:"provider"`
+	Model    string       `json:"model"`
+	Prompt   string       `json:"prompt"`
+	Options  MusicOptions `json:"options,omitempty"`
+}
+
+type MusicOptions struct {
+	Seed        *int64   `json:"seed,omitempty"`
+	Temperature *float64 `json:"temperature,omitempty"`
+}
+
+// MusicResponse is the provider-normalized result for music generation.
+type MusicResponse struct {
+	Provider      string                 `json:"provider"`
+	Model         string                 `json:"model"`
+	AudioBytes    []byte                 `json:"-"`
+	MimeType      string                 `json:"mime_type"`
+	Lyrics        string                 `json:"lyrics,omitempty"`
+	Structure     string                 `json:"structure,omitempty"`
+	UsageJSON     []byte                 `json:"-"`
+	UpstreamReqID string                 `json:"upstream_request_id,omitempty"`
+	CostUSD       *float64               `json:"cost_usd,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // EmbeddingRequest holds the parameters for an embedding request.
@@ -1479,6 +1507,313 @@ func (s *Service) geminiImageGenerate(ctx context.Context, baseURL, apiKey, mode
 	}, nil
 }
 
+// openrouterMusicGenerate uses OpenRouter chat completions with audio output.
+// OpenRouter documents audio output as streamed SSE chunks in choices[].delta.audio.
+func (s *Service) openrouterMusicGenerate(ctx context.Context, baseURL, apiKey, model string, req MusicRequest) (*MusicResponse, error) {
+	endpoint := strings.TrimRight(baseURL, "/") + "/chat/completions"
+	body := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]interface{}{
+			{"role": "user", "content": req.Prompt},
+		},
+		"modalities": []string{"text", "audio"},
+		"audio": map[string]interface{}{
+			"format": "mp3",
+		},
+		"stream": true,
+	}
+	if req.Options.Seed != nil {
+		body["seed"] = *req.Options.Seed
+	}
+	if req.Options.Temperature != nil {
+		body["temperature"] = *req.Options.Temperature
+	}
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	log.Printf("[openrouter-music] POST %s model=%s", endpoint, model)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	musicClient := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := musicClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return nil, fmt.Errorf("provider returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var audioB64 strings.Builder
+	var textParts []string
+	var requestID string
+	var usage json.RawMessage
+	var cost *float64
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			break
+		}
+		var chunk struct {
+			ID      string `json:"id"`
+			Choices []struct {
+				Delta struct {
+					Content interface{} `json:"content"`
+					Audio   struct {
+						Data       string `json:"data"`
+						Transcript string `json:"transcript"`
+						Format     string `json:"format"`
+					} `json:"audio"`
+				} `json:"delta"`
+				Message struct {
+					Content interface{} `json:"content"`
+					Audio   struct {
+						Data       string `json:"data"`
+						Transcript string `json:"transcript"`
+						Format     string `json:"format"`
+					} `json:"audio"`
+				} `json:"message"`
+			} `json:"choices"`
+			Usage json.RawMessage `json:"usage"`
+			Cost  *float64        `json:"cost"`
+		}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			continue
+		}
+		if requestID == "" {
+			requestID = chunk.ID
+		}
+		if len(chunk.Usage) > 0 && string(chunk.Usage) != "null" {
+			usage = chunk.Usage
+		}
+		if chunk.Cost != nil {
+			cost = chunk.Cost
+		}
+		for _, choice := range chunk.Choices {
+			collectOpenRouterContent(choice.Delta.Content, &textParts)
+			if choice.Delta.Audio.Transcript != "" {
+				textParts = append(textParts, choice.Delta.Audio.Transcript)
+			}
+			if choice.Delta.Audio.Data != "" {
+				audioB64.WriteString(choice.Delta.Audio.Data)
+			}
+			collectOpenRouterContent(choice.Message.Content, &textParts)
+			if choice.Message.Audio.Transcript != "" {
+				textParts = append(textParts, choice.Message.Audio.Transcript)
+			}
+			if choice.Message.Audio.Data != "" {
+				audioB64.WriteString(choice.Message.Audio.Data)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read stream: %w", err)
+	}
+	if audioB64.Len() == 0 {
+		return nil, fmt.Errorf("no audio returned by OpenRouter")
+	}
+	audioBytes, err := base64.StdEncoding.DecodeString(audioB64.String())
+	if err != nil {
+		return nil, fmt.Errorf("decode OpenRouter audio: %w", err)
+	}
+	text := strings.TrimSpace(strings.Join(textParts, "\n"))
+	return &MusicResponse{
+		Provider:      "openrouter",
+		Model:         model,
+		AudioBytes:    audioBytes,
+		MimeType:      "audio/mpeg",
+		Lyrics:        text,
+		Structure:     extractPossibleStructure(text),
+		UsageJSON:     usage,
+		UpstreamReqID: requestID,
+		CostUSD:       cost,
+		Metadata: map[string]interface{}{
+			"transport": "openrouter_chat_completions_stream",
+		},
+	}, nil
+}
+
+func collectOpenRouterContent(content interface{}, out *[]string) {
+	switch value := content.(type) {
+	case string:
+		if strings.TrimSpace(value) != "" {
+			*out = append(*out, value)
+		}
+	case []interface{}:
+		for _, item := range value {
+			part, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if text, ok := part["text"].(string); ok && strings.TrimSpace(text) != "" {
+				*out = append(*out, text)
+			}
+		}
+	}
+}
+
+// geminiMusicGenerate uses Gemini's native generateContent endpoint for Lyria.
+func (s *Service) geminiMusicGenerate(ctx context.Context, baseURL, apiKey, model string, req MusicRequest) (*MusicResponse, error) {
+	nativeBase := geminiNativeBaseURL(baseURL)
+	endpoint := fmt.Sprintf("%s/models/%s:generateContent", nativeBase, model)
+	genConfig := map[string]interface{}{
+		"responseModalities": []string{"AUDIO", "TEXT"},
+	}
+	if req.Options.Temperature != nil {
+		genConfig["temperature"] = *req.Options.Temperature
+	}
+	if strings.Contains(strings.ToLower(model), "pro") {
+		genConfig["responseFormat"] = map[string]interface{}{
+			"audio": map[string]interface{}{"mimeType": "audio/mpeg"},
+		}
+	}
+	body := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]interface{}{
+					{"text": req.Prompt},
+				},
+			},
+		},
+		"generationConfig": genConfig,
+	}
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	log.Printf("[gemini-music] POST %s model=%s", endpoint, model)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		httpReq.Header.Set("x-goog-api-key", apiKey)
+	}
+
+	musicClient := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := musicClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("provider returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(respBody, &raw); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	if feedback, ok := raw["promptFeedback"].(map[string]interface{}); ok {
+		if reason, _ := feedback["blockReason"].(string); reason != "" {
+			return nil, fmt.Errorf("Gemini blocked prompt: %s", reason)
+		}
+	}
+
+	candidates, _ := raw["candidates"].([]interface{})
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no candidates returned by Gemini")
+	}
+	var textParts []string
+	var audioBytes []byte
+	mimeType := "audio/mpeg"
+	for _, c := range candidates {
+		candidate, _ := c.(map[string]interface{})
+		content, _ := candidate["content"].(map[string]interface{})
+		parts, _ := content["parts"].([]interface{})
+		for _, p := range parts {
+			part, ok := p.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if text, ok := part["text"].(string); ok && strings.TrimSpace(text) != "" {
+				textParts = append(textParts, text)
+			}
+			var inlineData map[string]interface{}
+			if id, ok := part["inline_data"].(map[string]interface{}); ok {
+				inlineData = id
+			} else if id, ok := part["inlineData"].(map[string]interface{}); ok {
+				inlineData = id
+			}
+			if inlineData == nil {
+				continue
+			}
+			if mt, ok := inlineData["mime_type"].(string); ok && mt != "" {
+				mimeType = mt
+			} else if mt, ok := inlineData["mimeType"].(string); ok && mt != "" {
+				mimeType = mt
+			}
+			data, _ := inlineData["data"].(string)
+			if data == "" {
+				continue
+			}
+			decoded, err := base64.StdEncoding.DecodeString(data)
+			if err != nil {
+				return nil, fmt.Errorf("decode Gemini audio: %w", err)
+			}
+			audioBytes = append(audioBytes, decoded...)
+		}
+	}
+	if len(audioBytes) == 0 {
+		return nil, fmt.Errorf("no audio returned by Gemini")
+	}
+	usageJSON, _ := json.Marshal(raw["usageMetadata"])
+	text := strings.TrimSpace(strings.Join(textParts, "\n"))
+	return &MusicResponse{
+		Provider:   "gemini",
+		Model:      model,
+		AudioBytes: audioBytes,
+		MimeType:   mimeType,
+		Lyrics:     text,
+		Structure:  extractPossibleStructure(text),
+		UsageJSON:  usageJSON,
+		Metadata: map[string]interface{}{
+			"transport": "gemini_generate_content",
+		},
+	}, nil
+}
+
+func extractPossibleStructure(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	if strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[") {
+		return text
+	}
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if strings.Contains(lower, "intro") || strings.Contains(lower, "verse") || strings.Contains(lower, "chorus") || strings.Contains(lower, "bridge") || strings.Contains(lower, "outro") {
+			lines = append(lines, trimmed)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // openaiImageEdit sends a multipart form request to the OpenAI-compatible
 // /images/edits endpoint. The image and optional mask are decoded from base64
 // and included as file parts.
@@ -1749,6 +2084,31 @@ func (s *Service) ImageGenerate(ctx context.Context, req ImageRequest) (*ImageRe
 		Provider: providerType,
 		Model:    model,
 	}, nil
+}
+
+// GenerateMusic performs text-to-music generation for provider-native Lyria routes.
+// Only OpenRouter and Gemini provider profiles are supported.
+func (s *Service) GenerateMusic(ctx context.Context, req MusicRequest) (*MusicResponse, error) {
+	provider, err := s.resolveProviderProfile(req.Provider)
+	if err != nil {
+		return nil, err
+	}
+	baseURL, apiKey, _, providerType, err := s.extractProviderDetails(*provider)
+	if err != nil {
+		return nil, err
+	}
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		return nil, fmt.Errorf("music model is required")
+	}
+	switch strings.ToLower(providerType) {
+	case "openrouter":
+		return s.openrouterMusicGenerate(ctx, baseURL, apiKey, model, req)
+	case "gemini":
+		return s.geminiMusicGenerate(ctx, baseURL, apiKey, model, req)
+	default:
+		return nil, fmt.Errorf("provider type '%s' does not support music generation", providerType)
+	}
 }
 
 // Embed calls the provider's /embeddings endpoint (OpenAI-compatible) and

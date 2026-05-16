@@ -7,8 +7,8 @@
     "doc": "docs"
   },
   "scripts": {
-    "test:smoke": "playwright test tests/image-editor-toolbar.smoke.spec.ts --project=chromium",
-    "test:smoke:headed": "playwright test tests/image-editor-toolbar.smoke.spec.ts --project=chromium --headed"
+    "test:smoke": "playwright test tests/image-editor-toolbar.smoke.spec.ts tests/music-studio.smoke.spec.ts --project=chromium",
+    "test:smoke:headed": "playwright test tests/image-editor-toolbar.smoke.spec.ts tests/music-studio.smoke.spec.ts --project=chromium --headed"
   },
   "keywords": [],
   "author": "",

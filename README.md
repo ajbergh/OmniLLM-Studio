@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Local-first LLM chat application</strong> — Go backend + React frontend<br/>
-  Multi-provider streaming · Image Studio · RAG · File Library · Agent mode · Branching · Web search · Live sports lookup · Headless Browser · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
+  Multi-provider streaming · Image Studio · Music Studio · RAG · File Library · Agent mode · Branching · Web search · Live sports lookup · Headless Browser · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
 </p>
 
 <p align="center">
@@ -33,6 +33,7 @@
 | **Reasoning Effort** | Per-message thinking level (auto / low / medium / high) for models that support it — OpenAI o-series, GPT-5.x, Claude 4.x+, Groq compound |
 | **Conversation Management** | Create, rename, pin, archive, delete, full-text search, per-conversation model override |
 | **Image Studio** | Full canvas editor with generation, editing, inpainting, variant comparison, and branching history |
+| **Music Studio** | Generate, play, download, and manage Gemini Lyria music tracks through OpenRouter or Gemini direct |
 | **Markdown Rendering** | Syntax highlighting, KaTeX math, Mermaid diagrams, inline image rendering |
 | **Auto-Titling** | Conversations are automatically titled based on the first exchange |
 
@@ -76,6 +77,21 @@ A dedicated image workspace with canvas-based editing, multi-provider generation
 | **Stable Diffusion** | SDXL 1.0, SD v1.6 | Generate, Edit, Mask, Seed, Guidance, Style Refs |
 | **Together** | FLUX.1 Pro/Schnell/Kontext/Krea, FLUX.2 Pro/Dev/Flex, Imagen 4.0, HiDream I1, Ideogram 3.0, Seedream 3/4, and 30+ models | Generate, Multi-variant |
 | **OpenRouter** | openai/gpt-image-2, openai/dall-e-3 | Generate |
+
+### Music Studio
+
+A dedicated workspace for AI-assisted music generation. Generate MP3 tracks with Google Gemini Lyria via **either** the Gemini API directly **or** through OpenRouter — choose per-session based on which API key you've configured. Build prompts with structured controls (genre, mood, instruments, BPM, key, structure, lyrics), play and download results in-app, and manage sessions in a per-track history tree.
+
+Music Studio is generation-only in v1. TTS, STT, audio analysis, image-to-music, and realtime/live performance features are intentionally out of scope.
+
+| Provider path | Models | Notes |
+|---------------|--------|-------|
+| **OpenRouter** | `google/lyria-3-clip-preview`, `google/lyria-3-pro-preview` | Uses the existing encrypted OpenRouter provider profile and Lyria audio route |
+| **Gemini direct** | `lyria-3-clip-preview`, `lyria-3-pro-preview` | Uses the existing encrypted Gemini provider profile and native Gemini REST API |
+
+Setup: open **Settings → Providers** and configure either an OpenRouter API key or a Gemini API key. Configure defaults, custom Gemini Lyria model overrides, and model refresh from **Settings → Music**.
+
+Screenshot placeholder: `docs/assets/screenshots/music-studio.png`
 
 ### Platform
 
@@ -142,6 +158,15 @@ When **Anthropic** is selected, effort levels map to extended thinking `budget_t
 | **Together AI** | `google/imagen-4.0-preview`, `google/imagen-4.0-fast`, `google/imagen-4.0-ultra`, `google/flash-image-2.5`, `black-forest-labs/FLUX.1-schnell-Free`, `black-forest-labs/FLUX.1.1-pro`, `black-forest-labs/FLUX.1-kontext-pro`, `black-forest-labs/FLUX.2-pro`, `ByteDance-Seed/Seedream-3.0`, `ByteDance-Seed/Seedream-4.0`, `HiDream-ai/HiDream-I1-Full`, `ideogram/ideogram-3.0`, `stabilityai/stable-diffusion-xl-base-1.0`, and 20+ more |
 | **OpenRouter** | `openai/gpt-image-2`, `openai/dall-e-3`, `openai/gpt-image-1` |
 
+### Music Models
+
+Music generation is Lyria-only in v1.
+
+| Provider | Models |
+|----------|--------|
+| **OpenRouter** | `google/lyria-3-clip-preview`, `google/lyria-3-pro-preview` |
+| **Google Gemini** | `lyria-3-clip-preview`, `lyria-3-pro-preview` |
+
 ---
 
 ## Architecture
@@ -162,9 +187,9 @@ Frontend (React/TS)  ──SSE/REST──▶  Backend (Go/Chi)  ──SQL──�
                                           └──▶  go-rod/Chromium (headless browser)
 ```
 
-- **Frontend** — Single-page React app with Zustand state management, Tailwind v4 styling, and Framer Motion animations. Includes a full-featured Image Studio with canvas editor.
-- **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image generation routed through provider-specific adapters (OpenAI, Gemini, Stable Diffusion, Together), with ESPN-backed sports lookup handled locally before LLM fallback, and go-rod/Chromium available for JS-heavy page rendering and stateful browser sessions.
-- **Database** — SQLite with WAL mode, 33 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions, nodes, assets, masks, and references stored relationally.
+- **Frontend** — Single-page React app with Zustand state management, Tailwind v4 styling, and Framer Motion animations. Includes full-featured Image Studio and Music Studio workspaces.
+- **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image and music generation route through provider-specific adapters, with ESPN-backed sports lookup handled locally before LLM fallback, and go-rod/Chromium available for JS-heavy page rendering and stateful browser sessions.
+- **Database** — SQLite with WAL mode, 36 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions/nodes/assets and music sessions/generations/assets are stored relationally.
 - **Vector store (RAG)** — [`chromem-go`](https://github.com/philippgille/chromem-go) embedded vector DB with collections per conversation, workspace, and global scope. Multi-threaded NN search; zero third-party Go dependencies. Chunk text stays in SQLite (`document_chunks`); chromem stores vectors only. Legacy `document_embeddings` rows lazy-migrate on first retrieval after upgrade.
 - **File Library** — Durable file storage with conversation, workspace, and global scopes. Hybrid retrieval (vector + keyword) with citation-aware results. Dedicated UI panel for managing indexed files.
 
@@ -353,6 +378,7 @@ OmniLLM-Studio/
 │       │   ├── search_handler.go        # Semantic search + reindex
 │       │   ├── image_handler.go          # Quick image generation
 │       │   ├── image_session_handler.go  # Image Studio sessions, editing, masks
+│       │   ├── music_handler.go          # Music Studio sessions, SSE generation, assets
 │       │   └── ...                      # Additional handlers
 │       ├── agent/                       # Planner + Runner (autonomous tasks)
 │       ├── analytics/                   # Usage aggregation + cost estimation
@@ -360,15 +386,16 @@ OmniLLM-Studio/
 │       ├── bundle/                      # Import/export (conversations, attachments)
 │       ├── config/                      # Environment variable config
 │       ├── crypto/                      # AES-256-GCM encryption
-│       ├── db/                          # SQLite init, 28 versioned migrations
+│       ├── db/                          # SQLite init, 36 versioned migrations
 │       ├── eval/                        # Evaluation harness (scorer, runner)
-│       ├── llm/                         # Provider routing, streaming, embeddings, image generation
+│       ├── llm/                         # Provider routing, streaming, embeddings, image and music generation
 │       ├── models/                      # Data models (Go structs + JSON tags)
+│       ├── music/                       # Music orchestration, Lyria models, prompt assembly, storage
 │       ├── plugins/                     # JSON-RPC plugin loader + runtime
 │       ├── rag/                         # Chunker, retriever, context builder
 │       ├── repository/                  # Database CRUD layer
 │       ├── search/                      # Semantic search service
-        ├── browser/                     # Headless Chromium via go-rod — session manager, tools, stealth mode
+│       ├── browser/                     # Headless Chromium via go-rod — session manager, tools, stealth mode
 │       ├── sports/                      # ESPN-backed scores, schedules, standings, odds, news, stats, and roster lookup
 │       ├── templates/                   # Prompt template seeding
 │       ├── tools/                       # Tool registry + executor (web search, sports, calculator, document gen)
@@ -383,7 +410,7 @@ OmniLLM-Studio/
 │       └── components/                  # React components
 │           ├── ChatView.tsx             # Chat interface + streaming + usage display
 │           ├── Sidebar.tsx              # Conversation list, workspace filter, auth
-│           ├── SettingsPanel.tsx         # 7-tab settings (Providers, General, Appearance, RAG, Tools, Pricing, Auth)
+│           ├── SettingsPanel.tsx         # Settings tabs including Providers, RAG, Music, Tools, Pricing, Auth
 │           ├── SearchPanel.tsx           # Semantic search + reindex
 │           ├── AgentRunView.tsx          # Agent run visualization + resume
 │           ├── BranchSwitcher.tsx        # Branch management UI
@@ -396,7 +423,7 @@ OmniLLM-Studio/
 │           ├── ImportExportPanel.tsx     # Backup/restore
 │           ├── RAGSourcePanel.tsx        # Document management for RAG
 │           ├── LoginScreen.tsx           # Auth login/register
-│           └── image/                    # Image Studio components
+│           ├── image/                    # Image Studio components
 │               ├── ImageEditStudio.tsx   # Main Image Studio UI + session management
 │               ├── ImageCanvas.tsx       # Interactive canvas with drawing + masking
 │               ├── CanvasToolbar.tsx     # Brush, eraser, pan, zoom, undo/redo
@@ -404,6 +431,11 @@ OmniLLM-Studio/
 │               ├── VariantComparePanel.tsx # Side-by-side + overlay comparison
 │               ├── ImageAdvancedControls.tsx # Size, seed, creativity, variants
 │               └── PromptQualityTips.tsx # Real-time prompt quality analyzer
+│           └── music/                    # Music Studio components
+│               ├── MusicStudio.tsx       # Main Music Studio UI
+│               ├── MusicPromptBuilder.tsx # Provider/model + structured prompt controls
+│               ├── MusicResultCard.tsx   # Player, waveform, tabs, result actions
+│               └── MusicHistoryPanel.tsx # Generation history rail
 ├── scripts/
 │   ├── start-dev.bat                    # Dev: backend + frontend (Windows)
 │   ├── start-dev.sh                     # Dev: backend + frontend (Linux/macOS)
