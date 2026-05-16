@@ -87,6 +87,7 @@ export interface SendMessageRequest {
   web_search?: boolean;
   think?: boolean;
   reasoning_effort?: string;
+  no_reply?: boolean;
   override?: {
     provider?: string;
     model?: string;
@@ -249,6 +250,7 @@ export interface AppSettings {
   default_music_provider?: string;
   default_music_model_openrouter?: string;
   default_music_model_gemini?: string;
+  default_music_model_elevenlabs?: string;
   custom_gemini_lyria_model?: string;
   auto_enhance_music_prompts?: boolean;
   save_music_generation_metadata?: boolean;

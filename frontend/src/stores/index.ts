@@ -532,6 +532,7 @@ const defaultSettings: import('../types').AppSettings = {
   default_music_provider: 'openrouter',
   default_music_model_openrouter: 'google/lyria-3-clip-preview',
   default_music_model_gemini: 'lyria-3-clip-preview',
+  default_music_model_elevenlabs: 'music_v1',
   custom_gemini_lyria_model: '',
   auto_enhance_music_prompts: false,
   save_music_generation_metadata: true,
@@ -601,7 +602,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
 export type CrossoverContext =
   | { type: 'to-music'; data: { prompt: string; genre?: string; mood?: string; instruments?: string[]; tempo?: string; sessionId?: string } }
-  | { type: 'to-image'; data: { prompt: string } }
+  | { type: 'to-image'; data: { prompt: string; autoGenerate?: boolean; nonce?: string } }
   | null;
 
 interface CrossoverState {

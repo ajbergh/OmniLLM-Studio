@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,14 @@ var KnownLyriaModels = map[string][]Model{
 			Capabilities: []Capability{CapabilityTextToMusic}, InputModalities: []string{"text"}, OutputModalities: []string{"audio", "text"},
 			SupportedFormats: []string{"mp3", "wav"}, SupportsStreaming: false, DefaultOutputFormat: "audio/mpeg",
 			Notes: "Gemini direct Lyria 3 Pro. Google documents MP3 by default and WAV via generationConfig.",
+		},
+	},
+	ProviderElevenLabs: {
+		{
+			ID: "music_v1", Provider: ProviderElevenLabs, Name: "ElevenLabs Music v1",
+			Capabilities: []Capability{CapabilityTextToMusic}, InputModalities: []string{"text"}, OutputModalities: []string{"audio"},
+			SupportedFormats: []string{"mp3"}, SupportsStreaming: false, DefaultOutputFormat: "audio/mpeg",
+			Notes: "ElevenLabs /v1/music synchronous endpoint.",
 		},
 	},
 }
@@ -143,9 +152,37 @@ func DefaultModel(provider string) string {
 		return "google/lyria-3-clip-preview"
 	case ProviderGemini:
 		return "lyria-3-clip-preview"
+	case ProviderElevenLabs:
+		return "music_v1"
 	default:
 		return ""
 	}
+}
+
+// parseDurationToMS converts presets like "30s", "120s", "3m" into milliseconds.
+// Returns nil if the value is empty or non-numeric (e.g. "Loop-friendly").
+func parseDurationToMS(value string) *int {
+	v := strings.TrimSpace(strings.ToLower(value))
+	if v == "" {
+		return nil
+	}
+	multiplier := 1000
+	switch {
+	case strings.HasSuffix(v, "ms"):
+		v = strings.TrimSuffix(v, "ms")
+		multiplier = 1
+	case strings.HasSuffix(v, "s"):
+		v = strings.TrimSuffix(v, "s")
+	case strings.HasSuffix(v, "m"):
+		v = strings.TrimSuffix(v, "m")
+		multiplier = 60 * 1000
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n <= 0 {
+		return nil
+	}
+	ms := n * multiplier
+	return &ms
 }
 
 func normalizeProvider(provider string) string {
@@ -154,6 +191,8 @@ func normalizeProvider(provider string) string {
 		return ProviderOpenRouter
 	case ProviderGemini:
 		return ProviderGemini
+	case ProviderElevenLabs:
+		return ProviderElevenLabs
 	default:
 		return ""
 	}

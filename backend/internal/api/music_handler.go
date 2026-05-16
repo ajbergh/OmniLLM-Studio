@@ -463,10 +463,11 @@ func (h *MusicHandler) AttachToConversation(w http.ResponseWriter, r *http.Reque
 	}
 	_ = dstFile.Close()
 
-	// Determine attachment type
+	// Determine attachment type — DB constraint allows only 'image' or 'file';
+	// audio assets are stored as type 'file' (MIME type identifies the format).
 	attachType := "file"
-	if len(asset.MimeType) >= 6 && asset.MimeType[:6] == "audio/" {
-		attachType = "audio"
+	if len(asset.MimeType) >= 6 && asset.MimeType[:6] == "image/" {
+		attachType = "image"
 	}
 
 	attachment := &models.Attachment{

@@ -3,6 +3,7 @@ import { Music, PanelRight, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useConversationStore, useMessageStore, useSettingsStore, useCrossoverStore } from '../../stores';
 import { useMusicStudioStore } from '../../stores/musicStudio';
+import { useImageEditorStore } from '../../stores/imageEditor';
 import { musicApi, api, crossoverApi } from '../../api';
 import { MusicPromptBuilder } from './MusicPromptBuilder';
 import { MusicResultCard } from './MusicResultCard';
@@ -45,6 +46,7 @@ export function MusicStudio() {
   const fetchMessages = useMessageStore((state) => state.fetchMessages);
   const setAppMode = useSettingsStore((state) => state.setAppMode);
   const { crossoverContext, clearCrossoverContext, setCrossoverContext } = useCrossoverStore();
+  const createImageSession = useImageEditorStore((s) => s.createSession);
 
   useEffect(() => {
     loadProviders();
@@ -97,12 +99,15 @@ export function MusicStudio() {
     try {
       const convo = await createConversation(`Music: ${generation.title}`);
       const attachment = await musicApi.attachToConversation(generation.asset_id, convo.id);
+      // User messages render as plain text (no markdown), so avoid bracket-link syntax.
+      // The audio player in ChatView detects the /v1/attachments/.../download URL from
+      // the raw message.content string, so it must be present here.
       const content = [
         generation.prompt && `Music prompt: ${generation.prompt}`,
         generation.assembled_prompt && `Final prompt:\n${generation.assembled_prompt}`,
-        `\n[🎵 ${generation.title}](/v1/attachments/${attachment.id}/download)`,
+        `🎵 ${generation.title}\n/v1/attachments/${attachment.id}/download`,
       ].filter(Boolean).join('\n\n');
-      await api.sendMessage(convo.id, { content });
+      await api.sendMessage(convo.id, { content, no_reply: true });
       selectConversation(convo.id);
       clearMessages();
       await fetchMessages(convo.id);
@@ -116,13 +121,21 @@ export function MusicStudio() {
   const handleGenerateAlbumArt = async (generation: MusicGenerationDetail) => {
     if (!generation.prompt) return;
     try {
-      const result = await crossoverApi.translate.musicToImage({
-        prompt: generation.prompt,
-        genre: generation.assembled_prompt ? undefined : undefined,
+      const sessionTitle = `Album Art – ${(generation.title || generation.prompt).slice(0, 48)}`;
+      const [result, session] = await Promise.all([
+        crossoverApi.translate.musicToImage({ prompt: generation.prompt }),
+        createImageSession(sessionTitle),
+      ]);
+      if (!session) {
+        toast.error('Could not create image session');
+        return;
+      }
+      setCrossoverContext({
+        type: 'to-image',
+        data: { prompt: result.image_prompt, autoGenerate: true, nonce: crypto.randomUUID() },
       });
-      setCrossoverContext({ type: 'to-image', data: { prompt: result.image_prompt } });
       setAppMode('image');
-      toast.success('Opening Image Studio with generated prompt');
+      toast.success('Opening Image Studio — generating album art…');
     } catch (err) {
       toast.error(`Album art translation failed: ${(err as Error).message}`);
     }

@@ -97,6 +97,7 @@ const INSTRUMENT_OPTIONS = [
 const PROVIDER_LABELS: Record<MusicProviderKey, string> = {
   openrouter: 'OpenRouter',
   gemini: 'Gemini',
+  elevenlabs: 'ElevenLabs',
 };
 
 interface MusicPromptBuilderProps {
@@ -136,7 +137,7 @@ export function MusicPromptBuilder({
   onClear,
   onStop,
 }: MusicPromptBuilderProps) {
-  const availableProviders = (['openrouter', 'gemini'] as MusicProviderKey[]).filter((provider) => providers[provider]);
+  const availableProviders = (['openrouter', 'gemini', 'elevenlabs'] as MusicProviderKey[]).filter((provider) => providers[provider]);
   const selectedModelMeta = models.find((model) => model.id === selectedModel);
   const canGenerate = Boolean(selectedProvider && selectedModel && promptForm.prompt.trim() && !isGenerating);
 
@@ -149,7 +150,7 @@ export function MusicPromptBuilder({
             onClick={onRefreshModels}
             disabled={!selectedProvider || isGenerating}
             className="min-h-8 min-w-8 inline-flex items-center justify-center rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors disabled:opacity-40"
-            aria-label="Refresh Lyria models"
+            aria-label="Refresh music models"
             title="Refresh models"
           >
             <RefreshCw size={13} />
@@ -178,15 +179,15 @@ export function MusicPromptBuilder({
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-text-muted">Lyria Model</label>
+            <label className="mb-1.5 block text-xs font-medium text-text-muted">Model</label>
             <select
-              aria-label="Lyria model"
+              aria-label="Music model"
               value={selectedModel || ''}
               onChange={(event) => onModelChange(event.target.value)}
               disabled={!selectedProvider || models.length === 0}
               className="w-full min-h-10 rounded-xl border border-border bg-surface-alt px-3 text-sm text-text focus:outline-none focus:border-primary/50 disabled:opacity-50"
             >
-              <option value="">{models.length === 0 ? 'No Lyria models available' : 'Select model'}</option>
+              <option value="">{models.length === 0 ? 'No music models available' : 'Select model'}</option>
               {models.map((model) => (
                 <option key={model.id} value={model.id}>{model.name || model.id}</option>
               ))}
@@ -209,7 +210,7 @@ export function MusicPromptBuilder({
 
       {availableProviders.length === 0 && (
         <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-          Add an enabled OpenRouter or Gemini provider profile in Settings before generating music.
+          Add an enabled OpenRouter, Gemini, or ElevenLabs provider profile in Settings before generating music.
         </div>
       )}
 

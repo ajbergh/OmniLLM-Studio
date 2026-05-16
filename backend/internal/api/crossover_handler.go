@@ -137,10 +137,10 @@ func (h *CrossoverHandler) firstEnabledProvider(_ string) (string, error) {
 func buildTranslationPrompt(req translateRequest) (system, user string) {
 	switch {
 	case req.Source == "music" && req.Target == "image":
-		system = `You are a creative director specializing in translating musical descriptions into vivid visual concepts for image generation.
+		system = `You are an album art director with expertise in translating music into striking square cover art concepts.
 Your task: given a music prompt with optional genre, mood, and instruments, output a single JSON object with exactly this schema:
 {"image_prompt": "<string>"}
-The image_prompt should be a detailed, concrete visual description (100-200 words) suitable for an AI image generator. Include lighting, color palette, scene elements, artistic style, and atmosphere that evoke the feeling of the music. Do NOT include explanations or markdown — output ONLY the JSON object.`
+The image_prompt must describe a square album cover (1:1 aspect ratio). Write a vivid, art-directed visual prompt (80-150 words) in the style of professional album artwork. Emphasize: a single bold focal image or abstract motif centered for square crop; a strong, cohesive color palette of 2-4 colors; a defined artistic style (e.g. digital illustration, painterly, graphic design, photography with heavy post-processing, glitch art, retro poster); mood and atmosphere that mirror the sonic identity of the music. Avoid cluttered scenes — album covers are graphic and immediate. Do NOT mention text, typography, or album titles. Do NOT include explanations or markdown — output ONLY the JSON object.`
 		parts := []string{fmt.Sprintf("Music prompt: %s", req.Content.Prompt)}
 		if req.Content.Genre != "" {
 			parts = append(parts, fmt.Sprintf("Genre: %s", req.Content.Genre))

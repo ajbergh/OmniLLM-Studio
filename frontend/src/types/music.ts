@@ -1,4 +1,4 @@
-export type MusicProviderKey = 'openrouter' | 'gemini';
+export type MusicProviderKey = 'openrouter' | 'gemini' | 'elevenlabs';
 
 export type MusicCapability = 'text_to_music';
 
@@ -19,6 +19,7 @@ export interface MusicModel {
 export interface MusicProvidersResponse {
   openrouter: boolean;
   gemini: boolean;
+  elevenlabs: boolean;
 }
 
 export interface MusicOptions {

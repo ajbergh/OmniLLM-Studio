@@ -114,6 +114,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const pendingRefType = useRef<'content' | 'style'>('content');
   const canvasRef = useRef<ImageCanvasHandle>(null);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
+  const autoGenerateNonceRef = useRef<string | null>(null);
   const [capabilities, setCapabilities] = useState<ImageCapabilities | null>(null);
   const imageCapableProviders = useMemo(() => providers.filter((p) => p.image_capable && p.enabled), [providers]);
   const prevProviderRef = useRef<string | null>(null);
@@ -232,10 +233,19 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   // Receive crossover context (from Music Studio → Image Studio)
   useEffect(() => {
     if (!crossoverContext || crossoverContext.type !== 'to-image') return;
-    setPrompt(crossoverContext.data.prompt);
+    const { prompt: ctxPrompt, autoGenerate, nonce } = crossoverContext.data;
+    setPrompt(ctxPrompt);
     clearCrossoverContext();
-    toast.success('Prompt pre-filled from Music Studio');
-  }, [crossoverContext, clearCrossoverContext]);
+    if (autoGenerate && conversationId && activeSessionId) {
+      // Guard against StrictMode double-invocation via nonce
+      if (nonce && autoGenerateNonceRef.current === nonce) return;
+      if (nonce) autoGenerateNonceRef.current = nonce;
+      void generate(conversationId, { prompt: ctxPrompt, size: '1024x1024' });
+      toast.success('Generating album art…');
+    } else {
+      toast.success('Prompt pre-filled from Music Studio');
+    }
+  }, [crossoverContext, clearCrossoverContext, generate, conversationId, activeSessionId]);
 
   useImageEditorShortcuts({
     enabled: !!activeSessionId,

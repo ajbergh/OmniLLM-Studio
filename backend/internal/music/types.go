@@ -7,6 +7,7 @@ type Capability string
 const (
 	ProviderOpenRouter = "openrouter"
 	ProviderGemini     = "gemini"
+	ProviderElevenLabs = "elevenlabs"
 
 	CapabilityTextToMusic Capability = "text_to_music"
 )
@@ -72,6 +73,7 @@ type GenerateResponse struct {
 type ProvidersResponse struct {
 	OpenRouter bool `json:"openrouter"`
 	Gemini     bool `json:"gemini"`
+	ElevenLabs bool `json:"elevenlabs"`
 }
 
 type GenerationDetail struct {

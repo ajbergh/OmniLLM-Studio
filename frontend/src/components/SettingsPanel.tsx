@@ -20,6 +20,7 @@ const PROVIDER_TYPES = [
   { value: 'groq', label: 'Groq', icon: Zap, color: 'from-yellow-500/20 to-amber-500/20', iconColor: 'text-yellow-400' },
   { value: 'together', label: 'Together AI', icon: Cpu, color: 'from-indigo-500/20 to-blue-500/20', iconColor: 'text-indigo-400' },
   { value: 'mistral', label: 'Mistral AI', icon: Globe, color: 'from-cyan-500/20 to-teal-500/20', iconColor: 'text-cyan-400' },
+  { value: 'elevenlabs', label: 'ElevenLabs', icon: Music2, color: 'from-violet-500/20 to-purple-500/20', iconColor: 'text-violet-400' },
   { value: 'custom', label: 'Custom (OpenAI-compatible)', icon: Server, color: 'from-gray-500/20 to-slate-500/20', iconColor: 'text-gray-400' },
 ];
 
@@ -1718,16 +1719,17 @@ function MusicTab() {
   const { settings, updateSettings } = useSettingsStore();
   const { isEnabled, updateFeature } = useFeatureFlagStore();
   const [enabled, setEnabled] = useState(isEnabled('music_studio'));
-  const [providers, setProviders] = useState({ openrouter: false, gemini: false });
+  const [providers, setProviders] = useState({ openrouter: false, gemini: false, elevenlabs: false });
   const [defaultProvider, setDefaultProvider] = useState<MusicProviderKey>(
     (settings.default_music_provider as MusicProviderKey) || 'openrouter'
   );
   const [openRouterModel, setOpenRouterModel] = useState(settings.default_music_model_openrouter || 'google/lyria-3-clip-preview');
   const [geminiModel, setGeminiModel] = useState(settings.default_music_model_gemini || 'lyria-3-clip-preview');
+  const [elevenlabsModel, setElevenlabsModel] = useState(settings.default_music_model_elevenlabs || 'music_v1');
   const [customGeminiModel, setCustomGeminiModel] = useState(settings.custom_gemini_lyria_model || '');
   const [autoEnhance, setAutoEnhance] = useState(settings.auto_enhance_music_prompts ?? false);
   const [saveMetadata, setSaveMetadata] = useState(settings.save_music_generation_metadata ?? true);
-  const [models, setModels] = useState<Record<MusicProviderKey, MusicModel[]>>({ openrouter: [], gemini: [] });
+  const [models, setModels] = useState<Record<MusicProviderKey, MusicModel[]>>({ openrouter: [], gemini: [], elevenlabs: [] });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -1735,12 +1737,13 @@ function MusicTab() {
     setLoading(true);
     try {
       const providerStatus = await musicApi.providers();
-      const [openrouterModels, geminiModels] = await Promise.all([
+      const [openrouterModels, geminiModels, elevenlabsModels] = await Promise.all([
         musicApi.listModels('openrouter').catch(() => []),
         musicApi.listModels('gemini').catch(() => []),
+        musicApi.listModels('elevenlabs').catch(() => []),
       ]);
       setProviders(providerStatus);
-      setModels({ openrouter: openrouterModels, gemini: geminiModels });
+      setModels({ openrouter: openrouterModels, gemini: geminiModels, elevenlabs: elevenlabsModels });
     } finally {
       setLoading(false);
     }
@@ -1754,6 +1757,7 @@ function MusicTab() {
     setDefaultProvider((settings.default_music_provider as MusicProviderKey) || 'openrouter');
     setOpenRouterModel(settings.default_music_model_openrouter || 'google/lyria-3-clip-preview');
     setGeminiModel(settings.default_music_model_gemini || 'lyria-3-clip-preview');
+    setElevenlabsModel(settings.default_music_model_elevenlabs || 'music_v1');
     setCustomGeminiModel(settings.custom_gemini_lyria_model || '');
     setAutoEnhance(settings.auto_enhance_music_prompts ?? false);
     setSaveMetadata(settings.save_music_generation_metadata ?? true);
@@ -1766,12 +1770,13 @@ function MusicTab() {
   const refreshModels = async () => {
     setLoading(true);
     try {
-      const [openrouterModels, geminiModels] = await Promise.all([
+      const [openrouterModels, geminiModels, elevenlabsModels] = await Promise.all([
         musicApi.refreshModels('openrouter').catch(() => []),
         musicApi.refreshModels('gemini').catch(() => []),
+        musicApi.refreshModels('elevenlabs').catch(() => []),
       ]);
-      setModels({ openrouter: openrouterModels, gemini: geminiModels });
-      toast.success('Lyria model lists refreshed');
+      setModels({ openrouter: openrouterModels, gemini: geminiModels, elevenlabs: elevenlabsModels });
+      toast.success('Music model lists refreshed');
     } finally {
       setLoading(false);
     }
@@ -1789,6 +1794,7 @@ function MusicTab() {
         default_music_provider: defaultProvider,
         default_music_model_openrouter: openRouterModel,
         default_music_model_gemini: geminiModel,
+        default_music_model_elevenlabs: elevenlabsModel,
         custom_gemini_lyria_model: customGeminiModel.trim(),
         auto_enhance_music_prompts: autoEnhance,
         save_music_generation_metadata: saveMetadata,
@@ -1810,7 +1816,7 @@ function MusicTab() {
           </div>
           <div>
             <h3 className="text-sm font-bold">Music Studio</h3>
-            <p className="text-[11px] text-text-muted">Configure Gemini Lyria generation through OpenRouter or Gemini direct</p>
+            <p className="text-[11px] text-text-muted">Configure music generation across OpenRouter, Gemini, and ElevenLabs</p>
           </div>
         </div>
 
@@ -1839,6 +1845,7 @@ function MusicTab() {
               >
                 <option value="openrouter">OpenRouter {providers.openrouter ? '' : '(not configured)'}</option>
                 <option value="gemini">Gemini {providers.gemini ? '' : '(not configured)'}</option>
+                <option value="elevenlabs">ElevenLabs {providers.elevenlabs ? '' : '(not configured)'}</option>
               </select>
             </div>
             <div>
@@ -1863,6 +1870,13 @@ function MusicTab() {
               models={models.gemini}
               fallback="lyria-3-clip-preview"
               onChange={setGeminiModel}
+            />
+            <ModelSelect
+              label="ElevenLabs music model"
+              value={elevenlabsModel}
+              models={models.elevenlabs}
+              fallback="music_v1"
+              onChange={setElevenlabsModel}
             />
           </div>
 
@@ -1890,7 +1904,7 @@ function MusicTab() {
               className="min-h-10 flex items-center justify-center gap-2 px-4 rounded-xl border border-border bg-surface text-sm text-text-secondary hover:text-text hover:bg-surface-hover disabled:opacity-50"
             >
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-              Refresh Lyria Models
+              Refresh Music Models
             </motion.button>
             <motion.button
               whileHover={{ scale: 1.02 }}

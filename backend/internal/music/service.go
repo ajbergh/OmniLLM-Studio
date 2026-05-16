@@ -68,6 +68,8 @@ func (s *Service) ListProviders() (ProvidersResponse, error) {
 			out.OpenRouter = true
 		case ProviderGemini:
 			out.Gemini = true
+		case ProviderElevenLabs:
+			out.ElevenLabs = true
 		}
 	}
 	return out, nil
@@ -100,7 +102,7 @@ func (s *Service) CreateSession(userID, title, provider, model string) (*models.
 func (s *Service) Generate(ctx context.Context, userID string, req GenerateRequest, progress func(GenerationProgress)) (*models.MusicSession, *models.MusicGeneration, *models.MusicAsset, error) {
 	providerKey := normalizeProvider(req.Provider)
 	if providerKey == "" {
-		return nil, nil, nil, fmt.Errorf("%w: provider must be openrouter or gemini", ErrCapabilityUnsupported)
+		return nil, nil, nil, fmt.Errorf("%w: provider must be openrouter, gemini, or elevenlabs", ErrCapabilityUnsupported)
 	}
 	if strings.TrimSpace(req.Prompt) == "" {
 		return nil, nil, nil, fmt.Errorf("prompt is required")
@@ -156,14 +158,22 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 	}
 	_ = s.generations.MarkRunning(generation.ID)
 
+	llmOptions := llm.MusicOptions{
+		Seed:        req.Options.Seed,
+		Temperature: req.Options.Temperature,
+	}
+	if ms := parseDurationToMS(req.Options.Duration); ms != nil {
+		llmOptions.DurationMS = ms
+	}
+	if req.Instrumental || strings.EqualFold(strings.TrimSpace(req.VocalMode), "instrumental") {
+		instr := true
+		llmOptions.ForceInstrumental = &instr
+	}
 	result, err := s.llmSvc.GenerateMusic(ctx, llm.MusicRequest{
 		Provider: profile.ID,
 		Model:    modelID,
 		Prompt:   assembledPrompt,
-		Options: llm.MusicOptions{
-			Seed:        req.Options.Seed,
-			Temperature: req.Options.Temperature,
-		},
+		Options:  llmOptions,
 	})
 	if err != nil {
 		msg := err.Error()
@@ -266,7 +276,7 @@ func (s *Service) ensureSession(userID string, req GenerateRequest, provider, mo
 func (s *Service) resolveMusicProvider(provider string) (*models.ProviderProfile, error) {
 	provider = normalizeProvider(provider)
 	if provider == "" {
-		return nil, fmt.Errorf("%w: provider must be openrouter or gemini", ErrCapabilityUnsupported)
+		return nil, fmt.Errorf("%w: provider must be openrouter, gemini, or elevenlabs", ErrCapabilityUnsupported)
 	}
 	profiles, err := s.providers.List()
 	if err != nil {
@@ -297,6 +307,10 @@ func (s *Service) providerAPI(profile *models.ProviderProfile) (string, string, 
 	case ProviderGemini:
 		if baseURL == "" {
 			baseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
+		}
+	case ProviderElevenLabs:
+		if baseURL == "" {
+			baseURL = "https://api.elevenlabs.io"
 		}
 	}
 	return baseURL, key, nil

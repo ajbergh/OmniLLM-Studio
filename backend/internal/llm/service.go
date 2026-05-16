@@ -103,8 +103,10 @@ type MusicRequest struct {
 }
 
 type MusicOptions struct {
-	Seed        *int64   `json:"seed,omitempty"`
-	Temperature *float64 `json:"temperature,omitempty"`
+	Seed              *int64   `json:"seed,omitempty"`
+	Temperature       *float64 `json:"temperature,omitempty"`
+	DurationMS        *int     `json:"duration_ms,omitempty"`
+	ForceInstrumental *bool    `json:"force_instrumental,omitempty"`
 }
 
 // MusicResponse is the provider-normalized result for music generation.
@@ -1794,6 +1796,104 @@ func geminiMusicRequestBody(req MusicRequest) map[string]interface{} {
 	}
 }
 
+// elevenLabsMusicGenerate calls ElevenLabs POST /v1/music. The endpoint returns
+// raw audio bytes (default mp3_44100_128) and does not stream — the caller's
+// SSE keepalive ticker covers the synchronous wait.
+func (s *Service) elevenLabsMusicGenerate(ctx context.Context, baseURL, apiKey, model string, req MusicRequest) (*MusicResponse, error) {
+	root := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	root = strings.TrimSuffix(root, "/v1")
+	if root == "" {
+		root = "https://api.elevenlabs.io"
+	}
+	endpoint := root + "/v1/music?output_format=mp3_44100_128"
+	body := elevenLabsMusicRequestBody(req, model)
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	log.Printf("[elevenlabs-music] POST %s model=%s", endpoint, model)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "audio/mpeg")
+	if apiKey != "" {
+		httpReq.Header.Set("xi-api-key", apiKey)
+	}
+
+	musicClient := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := musicClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		return nil, fmt.Errorf("provider returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+	}
+
+	audioBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if len(audioBytes) == 0 {
+		return nil, fmt.Errorf("no audio returned by ElevenLabs")
+	}
+
+	mimeType := resp.Header.Get("Content-Type")
+	if strings.TrimSpace(mimeType) == "" {
+		mimeType = "audio/mpeg"
+	}
+	upstreamReqID := resp.Header.Get("request-id")
+	if upstreamReqID == "" {
+		upstreamReqID = resp.Header.Get("X-Request-Id")
+	}
+
+	return &MusicResponse{
+		Provider:      "elevenlabs",
+		Model:         model,
+		AudioBytes:    audioBytes,
+		MimeType:      mimeType,
+		UpstreamReqID: upstreamReqID,
+		Metadata: map[string]interface{}{
+			"transport":     "elevenlabs_v1_music",
+			"output_format": "mp3_44100_128",
+		},
+	}, nil
+}
+
+func elevenLabsMusicRequestBody(req MusicRequest, model string) map[string]interface{} {
+	modelID := strings.TrimSpace(model)
+	if modelID == "" {
+		modelID = "music_v1"
+	}
+	body := map[string]interface{}{
+		"prompt":   req.Prompt,
+		"model_id": modelID,
+	}
+	if req.Options.DurationMS != nil {
+		ms := *req.Options.DurationMS
+		if ms < 3000 {
+			ms = 3000
+		}
+		if ms > 600000 {
+			ms = 600000
+		}
+		body["music_length_ms"] = ms
+	}
+	if req.Options.ForceInstrumental != nil {
+		body["force_instrumental"] = *req.Options.ForceInstrumental
+	}
+	if req.Options.Seed != nil {
+		body["seed"] = *req.Options.Seed
+	}
+	// Temperature is intentionally ignored — ElevenLabs /v1/music does not accept it.
+	return body
+}
+
 func extractPossibleStructure(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -2085,8 +2185,8 @@ func (s *Service) ImageGenerate(ctx context.Context, req ImageRequest) (*ImageRe
 	}, nil
 }
 
-// GenerateMusic performs text-to-music generation for provider-native Lyria routes.
-// Only OpenRouter and Gemini provider profiles are supported.
+// GenerateMusic performs text-to-music generation across supported providers.
+// OpenRouter and Gemini route to Lyria; ElevenLabs routes to /v1/music.
 func (s *Service) GenerateMusic(ctx context.Context, req MusicRequest) (*MusicResponse, error) {
 	provider, err := s.resolveProviderProfile(req.Provider)
 	if err != nil {
@@ -2105,6 +2205,11 @@ func (s *Service) GenerateMusic(ctx context.Context, req MusicRequest) (*MusicRe
 		return s.openrouterMusicGenerate(ctx, baseURL, apiKey, model, req)
 	case "gemini":
 		return s.geminiMusicGenerate(ctx, baseURL, apiKey, model, req)
+	case "elevenlabs":
+		if strings.TrimSpace(baseURL) == "" {
+			baseURL = "https://api.elevenlabs.io"
+		}
+		return s.elevenLabsMusicGenerate(ctx, baseURL, apiKey, model, req)
 	default:
 		return nil, fmt.Errorf("provider type '%s' does not support music generation", providerType)
 	}

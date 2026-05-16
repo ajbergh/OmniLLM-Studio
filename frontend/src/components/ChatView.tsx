@@ -1626,7 +1626,29 @@ function MessageBubble({
             </div>
           </div>
         ) : isUser ? (
-          <div className="whitespace-pre-wrap break-words">{message.content}</div>
+          <>
+            <div className="whitespace-pre-wrap break-words">{message.content}</div>
+            {/* Audio player for audio attachments embedded in user messages (e.g. Send to Chat from Music Studio) */}
+            {(() => {
+              const audioIds = Array.from(
+                message.content.matchAll(/\/v1\/attachments\/([a-f0-9-]+)\/download/g)
+              ).map((m) => m[1]).filter((id) => attachments[id]?.mime_type?.startsWith('audio/'));
+              if (audioIds.length === 0) return null;
+              return (
+                <div className="mt-2 space-y-2">
+                  {audioIds.map((id) => (
+                    <audio
+                      key={id}
+                      controls
+                      preload="metadata"
+                      src={attachmentUrl(id)}
+                      className="w-full max-w-sm rounded-lg"
+                    />
+                  ))}
+                </div>
+              );
+            })()}
+          </>
         ) : (
           <>
             {/* Saved thinking block (Ollama think mode) */}

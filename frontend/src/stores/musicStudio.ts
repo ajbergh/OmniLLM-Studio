@@ -34,11 +34,13 @@ const DEFAULT_FORM: MusicPromptForm = {
 const DEFAULT_MODELS: Record<MusicProviderKey, string> = {
   openrouter: 'google/lyria-3-clip-preview',
   gemini: 'lyria-3-clip-preview',
+  elevenlabs: 'music_v1',
 };
 
 const PROVIDER_LABELS: Record<MusicProviderKey, string> = {
   openrouter: 'OpenRouter',
   gemini: 'Gemini',
+  elevenlabs: 'ElevenLabs',
 };
 
 function cloneForm(): MusicPromptForm {
@@ -84,6 +86,7 @@ function enabledProviders(providers: MusicProvidersResponse): MusicProviderKey[]
   const out: MusicProviderKey[] = [];
   if (providers.openrouter) out.push('openrouter');
   if (providers.gemini) out.push('gemini');
+  if (providers.elevenlabs) out.push('elevenlabs');
   return out;
 }
 
@@ -174,9 +177,9 @@ export const useMusicStudioStore = create<MusicStudioState>((set, get) => ({
   activeSessionId: null,
   activeGenerationId: null,
   generations: [],
-  providers: { openrouter: false, gemini: false },
+  providers: { openrouter: false, gemini: false, elevenlabs: false },
   selectedProvider: null,
-  modelsByProvider: { openrouter: [], gemini: [] },
+  modelsByProvider: { openrouter: [], gemini: [], elevenlabs: [] },
   selectedModel: null,
   promptForm: cloneForm(),
   isLoading: false,
@@ -318,7 +321,7 @@ export const useMusicStudioStore = create<MusicStudioState>((set, get) => ({
   generate: (parentId) => {
     const { selectedProvider, selectedModel, promptForm, activeSessionId } = get();
     if (!selectedProvider || !selectedModel) {
-      toast.error('Choose a music provider and Lyria model');
+      toast.error('Choose a music provider and model');
       return;
     }
     if (!promptForm.prompt.trim()) {
