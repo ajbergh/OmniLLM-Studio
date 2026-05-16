@@ -55,6 +55,7 @@ echo   Press Ctrl+C to stop.
 echo.
 
 cd /d "%PROJECT_ROOT%\backend\cmd\desktop"
+set OMNILLM_BROWSER_ENABLED=true
 wails dev -frontenddevserverurl http://localhost:5173
 
 pause

@@ -125,7 +125,7 @@ export function ChatView() {
     sendMessage, clearMessages, stopStreaming,
     webSearching, webSearchQuery, urlContextStatus, urlContextKind,
     browserStatus, browserStatusDetail, browserProgress,
-    ragIndexingStatus, ragIndexingDetail,
+    ragIndexingStatus, ragIndexingDetail, imageGenerating,
     regenerateLastMessage, editAndResend, generateImage,
   } = useMessageStore();
   const [input, setInput] = useState('');
@@ -818,6 +818,29 @@ export function ChatView() {
             </motion.div>
           )}
 
+          {/* Image generation indicator */}
+          {streaming && imageGenerating && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-start gap-3 max-w-3xl xl:max-w-4xl 2xl:max-w-5xl min-w-0"
+            >
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500/20 to-fuchsia-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                <Image size={15} className="text-violet-400 animate-pulse" />
+              </div>
+              <div className="flex min-w-0 flex-col gap-1 px-4 py-3 rounded-2xl bg-surface-alt border border-violet-500/20 rounded-bl-md">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                  </div>
+                  <span className="text-xs text-violet-400">Generating image…</span>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {/* Web search indicator */}
           {streaming && webSearching && (
             <motion.div
@@ -878,7 +901,7 @@ export function ChatView() {
           )}
 
           {/* Thinking indicator */}
-          {streaming && !streamingContent && !webSearching && !urlContextStatus && (
+          {streaming && !streamingContent && !webSearching && !urlContextStatus && !imageGenerating && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}

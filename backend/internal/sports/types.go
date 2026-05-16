@@ -47,6 +47,22 @@ const (
 	SportsIntentRankings     SportsIntentType = "rankings"
 	SportsIntentLeagueStats  SportsIntentType = "league_stats"
 	SportsIntentOdds         SportsIntentType = "odds"
+
+	// Extended capabilities (Q10, Q46, Q52, Q53, Q58, Q62, Q63, Q68–Q76)
+	SportsIntentSearch            SportsIntentType = "search"
+	SportsIntentQBR               SportsIntentType = "qbr"
+	SportsIntentAthleteComparison SportsIntentType = "athlete_comparison"
+	SportsIntentHotZones          SportsIntentType = "hot_zones"
+	SportsIntentGameDetail        SportsIntentType = "game_detail"
+	SportsIntentChampions         SportsIntentType = "champions"
+	SportsIntentDraft             SportsIntentType = "draft"
+	SportsIntentCoaches           SportsIntentType = "coaches"
+
+	// Q77–Q87 and Q94–Q99
+	SportsIntentVenues       SportsIntentType = "venues"       // stadium / arena lookup
+	SportsIntentPowerIndex   SportsIntentType = "power_index"  // FPI / BPI / SP+ power index
+	SportsIntentRecruits     SportsIntentType = "recruits"     // CFB recruit rankings
+	SportsIntentBracketology SportsIntentType = "bracketology" // NCAA bracket projections
 )
 
 type SportsRenderMode string
@@ -60,22 +76,24 @@ const (
 const DefaultSportsRenderMode = SportsRenderEnhancedMarkdown
 
 type SportsRequest struct {
-	RawQuery      string
-	Intent        SportsIntentType
-	League        string
-	Sport         string
-	TeamQuery     string
-	AthleteQuery  string
-	StatCategory  string
-	StatName      string
-	StatLabel     string
-	StatSort      string
-	Date          *time.Time
-	DateLabel     string
-	Season        int
-	Limit         int
-	RenderMode    SportsRenderMode
-	LeagueLogoURL string
+	RawQuery           string
+	Intent             SportsIntentType
+	League             string
+	Sport              string
+	TeamQuery          string
+	AthleteQuery       string
+	SecondAthleteQuery string // for athlete comparison (SportsIntentAthleteComparison)
+	GameDetailSubtype  string // "officials", "predictor", "probabilities", "gamepackage"
+	StatCategory       string
+	StatName           string
+	StatLabel          string
+	StatSort           string
+	Date               *time.Time
+	DateLabel          string
+	Season             int
+	Limit              int
+	RenderMode         SportsRenderMode
+	LeagueLogoURL      string
 }
 
 type LeagueConfig struct {
@@ -117,20 +135,28 @@ type LeagueIdentity struct {
 }
 
 type GameRow struct {
-	Date       string
-	Time       string
-	Status     string
-	StatusType string
-	Away       TeamIdentity
-	AwayTeam   string
-	AwayAbbr   string
-	AwayScore  string
-	Home       TeamIdentity
-	HomeTeam   string
-	HomeAbbr   string
-	HomeScore  string
-	Venue      string
-	Broadcasts string
+	Date          string
+	Time          string
+	Status        string
+	StatusType    string
+	Away          TeamIdentity
+	AwayTeam      string
+	AwayAbbr      string
+	AwayScore     string
+	Home          TeamIdentity
+	HomeTeam      string
+	HomeAbbr      string
+	HomeScore     string
+	Venue         string
+	Broadcasts    string
+	LinescoreRows []LinescoreRow // period/quarter breakdown; nil when not in-progress or final
+}
+
+// LinescoreRow holds the score for a single period or quarter.
+type LinescoreRow struct {
+	Period    int    // 1-based period/quarter number
+	AwayScore string // away team's score for this period
+	HomeScore string // home team's score for this period
 }
 
 type StandingsRow struct {
@@ -188,14 +214,15 @@ type OddsRow struct {
 }
 
 type RosterRow struct {
-	Group    string
-	Name     string
-	Position string
-	Jersey   string
-	Age      string
-	Height   string
-	Weight   string
-	Status   string
+	Group       string
+	Name        string
+	Position    string
+	Jersey      string
+	Age         string
+	Height      string
+	Weight      string
+	Status      string
+	HeadshotURL string // player headshot image URL (HTTPS-enforced)
 }
 
 type LeaderboardRow struct {

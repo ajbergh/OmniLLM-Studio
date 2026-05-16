@@ -643,6 +643,298 @@ func TestESPNTeamMatchesQuery(t *testing.T) {
 	}
 }
 
+// TestDetectTeamNewsQueries validates that natural-language news questions for
+// major teams across all four leagues are detected as SportsIntentNews with the
+// correct league and team. This exercises the teamAliases map comprehensively,
+// including teams that were previously missing and would silently return ok=false.
+func TestDetectTeamNewsQueries(t *testing.T) {
+	tests := []struct {
+		query      string
+		wantLeague string
+		wantTeam   string
+	}{
+		// ── NFL ──────────────────────────────────────────────────────────────
+		{"What's the latest Chicago Bears news?", espn.LeagueNFL, "Chicago Bears"},
+		{"What's the latest Kansas City Chiefs news?", espn.LeagueNFL, "Kansas City Chiefs"},
+		{"Baltimore Ravens news", espn.LeagueNFL, "Baltimore Ravens"},
+		{"Pittsburgh Steelers latest headlines", espn.LeagueNFL, "Pittsburgh Steelers"},
+		{"What's the latest Denver Broncos news?", espn.LeagueNFL, "Denver Broncos"},
+		{"Las Vegas Raiders news", espn.LeagueNFL, "Las Vegas Raiders"},
+		{"Seattle Seahawks news", espn.LeagueNFL, "Seattle Seahawks"},
+		{"Miami Dolphins latest news", espn.LeagueNFL, "Miami Dolphins"},
+		{"Minnesota Vikings news", espn.LeagueNFL, "Minnesota Vikings"},
+		{"What's the latest Tampa Bay Buccaneers news?", espn.LeagueNFL, "Tampa Bay Buccaneers"},
+		{"Cincinnati Bengals news", espn.LeagueNFL, "Cincinnati Bengals"},
+		{"New York Giants latest headlines", espn.LeagueNFL, "New York Giants"},
+		{"Houston Texans news", espn.LeagueNFL, "Houston Texans"},
+		{"Cleveland Browns news", espn.LeagueNFL, "Cleveland Browns"},
+		{"Washington Commanders latest news", espn.LeagueNFL, "Washington Commanders"},
+		{"Jacksonville Jaguars news", espn.LeagueNFL, "Jacksonville Jaguars"},
+		{"Tennessee Titans latest headlines", espn.LeagueNFL, "Tennessee Titans"},
+		{"New Orleans Saints news", espn.LeagueNFL, "New Orleans Saints"},
+		{"Atlanta Falcons news", espn.LeagueNFL, "Atlanta Falcons"},
+		{"Los Angeles Rams latest news", espn.LeagueNFL, "Los Angeles Rams"},
+		// ── MLB ──────────────────────────────────────────────────────────────
+		{"What the latest Chicago Cubs news?", espn.LeagueMLB, "Chicago Cubs"},
+		{"Houston Astros latest news", espn.LeagueMLB, "Houston Astros"},
+		{"Texas Rangers news", espn.LeagueMLB, "Texas Rangers"},
+		{"Toronto Blue Jays news", espn.LeagueMLB, "Toronto Blue Jays"},
+		{"Baltimore Orioles latest headlines", espn.LeagueMLB, "Baltimore Orioles"},
+		{"Seattle Mariners news", espn.LeagueMLB, "Seattle Mariners"},
+		{"Cleveland Guardians news", espn.LeagueMLB, "Cleveland Guardians"},
+		{"Detroit Tigers latest news", espn.LeagueMLB, "Detroit Tigers"},
+		{"Kansas City Royals news", espn.LeagueMLB, "Kansas City Royals"},
+		{"Milwaukee Brewers news", espn.LeagueMLB, "Milwaukee Brewers"},
+		{"Minnesota Twins latest headlines", espn.LeagueMLB, "Minnesota Twins"},
+		{"Colorado Rockies news", espn.LeagueMLB, "Colorado Rockies"},
+		{"Arizona Diamondbacks news", espn.LeagueMLB, "Arizona Diamondbacks"},
+		{"Washington Nationals latest news", espn.LeagueMLB, "Washington Nationals"},
+		{"Cincinnati Reds news", espn.LeagueMLB, "Cincinnati Reds"},
+		// ── NBA ──────────────────────────────────────────────────────────────
+		{"What's the latest Los Angeles Lakers news?", espn.LeagueNBA, "Los Angeles Lakers"},
+		{"Houston Rockets news", espn.LeagueNBA, "Houston Rockets"},
+		{"Oklahoma City Thunder latest news", espn.LeagueNBA, "Oklahoma City Thunder"},
+		{"Milwaukee Bucks news", espn.LeagueNBA, "Milwaukee Bucks"},
+		{"Brooklyn Nets latest headlines", espn.LeagueNBA, "Brooklyn Nets"},
+		{"Toronto Raptors news", espn.LeagueNBA, "Toronto Raptors"},
+		{"Philadelphia 76ers news", espn.LeagueNBA, "Philadelphia 76ers"},
+		{"San Antonio Spurs latest news", espn.LeagueNBA, "San Antonio Spurs"},
+		{"Cleveland Cavaliers news", espn.LeagueNBA, "Cleveland Cavaliers"},
+		{"Indiana Pacers news", espn.LeagueNBA, "Indiana Pacers"},
+		{"Atlanta Hawks latest headlines", espn.LeagueNBA, "Atlanta Hawks"},
+		{"Memphis Grizzlies news", espn.LeagueNBA, "Memphis Grizzlies"},
+		{"Charlotte Hornets news", espn.LeagueNBA, "Charlotte Hornets"},
+		{"Minnesota Timberwolves latest news", espn.LeagueNBA, "Minnesota Timberwolves"},
+		// ── NHL ──────────────────────────────────────────────────────────────
+		{"What's the latest Boston Bruins news?", espn.LeagueNHL, "Boston Bruins"},
+		{"Pittsburgh Penguins news", espn.LeagueNHL, "Pittsburgh Penguins"},
+		{"Washington Capitals latest headlines", espn.LeagueNHL, "Washington Capitals"},
+		{"Edmonton Oilers news", espn.LeagueNHL, "Edmonton Oilers"},
+		{"Carolina Hurricanes news", espn.LeagueNHL, "Carolina Hurricanes"},
+		{"Montreal Canadiens latest news", espn.LeagueNHL, "Montreal Canadiens"},
+		{"Seattle Kraken news", espn.LeagueNHL, "Seattle Kraken"},
+		{"Vancouver Canucks news", espn.LeagueNHL, "Vancouver Canucks"},
+		{"Nashville Predators latest headlines", espn.LeagueNHL, "Nashville Predators"},
+		{"Detroit Red Wings news", espn.LeagueNHL, "Detroit Red Wings"},
+		{"Calgary Flames news", espn.LeagueNHL, "Calgary Flames"},
+		{"Buffalo Sabres latest news", espn.LeagueNHL, "Buffalo Sabres"},
+		{"Philadelphia Flyers news", espn.LeagueNHL, "Philadelphia Flyers"},
+		{"Dallas Stars news", espn.LeagueNHL, "Dallas Stars"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			got, ok := DetectSportsIntent(tt.query, fixedNow())
+			if !ok {
+				t.Fatalf("DetectSportsIntent returned false")
+			}
+			if got.Intent != SportsIntentNews {
+				t.Fatalf("intent = %q, want news", got.Intent)
+			}
+			if got.League != tt.wantLeague {
+				t.Fatalf("league = %q, want %q", got.League, tt.wantLeague)
+			}
+			if got.TeamQuery != tt.wantTeam {
+				t.Fatalf("team = %q, want %q", got.TeamQuery, tt.wantTeam)
+			}
+		})
+	}
+}
+
+// TestDetectStatsLeaderQueries validates that 25 natural-language stat questions
+// across NFL, MLB, NBA, and NHL are detected as SportsIntentLeaders with the
+// correct league, sort key, and season year.
+func TestDetectStatsLeaderQueries(t *testing.T) {
+	tests := []struct {
+		query        string
+		wantLeague   string
+		wantStatSort string
+		wantSeason   int
+	}{
+		// ── NFL ──────────────────────────────────────────────────────────────
+		{
+			query:        "Who had the most rushing TDs in the NFL in 1999",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "rushing.rushingTouchdowns:desc",
+			wantSeason:   1999,
+		},
+		{
+			query:        "Who had the most rushing TBs in the NFL in 1999",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "rushing.rushingTouchdowns:desc",
+			wantSeason:   1999,
+		},
+		{
+			query:        "most rushing yards in the NFL 2023",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "rushing.rushingYards:desc",
+			wantSeason:   2023,
+		},
+		{
+			query:        "top receiving yards leaders in the NFL 2024",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "receiving.receivingYards:desc",
+			wantSeason:   2024,
+		},
+		{
+			query:        "most receiving touchdowns in the NFL 2022",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "receiving.receivingTouchdowns:desc",
+			wantSeason:   2022,
+		},
+		{
+			query:        "most receptions in the NFL 2024",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "receiving.receptions:desc",
+			wantSeason:   2024,
+		},
+		{
+			query:        "most catches in the NFL 2023",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "receiving.receptions:desc",
+			wantSeason:   2023,
+		},
+		{
+			query:        "NFL interceptions leaders 2021",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "defensive.interceptions:desc",
+			wantSeason:   2021,
+		},
+		{
+			query:        "most picks in the NFL 2020",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "defensive.interceptions:desc",
+			wantSeason:   2020,
+		},
+		{
+			query:        "most sacks in the NFL 2023",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "defensive.sacks:desc",
+			wantSeason:   2023,
+		},
+		{
+			query:        "most passing touchdowns in the NFL 2024",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "passing.passingTouchdowns:desc",
+			wantSeason:   2024,
+		},
+		{
+			query:        "top passing yards leaders in the NFL",
+			wantLeague:   espn.LeagueNFL,
+			wantStatSort: "passing.passingYards:desc",
+			wantSeason:   0,
+		},
+		// ── MLB ──────────────────────────────────────────────────────────────
+		{
+			query:        "who led MLB in home runs in 2019",
+			wantLeague:   espn.LeagueMLB,
+			wantStatSort: "batting.homeRuns:desc",
+			wantSeason:   2019,
+		},
+		{
+			query:        "most RBIs in MLB 2021",
+			wantLeague:   espn.LeagueMLB,
+			wantStatSort: "batting.RBIs:desc",
+			wantSeason:   2021,
+		},
+		{
+			query:        "MLB batting average leaders 2022",
+			wantLeague:   espn.LeagueMLB,
+			wantStatSort: "batting.avg:desc",
+			wantSeason:   2022,
+		},
+		{
+			query:        "most strikeouts leaders MLB 2023",
+			wantLeague:   espn.LeagueMLB,
+			wantStatSort: "pitching.strikeouts:desc",
+			wantSeason:   2023,
+		},
+		{
+			query:        "MLB ERA leaders 2024",
+			wantLeague:   espn.LeagueMLB,
+			wantStatSort: "pitching.ERA:asc",
+			wantSeason:   2024,
+		},
+		{
+			query:        "most stolen bases in MLB 2022",
+			wantLeague:   espn.LeagueMLB,
+			wantStatSort: "batting.stolenBases:desc",
+			wantSeason:   2022,
+		},
+		// ── NBA ──────────────────────────────────────────────────────────────
+		{
+			query:        "NBA points per game leaders 2024",
+			wantLeague:   espn.LeagueNBA,
+			wantStatSort: "offensive.avgPoints:desc",
+			wantSeason:   2024,
+		},
+		{
+			query:        "most rebounds per game in the NBA 2023",
+			wantLeague:   espn.LeagueNBA,
+			wantStatSort: "general.avgRebounds:desc",
+			wantSeason:   2023,
+		},
+		{
+			query:        "most assists per game in the NBA 2022",
+			wantLeague:   espn.LeagueNBA,
+			wantStatSort: "offensive.avgAssists:desc",
+			wantSeason:   2022,
+		},
+		{
+			query:        "NBA steals leaders 2021",
+			wantLeague:   espn.LeagueNBA,
+			wantStatSort: "defensive.avgSteals:desc",
+			wantSeason:   2021,
+		},
+		{
+			query:        "NBA blocks leaders 2023",
+			wantLeague:   espn.LeagueNBA,
+			wantStatSort: "defensive.avgBlocks:desc",
+			wantSeason:   2023,
+		},
+		// ── NHL ──────────────────────────────────────────────────────────────
+		{
+			query:        "most goals in the NHL 2024",
+			wantLeague:   espn.LeagueNHL,
+			wantStatSort: "scoring.goals:desc",
+			wantSeason:   2024,
+		},
+		{
+			query:        "NHL points leaders 2023",
+			wantLeague:   espn.LeagueNHL,
+			wantStatSort: "scoring.points:desc",
+			wantSeason:   2023,
+		},
+		{
+			query:        "most assists in the NHL 2022",
+			wantLeague:   espn.LeagueNHL,
+			wantStatSort: "scoring.assists:desc",
+			wantSeason:   2022,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			got, ok := DetectSportsIntent(tt.query, fixedNow())
+			if !ok {
+				t.Fatalf("DetectSportsIntent returned false")
+			}
+			if got.Intent != SportsIntentLeaders {
+				t.Fatalf("intent = %q, want leaders", got.Intent)
+			}
+			if got.League != tt.wantLeague {
+				t.Fatalf("league = %q, want %q", got.League, tt.wantLeague)
+			}
+			if got.StatSort != tt.wantStatSort {
+				t.Fatalf("stat sort = %q, want %q", got.StatSort, tt.wantStatSort)
+			}
+			if got.Season != tt.wantSeason {
+				t.Fatalf("season = %d, want %d", got.Season, tt.wantSeason)
+			}
+		})
+	}
+}
+
 func standingsEntry(team, abbr string, rank int, wins, losses string) espn.StandingsEntry {
 	return espn.StandingsEntry{
 		Team: espn.Team{DisplayName: team, Abbreviation: abbr},

@@ -134,6 +134,7 @@ interface MessageState {
   browserProgress: number | null;
   ragIndexingStatus: string | null;
   ragIndexingDetail: string | null;
+  imageGenerating: boolean;
 
   fetchMessages: (conversationId: string) => Promise<void>;
   sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }) => void;
@@ -164,6 +165,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   browserProgress: null,
   ragIndexingStatus: null,
   ragIndexingDetail: null,
+  imageGenerating: false,
 
   fetchMessages: async (conversationId: string) => {
     // Increment counter to detect stale responses from rapid switching
@@ -183,7 +185,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }) => {
-    set({ streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, ragIndexingStatus: null, ragIndexingDetail: null });
+    set({ streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, ragIndexingStatus: null, ragIndexingDetail: null, imageGenerating: false });
 
     const reqBody: SendMessageRequest = { content };
     if (override) reqBody.override = override;
@@ -259,6 +261,13 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         onRAGIndexing: (data) => {
           set({ ragIndexingStatus: data.status, ragIndexingDetail: data.detail || null });
         },
+        onImageGeneration: (data) => {
+          if (data.status === 'generating') {
+            set({ imageGenerating: true });
+          } else {
+            set({ imageGenerating: false });
+          }
+        },
         onDone: (data) => {
           // Guard: skip if no valid message_id (phantom prevention)
           if (!data.message_id) {
@@ -318,10 +327,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             browserStatus: null,
             browserStatusDetail: null,
             browserProgress: null,
+            imageGenerating: false,
           }));
         },
         onError: (error) => {
-          set({ error, streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null });
+          set({ error, streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, imageGenerating: false });
         },
       }
     );

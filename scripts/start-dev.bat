@@ -17,7 +17,7 @@ echo.
 
 REM Start Backend
 echo [1/2] Starting backend (Go)...
-start "OmniLLM-Studio Backend" cmd /k "cd /d "%PROJECT_ROOT%\backend" && go run ./cmd/server"
+start "OmniLLM-Studio Backend" cmd /k "cd /d "%PROJECT_ROOT%\backend" && set OMNILLM_BROWSER_ENABLED=true && go run ./cmd/server"
 timeout /t 2 /nobreak
 
 REM Start Frontend

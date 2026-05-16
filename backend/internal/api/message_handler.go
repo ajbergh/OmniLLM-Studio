@@ -758,6 +758,30 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	}
 
+	// ----- Image generation preflight (streaming) -----
+	// Detect image generation intent before web search and LLM calls.
+	// On a positive signal, generate the image, emit SSE events, save the
+	// assistant message, then return — bypassing the normal chat path.
+	if urlCtxResult == nil || !urlCtxResult.Handled {
+		imgIntent := detectImageIntent(req.Content)
+		if imgIntent.RequiresImageGeneration {
+			if imgMsg, generated := h.handleImageGenerationStream(
+				r.Context(), w, flusher, convoID, msgID, start,
+				imgIntent.Prompt, convo,
+			); generated {
+				if imgMsg != nil {
+					if _, saveErr := h.msgRepo.Create(imgMsg); saveErr != nil {
+						log.Printf("error saving image generation message: %v", saveErr)
+					}
+					_ = h.convoRepo.TouchUpdatedAt(convoID)
+				}
+				return
+			}
+			// If generation failed (unsupported provider, etc.) fall through
+			// to the normal LLM chat path so the user still gets a response.
+		}
+	}
+
 	// ----- File library preflight (streaming) -----
 	var fileSearchResults []filelibrary.FileSearchResult
 	fileIntent := filelibrary.DetectFileIntent(req.Content, req.AttachmentIDs)
@@ -1256,6 +1280,158 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		donePayload["cost"] = cost
 	}
 	sendSSE(w, flusher, "done", donePayload)
+}
+
+// handleImageGenerationStream generates an image for the given prompt, streams
+// SSE events to the client, and returns the assembled assistant message plus a
+// boolean indicating whether generation succeeded.  On failure it returns
+// (nil, false) so the caller can fall through to regular LLM chat.
+func (h *MessageHandler) handleImageGenerationStream(
+	ctx context.Context,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	convoID, msgID string,
+	start time.Time,
+	prompt string,
+	convo *models.Conversation,
+) (*models.Message, bool) {
+	sendSSE(w, flusher, "image_generation", map[string]interface{}{
+		"status": "generating",
+		"prompt": prompt,
+	})
+
+	// Resolve provider from the conversation; the LLM service picks the
+	// correct image model for that provider automatically.
+	provider := ""
+	if convo.DefaultProvider != nil {
+		provider = *convo.DefaultProvider
+	}
+
+	imgResp, err := h.llmSvc.ImageGenerate(ctx, llm.ImageRequest{
+		Provider: provider,
+		Prompt:   prompt,
+	})
+	if err != nil {
+		log.Printf("WARN: chat image generation intent (falling through to LLM): %v", err)
+		sendSSE(w, flusher, "image_generation", map[string]interface{}{
+			"status": "failed",
+			"error":  "image generation failed — answering as text",
+		})
+		return nil, false
+	}
+
+	latency := int(time.Since(start).Milliseconds())
+
+	// Persist each image as an attachment and build markdown content.
+	var attachments []models.Attachment
+	var imageMarkdownParts []string
+	var failedImages int
+
+	for i, img := range imgResp.Images {
+		imgData, decodeErr := decodeBase64Image(img.B64JSON)
+		if decodeErr != nil {
+			log.Printf("[image] failed to decode base64 for image %d: %v", i, decodeErr)
+			failedImages++
+			continue
+		}
+		filename, writeErr := writeImageToDisk(h.storageDir, imgData)
+		if writeErr != nil {
+			log.Printf("[image] failed to write image %d to disk: %v", i, writeErr)
+			failedImages++
+			continue
+		}
+
+		metaMap := map[string]string{
+			"revised_prompt":  img.RevisedPrompt,
+			"generator_model": imgResp.Model,
+		}
+		metaBytes, _ := json.Marshal(metaMap)
+
+		attachment := &models.Attachment{
+			ConversationID: convoID,
+			Type:           "image",
+			MimeType:       "image/png",
+			StoragePath:    filename,
+			Bytes:          int64(len(imgData)),
+			CreatedAt:      time.Now().UTC(),
+			MetadataJSON:   string(metaBytes),
+		}
+		if createErr := h.attachRepo.Create(attachment); createErr != nil {
+			log.Printf("[image] failed to create attachment record: %v", createErr)
+			failedImages++
+			continue
+		}
+
+		attachments = append(attachments, *attachment)
+		imageMarkdownParts = append(imageMarkdownParts,
+			fmt.Sprintf("![Generated image](/v1/attachments/%s/download)", attachment.ID),
+		)
+	}
+
+	if len(attachments) == 0 {
+		log.Printf("WARN: chat image generation: all images failed to save")
+		sendSSE(w, flusher, "image_generation", map[string]interface{}{
+			"status": "failed",
+			"error":  "image generation failed — answering as text",
+		})
+		return nil, false
+	}
+
+	// Build assistant message content.
+	content := ""
+	if len(imgResp.Images) > 0 && imgResp.Images[0].RevisedPrompt != "" {
+		content = fmt.Sprintf("*Revised prompt: %s*\n\n", imgResp.Images[0].RevisedPrompt)
+	}
+	for _, md := range imageMarkdownParts {
+		content += md + "\n\n"
+	}
+	if failedImages > 0 {
+		content += fmt.Sprintf("*⚠️ %d of %d images failed to save.*\n\n", failedImages, len(imgResp.Images))
+	}
+
+	// Stream the image markdown as token events so the streaming bubble renders it.
+	sendSSE(w, flusher, "image_generation", map[string]interface{}{
+		"status": "complete",
+		"count":  len(attachments),
+	})
+	sendSSE(w, flusher, "token", map[string]string{"content": content})
+
+	// Assemble the saved assistant message.
+	providerStr := imgResp.Provider
+	modelStr := imgResp.Model
+	metaBytes, _ := json.Marshal(map[string]interface{}{
+		"type":             "image_generation",
+		"image_generation": true,
+	})
+	assistantMsg := &models.Message{
+		ID:             msgID,
+		ConversationID: convoID,
+		Role:           "assistant",
+		Content:        content,
+		CreatedAt:      time.Now().UTC(),
+		Provider:       &providerStr,
+		Model:          &modelStr,
+		LatencyMs:      &latency,
+		MetadataJSON:   string(metaBytes),
+	}
+
+	// Link attachments to the assistant message.
+	for _, a := range attachments {
+		if linkErr := h.attachRepo.LinkToMessage(a.ID, msgID); linkErr != nil {
+			log.Printf("[image] failed to link attachment %s to message: %v", a.ID, linkErr)
+		}
+	}
+
+	sendSSE(w, flusher, "done", map[string]interface{}{
+		"message_id":       msgID,
+		"provider":         providerStr,
+		"model":            modelStr,
+		"latency_ms":       latency,
+		"image_generation": true,
+		"content":          content,
+	})
+
+	return assistantMsg, true
 }
 
 func sendSSE(w http.ResponseWriter, flusher http.Flusher, event string, data interface{}) {

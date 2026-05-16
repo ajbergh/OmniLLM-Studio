@@ -101,7 +101,8 @@ func (t *SportsLookupTool) Validate(args json.RawMessage) error {
 		case SportsIntentStandings, SportsIntentScores, SportsIntentSchedule, SportsIntentNews, SportsIntentOdds,
 			SportsIntentRoster, SportsIntentInjuries, SportsIntentTransactions,
 			SportsIntentTeamRecord, SportsIntentTeamSchedule, SportsIntentLeaders,
-			SportsIntentAthleteStats, SportsIntentAthleteNews, SportsIntentRankings, SportsIntentLeagueStats:
+			SportsIntentAthleteStats, SportsIntentAthleteNews, SportsIntentRankings, SportsIntentLeagueStats,
+			SportsIntentVenues, SportsIntentPowerIndex, SportsIntentRecruits, SportsIntentBracketology:
 		default:
 			return fmt.Errorf("unsupported sports intent")
 		}

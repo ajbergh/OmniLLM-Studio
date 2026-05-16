@@ -250,6 +250,7 @@ export const api = {
       onWebSearchResults?: (data: { query: string; results: WebSearchResult[] }) => void;
       onFileSearch?: (data: { status: string; scope?: string; query?: string; count?: number }) => void;
       onFileSearchResults?: (data: { results: FileSearchResult[] }) => void;
+      onImageGeneration?: (data: { status: string; prompt?: string; count?: number; error?: string }) => void;
       onRAGIndexing?: (data: { status: string; detail?: string }) => void;
       onURLContext?: (data: { status: string; url?: string; kind?: string; url_count?: number; source_count?: number; used_rag?: boolean }) => void;
       onBrowserDownloading?: (data: { progress_percent: number }) => void;
@@ -327,6 +328,9 @@ export const api = {
                 break;
               case 'file_search_results':
                 callbacks.onFileSearchResults?.(payload);
+                break;
+              case 'image_generation':
+                callbacks.onImageGeneration?.(payload);
                 break;
               case 'url_context':
                 callbacks.onURLContext?.(payload);

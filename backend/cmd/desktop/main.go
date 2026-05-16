@@ -172,6 +172,11 @@ func setDesktopDefaults() {
 		}
 		os.Setenv("OMNILLM_ATTACHMENTS_DIR", dir)
 	}
+	// Enable the headless browser runtime by default in desktop mode.
+	// Users installing the desktop app expect features to work out-of-the-box.
+	if os.Getenv("OMNILLM_BROWSER_ENABLED") == "" {
+		os.Setenv("OMNILLM_BROWSER_ENABLED", "true")
+	}
 }
 
 // desktopDataDir returns the platform-appropriate user data directory.

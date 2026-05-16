@@ -12,5 +12,7 @@ echo "Starting OmniLLM-Studio Backend..."
 echo "  URL: http://localhost:8080"
 echo ""
 
+export OMNILLM_BROWSER_ENABLED=true
+
 cd "$PROJECT_ROOT/backend"
 exec go run ./cmd/server

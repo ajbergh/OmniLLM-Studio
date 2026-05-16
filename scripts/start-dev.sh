@@ -32,7 +32,7 @@ if [ ! -d "$PROJECT_ROOT/frontend/node_modules" ]; then
 fi
 
 echo "[1/2] Starting backend (Go)..."
-(cd "$PROJECT_ROOT/backend" && go run ./cmd/server) &
+(cd "$PROJECT_ROOT/backend" && OMNILLM_BROWSER_ENABLED=true go run ./cmd/server) &
 BACKEND_PID=$!
 
 sleep 1

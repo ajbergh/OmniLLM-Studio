@@ -1,17 +1,20 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/ajbergh/omnillm-studio/internal/auth"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 // JSON response helpers
@@ -97,6 +100,21 @@ func SafeJoin(baseDir, untrustedPath string) (string, error) {
 	}
 
 	return joined, nil
+}
+
+// decodeBase64Image decodes a base64-encoded PNG string into raw bytes.
+func decodeBase64Image(b64 string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(b64)
+}
+
+// writeImageToDisk saves raw PNG bytes to storageDir and returns the filename.
+func writeImageToDisk(storageDir string, data []byte) (string, error) {
+	filename := uuid.New().String() + ".png"
+	filePath := filepath.Join(storageDir, filename)
+	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+		return "", err
+	}
+	return filename, nil
 }
 
 // verifyConversationAccess checks that the authenticated user owns the conversation

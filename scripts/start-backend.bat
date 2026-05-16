@@ -11,6 +11,8 @@ echo.
 echo Starting OmniLLM-Studio Backend...
 echo.
 
+set OMNILLM_BROWSER_ENABLED=true
+
 cd /d "%PROJECT_ROOT%\backend"
 go run ./cmd/server
 

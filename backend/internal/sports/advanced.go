@@ -298,6 +298,9 @@ func (c *ESPNClient) lookupAthleteRaw(ctx context.Context, cfg LeagueConfig, ath
 	case hasPhrase(norm, "bio"):
 		raw, err := c.client.AthleteBio(ctx, cfg.Sport, cfg.League, athleteID)
 		return raw, fmt.Sprintf("### %s Bio", req.AthleteQuery), wrapESPNError(ctx, err)
+	case hasAnyPhrase(norm, "hot zone", "hot zones"):
+		raw, err := c.client.CoreAthleteHotZones(ctx, cfg.Sport, cfg.League, athleteID)
+		return raw, fmt.Sprintf("### %s Hot Zones", req.AthleteQuery), wrapESPNError(ctx, err)
 	default:
 		raw, err := c.client.AthleteStats(ctx, cfg.Sport, cfg.League, athleteID, &espn.AthleteStatsOptions{Season: req.Season, SeasonType: espn.SeasonRegular})
 		return raw, fmt.Sprintf("### %s Stats", req.AthleteQuery), wrapESPNError(ctx, err)
@@ -338,15 +341,20 @@ func rosterRowFromAthlete(group string, athlete espn.Athlete) RosterRow {
 	if athlete.Status != nil {
 		status = firstNonEmpty(athlete.Status.Abbreviation, athlete.Status.Name, athlete.Status.Type)
 	}
+	headshotURL := ""
+	if athlete.Headshot != nil {
+		headshotURL = normalizeLogoURL(athlete.Headshot.Href)
+	}
 	return RosterRow{
-		Group:    group,
-		Name:     firstNonEmpty(athlete.DisplayName, athlete.FullName, athlete.ShortName),
-		Position: position,
-		Jersey:   athlete.Jersey,
-		Age:      intString(athlete.Age),
-		Height:   athlete.DisplayHeight,
-		Weight:   athlete.DisplayWeight,
-		Status:   status,
+		Group:       group,
+		Name:        firstNonEmpty(athlete.DisplayName, athlete.FullName, athlete.ShortName),
+		Position:    position,
+		Jersey:      athlete.Jersey,
+		Age:         intString(athlete.Age),
+		Height:      athlete.DisplayHeight,
+		Weight:      athlete.DisplayWeight,
+		Status:      status,
+		HeadshotURL: headshotURL,
 	}
 }
 

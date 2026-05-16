@@ -54,4 +54,5 @@ echo "  Press Ctrl+C to stop."
 echo ""
 
 cd "$PROJECT_ROOT/backend/cmd/desktop"
+export OMNILLM_BROWSER_ENABLED=true
 exec wails dev -frontenddevserverurl http://localhost:5173

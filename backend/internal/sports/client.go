@@ -49,6 +49,32 @@ func (c *ESPNClient) Lookup(ctx context.Context, req SportsRequest) (*SportsLook
 		return c.LookupLeaders(ctx, req)
 	case SportsIntentAthleteStats, SportsIntentAthleteNews:
 		return c.LookupAthlete(ctx, req)
+	// Extended capabilities (Q10, Q46, Q52, Q53, Q58, Q62, Q63, Q68–Q76)
+	case SportsIntentSearch:
+		return c.LookupSearch(ctx, req)
+	case SportsIntentQBR:
+		return c.LookupQBR(ctx, req)
+	case SportsIntentAthleteComparison:
+		return c.LookupAthleteComparison(ctx, req)
+	case SportsIntentHotZones:
+		return c.LookupHotZones(ctx, req)
+	case SportsIntentGameDetail:
+		return c.LookupGameDetail(ctx, req)
+	case SportsIntentChampions:
+		return c.LookupChampions(ctx, req)
+	case SportsIntentDraft:
+		return c.LookupDraft(ctx, req)
+	case SportsIntentCoaches:
+		return c.LookupCoaches(ctx, req)
+	// Q77–Q87
+	case SportsIntentVenues:
+		return c.LookupVenues(ctx, req)
+	case SportsIntentPowerIndex:
+		return c.LookupPowerIndex(ctx, req)
+	case SportsIntentRecruits:
+		return c.LookupRecruits(ctx, req)
+	case SportsIntentBracketology:
+		return c.LookupBracketology(ctx, req)
 	default:
 		return nil, fmt.Errorf("%w: unknown sports intent", ErrUnsupportedLeague)
 	}
@@ -173,11 +199,27 @@ func (c *ESPNClient) LookupNews(ctx context.Context, req SportsRequest) (*Sports
 			return nil, err
 		}
 		req.TeamQuery = teamDisplayName(*team)
-		feed, err := c.client.TeamNews(ctx, cfg.Sport, cfg.League, team.ID, limit)
-		if err != nil {
-			return nil, wrapESPNError(ctx, err)
+		// Try the ESPN team-specific news endpoint first.
+		if teamFeed, teamErr := c.client.TeamNews(ctx, cfg.Sport, cfg.League, team.ID, limit); teamErr == nil {
+			rows = normalizeNewsFeed(teamFeed)
 		}
-		rows = normalizeNewsFeed(feed)
+		// Fall back to league news filtered by team name when the team endpoint
+		// returns nothing (ESPN's team news API is often inactive for some leagues).
+		if len(rows) == 0 {
+			fetchLimit := limit * 5
+			if fetchLimit < 50 {
+				fetchLimit = 50
+			}
+			leagueFeed, leagueErr := c.client.News(ctx, cfg.Sport, cfg.League, fetchLimit)
+			if leagueErr != nil {
+				return nil, wrapESPNError(ctx, leagueErr)
+			}
+			allRows := normalizeNewsFeed(leagueFeed)
+			rows = filterNewsByTeam(allRows, req.TeamQuery)
+			if len(rows) > limit {
+				rows = rows[:limit]
+			}
+		}
 	} else if hasCfg {
 		feed, err := c.client.News(ctx, cfg.Sport, cfg.League, limit)
 		if err != nil {
@@ -304,7 +346,50 @@ func normalizeScoreboard(sb *espn.Scoreboard) []GameRow {
 			row.HomeAbbr = row.Home.Abbreviation
 			row.HomeScore = strings.TrimSpace(home.Score)
 		}
+		row.LinescoreRows = buildLinescoreRows(away, home)
 		rows = append(rows, row)
+	}
+	return rows
+}
+
+// buildLinescoreRows extracts period-by-period scores from two competitors.
+// Returns nil if neither competitor has linescore data.
+func buildLinescoreRows(away, home *espn.Competitor) []LinescoreRow {
+	if away == nil || home == nil {
+		return nil
+	}
+	maxPeriods := len(away.Linescores)
+	if len(home.Linescores) > maxPeriods {
+		maxPeriods = len(home.Linescores)
+	}
+	if maxPeriods == 0 {
+		return nil
+	}
+	rows := make([]LinescoreRow, maxPeriods)
+	for i := 0; i < maxPeriods; i++ {
+		period := i + 1
+		awayScore := ""
+		homeScore := ""
+		if i < len(away.Linescores) {
+			period = away.Linescores[i].Period
+			if period == 0 {
+				period = i + 1
+			}
+			awayScore = away.Linescores[i].DisplayValue
+			if awayScore == "" {
+				awayScore = fmt.Sprintf("%.0f", away.Linescores[i].Value)
+			}
+		}
+		if i < len(home.Linescores) {
+			if home.Linescores[i].Period != 0 {
+				period = home.Linescores[i].Period
+			}
+			homeScore = home.Linescores[i].DisplayValue
+			if homeScore == "" {
+				homeScore = fmt.Sprintf("%.0f", home.Linescores[i].Value)
+			}
+		}
+		rows[i] = LinescoreRow{Period: period, AwayScore: awayScore, HomeScore: homeScore}
 	}
 	return rows
 }
@@ -344,6 +429,66 @@ func normalizeNewsFeed(feed *espn.NewsFeed) []NewsRow {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// teamQueryVariants returns all normalized name variants for a given team name
+// by consulting the package-level teamAliases table. If no alias entry is
+// found, the result is a single-element slice with the normalized input.
+func teamQueryVariants(teamName string) []string {
+	normName := normalizeText(teamName)
+	for _, ta := range teamAliases {
+		if normalizeText(ta.TeamQuery) == normName {
+			return collectNormTeamAliases(ta)
+		}
+		for _, a := range ta.Aliases {
+			if normalizeText(a) == normName {
+				return collectNormTeamAliases(ta)
+			}
+		}
+	}
+	return []string{normName}
+}
+
+func collectNormTeamAliases(ta teamAlias) []string {
+	seen := make(map[string]struct{})
+	var result []string
+	add := func(s string) {
+		n := normalizeText(s)
+		if n != "" {
+			if _, dup := seen[n]; !dup {
+				seen[n] = struct{}{}
+				result = append(result, n)
+			}
+		}
+	}
+	add(ta.TeamQuery)
+	for _, a := range ta.Aliases {
+		add(a)
+	}
+	return result
+}
+
+// filterNewsByTeam returns rows whose headline or description mentions the team.
+// Abbreviations (e.g. "BAL") are expanded via teamAliases so that a query for
+// "BAL" also matches headlines containing "Baltimore Ravens".
+// Used as a fallback when the ESPN team-specific news endpoint returns nothing.
+func filterNewsByTeam(rows []NewsRow, teamName string) []NewsRow {
+	if teamName == "" || len(rows) == 0 {
+		return rows
+	}
+	variants := teamQueryVariants(teamName)
+	var filtered []NewsRow
+	for _, row := range rows {
+		normH := normalizeText(row.Headline)
+		normD := normalizeText(row.Description)
+		for _, v := range variants {
+			if strings.Contains(normH, v) || strings.Contains(normD, v) {
+				filtered = append(filtered, row)
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 func normalizeNowFeed(feed *espn.NowFeed) []NewsRow {
