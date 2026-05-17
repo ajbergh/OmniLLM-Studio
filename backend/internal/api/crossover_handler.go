@@ -1,3 +1,5 @@
+// Package api provides HTTP handlers and routing for the OmniLLM-Studio backend.
+// This file contains handlers for cross-provider functionalities.
 package api
 
 import (

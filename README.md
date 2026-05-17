@@ -49,6 +49,7 @@
 | **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction — runs after file search so private documents take priority |
 | **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, IPL cricket, and broad sports headlines |
 | **Headless Browser** | Full Chromium-powered browsing via go-rod — `browser_navigate`, `browser_screenshot`, `browser_interact`, `browser_pdf`, and `browser_session` tools for JS-heavy pages, research, and stateful multi-step browsing; auto-downloads Chromium on first use; stealth mode for anti-bot bypass |
+| **MCP Servers** | Model Context Protocol support — connect to external MCP servers to securely use their tools within chat and agent workflows |
 | **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, and document generation |
 | **Artifact Export** | Ask the LLM for any supported format and it generates a downloadable file automatically — `.docx` (Word), `.xlsx` (Excel), `.csv`, `.pdf`, `.md` (Markdown), `.html`, `.json`, `.yaml` — no copy-pasting required |
 
@@ -582,6 +583,21 @@ All routes are under `/v1/`.
 | `PATCH` | `/v1/settings` | Update settings (partial merge) |
 | `GET` | `/v1/features` | List feature flags |
 | `PATCH` | `/v1/features/:key` | Toggle feature flag |
+
+<details>
+<summary><strong>Model Context Protocol (MCP)</strong></summary>
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/mcp` | List registered MCP servers |
+| `POST` | `/v1/mcp` | Register a new MCP server |
+| `GET` | `/v1/mcp/:id` | Get MCP server details |
+| `PATCH` | `/v1/mcp/:id` | Update an MCP server |
+| `DELETE` | `/v1/mcp/:id` | Delete an MCP server |
+| `POST` | `/v1/mcp/:id/start` | Start an MCP server connection |
+| `POST` | `/v1/mcp/:id/stop` | Stop an MCP server connection |
+| `POST` | `/v1/mcp/:id/sync` | Sync tools from an active MCP server |
+| `GET` | `/v1/mcp/:id/status` | Get connection status of an MCP server |
 
 </details>
 

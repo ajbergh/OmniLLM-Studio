@@ -20,7 +20,8 @@ A comprehensive guide to all features in OmniLLM-Studio, covering what each feat
 12. [Evaluation Harness](#12-evaluation-harness)
 13. [Artifact Export System](#13-artifact-export-system)
 14. [Feature Flags](#14-feature-flags)
-15. [General Questions](#15-general-questions)
+15. [Model Context Protocol (MCP)](#15-model-context-protocol-mcp)
+16. [General Questions](#16-general-questions)
 
 ---
 
@@ -998,7 +999,50 @@ A: Yes. Feature flag changes take effect immediately via the API.
 
 ---
 
-## 15. General Questions
+## 15. Model Context Protocol (MCP)
+
+**Availability:** Built in; no dedicated feature flag is currently enforced.
+
+### What is the Model Context Protocol (MCP)?
+
+The Model Context Protocol (MCP) is an open standard that allows LLMs to securely connect to external tools, data sources, and environments. OmniLLM-Studio implements the MCP standard to allow you to easily connect local or remote MCP servers, giving your AI agents access to any tool exposed by those servers.
+
+### How does it work?
+
+1. **Register a Server:** You add an MCP server by providing its command and arguments (for `stdio` transport) or a URL (for `sse` transport).
+2. **Connection & Handshake:** OmniLLM-Studio connects to the server and negotiates protocol versions and capabilities.
+3. **Tool Syncing:** Once connected, the server's tools are queried and dynamically registered in OmniLLM-Studio's Tool Registry.
+4. **Execution:** When the LLM decides to use an MCP tool, OmniLLM-Studio executes it via the connected MCP server and returns the result back to the LLM.
+
+### How do I use it?
+
+- Open **Settings** → **MCP Servers** tab.
+- Click **Add Server** and provide a name, command (e.g., `npx`), and arguments (e.g., `-y @modelcontextprotocol/server-postgres`).
+- Enable the server. OmniLLM-Studio will start the server process and sync its tools automatically.
+- Once connected, the tools will appear in the **Tools** tab where you can configure their permissions (Allow, Ask, Deny).
+- The tools are now available to be used by the LLM in standard Chat or Agent Mode.
+
+### What are the benefits?
+
+- **Infinite Extensibility** — Instantly add database querying, file system access, API integrations, and more using community-built MCP servers.
+- **Dynamic Tooling** — Tools are discovered and synced at runtime without modifying OmniLLM-Studio code.
+- **Secure Sandboxing** — Permissions can be managed natively, ensuring the AI only has access to what you approve.
+- **Agent Mode Integration** — Agents can autonomously chain together both native OmniLLM-Studio tools and any MCP tools you've connected.
+
+### FAQ
+
+**Q: What transports are supported?**
+A: Currently, both `stdio` (running a local executable/script) and `sse` (Server-Sent Events over HTTP) transports are supported.
+
+**Q: Do MCP tools require Agent Mode?**
+A: No, MCP tools can be used in standard chat if the LLM provider supports tool calling, but they are incredibly powerful when combined with Agent Mode for autonomous tasks.
+
+**Q: How do I manage an MCP tool's permissions?**
+A: Once a server is connected and its tools are synced, they appear in your standard **Tools** settings tab just like built-in tools. You can set them to `allow`, `deny`, or `ask`.
+
+---
+
+## 16. General Questions
 
 ### What is OmniLLM-Studio?
 

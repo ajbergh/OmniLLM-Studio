@@ -1,3 +1,5 @@
+// Package mcpclient provides the Model Context Protocol (MCP) client implementation.
+// This file implements the base stdio-based MCP client which manages a subprocess.
 package mcpclient
 
 import (

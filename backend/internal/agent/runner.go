@@ -1,3 +1,6 @@
+// Package agent provides autonomous execution capabilities for OmniLLM-Studio.
+// It implements a Planner and a Runner that can decompose complex tasks into
+// steps, invoke tools, handle human-in-the-loop approvals, and summarize results.
 package agent
 
 import (

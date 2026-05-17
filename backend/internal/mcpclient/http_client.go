@@ -1,3 +1,5 @@
+// Package mcpclient provides the Model Context Protocol (MCP) client implementation.
+// This file implements the SSE-based MCP client which connects to remote HTTP servers.
 package mcpclient
 
 import (

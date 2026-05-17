@@ -40,8 +40,8 @@
     <rect x="52" y="118" width="200" height="22" rx="11" fill="#0f243d" stroke="#2b5f83"/>
     <text x="152" y="133" font-family="Consolas, monospace" font-size="10" fill="#9fd8ff" text-anchor="middle">Zustand state + typed API client</text>
 
-    <text x="52" y="160" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#a6bfd6">Chat UI, Image Studio, settings,</text>
-    <text x="52" y="176" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#a6bfd6">search, branching, RAG, admin tools.</text>
+    <text x="52" y="160" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#a6bfd6">Chat UI, Image/Music Studio, settings,</text>
+    <text x="52" y="176" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#a6bfd6">search, branching, RAG, File Library.</text>
 
     <rect x="52" y="196" width="96" height="22" rx="11" fill="#0e2138" stroke="#2b5f83"/>
     <text x="100" y="211" font-family="Consolas, monospace" font-size="10" fill="#8ed8ff" text-anchor="middle">REST</text>
@@ -58,8 +58,8 @@
     <text x="435" y="134" font-family="Consolas, monospace" font-size="10" fill="#8bdccf" text-anchor="middle">handlers -> services -> repositories</text>
 
     <text x="320" y="164" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#a8d5cd">Core domains:</text>
-    <text x="320" y="180" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#a8d5cd">LLM routing, image generation,</text>
-    <text x="320" y="196" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#a8d5cd">agent, RAG, analytics, plugins, auth.</text>
+    <text x="320" y="180" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#a8d5cd">LLM routing, media generation,</text>
+    <text x="320" y="196" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#a8d5cd">agent, RAG, MCP, browser, auth.</text>
 
     <rect x="320" y="216" width="108" height="24" rx="12" fill="#0f2b3d" stroke="#2f6f6d"/>
     <text x="374" y="232" font-family="Consolas, monospace" font-size="10" fill="#7ed0c3" text-anchor="middle">feature flags</text>
@@ -77,9 +77,9 @@
 
   <g>
     <text x="620" y="232" font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#67e8f9">INTEGRATIONS</text>
-    <text x="620" y="252" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#b4dde5">OpenAI, Gemini, Stable Diffusion,</text>
-    <text x="620" y="268" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#b4dde5">Together, Brave / DDG + Jina Reader</text>
-    <text x="620" y="284" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#b4dde5">Plugin subprocesses and eval harness</text>
+    <text x="620" y="252" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#b4dde5">OpenAI, Anthropic, Gemini, Ollama,</text>
+    <text x="620" y="268" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#b4dde5">Mistral, Groq, OpenRouter, Together</text>
+    <text x="620" y="284" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#b4dde5">Brave/DDG, Jina, ESPN, Chromium, MCP</text>
   </g>
 
   <g stroke="url(#arrow)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9">
@@ -98,3 +98,4 @@
 
   <text x="450" y="336" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#6f8ba8" text-anchor="middle">Local-first by default: your data lives in SQLite, while provider calls are orchestrated by your backend.</text>
 </svg>
+

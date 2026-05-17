@@ -1,3 +1,5 @@
+// Package agent provides autonomous execution capabilities for OmniLLM-Studio.
+// This file defines the core types and data structures used for agent planning and execution.
 package agent
 
 import (

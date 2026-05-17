@@ -1,3 +1,6 @@
+// Package agent provides autonomous execution capabilities for OmniLLM-Studio.
+// This file implements the Planner, which uses an LLM to generate structured
+// execution plans for a given goal.
 package agent
 
 import (

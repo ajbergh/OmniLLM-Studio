@@ -1,3 +1,6 @@
+// Package mcpclient provides the Model Context Protocol (MCP) client implementation.
+// This file contains the protocol types, schemas, and message structures used
+// to communicate with MCP servers over JSON-RPC.
 package mcpclient
 
 import "encoding/json"

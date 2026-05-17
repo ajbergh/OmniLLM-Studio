@@ -1,3 +1,5 @@
+// Package api provides HTTP handlers and routing for the OmniLLM-Studio backend.
+// This file contains the handlers for managing Model Context Protocol (MCP) servers.
 package api
 
 import (

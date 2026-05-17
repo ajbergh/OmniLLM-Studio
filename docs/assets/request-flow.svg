@@ -64,16 +64,17 @@
 
   <g>
     <text x="540" y="84" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#bef264">3) LLM ORCHESTRATION</text>
-    <text x="540" y="108" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#e7f7cc">provider profile + settings + model routing</text>
+    <text x="540" y="108" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#e7f7cc">provider profile + MCP + model routing</text>
 
     <rect x="540" y="126" width="72" height="24" rx="12" fill="url(#chip)" stroke="#4e6f4d"/>
     <text x="576" y="142" font-family="Consolas, monospace" font-size="10" fill="#cde891" text-anchor="middle">RAG</text>
 
-    <rect x="618" y="126" width="72" height="24" rx="12" fill="url(#chip)" stroke="#4e6f4d"/>
-    <text x="654" y="142" font-family="Consolas, monospace" font-size="10" fill="#cde891" text-anchor="middle">tools</text>
-
-    <rect x="696" y="126" width="64" height="24" rx="12" fill="url(#chip)" stroke="#4e6f4d"/>
-    <text x="728" y="142" font-family="Consolas, monospace" font-size="10" fill="#cde891" text-anchor="middle">web</text>
+    <rect x="618" y="126" width="50" height="24" rx="12" fill="url(#chip)" stroke="#4e6f4d"/>
+    <text x="643" y="142" font-family="Consolas, monospace" font-size="10" fill="#cde891" text-anchor="middle">MCP</text>
+    <rect x="674" y="126" width="50" height="24" rx="12" fill="url(#chip)" stroke="#4e6f4d"/>
+    <text x="699" y="142" font-family="Consolas, monospace" font-size="10" fill="#cde891" text-anchor="middle">web</text>
+    <rect x="730" y="126" width="50" height="24" rx="12" fill="url(#chip)" stroke="#4e6f4d"/>
+    <text x="755" y="142" font-family="Consolas, monospace" font-size="10" fill="#cde891" text-anchor="middle">tools</text>
 
     <text x="540" y="188" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#b9cf9b">token events emitted as they arrive</text>
   </g>
@@ -103,3 +104,5 @@
 
   <text x="550" y="238" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#6f8ba8" text-anchor="middle">Local-first architecture: SQLite storage, encrypted secrets, and provider calls routed from your backend.</text>
 </svg>
+
+

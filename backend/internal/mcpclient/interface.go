@@ -1,3 +1,5 @@
+// Package mcpclient provides the Model Context Protocol (MCP) client implementation.
+// This file defines the core Client interface for both stdio and SSE transports.
 package mcpclient
 
 import (

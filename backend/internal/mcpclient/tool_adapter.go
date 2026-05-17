@@ -1,3 +1,6 @@
+// Package mcpclient provides the Model Context Protocol (MCP) client implementation.
+// This file implements an adapter that bridges remote MCP tools to the local
+// OmniLLM-Studio tool registry.
 package mcpclient
 
 import (

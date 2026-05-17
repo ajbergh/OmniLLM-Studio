@@ -1,3 +1,6 @@
+// Package api provides HTTP handlers and routing for the OmniLLM-Studio backend.
+// This file contains the handlers for the Music Studio feature, managing sessions,
+// generations, and music assets.
 package api
 
 import (
