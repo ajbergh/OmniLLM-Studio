@@ -126,7 +126,10 @@ func (c *ESPNClient) LookupLeaders(ctx context.Context, req SportsRequest) (*Spo
 	var rows []LeaderboardRow
 	var leaderErr error
 	if strings.TrimSpace(req.TeamQuery) != "" {
-		rows, leaderErr = c.lookupTeamStatLeaders(ctx, cfg, req)
+		rows, leaderErr = c.lookupTeamCoreStatLeaders(ctx, cfg, req)
+		if leaderErr != nil {
+			rows, leaderErr = c.lookupTeamStatLeaders(ctx, cfg, req)
+		}
 	} else {
 		rows, leaderErr = c.lookupLeagueStatLeaders(ctx, cfg, req)
 	}
@@ -1346,6 +1349,24 @@ func (c *ESPNClient) lookupTeamCoreLeadersTable(ctx context.Context, cfg LeagueC
 	return SimpleTable{}, 0, ErrNoSportsData
 }
 
+func (c *ESPNClient) lookupTeamCoreStatLeaders(ctx context.Context, cfg LeagueConfig, req SportsRequest) ([]LeaderboardRow, error) {
+	team, err := c.resolveTeam(ctx, cfg, req.TeamQuery)
+	if err != nil {
+		return nil, err
+	}
+	for _, season := range leaderSeasonCandidates(c.timeNow(), req.Season) {
+		raw, err := c.coreTeamLeadersRaw(ctx, cfg, team.ID, season)
+		if err != nil {
+			continue
+		}
+		rows := c.coreTeamStatLeaderRows(ctx, cfg, *team, raw, req)
+		if len(rows) > 0 {
+			return rows, nil
+		}
+	}
+	return nil, ErrNoSportsData
+}
+
 func (c *ESPNClient) coreTeamLeadersRaw(ctx context.Context, cfg LeagueConfig, teamID string, season int) (json.RawMessage, error) {
 	path := fmt.Sprintf("/v2/sports/%s/leagues/%s/seasons/%d/types/%d/teams/%s/leaders",
 		cfg.Sport, cfg.League, season, int(espn.SeasonRegular), teamID)
@@ -1354,6 +1375,42 @@ func (c *ESPNClient) coreTeamLeadersRaw(ctx context.Context, cfg LeagueConfig, t
 		return nil, wrapESPNError(ctx, err)
 	}
 	return raw, nil
+}
+
+func (c *ESPNClient) coreTeamStatLeaderRows(ctx context.Context, cfg LeagueConfig, team espn.Team, raw json.RawMessage, req SportsRequest) []LeaderboardRow {
+	var payload coreLeadersPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil
+	}
+	categoryName := coreLeaderCategoryName(req.StatName)
+	limit := req.Limit
+	if limit <= 0 {
+		limit = defaultLimitForIntent(SportsIntentLeaders)
+	}
+	teamAbbr := firstNonEmpty(team.Abbreviation, team.ShortDisplayName, req.TeamQuery)
+	rows := make([]LeaderboardRow, 0, limit)
+	for _, cat := range payload.Categories {
+		if !coreLeaderCategoryMatches(cat.Name, cat.DisplayName, cat.ShortDisplayName, cat.Abbreviation, categoryName, req.StatLabel) {
+			continue
+		}
+		for i, leader := range cat.Leaders {
+			if len(rows) >= limit {
+				break
+			}
+			athleteID := extractIDFromRef(leader.Athlete.Ref)
+			if athleteID == "" {
+				continue
+			}
+			rows = append(rows, LeaderboardRow{
+				Rank:    i + 1,
+				Athlete: firstNonEmpty(c.resolveCoreAthleteName(ctx, cfg, athleteID), athleteID),
+				Team:    teamAbbr,
+				Value:   leaderDisplayValue(leader.DisplayValue, leader.Value),
+			})
+		}
+		break
+	}
+	return rows
 }
 
 func (c *ESPNClient) coreLeadersSimpleTable(ctx context.Context, cfg LeagueConfig, raw json.RawMessage, req SportsRequest, includeTeam bool) SimpleTable {
