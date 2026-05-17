@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
 import { api, authApi, browserApi, mcpApi, musicApi, setAuthToken } from '../api';
-import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, Github, Calculator, Link2, Search, Music2 } from 'lucide-react';
+import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, Github, Calculator, Link2, Search, Music2, Route as RouteIcon } from 'lucide-react';
 import type { BrowserSession, BrowserStatus, CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, ToolPolicy, UpdateMCPServerRequest } from '../types';
 import type { MusicModel, MusicProviderKey } from '../types/music';
 import { useTheme, THEMES } from '../theme';
@@ -36,13 +36,14 @@ function FreeModelBadge() {
   );
 }
 
-type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'music' | 'tools' | 'mcp' | 'pricing' | 'auth';
+type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'routing' | 'music' | 'tools' | 'mcp' | 'pricing' | 'auth';
 
 const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'providers', label: 'Providers' },
   { key: 'general', label: 'General' },
   { key: 'appearance', label: 'Appearance' },
   { key: 'rag', label: 'RAG' },
+  { key: 'routing', label: 'Routing' },
   { key: 'music', label: 'Music' },
   { key: 'tools', label: 'Tools' },
   { key: 'mcp', label: 'MCP' },
@@ -213,6 +214,16 @@ export function SettingsPanel() {
                     transition={{ duration: 0.2 }}
                   >
                     <RAGTab />
+                  </motion.div>
+                ) : tab === 'routing' ? (
+                  <motion.div
+                    key="routing"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <RoutingTab />
                   </motion.div>
                 ) : tab === 'music' ? (
                   <motion.div
@@ -1389,6 +1400,242 @@ function GeneralTab() {
       <p className="text-xs text-text-muted/40 text-center">
         More settings coming soon
       </p>
+    </div>
+  );
+}
+
+// ============================================
+// Routing / Intent Model Settings Tab
+// ============================================
+
+const ROUTER_DEFAULTS = {
+  mode: 'sports_only',
+  structuredOutputMode: 'auto',
+  confidenceThreshold: 0.75,
+  fallbackBehavior: 'local_detector',
+  timeoutMS: 8000,
+  maxTokens: 600,
+  temperature: 0,
+  cacheEnabled: true,
+} as const;
+
+const CHAT_CAPABLE_PROVIDER_TYPES = new Set(['openai', 'anthropic', 'ollama', 'openrouter', 'groq', 'together', 'mistral', 'gemini']);
+
+function RoutingTab() {
+  const { settings, updateSettings } = useSettingsStore();
+  const { providers } = useProviderStore();
+  const chatProviders = providers.filter((provider) => provider.enabled && CHAT_CAPABLE_PROVIDER_TYPES.has(provider.type));
+  const [routerEnabled, setRouterEnabled] = useState(settings.router_enabled ?? false);
+  const [mode, setMode] = useState(settings.router_mode || ROUTER_DEFAULTS.mode);
+  const [provider, setProvider] = useState(settings.router_provider || '');
+  const [model, setModel] = useState(settings.router_model || '');
+  const [structuredMode, setStructuredMode] = useState(settings.router_structured_output_mode || ROUTER_DEFAULTS.structuredOutputMode);
+  const [confidence, setConfidence] = useState(settings.router_confidence_threshold ?? ROUTER_DEFAULTS.confidenceThreshold);
+  const [fallback, setFallback] = useState(settings.router_fallback_behavior || ROUTER_DEFAULTS.fallbackBehavior);
+  const [timeoutMS, setTimeoutMS] = useState(settings.router_timeout_ms ?? ROUTER_DEFAULTS.timeoutMS);
+  const [maxTokens, setMaxTokens] = useState(settings.router_max_tokens ?? ROUTER_DEFAULTS.maxTokens);
+  const [temperature, setTemperature] = useState(settings.router_temperature ?? ROUTER_DEFAULTS.temperature);
+  const [showTrace, setShowTrace] = useState(settings.router_show_trace ?? false);
+  const [cacheEnabled, setCacheEnabled] = useState(settings.router_cache_enabled ?? ROUTER_DEFAULTS.cacheEnabled);
+  const [suggestions, setSuggestions] = useState<import('../types').RouterModelSuggestion[]>([]);
+  const [notes, setNotes] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setRouterEnabled(settings.router_enabled ?? false);
+    setMode(settings.router_mode || ROUTER_DEFAULTS.mode);
+    setProvider(settings.router_provider || '');
+    setModel(settings.router_model || '');
+    setStructuredMode(settings.router_structured_output_mode || ROUTER_DEFAULTS.structuredOutputMode);
+    setConfidence(settings.router_confidence_threshold ?? ROUTER_DEFAULTS.confidenceThreshold);
+    setFallback(settings.router_fallback_behavior || ROUTER_DEFAULTS.fallbackBehavior);
+    setTimeoutMS(settings.router_timeout_ms ?? ROUTER_DEFAULTS.timeoutMS);
+    setMaxTokens(settings.router_max_tokens ?? ROUTER_DEFAULTS.maxTokens);
+    setTemperature(settings.router_temperature ?? ROUTER_DEFAULTS.temperature);
+    setShowTrace(settings.router_show_trace ?? false);
+    setCacheEnabled(settings.router_cache_enabled ?? ROUTER_DEFAULTS.cacheEnabled);
+  }, [settings]);
+
+  useEffect(() => {
+    if (!provider) {
+      setSuggestions([]);
+      setNotes([]);
+      return;
+    }
+    api.getRouterSuggestions(provider)
+      .then((resp) => {
+        setSuggestions(resp.suggestions || []);
+        setNotes(resp.notes || []);
+      })
+      .catch(() => {
+        setSuggestions([]);
+        setNotes(['No curated suggestions available for this provider. Enter a chat-capable model manually.']);
+      });
+  }, [provider]);
+
+  const selectedProvider = chatProviders.find((p) => p.id === provider || p.name === provider || p.type === provider);
+
+  const saveRoutingSettings = async () => {
+    setSaving(true);
+    try {
+      await updateSettings({
+        router_enabled: routerEnabled,
+        router_mode: mode,
+        router_provider: provider,
+        router_model: model.trim(),
+        router_structured_output_mode: structuredMode,
+        router_confidence_threshold: confidence,
+        router_fallback_behavior: fallback,
+        router_timeout_ms: timeoutMS,
+        router_max_tokens: maxTokens,
+        router_temperature: temperature,
+        router_show_trace: showTrace,
+        router_cache_enabled: cacheEnabled,
+      });
+      toast.success('Routing settings saved');
+    } catch {
+      toast.error('Failed to save routing settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-sky-500/20 to-emerald-500/20 flex items-center justify-center shadow-md shadow-sky-500/10">
+            <RouteIcon size={18} className="text-sky-300" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold">Routing / Intent Model</h3>
+            <p className="text-[11px] text-text-muted">Classify requests and route tool lookups before the main model runs</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-4 py-2">
+            <div>
+              <label className="text-xs font-medium text-text-secondary block">Enable Router Model</label>
+              <p className="text-[10px] text-text-muted mt-0.5">Uses a small, fast model for structured routing. Existing sports detection remains as fallback.</p>
+            </div>
+            <button type="button" onClick={() => setRouterEnabled(!routerEnabled)} className={`relative w-10 h-5 rounded-full transition-colors ${routerEnabled ? 'bg-primary' : 'bg-border'}`} aria-label="Enable router model">
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${routerEnabled ? 'translate-x-5' : ''}`} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs font-medium text-text-secondary mb-1.5 block">Router Mode</span>
+              <select value={mode} onChange={(e) => setMode(e.target.value)} className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50">
+                <option value="off">Off</option>
+                <option value="sports_only">Sports only</option>
+                <option value="tools_only">Tools only</option>
+                <option value="all_preflight">All preflight routes</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-text-secondary mb-1.5 block">Fallback Behavior</span>
+              <select value={fallback} onChange={(e) => setFallback(e.target.value)} className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50">
+                <option value="local_detector">Local detector</option>
+                <option value="normal_llm">Normal LLM</option>
+                <option value="main_model">Main model</option>
+                <option value="clarify">Clarify</option>
+                <option value="fail_closed">Fail closed</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs font-medium text-text-secondary mb-1.5 block">Router Provider</span>
+              <select value={provider} onChange={(e) => setProvider(e.target.value)} className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50">
+                <option value="">Choose provider</option>
+                {chatProviders.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-text-secondary mb-1.5 block">Router Model</span>
+              <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="gpt-4o-mini" className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text placeholder:text-text-muted focus:outline-none focus:border-primary/50" />
+            </label>
+          </div>
+
+          {provider && (
+            <div className="rounded-xl border border-border bg-surface/50 p-3">
+              <p className="text-xs font-semibold text-text mb-2">Recommended routing models{selectedProvider ? ` for ${selectedProvider.name}` : ''}</p>
+              {suggestions.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {suggestions.map((suggestion) => (
+                    <button key={suggestion.model} type="button" onClick={() => setModel(suggestion.model)} className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-left text-[11px] text-text-secondary hover:text-text hover:border-primary/40 transition-colors" title={suggestion.reason}>
+                      {suggestion.model}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[11px] text-text-muted">No static suggestions for this provider type.</p>
+              )}
+              {notes.length > 0 && <p className="mt-2 text-[10px] text-text-muted leading-relaxed">{notes.join(' ')}</p>}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs font-medium text-text-secondary mb-1.5 block">Structured Output</span>
+              <select value={structuredMode} onChange={(e) => setStructuredMode(e.target.value)} className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50">
+                <option value="auto">Auto</option>
+                <option value="json_schema">JSON schema</option>
+                <option value="json_object">JSON object</option>
+                <option value="prompted_json">Prompted JSON</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-text-secondary mb-1.5 block">Confidence Threshold ({confidence.toFixed(2)})</span>
+              <input type="range" min={0.5} max={0.99} step={0.01} value={confidence} onChange={(e) => setConfidence(Number(e.target.value))} className="w-full accent-primary" />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="block">
+              <span className="text-xs font-medium text-text-secondary mb-1.5 block">Timeout (ms)</span>
+              <input type="number" min={1000} step={500} value={timeoutMS} onChange={(e) => setTimeoutMS(Number(e.target.value))} className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50" />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-text-secondary mb-1.5 block">Max Tokens</span>
+              <input type="number" min={100} step={50} value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50" />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-text-secondary mb-1.5 block">Temperature</span>
+              <input type="number" min={0} max={1} step={0.1} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50" />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <RoutingToggleRow label="Show router trace" description="Emits compact router SSE metadata while streaming" enabled={showTrace} onToggle={() => setShowTrace(!showTrace)} />
+            <RoutingToggleRow label="Router cache" description="Reserved for future short-lived decision caching" enabled={cacheEnabled} onToggle={() => setCacheEnabled(!cacheEnabled)} />
+          </div>
+
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={saveRoutingSettings} disabled={saving} className="flex items-center gap-2 px-4 py-2 rounded-xl btn-primary text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+            {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+            Save Routing Settings
+          </motion.button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoutingToggleRow({ label, description, enabled, onToggle }: { label: string; description: string; enabled: boolean; onToggle: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface/50 p-3">
+      <div>
+        <p className="text-xs font-medium text-text-secondary">{label}</p>
+        <p className="text-[10px] text-text-muted mt-0.5">{description}</p>
+      </div>
+      <button type="button" onClick={onToggle} className={`relative w-10 h-5 rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-border'}`}>
+        <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : ''}`} />
+      </button>
     </div>
   );
 }

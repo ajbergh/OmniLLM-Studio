@@ -5,18 +5,20 @@ import (
 	"net/http"
 
 	"github.com/ajbergh/omnillm-studio/internal/repository"
+	intentrouter "github.com/ajbergh/omnillm-studio/internal/router"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
 )
 
 // SettingsHandler handles application settings API endpoints.
 type SettingsHandler struct {
 	repo         *repository.SettingsRepo
+	providerRepo *repository.ProviderRepo
 	orchestrator *websearch.Orchestrator
 }
 
 // NewSettingsHandler creates a new SettingsHandler.
-func NewSettingsHandler(repo *repository.SettingsRepo, orchestrator *websearch.Orchestrator) *SettingsHandler {
-	return &SettingsHandler{repo: repo, orchestrator: orchestrator}
+func NewSettingsHandler(repo *repository.SettingsRepo, providerRepo *repository.ProviderRepo, orchestrator *websearch.Orchestrator) *SettingsHandler {
+	return &SettingsHandler{repo: repo, providerRepo: providerRepo, orchestrator: orchestrator}
 }
 
 func (h *SettingsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
@@ -136,6 +138,68 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Router / intent classification settings
+	if v, ok := raw["router_enabled"]; ok {
+		if b, ok := v.(bool); ok {
+			existing.RouterEnabled = b
+		}
+	}
+	if v, ok := raw["router_mode"]; ok {
+		if s, ok := v.(string); ok {
+			existing.RouterMode = s
+		}
+	}
+	if v, ok := raw["router_provider"]; ok {
+		if s, ok := v.(string); ok {
+			existing.RouterProvider = s
+		}
+	}
+	if v, ok := raw["router_model"]; ok {
+		if s, ok := v.(string); ok {
+			existing.RouterModel = s
+		}
+	}
+	if v, ok := raw["router_structured_output_mode"]; ok {
+		if s, ok := v.(string); ok {
+			existing.RouterStructuredOutputMode = s
+		}
+	}
+	if v, ok := raw["router_confidence_threshold"]; ok {
+		if n, ok := v.(float64); ok {
+			existing.RouterConfidenceThreshold = n
+		}
+	}
+	if v, ok := raw["router_fallback_behavior"]; ok {
+		if s, ok := v.(string); ok {
+			existing.RouterFallbackBehavior = s
+		}
+	}
+	if v, ok := raw["router_timeout_ms"]; ok {
+		if n, ok := v.(float64); ok {
+			existing.RouterTimeoutMS = int(n)
+		}
+	}
+	if v, ok := raw["router_max_tokens"]; ok {
+		if n, ok := v.(float64); ok {
+			existing.RouterMaxTokens = int(n)
+		}
+	}
+	if v, ok := raw["router_temperature"]; ok {
+		if n, ok := v.(float64); ok {
+			existing.RouterTemperature = n
+		}
+	}
+	if v, ok := raw["router_show_trace"]; ok {
+		if b, ok := v.(bool); ok {
+			existing.RouterShowTrace = b
+		}
+	}
+	if v, ok := raw["router_cache_enabled"]; ok {
+		if b, ok := v.(bool); ok {
+			existing.RouterCacheEnabled = b
+		}
+	}
+
 	if err := h.repo.SetTyped(existing); err != nil {
 		respondInternalError(w, err)
 		return
@@ -155,4 +219,20 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, s)
+}
+
+func (h *SettingsHandler) RouterSuggestions(w http.ResponseWriter, r *http.Request) {
+	providerKey := r.URL.Query().Get("provider")
+	providers, err := h.providerRepo.List()
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	for _, provider := range providers {
+		if providerKey == "" || provider.ID == providerKey || provider.Name == providerKey || provider.Type == providerKey {
+			respondJSON(w, http.StatusOK, intentrouter.SuggestionsForProvider(provider))
+			return
+		}
+	}
+	respondError(w, http.StatusNotFound, "provider not found")
 }

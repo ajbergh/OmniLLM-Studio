@@ -145,6 +145,9 @@ type ChatRequest struct {
 	Think           *bool         `json:"think,omitempty"`            // Ollama-only: enable/disable thinking
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high"
 	Tools           []Tool        `json:"tools,omitempty"`
+	ResponseFormat  interface{}   `json:"response_format,omitempty"` // OpenAI-compatible structured output / JSON mode
+	MaxTokens       *int          `json:"max_tokens,omitempty"`
+	Temperature     *float64      `json:"temperature,omitempty"`
 
 	// OpenRouter-specific fields (ignored by other providers)
 	ProviderPrefs  *ProviderPreferences `json:"provider,omitempty"` // Provider routing preferences
@@ -653,6 +656,15 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 	if len(req.Tools) > 0 {
 		body["tools"] = req.Tools
 	}
+	if req.ResponseFormat != nil {
+		body["response_format"] = req.ResponseFormat
+	}
+	if req.MaxTokens != nil && *req.MaxTokens > 0 {
+		body["max_tokens"] = *req.MaxTokens
+	}
+	if req.Temperature != nil {
+		body["temperature"] = *req.Temperature
+	}
 
 	// OpenRouter-specific: provider routing preferences
 	if req.ProviderPrefs != nil {
@@ -799,6 +811,15 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 
 	if len(req.Tools) > 0 {
 		body["tools"] = req.Tools
+	}
+	if req.ResponseFormat != nil {
+		body["response_format"] = req.ResponseFormat
+	}
+	if req.MaxTokens != nil && *req.MaxTokens > 0 {
+		body["max_tokens"] = *req.MaxTokens
+	}
+	if req.Temperature != nil {
+		body["temperature"] = *req.Temperature
 	}
 
 	// OpenRouter-specific: provider routing preferences

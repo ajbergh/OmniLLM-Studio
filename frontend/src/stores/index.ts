@@ -306,6 +306,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             metadata.image_generation = true;
             metadata.tool = 'image_generation';
           }
+          if (data.router) {
+            metadata.router = data.router;
+          }
           const assistantContent = (data.content || '').trim() || get().streamingContent;
           const assistantMsg: Message = {
             id: data.message_id,
@@ -542,6 +545,18 @@ const defaultSettings: import('../types').AppSettings = {
   rag_chunk_size: 512,
   rag_chunk_overlap: 64,
   rag_top_k: 5,
+  router_enabled: false,
+  router_mode: 'sports_only',
+  router_provider: '',
+  router_model: '',
+  router_structured_output_mode: 'auto',
+  router_confidence_threshold: 0.75,
+  router_fallback_behavior: 'local_detector',
+  router_timeout_ms: 8000,
+  router_max_tokens: 600,
+  router_temperature: 0,
+  router_show_trace: false,
+  router_cache_enabled: true,
 };
 
 function getInitialSidebarOpen(): boolean {

@@ -32,6 +32,9 @@ func (c *ESPNClient) lookupLeagueOdds(ctx context.Context, cfg LeagueConfig, req
 	if len(rows) == 0 {
 		return nil, ErrNoOdds
 	}
+	if err := ValidateOddsRows(req, rows); err != nil {
+		return nil, err
+	}
 
 	retrievedAt := c.timeNow()
 	leagueLogoURL := leagueIdentityForConfig(cfg).LogoURL
@@ -78,6 +81,9 @@ func (c *ESPNClient) lookupBroadOdds(ctx context.Context, req SportsRequest) (*S
 	}
 	if len(rows) == 0 {
 		return nil, ErrNoOdds
+	}
+	if err := ValidateOddsRows(req, rows); err != nil {
+		return nil, err
 	}
 
 	retrievedAt := c.timeNow()

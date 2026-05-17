@@ -110,7 +110,9 @@ func isGracefulLookupError(err error) bool {
 		errors.Is(err, ErrNoOdds) ||
 		errors.Is(err, ErrNoSportsData) ||
 		errors.Is(err, ErrTeamNotFound) ||
-		errors.Is(err, ErrAthleteNotFound)
+		errors.Is(err, ErrAthleteNotFound) ||
+		errors.Is(err, ErrSportsResultMismatch) ||
+		errors.Is(err, ErrSportsResultMissingRequired)
 }
 
 func (c *ESPNClient) emptyLookupResult(req SportsRequest, err error) *SportsLookupResult {
@@ -167,6 +169,8 @@ func emptyLookupTitle(req SportsRequest, leagueName string, err error) string {
 		return fmt.Sprintf("### %s News — No Articles Listed", subject)
 	case errors.Is(err, ErrNoOdds):
 		return fmt.Sprintf("### %s Odds — No Betting Lines Listed", subject)
+	case errors.Is(err, ErrSportsResultMismatch), errors.Is(err, ErrSportsResultMissingRequired):
+		return fmt.Sprintf("### %s %s — Requested Details Not Available", subject, titleCaseWords(action))
 	default:
 		return fmt.Sprintf("### %s %s — No ESPN Rows Returned", subject, titleCaseWords(action))
 	}
@@ -184,6 +188,8 @@ func emptyLookupStatus(err error) string {
 		return "Team not found"
 	case errors.Is(err, ErrAthleteNotFound):
 		return "Athlete not found"
+	case errors.Is(err, ErrSportsResultMismatch), errors.Is(err, ErrSportsResultMissingRequired):
+		return "Requested details unavailable"
 	default:
 		return "No data returned"
 	}
@@ -229,6 +235,11 @@ func (c *ESPNClient) LookupScores(ctx context.Context, req SportsRequest) (*Spor
 	leagueLogoURL := logoURLFromScoreboard(sb, cfg)
 	req.LeagueLogoURL = leagueLogoURL
 	rows := normalizeScoreboard(sb)
+	if wantsPitchingMatchups(req) && cfg.League == espn.LeagueMLB {
+		if rawRows, rawErr := c.lookupPitchingMatchupRows(ctx, cfg, req); rawErr == nil && len(rawRows) > 0 {
+			rows = mergePitchingMatchups(rows, rawRows)
+		}
+	}
 	if len(rows) == 0 {
 		if cfg.Sport == espn.SportRacing {
 			if result, resultErr := c.lookupRacingScoreboard(ctx, cfg, req, sb); resultErr == nil {
@@ -242,6 +253,9 @@ func (c *ESPNClient) LookupScores(ctx context.Context, req SportsRequest) (*Spor
 		if len(rows) == 0 {
 			return nil, fmt.Errorf("%w: %s", ErrNoMatchingGames, req.TeamQuery)
 		}
+	}
+	if err := ValidateGameRows(req, rows); err != nil {
+		return nil, err
 	}
 
 	retrievedAt := c.timeNow()
@@ -373,6 +387,169 @@ func racingCalendarRows(sb *espn.Scoreboard, limit int) [][]string {
 	return rows
 }
 
+func wantsPitchingMatchups(req SportsRequest) bool {
+	if strings.EqualFold(strings.TrimSpace(req.GameDetailSubtype), "pitching_matchups") ||
+		strings.EqualFold(strings.TrimSpace(req.GameDetailSubtype), "probable_pitchers") {
+		return true
+	}
+	norm := normalizeText(req.RawQuery)
+	return hasAnyPhrase(norm,
+		"pitching matchup", "pitching matchups",
+		"probable pitcher", "probable pitchers",
+		"probable starter", "probable starters",
+		"starting pitcher", "starting pitchers",
+	)
+}
+
+func (c *ESPNClient) lookupPitchingMatchupRows(ctx context.Context, cfg LeagueConfig, req SportsRequest) ([]GameRow, error) {
+	params := espn.Params{}
+	if req.Date != nil {
+		params["dates"] = req.Date.Format("20060102")
+	}
+	if req.Limit > 0 {
+		params["limit"] = req.Limit
+	} else {
+		params["limit"] = 100
+	}
+	path := fmt.Sprintf("/apis/site/v2/sports/%s/%s/scoreboard", cfg.Sport, cfg.League)
+	raw, err := c.client.GetRaw(ctx, espn.DomainSite, path, params)
+	if err != nil {
+		return nil, wrapESPNError(ctx, err)
+	}
+	return normalizePitchingMatchupScoreboard(raw), nil
+}
+
+func normalizePitchingMatchupScoreboard(raw json.RawMessage) []GameRow {
+	var payload struct {
+		Events []struct {
+			Date         string `json:"date"`
+			Competitions []struct {
+				Date          string              `json:"date"`
+				Venue         *espn.Venue         `json:"venue"`
+				Broadcasts    []espn.Broadcast    `json:"broadcasts"`
+				GeoBroadcasts []espn.GeoBroadcast `json:"geoBroadcasts"`
+				Status        espn.Status         `json:"status"`
+				Competitors   []struct {
+					HomeAway  string    `json:"homeAway"`
+					Team      espn.Team `json:"team"`
+					Probables []struct {
+						Athlete struct {
+							DisplayName string `json:"displayName"`
+							FullName    string `json:"fullName"`
+							ShortName   string `json:"shortName"`
+						} `json:"athlete"`
+						Record string `json:"record"`
+					} `json:"probables"`
+				} `json:"competitors"`
+			} `json:"competitions"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil
+	}
+	rows := make([]GameRow, 0, len(payload.Events))
+	for _, event := range payload.Events {
+		if len(event.Competitions) == 0 {
+			continue
+		}
+		comp := event.Competitions[0]
+		eventDate := firstNonEmpty(comp.Date, event.Date)
+		row := GameRow{
+			Date:       formatGameDate(eventDate),
+			Time:       formatGameTime(eventDate),
+			Status:     statusText(comp.Status, eventDate),
+			StatusType: statusKind(comp.Status),
+			Venue:      venueName(comp.Venue),
+			Broadcasts: broadcastNames(comp.Broadcasts, comp.GeoBroadcasts),
+		}
+		var awayPitcher, homePitcher string
+		for _, competitor := range comp.Competitors {
+			team := teamIdentityFromESPNTeam(competitor.Team)
+			if strings.EqualFold(competitor.HomeAway, "away") {
+				row.Away = team
+				row.AwayTeam = team.DisplayName
+				row.AwayAbbr = team.Abbreviation
+				awayPitcher = probablePitcherText(competitor.Probables)
+			} else if strings.EqualFold(competitor.HomeAway, "home") {
+				row.Home = team
+				row.HomeTeam = team.DisplayName
+				row.HomeAbbr = team.Abbreviation
+				homePitcher = probablePitcherText(competitor.Probables)
+			}
+		}
+		row.PitchingMatchup = pitchingMatchupText(awayPitcher, homePitcher)
+		if row.AwayTeam == "" && row.HomeTeam == "" {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func probablePitcherText(probables []struct {
+	Athlete struct {
+		DisplayName string `json:"displayName"`
+		FullName    string `json:"fullName"`
+		ShortName   string `json:"shortName"`
+	} `json:"athlete"`
+	Record string `json:"record"`
+}) string {
+	if len(probables) == 0 {
+		return ""
+	}
+	name := firstNonEmpty(probables[0].Athlete.DisplayName, probables[0].Athlete.FullName, probables[0].Athlete.ShortName)
+	if name == "" {
+		return ""
+	}
+	if record := strings.TrimSpace(probables[0].Record); record != "" {
+		return name + " " + record
+	}
+	return name
+}
+
+func pitchingMatchupText(away, home string) string {
+	away = strings.TrimSpace(away)
+	home = strings.TrimSpace(home)
+	switch {
+	case away != "" && home != "":
+		return away + " vs " + home
+	case away != "":
+		return away + " vs TBD"
+	case home != "":
+		return "TBD vs " + home
+	default:
+		return "TBD"
+	}
+}
+
+func mergePitchingMatchups(base, enriched []GameRow) []GameRow {
+	if len(base) == 0 {
+		return enriched
+	}
+	byMatchup := make(map[string]string, len(enriched))
+	for _, row := range enriched {
+		key := gameRowMatchupKey(row)
+		if key != "" && strings.TrimSpace(row.PitchingMatchup) != "" {
+			byMatchup[key] = row.PitchingMatchup
+		}
+	}
+	for i := range base {
+		if value := byMatchup[gameRowMatchupKey(base[i])]; value != "" {
+			base[i].PitchingMatchup = value
+		}
+	}
+	return base
+}
+
+func gameRowMatchupKey(row GameRow) string {
+	away := strings.ToLower(strings.TrimSpace(firstNonEmpty(row.Away.Abbreviation, row.AwayTeam, row.AwayAbbr)))
+	home := strings.ToLower(strings.TrimSpace(firstNonEmpty(row.Home.Abbreviation, row.HomeTeam, row.HomeAbbr)))
+	if away == "" && home == "" {
+		return ""
+	}
+	return away + "|" + home
+}
+
 func racingCompetitionType(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -470,6 +647,9 @@ func (c *ESPNClient) LookupStandings(ctx context.Context, req SportsRequest) (*S
 	if len(rows) == 0 {
 		return nil, ErrNoStandings
 	}
+	if err := ValidateStandingsRows(req, rows); err != nil {
+		return nil, err
+	}
 
 	retrievedAt := c.timeNow()
 	leagueLogoURL := leagueIdentityForConfig(cfg).LogoURL
@@ -562,6 +742,9 @@ func (c *ESPNClient) LookupNews(ctx context.Context, req SportsRequest) (*Sports
 
 	if len(rows) == 0 {
 		return nil, ErrNoNews
+	}
+	if err := ValidateNewsRows(req, rows); err != nil {
+		return nil, err
 	}
 
 	leagueName := "Sports"

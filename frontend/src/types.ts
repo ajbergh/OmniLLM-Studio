@@ -238,6 +238,38 @@ export interface MessageMetadata {
   browser_tool_results?: ToolResult[];
   cost?: number; // OpenRouter credit cost
   image_generation?: boolean;
+  router?: RouterTelemetry;
+}
+
+export interface RouterTelemetry {
+  enabled: boolean;
+  mode: string;
+  provider?: string;
+  model?: string;
+  latency_ms?: number;
+  confidence?: number;
+  route?: string;
+  validated: boolean;
+  fallback_used: boolean;
+  fallback_reason?: string;
+  structured_output_mode?: string;
+  error?: string;
+}
+
+export interface RouterModelSuggestion {
+  model: string;
+  label: string;
+  reason: string;
+  structured_output: string;
+  cost_tier: string;
+  confidence: string;
+}
+
+export interface RouterSuggestionsResponse {
+  provider: string;
+  provider_type: string;
+  suggestions: RouterModelSuggestion[];
+  notes: string[];
 }
 
 // Typed application settings (mirrors backend AppSettings).
@@ -260,6 +292,18 @@ export interface AppSettings {
   rag_chunk_size: number;
   rag_chunk_overlap: number;
   rag_top_k: number;
+  router_enabled: boolean;
+  router_mode?: string;
+  router_provider?: string;
+  router_model?: string;
+  router_structured_output_mode?: string;
+  router_confidence_threshold?: number;
+  router_fallback_behavior?: string;
+  router_timeout_ms?: number;
+  router_max_tokens?: number;
+  router_temperature?: number;
+  router_show_trace?: boolean;
+  router_cache_enabled?: boolean;
 }
 
 // ---- Image Generation Types ----

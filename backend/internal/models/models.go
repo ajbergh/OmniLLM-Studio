@@ -157,6 +157,19 @@ type AppSettings struct {
 	RAGChunkSize      int    `json:"rag_chunk_size,omitempty"`
 	RAGChunkOverlap   int    `json:"rag_chunk_overlap,omitempty"`
 	RAGTopK           int    `json:"rag_top_k,omitempty"`
+	// Router / intent classification settings
+	RouterEnabled              bool    `json:"router_enabled"`
+	RouterMode                 string  `json:"router_mode,omitempty"`
+	RouterProvider             string  `json:"router_provider,omitempty"`
+	RouterModel                string  `json:"router_model,omitempty"`
+	RouterStructuredOutputMode string  `json:"router_structured_output_mode,omitempty"`
+	RouterConfidenceThreshold  float64 `json:"router_confidence_threshold,omitempty"`
+	RouterFallbackBehavior     string  `json:"router_fallback_behavior,omitempty"`
+	RouterTimeoutMS            int     `json:"router_timeout_ms,omitempty"`
+	RouterMaxTokens            int     `json:"router_max_tokens,omitempty"`
+	RouterTemperature          float64 `json:"router_temperature,omitempty"`
+	RouterShowTrace            bool    `json:"router_show_trace,omitempty"`
+	RouterCacheEnabled         bool    `json:"router_cache_enabled,omitempty"`
 }
 
 // DefaultAppSettings returns the default settings.
@@ -179,6 +192,18 @@ func DefaultAppSettings() AppSettings {
 		RAGChunkSize:                1000,
 		RAGChunkOverlap:             200,
 		RAGTopK:                     5,
+		RouterEnabled:               false,
+		RouterMode:                  "sports_only",
+		RouterProvider:              "",
+		RouterModel:                 "",
+		RouterStructuredOutputMode:  "auto",
+		RouterConfidenceThreshold:   0.75,
+		RouterFallbackBehavior:      "local_detector",
+		RouterTimeoutMS:             8000,
+		RouterMaxTokens:             600,
+		RouterTemperature:           0.0,
+		RouterShowTrace:             false,
+		RouterCacheEnabled:          true,
 	}
 }
 
@@ -228,6 +253,36 @@ func (s AppSettings) ToMap() map[string]string {
 	}
 	if s.RAGTopK > 0 {
 		m["rag_top_k"] = fmt.Sprintf("%d", s.RAGTopK)
+	}
+	if s.RouterEnabled {
+		m["router_enabled"] = "true"
+	} else {
+		m["router_enabled"] = "false"
+	}
+	m["router_mode"] = s.RouterMode
+	m["router_provider"] = s.RouterProvider
+	m["router_model"] = s.RouterModel
+	m["router_structured_output_mode"] = s.RouterStructuredOutputMode
+	if s.RouterConfidenceThreshold > 0 {
+		m["router_confidence_threshold"] = strconv.FormatFloat(s.RouterConfidenceThreshold, 'f', -1, 64)
+	}
+	m["router_fallback_behavior"] = s.RouterFallbackBehavior
+	if s.RouterTimeoutMS > 0 {
+		m["router_timeout_ms"] = fmt.Sprintf("%d", s.RouterTimeoutMS)
+	}
+	if s.RouterMaxTokens > 0 {
+		m["router_max_tokens"] = fmt.Sprintf("%d", s.RouterMaxTokens)
+	}
+	m["router_temperature"] = strconv.FormatFloat(s.RouterTemperature, 'f', -1, 64)
+	if s.RouterShowTrace {
+		m["router_show_trace"] = "true"
+	} else {
+		m["router_show_trace"] = "false"
+	}
+	if s.RouterCacheEnabled {
+		m["router_cache_enabled"] = "true"
+	} else {
+		m["router_cache_enabled"] = "false"
 	}
 	return m
 }
@@ -321,6 +376,68 @@ func AppSettingsFromMap(m map[string]string) AppSettings {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			s.RAGTopK = n
 		}
+	}
+
+	// Router / intent classification settings
+	if v, ok := m["router_enabled"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		s.RouterEnabled = v == "true" || v == "1"
+	}
+	if v, ok := m["router_mode"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		if v != "" {
+			s.RouterMode = v
+		}
+	}
+	if v, ok := m["router_provider"]; ok {
+		s.RouterProvider = strings.TrimSpace(strings.Trim(v, `"`))
+	}
+	if v, ok := m["router_model"]; ok {
+		s.RouterModel = strings.TrimSpace(strings.Trim(v, `"`))
+	}
+	if v, ok := m["router_structured_output_mode"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		if v != "" {
+			s.RouterStructuredOutputMode = v
+		}
+	}
+	if v, ok := m["router_confidence_threshold"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			s.RouterConfidenceThreshold = f
+		}
+	}
+	if v, ok := m["router_fallback_behavior"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		if v != "" {
+			s.RouterFallbackBehavior = v
+		}
+	}
+	if v, ok := m["router_timeout_ms"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			s.RouterTimeoutMS = n
+		}
+	}
+	if v, ok := m["router_max_tokens"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			s.RouterMaxTokens = n
+		}
+	}
+	if v, ok := m["router_temperature"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			s.RouterTemperature = f
+		}
+	}
+	if v, ok := m["router_show_trace"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		s.RouterShowTrace = v == "true" || v == "1"
+	}
+	if v, ok := m["router_cache_enabled"]; ok {
+		v = strings.TrimSpace(strings.Trim(v, `"`))
+		s.RouterCacheEnabled = v != "false" && v != "0"
 	}
 
 	return s
