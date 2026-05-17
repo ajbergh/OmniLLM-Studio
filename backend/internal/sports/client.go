@@ -32,6 +32,14 @@ func NewESPNClient() *ESPNClient {
 }
 
 func (c *ESPNClient) Lookup(ctx context.Context, req SportsRequest) (*SportsLookupResult, error) {
+	result, err := c.lookup(ctx, req)
+	if err != nil && isGracefulLookupError(err) {
+		return c.emptyLookupResult(req, err), nil
+	}
+	return result, err
+}
+
+func (c *ESPNClient) lookup(ctx context.Context, req SportsRequest) (*SportsLookupResult, error) {
 	switch req.Intent {
 	case SportsIntentStandings:
 		return c.LookupStandings(ctx, req)
@@ -43,13 +51,23 @@ func (c *ESPNClient) Lookup(ctx context.Context, req SportsRequest) (*SportsLook
 		return c.LookupOdds(ctx, req)
 	case SportsIntentRoster:
 		return c.LookupRoster(ctx, req)
-	case SportsIntentInjuries, SportsIntentTransactions, SportsIntentTeamRecord, SportsIntentTeamSchedule, SportsIntentRankings, SportsIntentLeagueStats:
+	case SportsIntentInjuries, SportsIntentTransactions, SportsIntentTeamSchedule, SportsIntentRankings, SportsIntentLeagueStats, SportsIntentCalendar:
 		return c.LookupGeneric(ctx, req)
+	case SportsIntentTeamRecord:
+		return c.LookupTeamRecord(ctx, req)
+	case SportsIntentTeams:
+		return c.LookupTeams(ctx, req)
+	case SportsIntentTeamHistory:
+		return c.LookupTeamHistory(ctx, req)
+	case SportsIntentSeasons:
+		return c.LookupSeasons(ctx, req)
 	case SportsIntentLeaders:
 		return c.LookupLeaders(ctx, req)
-	case SportsIntentAthleteStats, SportsIntentAthleteNews:
+	case SportsIntentAthleteStats, SportsIntentAthleteNews, SportsIntentAthleteAwards, SportsIntentAthleteSeasons, SportsIntentAthleteRecords, SportsIntentAthleteInjuries:
 		return c.LookupAthlete(ctx, req)
 	// Extended capabilities (Q10, Q46, Q52, Q53, Q58, Q62, Q63, Q68–Q76)
+	case SportsIntentScoreboardHeader:
+		return c.LookupScoreboardHeader(ctx, req)
 	case SportsIntentSearch:
 		return c.LookupSearch(ctx, req)
 	case SportsIntentQBR:
@@ -75,9 +93,111 @@ func (c *ESPNClient) Lookup(ctx context.Context, req SportsRequest) (*SportsLook
 		return c.LookupRecruits(ctx, req)
 	case SportsIntentBracketology:
 		return c.LookupBracketology(ctx, req)
+	case SportsIntentTournaments:
+		return c.LookupTournaments(ctx, req)
+	case SportsIntentFantasy:
+		return c.LookupFantasy(ctx, req)
 	default:
 		return nil, fmt.Errorf("%w: unknown sports intent", ErrUnsupportedLeague)
 	}
+}
+
+func isGracefulLookupError(err error) bool {
+	return errors.Is(err, ErrNoGames) ||
+		errors.Is(err, ErrNoMatchingGames) ||
+		errors.Is(err, ErrNoStandings) ||
+		errors.Is(err, ErrNoNews) ||
+		errors.Is(err, ErrNoOdds) ||
+		errors.Is(err, ErrNoSportsData) ||
+		errors.Is(err, ErrTeamNotFound) ||
+		errors.Is(err, ErrAthleteNotFound)
+}
+
+func (c *ESPNClient) emptyLookupResult(req SportsRequest, err error) *SportsLookupResult {
+	retrievedAt := c.timeNow()
+	cfg, hasCfg := leagueConfigForRequest(req)
+	leagueName := "Sports"
+	league := req.League
+	sport := req.Sport
+	leagueLogoURL := ""
+	if hasCfg {
+		leagueName = cfg.DisplayName
+		league = cfg.League
+		sport = cfg.Sport
+		leagueLogoURL = leagueIdentityForConfig(cfg).LogoURL
+	}
+	message := UserFacingError(req, err)
+	if strings.TrimSpace(message) == "" {
+		message = "ESPN returned no rows for this lookup right now."
+	}
+	table := SimpleTable{
+		Headers: []string{"Status", "Detail"},
+		Rows: [][]string{{
+			emptyLookupStatus(err),
+			message,
+		}},
+	}
+	return &SportsLookupResult{
+		Intent:        req.Intent,
+		League:        league,
+		LeagueName:    leagueName,
+		LeagueLogoURL: leagueLogoURL,
+		Sport:         sport,
+		DateLabel:     req.DateLabel,
+		Markdown:      RenderSimpleMarkdown(emptyLookupTitle(req, leagueName, err), table, retrievedAt),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+		RenderMode:    renderMode(req),
+	}
+}
+
+func emptyLookupTitle(req SportsRequest, leagueName string, err error) string {
+	subject := strings.TrimSpace(firstNonEmpty(req.TeamQuery, req.AthleteQuery, leagueName))
+	if subject == "" {
+		subject = "ESPN"
+	}
+	action := strings.ReplaceAll(string(req.Intent), "_", " ")
+	if action == "" || action == string(SportsIntentUnknown) {
+		action = "lookup"
+	}
+	switch {
+	case errors.Is(err, ErrNoGames), errors.Is(err, ErrNoMatchingGames):
+		return fmt.Sprintf("### %s %s — No Scheduled Events Listed", subject, titleCaseWords(action))
+	case errors.Is(err, ErrNoNews):
+		return fmt.Sprintf("### %s News — No Articles Listed", subject)
+	case errors.Is(err, ErrNoOdds):
+		return fmt.Sprintf("### %s Odds — No Betting Lines Listed", subject)
+	default:
+		return fmt.Sprintf("### %s %s — No ESPN Rows Returned", subject, titleCaseWords(action))
+	}
+}
+
+func emptyLookupStatus(err error) string {
+	switch {
+	case errors.Is(err, ErrNoGames), errors.Is(err, ErrNoMatchingGames):
+		return "No scheduled events"
+	case errors.Is(err, ErrNoNews):
+		return "No articles listed"
+	case errors.Is(err, ErrNoOdds):
+		return "No betting lines listed"
+	case errors.Is(err, ErrTeamNotFound):
+		return "Team not found"
+	case errors.Is(err, ErrAthleteNotFound):
+		return "Athlete not found"
+	default:
+		return "No data returned"
+	}
+}
+
+func titleCaseWords(value string) string {
+	words := strings.Fields(value)
+	for i, word := range words {
+		if word == "" {
+			continue
+		}
+		words[i] = strings.ToUpper(word[:1]) + word[1:]
+	}
+	return strings.Join(words, " ")
 }
 
 func (c *ESPNClient) LookupScores(ctx context.Context, req SportsRequest) (*SportsLookupResult, error) {
@@ -110,6 +230,11 @@ func (c *ESPNClient) LookupScores(ctx context.Context, req SportsRequest) (*Spor
 	req.LeagueLogoURL = leagueLogoURL
 	rows := normalizeScoreboard(sb)
 	if len(rows) == 0 {
+		if cfg.Sport == espn.SportRacing {
+			if result, resultErr := c.lookupRacingScoreboard(ctx, cfg, req, sb); resultErr == nil {
+				return result, nil
+			}
+		}
 		return nil, ErrNoGames
 	}
 	if req.TeamQuery != "" {
@@ -132,6 +257,200 @@ func (c *ESPNClient) LookupScores(ctx context.Context, req SportsRequest) (*Spor
 		RetrievedAt:   retrievedAt,
 		RenderMode:    renderMode(req),
 	}, nil
+}
+
+func (c *ESPNClient) lookupRacingScoreboard(ctx context.Context, cfg LeagueConfig, req SportsRequest, sb *espn.Scoreboard) (*SportsLookupResult, error) {
+	norm := normalizeText(req.RawQuery)
+	if hasAnyPhrase(norm, "most recent race", "latest race", "recent race", "who won") {
+		if result, err := c.lookupRecentRacingResult(ctx, cfg, req, sb); err == nil {
+			return result, nil
+		}
+	}
+	table := racingScheduleTable(sb, req.Limit)
+	if len(table.Rows) == 0 {
+		return nil, ErrNoGames
+	}
+	title := fmt.Sprintf("### %s Race Schedule", cfg.DisplayName)
+	if label := strings.TrimSpace(req.DateLabel); label != "" {
+		title += " — " + label
+	}
+	retrievedAt := c.timeNow()
+	return &SportsLookupResult{
+		Intent:        req.Intent,
+		League:        cfg.League,
+		LeagueName:    cfg.DisplayName,
+		LeagueLogoURL: leagueIdentityForConfig(cfg).LogoURL,
+		Sport:         cfg.Sport,
+		DateLabel:     req.DateLabel,
+		Markdown:      RenderSimpleMarkdown(title, table, retrievedAt),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+		RenderMode:    renderMode(req),
+	}, nil
+}
+
+func (c *ESPNClient) lookupRecentRacingResult(ctx context.Context, cfg LeagueConfig, req SportsRequest, sb *espn.Scoreboard) (*SportsLookupResult, error) {
+	eventID, eventName := recentRacingEventFromCalendar(sb, c.timeNow())
+	if eventID == "" {
+		return nil, ErrNoGames
+	}
+	raw, err := c.client.SummaryRaw(ctx, cfg.Sport, cfg.League, eventID)
+	if err != nil {
+		return nil, wrapESPNError(ctx, err)
+	}
+	table := rawJSONTable(raw, req.Limit)
+	if len(table.Rows) == 0 {
+		return nil, ErrNoSportsData
+	}
+	retrievedAt := c.timeNow()
+	return &SportsLookupResult{
+		Intent:        SportsIntentScores,
+		League:        cfg.League,
+		LeagueName:    cfg.DisplayName,
+		LeagueLogoURL: leagueIdentityForConfig(cfg).LogoURL,
+		Sport:         cfg.Sport,
+		Markdown:      RenderSimpleMarkdown(fmt.Sprintf("### %s Result", firstNonEmpty(eventName, cfg.DisplayName+" Race")), table, retrievedAt),
+		Source:        SourceESPN,
+		RetrievedAt:   retrievedAt,
+		RenderMode:    renderMode(req),
+	}, nil
+}
+
+func racingScheduleTable(sb *espn.Scoreboard, limit int) SimpleTable {
+	if sb == nil {
+		return SimpleTable{}
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+	rows := make([][]string, 0, limit)
+	for _, event := range sb.Events {
+		for _, comp := range event.Competitions {
+			if len(rows) >= limit {
+				break
+			}
+			session := racingCompetitionType(comp.Type)
+			if session == "" {
+				session = firstNonEmpty(event.ShortName, event.Name)
+			}
+			rows = append(rows, []string{
+				emptyAsDash(firstNonEmpty(event.Name, event.ShortName)),
+				emptyAsDash(session),
+				emptyAsDash(formatGameDate(firstNonEmpty(comp.Date, event.Date))),
+				emptyAsDash(formatGameTime(firstNonEmpty(comp.Date, event.Date))),
+				emptyAsDash(statusText(chooseStatus(event.Status, comp.Status), firstNonEmpty(comp.Date, event.Date))),
+				emptyAsDash(broadcastNames(comp.Broadcasts, comp.GeoBroadcasts)),
+			})
+		}
+	}
+	if len(rows) == 0 {
+		rows = racingCalendarRows(sb, limit)
+	}
+	return SimpleTable{Headers: []string{"Race", "Session", "Date", "Time", "Status", "Broadcast"}, Rows: rows}
+}
+
+func racingCalendarRows(sb *espn.Scoreboard, limit int) [][]string {
+	var rows [][]string
+	for _, league := range sb.Leagues {
+		for _, item := range league.Calendar {
+			if len(rows) >= limit {
+				return rows
+			}
+			cal, ok := racingCalendarItem(item)
+			if !ok {
+				continue
+			}
+			rows = append(rows, []string{
+				emptyAsDash(cal.Label),
+				"Race weekend",
+				emptyAsDash(formatGameDate(cal.StartDate)),
+				emptyAsDash(formatGameTime(cal.StartDate)),
+				emptyAsDash(dateRangeLabel(cal.StartDate, cal.EndDate)),
+				"",
+			})
+		}
+	}
+	return rows
+}
+
+func racingCompetitionType(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var value struct {
+		Text         string `json:"text"`
+		Name         string `json:"name"`
+		Abbreviation string `json:"abbreviation"`
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return firstNonEmpty(value.Abbreviation, value.Text, value.Name)
+}
+
+type racingCalItem struct {
+	Label     string
+	StartDate string
+	EndDate   string
+	EventID   string
+}
+
+func racingCalendarItem(item any) (racingCalItem, bool) {
+	raw, err := json.Marshal(item)
+	if err != nil {
+		return racingCalItem{}, false
+	}
+	var cal struct {
+		Label     string `json:"label"`
+		StartDate string `json:"startDate"`
+		EndDate   string `json:"endDate"`
+		Event     struct {
+			Ref string `json:"$ref"`
+		} `json:"event"`
+	}
+	if err := json.Unmarshal(raw, &cal); err != nil {
+		return racingCalItem{}, false
+	}
+	return racingCalItem{
+		Label:     cal.Label,
+		StartDate: cal.StartDate,
+		EndDate:   cal.EndDate,
+		EventID:   extractIDFromRef(cal.Event.Ref),
+	}, strings.TrimSpace(cal.Label) != ""
+}
+
+func recentRacingEventFromCalendar(sb *espn.Scoreboard, now time.Time) (string, string) {
+	var best racingCalItem
+	var bestEnd time.Time
+	for _, league := range sb.Leagues {
+		for _, item := range league.Calendar {
+			cal, ok := racingCalendarItem(item)
+			if !ok || cal.EventID == "" {
+				continue
+			}
+			end, ok := parseESPNTime(cal.EndDate)
+			if !ok || end.After(now) {
+				continue
+			}
+			if best.EventID == "" || end.After(bestEnd) {
+				best = cal
+				bestEnd = end
+			}
+		}
+	}
+	return best.EventID, best.Label
+}
+
+func dateRangeLabel(start, end string) string {
+	startTime, startOK := parseESPNTime(start)
+	endTime, endOK := parseESPNTime(end)
+	if !startOK || !endOK {
+		return ""
+	}
+	if startTime.Year() == endTime.Year() && startTime.Month() == endTime.Month() && startTime.Day() == endTime.Day() {
+		return startTime.Local().Format("Jan 2")
+	}
+	return startTime.Local().Format("Jan 2") + "-" + endTime.Local().Format("Jan 2")
 }
 
 func (c *ESPNClient) LookupStandings(ctx context.Context, req SportsRequest) (*SportsLookupResult, error) {
@@ -202,6 +521,13 @@ func (c *ESPNClient) LookupNews(ctx context.Context, req SportsRequest) (*Sports
 		// Try the ESPN team-specific news endpoint first.
 		if teamFeed, teamErr := c.client.TeamNews(ctx, cfg.Sport, cfg.League, team.ID, limit); teamErr == nil {
 			rows = normalizeNewsFeed(teamFeed)
+		}
+		// Some ESPN team news endpoints return an empty object even when the
+		// league news endpoint can filter by team ID.
+		if len(rows) == 0 {
+			if teamRows, teamErr := c.lookupTeamNewsByLeagueParam(ctx, cfg, team.ID, limit); teamErr == nil {
+				rows = teamRows
+			}
 		}
 		// Fall back to league news filtered by team name when the team endpoint
 		// returns nothing (ESPN's team news API is often inactive for some leagues).
@@ -278,6 +604,26 @@ func (c *ESPNClient) lookupBroadNewsRows(ctx context.Context, limit int) ([]News
 	return rows, nil
 }
 
+func (c *ESPNClient) lookupTeamNewsByLeagueParam(ctx context.Context, cfg LeagueConfig, teamID string, limit int) ([]NewsRow, error) {
+	if strings.TrimSpace(teamID) == "" {
+		return nil, ErrTeamNotFound
+	}
+	path := fmt.Sprintf("/apis/site/v2/sports/%s/%s/news", cfg.Sport, cfg.League)
+	params := espn.Params{"team": teamID}
+	if limit > 0 {
+		params["limit"] = limit
+	}
+	raw, err := c.client.GetRaw(ctx, espn.DomainSite, path, params)
+	if err != nil {
+		return nil, wrapESPNError(ctx, err)
+	}
+	var feed espn.NewsFeed
+	if err := json.Unmarshal(raw, &feed); err != nil {
+		return nil, fmt.Errorf("decode espn team-filtered news: %w", err)
+	}
+	return normalizeNewsFeed(&feed), nil
+}
+
 func (c *ESPNClient) timeNow() time.Time {
 	if c != nil && c.now != nil {
 		return c.now()
@@ -301,8 +647,20 @@ func wrapESPNError(ctx context.Context, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, espn.ErrNotFound) {
+		return fmt.Errorf("%w: %v", ErrNoSportsData, err)
+	}
 	if errors.Is(err, espn.ErrRateLimited) {
 		return fmt.Errorf("%w: %v", ErrRateLimited, err)
+	}
+	// ESPN returns HTTP 400/404 for unsupported queries (e.g. historical seasons
+	// that predate the API's coverage, or parameters the endpoint doesn't accept).
+	// Map these to ErrNoSportsData so ErrorForRequest can render a helpful message.
+	if s := err.Error(); strings.Contains(s, "status 400") || strings.Contains(s, "status 404") {
+		return fmt.Errorf("%w: %v", ErrNoSportsData, err)
 	}
 	return err
 }
@@ -781,24 +1139,18 @@ func espnTeamMatchesQuery(team espn.Team, query string) bool {
 	if query == "" {
 		return false
 	}
-	fields := []string{
-		team.ID,
-		team.DisplayName,
-		team.ShortDisplayName,
-		team.Name,
-		team.Nickname,
-		team.Location,
-		team.Abbreviation,
-		team.Slug,
-	}
+	fields := []string{team.ID, team.DisplayName, team.ShortDisplayName, team.Name, team.Nickname, team.Abbreviation, team.Slug}
 	for _, field := range fields {
 		norm := normalizeText(field)
 		if norm == "" {
 			continue
 		}
-		if norm == query || strings.Contains(norm, query) || strings.Contains(query, norm) {
+		if norm == query || strings.Contains(norm, query) {
 			return true
 		}
+	}
+	if location := normalizeText(team.Location); location != "" && location == query {
+		return true
 	}
 	return false
 }

@@ -348,29 +348,29 @@ type statMetricConfig struct {
 }
 
 var statMetricConfigs = []statMetricConfig{
-	{Aliases: []string{"hr", "home run", "home runs", "homer", "homers"}, DefaultLeague: espn.LeagueMLB, Category: "batting", StatName: "homeRuns", Label: "HR", Sort: "batting.homeRuns:desc", DisplayName: "Home Runs"},
+	{Aliases: []string{"hr", "hrs", "home run", "home runs", "homer", "homers"}, DefaultLeague: espn.LeagueMLB, Category: "batting", StatName: "homeRuns", Label: "HR", Sort: "batting.homeRuns:desc", DisplayName: "Home Runs"},
 	{Aliases: []string{"rbi", "rbis", "runs batted in"}, DefaultLeague: espn.LeagueMLB, Category: "batting", StatName: "RBIs", Label: "RBI", Sort: "batting.RBIs:desc", DisplayName: "RBI"},
-	{Aliases: []string{"batting average", "avg"}, DefaultLeague: espn.LeagueMLB, Category: "batting", StatName: "avg", Label: "AVG", Sort: "batting.avg:desc", DisplayName: "Batting Average"},
+	{Aliases: []string{"batting average", "avg", "batting avg"}, DefaultLeague: espn.LeagueMLB, Category: "batting", StatName: "avg", Label: "AVG", Sort: "batting.avg:desc", DisplayName: "Batting Average"},
 	{Aliases: []string{"hits"}, DefaultLeague: espn.LeagueMLB, Category: "batting", StatName: "hits", Label: "H", Sort: "batting.hits:desc", DisplayName: "Hits"},
-	{Aliases: []string{"stolen bases", "steals"}, DefaultLeague: espn.LeagueMLB, Category: "batting", StatName: "stolenBases", Label: "SB", Sort: "batting.stolenBases:desc", DisplayName: "Stolen Bases"},
+	{Aliases: []string{"stolen bases", "stolen base", "steals"}, DefaultLeague: espn.LeagueMLB, Category: "batting", StatName: "stolenBases", Label: "SB", Sort: "batting.stolenBases:desc", DisplayName: "Stolen Bases"},
 	{Aliases: []string{"era", "earned run average"}, DefaultLeague: espn.LeagueMLB, Category: "pitching", StatName: "ERA", Label: "ERA", Sort: "pitching.ERA:asc", DisplayName: "ERA", Ascending: true},
-	{Aliases: []string{"strikeout", "strikeouts", "ks"}, DefaultLeague: espn.LeagueMLB, Category: "pitching", StatName: "strikeouts", Label: "K", Sort: "pitching.strikeouts:desc", DisplayName: "Strikeouts"},
-	{Aliases: []string{"saves"}, DefaultLeague: espn.LeagueMLB, Category: "pitching", StatName: "saves", Label: "SV", Sort: "pitching.saves:desc", DisplayName: "Saves"},
+	{Aliases: []string{"strikeout", "strikeouts", "ks", "k"}, DefaultLeague: espn.LeagueMLB, Category: "pitching", StatName: "strikeouts", Label: "K", Sort: "pitching.strikeouts:desc", DisplayName: "Strikeouts"},
+	{Aliases: []string{"saves", "save"}, DefaultLeague: espn.LeagueMLB, Category: "pitching", StatName: "saves", Label: "SV", Sort: "pitching.saves:desc", DisplayName: "Saves"},
 	{Aliases: []string{"whip"}, DefaultLeague: espn.LeagueMLB, Category: "pitching", StatName: "WHIP", Label: "WHIP", Sort: "pitching.WHIP:asc", DisplayName: "WHIP", Ascending: true},
-	{Aliases: []string{"passing yards"}, DefaultLeague: espn.LeagueNFL, Category: "passing", StatName: "passingYards", Label: "YDS", Sort: "passing.passingYards:desc", DisplayName: "Passing Yards"},
-	{Aliases: []string{"passing touchdowns", "passing tds", "passing td"}, DefaultLeague: espn.LeagueNFL, Category: "passing", StatName: "passingTouchdowns", Label: "TD", Sort: "passing.passingTouchdowns:desc", DisplayName: "Passing Touchdowns"},
-	{Aliases: []string{"rushing yards"}, DefaultLeague: espn.LeagueNFL, Category: "rushing", StatName: "rushingYards", Label: "YDS", Sort: "rushing.rushingYards:desc", DisplayName: "Rushing Yards"},
-	{Aliases: []string{"rushing touchdowns", "rushing tds", "rushing td", "rushing tbs"}, DefaultLeague: espn.LeagueNFL, Category: "rushing", StatName: "rushingTouchdowns", Label: "TD", Sort: "rushing.rushingTouchdowns:desc", DisplayName: "Rushing Touchdowns"},
-	{Aliases: []string{"receiving yards"}, DefaultLeague: espn.LeagueNFL, Category: "receiving", StatName: "receivingYards", Label: "YDS", Sort: "receiving.receivingYards:desc", DisplayName: "Receiving Yards"},
-	{Aliases: []string{"receiving touchdowns", "receiving tds", "receiving td"}, DefaultLeague: espn.LeagueNFL, Category: "receiving", StatName: "receivingTouchdowns", Label: "TD", Sort: "receiving.receivingTouchdowns:desc", DisplayName: "Receiving Touchdowns"},
-	{Aliases: []string{"receptions", "catches"}, DefaultLeague: espn.LeagueNFL, Category: "receiving", StatName: "receptions", Label: "REC", Sort: "receiving.receptions:desc", DisplayName: "Receptions"},
-	{Aliases: []string{"interceptions", "picks", "pick sixes"}, DefaultLeague: espn.LeagueNFL, Category: "defensive", StatName: "interceptions", Label: "INT", Sort: "defensive.interceptions:desc", DisplayName: "Interceptions"},
-	{Aliases: []string{"sacks"}, DefaultLeague: espn.LeagueNFL, Category: "defensive", StatName: "sacks", Label: "SACKS", Sort: "defensive.sacks:desc", DisplayName: "Sacks"},
-	{Aliases: []string{"points per game", "ppg", "points"}, DefaultLeague: espn.LeagueNBA, Category: "offensive", StatName: "avgPoints", Label: "PTS", Sort: "offensive.avgPoints:desc", DisplayName: "Points Per Game"},
-	{Aliases: []string{"rebounds", "rebounds per game", "rpg"}, DefaultLeague: espn.LeagueNBA, Category: "general", StatName: "avgRebounds", Label: "REB", Sort: "general.avgRebounds:desc", DisplayName: "Rebounds Per Game"},
-	{Aliases: []string{"assists", "assists per game", "apg"}, DefaultLeague: espn.LeagueNBA, Category: "offensive", StatName: "avgAssists", Label: "AST", Sort: "offensive.avgAssists:desc", DisplayName: "Assists Per Game"},
-	{Aliases: []string{"steals", "steals per game"}, DefaultLeague: espn.LeagueNBA, Category: "defensive", StatName: "avgSteals", Label: "STL", Sort: "defensive.avgSteals:desc", DisplayName: "Steals Per Game"},
-	{Aliases: []string{"blocks", "blocks per game"}, DefaultLeague: espn.LeagueNBA, Category: "defensive", StatName: "avgBlocks", Label: "BLK", Sort: "defensive.avgBlocks:desc", DisplayName: "Blocks Per Game"},
+	{Aliases: []string{"passing yards", "passing yds", "pass yds"}, DefaultLeague: espn.LeagueNFL, Category: "passing", StatName: "passingYards", Label: "YDS", Sort: "passing.passingYards:desc", DisplayName: "Passing Yards"},
+	{Aliases: []string{"passing touchdowns", "passing touchdown", "passing tds", "passing td", "pass tds", "pass td"}, DefaultLeague: espn.LeagueNFL, Category: "passing", StatName: "passingTouchdowns", Label: "TD", Sort: "passing.passingTouchdowns:desc", DisplayName: "Passing Touchdowns"},
+	{Aliases: []string{"rushing yards", "rushing yds", "rush yds"}, DefaultLeague: espn.LeagueNFL, Category: "rushing", StatName: "rushingYards", Label: "YDS", Sort: "rushing.rushingYards:desc", DisplayName: "Rushing Yards"},
+	{Aliases: []string{"rushing touchdowns", "rushing tds", "rushing td", "rushing tbs", "rush tds", "rush td"}, DefaultLeague: espn.LeagueNFL, Category: "rushing", StatName: "rushingTouchdowns", Label: "TD", Sort: "rushing.rushingTouchdowns:desc", DisplayName: "Rushing Touchdowns"},
+	{Aliases: []string{"receiving yards", "receiving yds", "rec yds"}, DefaultLeague: espn.LeagueNFL, Category: "receiving", StatName: "receivingYards", Label: "YDS", Sort: "receiving.receivingYards:desc", DisplayName: "Receiving Yards"},
+	{Aliases: []string{"receiving touchdowns", "receiving tds", "receiving td", "rec tds", "rec td"}, DefaultLeague: espn.LeagueNFL, Category: "receiving", StatName: "receivingTouchdowns", Label: "TD", Sort: "receiving.receivingTouchdowns:desc", DisplayName: "Receiving Touchdowns"},
+	{Aliases: []string{"receptions", "catches", "reception"}, DefaultLeague: espn.LeagueNFL, Category: "receiving", StatName: "receptions", Label: "REC", Sort: "receiving.receptions:desc", DisplayName: "Receptions"},
+	{Aliases: []string{"interceptions", "picks", "pick sixes", "pick six"}, DefaultLeague: espn.LeagueNFL, Category: "defensive", StatName: "interceptions", Label: "INT", Sort: "defensive.interceptions:desc", DisplayName: "Interceptions"},
+	{Aliases: []string{"sacks", "sack"}, DefaultLeague: espn.LeagueNFL, Category: "defensive", StatName: "sacks", Label: "SACKS", Sort: "defensive.sacks:desc", DisplayName: "Sacks"},
+	{Aliases: []string{"points per game", "ppg", "pts"}, DefaultLeague: espn.LeagueNBA, Category: "offensive", StatName: "avgPoints", Label: "PTS", Sort: "offensive.avgPoints:desc", DisplayName: "Points Per Game"},
+	{Aliases: []string{"rebounds", "rebounds per game", "rpg", "reb"}, DefaultLeague: espn.LeagueNBA, Category: "general", StatName: "avgRebounds", Label: "REB", Sort: "general.avgRebounds:desc", DisplayName: "Rebounds Per Game"},
+	{Aliases: []string{"assists", "assists per game", "apg", "ast"}, DefaultLeague: espn.LeagueNBA, Category: "offensive", StatName: "avgAssists", Label: "AST", Sort: "offensive.avgAssists:desc", DisplayName: "Assists Per Game"},
+	{Aliases: []string{"steals", "steals per game", "stl"}, DefaultLeague: espn.LeagueNBA, Category: "defensive", StatName: "avgSteals", Label: "STL", Sort: "defensive.avgSteals:desc", DisplayName: "Steals Per Game"},
+	{Aliases: []string{"blocks", "blocks per game", "blk"}, DefaultLeague: espn.LeagueNBA, Category: "defensive", StatName: "avgBlocks", Label: "BLK", Sort: "defensive.avgBlocks:desc", DisplayName: "Blocks Per Game"},
 	{Aliases: []string{"goals"}, DefaultLeague: espn.LeagueNHL, Category: "scoring", StatName: "goals", Label: "G", Sort: "scoring.goals:desc", DisplayName: "Goals"},
 	{Aliases: []string{"hockey assists", "assists"}, DefaultLeague: espn.LeagueNHL, Category: "scoring", StatName: "assists", Label: "A", Sort: "scoring.assists:desc", DisplayName: "Assists"},
 	{Aliases: []string{"hockey points", "points"}, DefaultLeague: espn.LeagueNHL, Category: "scoring", StatName: "points", Label: "PTS", Sort: "scoring.points:desc", DisplayName: "Points"},
@@ -408,7 +408,7 @@ func DetectSportsIntent(query string, now time.Time) (*SportsRequest, bool) {
 	if intent == SportsIntentTeamRecord && teamQuery == "" {
 		return nil, false
 	}
-	if metric, ok := detectStatMetric(norm, cfg, hasLeague); ok && isLeaderQuery(norm) {
+	if metric, ok := detectStatMetric(norm, cfg, hasLeague); ok && isLeaderQuery(norm) && !isHistoricalSearchFallback(norm) {
 		intent = SportsIntentLeaders
 		if !hasLeague && metric.DefaultLeague != "" {
 			if metricCfg, ok := leagueConfigByLeague(metric.DefaultLeague); ok {
@@ -447,6 +447,18 @@ func DetectSportsIntent(query string, now time.Time) (*SportsRequest, bool) {
 
 	// ── Extended-capability intents ─────────────────────────────────────────
 	switch intent {
+	case SportsIntentScoreboardHeader:
+		date, dateLabel, _ := parseDateFromQuery(raw, norm, now, SportsIntentSchedule)
+		return &SportsRequest{
+			RawQuery:          raw,
+			Intent:            SportsIntentScoreboardHeader,
+			GameDetailSubtype: scoreboardHeaderSubtype(norm),
+			Date:              date,
+			DateLabel:         dateLabel,
+			Season:            season,
+			Limit:             limit,
+		}, true
+
 	case SportsIntentSearch:
 		sq := extractSearchQuery(raw)
 		return &SportsRequest{
@@ -457,6 +469,82 @@ func DetectSportsIntent(query string, now time.Time) (*SportsRequest, bool) {
 			AthleteQuery: sq,
 			Season:       season,
 			Limit:        limit,
+		}, true
+
+	case SportsIntentTeams:
+		if !hasLeague {
+			return nil, false
+		}
+		return &SportsRequest{
+			RawQuery: raw,
+			Intent:   SportsIntentTeams,
+			League:   cfg.League,
+			Sport:    cfg.Sport,
+			Season:   season,
+			Limit:    limit,
+		}, true
+
+	case SportsIntentTeamHistory:
+		if !hasLeague || teamQuery == "" {
+			return nil, false
+		}
+		return &SportsRequest{
+			RawQuery:  raw,
+			Intent:    SportsIntentTeamHistory,
+			League:    cfg.League,
+			Sport:     cfg.Sport,
+			TeamQuery: teamQuery,
+			Season:    season,
+			Limit:     limit,
+		}, true
+
+	case SportsIntentSeasons:
+		if !hasLeague {
+			return nil, false
+		}
+		return &SportsRequest{
+			RawQuery: raw,
+			Intent:   SportsIntentSeasons,
+			League:   cfg.League,
+			Sport:    cfg.Sport,
+			Season:   season,
+			Limit:    limit,
+		}, true
+
+	case SportsIntentCalendar:
+		if !hasLeague {
+			return nil, false
+		}
+		return &SportsRequest{
+			RawQuery: raw,
+			Intent:   SportsIntentCalendar,
+			League:   cfg.League,
+			Sport:    cfg.Sport,
+			Season:   season,
+			Limit:    limit,
+		}, true
+
+	case SportsIntentTournaments:
+		if !hasLeague {
+			return nil, false
+		}
+		return &SportsRequest{
+			RawQuery: raw,
+			Intent:   SportsIntentTournaments,
+			League:   cfg.League,
+			Sport:    cfg.Sport,
+			Season:   season,
+			Limit:    limit,
+		}, true
+
+	case SportsIntentFantasy:
+		return &SportsRequest{
+			RawQuery:          raw,
+			Intent:            SportsIntentFantasy,
+			TeamQuery:         fantasyLeagueIDFromQuery(raw),
+			GameDetailSubtype: fantasySubtype(norm),
+			Season:            season,
+			Limit:             limit,
 		}, true
 
 	case SportsIntentAthleteComparison:
@@ -475,6 +563,14 @@ func DetectSportsIntent(query string, now time.Time) (*SportsRequest, bool) {
 			Limit:              limit,
 		}, true
 
+	case SportsIntentAthleteAwards, SportsIntentAthleteSeasons, SportsIntentAthleteRecords, SportsIntentAthleteInjuries:
+		athleteQuery := extractAthleteQuery(raw, norm, cfg, hasLeague, intent)
+		if athleteQuery == "" {
+			return nil, false
+		}
+		req := sportsRequestWithStat(raw, cfg, hasLeague, teamQuery, athleteQuery, intent, statMetricConfig{}, season, limit)
+		return req, true
+
 	case SportsIntentHotZones:
 		athleteQuery := extractAthleteQuery(raw, norm, cfg, hasLeague, intent)
 		if athleteQuery == "" {
@@ -491,6 +587,12 @@ func DetectSportsIntent(query string, now time.Time) (*SportsRequest, bool) {
 		}, true
 
 	case SportsIntentGameDetail:
+		if !hasLeague {
+			if champCfg, ok := detectLeagueFromChampionship(norm); ok {
+				cfg = champCfg
+				hasLeague = true
+			}
+		}
 		if !hasLeague {
 			return nil, false
 		}
@@ -513,12 +615,16 @@ func DetectSportsIntent(query string, now time.Time) (*SportsRequest, bool) {
 				hasLeague = true
 			}
 		}
+		athleteQuery := extractAthleteQuery(raw, norm, cfg, hasLeague, intent)
+		if hasAnyPhrase(norm, "best qbr", "who had the best", "who has the best", "highest qbr", "qbr leaders") {
+			athleteQuery = ""
+		}
 		return &SportsRequest{
 			RawQuery:     raw,
 			Intent:       SportsIntentQBR,
 			League:       cfg.League,
 			Sport:        cfg.Sport,
-			AthleteQuery: extractAthleteQuery(raw, norm, cfg, hasLeague, intent),
+			AthleteQuery: athleteQuery,
 			Season:       season,
 			Limit:        limit,
 		}, hasLeague
@@ -556,16 +662,25 @@ func DetectSportsIntent(query string, now time.Time) (*SportsRequest, bool) {
 
 	case SportsIntentCoaches:
 		if !hasLeague {
+			if hasAnyPhrase(norm, "coaching record", "career coaching record", "coach record") {
+				if nflCfg, ok := leagueConfigByLeague(espn.LeagueNFL); ok {
+					cfg = nflCfg
+					hasLeague = true
+				}
+			}
+		}
+		if !hasLeague {
 			return nil, false
 		}
 		return &SportsRequest{
-			RawQuery:  raw,
-			Intent:    SportsIntentCoaches,
-			League:    cfg.League,
-			Sport:     cfg.Sport,
-			TeamQuery: teamQuery,
-			Season:    season,
-			Limit:     limit,
+			RawQuery:     raw,
+			Intent:       SportsIntentCoaches,
+			League:       cfg.League,
+			Sport:        cfg.Sport,
+			TeamQuery:    teamQuery,
+			AthleteQuery: extractCoachQuery(raw, norm),
+			Season:       season,
+			Limit:        limit,
 		}, true
 
 	case SportsIntentVenues:
@@ -775,8 +890,12 @@ func isNonLookupQuery(norm string) bool {
 	if hasPhrase(norm, "is calculated") || hasPhrase(norm, "are calculated") {
 		return true
 	}
-	// Allow historical champion queries through before blocking on history/all-time keywords.
-	if !hasAnyPhrase(norm, "champion", "championship", "won the", "winner", "super bowl", "stanley cup", "world series") {
+	// Allow endpoint-backed historical lookups through before blocking on broad
+	// history/all-time wording.
+	if !hasAnyPhrase(norm,
+		"champion", "championship", "won the", "winner", "super bowl", "stanley cup", "world series",
+		"franchise history", "team history", "injury history", "most goals", "goals scored",
+	) {
 		if hasAnyPhrase(norm, "in history", "all time record", "history", "all time") {
 			return true
 		}
@@ -868,6 +987,9 @@ func detectTeamAliasFuzzy(norm string) (teamAlias, bool) {
 				if len(tok) < 6 {
 					continue
 				}
+				if tok[0] != aliasWord[0] {
+					continue
+				}
 				if levenshteinDistance(tok, aliasWord) == 1 {
 					return team, true
 				}
@@ -879,6 +1001,66 @@ func detectTeamAliasFuzzy(norm string) (teamAlias, bool) {
 
 func detectIntent(norm string) SportsIntentType {
 	// ── Extended capabilities: checked first to avoid overlap ──────────────
+
+	if hasAnyPhrase(norm, "across the major sports", "major sports", "on espn today", "espn today") &&
+		hasAnyPhrase(norm, "games", "scoreboard", "what games", "which games") {
+		return SportsIntentScoreboardHeader
+	}
+	if hasAnyPhrase(norm, "nationally televised", "national tv", "televised tonight", "televised today") {
+		return SportsIntentScoreboardHeader
+	}
+	if hasAnyPhrase(norm,
+		"period by period", "period-by-period", "play by play", "play-by-play",
+		"summary of", "game summary", "most recent chiefs game", "most recent game",
+		"team stats for both sides", "both sides in the last",
+	) {
+		return SportsIntentGameDetail
+	}
+	if hasAnyPhrase(norm, "most recent race", "latest race", "recent race") {
+		return SportsIntentScores
+	}
+	if hasPhrase(norm, "fantasy") && hasAnyPhrase(norm,
+		"espn fantasy", "public fantasy", "fantasy football league", "fantasy baseball league",
+		"league info", "league information", "league id", "league 12345", "player info", "player information",
+	) {
+		return SportsIntentFantasy
+	}
+	if hasAnyPhrase(norm, "tournaments", "tournament calendar") &&
+		hasAnyPhrase(norm, "pga", "golf", "atp", "tennis") {
+		return SportsIntentTournaments
+	}
+	if hasPhrase(norm, "calendar") {
+		if hasAnyPhrase(norm, "atp", "tennis", "pga", "golf") {
+			return SportsIntentTournaments
+		}
+		return SportsIntentCalendar
+	}
+	if hasAnyPhrase(norm, "seasons are available", "available seasons", "what seasons are available") {
+		return SportsIntentSeasons
+	}
+	if hasAnyPhrase(norm, "franchise history", "team history") {
+		return SportsIntentTeamHistory
+	}
+	if hasAnyPhrase(norm, "list all teams", "all teams in", "what teams were", "which teams were", "teams were in") {
+		return SportsIntentTeams
+	}
+	if hasAnyPhrase(norm, "awards has", "award has", "awards did", "what awards") {
+		return SportsIntentAthleteAwards
+	}
+	if hasAnyPhrase(norm, "seasons did", "what seasons did", "play in") &&
+		!hasAnyPhrase(norm, "teams", "team", "stadium", "arena", "ballpark", "venue", "home") {
+		return SportsIntentAthleteSeasons
+	}
+	if hasAnyPhrase(norm, "records does", "record does", "records did", "record did", "records has", "record has") ||
+		(hasAnyPhrase(norm, "hold", "holds") && hasAnyPhrase(norm, "record", "records")) {
+		return SportsIntentAthleteRecords
+	}
+	if hasPhrase(norm, "injury history") {
+		return SportsIntentAthleteInjuries
+	}
+	if hasAnyPhrase(norm, "in history", "history", "all time") && isLeaderQuery(norm) {
+		return SportsIntentSearch
+	}
 
 	// Bracketology (Q87): NCAA bracket projections — before generic schedule/standings
 	if hasAnyPhrase(norm, "bracketology", "bracket projection", "bracket projections",
@@ -898,7 +1080,8 @@ func detectIntent(norm string) SportsIntentType {
 	}
 	// Venues / stadiums / arenas (Q77-Q78)
 	if hasAnyPhrase(norm, "home stadium", "home arena", "home ballpark", "home venue", "home venues", "home field",
-		"what stadium", "which stadium", "what arena", "which arena", "what ballpark", "which ballpark") {
+		"what stadium", "which stadium", "what arena", "which arena", "what ballpark", "which ballpark",
+		"venues", "stadiums", "arenas", "ballparks") {
 		return SportsIntentVenues
 	}
 
@@ -916,18 +1099,19 @@ func detectIntent(norm string) SportsIntentType {
 		return SportsIntentChampions
 	}
 	// Champions with a year: "who won the 2024 Super Bowl", "2023 World Series winner"
-	if hasAnyPhrase(norm, "super bowl", "world series", "stanley cup", "nba finals", "nba championship") &&
-		hasAnyPhrase(norm, "won", "winner", "champion", "champions", "championship") {
+	if hasAnyPhrase(norm, "super bowl", "world series", "stanley cup", "stanley cup final", "nba finals", "nba championship") &&
+		hasAnyPhrase(norm, "won", "winner", "champion", "champions", "championship", "made", "final", "finals") {
 		return SportsIntentChampions
 	}
 	// Draft (Q73-Q74): before schedule/transactions
 	if hasAnyPhrase(norm, "draft results", "draft picks", "draft class", "nfl draft", "nba draft", "mlb draft", "nhl draft", "cfb draft") ||
-		(hasPhrase(norm, "draft") && hasAnyPhrase(norm, "round", "pick", "overall", "selection")) {
+		(hasPhrase(norm, "draft") && hasAnyPhrase(norm, "round", "pick", "overall", "selection", "who did", "did the", "drafted")) {
 		return SportsIntentDraft
 	}
 	// Coaches (Q75-Q76): before roster (coaching staff ≠ player roster)
 	if hasAnyPhrase(norm, "head coach", "head coaches", "coaching staff", "who is the coach", "who coaches") ||
-		(hasPhrase(norm, "coaches") && !hasPhrase(norm, "poll")) {
+		(hasPhrase(norm, "coaches") && !hasPhrase(norm, "poll")) ||
+		hasAnyPhrase(norm, "coaching record", "career coaching record", "coach record") {
 		return SportsIntentCoaches
 	}
 	// Game detail subtypes (Q58 win prob / Q62 predictor / Q63 officials / Q68 CDN package)
@@ -962,11 +1146,11 @@ func detectIntent(norm string) SportsIntentType {
 	}
 
 	// ── Existing intent detection ───────────────────────────────────────────
-	if hasAnyPhrase(norm, "roster", "depth chart", "who is on", "who plays for") {
-		return SportsIntentRoster
-	}
 	if hasAnyPhrase(norm, "injury", "injuries", "injured", "injury report") {
 		return SportsIntentInjuries
+	}
+	if hasAnyPhrase(norm, "roster", "depth chart", "who is on", "who plays for") {
+		return SportsIntentRoster
 	}
 	if hasAnyPhrase(norm, "transaction", "transactions", "traded", "signed", "waived") {
 		return SportsIntentTransactions
@@ -999,7 +1183,8 @@ func detectIntent(norm string) SportsIntentType {
 	if hasAnyPhrase(norm, "top 25", "poll", "polls", "ap poll", "coaches poll") ||
 		(hasPhrase(norm, "rankings") && hasAnyPhrase(norm,
 			"college football", "ncaaf", "cfb", "college basketball", "ncaamb", "ncaawb",
-		)) {
+		)) ||
+		(hasAnyPhrase(norm, "ranked", "ranked number one", "ranked no 1", "number one") && hasAnyPhrase(norm, "college football", "college basketball", "ncaamb", "ncaawb")) {
 		return SportsIntentRankings
 	}
 	if hasAnyPhrase(norm,
@@ -1011,6 +1196,9 @@ func detectIntent(norm string) SportsIntentType {
 	if hasAnyPhrase(norm,
 		"score", "scores", "final", "result", "results", "how did", "who won", "live score",
 	) {
+		return SportsIntentScores
+	}
+	if hasAnyPhrase(norm, "most recent race", "latest race", "recent race") {
 		return SportsIntentScores
 	}
 	if hasAnyPhrase(norm,
@@ -1138,9 +1326,14 @@ func hasPlayerStatMetric(norm string) bool {
 func isLeaderQuery(norm string) bool {
 	return hasAnyPhrase(norm,
 		"leader", "leaders", "leaderboard", "stat leaders", "league leaders",
-		"top", "top players", "most", "who leads", "who led", "led the", "league leader",
+		"top", "top players", "most", "who leads", "who led", "who lead", "led the", "lead the", "league leader",
 		"highest", "lowest", "best", "fewest",
 	)
+}
+
+func isHistoricalSearchFallback(norm string) bool {
+	return hasAnyPhrase(norm, "in history", "history", "all time") &&
+		hasAnyPhrase(norm, "most goals", "goals scored")
 }
 
 func detectStatMetric(norm string, cfg LeagueConfig, hasLeague bool) (statMetricConfig, bool) {
@@ -1226,13 +1419,21 @@ func parseLimitFromQuery(norm string, fallback int) int {
 func extractAthleteQuery(raw, norm string, cfg LeagueConfig, hasLeague bool, intent SportsIntentType) string {
 	cleaned := normalizeText(raw)
 	for _, phrase := range []string{
-		"show me", "what are", "what is", "whats", "what s", "give me", "print out", "table",
+		"show me", "show", "what are", "what is", "whats", "what s", "what", "who", "give me", "print out", "table",
+		"what was", "was", "the", "current",
 		"player stats", "player statistics", "athlete stats", "athlete statistics",
 		"stats", "statistics", "stat", "game log", "gamelog", "splits", "bio", "news",
+		"hot zone", "hot zones", "batting", "pitching",
+		"qbr", "total qbr", "quarterback rating",
+		"awards", "award", "won", "wins", "has", "have",
+		"seasons did", "seasons", "did", "does", "play in", "play", "played",
+		"records", "record", "holds", "hold",
+		"injury history", "injury", "injuries", "history",
 		"for", "in", "during", "season", "regular season", "latest", "headlines",
 	} {
 		cleaned = removePhrase(cleaned, phrase)
 	}
+	cleaned = removePhrase(cleaned, "s")
 	if hasLeague {
 		for _, alias := range cfg.Aliases {
 			cleaned = removePhrase(cleaned, alias)
@@ -1562,6 +1763,7 @@ func cleanAthleteToken(s string) string {
 	for _, suffix := range []string{
 		" in the nba", " in the nfl", " in the nhl", " in the mlb", " in the wnba",
 		" stats", " statistics", " career", " season",
+		" head-to-head", " head to head", " matchup", " comparison",
 		" nba", " nfl", " nhl", " mlb", " wnba",
 	} {
 		if strings.HasSuffix(lower, suffix) {
@@ -1569,7 +1771,7 @@ func cleanAthleteToken(s string) string {
 			lower = strings.ToLower(s)
 		}
 	}
-	return s
+	return strings.Trim(s, " \t\r\n.?!,;:")
 }
 
 // extractSearchQuery strips "search espn for …" / "espn search …" prefixes and
@@ -1587,12 +1789,45 @@ func extractSearchQuery(raw string) string {
 	return raw
 }
 
+func scoreboardHeaderSubtype(norm string) string {
+	if hasAnyPhrase(norm, "televised", "broadcast", "broadcasting", "national tv", "nationally televised") {
+		return "broadcasts"
+	}
+	return "games"
+}
+
+func fantasySubtype(norm string) string {
+	if hasAnyPhrase(norm, "player info", "players info", "player information", "players information") {
+		return "player_info"
+	}
+	return "league"
+}
+
+func extractCoachQuery(raw, norm string) string {
+	if !hasAnyPhrase(norm, "coaching record", "career coaching record", "coach record") {
+		return ""
+	}
+	cleaned := normalizeText(raw)
+	for _, phrase := range []string{
+		"what is", "whats", "what s", "show", "show me", "career", "coaching", "coach", "record", "records",
+	} {
+		cleaned = removePhrase(cleaned, phrase)
+	}
+	return strings.TrimSpace(cleaned)
+}
+
 // detectGameDetailSubtype returns the sub-operation string for a
 // SportsIntentGameDetail request.
 func detectGameDetailSubtype(norm string) string {
 	if hasAnyPhrase(norm, "who are the officials", "who are the refs", "who are the referees",
 		"game officials", "assigned officials", "officiating crew") {
 		return "officials"
+	}
+	if hasAnyPhrase(norm, "play by play", "play-by-play") {
+		return "plays"
+	}
+	if hasAnyPhrase(norm, "team stats for both sides", "both sides in the last", "competitor statistics") {
+		return "team_stats"
 	}
 	if hasAnyPhrase(norm, "win probability", "win prob", "winning probability") {
 		return "probabilities"

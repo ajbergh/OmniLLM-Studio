@@ -102,7 +102,12 @@ func (t *SportsLookupTool) Validate(args json.RawMessage) error {
 			SportsIntentRoster, SportsIntentInjuries, SportsIntentTransactions,
 			SportsIntentTeamRecord, SportsIntentTeamSchedule, SportsIntentLeaders,
 			SportsIntentAthleteStats, SportsIntentAthleteNews, SportsIntentRankings, SportsIntentLeagueStats,
-			SportsIntentVenues, SportsIntentPowerIndex, SportsIntentRecruits, SportsIntentBracketology:
+			SportsIntentTeams, SportsIntentTeamHistory, SportsIntentSeasons, SportsIntentCalendar,
+			SportsIntentScoreboardHeader, SportsIntentSearch, SportsIntentQBR, SportsIntentAthleteComparison,
+			SportsIntentAthleteAwards, SportsIntentAthleteSeasons, SportsIntentAthleteRecords, SportsIntentAthleteInjuries,
+			SportsIntentHotZones, SportsIntentGameDetail, SportsIntentChampions, SportsIntentDraft, SportsIntentCoaches,
+			SportsIntentVenues, SportsIntentPowerIndex, SportsIntentRecruits, SportsIntentBracketology,
+			SportsIntentTournaments, SportsIntentFantasy:
 		default:
 			return fmt.Errorf("unsupported sports intent")
 		}

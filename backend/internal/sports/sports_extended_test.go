@@ -218,7 +218,13 @@ func TestDetectStatMetricBoundaries(t *testing.T) {
 		wantSort     string
 	}{
 		{"who leads the NBA in ppg?", espn.LeagueNBA, "avgPoints", "offensive.avgPoints:desc"},
+		{"who leads the NBA in pts?", espn.LeagueNBA, "avgPoints", "offensive.avgPoints:desc"},
 		{"NBA assists leaders", espn.LeagueNBA, "avgAssists", "offensive.avgAssists:desc"},
+		{"NBA ast leaders", espn.LeagueNBA, "avgAssists", "offensive.avgAssists:desc"},
+		{"NBA reb leaders", espn.LeagueNBA, "avgRebounds", "general.avgRebounds:desc"},
+		// "hrs" plural abbreviation for home runs — was previously not matched
+		{"who led the MLB in HRs in 1985?", espn.LeagueMLB, "homeRuns", "batting.homeRuns:desc"},
+		{"MLB hrs leaders", espn.LeagueMLB, "homeRuns", "batting.homeRuns:desc"},
 		{"NHL goals leaders", espn.LeagueNHL, "goals", "scoring.goals:desc"},
 		// NHL has its own "assists" entry; hasLeague=NHL causes the NBA entry to
 		// be skipped and the NHL entry to be returned.
@@ -850,8 +856,6 @@ func TestDetectSportsIntentSoccer(t *testing.T) {
 
 func TestDetectSportsIntentNegativeExtended(t *testing.T) {
 	queries := []string{
-		// "in history" is a non-lookup marker (all-time records, not current season)
-		"Who has scored the most goals in NHL history",
 		// Historical fact question
 		"When did the Blackhawks last win the Stanley Cup",
 		// Request to explain a concept — how it is calculated
@@ -865,5 +869,18 @@ func TestDetectSportsIntentNegativeExtended(t *testing.T) {
 				t.Errorf("DetectSportsIntent(%q) = %+v, true; want false", q, got)
 			}
 		})
+	}
+}
+
+func TestDetectSportsIntentHistoricalLeaderSearchFallback(t *testing.T) {
+	got, ok := DetectSportsIntent("Who has scored the most goals in NHL history", fixedNow())
+	if !ok {
+		t.Fatal("expected historical NHL leader query to route to ESPN search fallback")
+	}
+	if got.Intent != SportsIntentSearch {
+		t.Fatalf("intent = %q, want %q", got.Intent, SportsIntentSearch)
+	}
+	if got.League != espn.LeagueNHL {
+		t.Fatalf("league = %q, want %q", got.League, espn.LeagueNHL)
 	}
 }

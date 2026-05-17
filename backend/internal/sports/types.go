@@ -47,11 +47,20 @@ const (
 	SportsIntentRankings     SportsIntentType = "rankings"
 	SportsIntentLeagueStats  SportsIntentType = "league_stats"
 	SportsIntentOdds         SportsIntentType = "odds"
+	SportsIntentTeams        SportsIntentType = "teams"
+	SportsIntentTeamHistory  SportsIntentType = "team_history"
+	SportsIntentSeasons      SportsIntentType = "seasons"
+	SportsIntentCalendar     SportsIntentType = "calendar"
 
 	// Extended capabilities (Q10, Q46, Q52, Q53, Q58, Q62, Q63, Q68–Q76)
+	SportsIntentScoreboardHeader  SportsIntentType = "scoreboard_header"
 	SportsIntentSearch            SportsIntentType = "search"
 	SportsIntentQBR               SportsIntentType = "qbr"
 	SportsIntentAthleteComparison SportsIntentType = "athlete_comparison"
+	SportsIntentAthleteAwards     SportsIntentType = "athlete_awards"
+	SportsIntentAthleteSeasons    SportsIntentType = "athlete_seasons"
+	SportsIntentAthleteRecords    SportsIntentType = "athlete_records"
+	SportsIntentAthleteInjuries   SportsIntentType = "athlete_injuries"
 	SportsIntentHotZones          SportsIntentType = "hot_zones"
 	SportsIntentGameDetail        SportsIntentType = "game_detail"
 	SportsIntentChampions         SportsIntentType = "champions"
@@ -63,6 +72,8 @@ const (
 	SportsIntentPowerIndex   SportsIntentType = "power_index"  // FPI / BPI / SP+ power index
 	SportsIntentRecruits     SportsIntentType = "recruits"     // CFB recruit rankings
 	SportsIntentBracketology SportsIntentType = "bracketology" // NCAA bracket projections
+	SportsIntentTournaments  SportsIntentType = "tournaments"  // golf / tennis tournament lists
+	SportsIntentFantasy      SportsIntentType = "fantasy"      // ESPN fantasy league/player info
 )
 
 type SportsRenderMode string
@@ -236,6 +247,7 @@ type LeaderboardRow struct {
 type SearchEntity struct {
 	ID     string
 	Name   string
+	Type   string
 	League string
 	Sport  string
 	Team   string
@@ -295,6 +307,18 @@ func UserFacingError(req SportsRequest, err error) string {
 		return fmt.Sprintf("ESPN did not return betting odds for %s right now.", name)
 	}
 	if errors.Is(err, ErrNoSportsData) {
+		// For leader/stats queries with a truly historical season (pre-2002),
+		// explain that ESPN's API doesn't cover data that far back.
+		if (req.Intent == SportsIntentLeaders || req.Intent == SportsIntentAthleteStats) && req.Season > 0 && req.Season < 2002 {
+			leagueName := req.League
+			if cfg, ok := leagueConfigForRequest(req); ok {
+				leagueName = cfg.DisplayName
+			}
+			if leagueName == "" {
+				leagueName = "that league"
+			}
+			return fmt.Sprintf("ESPN's statistics API does not have %s data for the %d season. Historical player statistics are only available for recent seasons (approximately 2002–present).", leagueName, req.Season)
+		}
 		name := req.League
 		if cfg, ok := leagueConfigForRequest(req); ok {
 			name = cfg.DisplayName

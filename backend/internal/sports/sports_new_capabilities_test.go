@@ -736,6 +736,73 @@ func TestQBRDetectionNoLeagueDefaultsNFL(t *testing.T) {
 	}
 }
 
+func TestQBRDetectionExtractsCleanAthlete(t *testing.T) {
+	req, ok := DetectSportsIntent("Show Patrick Mahomes' QBR for 2023", fixedNow())
+	if !ok {
+		t.Fatal("DetectSportsIntent returned false for QBR query")
+	}
+	if req.AthleteQuery != "patrick mahomes" {
+		t.Errorf("AthleteQuery = %q, want %q", req.AthleteQuery, "patrick mahomes")
+	}
+	if req.Season != 2023 {
+		t.Errorf("Season = %d, want 2023", req.Season)
+	}
+}
+
+func TestQBRGroupForLeague(t *testing.T) {
+	if got := qbrGroupForLeague(espn.LeagueNFL); got != 9 {
+		t.Errorf("NFL QBR group = %d, want 9", got)
+	}
+	if got := qbrGroupForLeague(espn.LeagueCollegeFootball); got != espn.GroupFBS {
+		t.Errorf("CFB QBR group = %d, want %d", got, espn.GroupFBS)
+	}
+}
+
+func TestNormalizeQBRTable(t *testing.T) {
+	raw := json.RawMessage(`{
+		"items": [
+			{
+				"athlete": {"$ref": "http://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/2023/athletes/3139477?lang=en"},
+				"team": {"$ref": "http://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/2023/teams/12?lang=en"},
+				"splits": {"categories": [{"name": "general", "stats": [
+					{"name": "schedAdjQBR", "displayValue": "63.9", "value": 63.9},
+					{"name": "qbr", "displayValue": "65.1", "value": 65.1},
+					{"name": "qbpaa", "displayValue": "32.5", "value": 32.5},
+					{"name": "actionPlays", "displayValue": "706", "value": 706}
+				]}]}
+			},
+			{
+				"athlete": {"$ref": "http://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/2023/athletes/2577417?lang=en"},
+				"team": {"$ref": "http://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/2023/teams/6?lang=en"},
+				"splits": {"categories": [{"name": "general", "stats": [
+					{"name": "schedAdjQBR", "displayValue": "73.4", "value": 73.4},
+					{"name": "qbr", "displayValue": "75.3", "value": 75.3},
+					{"name": "qbpaa", "displayValue": "57.0", "value": 56.98},
+					{"name": "actionPlays", "displayValue": "724", "value": 724}
+				]}]}
+			}
+		]
+	}`)
+	table := normalizeQBRTable(
+		raw,
+		map[string]string{"3139477": "Patrick Mahomes", "2577417": "Dak Prescott"},
+		map[string]string{"12": "KC", "6": "DAL"},
+		10,
+	)
+	if len(table.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(table.Rows))
+	}
+	if got := table.Rows[0][1]; got != "Dak Prescott" {
+		t.Errorf("top player = %q, want Dak Prescott", got)
+	}
+	if got := table.Rows[1][1]; got != "Patrick Mahomes" {
+		t.Errorf("second player = %q, want Patrick Mahomes", got)
+	}
+	if got := table.Rows[1][3]; got != "63.9" {
+		t.Errorf("Patrick total QBR = %q, want 63.9", got)
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TestHotZonesDetectionExtractsAthlete — verifies that an athlete name is
 // extracted from a hot-zones query.
