@@ -64,6 +64,11 @@ func (c *ESPNClient) LookupScoreboardHeader(ctx context.Context, req SportsReque
 	if len(table.Rows) == 0 {
 		return nil, ErrNoSportsData
 	}
+	req.Intent = SportsIntentScoreboardHeader
+	req.DateLabel = label
+	if err := ValidateScoreboardHeaderTable(req, table); err != nil {
+		return nil, err
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:      SportsIntentScoreboardHeader,
@@ -298,6 +303,11 @@ func (c *ESPNClient) LookupSeasons(ctx context.Context, req SportsRequest) (*Spo
 	if len(table.Rows) == 0 {
 		return nil, ErrNoSportsData
 	}
+	req.Intent = SportsIntentSeasons
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:        SportsIntentSeasons,
@@ -337,6 +347,11 @@ func (c *ESPNClient) LookupTournaments(ctx context.Context, req SportsRequest) (
 	}
 	if len(table.Rows) == 0 {
 		return nil, ErrNoSportsData
+	}
+	req.Intent = SportsIntentTournaments
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
 	}
 	title := fmt.Sprintf("### %s Tournaments", cfg.DisplayName)
 	if majorsOnly {
@@ -388,6 +403,10 @@ func (c *ESPNClient) LookupFantasy(ctx context.Context, req SportsRequest) (*Spo
 	if len(table.Rows) == 0 {
 		return c.fantasyAvailabilityResult(req, game, season, leagueID, title), nil
 	}
+	req.Intent = SportsIntentFantasy
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:      SportsIntentFantasy,
@@ -408,6 +427,10 @@ func (c *ESPNClient) fantasyAvailabilityResult(req SportsRequest, game espn.Fant
 	table := SimpleTable{
 		Headers: []string{"Status", "Detail"},
 		Rows:    [][]string{{status, detail}},
+	}
+	req.Intent = SportsIntentFantasy
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return c.emptyLookupResult(req, err)
 	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{

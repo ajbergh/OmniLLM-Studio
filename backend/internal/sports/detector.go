@@ -782,16 +782,32 @@ func DetectSportsIntent(query string, now time.Time) (*SportsRequest, bool) {
 
 	date, dateLabel, _ := parseDateFromQuery(raw, norm, now, intent)
 	return &SportsRequest{
-		RawQuery:  raw,
-		Intent:    intent,
-		League:    cfg.League,
-		Sport:     cfg.Sport,
-		TeamQuery: teamQuery,
-		Date:      date,
-		DateLabel: dateLabel,
-		Season:    season,
-		Limit:     limit,
+		RawQuery:          raw,
+		Intent:            intent,
+		League:            cfg.League,
+		Sport:             cfg.Sport,
+		TeamQuery:         teamQuery,
+		GameDetailSubtype: scheduleSubtype(norm, intent),
+		Date:              date,
+		DateLabel:         dateLabel,
+		Season:            season,
+		Limit:             limit,
 	}, true
+}
+
+func scheduleSubtype(norm string, intent SportsIntentType) string {
+	if intent != SportsIntentSchedule && intent != SportsIntentScores {
+		return ""
+	}
+	if hasAnyPhrase(norm,
+		"pitching matchup", "pitching matchups",
+		"probable pitcher", "probable pitchers",
+		"probable starter", "probable starters",
+		"starting pitcher", "starting pitchers",
+	) {
+		return "pitching_matchups"
+	}
+	return ""
 }
 
 func ParseDateValue(value string, now time.Time, intent SportsIntentType) (*time.Time, string, error) {

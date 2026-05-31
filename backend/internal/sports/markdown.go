@@ -25,6 +25,9 @@ func renderGamesPlainMarkdown(req SportsRequest, cfg LeagueConfig, rows []GameRo
 	if req.Intent == SportsIntentSchedule {
 		intentLabel = "Schedule"
 	}
+	if wantsPitchingMatchups(req) {
+		intentLabel = "Pitching Matchups"
+	}
 
 	var b strings.Builder
 	title := fmt.Sprintf("### %s %s", cfg.DisplayName, intentLabel)
@@ -36,6 +39,14 @@ func renderGamesPlainMarkdown(req SportsRequest, cfg LeagueConfig, rows []GameRo
 	writeSourceLine(&b, retrievedAt)
 
 	if shouldRenderSchedule(req, rows) {
+		if wantsPitchingMatchups(req) {
+			b.WriteString(renderTable(
+				[]string{"Time", "Away", "Home", "Pitching Matchup", "Venue", "Broadcast"},
+				[]string{"---", "---", "---", "---", "---", "---"},
+				pitchingScheduleRows(rows),
+			))
+			return strings.TrimSpace(b.String())
+		}
 		b.WriteString(renderTable(
 			[]string{"Time", "Away", "Home", "Venue", "Broadcast"},
 			[]string{"---", "---", "---", "---", "---"},
@@ -105,6 +116,9 @@ func renderGamesEnhancedMarkdown(req SportsRequest, cfg LeagueConfig, rows []Gam
 	if req.Intent == SportsIntentSchedule {
 		intentLabel = "Schedule"
 	}
+	if wantsPitchingMatchups(req) {
+		intentLabel = "Pitching Matchups"
+	}
 	title := fmt.Sprintf("%s %s", cfg.DisplayName, intentLabel)
 	if label := strings.TrimSpace(req.DateLabel); label != "" {
 		title += " — " + label
@@ -120,6 +134,14 @@ func renderGamesEnhancedMarkdown(req SportsRequest, cfg LeagueConfig, rows []Gam
 	}, title, SportsRenderEnhancedMarkdown))
 
 	if shouldRenderSchedule(req, rows) {
+		if wantsPitchingMatchups(req) {
+			b.WriteString(renderTable(
+				[]string{"Time", "Matchup", "Pitching Matchup", "Venue", "Broadcast"},
+				[]string{"---", "---", "---", "---", "---"},
+				pitchingScheduleRowsMode(rows, SportsRenderEnhancedMarkdown),
+			))
+			return strings.TrimSpace(b.String())
+		}
 		b.WriteString(renderTable(
 			[]string{"Time", "Matchup", "Venue", "Broadcast"},
 			[]string{"---", "---", "---", "---"},
@@ -546,6 +568,22 @@ func scheduleRows(rows []GameRow) [][]string {
 	return out
 }
 
+func pitchingScheduleRows(rows []GameRow) [][]string {
+	out := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		timeText := firstNonEmpty(row.Time, row.Status)
+		out = append(out, []string{
+			emptyAsDash(timeText),
+			emptyAsDash(row.AwayTeam),
+			emptyAsDash(row.HomeTeam),
+			emptyAsDash(row.PitchingMatchup),
+			emptyAsDash(row.Venue),
+			emptyAsDash(row.Broadcasts),
+		})
+	}
+	return out
+}
+
 func scoreRowsMode(rows []GameRow, mode SportsRenderMode) [][]string {
 	out := make([][]string, 0, len(rows))
 	for _, row := range rows {
@@ -566,6 +604,21 @@ func scheduleRowsMode(rows []GameRow, mode SportsRenderMode) [][]string {
 		out = append(out, []string{
 			renderStatusBadge(timeText, row.StatusType, mode),
 			matchupCell(row, mode),
+			emptyAsDash(row.Venue),
+			emptyAsDash(row.Broadcasts),
+		})
+	}
+	return out
+}
+
+func pitchingScheduleRowsMode(rows []GameRow, mode SportsRenderMode) [][]string {
+	out := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		timeText := firstNonEmpty(row.Time, row.Status, scoreStatusLabel(row))
+		out = append(out, []string{
+			renderStatusBadge(timeText, row.StatusType, mode),
+			matchupCell(row, mode),
+			emptyAsDash(row.PitchingMatchup),
 			emptyAsDash(row.Venue),
 			emptyAsDash(row.Broadcasts),
 		})

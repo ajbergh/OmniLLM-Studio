@@ -35,6 +35,10 @@ func (c *ESPNClient) LookupSearch(ctx context.Context, req SportsRequest) (*Spor
 	if len(entities) == 0 {
 		return nil, ErrNoSportsData
 	}
+	req.Intent = SportsIntentSearch
+	if err := ValidateSearchEntities(req, entities); err != nil {
+		return nil, err
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:      SportsIntentSearch,
@@ -84,6 +88,11 @@ func (c *ESPNClient) LookupQBR(ctx context.Context, req SportsRequest) (*SportsL
 		if len(table.Rows) == 0 {
 			return nil, fmt.Errorf("%w: %s", ErrAthleteNotFound, aq)
 		}
+	}
+	req.Intent = SportsIntentQBR
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
 	}
 	title := fmt.Sprintf("### %s QBR", cfg.DisplayName)
 	if season > 0 {
@@ -325,6 +334,13 @@ func (c *ESPNClient) LookupAthleteComparison(ctx context.Context, req SportsRequ
 	if len(table.Rows) == 0 {
 		return c.lookupAthleteStatsComparison(ctx, cfg, entity1, entity2, req)
 	}
+	req.Intent = SportsIntentAthleteComparison
+	req.League = cfg.League
+	req.AthleteQuery = entity1.Name
+	req.SecondAthleteQuery = entity2.Name
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
+	}
 	title := fmt.Sprintf("### %s vs %s", entity1.Name, entity2.Name)
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
@@ -366,6 +382,11 @@ func (c *ESPNClient) LookupHotZones(ctx context.Context, req SportsRequest) (*Sp
 	if len(table.Rows) == 0 {
 		return c.lookupHotZonesFallback(ctx, cfg, entity, req)
 	}
+	req.Intent = SportsIntentHotZones
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
+	}
 	title := fmt.Sprintf("### %s Hot Zones", entity.Name)
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
@@ -401,6 +422,13 @@ func (c *ESPNClient) lookupAthleteStatsComparison(ctx context.Context, cfg Leagu
 		rows = append(rows, []string{key, emptyAsDash(firstStats[key]), emptyAsDash(secondStats[key])})
 	}
 	table := SimpleTable{Headers: []string{"Stat", first.Name, second.Name}, Rows: rows}
+	req.Intent = SportsIntentAthleteComparison
+	req.League = cfg.League
+	req.AthleteQuery = first.Name
+	req.SecondAthleteQuery = second.Name
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:        SportsIntentAthleteComparison,
@@ -426,6 +454,11 @@ func (c *ESPNClient) lookupHotZonesFallback(ctx context.Context, cfg LeagueConfi
 	table := rawJSONTable(raw, req.Limit)
 	if len(table.Rows) == 0 {
 		return nil, ErrNoSportsData
+	}
+	req.Intent = SportsIntentHotZones
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
 	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
@@ -575,6 +608,10 @@ func (c *ESPNClient) LookupGameDetail(ctx context.Context, req SportsRequest) (*
 		if len(table.Rows) == 0 {
 			return nil, ErrNoSportsData
 		}
+	}
+	req.Intent = SportsIntentGameDetail
+	if err := ValidateGameDetailTable(req, table, title); err != nil {
+		return nil, err
 	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
@@ -891,6 +928,11 @@ func (c *ESPNClient) renderChampionRows(req SportsRequest, cfg LeagueConfig, row
 		Headers: []string{"Game", "Date", "Winner", "Score", "Loser"},
 		Rows:    rows,
 	}
+	req.Intent = SportsIntentChampions
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return c.emptyLookupResult(req, err)
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:        SportsIntentChampions,
@@ -1005,6 +1047,11 @@ func (c *ESPNClient) LookupDraft(ctx context.Context, req SportsRequest) (*Sport
 			table = filtered
 		}
 	}
+	req.Intent = SportsIntentDraft
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:        SportsIntentDraft,
@@ -1056,6 +1103,11 @@ func (c *ESPNClient) LookupCoaches(ctx context.Context, req SportsRequest) (*Spo
 		if len(table.Rows) == 0 {
 			return nil, ErrNoSportsData
 		}
+		req.Intent = SportsIntentCoaches
+		req.League = cfg.League
+		if err := ValidateSimpleTable(req, table); err != nil {
+			return nil, err
+		}
 		title := fmt.Sprintf("### %s Coaching Staff", teamDisplayName(*team))
 		retrievedAt := c.timeNow()
 		return &SportsLookupResult{
@@ -1086,6 +1138,11 @@ func (c *ESPNClient) LookupCoaches(ctx context.Context, req SportsRequest) (*Spo
 	table := SimpleTable{
 		Headers: []string{"#", "Ref URL"},
 		Rows:    rows,
+	}
+	req.Intent = SportsIntentCoaches
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
 	}
 	title := fmt.Sprintf("### %s Coaches", cfg.DisplayName)
 	if req.Season > 0 {
@@ -1139,6 +1196,11 @@ func (c *ESPNClient) lookupCoachSearch(ctx context.Context, cfg LeagueConfig, re
 	table := SimpleTable{
 		Headers: []string{"Name", "Type", "Description", "League", "URL"},
 		Rows:    rows,
+	}
+	req.Intent = SportsIntentCoaches
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
 	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
@@ -1206,6 +1268,11 @@ func (c *ESPNClient) lookupCurrentCoachesFromRosters(ctx context.Context, cfg Le
 		})
 	}
 	table := SimpleTable{Headers: headers, Rows: rows}
+	req.Intent = SportsIntentCoaches
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:        SportsIntentCoaches,

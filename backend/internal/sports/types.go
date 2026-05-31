@@ -94,7 +94,7 @@ type SportsRequest struct {
 	TeamQuery          string
 	AthleteQuery       string
 	SecondAthleteQuery string // for athlete comparison (SportsIntentAthleteComparison)
-	GameDetailSubtype  string // "officials", "predictor", "probabilities", "gamepackage"
+	GameDetailSubtype  string // game-detail sub-operation or schedule/scores subtype, e.g. "officials", "predictor", "pitching_matchups", "broadcasts"
 	StatCategory       string
 	StatName           string
 	StatLabel          string
@@ -146,21 +146,22 @@ type LeagueIdentity struct {
 }
 
 type GameRow struct {
-	Date          string
-	Time          string
-	Status        string
-	StatusType    string
-	Away          TeamIdentity
-	AwayTeam      string
-	AwayAbbr      string
-	AwayScore     string
-	Home          TeamIdentity
-	HomeTeam      string
-	HomeAbbr      string
-	HomeScore     string
-	Venue         string
-	Broadcasts    string
-	LinescoreRows []LinescoreRow // period/quarter breakdown; nil when not in-progress or final
+	Date            string
+	Time            string
+	Status          string
+	StatusType      string
+	Away            TeamIdentity
+	AwayTeam        string
+	AwayAbbr        string
+	AwayScore       string
+	Home            TeamIdentity
+	HomeTeam        string
+	HomeAbbr        string
+	HomeScore       string
+	Venue           string
+	Broadcasts      string
+	PitchingMatchup string
+	LinescoreRows   []LinescoreRow // period/quarter breakdown; nil when not in-progress or final
 }
 
 // LinescoreRow holds the score for a single period or quarter.
@@ -269,6 +270,29 @@ func UserFacingError(req SportsRequest, err error) string {
 			return fmt.Sprintf("I found the league, but ESPN did not return games for that date.")
 		}
 		return "ESPN did not return games for that date."
+	}
+	if errors.Is(err, ErrSportsResultMissingRequired) || errors.Is(err, ErrSportsResultMismatch) {
+		switch sportsValidationCode(err) {
+		case SportsValidationMissingPitchingMatchups:
+			return "I found the MLB schedule, but ESPN did not provide probable pitchers for those games yet."
+		case SportsValidationMissingBroadcasts:
+			return "I found the games, but ESPN did not provide broadcast information for them."
+		case SportsValidationMissingStandings:
+			return "I found standings data from ESPN, but it did not include the team and ranking fields needed to answer that question."
+		case SportsValidationMissingOdds:
+			return "I found games from ESPN, but ESPN did not provide betting lines for them."
+		case SportsValidationMissingRequiredColumns:
+			return "I found sports data from ESPN, but it was missing required columns for that answer."
+		case SportsValidationWrongResultType:
+			return "I found sports data from ESPN, but it did not match the type of answer requested."
+		case SportsValidationWrongLeagueForIntent:
+			return "That sports lookup is not available for the requested league."
+		case SportsValidationMissingTeamMatch:
+			if req.TeamQuery != "" {
+				return fmt.Sprintf("ESPN returned games, but none matched %q.", req.TeamQuery)
+			}
+		}
+		return "I found sports data from ESPN, but it did not include the fields needed to answer that question."
 	}
 	if errors.Is(err, ErrNoStandings) {
 		name := req.League

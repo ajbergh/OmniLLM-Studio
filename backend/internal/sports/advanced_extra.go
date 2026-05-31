@@ -58,6 +58,11 @@ func (c *ESPNClient) LookupVenues(ctx context.Context, req SportsRequest) (*Spor
 		Headers: []string{"Venue", "Location", "Capacity", "Indoor/Outdoor", "Surface"},
 		Rows:    rows,
 	}
+	req.Intent = SportsIntentVenues
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:      SportsIntentVenues,
@@ -93,6 +98,11 @@ func (c *ESPNClient) lookupTeamVenue(ctx context.Context, cfg LeagueConfig, req 
 	table := SimpleTable{
 		Headers: []string{"Venue", "Location", "Capacity", "Indoor/Outdoor", "Surface"},
 		Rows:    [][]string{NormalizeVenueStruct(*team.Venue)},
+	}
+	req.Intent = SportsIntentVenues
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
 	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
@@ -203,6 +213,11 @@ func (c *ESPNClient) LookupPowerIndex(ctx context.Context, req SportsRequest) (*
 	if len(table.Rows) == 0 {
 		return nil, ErrNoSportsData
 	}
+	req.Intent = SportsIntentPowerIndex
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
+	}
 	title := fmt.Sprintf("### %s Power Index", cfg.DisplayName)
 	if req.Season > 0 {
 		title = fmt.Sprintf("### %s Power Index (%d)", cfg.DisplayName, req.Season)
@@ -271,6 +286,11 @@ func (c *ESPNClient) LookupRecruits(ctx context.Context, req SportsRequest) (*Sp
 	if len(table.Rows) == 0 {
 		return nil, ErrNoSportsData
 	}
+	req.Intent = SportsIntentRecruits
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:      SportsIntentRecruits,
@@ -298,6 +318,13 @@ func (c *ESPNClient) LookupBracketology(ctx context.Context, req SportsRequest) 
 	table := rawJSONTable(raw, req.Limit)
 	if len(table.Rows) == 0 {
 		return c.bracketologyAvailabilityResult(req), nil
+	}
+	req.Intent = SportsIntentBracketology
+	if strings.TrimSpace(req.League) == "" {
+		req.League = espn.LeagueMensCollegeBball
+	}
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
 	}
 	title := "### NCAA Tournament Bracketology"
 	if req.Season > 0 {

@@ -5,6 +5,7 @@ import {
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Pencil,
   Download, FileText, ArrowDown, Sparkles, Paperclip, X, Image, ImagePlus,
   GitBranch, Layout, Zap, Brain, Link as LinkIcon, Files, DollarSign, Music2,
+  Route,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -22,7 +23,7 @@ import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi, a
 import { useImageEditorStore } from '../stores/imageEditor';
 import { useMusicStudioStore } from '../stores/musicStudio';
 import { matchesShortcut } from '../shortcuts';
-import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult, Attachment } from '../types';
+import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult, Attachment, RouterTelemetry } from '../types';
 import { AgentEventType } from '../types';
 import { getModelReasoningLevels, getModelToolCallingSupport, isFreeModel, type ReasoningEffortLevel } from '../models';
 
@@ -114,6 +115,27 @@ function getToolCallArgs(call: ToolCall): Record<string, unknown> | undefined {
   } catch {
     return { arguments: rawArgs };
   }
+}
+
+function routerTraceLabel(router: RouterTelemetry): string {
+  if (router.error) return 'Router error';
+  if (router.route) return `Router: ${router.route}`;
+  return router.fallback_used ? 'Router fallback' : 'Router';
+}
+
+function routerTraceTitle(router: RouterTelemetry): string {
+  const details = [
+    `Router ${router.enabled ? 'enabled' : 'disabled'}`,
+    router.route ? `Route: ${router.route}` : '',
+    router.provider ? `Provider: ${router.provider}` : '',
+    router.model ? `Model: ${router.model}` : '',
+    router.confidence !== undefined ? `Confidence: ${router.confidence.toFixed(2)}` : '',
+    router.latency_ms !== undefined ? `Latency: ${router.latency_ms}ms` : '',
+    router.validated ? 'Validated: yes' : 'Validated: no',
+    router.fallback_used ? `Fallback: ${router.fallback_reason || 'used'}` : '',
+    router.error ? `Error: ${router.error}` : '',
+  ].filter(Boolean);
+  return details.join('\n');
 }
 
 export function ChatView() {
@@ -1754,6 +1776,22 @@ function MessageBubble({
         {!isUser && (
           <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/50">
             <div className="flex items-center gap-3 text-[11px] text-text-muted">
+              {metadata?.router && (
+                <span
+                  className={clsx(
+                    'flex items-center gap-1',
+                    metadata.router.error
+                      ? 'text-red-400'
+                      : metadata.router.fallback_used
+                        ? 'text-yellow-400'
+                        : 'text-teal-400'
+                  )}
+                  title={routerTraceTitle(metadata.router)}
+                >
+                  <Route size={10} />
+                  {routerTraceLabel(metadata.router)}
+                </span>
+              )}
               {metadata?.web_search && (
                 <span className="flex items-center gap-1 text-blue-400">
                   <Globe size={10} />

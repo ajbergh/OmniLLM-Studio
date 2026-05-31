@@ -77,6 +77,8 @@ import type {
   CrossoverMusicToImageResponse,
   CrossoverImageToMusicResponse,
   Attachment,
+  RouterSuggestionsResponse,
+  RouterTelemetry,
 } from './types';
 import type {
   GenerateMusicRequest,
@@ -267,7 +269,7 @@ export const api = {
       onToken: (content: string) => void;
       onThinking?: (content: string) => void;
       onStart?: (data: { message_id: string; user_message_id: string }) => void;
-      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; content?: string; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; browser_tool?: boolean; browser_navigated_urls?: string[]; tool_calls?: ToolCall[]; browser_tool_results?: ToolResult[]; thinking?: string; cost?: number; image_generation?: boolean }) => void;
+      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; content?: string; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; browser_tool?: boolean; browser_navigated_urls?: string[]; tool_calls?: ToolCall[]; browser_tool_results?: ToolResult[]; thinking?: string; cost?: number; image_generation?: boolean; router?: RouterTelemetry }) => void;
       onError?: (error: string) => void;
       onWebSearch?: (data: { tool_call: ToolCall; status: string }) => void;
       onWebSearchResults?: (data: { query: string; results: WebSearchResult[] }) => void;
@@ -487,6 +489,9 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+
+  getRouterSuggestions: (provider: string) =>
+    apiFetch<RouterSuggestionsResponse>(`/settings/router/suggestions?provider=${encodeURIComponent(provider)}`),
 
   // ---- Ollama ----
 

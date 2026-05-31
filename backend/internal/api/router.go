@@ -26,6 +26,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/plugins"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
+	intentrouter "github.com/ajbergh/omnillm-studio/internal/router"
 	"github.com/ajbergh/omnillm-studio/internal/search"
 	"github.com/ajbergh/omnillm-studio/internal/sports"
 	"github.com/ajbergh/omnillm-studio/internal/templates"
@@ -90,6 +91,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 
 	// Services
 	llmService := llm.NewService(providerRepo, settingsRepo)
+	routerService := intentrouter.NewService(llmService, settingsRepo, providerRepo)
 
 	// RAG vector store (chromem-go) + retriever
 	vectorStore, err := rag.NewVectorStore(cfg.ChromemDir, cfg.ChromemCompress)
@@ -169,9 +171,9 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 
 	// Handlers
 	convoHandler := NewConversationHandler(convoRepo, vectorStore)
-	msgHandler := NewMessageHandler(msgRepo, convoRepo, workspaceRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo, urlCtxSvc, toolRegistry, toolExecutor, fileLibrarySvc)
+	msgHandler := NewMessageHandler(msgRepo, convoRepo, workspaceRepo, attachRepo, cfg.AttachmentsDir, llmService, orchestrator, ragRetriever, settingsRepo, providerRepo, chunkRepo, vectorStore, wordGen, artifactGen, featureFlagRepo, urlCtxSvc, routerService, toolRegistry, toolExecutor, fileLibrarySvc)
 	providerHandler := NewProviderHandler(providerRepo)
-	settingsHandler := NewSettingsHandler(settingsRepo, orchestrator)
+	settingsHandler := NewSettingsHandler(settingsRepo, providerRepo, orchestrator)
 	wsHandler := NewWebSearchHandler(orchestrator)
 	titleHandler := NewTitleHandler(convoRepo, msgRepo, llmService)
 	attachHandler := NewAttachmentHandler(attachRepo, convoRepo, fileLibrarySvc, cfg.AttachmentsDir)
@@ -446,6 +448,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 
 			// Settings (read: any user; write: admin only)
 			r.Get("/settings", settingsHandler.GetAll)
+			r.Get("/settings/router/suggestions", settingsHandler.RouterSuggestions)
 			r.Group(func(r chi.Router) {
 				r.Use(auth.RequireRole("admin"))
 				r.Patch("/settings", settingsHandler.Update)

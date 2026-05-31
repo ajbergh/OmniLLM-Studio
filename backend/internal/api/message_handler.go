@@ -19,6 +19,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
+	intentrouter "github.com/ajbergh/omnillm-studio/internal/router"
 	"github.com/ajbergh/omnillm-studio/internal/sports"
 	"github.com/ajbergh/omnillm-studio/internal/tools"
 	"github.com/ajbergh/omnillm-studio/internal/urlcontext"
@@ -46,6 +47,7 @@ type MessageHandler struct {
 	artifactGen     *artifacts.Generator
 	featureFlagRepo *repository.FeatureFlagRepo
 	urlContextSvc   *urlcontext.Service
+	routerSvc       *intentrouter.Service
 	toolRegistry    *tools.Registry
 	toolExecutor    *tools.Executor
 	fileLibrarySvc  *filelibrary.LibraryService
@@ -69,6 +71,7 @@ func NewMessageHandler(
 	artifactGen *artifacts.Generator,
 	featureFlagRepo *repository.FeatureFlagRepo,
 	urlContextSvc *urlcontext.Service,
+	routerSvc *intentrouter.Service,
 	toolRegistry *tools.Registry,
 	toolExecutor *tools.Executor,
 	fileLibrarySvc *filelibrary.LibraryService,
@@ -90,6 +93,7 @@ func NewMessageHandler(
 		artifactGen:     artifactGen,
 		featureFlagRepo: featureFlagRepo,
 		urlContextSvc:   urlContextSvc,
+		routerSvc:       routerSvc,
 		toolRegistry:    toolRegistry,
 		toolExecutor:    toolExecutor,
 		fileLibrarySvc:  fileLibrarySvc,
@@ -301,14 +305,34 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Sports direct lookup only when URL context did not handle the request.
 	if urlCtxResult == nil || !urlCtxResult.Handled {
-		if assistantMsg, handled := h.handleSportsLookupMessage(r.Context(), convoID, uuid.New().String(), req.Content); handled {
-			if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+		routerMsg, skipLocalSports, routerTelemetry := h.tryRouterSportsLookup(r.Context(), convoID, uuid.New().String(), req.Content)
+		if routerMsg != nil {
+			if _, err := h.msgRepo.Create(routerMsg); err != nil {
 				respondInternalError(w, err)
 				return
 			}
 			_ = h.convoRepo.TouchUpdatedAt(convoID)
-			respondJSON(w, http.StatusOK, assistantMsg)
+			respondJSON(w, http.StatusOK, routerMsg)
 			return
+		}
+		if !skipLocalSports {
+			if routerTelemetry != nil {
+				routerTelemetry.FallbackUsed = true
+				if routerTelemetry.FallbackReason == "" {
+					routerTelemetry.FallbackReason = "local_detector"
+				}
+			}
+		}
+		if !skipLocalSports {
+			if assistantMsg, handled := h.handleSportsLookupMessageWithTelemetry(r.Context(), convoID, uuid.New().String(), req.Content, routerTelemetry); handled {
+				if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+					respondInternalError(w, err)
+					return
+				}
+				_ = h.convoRepo.TouchUpdatedAt(convoID)
+				respondJSON(w, http.StatusOK, assistantMsg)
+				return
+			}
 		}
 
 	}
@@ -735,21 +759,27 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	// Sports direct lookup only when URL context did not handle the request.
 	if urlCtxResult == nil || !urlCtxResult.Handled {
-		if assistantMsg, handled := h.handleSportsLookupMessage(r.Context(), convoID, msgID, req.Content); handled {
+		routerMsg, skipLocalSports, routerTelemetry := h.tryRouterSportsLookup(r.Context(), convoID, msgID, req.Content)
+		if routerTelemetry != nil {
+			if settings, err := h.settingsRepo.GetTyped(); err == nil && settings.RouterShowTrace {
+				sendSSE(w, flusher, "router", routerTelemetry)
+			}
+		}
+		if routerMsg != nil {
 			sendSSE(w, flusher, "sports_lookup", map[string]interface{}{
 				"status": "complete",
 				"source": sports.SourceESPN,
 			})
 			sendSSE(w, flusher, "token", map[string]string{
-				"content": assistantMsg.Content,
+				"content": routerMsg.Content,
 			})
-			if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+			if _, err := h.msgRepo.Create(routerMsg); err != nil {
 				log.Printf("error saving sports lookup message: %v", err)
 			}
 			_ = h.convoRepo.TouchUpdatedAt(convoID)
 			latencyMS := 0
-			if assistantMsg.LatencyMs != nil {
-				latencyMS = *assistantMsg.LatencyMs
+			if routerMsg.LatencyMs != nil {
+				latencyMS = *routerMsg.LatencyMs
 			}
 			donePayload := map[string]interface{}{
 				"message_id":    msgID,
@@ -759,8 +789,49 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				"sports_lookup": true,
 				"source":        sports.SourceESPN,
 			}
+			if routerTelemetry != nil {
+				donePayload["router"] = routerTelemetry
+			}
 			sendSSE(w, flusher, "done", donePayload)
 			return
+		}
+		if !skipLocalSports {
+			if routerTelemetry != nil {
+				routerTelemetry.FallbackUsed = true
+				if routerTelemetry.FallbackReason == "" {
+					routerTelemetry.FallbackReason = "local_detector"
+				}
+			}
+			if assistantMsg, handled := h.handleSportsLookupMessageWithTelemetry(r.Context(), convoID, msgID, req.Content, routerTelemetry); handled {
+				sendSSE(w, flusher, "sports_lookup", map[string]interface{}{
+					"status": "complete",
+					"source": sports.SourceESPN,
+				})
+				sendSSE(w, flusher, "token", map[string]string{
+					"content": assistantMsg.Content,
+				})
+				if _, err := h.msgRepo.Create(assistantMsg); err != nil {
+					log.Printf("error saving sports lookup message: %v", err)
+				}
+				_ = h.convoRepo.TouchUpdatedAt(convoID)
+				latencyMS := 0
+				if assistantMsg.LatencyMs != nil {
+					latencyMS = *assistantMsg.LatencyMs
+				}
+				donePayload := map[string]interface{}{
+					"message_id":    msgID,
+					"provider":      "sports_lookup",
+					"model":         "espn-go",
+					"latency_ms":    latencyMS,
+					"sports_lookup": true,
+					"source":        sports.SourceESPN,
+				}
+				if routerTelemetry != nil {
+					donePayload["router"] = routerTelemetry
+				}
+				sendSSE(w, flusher, "done", donePayload)
+				return
+			}
 		}
 
 	}
@@ -1995,6 +2066,10 @@ const sportsLookupFeatureFlag = "sports_lookup_enabled"
 const sportsLookupSystemDirective = `You have access to a local sports_lookup capability that can retrieve ESPN-backed sports standings, scores, schedules, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders using ESPN public APIs, including IPL cricket. For current sports questions, betting odds questions, and ESPN-specific sports data questions, do not answer from memory and do not say you cannot access current sports data. Request or use sports_lookup and present the returned Markdown table. If the tool returns an error or unsupported league, explain that clearly.`
 
 func (h *MessageHandler) handleSportsLookupMessage(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool) {
+	return h.handleSportsLookupMessageWithTelemetry(ctx, conversationID, messageID, query, nil)
+}
+
+func (h *MessageHandler) handleSportsLookupMessageWithTelemetry(ctx context.Context, conversationID, messageID, query string, routerTelemetry *intentrouter.RouterTelemetry) (*models.Message, bool) {
 	if !h.sportsLookupEnabled() {
 		return nil, false
 	}
@@ -2004,9 +2079,13 @@ func (h *MessageHandler) handleSportsLookupMessage(ctx context.Context, conversa
 		return nil, false
 	}
 
+	return h.handleSportsLookupRequest(ctx, conversationID, messageID, req, routerTelemetry), true
+}
+
+func (h *MessageHandler) handleSportsLookupRequest(ctx context.Context, conversationID, messageID string, req *sports.SportsRequest, routerTelemetry *intentrouter.RouterTelemetry) *models.Message {
 	start := time.Now()
 	var result *sports.SportsLookupResult
-	err := sports.ValidateDateInQuery(query, start)
+	err := sports.ValidateDateInQuery(req.RawQuery, start)
 	if err == nil {
 		result, err = sports.NewESPNClient().Lookup(ctx, *req)
 	}
@@ -2019,6 +2098,9 @@ func (h *MessageHandler) handleSportsLookupMessage(ctx context.Context, conversa
 		"source":        sports.SourceESPN,
 		"intent":        req.Intent,
 		"league":        req.League,
+	}
+	if routerTelemetry != nil {
+		metaMap["router"] = routerTelemetry
 	}
 
 	if err != nil {
@@ -2048,7 +2130,64 @@ func (h *MessageHandler) handleSportsLookupMessage(ctx context.Context, conversa
 		Model:          &model,
 		LatencyMs:      &latency,
 		MetadataJSON:   string(metaJSON),
-	}, true
+	}
+}
+
+func (h *MessageHandler) tryRouterSportsLookup(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool, *intentrouter.RouterTelemetry) {
+	if h.routerSvc == nil || !h.sportsLookupEnabled() {
+		return nil, false, nil
+	}
+	resp, err := h.routerSvc.Route(ctx, intentrouter.RouteRequest{
+		UserMessage:     query,
+		ConversationID:  conversationID,
+		Mode:            intentrouter.RouterModeSportsOnly,
+		AvailableRoutes: []intentrouter.RouteName{intentrouter.RouteSportsLookup, intentrouter.RouteNormalLLM, intentrouter.RouteClarify},
+	})
+	if err != nil {
+		log.Printf("[router] sports route failed: %v", err)
+		return nil, false, nil
+	}
+	if resp == nil {
+		return nil, false, nil
+	}
+	telemetry := resp.Telemetry
+	if !resp.Valid {
+		return nil, false, &telemetry
+	}
+	switch resp.Decision.Route {
+	case intentrouter.RouteSportsLookup:
+		sportsReq, mapErr := intentrouter.SportsRequestFromDecision(query, resp.Decision, time.Now())
+		if mapErr != nil {
+			telemetry.Validated = false
+			telemetry.FallbackUsed = true
+			telemetry.FallbackReason = "sports_mapping_failed"
+			telemetry.Error = mapErr.Error()
+			return nil, false, &telemetry
+		}
+		return h.handleSportsLookupRequest(ctx, conversationID, messageID, sportsReq, &telemetry), true, &telemetry
+	case intentrouter.RouteNormalLLM, intentrouter.RouteNone:
+		return nil, true, &telemetry
+	case intentrouter.RouteClarify:
+		settings, settingsErr := h.settingsRepo.GetTyped()
+		if settingsErr == nil && settings.RouterFallbackBehavior == intentrouter.FallbackClarify && strings.TrimSpace(resp.Decision.ClarifyingQuestion) != "" {
+			provider := "router"
+			model := "clarify"
+			metaJSON, _ := json.Marshal(map[string]interface{}{"router": telemetry})
+			return &models.Message{
+				ID:             messageID,
+				ConversationID: conversationID,
+				Role:           "assistant",
+				Content:        strings.TrimSpace(resp.Decision.ClarifyingQuestion),
+				CreatedAt:      time.Now().UTC(),
+				Provider:       &provider,
+				Model:          &model,
+				MetadataJSON:   string(metaJSON),
+			}, true, &telemetry
+		}
+		return nil, false, &telemetry
+	default:
+		return nil, false, &telemetry
+	}
 }
 
 func (h *MessageHandler) sportsLookupEnabled() bool {

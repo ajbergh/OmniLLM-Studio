@@ -35,6 +35,9 @@ func (c *ESPNClient) LookupRoster(ctx context.Context, req SportsRequest) (*Spor
 	if len(rows) == 0 {
 		return nil, ErrNoSportsData
 	}
+	if err := ValidateRosterRows(req, rows); err != nil {
+		return nil, err
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:        SportsIntentRoster,
@@ -105,6 +108,11 @@ func (c *ESPNClient) LookupLeaders(ctx context.Context, req SportsRequest) (*Spo
 		if len(table.Rows) == 0 {
 			return nil, ErrNoSportsData
 		}
+		req.Intent = SportsIntentLeaders
+		req.League = cfg.League
+		if err := ValidateSimpleTable(req, table); err != nil {
+			return nil, err
+		}
 		retrievedAt := c.timeNow()
 		return &SportsLookupResult{
 			Intent:        SportsIntentLeaders,
@@ -138,6 +146,9 @@ func (c *ESPNClient) LookupLeaders(ctx context.Context, req SportsRequest) (*Spo
 	}
 	if len(rows) == 0 {
 		return nil, ErrNoSportsData
+	}
+	if err := ValidateLeaderboardRows(req, rows); err != nil {
+		return nil, err
 	}
 	if req.Season > 0 && req.DateLabel == "" {
 		req.DateLabel = strconv.Itoa(req.Season)
@@ -210,6 +221,10 @@ func (c *ESPNClient) LookupAthlete(ctx context.Context, req SportsRequest) (*Spo
 		}
 		return nil, ErrNoSportsData
 	}
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
+	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
 		Intent:        req.Intent,
@@ -250,6 +265,10 @@ func (c *ESPNClient) LookupGeneric(ctx context.Context, req SportsRequest) (*Spo
 	table := rawJSONTable(raw, req.Limit)
 	if len(table.Rows) == 0 {
 		return nil, ErrNoSportsData
+	}
+	req.League = cfg.League
+	if err := ValidateSimpleTable(req, table); err != nil {
+		return nil, err
 	}
 	retrievedAt := c.timeNow()
 	return &SportsLookupResult{
@@ -688,6 +707,11 @@ func (c *ESPNClient) lookupAthleteFallback(ctx context.Context, cfg LeagueConfig
 		if len(table.Rows) == 0 {
 			return nil, ErrNoSportsData
 		}
+		req.Intent = SportsIntentAthleteSeasons
+		req.League = cfg.League
+		if err := ValidateSimpleTable(req, table); err != nil {
+			return nil, err
+		}
 		retrievedAt := c.timeNow()
 		return &SportsLookupResult{
 			Intent:        SportsIntentAthleteSeasons,
@@ -708,6 +732,11 @@ func (c *ESPNClient) lookupAthleteFallback(ctx context.Context, cfg LeagueConfig
 				"No injury-history rows listed",
 				"ESPN did not expose public injury-history rows for this athlete endpoint.",
 			}},
+		}
+		req.Intent = SportsIntentAthleteInjuries
+		req.League = cfg.League
+		if err := ValidateSimpleTable(req, table); err != nil {
+			return nil, err
 		}
 		retrievedAt := c.timeNow()
 		return &SportsLookupResult{
