@@ -1,4 +1,5 @@
 import { Pause, Play } from 'lucide-react';
+import { useRef } from 'react';
 import { videoApi } from '../../api';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 
@@ -15,6 +16,7 @@ export function VideoPreviewCanvas() {
   const playheadMs = useVideoStudioStore((state) => state.playheadMs);
   const isPlaying = useVideoStudioStore((state) => state.isPlaying);
   const setPlaying = useVideoStudioStore((state) => state.setPlaying);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   const activeClips = (timeline?.tracks || [])
     .filter((track) => track.visible && !track.muted)
@@ -22,6 +24,10 @@ export function VideoPreviewCanvas() {
     .filter(({ clip }) => playheadMs >= clip.start_ms && playheadMs < clip.start_ms + clip.duration_ms);
   const visual = [...activeClips].reverse().find(({ track }) => ['video', 'image', 'text', 'caption', 'callout'].includes(track.type));
   const asset = visual?.clip.asset_id ? assets.find((item) => item.id === visual.clip.asset_id) : undefined;
+
+  const isVideoAsset = asset !== undefined && asset.mime_type.startsWith('video/');
+  const isImageAsset = asset !== undefined && asset.mime_type.startsWith('image/');
+  const isDevPlaceholder = asset !== undefined && asset.mime_type === 'text/plain';
 
   return (
     <div className="flex h-full min-h-[320px] flex-col rounded-lg border border-border bg-black">
@@ -38,11 +44,31 @@ export function VideoPreviewCanvas() {
             background: timeline?.canvas.background || '#000000',
           }}
         >
-          {asset?.mime_type.startsWith('image/') ? (
+          {isVideoAsset ? (
+            <video
+              ref={videoRef}
+              key={asset.id}
+              src={videoApi.downloadUrl(asset.id)}
+              className="h-full w-full object-contain"
+              controls={false}
+              playsInline
+              autoPlay={false}
+              aria-label={asset.file_name}
+            />
+          ) : isImageAsset ? (
             <img src={videoApi.downloadUrl(asset.id)} alt={asset.file_name} className="h-full w-full object-contain" />
           ) : visual?.clip.text ? (
             <div className="px-8 text-center text-4xl font-bold text-white drop-shadow">
               {visual.clip.text.text}
+            </div>
+          ) : isDevPlaceholder ? (
+            <div className="max-w-md px-6 text-center">
+              <div className="mx-auto mb-3 h-14 w-14 rounded-lg border border-amber-500/30 bg-amber-500/10 flex items-center justify-center text-2xl">
+                🎬
+              </div>
+              <p className="truncate text-sm font-medium text-white">{asset.file_name}</p>
+              <p className="mt-1 text-[11px] text-amber-400/80">Development placeholder — no real API key configured</p>
+              <p className="mt-1 text-[10px] text-white/40">{asset.kind} · {asset.mime_type}</p>
             </div>
           ) : asset ? (
             <div className="max-w-md px-6 text-center">

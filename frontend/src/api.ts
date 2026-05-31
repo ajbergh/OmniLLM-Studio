@@ -1497,6 +1497,18 @@ export const videoApi = {
       method: 'DELETE',
     }),
 
+  attachAssetToConversation: (assetId: string, conversationId: string) =>
+    apiFetch<{ id: string; conversation_id: string; type: string; mime_type: string }>(
+      `/video/assets/${encodeURIComponent(assetId)}/attach-to-conversation`,
+      { method: 'POST', body: JSON.stringify({ conversation_id: conversationId }) },
+    ),
+
+  registerAssetInLibrary: (assetId: string) =>
+    apiFetch<{ id: string; display_name: string; scope: string }>(
+      `/video/assets/${encodeURIComponent(assetId)}/register-in-library`,
+      { method: 'POST', body: JSON.stringify({}) },
+    ),
+
   downloadUrl: (assetId: string) => videoAssetUrl(assetId),
 
   enhancePrompt: (data: { prompt: string; aspect_ratio?: string; duration_seconds?: number; negative_prompt?: string }) =>

@@ -3,16 +3,19 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/auth"
+	"github.com/ajbergh/omnillm-studio/internal/filelibrary"
 	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/ajbergh/omnillm-studio/internal/video"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 type VideoHandler struct {
@@ -22,6 +25,9 @@ type VideoHandler struct {
 	assetRepo     *repository.VideoAssetRepo
 	timelineRepo  *repository.VideoTimelineRepo
 	renderJobRepo *repository.VideoRenderJobRepo
+	convoRepo     *repository.ConversationRepo
+	attachRepo    *repository.AttachmentRepo
+	fileSvc       *filelibrary.LibraryService
 	storageDir    string
 }
 
@@ -32,6 +38,9 @@ func NewVideoHandler(
 	assetRepo *repository.VideoAssetRepo,
 	timelineRepo *repository.VideoTimelineRepo,
 	renderJobRepo *repository.VideoRenderJobRepo,
+	convoRepo *repository.ConversationRepo,
+	attachRepo *repository.AttachmentRepo,
+	fileSvc *filelibrary.LibraryService,
 	storageDir string,
 ) *VideoHandler {
 	return &VideoHandler{
@@ -41,6 +50,9 @@ func NewVideoHandler(
 		assetRepo:     assetRepo,
 		timelineRepo:  timelineRepo,
 		renderJobRepo: renderJobRepo,
+		convoRepo:     convoRepo,
+		attachRepo:    attachRepo,
+		fileSvc:       fileSvc,
 		storageDir:    storageDir,
 	}
 }
@@ -596,6 +608,160 @@ func (h *VideoHandler) loadOwnedGeneration(w http.ResponseWriter, r *http.Reques
 		return nil, false
 	}
 	return generation, true
+}
+
+// AttachToConversation copies a video asset into a conversation attachment.
+// POST /v1/video/assets/{assetId}/attach-to-conversation
+func (h *VideoHandler) AttachToConversation(w http.ResponseWriter, r *http.Request) {
+	if h.attachRepo == nil || h.convoRepo == nil {
+		respondError(w, http.StatusNotImplemented, "attach-to-conversation not configured")
+		return
+	}
+	asset, ok := h.loadOwnedAsset(w, r, chi.URLParam(r, "assetId"))
+	if !ok {
+		return
+	}
+	var req struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.ConversationID == "" {
+		respondError(w, http.StatusBadRequest, "conversation_id is required")
+		return
+	}
+	if !verifyConversationAccessByID(w, r, h.convoRepo, req.ConversationID) {
+		return
+	}
+
+	srcPath, err := SafeJoin(h.storageDir, asset.FilePath)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid asset path")
+		return
+	}
+	srcFile, err := os.Open(srcPath) // #nosec G304 — srcPath validated by SafeJoin
+	if err != nil {
+		respondError(w, http.StatusNotFound, "asset file not found on disk")
+		return
+	}
+	defer srcFile.Close()
+
+	newFileName := uuid.New().String() + filepath.Ext(asset.FileName)
+	dstPath := filepath.Join(h.storageDir, newFileName)
+	dstFile, err := os.Create(dstPath) // #nosec G304
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	defer dstFile.Close()
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		_ = os.Remove(dstPath)
+		respondInternalError(w, err)
+		return
+	}
+	_ = dstFile.Close()
+
+	attachType := "file"
+	if len(asset.MimeType) >= 6 && asset.MimeType[:6] == "image/" {
+		attachType = "image"
+	}
+	attachment := &models.Attachment{
+		ID:             uuid.New().String(),
+		ConversationID: req.ConversationID,
+		Type:           attachType,
+		MimeType:       asset.MimeType,
+		StoragePath:    newFileName,
+		Bytes:          asset.SizeBytes,
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := h.attachRepo.Create(attachment); err != nil {
+		_ = os.Remove(dstPath)
+		respondInternalError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusCreated, attachment)
+}
+
+// RegisterInLibrary ingests a video asset into the File Library at global scope.
+// POST /v1/video/assets/{assetId}/register-in-library
+func (h *VideoHandler) RegisterInLibrary(w http.ResponseWriter, r *http.Request) {
+	if h.fileSvc == nil || h.attachRepo == nil {
+		respondError(w, http.StatusNotImplemented, "file library not configured")
+		return
+	}
+	asset, ok := h.loadOwnedAsset(w, r, chi.URLParam(r, "assetId"))
+	if !ok {
+		return
+	}
+
+	// First create a temporary attachment record so IngestFile can locate the file.
+	attachID := uuid.New().String()
+	newFileName := uuid.New().String() + filepath.Ext(asset.FileName)
+	srcPath, err := SafeJoin(h.storageDir, asset.FilePath)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid asset path")
+		return
+	}
+	srcBytes, err := os.ReadFile(srcPath) // #nosec G304
+	if err != nil {
+		respondError(w, http.StatusNotFound, "asset file not found on disk")
+		return
+	}
+	dstPath := filepath.Join(h.storageDir, newFileName)
+	if err := os.WriteFile(dstPath, srcBytes, 0o644); err != nil { // #nosec G306
+		respondInternalError(w, err)
+		return
+	}
+
+	userID := auth.UserIDFromContext(r.Context())
+
+	// File Library requires an attachment tied to a conversation (schema constraint).
+	// Create a staging conversation to host this attachment.
+	stagingConvo, err := h.convoRepo.CreateWithKind(userID, "Video Library: "+asset.FileName, "video_library", nil, nil, nil)
+	if err != nil {
+		_ = os.Remove(dstPath)
+		respondInternalError(w, err)
+		return
+	}
+
+	attachType := "file"
+	if len(asset.MimeType) >= 6 && asset.MimeType[:6] == "image/" {
+		attachType = "image"
+	}
+	tempAttach := &models.Attachment{
+		ID:             attachID,
+		ConversationID: stagingConvo.ID,
+		Type:           attachType,
+		MimeType:       asset.MimeType,
+		StoragePath:    newFileName,
+		Bytes:          asset.SizeBytes,
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := h.attachRepo.Create(tempAttach); err != nil {
+		_ = os.Remove(dstPath)
+		respondInternalError(w, err)
+		return
+	}
+
+	displayName := asset.FileName
+	file, err := h.fileSvc.IngestFile(r.Context(), filelibrary.IngestFileRequest{
+		OwnerUserID:  userID,
+		AttachmentID: attachID,
+		Scope:        "global",
+		DisplayName:  displayName,
+		Metadata: map[string]interface{}{
+			"source":         "video_studio",
+			"video_asset_id": asset.ID,
+			"mime_type":      asset.MimeType,
+		},
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, file)
 }
 
 func (h *VideoHandler) loadOwnedAsset(w http.ResponseWriter, r *http.Request, assetID string) (*models.VideoAsset, bool) {

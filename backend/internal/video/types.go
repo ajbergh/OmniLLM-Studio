@@ -49,27 +49,28 @@ type ProviderInfo struct {
 }
 
 type GenerateRequest struct {
-	ProjectID         string          `json:"project_id,omitempty"`
-	ParentID          string          `json:"parent_id,omitempty"`
-	Title             string          `json:"title,omitempty"`
-	Provider          string          `json:"provider"`
-	Model             string          `json:"model"`
-	Prompt            string          `json:"prompt"`
-	Enhance           bool            `json:"enhance,omitempty"`
-	EnhancedPrompt    string          `json:"enhanced_prompt,omitempty"`
-	NegativePrompt    string          `json:"negative_prompt,omitempty"`
-	AspectRatio       string          `json:"aspect_ratio,omitempty"`
-	DurationSeconds   int             `json:"duration_seconds,omitempty"`
-	Resolution        string          `json:"resolution,omitempty"`
-	FPS               int             `json:"fps,omitempty"`
-	Seed              *int64          `json:"seed,omitempty"`
-	ReferenceAssetIDs []string        `json:"reference_asset_ids,omitempty"`
-	CameraMotion      string          `json:"camera_motion,omitempty"`
-	ShotType          string          `json:"shot_type,omitempty"`
-	StylePreset       string          `json:"style_preset,omitempty"`
-	ProductionNotes   string          `json:"production_notes,omitempty"`
-	Settings          json.RawMessage `json:"settings,omitempty"`
-	PlaceOnTimeline   bool            `json:"place_on_timeline,omitempty"`
+	ProjectID           string          `json:"project_id,omitempty"`
+	ParentID            string          `json:"parent_id,omitempty"`
+	Title               string          `json:"title,omitempty"`
+	Provider            string          `json:"provider"`
+	Model               string          `json:"model"`
+	Prompt              string          `json:"prompt"`
+	Enhance             bool            `json:"enhance,omitempty"`
+	EnhancedPrompt      string          `json:"enhanced_prompt,omitempty"`
+	NegativePrompt      string          `json:"negative_prompt,omitempty"`
+	AspectRatio         string          `json:"aspect_ratio,omitempty"`
+	DurationSeconds     int             `json:"duration_seconds,omitempty"`
+	Resolution          string          `json:"resolution,omitempty"`
+	FPS                 int             `json:"fps,omitempty"`
+	Seed                *int64          `json:"seed,omitempty"`
+	ReferenceAssetIDs   []string        `json:"reference_asset_ids,omitempty"`
+	ReferenceAssetPaths []string        `json:"-"` // resolved by service, not from JSON
+	CameraMotion        string          `json:"camera_motion,omitempty"`
+	ShotType            string          `json:"shot_type,omitempty"`
+	StylePreset         string          `json:"style_preset,omitempty"`
+	ProductionNotes     string          `json:"production_notes,omitempty"`
+	Settings            json.RawMessage `json:"settings,omitempty"`
+	PlaceOnTimeline     bool            `json:"place_on_timeline,omitempty"`
 }
 
 type GenerationProgress struct {
@@ -143,13 +144,13 @@ type ExternalAssetImportRequest struct {
 }
 
 type ExportSettings struct {
-	Format                string  `json:"format"`
-	Codec                 string  `json:"codec,omitempty"`
-	Resolution            string  `json:"resolution"`
-	FPS                   int     `json:"fps,omitempty"`
-	Quality               string  `json:"quality,omitempty"`
-	IncludeAudio          bool    `json:"include_audio"`
+	Format                 string  `json:"format"`
+	Codec                  string  `json:"codec,omitempty"`
+	Resolution             string  `json:"resolution"`
+	FPS                    int     `json:"fps,omitempty"`
+	Quality                string  `json:"quality,omitempty"`
+	IncludeAudio           bool    `json:"include_audio"`
 	RegisterInFileLibrary  bool    `json:"register_in_file_library,omitempty"`
-	EstimatedDurationMS   int64   `json:"estimated_duration_ms,omitempty"`
+	EstimatedDurationMS    int64   `json:"estimated_duration_ms,omitempty"`
 	MockRenderDelaySeconds float64 `json:"mock_render_delay_seconds,omitempty"`
 }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Copy, GitBranch, MessageSquare, Music2, Image } from 'lucide-react';
+import { Copy, GitBranch, MessageSquare, Music2, Image, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { clsx } from 'clsx';
 import { musicAssetUrl } from '../../api';
@@ -17,6 +17,7 @@ interface MusicResultCardProps {
   onRegenerate: (generationId: string) => void;
   onSendToChat: (generation: MusicGenerationDetail) => void;
   onGenerateAlbumArt?: (generation: MusicGenerationDetail) => void;
+  onSendToVideo?: (generation: MusicGenerationDetail) => void;
 }
 
 const TABS: Array<{ key: ResultTab; label: string }> = [
@@ -34,6 +35,7 @@ export function MusicResultCard({
   onRegenerate,
   onSendToChat,
   onGenerateAlbumArt,
+  onSendToVideo,
 }: MusicResultCardProps) {
   const [tab, setTab] = useState<ResultTab>('lyrics');
   const assetUrl = generation?.asset_id ? musicAssetUrl(generation.asset_id) : undefined;
@@ -126,6 +128,16 @@ export function MusicResultCard({
               >
                 <Image size={14} />
                 Album Art
+              </button>
+            )}
+            {onSendToVideo && generation.status === 'completed' && (
+              <button
+                onClick={() => onSendToVideo(generation)}
+                className="min-h-10 inline-flex items-center gap-2 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:text-text hover:bg-surface-hover transition-colors"
+                title="Translate music prompt to video and open Video Studio"
+              >
+                <Video size={14} />
+                Make Video
               </button>
             )}
           </div>

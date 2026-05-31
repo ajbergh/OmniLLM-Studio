@@ -152,6 +152,9 @@ export function VideoInspector() {
                 Keyframe
               </button>
             </div>
+            <p className="rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-400/70" title="Effects, transitions, fades, opacity, and keyframes are stored in the timeline JSON but are not yet applied by the FFmpeg renderer during video export.">
+              ⚠ Effects &amp; transitions not yet rendered in export
+            </p>
             <div className="space-y-1">
               {clip.effects.map((effect) => (
                 <div key={effect.id} className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] text-text-muted">

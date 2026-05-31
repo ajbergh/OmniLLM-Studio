@@ -97,18 +97,22 @@ Screenshot placeholder: `docs/assets/screenshots/music-studio.png`
 
 ### Video Studio
 
-A dedicated project workspace for AI video generation and lightweight timeline editing. Video Studio includes real OpenRouter Video and direct Gemini Veo 3.1 adapters, provider/model discovery, prompt enhancement, generation history, durable media assets, real backend imports from File Library/Music/Image sources, a neutral timeline JSON model, clip editing, preview, FFmpeg export jobs, and rule-based storyboard/edit-plan actions.
+A dedicated project workspace for AI video generation and lightweight timeline editing. Video Studio includes real OpenRouter Video and direct Gemini Veo 3.1 adapters, live provider/model discovery (Gemini queries `/v1beta/models` at runtime with a static fallback), prompt enhancement, generation history, durable media assets, real backend imports from File Library/Music/Image sources, a neutral timeline JSON model, clip editing, preview, FFmpeg export jobs, an LLM-backed AI assistant, and cross-studio send-to-chat and file-library registration.
 
-The built-in `mock` provider is available for local development and writes deterministic placeholder assets under the configured attachments directory. OpenRouter and Gemini use encrypted provider profiles from Settings. Export uses FFmpeg to create real MP4/WebM bytes from the timeline canvas and text/caption/callout clips; full media compositing and effect parity are renderer follow-ups.
+The built-in `mock` provider is available for local development and writes deterministic placeholder assets under the configured attachments directory. OpenRouter and Gemini use encrypted provider profiles from Settings. Export uses FFmpeg to composite real video/image media alongside text/caption/callout clips; effects, transitions, fade keyframes, and audio mixing are stored in the timeline but not yet applied during render (the inspector shows a warning). Gemini Veo supports reference image input for image-to-video generation.
 
 | Capability | Description |
 |------------|-------------|
 | **Generation** | Text-to-video generation with capability-driven controls, prompt enhancement, SSE progress, history, and branching |
+| **Reference Image (Gemini)** | Supply an image asset as a reference to guide Gemini Veo image-to-video generation |
 | **Timeline** | Multi-track video, image, audio, music, text, caption, shape, and callout timeline with move, trim, split, duplicate, delete, track mute/lock/visibility, fades, volume, effects, transitions, and keyframes |
-| **Preview** | Browser-state preview of active timeline clips at the current playhead |
-| **Export** | Persistent render jobs and durable MP4/WebM export assets through the FFmpeg renderer |
-| **AI Assistance** | Rule-based storyboard, timeline plan, edit plan validation/application, and social-format variant generation |
-| **Cross-Studio** | Crossover translation support for image/music/chat to video and video to image/music, plus real byte-copy imports for File Library, Music Studio, and Image/attachment assets |
+| **Preview** | Real `<video>` and `<img>` elements for media assets; labelled amber placeholder for mock dev assets |
+| **Export** | Persistent render jobs — FFmpeg composites real video/image media plus text overlays into durable MP4/WebM |
+| **AI Assistance** | LLM-backed storyboard and edit-plan generation (with deterministic fallbacks); rule-based social-format variants, apply-plan, and validate-plan |
+| **Cross-Studio Imports** | One-click import from File Library, Music Studio, and Image Studio into the Video asset bin |
+| **Send to Chat** | Copy any video asset into a conversation attachment and navigate directly to that chat |
+| **Register in Library** | Ingest any video asset into the global File Library scope for RAG retrieval and library search |
+| **Cross-Studio Shortcuts** | "Make Video" buttons in Image Studio and Music Studio route assets into Video Studio via domain translation |
 
 Docs: `docs/VIDEO_STUDIO.md`, `docs/VIDEO_STUDIO_ARCHITECTURE.md`, `docs/VIDEO_PROVIDER_ADAPTERS.md`, `docs/VIDEO_TIMELINE_SCHEMA.md`, and `docs/VIDEO_RENDERING.md`.
 

@@ -2,9 +2,11 @@ package video
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/google/uuid"
 )
@@ -60,7 +62,6 @@ func (s *Service) CreateStoryboard(ctx context.Context, userID, projectID string
 	if _, err := s.ensureProjectOwned(userID, projectID); err != nil {
 		return nil, err
 	}
-	_ = ctx
 	prompt := strings.TrimSpace(req.Prompt)
 	if prompt == "" {
 		prompt = strings.TrimSpace(req.Instruction)
@@ -68,6 +69,19 @@ func (s *Service) CreateStoryboard(ctx context.Context, userID, projectID string
 	if prompt == "" {
 		prompt = "A concise product story with an opening hook, demonstration, and closing title card."
 	}
+
+	// Try LLM path first when a provider is available.
+	if s.llm != nil {
+		if provider := s.firstEnabledChatProvider(); provider != "" {
+			result, err := s.llmStoryboard(ctx, provider, prompt)
+			if err == nil {
+				return result, nil
+			}
+			// Fall through to deterministic on error.
+		}
+	}
+
+	// Deterministic fallback.
 	title := DeriveTitle(prompt)
 	scenes := []StoryboardScene{
 		{
@@ -105,6 +119,58 @@ func (s *Service) CreateStoryboard(ctx context.Context, userID, projectID string
 	}, nil
 }
 
+// llmStoryboard calls the LLM to generate a structured storyboard.
+func (s *Service) llmStoryboard(ctx context.Context, provider, prompt string) (*StoryboardResponse, error) {
+	system := `You are a professional video director and storyboard artist.
+Given a video concept, produce a detailed 3–5 scene storyboard in JSON.
+Output ONLY a JSON object matching this schema (no markdown, no explanation):
+{
+  "title": "<short title for the video>",
+  "prompt_seed": "<the original concept>",
+  "script": "<one paragraph describing the full narrative arc>",
+  "shot_list": ["<shot description 1>", "<shot description 2>", "..."],
+  "scenes": [
+    {
+      "id": "<unique-id>",
+      "title": "<scene title>",
+      "description": "<director's note: what happens in this scene>",
+      "duration_ms": <milliseconds as integer, e.g. 6000>,
+      "prompt": "<ready-to-use text-to-video generation prompt for this scene>"
+    }
+  ]
+}
+Make each scene prompt cinematic and self-contained (25–60 words). Durations should add up to a coherent short video (15–60 seconds total).`
+
+	resp, err := s.llm.ChatComplete(ctx, llm.ChatRequest{
+		Provider: provider,
+		Messages: []llm.ChatMessage{
+			{Role: "system", Content: system},
+			{Role: "user", Content: "Video concept: " + prompt},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Strip potential markdown fences.
+	raw := strings.TrimSpace(resp.Content)
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
+	raw = strings.TrimSpace(raw)
+
+	var result StoryboardResponse
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		return nil, fmt.Errorf("parse storyboard JSON: %w (raw: %.200s)", err, raw)
+	}
+	// Ensure scene IDs are set.
+	for i := range result.Scenes {
+		if result.Scenes[i].ID == "" {
+			result.Scenes[i].ID = "scene-" + uuid.New().String()
+		}
+	}
+	return &result, nil
+}
+
 func (s *Service) CreateTimelinePlan(ctx context.Context, userID, projectID string, req AssistantRequest) (*EditPlan, error) {
 	if _, _, err := s.GetOrCreateTimeline(ctx, userID, projectID); err != nil {
 		return nil, err
@@ -126,6 +192,19 @@ func (s *Service) CreateEditPlan(ctx context.Context, userID, projectID string, 
 	if _, _, err := s.GetOrCreateTimeline(ctx, userID, projectID); err != nil {
 		return nil, err
 	}
+
+	// Try LLM path first when a provider is available.
+	if s.llm != nil {
+		if provider := s.firstEnabledChatProvider(); provider != "" {
+			result, err := s.llmEditPlan(ctx, provider, req)
+			if err == nil {
+				return result, nil
+			}
+			// Fall through to deterministic on error.
+		}
+	}
+
+	// Deterministic fallback.
 	instruction := strings.ToLower(strings.TrimSpace(req.Instruction + " " + req.Prompt))
 	if instruction == "" {
 		instruction = "tighten timeline"
@@ -145,6 +224,64 @@ func (s *Service) CreateEditPlan(ctx context.Context, userID, projectID string, 
 	}
 	if len(plan.Operations) == 0 {
 		plan.Operations = append(plan.Operations, EditOperation{Type: "set_duration", DurationMS: 30000})
+	}
+	return &plan, nil
+}
+
+// llmEditPlan calls the LLM to generate a structured edit plan.
+func (s *Service) llmEditPlan(ctx context.Context, provider string, req AssistantRequest) (*EditPlan, error) {
+	instruction := strings.TrimSpace(req.Instruction)
+	if instruction == "" {
+		instruction = strings.TrimSpace(req.Prompt)
+	}
+	if instruction == "" {
+		instruction = "Suggest useful timeline edits."
+	}
+
+	system := `You are an expert video editor. Given an editing instruction, output a JSON edit plan.
+Output ONLY a JSON object matching this schema (no markdown, no explanation):
+{
+  "summary": "<one sentence describing what this edit plan does>",
+  "operations": [
+    {
+      "type": "<operation type>",
+      "clip_id": "<optional clip id>",
+      "track_id": "<optional track id, e.g. 'track-text-1'>",
+      "start_ms": <optional integer milliseconds>,
+      "duration_ms": <optional integer milliseconds>,
+      "text": "<optional text content>",
+      "width": <optional integer>,
+      "height": <optional integer>,
+      "fps": <optional integer>
+    }
+  ]
+}
+Valid operation types: set_canvas, set_duration, add_text_clip, move_clip, trim_clip, delete_clip.
+- set_canvas: provide width, height, fps
+- set_duration: provide duration_ms
+- add_text_clip: provide track_id, start_ms, duration_ms, text
+- move_clip / trim_clip / delete_clip: provide clip_id
+Only include fields relevant to the operation type. Do not include null or zero values for optional fields.`
+
+	resp, err := s.llm.ChatComplete(ctx, llm.ChatRequest{
+		Provider: provider,
+		Messages: []llm.ChatMessage{
+			{Role: "system", Content: system},
+			{Role: "user", Content: "Editing instruction: " + instruction},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	raw := strings.TrimSpace(resp.Content)
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
+	raw = strings.TrimSpace(raw)
+
+	var plan EditPlan
+	if err := json.Unmarshal([]byte(raw), &plan); err != nil {
+		return nil, fmt.Errorf("parse edit plan JSON: %w (raw: %.200s)", err, raw)
 	}
 	return &plan, nil
 }

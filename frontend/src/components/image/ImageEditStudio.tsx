@@ -11,7 +11,7 @@ import { useImageEditorShortcuts } from './useImageEditorShortcuts';
 import {
   Image, Sparkles, Pencil, X, Undo2, Redo2, Trash2,
   Paintbrush, Eraser, Move, Eye, EyeOff, ImagePlus, XCircle, AlertTriangle,
-  PanelLeft, PanelRight, Upload, MessageSquare, Music2,
+  PanelLeft, PanelRight, Upload, MessageSquare, Music2, Video,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { toast } from 'sonner';
@@ -110,6 +110,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const [lastPromptBeforeEnhance, setLastPromptBeforeEnhance] = useState<string | null>(null);
   const [sendingToChat, setSendingToChat] = useState(false);
   const [generatingSoundtrack, setGeneratingSoundtrack] = useState(false);
+  const [generatingVideo, setGeneratingVideo] = useState(false);
   const refInputRef = useRef<HTMLInputElement>(null);
   const pendingRefType = useRef<'content' | 'style'>('content');
   const canvasRef = useRef<ImageCanvasHandle>(null);
@@ -425,6 +426,21 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
       toast.error(`Failed to send to chat: ${(err as Error).message}`);
     } finally {
       setSendingToChat(false);
+    }
+  };
+
+  const handleGenerateVideo = async () => {
+    if (!activeNode?.instruction) return;
+    setGeneratingVideo(true);
+    try {
+      const result = await crossoverApi.translate.imageToVideo({ prompt: activeNode.instruction });
+      setCrossoverContext({ type: 'to-video', data: { prompt: result.video_prompt } });
+      setAppMode('video');
+      toast.success('Opening Video Studio with generated prompt');
+    } catch (err) {
+      toast.error(`Translation failed: ${(err as Error).message}`);
+    } finally {
+      setGeneratingVideo(false);
     }
   };
 
@@ -1072,6 +1088,18 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                     >
                       <Music2 size={12} />
                       {generatingSoundtrack ? 'Translating…' : 'Soundtrack'}
+                    </button>
+                    <button
+                      onClick={handleGenerateVideo}
+                      disabled={generatingVideo || !activeNode?.instruction}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl
+                                 text-xs font-medium text-text-muted bg-surface-hover border border-border
+                                 hover:text-text hover:border-primary/40 transition-colors
+                                 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={activeNode?.instruction ? 'Translate image prompt to video and open Video Studio' : 'Generate an image first'}
+                    >
+                      <Video size={12} />
+                      {generatingVideo ? 'Translating…' : 'Make Video'}
                     </button>
                   </div>
                 )}

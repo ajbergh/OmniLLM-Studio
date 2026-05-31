@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +22,21 @@ type RenderRequest struct {
 	Project  models.VideoProject `json:"project"`
 	Timeline TimelineDocument    `json:"timeline"`
 	Settings ExportSettings      `json:"settings"`
+	// AttachmentsDir is the root directory where asset files are stored.
+	// Required for media compositing; if empty, only text overlays are rendered.
+	AttachmentsDir string `json:"-"`
+	// Assets maps asset ID → VideoAsset for clips referenced in the timeline.
+	Assets map[string]models.VideoAsset `json:"-"`
+}
+
+// resolvedClip is a timeline clip with its asset file path resolved to an absolute path.
+type resolvedClip struct {
+	inputIdx int
+	clip     TimelineClip
+	filePath string
+	isVideo  bool
+	isImage  bool
+	isAudio  bool
 }
 
 type RenderProgress struct {
@@ -99,15 +116,58 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		"-f", "lavfi",
 		"-i", fmt.Sprintf("color=c=%s:s=%dx%d:r=%d:d=%.3f", background, width, height, fps, durationSeconds),
 	}
-	if req.Settings.IncludeAudio {
-		args = append(args, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000")
-	}
-	if filters := ffmpegVideoFilters(req.Timeline, width, height); filters != "" {
-		args = append(args, "-vf", filters)
-	}
-	args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps), "-map", "0:v:0")
-	if req.Settings.IncludeAudio {
-		args = append(args, "-map", "1:a:0", "-shortest")
+
+	// Attempt to resolve media clips from the asset map.
+	resolved := resolveMediaClips(req)
+
+	if len(resolved) > 0 {
+		// ── Media compositing path ─────────────────────────────────────────
+		// Assign input indices and add each file as an FFmpeg input.
+		nextIdx := 1
+		for i := range resolved {
+			resolved[i].inputIdx = nextIdx
+			args = append(args, "-i", resolved[i].filePath)
+			nextIdx++
+		}
+		hasAudioClips := func() bool {
+			for _, rc := range resolved {
+				if rc.isAudio {
+					return true
+				}
+			}
+			return false
+		}()
+		// Add silent audio source only when IncludeAudio is requested but no
+		// audio clips are present in the timeline.
+		anullIdx := -1
+		if req.Settings.IncludeAudio && !hasAudioClips {
+			anullIdx = nextIdx
+			args = append(args, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000")
+		}
+
+		filterStr, videoLabel, audioLabel := buildFilterComplex(req.Timeline, resolved, width, height)
+		args = append(args, "-filter_complex", filterStr)
+		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps))
+		args = append(args, "-map", videoLabel)
+		if req.Settings.IncludeAudio {
+			if audioLabel != "" {
+				args = append(args, "-map", audioLabel)
+			} else if anullIdx >= 0 {
+				args = append(args, "-map", fmt.Sprintf("%d:a:0", anullIdx), "-shortest")
+			}
+		}
+	} else {
+		// ── Simple path (no media files) ───────────────────────────────────
+		if req.Settings.IncludeAudio {
+			args = append(args, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000")
+		}
+		if filters := ffmpegVideoFilters(req.Timeline, width, height); filters != "" {
+			args = append(args, "-vf", filters)
+		}
+		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps), "-map", "0:v:0")
+		if req.Settings.IncludeAudio {
+			args = append(args, "-map", "1:a:0", "-shortest")
+		}
 	}
 	args = appendFFmpegCodecArgs(args, format, req.Settings)
 	args = append(args, outputPath)
@@ -300,6 +360,138 @@ func appendFFmpegCodecArgs(args []string, format string, settings ExportSettings
 		}
 	}
 	return args
+}
+
+// resolveMediaClips iterates the timeline tracks and returns all clips that
+// reference a known asset with a valid file on disk, in ascending start-time order.
+func resolveMediaClips(req RenderRequest) []resolvedClip {
+	if req.AttachmentsDir == "" || len(req.Assets) == 0 {
+		return nil
+	}
+	var result []resolvedClip
+	for _, track := range req.Timeline.Tracks {
+		if !track.Visible || track.Muted {
+			continue
+		}
+		for _, clip := range track.Clips {
+			if clip.AssetID == "" || clip.DurationMS <= 0 {
+				continue
+			}
+			asset, ok := req.Assets[clip.AssetID]
+			if !ok || asset.FilePath == "" {
+				continue
+			}
+			fullPath := filepath.Join(req.AttachmentsDir, filepath.FromSlash(asset.FilePath))
+			if _, err := os.Stat(fullPath); err != nil {
+				continue // file not found on disk — skip silently
+			}
+			mime := strings.ToLower(strings.TrimSpace(strings.SplitN(asset.MimeType, ";", 2)[0]))
+			rc := resolvedClip{
+				clip:     clip,
+				filePath: fullPath,
+				isVideo:  strings.HasPrefix(mime, "video/"),
+				isImage:  strings.HasPrefix(mime, "image/"),
+				isAudio:  strings.HasPrefix(mime, "audio/"),
+			}
+			if rc.isVideo || rc.isImage || rc.isAudio {
+				result = append(result, rc)
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].clip.StartMS < result[j].clip.StartMS
+	})
+	return result
+}
+
+// buildFilterComplex constructs an FFmpeg -filter_complex expression that composites
+// all resolved media clips onto a lavfi color background (input 0).
+// It returns the filter_complex string, the final video stream label, and the final
+// audio stream label (empty if no audio clips).
+func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, height int) (filterStr, videoLabel, audioLabel string) {
+	var parts []string
+
+	// ── Video / image overlays ──────────────────────────────────────────────
+	prevV := "[base_v]"
+	parts = append(parts, "[0:v]setpts=PTS-STARTPTS[base_v]")
+
+	scaleChain := fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2",
+		width, height, width, height)
+
+	for _, rc := range clips {
+		if !rc.isVideo && !rc.isImage {
+			continue
+		}
+		cLabel := fmt.Sprintf("[c%d_v]", rc.inputIdx)
+		ovLabel := fmt.Sprintf("[ov%d_v]", rc.inputIdx)
+		startS := float64(rc.clip.StartMS) / 1000.0
+		endS := float64(rc.clip.StartMS+rc.clip.DurationMS) / 1000.0
+		trimInS := float64(rc.clip.TrimInMS) / 1000.0
+		durS := float64(rc.clip.DurationMS) / 1000.0
+
+		var srcFilter string
+		if rc.isImage {
+			srcFilter = fmt.Sprintf("[%d:v]loop=loop=-1:size=1:start=0,trim=duration=%.3f,setpts=PTS-STARTPTS,%s%s",
+				rc.inputIdx, durS, scaleChain, cLabel)
+		} else {
+			srcFilter = fmt.Sprintf("[%d:v]trim=start=%.3f:duration=%.3f,setpts=PTS-STARTPTS,%s%s",
+				rc.inputIdx, trimInS, durS, scaleChain, cLabel)
+		}
+		overlayFilter := fmt.Sprintf("%s%soverlay=enable='between(t\\,%.3f\\,%.3f)':x=0:y=0%s",
+			prevV, cLabel, startS, endS, ovLabel)
+
+		parts = append(parts, srcFilter, overlayFilter)
+		prevV = ovLabel
+	}
+
+	// ── Text / caption / callout overlays ──────────────────────────────────
+	textIdx := 0
+	for _, track := range doc.Tracks {
+		if !track.Visible || track.Muted {
+			continue
+		}
+		if track.Type != TrackTypeText && track.Type != TrackTypeCaption && track.Type != TrackTypeCallout {
+			continue
+		}
+		for _, clip := range track.Clips {
+			if clip.Text == nil || strings.TrimSpace(clip.Text.Text) == "" {
+				continue
+			}
+			filter := drawTextFilter(clip, *clip.Text, width, height)
+			if filter == "" {
+				continue
+			}
+			outLabel := fmt.Sprintf("[t%d_v]", textIdx)
+			parts = append(parts, prevV+filter+outLabel)
+			prevV = outLabel
+			textIdx++
+		}
+	}
+	videoLabel = prevV
+
+	// ── Audio clips ─────────────────────────────────────────────────────────
+	var aLabels []string
+	for _, rc := range clips {
+		if !rc.isAudio {
+			continue
+		}
+		aLabel := fmt.Sprintf("[a%d]", rc.inputIdx)
+		trimInS := float64(rc.clip.TrimInMS) / 1000.0
+		durS := float64(rc.clip.DurationMS) / 1000.0
+		startMS := rc.clip.StartMS
+		parts = append(parts, fmt.Sprintf("[%d:a]atrim=start=%.3f:duration=%.3f,asetpts=PTS-STARTPTS,adelay=%d|%d%s",
+			rc.inputIdx, trimInS, durS, startMS, startMS, aLabel))
+		aLabels = append(aLabels, aLabel)
+	}
+	if len(aLabels) > 1 {
+		audioLabel = "[final_audio]"
+		parts = append(parts, strings.Join(aLabels, "")+
+			fmt.Sprintf("amix=inputs=%d:normalize=0:dropout_transition=0[final_audio]", len(aLabels)))
+	} else if len(aLabels) == 1 {
+		audioLabel = aLabels[0]
+	}
+
+	return strings.Join(parts, ";"), videoLabel, audioLabel
 }
 
 func ffmpegVideoFilters(doc TimelineDocument, width, height int) string {

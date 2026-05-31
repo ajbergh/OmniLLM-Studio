@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/google/uuid"
@@ -19,6 +20,12 @@ var (
 	ErrCapabilityUnsupported = errors.New("video capability unsupported")
 	ErrProviderUnavailable   = errors.New("video provider unavailable")
 )
+
+// llmCompleter is a narrow interface for making non-streaming LLM completions.
+// Using an interface keeps the video package decoupled from llm.Service internals.
+type llmCompleter interface {
+	ChatComplete(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error)
+}
 
 type Service struct {
 	projects         *repository.VideoProjectRepo
@@ -37,6 +44,7 @@ type Service struct {
 	storage          *Storage
 	registry         *ModelRegistry
 	renderer         Renderer
+	llm              llmCompleter // optional — nil = deterministic fallback
 }
 
 func NewService(
@@ -47,6 +55,7 @@ func NewService(
 	renderJobs *repository.VideoRenderJobRepo,
 	providerProfiles *repository.ProviderRepo,
 	attachmentsDir string,
+	llmSvc llmCompleter,
 ) *Service {
 	return &Service{
 		projects:         projects,
@@ -59,6 +68,7 @@ func NewService(
 		storage:          NewStorage(attachmentsDir),
 		registry:         NewModelRegistry(NewMockProvider(), NewOpenRouterProvider("", ""), NewGeminiProvider("", "")),
 		renderer:         NewFFmpegRenderer(""),
+		llm:              llmSvc,
 	}
 }
 
@@ -255,6 +265,24 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 	providerReq.Model = modelID
 	providerReq.ProjectID = project.ID
 	providerReq.EnhancedPrompt = enhancedPrompt
+
+	// Resolve reference asset IDs → absolute file paths so providers don't
+	// need to know about the storage layer.
+	if len(providerReq.ReferenceAssetIDs) > 0 {
+		paths := make([]string, 0, len(providerReq.ReferenceAssetIDs))
+		for _, assetID := range providerReq.ReferenceAssetIDs {
+			asset, err := s.assets.GetByID(assetID)
+			if err != nil || asset == nil {
+				continue
+			}
+			absPath := filepath.Join(s.attachmentsDir, filepath.FromSlash(asset.FilePath))
+			if _, statErr := os.Stat(absPath); statErr == nil {
+				paths = append(paths, absPath)
+			}
+		}
+		providerReq.ReferenceAssetPaths = paths
+	}
+
 	result, err := provider.Generate(ctx, providerReq, func(p GenerationProgress) {
 		if progress == nil {
 			return
@@ -838,7 +866,22 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 	var settings ExportSettings
 	_ = json.Unmarshal([]byte(job.SettingsJSON), &settings)
 	settings, _ = validateExportSettings(settings, *project)
-	result, err := s.renderer.Render(ctx, RenderRequest{Project: *project, Timeline: doc, Settings: settings}, func(p RenderProgress) {
+
+	// Resolve asset map for media compositing.
+	assetList, _ := s.assets.ListByProject(project.ID)
+	assetMap := make(map[string]models.VideoAsset, len(assetList))
+	for _, a := range assetList {
+		assetMap[a.ID] = a
+	}
+	attachmentsDir := filepath.Dir(s.storage.Root())
+
+	result, err := s.renderer.Render(ctx, RenderRequest{
+		Project:        *project,
+		Timeline:       doc,
+		Settings:       settings,
+		AttachmentsDir: attachmentsDir,
+		Assets:         assetMap,
+	}, func(p RenderProgress) {
 		_ = s.renderJobs.UpdateProgress(job.ID, p.Progress)
 	})
 	if err != nil {
@@ -887,6 +930,20 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 func (s *Service) renderJobCancelled(jobID string) bool {
 	job, err := s.renderJobs.GetByID(jobID)
 	return err == nil && job != nil && job.Status == "cancelled"
+}
+
+// firstEnabledChatProvider returns the name of the first enabled LLM provider, or "".
+func (s *Service) firstEnabledChatProvider() string {
+	providers, err := s.providerProfiles.List()
+	if err != nil {
+		return ""
+	}
+	for _, p := range providers {
+		if p.Enabled {
+			return p.Name
+		}
+	}
+	return ""
 }
 
 func (s *Service) ensureProject(ctx context.Context, userID string, req GenerateRequest, provider, model string) (*models.VideoProject, error) {

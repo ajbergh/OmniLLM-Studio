@@ -38,11 +38,28 @@ The adapter includes a built-in model snapshot for the current OpenRouter video 
 
 `NewGeminiProvider()` uses the direct Gemini API for Veo 3.1:
 
+- **Model discovery**: calls `GET /v1beta/models?pageSize=100` and filters to `veo`-named models that support `predictLongRunning`. Falls back to the built-in `KnownGeminiVeoModels()` snapshot when the API is unavailable or returns an empty list.
 - Generation submit: `POST /models/{model}:predictLongRunning`
 - Job polling: Gemini long-running operation name
 - Output retrieval: generated sample `video.uri`
 
-The adapter currently exposes:
+**Reference image support (image-to-video):** when `GenerateRequest.ReferenceAssetPaths` is non-empty, `readReferenceImage` reads the first file, detects its MIME type (JPEG, PNG, WebP, or GIF), base64-encodes the bytes, and embeds them into the prediction request as:
+
+```json
+{
+  "instance": {
+    "prompt": "...",
+    "image": {
+      "bytesBase64Encoded": "<base64>",
+      "mimeType": "image/jpeg"
+    }
+  }
+}
+```
+
+The service layer resolves `ReferenceAssetIDs` → `ReferenceAssetPaths` before calling the provider, so the caller supplies asset IDs and the provider receives resolved local file paths.
+
+**Built-in model list (snapshot):**
 
 - `veo-3.1-generate-preview`
 - `veo-3.1-fast-generate-preview`

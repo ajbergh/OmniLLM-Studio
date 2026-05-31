@@ -154,6 +154,7 @@ func newImportTestService(database *sql.DB, attachmentsDir string) *Service {
 		repository.NewVideoRenderJobRepo(database),
 		nil,
 		attachmentsDir,
+		nil, // no LLM in tests
 	)
 }
 

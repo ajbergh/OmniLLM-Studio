@@ -118,6 +118,18 @@ export function MusicStudio() {
     }
   };
 
+  const handleGenerateVideo = async (generation: MusicGenerationDetail) => {
+    if (!generation.prompt) return;
+    try {
+      const result = await crossoverApi.translate.musicToVideo({ prompt: generation.prompt });
+      setCrossoverContext({ type: 'to-video', data: { prompt: result.video_prompt } });
+      setAppMode('video');
+      toast.success('Opening Video Studio with generated prompt');
+    } catch (err) {
+      toast.error(`Video translation failed: ${(err as Error).message}`);
+    }
+  };
+
   const handleGenerateAlbumArt = async (generation: MusicGenerationDetail) => {
     if (!generation.prompt) return;
     try {
@@ -203,6 +215,7 @@ export function MusicStudio() {
             onRegenerate={regenerateFromGeneration}
             onSendToChat={handleSendToChat}
             onGenerateAlbumArt={handleGenerateAlbumArt}
+            onSendToVideo={handleGenerateVideo}
           />
         </main>
 

@@ -1,11 +1,13 @@
 import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import {
+  BookMarked,
   Clapperboard,
   Download,
   Film,
   GitBranch,
   Loader2,
+  MessageSquare,
   Plus,
   RefreshCw,
   Sparkles,
@@ -15,6 +17,7 @@ import {
 import { toast } from 'sonner';
 import { videoApi } from '../../api';
 import { useVideoStudioStore } from '../../stores/videoStudio';
+import { useConversationStore, useCrossoverStore } from '../../stores';
 import type { VideoGenerationDetail, VideoProviderKey } from '../../types/video';
 import { VideoInspector } from './VideoInspector';
 import { VideoPreviewCanvas } from './VideoPreviewCanvas';
@@ -53,10 +56,23 @@ export function VideoStudio() {
   const selectAsset = useVideoStudioStore((state) => state.selectAsset);
   const addAssetToTimeline = useVideoStudioStore((state) => state.addAssetToTimeline);
 
+  const { crossoverContext, clearCrossoverContext } = useCrossoverStore();
+
   useEffect(() => {
     loadProviders();
     loadProjects();
   }, [loadProviders, loadProjects]);
+
+  // Receive crossover context from Image Studio or Music Studio.
+  useEffect(() => {
+    if (!crossoverContext || crossoverContext.type !== 'to-video') return;
+    const { prompt } = crossoverContext.data;
+    clearCrossoverContext();
+    if (prompt) {
+      setPromptField('prompt', prompt);
+      toast.success('Prompt pre-filled from Image/Music Studio');
+    }
+  }, [crossoverContext, clearCrossoverContext, setPromptField]);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) || null,
@@ -487,6 +503,28 @@ function AssetPanel({
   onSelect: (assetId: string) => void;
   onAdd: (assetId: string) => void;
 }) {
+  const createConversation = useConversationStore((state) => state.createConversation);
+  const selectConversation = useConversationStore((state) => state.selectConversation);
+
+  const handleSendToChat = async (asset: { id: string; file_name: string }) => {
+    try {
+      const convo = await createConversation(`Video: ${asset.file_name}`);
+      await videoApi.attachAssetToConversation(asset.id, convo.id);
+      selectConversation(convo.id);
+      toast.success('Video asset sent to chat');
+    } catch (err) {
+      toast.error(`Failed to send to chat: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const handleRegisterInLibrary = async (asset: { id: string; file_name: string }) => {
+    try {
+      await videoApi.registerAssetInLibrary(asset.id);
+      toast.success(`"${asset.file_name}" added to File Library`);
+    } catch (err) {
+      toast.error(`Failed to register in library: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
   return (
     <section className="min-h-0 border-t border-border p-3">
       <div className="mb-3 flex items-center justify-between">
@@ -542,6 +580,28 @@ function AssetPanel({
                   title="Download"
                 >
                   <Download size={13} />
+                </button>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void handleSendToChat(asset);
+                  }}
+                  className="min-h-8 min-w-8 rounded-lg border border-border bg-surface text-text-muted hover:text-text inline-flex items-center justify-center"
+                  aria-label={`Send ${asset.file_name} to chat`}
+                  title="Send to Chat"
+                >
+                  <MessageSquare size={13} />
+                </button>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void handleRegisterInLibrary(asset);
+                  }}
+                  className="min-h-8 min-w-8 rounded-lg border border-border bg-surface text-text-muted hover:text-text inline-flex items-center justify-center"
+                  aria-label={`Register ${asset.file_name} in File Library`}
+                  title="Register in File Library"
+                >
+                  <BookMarked size={13} />
                 </button>
               </div>
               <p className="mt-2 text-[10px] text-text-muted">{Math.max(1, Math.round(asset.size_bytes / 1024))} KB</p>

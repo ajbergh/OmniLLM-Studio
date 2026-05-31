@@ -245,9 +245,9 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	videoAssetRepo := repository.NewVideoAssetRepo(database)
 	videoTimelineRepo := repository.NewVideoTimelineRepo(database)
 	videoRenderJobRepo := repository.NewVideoRenderJobRepo(database)
-	videoService := video.NewService(videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, providerRepo, cfg.AttachmentsDir)
+	videoService := video.NewService(videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, providerRepo, cfg.AttachmentsDir, llmService)
 	videoService.ConfigureExternalAssetSources(libraryFileRepo, musicSessionRepo, musicAssetRepo, imgAssetRepo, attachRepo, convoRepo, cfg.AttachmentsDir)
-	videoHandler := NewVideoHandler(videoService, videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, cfg.AttachmentsDir)
+	videoHandler := NewVideoHandler(videoService, videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, convoRepo, attachRepo, fileLibrarySvc, cfg.AttachmentsDir)
 	crossoverHandler := NewCrossoverHandler(llmService, providerRepo)
 
 	// Semantic Search
@@ -441,6 +441,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Get("/video/assets/{assetId}", videoHandler.GetAsset)
 			r.Get("/video/assets/{assetId}/download", videoHandler.DownloadAsset)
 			r.Delete("/video/assets/{assetId}", videoHandler.DeleteAsset)
+			r.Post("/video/assets/{assetId}/attach-to-conversation", videoHandler.AttachToConversation)
+			r.Post("/video/assets/{assetId}/register-in-library", videoHandler.RegisterInLibrary)
 			r.Post("/video/enhance-prompt", videoHandler.EnhancePrompt)
 
 			// Cross-studio domain translation

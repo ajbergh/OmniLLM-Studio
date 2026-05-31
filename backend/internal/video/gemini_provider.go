@@ -3,11 +3,14 @@ package video
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -45,8 +48,79 @@ func (p *GeminiProvider) Configured() bool {
 }
 
 func (p *GeminiProvider) ListModels(ctx context.Context) ([]Model, error) {
-	_ = ctx
-	return KnownGeminiVeoModels(), nil
+	if !p.Configured() {
+		return KnownGeminiVeoModels(), nil
+	}
+	live, err := p.fetchLiveModels(ctx)
+	if err != nil || len(live) == 0 {
+		// Fall back to static list on any error.
+		return KnownGeminiVeoModels(), nil
+	}
+	return live, nil
+}
+
+// fetchLiveModels calls the Gemini models.list API and returns Veo model entries.
+func (p *GeminiProvider) fetchLiveModels(ctx context.Context) ([]Model, error) {
+	type geminiModel struct {
+		Name                       string   `json:"name"`
+		DisplayName                string   `json:"displayName"`
+		SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+	}
+	type listResp struct {
+		Models []geminiModel `json:"models"`
+	}
+
+	reqURL := p.baseURL + "/models?pageSize=100"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("x-goog-api-key", p.apiKey)
+	httpReq.Header.Set("Accept", "application/json")
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("list Gemini models: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProviderJSONBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read Gemini models list: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("Gemini models list returned %s", resp.Status)
+	}
+
+	var data listResp
+	if err := json.Unmarshal(body, &data); err != nil {
+		return nil, fmt.Errorf("decode Gemini models list: %w", err)
+	}
+
+	var out []Model
+	for _, m := range data.Models {
+		// name is like "models/veo-3.1-generate-preview"
+		modelID := strings.TrimPrefix(m.Name, "models/")
+		if !strings.Contains(strings.ToLower(modelID), "veo") {
+			continue
+		}
+		// Check that predictLongRunning is available.
+		supportsPredict := false
+		for _, method := range m.SupportedGenerationMethods {
+			if method == "predictLongRunning" || method == "predict" {
+				supportsPredict = true
+				break
+			}
+		}
+		if !supportsPredict {
+			continue
+		}
+		displayName := strings.TrimSpace(m.DisplayName)
+		if displayName == "" {
+			displayName = modelID
+		}
+		out = append(out, geminiVeoKnownModel(modelID, displayName, []string{"720p", "1080p"}, "Discovered via Gemini models API."))
+	}
+	return out, nil
 }
 
 func (p *GeminiProvider) Capabilities(model string) []Capability {
@@ -56,9 +130,6 @@ func (p *GeminiProvider) Capabilities(model string) []Capability {
 func (p *GeminiProvider) Generate(ctx context.Context, req GenerateRequest, progress func(GenerationProgress)) (*GenerationResult, error) {
 	if !p.Configured() {
 		return nil, fmt.Errorf("%w: no enabled Gemini provider profile with an API key", ErrProviderUnavailable)
-	}
-	if len(req.ReferenceAssetIDs) > 0 {
-		return nil, fmt.Errorf("%w: direct Gemini Veo reference asset uploads are not wired yet", ErrCapabilityUnsupported)
 	}
 	if progress != nil {
 		progress(GenerationProgress{Stage: "submitting", Message: "Submitting Gemini Veo long-running operation", Progress: 0.08})
@@ -88,6 +159,18 @@ func (p *GeminiProvider) Generate(ctx context.Context, req GenerateRequest, prog
 	}
 
 	instance := map[string]any{"prompt": prompt}
+
+	// Attach the first resolved reference image (image-to-video).
+	// Gemini Veo 2 accepts a single base64-encoded image in instances[0].image.
+	if len(req.ReferenceAssetPaths) > 0 {
+		imgBytes, imgMime, readErr := p.readReferenceImage(req.ReferenceAssetPaths[0])
+		if readErr == nil && len(imgBytes) > 0 {
+			instance["image"] = map[string]any{
+				"bytesBase64Encoded": base64.StdEncoding.EncodeToString(imgBytes),
+				"mimeType":           imgMime,
+			}
+		}
+	}
 	parameters := map[string]any{
 		"aspectRatio":     aspectRatio,
 		"durationSeconds": duration,
@@ -282,6 +365,28 @@ func (p *GeminiProvider) mediaURL(videoURI string) string {
 		return p.baseURL + "/" + videoURI + ":download?alt=media"
 	}
 	return p.baseURL + "/" + videoURI
+}
+
+// readReferenceImage reads an image file and returns its bytes and MIME type.
+// Only image MIME types are accepted; non-image files return an error.
+func (p *GeminiProvider) readReferenceImage(path string) ([]byte, string, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	mimeByExt := map[string]string{
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".png":  "image/png",
+		".webp": "image/webp",
+		".gif":  "image/gif",
+	}
+	mimeType, ok := mimeByExt[ext]
+	if !ok {
+		return nil, "", fmt.Errorf("unsupported reference image type: %s", ext)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("read reference image: %w", err)
+	}
+	return data, mimeType, nil
 }
 
 func normalizeGeminiVideoBaseURL(baseURL string) string {
