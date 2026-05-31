@@ -6,7 +6,7 @@
 #   - Go 1.24+
 #   - Node.js 18+
 #   - Wails CLI v2: go install github.com/wailsapp/wails/v2/cmd/wails@latest
-#   - GCC + pkg-config
+#   - GCC + pkg-config  (needed by Wails for WebKit2GTK bindings — NOT for SQLite)
 #   - WebKit2GTK: sudo apt install libgtk-3-dev libwebkit2gtk-4.0-dev (Debian/Ubuntu)
 #
 # Usage:
@@ -38,6 +38,9 @@ echo "=========================================="
 echo ""
 
 # --- Check prerequisites ---
+# CGO is required on Linux for Wails WebKit2GTK bindings (not for SQLite — we use pure-Go modernc.org/sqlite)
+export CGO_ENABLED=1
+
 for cmd in go node npm wails gcc pkg-config; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "[ERROR] '$cmd' not found in PATH."
