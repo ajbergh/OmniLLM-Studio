@@ -97,13 +97,13 @@ Screenshot placeholder: `docs/assets/screenshots/music-studio.png`
 
 ### Video Studio
 
-A dedicated project workspace for AI video generation and lightweight timeline editing. Video Studio includes provider/model discovery, prompt enhancement, generation history, durable media assets, a neutral timeline JSON model, clip editing, preview, mock export jobs, and AI-assisted storyboard/edit-plan actions.
+A dedicated project workspace for AI video generation and lightweight timeline editing. Video Studio includes real OpenRouter Video and direct Gemini Veo 3.1 adapters, provider/model discovery, prompt enhancement, generation history, durable media assets, a neutral timeline JSON model, clip editing, preview, mock export jobs, and AI-assisted storyboard/edit-plan actions.
 
-The built-in `mock` provider is available for local development and writes deterministic placeholder assets under the configured attachments directory. Production video providers should be added through the backend `video.Provider` interface; production export should replace the current mock renderer with a Remotion, FFmpeg, or provider-backed `video.Renderer` adapter.
+The built-in `mock` provider is available for local development and writes deterministic placeholder assets under the configured attachments directory. OpenRouter and Gemini use encrypted provider profiles from Settings. Production export should replace the current mock renderer with a Remotion, FFmpeg, or provider-backed `video.Renderer` adapter.
 
 | Capability | Description |
 |------------|-------------|
-| **Generation** | Text-to-video mock generation with capability-driven controls, prompt enhancement, SSE progress, history, and branching |
+| **Generation** | Text-to-video generation with capability-driven controls, prompt enhancement, SSE progress, history, and branching |
 | **Timeline** | Multi-track video, image, audio, music, text, caption, shape, and callout timeline with move, trim, split, duplicate, delete, track mute/lock/visibility, fades, volume, effects, transitions, and keyframes |
 | **Preview** | Browser-state preview of active timeline clips at the current playhead |
 | **Export** | Persistent render jobs and durable export assets through the mock renderer |
@@ -188,13 +188,15 @@ Music generation is Lyria-only in v1.
 
 ### Video Models
 
-Video Studio currently ships with a local development provider:
+Video Studio ships with the local mock provider plus real video generation adapters:
 
 | Provider | Models | Notes |
 |----------|--------|-------|
 | **Mock** | `mock-video-v1` | Deterministic placeholder generation and mock render/export flow; no API key required |
+| **OpenRouter Video** | Current `/videos/models` discovery, with built-in snapshot including `google/veo-3.1`, `google/veo-3.1-fast`, `google/veo-3.1-lite`, `x-ai/grok-imagine-video`, `kwaivgi/kling-v3.0-pro`, `kwaivgi/kling-v3.0-std`, `kwaivgi/kling-video-o1`, `minimax/hailuo-2.3`, `bytedance/seedance-2.0-fast`, `bytedance/seedance-2.0`, `alibaba/wan-2.7` | Uses an encrypted OpenRouter provider profile, submits `/videos` jobs, polls the returned URL, and downloads completed video outputs |
+| **Gemini direct** | `veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview` | Uses an encrypted Gemini provider profile and direct Gemini `predictLongRunning` Veo operations |
 
-Real provider adapters can be registered in the backend video model registry.
+Setup: open **Settings → Providers** and configure either an OpenRouter API key or a Gemini API key. Then use **Settings → Video** or Video Studio's Generate panel to select the provider/model.
 
 ---
 

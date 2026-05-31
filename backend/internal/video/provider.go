@@ -10,6 +10,7 @@ import (
 type Provider interface {
 	Key() string
 	DisplayName() string
+	Configured() bool
 	ListModels(ctx context.Context) ([]Model, error)
 	Capabilities(model string) []Capability
 	Generate(ctx context.Context, req GenerateRequest, progress func(GenerationProgress)) (*GenerationResult, error)
@@ -27,6 +28,10 @@ func (p *MockProvider) Key() string {
 
 func (p *MockProvider) DisplayName() string {
 	return "Mock Video"
+}
+
+func (p *MockProvider) Configured() bool {
+	return true
 }
 
 func (p *MockProvider) ListModels(ctx context.Context) ([]Model, error) {
@@ -78,7 +83,7 @@ func (p *MockProvider) Generate(ctx context.Context, req GenerateRequest, progre
 		Metadata: map[string]any{
 			"mock":             true,
 			"placeholder_kind": "video",
-			"note":             "Replace the mock provider with a real video adapter when credentials are available.",
+			"note":             "Local placeholder asset generated without calling OpenRouter or Gemini.",
 		},
 	}, nil
 }
@@ -118,6 +123,16 @@ func dimensionsForResolution(resolution, aspectRatio string) (int, int) {
 			return 1080, 1920
 		}
 		return 1920, 1080
+	case "4k", "2160p":
+		if aspectRatio == "9:16" {
+			return 2160, 3840
+		}
+		return 3840, 2160
+	case "480p":
+		if aspectRatio == "9:16" {
+			return 480, 854
+		}
+		return 854, 480
 	default:
 		if aspectRatio == "9:16" {
 			return 1080, 1920

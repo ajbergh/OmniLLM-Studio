@@ -2285,7 +2285,7 @@ function VideoTab() {
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="text-xs font-medium text-text-secondary mb-1.5 block">Development provider</label>
+              <label className="text-xs font-medium text-text-secondary mb-1.5 block">Default provider</label>
               <select
                 value={provider}
                 onChange={(event) => { void handleProviderChange(event.target.value as VideoProviderKey); }}
@@ -2315,7 +2315,7 @@ function VideoTab() {
 
           <div className="rounded-xl border border-border bg-surface p-3">
             <p className="text-xs text-text-secondary">
-              The mock provider is local-only and writes deterministic placeholder assets for development. Real provider adapters can be added behind the same capability-driven model registry.
+              OpenRouter Video and direct Gemini Veo use encrypted provider profiles when API keys are configured. The mock provider stays available for local placeholder assets.
             </p>
           </div>
 

@@ -18,14 +18,15 @@ var (
 )
 
 type Service struct {
-	projects    *repository.VideoProjectRepo
-	generations *repository.VideoGenerationRepo
-	assets      *repository.VideoAssetRepo
-	timelines   *repository.VideoTimelineRepo
-	renderJobs  *repository.VideoRenderJobRepo
-	storage     *Storage
-	registry    *ModelRegistry
-	renderer    Renderer
+	projects         *repository.VideoProjectRepo
+	generations      *repository.VideoGenerationRepo
+	assets           *repository.VideoAssetRepo
+	timelines        *repository.VideoTimelineRepo
+	renderJobs       *repository.VideoRenderJobRepo
+	providerProfiles *repository.ProviderRepo
+	storage          *Storage
+	registry         *ModelRegistry
+	renderer         Renderer
 }
 
 func NewService(
@@ -34,17 +35,19 @@ func NewService(
 	assets *repository.VideoAssetRepo,
 	timelines *repository.VideoTimelineRepo,
 	renderJobs *repository.VideoRenderJobRepo,
+	providerProfiles *repository.ProviderRepo,
 	attachmentsDir string,
 ) *Service {
 	return &Service{
-		projects:    projects,
-		generations: generations,
-		assets:      assets,
-		timelines:   timelines,
-		renderJobs:  renderJobs,
-		storage:     NewStorage(attachmentsDir),
-		registry:    NewModelRegistry(NewMockProvider()),
-		renderer:    NewMockRenderer(),
+		projects:         projects,
+		generations:      generations,
+		assets:           assets,
+		timelines:        timelines,
+		renderJobs:       renderJobs,
+		providerProfiles: providerProfiles,
+		storage:          NewStorage(attachmentsDir),
+		registry:         NewModelRegistry(NewMockProvider(), NewOpenRouterProvider("", ""), NewGeminiProvider("", "")),
+		renderer:         NewMockRenderer(),
 	}
 }
 
@@ -52,8 +55,54 @@ func (s *Service) OutputDirectory() string {
 	return s.storage.Root()
 }
 
+func (s *Service) providerRegistry() *ModelRegistry {
+	if s.providerProfiles == nil {
+		return s.registry
+	}
+	var openRouterBaseURL, openRouterAPIKey string
+	var geminiBaseURL, geminiAPIKey string
+	profiles, err := s.providerProfiles.List()
+	if err == nil {
+		for i := range profiles {
+			profile := profiles[i]
+			if !profile.Enabled {
+				continue
+			}
+			providerType := NormalizeProvider(profile.Type)
+			if providerType != ProviderOpenRouter && providerType != ProviderGemini {
+				continue
+			}
+			apiKey, keyErr := s.providerProfiles.GetAPIKey(profile.ID)
+			if keyErr != nil {
+				apiKey = ""
+			}
+			baseURL := ""
+			if profile.BaseURL != nil {
+				baseURL = strings.TrimSpace(*profile.BaseURL)
+			}
+			switch providerType {
+			case ProviderOpenRouter:
+				if openRouterAPIKey == "" {
+					openRouterBaseURL = baseURL
+					openRouterAPIKey = strings.TrimSpace(apiKey)
+				}
+			case ProviderGemini:
+				if geminiAPIKey == "" {
+					geminiBaseURL = baseURL
+					geminiAPIKey = strings.TrimSpace(apiKey)
+				}
+			}
+		}
+	}
+	return NewModelRegistry(
+		NewMockProvider(),
+		NewOpenRouterProvider(openRouterBaseURL, openRouterAPIKey),
+		NewGeminiProvider(geminiBaseURL, geminiAPIKey),
+	)
+}
+
 func (s *Service) ListProviders(ctx context.Context) ([]ProviderInfo, error) {
-	return s.registry.ListProviders(ctx)
+	return s.providerRegistry().ListProviders(ctx)
 }
 
 func (s *Service) ListModels(ctx context.Context, provider string, refresh bool) ([]Model, error) {
@@ -62,7 +111,7 @@ func (s *Service) ListModels(ctx context.Context, provider string, refresh bool)
 	if provider == "" {
 		return nil, fmt.Errorf("%w: unsupported provider", ErrCapabilityUnsupported)
 	}
-	return s.registry.ListModels(ctx, provider)
+	return s.providerRegistry().ListModels(ctx, provider)
 }
 
 func (s *Service) CreateProject(userID, title, provider, model string, width, height, fps int, aspectRatio string) (*models.VideoProject, error) {
@@ -74,8 +123,9 @@ func (s *Service) CreateProject(userID, title, provider, model string, width, he
 	if provider == "" {
 		provider = ProviderMock
 	}
+	registry := s.providerRegistry()
 	if model == "" {
-		model = s.registry.DefaultModel(context.Background(), provider)
+		model = registry.DefaultModel(context.Background(), provider)
 	}
 	if width <= 0 {
 		width = DefaultProjectWidth
@@ -97,9 +147,13 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 	if providerKey == "" {
 		return nil, nil, nil, fmt.Errorf("%w: unsupported video provider", ErrCapabilityUnsupported)
 	}
-	provider, ok := s.registry.Provider(providerKey)
+	registry := s.providerRegistry()
+	provider, ok := registry.Provider(providerKey)
 	if !ok {
 		return nil, nil, nil, fmt.Errorf("%w: no adapter registered for %s", ErrProviderUnavailable, providerKey)
+	}
+	if !provider.Configured() {
+		return nil, nil, nil, fmt.Errorf("%w: no enabled %s provider profile with an API key", ErrProviderUnavailable, providerKey)
 	}
 	if strings.TrimSpace(req.Prompt) == "" {
 		return nil, nil, nil, fmt.Errorf("prompt is required")
@@ -107,9 +161,9 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 
 	modelID := strings.TrimSpace(req.Model)
 	if modelID == "" {
-		modelID = s.registry.DefaultModel(ctx, providerKey)
+		modelID = registry.DefaultModel(ctx, providerKey)
 	}
-	if modelID == "" || !s.registry.ValidateModel(ctx, providerKey, modelID) {
+	if modelID == "" || !registry.ValidateModel(ctx, providerKey, modelID) {
 		return nil, nil, nil, fmt.Errorf("%w: %s is not supported by %s", ErrCapabilityUnsupported, modelID, providerKey)
 	}
 

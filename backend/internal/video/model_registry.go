@@ -48,7 +48,7 @@ func (r *ModelRegistry) ListProviders(ctx context.Context) ([]ProviderInfo, erro
 		out = append(out, ProviderInfo{
 			Key:         provider.Key(),
 			DisplayName: provider.DisplayName(),
-			Configured:  provider.Key() == ProviderMock,
+			Configured:  provider.Configured(),
 			Mock:        provider.Key() == ProviderMock,
 			Models:      models,
 		})

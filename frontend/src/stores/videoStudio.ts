@@ -312,7 +312,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       const providers = await videoApi.providers();
       const available = providers.filter((provider) => provider.configured).map((provider) => provider.key);
       const current = get().selectedProvider;
-      const selectedProvider = available.includes(current) ? current : available[0] || 'mock';
+      const preferredRealProvider = providers.find((provider) => provider.configured && !provider.mock)?.key;
+      const selectedProvider = available.includes(current) && (current !== 'mock' || !preferredRealProvider)
+        ? current
+        : preferredRealProvider || available[0] || 'mock';
       set({ providers, selectedProvider });
       await get().loadModels(selectedProvider);
     } catch (err) {
