@@ -126,3 +126,30 @@ type EnhancePromptRequest struct {
 type EnhancePromptResponse struct {
 	Prompt string `json:"prompt"`
 }
+
+type ExternalAssetImportRequest struct {
+	SourceStudio string         `json:"source_studio"`
+	SourceID     string         `json:"source_id"`
+	SourceType   string         `json:"source_type,omitempty"`
+	Kind         string         `json:"kind"`
+	FileName     string         `json:"file_name"`
+	MimeType     string         `json:"mime_type"`
+	SizeBytes    int64          `json:"size_bytes,omitempty"`
+	DurationMS   *int64         `json:"duration_ms,omitempty"`
+	Width        *int           `json:"width,omitempty"`
+	Height       *int           `json:"height,omitempty"`
+	FPS          *float64       `json:"fps,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+}
+
+type ExportSettings struct {
+	Format                string  `json:"format"`
+	Codec                 string  `json:"codec,omitempty"`
+	Resolution            string  `json:"resolution"`
+	FPS                   int     `json:"fps,omitempty"`
+	Quality               string  `json:"quality,omitempty"`
+	IncludeAudio          bool    `json:"include_audio"`
+	RegisterInFileLibrary  bool    `json:"register_in_file_library,omitempty"`
+	EstimatedDurationMS   int64   `json:"estimated_duration_ms,omitempty"`
+	MockRenderDelaySeconds float64 `json:"mock_render_delay_seconds,omitempty"`
+}

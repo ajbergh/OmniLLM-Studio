@@ -5,7 +5,6 @@ import {
   Download,
   Film,
   GitBranch,
-  Layers,
   Loader2,
   Plus,
   RefreshCw,
@@ -17,11 +16,16 @@ import { toast } from 'sonner';
 import { videoApi } from '../../api';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import type { VideoGenerationDetail, VideoProviderKey } from '../../types/video';
+import { VideoInspector } from './VideoInspector';
+import { VideoPreviewCanvas } from './VideoPreviewCanvas';
+import { VideoRenderPanel } from './VideoRenderPanel';
+import { VideoTimeline } from './timeline/VideoTimeline';
 
 export function VideoStudio() {
   const projects = useVideoStudioStore((state) => state.projects);
   const activeProjectId = useVideoStudioStore((state) => state.activeProjectId);
   const activeGenerationId = useVideoStudioStore((state) => state.activeGenerationId);
+  const selectedAssetId = useVideoStudioStore((state) => state.selectedAssetId);
   const generations = useVideoStudioStore((state) => state.generations);
   const assets = useVideoStudioStore((state) => state.assets);
   const providers = useVideoStudioStore((state) => state.providers);
@@ -46,6 +50,8 @@ export function VideoStudio() {
   const generate = useVideoStudioStore((state) => state.generate);
   const branchFromGeneration = useVideoStudioStore((state) => state.branchFromGeneration);
   const stopGeneration = useVideoStudioStore((state) => state.stopGeneration);
+  const selectAsset = useVideoStudioStore((state) => state.selectAsset);
+  const addAssetToTimeline = useVideoStudioStore((state) => state.addAssetToTimeline);
 
   useEffect(() => {
     loadProviders();
@@ -61,8 +67,8 @@ export function VideoStudio() {
     [generations, activeGenerationId],
   );
   const activeAsset = useMemo(
-    () => assets.find((asset) => asset.id === activeGeneration?.output_asset_id) || assets[0] || null,
-    [assets, activeGeneration],
+    () => assets.find((asset) => asset.id === selectedAssetId) || assets.find((asset) => asset.id === activeGeneration?.output_asset_id) || assets[0] || null,
+    [assets, activeGeneration, selectedAssetId],
   );
   const models = modelsByProvider[selectedProvider] || [];
   const selectedModelCapabilities = models.find((model) => model.id === selectedModel)?.capabilities || [];
@@ -309,70 +315,32 @@ export function VideoStudio() {
 
         <main className="flex min-h-[620px] min-w-0 flex-col bg-surface">
           <section className="min-h-0 flex-1 border-b border-border p-3">
-            <div className="flex h-full min-h-[360px] flex-col rounded-lg border border-border bg-black">
-              <div className="flex items-center justify-between border-b border-white/10 px-3 py-2 text-xs text-white/70">
-                <span>Preview</span>
-                <span>{activeProject ? `${activeProject.width}x${activeProject.height} · ${activeProject.fps}fps` : 'No project selected'}</span>
-              </div>
-              <div className="flex flex-1 items-center justify-center p-6 text-center">
-                <div className="max-w-lg">
-                  <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-lg border border-white/15 bg-white/5">
-                    <Film size={26} className="text-white/80" />
-                  </div>
-                  <h2 className="text-sm font-semibold text-white">
-                    {activeAsset ? activeAsset.file_name : 'No video asset selected'}
-                  </h2>
-                  <p className="mt-2 text-xs leading-relaxed text-white/55">
-                    {activeAsset
-                      ? 'Generated assets are durable and ready for timeline placement. Browser-native playback and compositing arrive with the Phase 2 timeline implementation.'
-                      : 'Generate a mock clip or import media to begin composing a Video Studio project.'}
-                  </p>
-                  {activeGeneration?.enhanced_prompt && (
-                    <p className="mt-4 line-clamp-5 rounded-lg border border-white/10 bg-white/5 p-3 text-left text-[11px] leading-relaxed text-white/60">
-                      {activeGeneration.enhanced_prompt}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
+            <VideoPreviewCanvas />
           </section>
 
-          <section className="h-64 shrink-0 border-b border-border bg-surface-raised p-3">
-            <div className="flex h-full flex-col rounded-lg border border-border bg-surface">
-              <div className="flex items-center justify-between border-b border-border px-3 py-2">
-                <div className="flex items-center gap-2 text-sm font-medium text-text">
-                  <Layers size={15} className="text-primary" />
-                  Timeline
-                </div>
-                <span className="text-[11px] text-text-muted">Phase 2 editor surface</span>
-              </div>
-              <div className="grid flex-1 grid-rows-3 gap-2 p-3">
-                {['Video 1', 'Overlay 1', 'Audio 1'].map((track, index) => (
-                  <div key={track} className="grid grid-cols-[86px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-surface-alt">
-                    <div className="border-r border-border px-2 py-2 text-[11px] text-text-muted">{track}</div>
-                    <div className="relative">
-                      {index === 0 && activeAsset && (
-                        <div className="absolute left-3 top-2 h-8 max-w-[60%] rounded-md border border-primary/30 bg-primary/15 px-3 py-2 text-[11px] text-primary truncate">
-                          {activeAsset.file_name}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+          <section className="h-72 shrink-0 border-b border-border bg-surface-raised p-3">
+            <VideoTimeline />
           </section>
         </main>
 
         <aside className="min-h-0 border-t border-border bg-surface-raised xl:border-l xl:border-t-0">
-          <div className="flex h-full min-h-[520px] flex-col">
+          <div className="flex h-full min-h-[520px] flex-col overflow-y-auto">
+            <VideoInspector />
+            <div className="px-3 pb-3">
+              <VideoRenderPanel />
+            </div>
             <HistoryPanel
               generations={generations}
               activeGenerationId={activeGeneration?.id || null}
               onSelect={(generation) => useVideoStudioStore.setState({ activeGenerationId: generation.id })}
               onBranch={(generationId) => { void branchFromGeneration(generationId); }}
             />
-            <AssetPanel assets={assets} activeAssetId={activeAsset?.id || null} />
+            <AssetPanel
+              assets={assets}
+              activeAssetId={activeAsset?.id || null}
+              onSelect={selectAsset}
+              onAdd={(assetId) => { void addAssetToTimeline(assetId); }}
+            />
           </div>
         </aside>
       </div>
@@ -508,9 +476,19 @@ function HistoryPanel({
   );
 }
 
-function AssetPanel({ assets, activeAssetId }: { assets: Array<{ id: string; file_name: string; kind: string; size_bytes: number; mime_type: string }>; activeAssetId: string | null }) {
+function AssetPanel({
+  assets,
+  activeAssetId,
+  onSelect,
+  onAdd,
+}: {
+  assets: Array<{ id: string; file_name: string; kind: string; size_bytes: number; mime_type: string }>;
+  activeAssetId: string | null;
+  onSelect: (assetId: string) => void;
+  onAdd: (assetId: string) => void;
+}) {
   return (
-    <section className="min-h-0 flex-1 overflow-y-auto p-3">
+    <section className="min-h-0 border-t border-border p-3">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-text">Assets</h2>
         <span className="text-[11px] text-text-muted">{assets.length} item{assets.length === 1 ? '' : 's'}</span>
@@ -524,6 +502,15 @@ function AssetPanel({ assets, activeAssetId }: { assets: Array<{ id: string; fil
           {assets.map((asset) => (
             <div
               key={asset.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelect(asset.id)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onSelect(asset.id);
+                }
+              }}
               className={`rounded-lg border p-3 ${
                 asset.id === activeAssetId ? 'border-primary/30 bg-primary/10' : 'border-border bg-surface-alt'
               }`}
@@ -534,7 +521,19 @@ function AssetPanel({ assets, activeAssetId }: { assets: Array<{ id: string; fil
                   <p className="mt-1 text-[10px] text-text-muted">{asset.kind} · {asset.mime_type}</p>
                 </div>
                 <button
-                  onClick={() => {
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAdd(asset.id);
+                  }}
+                  className="min-h-8 min-w-8 rounded-lg border border-border bg-surface text-text-muted hover:text-text inline-flex items-center justify-center"
+                  aria-label={`Add ${asset.file_name} to timeline`}
+                  title="Add to timeline"
+                >
+                  <Plus size={13} />
+                </button>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
                     window.open(videoApi.downloadUrl(asset.id), '_blank', 'noopener,noreferrer');
                     toast.success('Opening asset download');
                   }}

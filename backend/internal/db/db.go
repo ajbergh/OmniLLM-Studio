@@ -130,6 +130,8 @@ func versionedMigrations() []Migration {
 		{Version: 35, Name: "browser_sessions_and_flag", SQL: migrationBrowserSessionsAndFlag},
 		{Version: 36, Name: "music_studio", SQL: migrationMusicStudio},
 		{Version: 37, Name: "video_studio_foundation", SQL: migrationVideoStudioFoundation},
+		{Version: 38, Name: "video_studio_timelines", SQL: migrationVideoStudioTimelines},
+		{Version: 39, Name: "video_studio_render_jobs", SQL: migrationVideoStudioRenderJobs},
 	}
 }
 
@@ -723,6 +725,48 @@ CREATE INDEX IF NOT EXISTS idx_video_assets_kind ON video_assets(kind);
 INSERT INTO feature_flags (key, enabled, metadata)
 VALUES ('video_studio', 1, '{"label":"Video Studio","description":"AI video generation and timeline editing."}')
 ON CONFLICT(key) DO NOTHING;
+`
+
+// V38: Video Studio neutral timeline persistence.
+const migrationVideoStudioTimelines = `
+CREATE TABLE IF NOT EXISTS video_timelines (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	name TEXT NOT NULL DEFAULT 'Main Timeline',
+	active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+	timeline_json TEXT NOT NULL DEFAULT '{}',
+	duration_ms INTEGER NOT NULL DEFAULT 0,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	FOREIGN KEY (project_id) REFERENCES video_projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_timelines_project ON video_timelines(project_id);
+CREATE INDEX IF NOT EXISTS idx_video_timelines_active ON video_timelines(project_id, active);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_timelines_one_active ON video_timelines(project_id) WHERE active = 1;
+`
+
+// V39: Video Studio render/export jobs.
+const migrationVideoStudioRenderJobs = `
+CREATE TABLE IF NOT EXISTS video_render_jobs (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	timeline_id TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','completed','failed','cancelled')),
+	progress REAL NOT NULL DEFAULT 0,
+	settings_json TEXT NOT NULL DEFAULT '{}',
+	output_asset_id TEXT,
+	error TEXT,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	started_at DATETIME,
+	completed_at DATETIME,
+	FOREIGN KEY (project_id) REFERENCES video_projects(id) ON DELETE CASCADE,
+	FOREIGN KEY (timeline_id) REFERENCES video_timelines(id) ON DELETE CASCADE,
+	FOREIGN KEY (output_asset_id) REFERENCES video_assets(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_render_jobs_project ON video_render_jobs(project_id);
+CREATE INDEX IF NOT EXISTS idx_video_render_jobs_status ON video_render_jobs(status);
 `
 
 // V14: Add workspace_id to conversations

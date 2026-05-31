@@ -970,3 +970,28 @@ type VideoAsset struct {
 	MetadataJSON  string    `json:"metadata_json,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 }
+
+type VideoTimeline struct {
+	ID           string    `json:"id"`
+	ProjectID    string    `json:"project_id"`
+	Name         string    `json:"name"`
+	Active       bool      `json:"active"`
+	TimelineJSON string    `json:"timeline_json"`
+	DurationMS   int64     `json:"duration_ms"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type VideoRenderJob struct {
+	ID            string     `json:"id"`
+	ProjectID     string     `json:"project_id"`
+	TimelineID    string     `json:"timeline_id"`
+	Status        string     `json:"status"`
+	Progress      float64    `json:"progress"`
+	SettingsJSON  string     `json:"settings_json"`
+	OutputAssetID *string    `json:"output_asset_id,omitempty"`
+	Error         *string    `json:"error,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+}

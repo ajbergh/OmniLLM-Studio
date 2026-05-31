@@ -16,11 +16,13 @@ import (
 )
 
 type VideoHandler struct {
-	service     *video.Service
-	projectRepo *repository.VideoProjectRepo
-	genRepo     *repository.VideoGenerationRepo
-	assetRepo   *repository.VideoAssetRepo
-	storageDir  string
+	service       *video.Service
+	projectRepo   *repository.VideoProjectRepo
+	genRepo       *repository.VideoGenerationRepo
+	assetRepo     *repository.VideoAssetRepo
+	timelineRepo  *repository.VideoTimelineRepo
+	renderJobRepo *repository.VideoRenderJobRepo
+	storageDir    string
 }
 
 func NewVideoHandler(
@@ -28,14 +30,18 @@ func NewVideoHandler(
 	projectRepo *repository.VideoProjectRepo,
 	genRepo *repository.VideoGenerationRepo,
 	assetRepo *repository.VideoAssetRepo,
+	timelineRepo *repository.VideoTimelineRepo,
+	renderJobRepo *repository.VideoRenderJobRepo,
 	storageDir string,
 ) *VideoHandler {
 	return &VideoHandler{
-		service:     service,
-		projectRepo: projectRepo,
-		genRepo:     genRepo,
-		assetRepo:   assetRepo,
-		storageDir:  storageDir,
+		service:       service,
+		projectRepo:   projectRepo,
+		genRepo:       genRepo,
+		assetRepo:     assetRepo,
+		timelineRepo:  timelineRepo,
+		renderJobRepo: renderJobRepo,
+		storageDir:    storageDir,
 	}
 }
 
@@ -185,6 +191,64 @@ func (h *VideoHandler) ListGenerations(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, h.enrichGenerations(generations))
 }
 
+func (h *VideoHandler) GetTimeline(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadOwnedProject(w, r, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	timeline, doc, err := h.service.GetOrCreateTimeline(r.Context(), auth.UserIDFromContext(r.Context()), project.ID)
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"timeline": timeline,
+		"document": doc,
+	})
+}
+
+func (h *VideoHandler) SaveTimeline(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadOwnedProject(w, r, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	var doc video.TimelineDocument
+	if err := decodeJSON(r, &doc); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid timeline document")
+		return
+	}
+	timeline, saved, err := h.service.SaveTimeline(r.Context(), auth.UserIDFromContext(r.Context()), project.ID, doc)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"timeline": timeline,
+		"document": saved,
+	})
+}
+
+func (h *VideoHandler) ImportAssetToTimeline(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadOwnedProject(w, r, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	var req video.TimelineImportAssetRequest
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	timeline, doc, err := h.service.ImportAssetToTimeline(r.Context(), auth.UserIDFromContext(r.Context()), project.ID, req)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"timeline": timeline,
+		"document": doc,
+	})
+}
+
 func (h *VideoHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	var req video.GenerateRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -280,11 +344,16 @@ func (h *VideoHandler) SendGenerationToTimeline(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	respondJSON(w, http.StatusAccepted, map[string]interface{}{
+	timeline, doc, err := h.service.SendGenerationToTimeline(r.Context(), auth.UserIDFromContext(r.Context()), generation.ID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"project_id": generation.ProjectID,
 		"asset_id":   generation.OutputAssetID,
-		"queued":     false,
-		"message":    "Timeline placement will be enabled in Phase 2.",
+		"timeline":   timeline,
+		"document":   doc,
 	})
 }
 
@@ -302,6 +371,24 @@ func (h *VideoHandler) ListAssets(w http.ResponseWriter, r *http.Request) {
 		assets = []models.VideoAsset{}
 	}
 	respondJSON(w, http.StatusOK, assets)
+}
+
+func (h *VideoHandler) ImportExternalAsset(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadOwnedProject(w, r, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	var req video.ExternalAssetImportRequest
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	asset, err := h.service.ImportExternalAsset(r.Context(), auth.UserIDFromContext(r.Context()), project.ID, req)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, asset)
 }
 
 func (h *VideoHandler) GetAsset(w http.ResponseWriter, r *http.Request) {
@@ -342,6 +429,42 @@ func (h *VideoHandler) DeleteAsset(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
+func (h *VideoHandler) StartRender(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadOwnedProject(w, r, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	var settings video.ExportSettings
+	if err := decodeJSON(r, &settings); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid render settings")
+		return
+	}
+	job, err := h.service.StartRender(r.Context(), auth.UserIDFromContext(r.Context()), project.ID, settings)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusAccepted, job)
+}
+
+func (h *VideoHandler) GetRenderJob(w http.ResponseWriter, r *http.Request) {
+	job, err := h.service.GetRenderJob(auth.UserIDFromContext(r.Context()), chi.URLParam(r, "jobId"))
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, job)
+}
+
+func (h *VideoHandler) CancelRenderJob(w http.ResponseWriter, r *http.Request) {
+	job, err := h.service.CancelRenderJob(auth.UserIDFromContext(r.Context()), chi.URLParam(r, "jobId"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, job)
+}
+
 func (h *VideoHandler) EnhancePrompt(w http.ResponseWriter, r *http.Request) {
 	var req video.EnhancePromptRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -354,6 +477,92 @@ func (h *VideoHandler) EnhancePrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, video.EnhancePromptResponse{Prompt: enhanced})
+}
+
+func (h *VideoHandler) AssistantStoryboard(w http.ResponseWriter, r *http.Request) {
+	project, req, ok := h.decodeAssistantRequest(w, r)
+	if !ok {
+		return
+	}
+	resp, err := h.service.CreateStoryboard(r.Context(), auth.UserIDFromContext(r.Context()), project.ID, req)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, resp)
+}
+
+func (h *VideoHandler) AssistantTimelinePlan(w http.ResponseWriter, r *http.Request) {
+	project, req, ok := h.decodeAssistantRequest(w, r)
+	if !ok {
+		return
+	}
+	resp, err := h.service.CreateTimelinePlan(r.Context(), auth.UserIDFromContext(r.Context()), project.ID, req)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, resp)
+}
+
+func (h *VideoHandler) AssistantEditPlan(w http.ResponseWriter, r *http.Request) {
+	project, req, ok := h.decodeAssistantRequest(w, r)
+	if !ok {
+		return
+	}
+	resp, err := h.service.CreateEditPlan(r.Context(), auth.UserIDFromContext(r.Context()), project.ID, req)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, resp)
+}
+
+func (h *VideoHandler) AssistantApplyEditPlan(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadOwnedProject(w, r, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	var plan video.EditPlan
+	if err := decodeJSON(r, &plan); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid edit plan")
+		return
+	}
+	timeline, doc, err := h.service.ApplyEditPlan(r.Context(), auth.UserIDFromContext(r.Context()), project.ID, plan)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"timeline": timeline,
+		"document": doc,
+	})
+}
+
+func (h *VideoHandler) AssistantSocialVariants(w http.ResponseWriter, r *http.Request) {
+	project, req, ok := h.decodeAssistantRequest(w, r)
+	if !ok {
+		return
+	}
+	resp, err := h.service.CreateSocialVariants(r.Context(), auth.UserIDFromContext(r.Context()), project.ID, req)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, resp)
+}
+
+func (h *VideoHandler) decodeAssistantRequest(w http.ResponseWriter, r *http.Request) (*models.VideoProject, video.AssistantRequest, bool) {
+	project, ok := h.loadOwnedProject(w, r, chi.URLParam(r, "projectId"))
+	if !ok {
+		return nil, video.AssistantRequest{}, false
+	}
+	var req video.AssistantRequest
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return nil, video.AssistantRequest{}, false
+	}
+	return project, req, true
 }
 
 func (h *VideoHandler) loadOwnedProject(w http.ResponseWriter, r *http.Request, projectID string) (*models.VideoProject, bool) {

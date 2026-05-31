@@ -969,8 +969,8 @@ export interface CrossoverTranslateContentRequest {
 }
 
 export interface CrossoverTranslateRequest {
-  source: 'music' | 'image';
-  target: 'music' | 'image';
+  source: 'music' | 'image' | 'chat' | 'video';
+  target: 'music' | 'image' | 'video';
   content: CrossoverTranslateContentRequest;
 }
 
@@ -986,6 +986,17 @@ export interface CrossoverImageToMusicResponse {
   mood: string;
   instruments: string[];
   tempo?: string;
+}
+
+export interface CrossoverToVideoResponse {
+  title?: string;
+  video_prompt: string;
+  shot_type?: string;
+  camera_motion?: string;
+  duration_seconds?: number;
+  aspect_ratio?: string;
+  timeline_notes?: string;
+  storyboard?: string[];
 }
 
 // ── Image Edit Mode ──

@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Local-first LLM chat application</strong> — Go backend + React frontend<br/>
-  Multi-provider streaming · Image Studio · Music Studio · RAG · File Library · Agent mode · Branching · Web search · Live sports lookup · Headless Browser · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
+  Multi-provider streaming · Image Studio · Music Studio · Video Studio · RAG · File Library · Agent mode · Branching · Web search · Live sports lookup · Headless Browser · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
 </p>
 
 <p align="center">
@@ -34,6 +34,7 @@
 | **Conversation Management** | Create, rename, pin, archive, delete, full-text search, per-conversation model override |
 | **Image Studio** | Full canvas editor with generation, editing, inpainting, variant comparison, and branching history |
 | **Music Studio** | Generate, play, download, and manage Gemini Lyria music tracks through OpenRouter or Gemini direct |
+| **Video Studio** | Project-based AI video generation, timeline editing, mock render/export, and cross-studio prompt translation |
 | **Markdown Rendering** | Syntax highlighting, KaTeX math, Mermaid diagrams, inline image rendering |
 | **Auto-Titling** | Conversations are automatically titled based on the first exchange |
 
@@ -93,6 +94,23 @@ Music Studio is generation-only in v1. TTS, STT, audio analysis, image-to-music,
 Setup: open **Settings → Providers** and configure either an OpenRouter API key or a Gemini API key. Configure defaults, custom Gemini Lyria model overrides, and model refresh from **Settings → Music**.
 
 Screenshot placeholder: `docs/assets/screenshots/music-studio.png`
+
+### Video Studio
+
+A dedicated project workspace for AI video generation and lightweight timeline editing. Video Studio includes provider/model discovery, prompt enhancement, generation history, durable media assets, a neutral timeline JSON model, clip editing, preview, mock export jobs, and AI-assisted storyboard/edit-plan actions.
+
+The built-in `mock` provider is available for local development and writes deterministic placeholder assets under the configured attachments directory. Production video providers should be added through the backend `video.Provider` interface; production export should replace the current mock renderer with a Remotion, FFmpeg, or provider-backed `video.Renderer` adapter.
+
+| Capability | Description |
+|------------|-------------|
+| **Generation** | Text-to-video mock generation with capability-driven controls, prompt enhancement, SSE progress, history, and branching |
+| **Timeline** | Multi-track video, image, audio, music, text, caption, shape, and callout timeline with move, trim, split, duplicate, delete, track mute/lock/visibility, fades, volume, effects, transitions, and keyframes |
+| **Preview** | Browser-state preview of active timeline clips at the current playhead |
+| **Export** | Persistent render jobs and durable export assets through the mock renderer |
+| **AI Assistance** | Storyboard, timeline plan, edit plan validation/application, and social-format variant generation |
+| **Cross-Studio** | Crossover translation support for image/music/chat to video and video to image/music |
+
+Docs: `docs/VIDEO_STUDIO.md`, `docs/VIDEO_STUDIO_ARCHITECTURE.md`, `docs/VIDEO_PROVIDER_ADAPTERS.md`, `docs/VIDEO_TIMELINE_SCHEMA.md`, and `docs/VIDEO_RENDERING.md`.
 
 ### Platform
 
@@ -167,6 +185,16 @@ Music generation is Lyria-only in v1.
 |----------|--------|
 | **OpenRouter** | `google/lyria-3-clip-preview`, `google/lyria-3-pro-preview` |
 | **Google Gemini** | `lyria-3-clip-preview`, `lyria-3-pro-preview` |
+
+### Video Models
+
+Video Studio currently ships with a local development provider:
+
+| Provider | Models | Notes |
+|----------|--------|-------|
+| **Mock** | `mock-video-v1` | Deterministic placeholder generation and mock render/export flow; no API key required |
+
+Real provider adapters can be registered in the backend video model registry.
 
 ---
 

@@ -76,6 +76,7 @@ import type {
   CrossoverTranslateRequest,
   CrossoverMusicToImageResponse,
   CrossoverImageToMusicResponse,
+  CrossoverToVideoResponse,
   Attachment,
   RouterSuggestionsResponse,
   RouterTelemetry,
@@ -96,6 +97,8 @@ import type {
 import type {
   GenerateVideoRequest,
   VideoAsset,
+  VideoAssistantRequest,
+  VideoEditPlan,
   VideoGenerationDetail,
   VideoGenerationDone,
   VideoGenerationError,
@@ -105,6 +108,11 @@ import type {
   VideoProjectDetail,
   VideoProviderInfo,
   VideoProviderKey,
+  VideoRenderJob,
+  VideoSocialVariant,
+  VideoStoryboardResponse,
+  VideoTimelineDetail,
+  VideoTimelineDocument,
 } from './types/video';
 
 // In the Wails desktop build the API runs on a real local HTTP server
@@ -1461,6 +1469,25 @@ export const videoApi = {
   listAssets: (projectId: string) =>
     apiFetch<VideoAsset[]>(`/video/projects/${encodeURIComponent(projectId)}/assets`),
 
+  importExternalAsset: (projectId: string, data: {
+    source_studio: string;
+    source_id: string;
+    source_type?: string;
+    kind: VideoAsset['kind'];
+    file_name: string;
+    mime_type: string;
+    size_bytes?: number;
+    duration_ms?: number;
+    width?: number;
+    height?: number;
+    fps?: number;
+    metadata?: Record<string, unknown>;
+  }) =>
+    apiFetch<VideoAsset>(`/video/projects/${encodeURIComponent(projectId)}/assets/import`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   getAsset: (assetId: string) =>
     apiFetch<VideoAsset>(`/video/assets/${encodeURIComponent(assetId)}`),
 
@@ -1476,6 +1503,75 @@ export const videoApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  getTimeline: (projectId: string) =>
+    apiFetch<VideoTimelineDetail>(`/video/projects/${encodeURIComponent(projectId)}/timeline`),
+
+  saveTimeline: (projectId: string, document: VideoTimelineDocument) =>
+    apiFetch<VideoTimelineDetail>(`/video/projects/${encodeURIComponent(projectId)}/timeline`, {
+      method: 'PUT',
+      body: JSON.stringify(document),
+    }),
+
+  importAssetToTimeline: (projectId: string, data: { asset_id: string; track_id?: string; track_type?: string; start_ms?: number; duration_ms?: number }) =>
+    apiFetch<VideoTimelineDetail>(`/video/projects/${encodeURIComponent(projectId)}/timeline/import-asset`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  renderTimeline: (projectId: string, data: {
+    format: 'mp4' | 'webm';
+    codec?: string;
+    resolution: '720p' | '1080p' | 'project';
+    fps?: number;
+    quality?: 'draft' | 'standard' | 'high';
+    include_audio: boolean;
+    register_in_file_library?: boolean;
+  }) =>
+    apiFetch<VideoRenderJob>(`/video/projects/${encodeURIComponent(projectId)}/render`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getRenderJob: (jobId: string) =>
+    apiFetch<VideoRenderJob>(`/video/render-jobs/${encodeURIComponent(jobId)}`),
+
+  cancelRenderJob: (jobId: string) =>
+    apiFetch<VideoRenderJob>(`/video/render-jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: 'POST',
+    }),
+
+  assistant: {
+    storyboard: (projectId: string, data: VideoAssistantRequest) =>
+      apiFetch<VideoStoryboardResponse>(`/video/projects/${encodeURIComponent(projectId)}/assistant/storyboard`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    timelinePlan: (projectId: string, data: VideoAssistantRequest) =>
+      apiFetch<VideoEditPlan>(`/video/projects/${encodeURIComponent(projectId)}/assistant/timeline-plan`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    editPlan: (projectId: string, data: VideoAssistantRequest) =>
+      apiFetch<VideoEditPlan>(`/video/projects/${encodeURIComponent(projectId)}/assistant/edit-plan`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    applyEditPlan: (projectId: string, data: VideoEditPlan) =>
+      apiFetch<VideoTimelineDetail>(`/video/projects/${encodeURIComponent(projectId)}/assistant/apply-edit-plan`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    socialVariants: (projectId: string, data: VideoAssistantRequest) =>
+      apiFetch<VideoSocialVariant[]>(`/video/projects/${encodeURIComponent(projectId)}/assistant/social-variants`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
 
   generate: (
     req: GenerateVideoRequest,
@@ -1577,7 +1673,7 @@ export const videoApi = {
 // ── Crossover Translation ──────────────────────────────────────────────────
 
 export const crossoverApi = {
-  /** Translate a domain prompt between music and image studios via LLM. */
+  /** Translate a domain prompt between studios via LLM. */
   translate: {
     musicToImage: (content: CrossoverTranslateRequest['content']) =>
       apiFetch<CrossoverMusicToImageResponse>('/crossover/translate', {
@@ -1596,6 +1692,36 @@ export const crossoverApi = {
       apiFetch<CrossoverImageToMusicResponse>('/crossover/translate', {
         method: 'POST',
         body: JSON.stringify({ source: 'chat', target: 'music', content }),
+      }),
+
+    imageToVideo: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverToVideoResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'image', target: 'video', content } satisfies CrossoverTranslateRequest),
+      }),
+
+    musicToVideo: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverToVideoResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'music', target: 'video', content } satisfies CrossoverTranslateRequest),
+      }),
+
+    chatToVideo: (content: { prompt: string }) =>
+      apiFetch<CrossoverToVideoResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'chat', target: 'video', content } satisfies CrossoverTranslateRequest),
+      }),
+
+    videoToImage: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverMusicToImageResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'video', target: 'image', content } satisfies CrossoverTranslateRequest),
+      }),
+
+    videoToMusic: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverImageToMusicResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'video', target: 'music', content } satisfies CrossoverTranslateRequest),
       }),
   },
 };

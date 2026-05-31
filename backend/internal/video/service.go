@@ -9,6 +9,7 @@ import (
 
 	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
+	"github.com/google/uuid"
 )
 
 var (
@@ -20,22 +21,30 @@ type Service struct {
 	projects    *repository.VideoProjectRepo
 	generations *repository.VideoGenerationRepo
 	assets      *repository.VideoAssetRepo
+	timelines   *repository.VideoTimelineRepo
+	renderJobs  *repository.VideoRenderJobRepo
 	storage     *Storage
 	registry    *ModelRegistry
+	renderer    Renderer
 }
 
 func NewService(
 	projects *repository.VideoProjectRepo,
 	generations *repository.VideoGenerationRepo,
 	assets *repository.VideoAssetRepo,
+	timelines *repository.VideoTimelineRepo,
+	renderJobs *repository.VideoRenderJobRepo,
 	attachmentsDir string,
 ) *Service {
 	return &Service{
 		projects:    projects,
 		generations: generations,
 		assets:      assets,
+		timelines:   timelines,
+		renderJobs:  renderJobs,
 		storage:     NewStorage(attachmentsDir),
 		registry:    NewModelRegistry(NewMockProvider()),
+		renderer:    NewMockRenderer(),
 	}
 }
 
@@ -194,9 +203,9 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 	metadata["output_directory"] = s.storage.Root()
 	metaJSONBytes, _ := json.Marshal(metadata)
 	metaJSON := string(metaJSONBytes)
-	projectID := project.ID
+	projectRefID := project.ID
 	asset := &models.VideoAsset{
-		ProjectID:    &projectID,
+		ProjectID:    &projectRefID,
 		SourceType:   "generation",
 		Kind:         "video",
 		FileName:     fileName,
@@ -236,7 +245,337 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 	if progress != nil {
 		progress(GenerationProgress{Stage: "done", Message: "Video generation complete", ProjectID: project.ID, GenerationID: generation.ID, Progress: 1})
 	}
+	if req.PlaceOnTimeline {
+		_, _, _ = s.ImportAssetToTimeline(ctx, userID, project.ID, TimelineImportAssetRequest{AssetID: asset.ID})
+	}
 	return project, generation, asset, nil
+}
+
+func (s *Service) GetOrCreateTimeline(ctx context.Context, userID, projectID string) (*models.VideoTimeline, TimelineDocument, error) {
+	project, err := s.ensureProjectOwned(userID, projectID)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	timeline, err := s.timelines.GetActiveByProject(project.ID)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	fallback := NewEmptyTimeline(project.Width, project.Height, project.FPS)
+	if timeline != nil {
+		doc, err := TimelineFromJSON(timeline.TimelineJSON, fallback)
+		if err != nil {
+			return nil, TimelineDocument{}, err
+		}
+		return timeline, doc, nil
+	}
+	_ = ctx
+	doc, err := ValidateTimelineDocument(fallback)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	raw, err := TimelineToJSON(doc)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	timeline = &models.VideoTimeline{
+		ProjectID:    project.ID,
+		Name:         "Main Timeline",
+		Active:       true,
+		TimelineJSON: raw,
+		DurationMS:   doc.DurationMS,
+	}
+	if err := s.timelines.Create(timeline); err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	return timeline, doc, nil
+}
+
+func (s *Service) SaveTimeline(ctx context.Context, userID, projectID string, doc TimelineDocument) (*models.VideoTimeline, TimelineDocument, error) {
+	project, err := s.ensureProjectOwned(userID, projectID)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	doc, err = ValidateTimelineDocument(doc)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	raw, err := TimelineToJSON(doc)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	timeline, _, err := s.GetOrCreateTimeline(ctx, userID, project.ID)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	timeline.TimelineJSON = raw
+	timeline.DurationMS = doc.DurationMS
+	timeline.Active = true
+	if err := s.timelines.Save(timeline); err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	refreshed, err := s.timelines.GetByID(timeline.ID)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	if refreshed != nil {
+		timeline = refreshed
+	}
+	return timeline, doc, nil
+}
+
+func (s *Service) ImportAssetToTimeline(ctx context.Context, userID, projectID string, req TimelineImportAssetRequest) (*models.VideoTimeline, TimelineDocument, error) {
+	if strings.TrimSpace(req.AssetID) == "" {
+		return nil, TimelineDocument{}, fmt.Errorf("asset_id is required")
+	}
+	project, err := s.ensureProjectOwned(userID, projectID)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	asset, err := s.assets.GetByID(req.AssetID)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	if asset == nil || asset.ProjectID == nil || *asset.ProjectID != project.ID {
+		return nil, TimelineDocument{}, fmt.Errorf("video asset not found")
+	}
+	timeline, doc, err := s.GetOrCreateTimeline(ctx, userID, project.ID)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	doc, _, err = AddAssetToTimeline(doc, *asset, req)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	raw, err := TimelineToJSON(doc)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	timeline.TimelineJSON = raw
+	timeline.DurationMS = doc.DurationMS
+	timeline.Active = true
+	if err := s.timelines.Save(timeline); err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	refreshed, err := s.timelines.GetByID(timeline.ID)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	if refreshed != nil {
+		timeline = refreshed
+	}
+	return timeline, doc, nil
+}
+
+func (s *Service) SendGenerationToTimeline(ctx context.Context, userID, generationID string) (*models.VideoTimeline, TimelineDocument, error) {
+	generation, err := s.generations.GetByID(generationID)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	if generation == nil {
+		return nil, TimelineDocument{}, fmt.Errorf("video generation not found")
+	}
+	if _, err := s.ensureProjectOwned(userID, generation.ProjectID); err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	if generation.OutputAssetID == nil || *generation.OutputAssetID == "" {
+		return nil, TimelineDocument{}, fmt.Errorf("generation has no output asset")
+	}
+	return s.ImportAssetToTimeline(ctx, userID, generation.ProjectID, TimelineImportAssetRequest{AssetID: *generation.OutputAssetID})
+}
+
+func (s *Service) ImportExternalAsset(ctx context.Context, userID, projectID string, req ExternalAssetImportRequest) (*models.VideoAsset, error) {
+	project, err := s.ensureProjectOwned(userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	kind := strings.ToLower(strings.TrimSpace(req.Kind))
+	if trackTypeForAssetKind(kind) == "" && kind != "export" && kind != "other" {
+		return nil, fmt.Errorf("unsupported media type")
+	}
+	sourceStudio := strings.TrimSpace(req.SourceStudio)
+	if sourceStudio == "" {
+		sourceStudio = "file_library"
+	}
+	sourceID := strings.TrimSpace(req.SourceID)
+	if sourceID == "" {
+		return nil, fmt.Errorf("source_id is required")
+	}
+	sourceType := strings.TrimSpace(req.SourceType)
+	if sourceType == "" {
+		sourceType = "import"
+	}
+	fileName := strings.TrimSpace(req.FileName)
+	if fileName == "" {
+		fileName = sourceStudio + "-" + sourceID + extensionForMimeType(req.MimeType)
+	}
+	mimeType := strings.TrimSpace(req.MimeType)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	importID := "import-" + uuid.New().String()
+	metadata := req.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["source_studio"] = sourceStudio
+	metadata["source_id"] = sourceID
+	payload, _ := json.MarshalIndent(metadata, "", "  ")
+	relativePath, storedName, err := s.storage.Write(project.ID, importID, fileName+".ref.txt", "text/plain", payload)
+	if err != nil {
+		return nil, err
+	}
+	metaJSONBytes, _ := json.Marshal(metadata)
+	metaJSON := string(metaJSONBytes)
+	projectRefID := project.ID
+	asset := &models.VideoAsset{
+		ProjectID:    &projectRefID,
+		SourceType:   sourceType,
+		SourceStudio: &sourceStudio,
+		SourceID:     &sourceID,
+		Kind:         kind,
+		FileName:     storedName,
+		FilePath:     relativePath,
+		MimeType:     "text/plain",
+		SizeBytes:    int64(len(payload)),
+		DurationMS:   req.DurationMS,
+		Width:        req.Width,
+		Height:       req.Height,
+		FPS:          req.FPS,
+		MetadataJSON: metaJSON,
+	}
+	if asset.SizeBytes == 0 {
+		asset.SizeBytes = req.SizeBytes
+	}
+	if err := s.assets.Create(asset); err != nil {
+		return nil, err
+	}
+	_ = ctx
+	return asset, nil
+}
+
+func (s *Service) StartRender(ctx context.Context, userID, projectID string, settings ExportSettings) (*models.VideoRenderJob, error) {
+	project, err := s.ensureProjectOwned(userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	settings, err = validateExportSettings(settings, *project)
+	if err != nil {
+		return nil, err
+	}
+	timeline, _, err := s.GetOrCreateTimeline(ctx, userID, project.ID)
+	if err != nil {
+		return nil, err
+	}
+	settingsJSON, _ := json.Marshal(settings)
+	job := &models.VideoRenderJob{
+		ProjectID:    project.ID,
+		TimelineID:   timeline.ID,
+		Status:       "queued",
+		Progress:     0,
+		SettingsJSON: string(settingsJSON),
+	}
+	if err := s.renderJobs.Create(job); err != nil {
+		return nil, err
+	}
+	go s.runRenderJob(context.Background(), job.ID)
+	return job, nil
+}
+
+func (s *Service) GetRenderJob(userID, jobID string) (*models.VideoRenderJob, error) {
+	job, err := s.renderJobs.GetByID(jobID)
+	if err != nil {
+		return nil, err
+	}
+	if job == nil {
+		return nil, fmt.Errorf("render job not found")
+	}
+	if _, err := s.ensureProjectOwned(userID, job.ProjectID); err != nil {
+		return nil, err
+	}
+	return job, nil
+}
+
+func (s *Service) CancelRenderJob(userID, jobID string) (*models.VideoRenderJob, error) {
+	job, err := s.GetRenderJob(userID, jobID)
+	if err != nil {
+		return nil, err
+	}
+	if job.Status == "completed" || job.Status == "failed" || job.Status == "cancelled" {
+		return job, nil
+	}
+	if err := s.renderJobs.MarkCancelled(job.ID); err != nil {
+		return nil, err
+	}
+	return s.renderJobs.GetByID(job.ID)
+}
+
+func (s *Service) runRenderJob(ctx context.Context, jobID string) {
+	job, err := s.renderJobs.GetByID(jobID)
+	if err != nil || job == nil {
+		return
+	}
+	if err := s.renderJobs.MarkRunning(job.ID); err != nil {
+		return
+	}
+	project, err := s.projects.GetByID(job.ProjectID)
+	if err != nil || project == nil {
+		_ = s.renderJobs.MarkFailed(job.ID, "video project not found")
+		return
+	}
+	timeline, err := s.timelines.GetByID(job.TimelineID)
+	if err != nil || timeline == nil {
+		_ = s.renderJobs.MarkFailed(job.ID, "timeline not found")
+		return
+	}
+	doc, err := TimelineFromJSON(timeline.TimelineJSON, NewEmptyTimeline(project.Width, project.Height, project.FPS))
+	if err != nil {
+		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
+		return
+	}
+	var settings ExportSettings
+	_ = json.Unmarshal([]byte(job.SettingsJSON), &settings)
+	settings, _ = validateExportSettings(settings, *project)
+	result, err := s.renderer.Render(ctx, RenderRequest{Project: *project, Timeline: doc, Settings: settings}, func(p RenderProgress) {
+		_ = s.renderJobs.UpdateProgress(job.ID, p.Progress)
+	})
+	if err != nil {
+		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
+		return
+	}
+	relativePath, fileName, err := s.storage.Write(project.ID, job.ID, result.FileName, result.MimeType, result.Data)
+	if err != nil {
+		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
+		return
+	}
+	meta := result.Metadata
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["render_job_id"] = job.ID
+	meta["timeline_id"] = timeline.ID
+	metaJSONBytes, _ := json.Marshal(meta)
+	metaJSON := string(metaJSONBytes)
+	projectID := project.ID
+	asset := &models.VideoAsset{
+		ProjectID:    &projectID,
+		SourceType:   "render",
+		SourceID:     &job.ID,
+		Kind:         "export",
+		FileName:     fileName,
+		FilePath:     relativePath,
+		MimeType:     result.MimeType,
+		SizeBytes:    int64(len(result.Data)),
+		DurationMS:   &result.DurationMS,
+		Width:        &result.Width,
+		Height:       &result.Height,
+		FPS:          &result.FPS,
+		MetadataJSON: metaJSON,
+	}
+	if err := s.assets.Create(asset); err != nil {
+		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
+		return
+	}
+	_ = s.renderJobs.MarkCompleted(job.ID, asset.ID)
 }
 
 func (s *Service) ensureProject(ctx context.Context, userID string, req GenerateRequest, provider, model string) (*models.VideoProject, error) {
@@ -267,6 +606,67 @@ func (s *Service) ensureProject(ctx context.Context, userID string, req Generate
 		title = DeriveTitle(req.Prompt)
 	}
 	return s.CreateProject(userID, title, provider, model, width, height, defaultInt(req.FPS, DefaultProjectFPS), req.AspectRatio)
+}
+
+func (s *Service) ensureProjectOwned(userID, projectID string) (*models.VideoProject, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, fmt.Errorf("project_id is required")
+	}
+	project, err := s.projects.GetByID(projectID)
+	if err != nil {
+		return nil, err
+	}
+	if project == nil {
+		return nil, fmt.Errorf("video project not found")
+	}
+	ok, err := s.projects.BelongsToUser(project.ID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("video project not found")
+	}
+	return project, nil
+}
+
+func validateExportSettings(settings ExportSettings, project models.VideoProject) (ExportSettings, error) {
+	settings.Format = strings.ToLower(strings.TrimSpace(settings.Format))
+	if settings.Format == "" {
+		settings.Format = "mp4"
+	}
+	if settings.Format != "mp4" && settings.Format != "webm" {
+		return ExportSettings{}, fmt.Errorf("unsupported export format")
+	}
+	settings.Codec = strings.ToLower(strings.TrimSpace(settings.Codec))
+	settings.Resolution = strings.ToLower(strings.TrimSpace(settings.Resolution))
+	if settings.Resolution == "" {
+		settings.Resolution = "project"
+	}
+	switch settings.Resolution {
+	case "project", "720p", "1080p":
+	default:
+		return ExportSettings{}, fmt.Errorf("unsupported export resolution")
+	}
+	if settings.FPS <= 0 {
+		settings.FPS = project.FPS
+	}
+	if settings.FPS <= 0 {
+		settings.FPS = DefaultProjectFPS
+	}
+	if settings.FPS > 120 {
+		return ExportSettings{}, fmt.Errorf("fps must be 120 or lower")
+	}
+	settings.Quality = strings.ToLower(strings.TrimSpace(settings.Quality))
+	if settings.Quality == "" {
+		settings.Quality = "standard"
+	}
+	switch settings.Quality {
+	case "draft", "standard", "high":
+	default:
+		return ExportSettings{}, fmt.Errorf("unsupported export quality")
+	}
+	return settings, nil
 }
 
 func buildSettingsJSON(req GenerateRequest) string {

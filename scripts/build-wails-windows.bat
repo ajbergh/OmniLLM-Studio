@@ -18,6 +18,12 @@ setlocal enabledelayedexpansion
 set SCRIPT_DIR=%~dp0
 set PROJECT_ROOT=%SCRIPT_DIR%..
 
+REM --- Ensure Go user bin (GOPATH\bin) is on PATH so wails.exe is found ---
+for /f "tokens=*" %%i in ('go env GOPATH 2^>nul') do set GOPATH_DIR=%%i
+if not "%GOPATH_DIR%"=="" set PATH=%GOPATH_DIR%\bin;%PATH%
+REM Fallback: also add the conventional %USERPROFILE%\go\bin
+set PATH=%USERPROFILE%\go\bin;%PATH%
+
 REM --- Architecture ---
 set ARCH=%1
 if "%ARCH%"=="" set ARCH=amd64
