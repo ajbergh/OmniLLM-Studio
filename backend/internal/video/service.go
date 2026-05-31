@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ajbergh/omnillm-studio/internal/models"
@@ -24,6 +27,13 @@ type Service struct {
 	timelines        *repository.VideoTimelineRepo
 	renderJobs       *repository.VideoRenderJobRepo
 	providerProfiles *repository.ProviderRepo
+	libraryFiles     *repository.LibraryFileRepo
+	musicSessions    *repository.MusicSessionRepo
+	musicAssets      *repository.MusicAssetRepo
+	imageAssets      *repository.ImageNodeAssetRepo
+	attachments      *repository.AttachmentRepo
+	conversations    *repository.ConversationRepo
+	attachmentsDir   string
 	storage          *Storage
 	registry         *ModelRegistry
 	renderer         Renderer
@@ -45,10 +55,32 @@ func NewService(
 		timelines:        timelines,
 		renderJobs:       renderJobs,
 		providerProfiles: providerProfiles,
+		attachmentsDir:   attachmentsDir,
 		storage:          NewStorage(attachmentsDir),
 		registry:         NewModelRegistry(NewMockProvider(), NewOpenRouterProvider("", ""), NewGeminiProvider("", "")),
-		renderer:         NewMockRenderer(),
+		renderer:         NewFFmpegRenderer(""),
 	}
+}
+
+func (s *Service) ConfigureExternalAssetSources(
+	libraryFiles *repository.LibraryFileRepo,
+	musicSessions *repository.MusicSessionRepo,
+	musicAssets *repository.MusicAssetRepo,
+	imageAssets *repository.ImageNodeAssetRepo,
+	attachments *repository.AttachmentRepo,
+	conversations *repository.ConversationRepo,
+	attachmentsDir string,
+) *Service {
+	s.libraryFiles = libraryFiles
+	s.musicSessions = musicSessions
+	s.musicAssets = musicAssets
+	s.imageAssets = imageAssets
+	s.attachments = attachments
+	s.conversations = conversations
+	if strings.TrimSpace(attachmentsDir) != "" {
+		s.attachmentsDir = attachmentsDir
+	}
+	return s
 }
 
 func (s *Service) OutputDirectory() string {
@@ -442,11 +474,7 @@ func (s *Service) ImportExternalAsset(ctx context.Context, userID, projectID str
 	if err != nil {
 		return nil, err
 	}
-	kind := strings.ToLower(strings.TrimSpace(req.Kind))
-	if trackTypeForAssetKind(kind) == "" && kind != "export" && kind != "other" {
-		return nil, fmt.Errorf("unsupported media type")
-	}
-	sourceStudio := strings.TrimSpace(req.SourceStudio)
+	sourceStudio := normalizeExternalSourceStudio(req.SourceStudio)
 	if sourceStudio == "" {
 		sourceStudio = "file_library"
 	}
@@ -458,11 +486,23 @@ func (s *Service) ImportExternalAsset(ctx context.Context, userID, projectID str
 	if sourceType == "" {
 		sourceType = "import"
 	}
-	fileName := strings.TrimSpace(req.FileName)
-	if fileName == "" {
-		fileName = sourceStudio + "-" + sourceID + extensionForMimeType(req.MimeType)
+
+	resolved, err := s.resolveExternalAssetData(ctx, userID, sourceStudio, sourceID, req)
+	if err != nil {
+		return nil, err
 	}
-	mimeType := strings.TrimSpace(req.MimeType)
+	kind := strings.ToLower(strings.TrimSpace(resolved.kind))
+	if kind == "" {
+		kind = kindForMimeType(resolved.mimeType)
+	}
+	if trackTypeForAssetKind(kind) == "" && kind != "export" && kind != "other" {
+		return nil, fmt.Errorf("unsupported media type")
+	}
+	fileName := strings.TrimSpace(resolved.fileName)
+	if fileName == "" {
+		fileName = sourceStudio + "-" + sourceID + extensionForMimeType(resolved.mimeType)
+	}
+	mimeType := strings.TrimSpace(resolved.mimeType)
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
 	}
@@ -471,10 +511,14 @@ func (s *Service) ImportExternalAsset(ctx context.Context, userID, projectID str
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
+	for key, value := range resolved.metadata {
+		if _, exists := metadata[key]; !exists {
+			metadata[key] = value
+		}
+	}
 	metadata["source_studio"] = sourceStudio
 	metadata["source_id"] = sourceID
-	payload, _ := json.MarshalIndent(metadata, "", "  ")
-	relativePath, storedName, err := s.storage.Write(project.ID, importID, fileName+".ref.txt", "text/plain", payload)
+	relativePath, storedName, err := s.storage.Write(project.ID, importID, fileName, mimeType, resolved.data)
 	if err != nil {
 		return nil, err
 	}
@@ -489,22 +533,224 @@ func (s *Service) ImportExternalAsset(ctx context.Context, userID, projectID str
 		Kind:         kind,
 		FileName:     storedName,
 		FilePath:     relativePath,
-		MimeType:     "text/plain",
-		SizeBytes:    int64(len(payload)),
-		DurationMS:   req.DurationMS,
-		Width:        req.Width,
-		Height:       req.Height,
-		FPS:          req.FPS,
+		MimeType:     mimeType,
+		SizeBytes:    int64(len(resolved.data)),
+		DurationMS:   resolved.durationMS,
+		Width:        resolved.width,
+		Height:       resolved.height,
+		FPS:          resolved.fps,
 		MetadataJSON: metaJSON,
 	}
 	if asset.SizeBytes == 0 {
-		asset.SizeBytes = req.SizeBytes
+		asset.SizeBytes = resolved.sizeBytes
 	}
 	if err := s.assets.Create(asset); err != nil {
 		return nil, err
 	}
 	_ = ctx
 	return asset, nil
+}
+
+type externalAssetData struct {
+	data       []byte
+	fileName   string
+	mimeType   string
+	sizeBytes  int64
+	kind       string
+	durationMS *int64
+	width      *int
+	height     *int
+	fps        *float64
+	metadata   map[string]any
+}
+
+func (s *Service) resolveExternalAssetData(ctx context.Context, userID, sourceStudio, sourceID string, req ExternalAssetImportRequest) (externalAssetData, error) {
+	_ = ctx
+	switch sourceStudio {
+	case "file_library":
+		return s.resolveFileLibraryAsset(userID, sourceID, req)
+	case "music":
+		return s.resolveMusicAsset(userID, sourceID, req)
+	case "image":
+		return s.resolveImageAsset(userID, sourceID, req)
+	case "attachment":
+		return s.resolveAttachmentAsset(userID, sourceID, req, map[string]any{})
+	default:
+		return externalAssetData{}, fmt.Errorf("unsupported source_studio %q", sourceStudio)
+	}
+}
+
+func (s *Service) resolveFileLibraryAsset(userID, sourceID string, req ExternalAssetImportRequest) (externalAssetData, error) {
+	if s.libraryFiles == nil {
+		return externalAssetData{}, fmt.Errorf("file library import is not configured")
+	}
+	file, err := s.libraryFiles.GetByID(sourceID)
+	if err != nil {
+		return externalAssetData{}, err
+	}
+	if file == nil || !libraryFileVisibleToUser(file.OwnerUserID, userID) || strings.EqualFold(file.Status, "deleted") {
+		return externalAssetData{}, fmt.Errorf("file library asset not found")
+	}
+	if file.StoragePath == nil || strings.TrimSpace(*file.StoragePath) == "" {
+		return externalAssetData{}, fmt.Errorf("file library asset has no stored file")
+	}
+	path, err := safeJoin(s.attachmentsDir, *file.StoragePath)
+	if err != nil {
+		return externalAssetData{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return externalAssetData{}, fmt.Errorf("read file library asset: %w", err)
+	}
+	mimeType := firstNonEmpty(req.MimeType, ptrValue(file.MimeType), mime.TypeByExtension(filepath.Ext(path)), "application/octet-stream")
+	fileName := firstNonEmpty(req.FileName, ptrValue(file.OriginalFilename), file.DisplayName, filepath.Base(*file.StoragePath))
+	kind := firstNonEmpty(req.Kind, kindForMimeType(mimeType))
+	return externalAssetData{
+		data:       data,
+		fileName:   fileName,
+		mimeType:   mimeType,
+		sizeBytes:  firstPositiveInt64(file.SizeBytes, int64(len(data))),
+		kind:       kind,
+		durationMS: req.DurationMS,
+		width:      req.Width,
+		height:     req.Height,
+		fps:        req.FPS,
+		metadata: map[string]any{
+			"library_scope":        file.Scope,
+			"library_status":       file.Status,
+			"library_display_name": file.DisplayName,
+		},
+	}, nil
+}
+
+func (s *Service) resolveMusicAsset(userID, sourceID string, req ExternalAssetImportRequest) (externalAssetData, error) {
+	if s.musicAssets == nil || s.musicSessions == nil {
+		return externalAssetData{}, fmt.Errorf("music studio import is not configured")
+	}
+	asset, err := s.musicAssets.GetByID(sourceID)
+	if err != nil {
+		return externalAssetData{}, err
+	}
+	if asset == nil {
+		asset, err = s.musicAssets.GetByGeneration(sourceID)
+		if err != nil {
+			return externalAssetData{}, err
+		}
+	}
+	if asset == nil {
+		return externalAssetData{}, fmt.Errorf("music asset not found")
+	}
+	ok, err := s.musicSessions.BelongsToUser(asset.SessionID, userID)
+	if err != nil {
+		return externalAssetData{}, err
+	}
+	if !ok {
+		return externalAssetData{}, fmt.Errorf("music asset not found")
+	}
+	path, err := safeJoin(s.attachmentsDir, asset.FilePath)
+	if err != nil {
+		return externalAssetData{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return externalAssetData{}, fmt.Errorf("read music asset: %w", err)
+	}
+	var durationMS *int64
+	if asset.DurationMS > 0 {
+		duration := asset.DurationMS
+		durationMS = &duration
+	}
+	metadata := map[string]any{
+		"music_session_id":    asset.SessionID,
+		"music_generation_id": asset.GenerationID,
+		"music_provider":      asset.Provider,
+		"music_model":         asset.Model,
+	}
+	if strings.TrimSpace(asset.MetadataJSON) != "" && asset.MetadataJSON != "{}" {
+		metadata["music_metadata_json"] = asset.MetadataJSON
+	}
+	return externalAssetData{
+		data:       data,
+		fileName:   firstNonEmpty(req.FileName, asset.FileName, filepath.Base(asset.FilePath)),
+		mimeType:   firstNonEmpty(req.MimeType, asset.MimeType, mime.TypeByExtension(filepath.Ext(asset.FilePath)), "application/octet-stream"),
+		sizeBytes:  firstPositiveInt64(asset.SizeBytes, int64(len(data))),
+		kind:       firstNonEmpty(req.Kind, asset.Kind, "music"),
+		durationMS: firstNonNilInt64(req.DurationMS, durationMS),
+		width:      req.Width,
+		height:     req.Height,
+		fps:        req.FPS,
+		metadata:   metadata,
+	}, nil
+}
+
+func (s *Service) resolveImageAsset(userID, sourceID string, req ExternalAssetImportRequest) (externalAssetData, error) {
+	if s.imageAssets == nil {
+		return s.resolveAttachmentAsset(userID, sourceID, req, map[string]any{})
+	}
+	imageAsset, err := s.imageAssets.GetByID(sourceID)
+	if err != nil {
+		return externalAssetData{}, err
+	}
+	if imageAsset == nil {
+		return s.resolveAttachmentAsset(userID, sourceID, req, map[string]any{})
+	}
+	metadata := map[string]any{
+		"image_node_id":  imageAsset.NodeID,
+		"variant_index":  imageAsset.VariantIndex,
+		"image_asset_id": imageAsset.ID,
+		"image_selected": imageAsset.IsSelected,
+		"attachment_id":  imageAsset.AttachmentID,
+	}
+	return s.resolveAttachmentAsset(userID, imageAsset.AttachmentID, req, metadata)
+}
+
+func (s *Service) resolveAttachmentAsset(userID, sourceID string, req ExternalAssetImportRequest, metadata map[string]any) (externalAssetData, error) {
+	if s.attachments == nil {
+		return externalAssetData{}, fmt.Errorf("attachment import is not configured")
+	}
+	attachment, err := s.attachments.GetByID(sourceID)
+	if err != nil {
+		return externalAssetData{}, err
+	}
+	if attachment == nil {
+		return externalAssetData{}, fmt.Errorf("attachment asset not found")
+	}
+	if userID != "" && s.conversations != nil {
+		conversation, err := s.conversations.GetByIDForUser(attachment.ConversationID, userID)
+		if err != nil {
+			return externalAssetData{}, err
+		}
+		if conversation == nil {
+			return externalAssetData{}, fmt.Errorf("attachment asset not found")
+		}
+	}
+	path, err := safeJoin(s.attachmentsDir, attachment.StoragePath)
+	if err != nil {
+		return externalAssetData{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return externalAssetData{}, fmt.Errorf("read attachment asset: %w", err)
+	}
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["attachment_id"] = attachment.ID
+	metadata["attachment_conversation_id"] = attachment.ConversationID
+	fileName := firstNonEmpty(req.FileName, attachmentOriginalName(attachment), filepath.Base(attachment.StoragePath))
+	mimeType := firstNonEmpty(req.MimeType, attachment.MimeType, mime.TypeByExtension(filepath.Ext(path)), "application/octet-stream")
+	return externalAssetData{
+		data:       data,
+		fileName:   fileName,
+		mimeType:   mimeType,
+		sizeBytes:  firstPositiveInt64(attachment.Bytes, int64(len(data))),
+		kind:       firstNonEmpty(req.Kind, kindForMimeType(mimeType), "image"),
+		durationMS: req.DurationMS,
+		width:      firstNonNilInt(req.Width, attachment.Width),
+		height:     firstNonNilInt(req.Height, attachment.Height),
+		fps:        req.FPS,
+		metadata:   metadata,
+	}, nil
 }
 
 func (s *Service) StartRender(ctx context.Context, userID, projectID string, settings ExportSettings) (*models.VideoRenderJob, error) {
@@ -571,6 +817,9 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 	if err := s.renderJobs.MarkRunning(job.ID); err != nil {
 		return
 	}
+	if s.renderJobCancelled(job.ID) {
+		return
+	}
 	project, err := s.projects.GetByID(job.ProjectID)
 	if err != nil || project == nil {
 		_ = s.renderJobs.MarkFailed(job.ID, "video project not found")
@@ -594,6 +843,9 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 	})
 	if err != nil {
 		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
+		return
+	}
+	if s.renderJobCancelled(job.ID) {
 		return
 	}
 	relativePath, fileName, err := s.storage.Write(project.ID, job.ID, result.FileName, result.MimeType, result.Data)
@@ -630,6 +882,11 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 		return
 	}
 	_ = s.renderJobs.MarkCompleted(job.ID, asset.ID)
+}
+
+func (s *Service) renderJobCancelled(jobID string) bool {
+	job, err := s.renderJobs.GetByID(jobID)
+	return err == nil && job != nil && job.Status == "cancelled"
 }
 
 func (s *Service) ensureProject(ctx context.Context, userID string, req GenerateRequest, provider, model string) (*models.VideoProject, error) {
@@ -743,4 +1000,95 @@ func buildSettingsJSON(req GenerateRequest) string {
 	}
 	data, _ := json.Marshal(settings)
 	return string(data)
+}
+
+func libraryFileVisibleToUser(ownerUserID *string, userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return ownerUserID == nil || strings.TrimSpace(*ownerUserID) == ""
+	}
+	return ownerUserID != nil && *ownerUserID == userID
+}
+
+func normalizeExternalSourceStudio(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "-", "_")
+	switch value {
+	case "", "file", "filelibrary", "file_library":
+		return "file_library"
+	case "music", "music_studio":
+		return "music"
+	case "image", "image_studio":
+		return "image"
+	case "attachment", "attachments":
+		return "attachment"
+	default:
+		return value
+	}
+}
+
+func kindForMimeType(mimeType string) string {
+	mimeType = strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
+	switch {
+	case strings.HasPrefix(mimeType, "video/"):
+		return "video"
+	case strings.HasPrefix(mimeType, "image/"):
+		return "image"
+	case strings.HasPrefix(mimeType, "audio/"):
+		return "audio"
+	case strings.HasPrefix(mimeType, "text/"):
+		return "text"
+	case mimeType == "application/pdf", mimeType == "application/json", mimeType == "application/markdown":
+		return "text"
+	default:
+		return "other"
+	}
+}
+
+func ptrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func firstPositiveInt64(values ...int64) int64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstNonNilInt64(values ...*int64) *int64 {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func firstNonNilInt(values ...*int) *int {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func attachmentOriginalName(attachment *models.Attachment) string {
+	if attachment == nil || strings.TrimSpace(attachment.MetadataJSON) == "" {
+		return ""
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(attachment.MetadataJSON), &metadata); err != nil {
+		return ""
+	}
+	if value, ok := metadata["original_name"].(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
 }

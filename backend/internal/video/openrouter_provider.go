@@ -49,8 +49,10 @@ func (p *OpenRouterProvider) ListModels(ctx context.Context) ([]Model, error) {
 	if !p.Configured() {
 		return fallback, nil
 	}
+	discoveryCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/videos/models", nil)
+	req, err := http.NewRequestWithContext(discoveryCtx, http.MethodGet, p.baseURL+"/videos/models", nil)
 	if err != nil {
 		return fallback, nil
 	}

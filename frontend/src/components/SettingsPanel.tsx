@@ -2201,7 +2201,10 @@ function VideoTab() {
     try {
       const providerStatus = await videoApi.providers();
       setProviders(providerStatus);
-      const preferredProvider = providerStatus.find((item) => item.key === provider)?.key || providerStatus[0]?.key || 'mock';
+      const configured = providerStatus.filter((item) => item.configured);
+      const preferredRealProvider = configured.find((item) => !item.mock)?.key;
+      const currentIsUsable = configured.some((item) => item.key === provider) && (provider !== 'mock' || !preferredRealProvider);
+      const preferredProvider = currentIsUsable ? provider : preferredRealProvider || configured[0]?.key || 'mock';
       setProvider(preferredProvider);
       const loadedModels = await videoApi.listModels(preferredProvider).catch(() => []);
       setModels(loadedModels);

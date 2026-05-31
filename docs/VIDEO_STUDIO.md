@@ -11,9 +11,10 @@ Video Studio is a first-class project workspace for AI video generation, timelin
 - Neutral OmniLLM timeline JSON with video, image, audio, music, text, caption, shape, and callout track types.
 - Asset placement, clip move, trim, split, delete, duplicate, fades, volume, transforms, effects, transitions, text clips, and keyframes.
 - Preview canvas driven by browser state.
-- Mock render/export jobs that create durable export assets.
-- Assistant storyboard, timeline-plan, edit-plan, apply-plan, and social-variant endpoints.
+- FFmpeg-backed render/export jobs that create durable MP4/WebM export assets.
+- Rule-based assistant storyboard, timeline-plan, edit-plan, apply-plan, and social-variant endpoints.
 - Crossover translation support for image, music, chat, and video domains.
+- Backend asset import that copies real bytes from File Library records, Music Studio assets, and Image/attachment-backed sources into Video Studio storage while preserving source metadata.
 
 ## Development Provider
 
@@ -31,6 +32,14 @@ OpenRouter and Gemini use encrypted provider profiles from Settings:
 - Gemini: defaults to `https://generativelanguage.googleapis.com/v1beta`, uses direct Veo `predictLongRunning`, polls long-running operations, and downloads generated sample video URIs.
 
 The model list still includes a built-in snapshot when credentials are not configured so the UI can present expected capabilities before generation is available.
+
+## Rendering
+
+Video Studio exports through persisted backend render jobs. The default renderer uses FFmpeg to create real MP4/WebM files from the timeline canvas and visible text/caption/callout clips. Generated/imported media compositing, audio mixing, and full effect/transition/keyframe parity are still renderer enhancements tracked separately from the saved timeline model.
+
+## Cross-Studio Imports
+
+`POST /v1/video/projects/{projectId}/assets/import` accepts File Library, Music Studio, Image Studio, and attachment-backed source IDs. The service resolves the original stored file, checks project/source ownership where the source model supports it, copies the bytes into `<attachments_dir>/video/...`, and stores a `VideoAsset` with `source_studio` and `source_id` metadata. UI result-card shortcuts are still being completed, but the backend import path no longer writes metadata-only placeholder files.
 
 ## Feature Flag
 

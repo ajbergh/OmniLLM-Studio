@@ -101,7 +101,7 @@ func (r *VideoRenderJobRepo) MarkCompleted(id, outputAssetID string) error {
 	_, err := r.db.Exec(`
 		UPDATE video_render_jobs
 		SET status = 'completed', progress = 1, output_asset_id = ?, error = NULL, completed_at = ?
-		WHERE id = ?`,
+		WHERE id = ? AND status IN ('queued','running')`,
 		outputAssetID, now, id,
 	)
 	if err != nil {
@@ -115,7 +115,7 @@ func (r *VideoRenderJobRepo) MarkFailed(id, message string) error {
 	_, err := r.db.Exec(`
 		UPDATE video_render_jobs
 		SET status = 'failed', error = ?, completed_at = ?
-		WHERE id = ?`,
+		WHERE id = ? AND status <> 'cancelled'`,
 		message, now, id,
 	)
 	if err != nil {

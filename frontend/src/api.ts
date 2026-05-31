@@ -113,6 +113,7 @@ import type {
   VideoStoryboardResponse,
   VideoTimelineDetail,
   VideoTimelineDocument,
+  VideoTimelineRecord,
 } from './types/video';
 
 // In the Wails desktop build the API runs on a real local HTTP server
@@ -1461,7 +1462,7 @@ export const videoApi = {
     }),
 
   sendGenerationToTimeline: (generationId: string) =>
-    apiFetch<{ project_id: string; asset_id?: string; queued: boolean; message: string }>(
+    apiFetch<{ project_id: string; asset_id?: string; timeline: VideoTimelineRecord; document: VideoTimelineDocument }>(
       `/video/generations/${encodeURIComponent(generationId)}/send-to-timeline`,
       { method: 'POST' },
     ),
@@ -1473,9 +1474,9 @@ export const videoApi = {
     source_studio: string;
     source_id: string;
     source_type?: string;
-    kind: VideoAsset['kind'];
-    file_name: string;
-    mime_type: string;
+    kind?: VideoAsset['kind'];
+    file_name?: string;
+    mime_type?: string;
     size_bytes?: number;
     duration_ms?: number;
     width?: number;

@@ -246,6 +246,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	videoTimelineRepo := repository.NewVideoTimelineRepo(database)
 	videoRenderJobRepo := repository.NewVideoRenderJobRepo(database)
 	videoService := video.NewService(videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, providerRepo, cfg.AttachmentsDir)
+	videoService.ConfigureExternalAssetSources(libraryFileRepo, musicSessionRepo, musicAssetRepo, imgAssetRepo, attachRepo, convoRepo, cfg.AttachmentsDir)
 	videoHandler := NewVideoHandler(videoService, videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, cfg.AttachmentsDir)
 	crossoverHandler := NewCrossoverHandler(llmService, providerRepo)
 
