@@ -32,20 +32,6 @@ export function VideoTimeline() {
   const width = Math.max(900, (timeline?.duration_ms || 30000) * pxPerMs);
 
   useEffect(() => {
-    if (!isPlaying || !timeline) return;
-    const id = window.setInterval(() => {
-      const next = useVideoStudioStore.getState().playheadMs + 100;
-      if (next >= timeline.duration_ms) {
-        setPlaying(false);
-        setPlayhead(0);
-      } else {
-        setPlayhead(next);
-      }
-    }, 100);
-    return () => window.clearInterval(id);
-  }, [isPlaying, setPlayhead, setPlaying, timeline]);
-
-  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;

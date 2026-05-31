@@ -1,7 +1,8 @@
 import { Pause, Play } from 'lucide-react';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { videoApi } from '../../api';
 import { useVideoStudioStore } from '../../stores/videoStudio';
+import type { VideoTimelineClip } from '../../types/video';
 
 function formatTime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -16,7 +17,13 @@ export function VideoPreviewCanvas() {
   const playheadMs = useVideoStudioStore((state) => state.playheadMs);
   const isPlaying = useVideoStudioStore((state) => state.isPlaying);
   const setPlaying = useVideoStudioStore((state) => state.setPlaying);
+  const setPlayhead = useVideoStudioStore((state) => state.setPlayhead);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const rafRef = useRef<number | null>(null);
+
+  // Keep a ref to the current clip so effects can read it without being in their dep arrays.
+  const visualClipRef = useRef<VideoTimelineClip | undefined>(undefined);
+  const timelineDurationRef = useRef<number>(0);
 
   const activeClips = (timeline?.tracks || [])
     .filter((track) => track.visible && !track.muted)
@@ -24,6 +31,76 @@ export function VideoPreviewCanvas() {
     .filter(({ clip }) => playheadMs >= clip.start_ms && playheadMs < clip.start_ms + clip.duration_ms);
   const visual = [...activeClips].reverse().find(({ track }) => ['video', 'image', 'text', 'caption', 'callout'].includes(track.type));
   const asset = visual?.clip.asset_id ? assets.find((item) => item.id === visual.clip.asset_id) : undefined;
+
+  // Keep refs in sync every render.
+  visualClipRef.current = visual?.clip;
+  timelineDurationRef.current = timeline?.duration_ms ?? 0;
+
+  // rAF loop: advance playheadMs in the store while playing.
+  useEffect(() => {
+    if (!isPlaying) {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      return;
+    }
+    // Capture the playhead position at the moment play starts.
+    const startWall = performance.now();
+    const startPlayhead = useVideoStudioStore.getState().playheadMs;
+    const tick = () => {
+      const elapsed = performance.now() - startWall;
+      const next = startPlayhead + elapsed;
+      const dur = timelineDurationRef.current;
+      if (dur > 0 && next >= dur) {
+        setPlayhead(0);
+        setPlaying(false);
+        return;
+      }
+      setPlayhead(next);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying]);
+
+  // Play / pause the <video> element and seek it to the right frame on play start.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (isPlaying) {
+      const clip = visualClipRef.current;
+      if (clip) {
+        const trimIn = (clip.trim_in_ms ?? 0) / 1000;
+        const offsetInClip = Math.max(0, useVideoStudioStore.getState().playheadMs - clip.start_ms) / 1000;
+        video.currentTime = trimIn + offsetInClip;
+      }
+      video.play().catch(() => { /* autoplay policy */ });
+    } else {
+      video.pause();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying]);
+
+  // Seek the <video> to match the playhead while paused (scrubbing).
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || isPlaying) return;
+    const clip = visualClipRef.current;
+    if (!clip) return;
+    const trimIn = (clip.trim_in_ms ?? 0) / 1000;
+    const offsetInClip = Math.max(0, playheadMs - clip.start_ms) / 1000;
+    const target = trimIn + offsetInClip;
+    if (Math.abs(video.currentTime - target) > 0.05) {
+      video.currentTime = target;
+    }
+  }, [playheadMs, isPlaying]);
 
   const isVideoAsset = asset !== undefined && asset.mime_type.startsWith('video/');
   const isImageAsset = asset !== undefined && asset.mime_type.startsWith('image/');

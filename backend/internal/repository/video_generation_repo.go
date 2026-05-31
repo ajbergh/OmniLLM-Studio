@@ -62,7 +62,7 @@ func (r *VideoGenerationRepo) ListByProject(projectID string) ([]models.VideoGen
 	}
 	defer rows.Close()
 
-	var generations []models.VideoGeneration
+	generations := make([]models.VideoGeneration, 0)
 	for rows.Next() {
 		generation, err := scanVideoGeneration(rows)
 		if err != nil {

@@ -70,7 +70,7 @@ func (r *VideoAssetRepo) ListByProject(projectID string) ([]models.VideoAsset, e
 	}
 	defer rows.Close()
 
-	var assets []models.VideoAsset
+	assets := make([]models.VideoAsset, 0)
 	for rows.Next() {
 		asset, err := scanVideoAsset(rows)
 		if err != nil {

@@ -392,14 +392,16 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const detail = await videoApi.getProject(projectId);
-      const nextActiveGenerationId = detail.generations[detail.generations.length - 1]?.id || null;
+      const gens = detail.generations ?? [];
+      const assetList = detail.assets ?? [];
+      const nextActiveGenerationId = gens[gens.length - 1]?.id || null;
       set((state) => ({
         projects: upsertProject(state.projects, detail.project),
         activeProjectId: detail.project.id,
         activeGenerationId: nextActiveGenerationId,
-        selectedAssetId: detail.assets[0]?.id || null,
-        generations: detail.generations,
-        assets: detail.assets,
+        selectedAssetId: assetList[0]?.id || null,
+        generations: gens,
+        assets: assetList,
         selectedProvider: detail.project.default_provider || state.selectedProvider,
         selectedModel: detail.project.default_model || state.selectedModel,
         timeline: defaultTimeline(detail.project),

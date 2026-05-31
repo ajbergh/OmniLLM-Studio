@@ -57,7 +57,7 @@ func (r *VideoRenderJobRepo) ListByProject(projectID string) ([]models.VideoRend
 	}
 	defer rows.Close()
 
-	var jobs []models.VideoRenderJob
+	jobs := make([]models.VideoRenderJob, 0)
 	for rows.Next() {
 		job, err := scanVideoRenderJob(rows)
 		if err != nil {
