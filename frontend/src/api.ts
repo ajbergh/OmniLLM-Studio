@@ -93,6 +93,19 @@ import type {
   MusicSession,
   MusicSessionDetail,
 } from './types/music';
+import type {
+  GenerateVideoRequest,
+  VideoAsset,
+  VideoGenerationDetail,
+  VideoGenerationDone,
+  VideoGenerationError,
+  VideoGenerationProgress,
+  VideoModel,
+  VideoProject,
+  VideoProjectDetail,
+  VideoProviderInfo,
+  VideoProviderKey,
+} from './types/video';
 
 // In the Wails desktop build the API runs on a real local HTTP server
 // (required for SSE streaming). The Go App.GetAPIBase() binding returns
@@ -147,6 +160,10 @@ export function attachmentUrl(attachmentId: string): string {
 
 export function musicAssetUrl(assetId: string): string {
   return `${BASE_URL}/music/assets/${encodeURIComponent(assetId)}/download`;
+}
+
+export function videoAssetUrl(assetId: string): string {
+  return `${BASE_URL}/video/assets/${encodeURIComponent(assetId)}/download`;
 }
 
 // Upload a file as an attachment scoped to a conversation.
@@ -1376,6 +1393,185 @@ export const musicApi = {
       `/music/assets/${encodeURIComponent(assetId)}/attach-to-conversation`,
       { method: 'POST', body: JSON.stringify({ conversation_id: conversationId }) },
     ),
+};
+
+// ── Video Studio ──────────────────────────────────────────────────────────
+
+export const videoApi = {
+  providers: () =>
+    apiFetch<VideoProviderInfo[]>('/video/providers'),
+
+  listModels: (provider: VideoProviderKey) =>
+    apiFetch<VideoModel[]>(`/video/models?provider=${encodeURIComponent(provider)}`),
+
+  refreshModels: (provider: VideoProviderKey) =>
+    apiFetch<VideoModel[]>(`/video/models/refresh?provider=${encodeURIComponent(provider)}`, {
+      method: 'POST',
+    }),
+
+  listProjects: () =>
+    apiFetch<VideoProject[]>('/video/projects'),
+
+  createProject: (data: { title?: string; provider?: VideoProviderKey; model?: string; width?: number; height?: number; fps?: number; aspect_ratio?: string } = {}) =>
+    apiFetch<VideoProject>('/video/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getProject: (projectId: string) =>
+    apiFetch<VideoProjectDetail>(`/video/projects/${encodeURIComponent(projectId)}`),
+
+  updateProject: (projectId: string, data: { title?: string; provider?: VideoProviderKey; model?: string; width?: number; height?: number; fps?: number; aspect_ratio?: string }) =>
+    apiFetch<VideoProject>(`/video/projects/${encodeURIComponent(projectId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  deleteProject: (projectId: string) =>
+    apiFetch<{ deleted: boolean }>(`/video/projects/${encodeURIComponent(projectId)}`, {
+      method: 'DELETE',
+    }),
+
+  listGenerations: (projectId: string) =>
+    apiFetch<VideoGenerationDetail[]>(`/video/projects/${encodeURIComponent(projectId)}/generations`),
+
+  getGeneration: (generationId: string) =>
+    apiFetch<VideoGenerationDetail>(`/video/generations/${encodeURIComponent(generationId)}`),
+
+  branchGeneration: (generationId: string) =>
+    apiFetch<{
+      parent_id: string;
+      project_id: string;
+      prompt: string;
+      enhanced_prompt?: string;
+      negative_prompt?: string;
+      provider: VideoProviderKey;
+      model: string;
+      settings_json?: string;
+    }>(`/video/generations/${encodeURIComponent(generationId)}/branch`, {
+      method: 'POST',
+    }),
+
+  sendGenerationToTimeline: (generationId: string) =>
+    apiFetch<{ project_id: string; asset_id?: string; queued: boolean; message: string }>(
+      `/video/generations/${encodeURIComponent(generationId)}/send-to-timeline`,
+      { method: 'POST' },
+    ),
+
+  listAssets: (projectId: string) =>
+    apiFetch<VideoAsset[]>(`/video/projects/${encodeURIComponent(projectId)}/assets`),
+
+  getAsset: (assetId: string) =>
+    apiFetch<VideoAsset>(`/video/assets/${encodeURIComponent(assetId)}`),
+
+  deleteAsset: (assetId: string) =>
+    apiFetch<{ deleted: boolean }>(`/video/assets/${encodeURIComponent(assetId)}`, {
+      method: 'DELETE',
+    }),
+
+  downloadUrl: (assetId: string) => videoAssetUrl(assetId),
+
+  enhancePrompt: (data: { prompt: string; aspect_ratio?: string; duration_seconds?: number; negative_prompt?: string }) =>
+    apiFetch<{ prompt: string }>('/video/enhance-prompt', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  generate: (
+    req: GenerateVideoRequest,
+    callbacks: {
+      onStarted?: (data: VideoGenerationProgress) => void;
+      onProgress?: (data: VideoGenerationProgress) => void;
+      onDone?: (data: VideoGenerationDone) => void;
+      onError?: (data: VideoGenerationError) => void;
+    },
+  ) => {
+    const controller = new AbortController();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (authToken) {
+      headers.Authorization = `Bearer ${authToken}`;
+    }
+
+    fetch(`${BASE_URL}/video/generations`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({ error: response.statusText }));
+          callbacks.onError?.({ error: body.error || `Video generation failed: ${response.status}` });
+          return;
+        }
+        const reader = response.body?.getReader();
+        if (!reader) {
+          callbacks.onError?.({ error: 'No readable stream returned' });
+          return;
+        }
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let currentEvent = 'video_generation_progress';
+        let pendingData = '';
+        let terminalReceived = false;
+
+        const dispatch = (eventType: string, dataStr: string) => {
+          try {
+            const payload = JSON.parse(dataStr);
+            if (eventType === 'video_generation_started') {
+              callbacks.onStarted?.(payload);
+            } else if (eventType === 'video_generation_done') {
+              terminalReceived = true;
+              callbacks.onDone?.(payload);
+            } else if (eventType === 'video_generation_error') {
+              terminalReceived = true;
+              callbacks.onError?.(payload);
+            } else {
+              callbacks.onProgress?.(payload);
+            }
+          } catch {
+            // Ignore malformed SSE frames.
+          }
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line) {
+              if (pendingData) {
+                dispatch(currentEvent, pendingData);
+                pendingData = '';
+                currentEvent = 'video_generation_progress';
+              }
+              continue;
+            }
+            if (line.startsWith('event:')) {
+              currentEvent = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              pendingData += line.slice(5).trim();
+            }
+          }
+        }
+        if (pendingData) {
+          dispatch(currentEvent, pendingData);
+        }
+        if (!terminalReceived) {
+          callbacks.onError?.({ error: 'Video generation stream closed unexpectedly' });
+        }
+      })
+      .catch((err) => {
+        if (err?.name !== 'AbortError') {
+          callbacks.onError?.({ error: err?.message || 'Video generation failed' });
+        }
+      });
+
+    return { abort: () => controller.abort() };
+  },
 };
 
 // ── Crossover Translation ──────────────────────────────────────────────────

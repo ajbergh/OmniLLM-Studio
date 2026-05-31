@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useConversationStore, useSettingsStore, useMessageStore, useProviderStore, useFeatureFlagStore } from '../stores';
 import { useImageEditorStore } from '../stores/imageEditor';
 import { useMusicStudioStore } from '../stores/musicStudio';
+import { useVideoStudioStore } from '../stores/videoStudio';
 import {
   Plus,
   Search,
@@ -20,6 +21,7 @@ import {
   ImageIcon,
   Files,
   Music2,
+  Film,
 } from 'lucide-react';
 import { AppIcon } from './AppIcon';
 import { clsx } from 'clsx';
@@ -27,6 +29,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import type { Conversation, ImageSession } from '../types';
 import type { MusicSession } from '../types/music';
+import type { VideoProject } from '../types/video';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { api, authApi, setAuthToken, imageSessionApi } from '../api';
 
@@ -130,6 +133,14 @@ export function Sidebar() {
     createSession: createMusicSession,
     deleteSession: deleteMusicSession,
   } = useMusicStudioStore();
+  const {
+    projects: videoProjects,
+    activeProjectId,
+    loadProjects: loadVideoProjects,
+    selectProject: selectVideoProject,
+    createProject: createVideoProject,
+    deleteProject: deleteVideoProject,
+  } = useVideoStudioStore();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -139,6 +150,7 @@ export function Sidebar() {
   const [authEnabled, setAuthEnabled] = useState(false);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const musicStudioEnabled = features.length === 0 || isEnabled('music_studio');
+  const videoStudioEnabled = features.length === 0 || isEnabled('video_studio');
 
   useEffect(() => {
     fetchConversations();
@@ -152,7 +164,10 @@ export function Sidebar() {
     if (!musicStudioEnabled && appMode === 'music') {
       setAppMode('chat');
     }
-  }, [appMode, musicStudioEnabled, setAppMode]);
+    if (!videoStudioEnabled && appMode === 'video') {
+      setAppMode('chat');
+    }
+  }, [appMode, musicStudioEnabled, videoStudioEnabled, setAppMode]);
 
   // Load all image sessions when in image mode
   useEffect(() => {
@@ -166,6 +181,12 @@ export function Sidebar() {
       loadMusicSessions();
     }
   }, [appMode, loadMusicSessions]);
+
+  useEffect(() => {
+    if (appMode === 'video') {
+      loadVideoProjects();
+    }
+  }, [appMode, loadVideoProjects]);
 
   // Check if auth is enabled and get current user
   useEffect(() => {
@@ -305,6 +326,7 @@ export function Sidebar() {
   const groups = useMemo(() => groupConversationsByDate(visibleConversations), [visibleConversations]);
   const sessionGroups = useMemo(() => groupSessionsByDate(imageSessions), [imageSessions]);
   const musicSessionGroups = useMemo(() => groupSessionsByDate(musicSessions), [musicSessions]);
+  const videoProjectGroups = useMemo(() => groupSessionsByDate(videoProjects), [videoProjects]);
 
   const handleNewSession = async () => {
     const now = new Date();
@@ -328,6 +350,14 @@ export function Sidebar() {
     }
   };
 
+  const handleNewVideoProject = async () => {
+    const project = await createVideoProject();
+    if (project) {
+      await loadVideoProjects();
+      toast.success('New video project created');
+    }
+  };
+
   const handleSelectSession = useCallback(
     async (session: ImageSession) => {
       await loadSession(session.conversation_id, session.id);
@@ -348,6 +378,17 @@ export function Sidebar() {
       }
     },
     [selectMusicSession, sidebarOpen, toggleSidebar]
+  );
+
+  const handleSelectVideoProject = useCallback(
+    async (project: VideoProject) => {
+      await selectVideoProject(project.id);
+      setContextMenuId(null);
+      if (window.innerWidth < 768 && sidebarOpen) {
+        toggleSidebar();
+      }
+    },
+    [selectVideoProject, sidebarOpen, toggleSidebar]
   );
 
   const handleDeleteSession = (session: ImageSession) => {
@@ -380,6 +421,20 @@ export function Sidebar() {
         label: 'Delete',
         onClick: async () => {
           await deleteMusicSession(session.id);
+        },
+      },
+      cancel: { label: 'Cancel', onClick: () => {} },
+      duration: 5000,
+    });
+  };
+
+  const handleDeleteVideoProject = (project: VideoProject) => {
+    setContextMenuId(null);
+    toast('Delete this video project?', {
+      action: {
+        label: 'Delete',
+        onClick: async () => {
+          await deleteVideoProject(project.id);
         },
       },
       cancel: { label: 'Cancel', onClick: () => {} },
@@ -430,9 +485,9 @@ export function Sidebar() {
           <motion.button
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
-            onClick={appMode === 'image' ? handleNewSession : appMode === 'music' ? handleNewMusicSession : handleNew}
+            onClick={appMode === 'image' ? handleNewSession : appMode === 'music' ? handleNewMusicSession : appMode === 'video' ? handleNewVideoProject : handleNew}
             className="p-2 rounded-xl hover:bg-surface-hover text-text-muted hover:text-primary transition-colors"
-            aria-label={appMode === 'image' ? 'New image session' : appMode === 'music' ? 'New music session' : 'New conversation (Ctrl+N)'}
+            aria-label={appMode === 'image' ? 'New image session' : appMode === 'music' ? 'New music session' : appMode === 'video' ? 'New video project' : 'New conversation (Ctrl+N)'}
           >
             <Plus size={16} />
           </motion.button>
@@ -450,43 +505,57 @@ export function Sidebar() {
 
       {/* Mode Switcher */}
       <div className="px-3 pb-2">
-        <div className="flex rounded-xl bg-surface border border-border p-1">
+        <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface border border-border p-1">
           <button
             onClick={() => setAppMode('chat')}
             className={clsx(
-              'flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
+              'min-h-10 px-2 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
               appMode === 'chat'
                 ? 'bg-primary/20 text-primary shadow-sm'
                 : 'text-text-muted hover:text-text hover:bg-surface-hover'
             )}
           >
             <MessageSquare size={14} />
-            Chat Studio
+            Chat
           </button>
           <button
             onClick={() => setAppMode('image')}
             className={clsx(
-              'flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
+              'min-h-10 px-2 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
               appMode === 'image'
                 ? 'bg-primary/20 text-primary shadow-sm'
                 : 'text-text-muted hover:text-text hover:bg-surface-hover'
             )}
           >
             <ImageIcon size={14} />
-            Image Studio
+            Image
           </button>
           {musicStudioEnabled && (
             <button
               onClick={() => setAppMode('music')}
               className={clsx(
-                'flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
+                'min-h-10 px-2 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
                 appMode === 'music'
                   ? 'bg-primary/20 text-primary shadow-sm'
                   : 'text-text-muted hover:text-text hover:bg-surface-hover'
               )}
             >
               <Music2 size={14} />
-              Music Studio
+              Music
+            </button>
+          )}
+          {videoStudioEnabled && (
+            <button
+              onClick={() => setAppMode('video')}
+              className={clsx(
+                'min-h-10 px-2 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
+                appMode === 'video'
+                  ? 'bg-primary/20 text-primary shadow-sm'
+                  : 'text-text-muted hover:text-text hover:bg-surface-hover'
+              )}
+            >
+              <Film size={14} />
+              Video
             </button>
           )}
         </div>
@@ -646,6 +715,46 @@ export function Sidebar() {
                     setContextMenuId={setContextMenuId}
                     onSelect={handleSelectMusicSession}
                     onDelete={handleDeleteMusicSession}
+                    index={i}
+                  />
+                ))}
+              </div>
+            ))
+          )
+        ) : appMode === 'video' ? (
+          // ── Video Projects List ──
+          videoProjects.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-center py-12 px-4"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mx-auto mb-4">
+                <Film size={20} className="text-primary" />
+              </div>
+              <p className="text-text-muted text-sm mb-3">No video projects yet</p>
+              <button
+                onClick={handleNewVideoProject}
+                className="btn-primary px-4 py-2 rounded-xl text-xs font-medium inline-flex items-center gap-1.5"
+              >
+                <Plus size={13} /> Start your first project
+              </button>
+            </motion.div>
+          ) : (
+            videoProjectGroups.map((group) => (
+              <div key={group.label} className="mb-2">
+                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-text-muted/60">
+                  {group.label}
+                </div>
+                {group.sessions.map((project, i) => (
+                  <VideoProjectItem
+                    key={project.id}
+                    project={project}
+                    isActive={project.id === activeProjectId}
+                    contextMenuId={contextMenuId}
+                    setContextMenuId={setContextMenuId}
+                    onSelect={handleSelectVideoProject}
+                    onDelete={handleDeleteVideoProject}
                     index={i}
                   />
                 ))}
@@ -1121,6 +1230,89 @@ function MusicSessionItem({
             <ContextMenuItem
               icon={<Trash2 size={13} />}
               onClick={() => onDelete(session)}
+              danger
+            >
+              Delete
+            </ContextMenuItem>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+function VideoProjectItem({
+  project,
+  isActive,
+  contextMenuId,
+  setContextMenuId,
+  onSelect,
+  onDelete,
+  index,
+}: {
+  project: VideoProject;
+  isActive: boolean;
+  contextMenuId: string | null;
+  setContextMenuId: (id: string | null) => void;
+  onSelect: (project: VideoProject) => void;
+  onDelete: (project: VideoProject) => void;
+  index: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: index * 0.03, duration: 0.3 }}
+      onClick={() => onSelect(project)}
+      className={clsx(
+        'group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer text-sm mb-0.5',
+        'transition-all duration-200 relative',
+        isActive
+          ? 'bg-primary/10 text-text border border-primary/20'
+          : 'text-text-secondary hover:bg-surface-hover hover:text-text border border-transparent'
+      )}
+    >
+      {isActive && (
+        <motion.div
+          layoutId="active-video-project-indicator"
+          className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-full bg-gradient-to-b from-primary to-accent"
+          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+        />
+      )}
+
+      <Film size={14} className={clsx(
+        'shrink-0 transition-colors',
+        isActive ? 'text-primary' : 'opacity-40'
+      )} />
+
+      <span className="flex-1 truncate">{project.title}</span>
+
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setContextMenuId(contextMenuId === project.id ? null : project.id);
+        }}
+        className={clsx(
+          'p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all',
+          contextMenuId === project.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
+        )}
+      >
+        <MoreHorizontal size={14} />
+      </button>
+
+      <AnimatePresence>
+        {contextMenuId === project.id && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -4 }}
+            transition={{ duration: 0.15 }}
+            className="absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1.5 bg-surface-raised border border-border rounded-xl shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ContextMenuItem
+              icon={<Trash2 size={13} />}
+              onClick={() => onDelete(project)}
               danger
             >
               Delete

@@ -7,6 +7,7 @@ import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/ChatView';
 import { ImageEditStudio } from './components/image/ImageEditStudio';
 import { MusicStudio } from './components/music/MusicStudio';
+import { VideoStudio } from './components/video/VideoStudio';
 import { SettingsPanel } from './components/SettingsPanel';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { LoginScreen } from './components/LoginScreen';
@@ -21,6 +22,7 @@ import { DialogShell } from './components/DialogShell';
 import { useSettingsStore, useConversationStore, useMessageStore, useProviderStore } from './stores';
 import { useImageEditorStore } from './stores/imageEditor';
 import { useMusicStudioStore } from './stores/musicStudio';
+import { useVideoStudioStore } from './stores/videoStudio';
 import { authApi } from './api';
 import { matchesShortcut } from './shortcuts';
 import {
@@ -79,6 +81,7 @@ function App() {
   const providers = useProviderStore((s) => s.providers);
   const { createSession: createImageSession, loadAllSessions, loadSession: loadImageSession } = useImageEditorStore();
   const { createSession: createMusicSession, loadSessions: loadMusicSessions } = useMusicStudioStore();
+  const { createProject: createVideoProject, loadProjects: loadVideoProjects } = useVideoStudioStore();
   const [activePanel, setActivePanel] = useState<OverlayPanel | null>(null);
   const [fileLibraryPreferredScope, setFileLibraryPreferredScope] = useState<'workspace' | 'conversation' | 'global' | 'all'>('all');
   const [fileLibraryPreferredWorkspaceId, setFileLibraryPreferredWorkspaceId] = useState<string | null>(null);
@@ -173,6 +176,14 @@ function App() {
           });
           return;
         }
+        if (appMode === 'video') {
+          createVideoProject().then(async (project) => {
+            if (!project) return;
+            await loadVideoProjects();
+            toast.success('New video project created');
+          });
+          return;
+        }
         const enabledProviders = providers.filter((p) => p.enabled);
         const defaultProvider = enabledProviders[0];
         createConversation(undefined, {
@@ -223,10 +234,12 @@ function App() {
       createConversation,
       createImageSession,
       createMusicSession,
+      createVideoProject,
       clearMessages,
       loadAllSessions,
       loadImageSession,
       loadMusicSessions,
+      loadVideoProjects,
       openSettingsPanel,
       providers,
       selectConversation,
@@ -348,7 +361,7 @@ function App() {
             <div className="flex min-h-11 items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-text-muted">
-                  {appMode === 'image' ? 'Image Studio' : appMode === 'music' ? 'Music Studio' : 'Chat Studio'}
+                  {appMode === 'image' ? 'Image Studio' : appMode === 'music' ? 'Music Studio' : appMode === 'video' ? 'Video Studio' : 'Chat Studio'}
                 </p>
               </div>
 
@@ -409,6 +422,7 @@ function App() {
           {appMode === 'chat' && <ChatView />}
           {appMode === 'image' && <ImageEditStudio />}
           {appMode === 'music' && <MusicStudio />}
+          {appMode === 'video' && <VideoStudio />}
         </main>
 
         <DialogShell

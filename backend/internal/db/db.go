@@ -129,6 +129,7 @@ func versionedMigrations() []Migration {
 		{Version: 34, Name: "workspace_project_context", SQL: migrationWorkspaceProjectContext},
 		{Version: 35, Name: "browser_sessions_and_flag", SQL: migrationBrowserSessionsAndFlag},
 		{Version: 36, Name: "music_studio", SQL: migrationMusicStudio},
+		{Version: 37, Name: "video_studio_foundation", SQL: migrationVideoStudioFoundation},
 	}
 }
 
@@ -640,6 +641,87 @@ INSERT INTO settings (key, value_json) VALUES
 	('custom_gemini_lyria_model', ''),
 	('auto_enhance_music_prompts', 'false'),
 	('save_music_generation_metadata', 'true')
+ON CONFLICT(key) DO NOTHING;
+`
+
+// V37: Video Studio projects, generations, assets, and feature flag.
+const migrationVideoStudioFoundation = `
+CREATE TABLE IF NOT EXISTS video_projects (
+	id TEXT PRIMARY KEY,
+	user_id TEXT,
+	title TEXT NOT NULL,
+	active_timeline_id TEXT,
+	default_provider TEXT,
+	default_model TEXT,
+	width INTEGER NOT NULL DEFAULT 1920,
+	height INTEGER NOT NULL DEFAULT 1080,
+	fps INTEGER NOT NULL DEFAULT 30,
+	duration_ms INTEGER NOT NULL DEFAULT 0,
+	aspect_ratio TEXT NOT NULL DEFAULT '16:9',
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS video_generations (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	parent_id TEXT,
+	status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','completed','failed','cancelled')),
+	provider TEXT NOT NULL,
+	model TEXT NOT NULL,
+	prompt TEXT NOT NULL,
+	enhanced_prompt TEXT,
+	negative_prompt TEXT,
+	settings_json TEXT NOT NULL DEFAULT '{}',
+	input_asset_ids_json TEXT NOT NULL DEFAULT '[]',
+	output_asset_id TEXT,
+	upstream_job_id TEXT,
+	upstream_request_id TEXT,
+	usage_json TEXT,
+	cost_usd REAL,
+	error TEXT,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	completed_at DATETIME,
+	FOREIGN KEY (project_id) REFERENCES video_projects(id) ON DELETE CASCADE,
+	FOREIGN KEY (parent_id) REFERENCES video_generations(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS video_assets (
+	id TEXT PRIMARY KEY,
+	project_id TEXT,
+	source_type TEXT NOT NULL,
+	source_studio TEXT,
+	source_id TEXT,
+	kind TEXT NOT NULL CHECK(kind IN ('video','image','audio','music','text','caption','export','other')),
+	file_name TEXT NOT NULL,
+	file_path TEXT NOT NULL,
+	mime_type TEXT NOT NULL,
+	size_bytes INTEGER NOT NULL DEFAULT 0,
+	duration_ms INTEGER,
+	width INTEGER,
+	height INTEGER,
+	fps REAL,
+	thumbnail_path TEXT,
+	waveform_path TEXT,
+	provider TEXT,
+	model TEXT,
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	FOREIGN KEY (project_id) REFERENCES video_projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_projects_user ON video_projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_video_projects_updated_at ON video_projects(updated_at);
+CREATE INDEX IF NOT EXISTS idx_video_generations_project ON video_generations(project_id);
+CREATE INDEX IF NOT EXISTS idx_video_generations_parent ON video_generations(parent_id);
+CREATE INDEX IF NOT EXISTS idx_video_generations_status ON video_generations(status);
+CREATE INDEX IF NOT EXISTS idx_video_assets_project ON video_assets(project_id);
+CREATE INDEX IF NOT EXISTS idx_video_assets_kind ON video_assets(kind);
+
+INSERT INTO feature_flags (key, enabled, metadata)
+VALUES ('video_studio', 1, '{"label":"Video Studio","description":"AI video generation and timeline editing."}')
 ON CONFLICT(key) DO NOTHING;
 `
 

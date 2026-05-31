@@ -32,6 +32,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/templates"
 	"github.com/ajbergh/omnillm-studio/internal/tools"
 	"github.com/ajbergh/omnillm-studio/internal/urlcontext"
+	"github.com/ajbergh/omnillm-studio/internal/video"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
 	"github.com/ajbergh/omnillm-studio/internal/wordgen"
 	"github.com/go-chi/chi/v5"
@@ -237,6 +238,13 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 		providerRepo, settingsRepo, llmService, cfg.AttachmentsDir,
 	)
 	musicHandler := NewMusicHandler(musicService, musicSessionRepo, musicGenerationRepo, musicAssetRepo, attachRepo, convoRepo, cfg.AttachmentsDir)
+
+	// Video Studio Projects
+	videoProjectRepo := repository.NewVideoProjectRepo(database)
+	videoGenerationRepo := repository.NewVideoGenerationRepo(database)
+	videoAssetRepo := repository.NewVideoAssetRepo(database)
+	videoService := video.NewService(videoProjectRepo, videoGenerationRepo, videoAssetRepo, cfg.AttachmentsDir)
+	videoHandler := NewVideoHandler(videoService, videoProjectRepo, videoGenerationRepo, videoAssetRepo, cfg.AttachmentsDir)
 	crossoverHandler := NewCrossoverHandler(llmService, providerRepo)
 
 	// Semantic Search
@@ -395,6 +403,30 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Get("/music/assets/{assetId}/download", musicHandler.DownloadAsset)
 			r.Delete("/music/assets/{assetId}", musicHandler.DeleteAsset)
 			r.Post("/music/assets/{assetId}/attach-to-conversation", musicHandler.AttachToConversation)
+
+			// Video Studio
+			r.Get("/video/providers", videoHandler.Providers)
+			r.Get("/video/models", videoHandler.Models)
+			r.Post("/video/models/refresh", videoHandler.RefreshModels)
+			r.Route("/video/projects", func(r chi.Router) {
+				r.Get("/", videoHandler.ListProjects)
+				r.Post("/", videoHandler.CreateProject)
+				r.Route("/{projectId}", func(r chi.Router) {
+					r.Get("/", videoHandler.GetProject)
+					r.Patch("/", videoHandler.UpdateProject)
+					r.Delete("/", videoHandler.DeleteProject)
+					r.Get("/generations", videoHandler.ListGenerations)
+					r.Get("/assets", videoHandler.ListAssets)
+				})
+			})
+			r.Post("/video/generations", videoHandler.Generate)
+			r.Get("/video/generations/{generationId}", videoHandler.GetGeneration)
+			r.Post("/video/generations/{generationId}/branch", videoHandler.BranchGeneration)
+			r.Post("/video/generations/{generationId}/send-to-timeline", videoHandler.SendGenerationToTimeline)
+			r.Get("/video/assets/{assetId}", videoHandler.GetAsset)
+			r.Get("/video/assets/{assetId}/download", videoHandler.DownloadAsset)
+			r.Delete("/video/assets/{assetId}", videoHandler.DeleteAsset)
+			r.Post("/video/enhance-prompt", videoHandler.EnhancePrompt)
 
 			// Cross-studio domain translation
 			r.Post("/crossover/translate", crossoverHandler.Translate)
