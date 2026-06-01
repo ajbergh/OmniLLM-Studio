@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { DragHandle, useResizablePanels } from '../ResizablePanels';
 import { useImageEditorStore } from '../../stores/imageEditor';
 import { useProviderStore, useConversationStore, useMessageStore, useSettingsStore, useCrossoverStore } from '../../stores';
 import { useMusicStudioStore } from '../../stores/musicStudio';
@@ -466,6 +467,8 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     }
   };
 
+  const { leftStyle, rightStyle, startLeft, startRight, isWide } = useResizablePanels({ defaultLeft: 320, defaultRight: 288, breakpoint: 1024 });
+
   if (!conversationId) {
     return (
       <div className="flex-1 flex items-center justify-center bg-surface">
@@ -594,8 +597,8 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
           'min-h-0 flex-1 flex-col overflow-y-auto border-border bg-surface-raised',
           'border-b lg:border-b-0 lg:border-r',
           mobilePanel === 'prompt' ? 'flex' : 'hidden',
-          leftPanelOpen ? 'lg:flex lg:w-80 lg:flex-none lg:shrink-0' : 'lg:hidden'
-        )}>
+          leftPanelOpen ? 'lg:flex lg:flex-none lg:shrink-0' : 'lg:hidden'
+        )} style={leftPanelOpen ? leftStyle : undefined}>
           <div className="p-4 space-y-4">
             {activeSessionId && (
               <>
@@ -1109,6 +1112,8 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
         </div>
         )}
 
+        {leftPanelOpen && isWide && <DragHandle visibilityClass="hidden lg:flex" onMouseDown={startLeft} />}
+
         {/* Center — canvas */}
         <div className={clsx(
           'min-w-0 flex-1 bg-surface items-center justify-center relative overflow-hidden',
@@ -1179,14 +1184,16 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
           {/* Zoom controls removed — now provided by CanvasToolbar in ImageCanvas */}
         </div>
 
+        {rightPanelOpen && isWide && <DragHandle visibilityClass="hidden lg:flex" onMouseDown={startRight} />}
+
         {/* Right panel — history */}
         {(rightPanelOpen || mobilePanel === 'history') && (
         <div className={clsx(
           'min-h-0 flex-1 overflow-y-auto border-border bg-surface-raised',
           'border-t lg:border-t-0 lg:border-l',
           mobilePanel === 'history' ? 'block' : 'hidden',
-          rightPanelOpen ? 'lg:block lg:w-72 lg:flex-none lg:shrink-0' : 'lg:hidden'
-        )}>
+          rightPanelOpen ? 'lg:block lg:flex-none lg:shrink-0' : 'lg:hidden'
+        )} style={rightPanelOpen ? rightStyle : undefined}>
           <ImageHistoryPanel
             conversationId={conversationId!}
             nodes={nodes}

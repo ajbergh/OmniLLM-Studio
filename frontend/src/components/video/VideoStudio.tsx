@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { DragHandle, useResizablePanels } from '../ResizablePanels';
 import type { ReactNode } from 'react';
 import {
   ChevronDown,
@@ -241,6 +242,8 @@ export function VideoStudio() {
     generate();
   };
 
+  const { leftStyle, rightStyle, startLeft, startRight } = useResizablePanels({ defaultLeft: 360, defaultRight: 320 });
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface">
       <div className="flex flex-col gap-2 border-b border-border bg-surface-raised px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:px-4">
@@ -269,8 +272,8 @@ export function VideoStudio() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)_320px]">
-        <aside className="min-h-0 overflow-y-auto border-b border-border bg-surface xl:border-b-0 xl:border-r">
+      <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
+        <aside className="min-h-0 overflow-y-auto border-b border-border bg-surface xl:border-b-0 xl:border-r" style={leftStyle}>
           <div className="space-y-3 p-3">
             <ProjectStrip
               projects={projects}
@@ -657,11 +660,15 @@ export function VideoStudio() {
           </div>
         </aside>
 
-        <main className="min-h-0 min-w-0 overflow-y-auto bg-surface p-3">
+        <DragHandle onMouseDown={startLeft} />
+
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-surface p-3">
           <ResultPreview asset={activeAsset} generation={activeGeneration} onEdit={() => setAppMode('video-edit')} />
         </main>
 
-        <aside className="min-h-0 overflow-y-auto border-t border-border bg-surface-raised xl:border-l xl:border-t-0">
+        <DragHandle onMouseDown={startRight} />
+
+        <aside className="min-h-0 overflow-y-auto border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
           <HistoryPanel
             generations={generations}
             activeGenerationId={activeGeneration?.id || null}

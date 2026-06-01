@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { DragHandle, useResizablePanels } from '../ResizablePanels';
 import { Download, Film, Loader2, Plus, Scissors } from 'lucide-react';
 import { toast } from 'sonner';
 import { videoApi } from '../../api';
@@ -40,6 +41,8 @@ export function VideoEditStudio() {
     [assets, selectedAssetId],
   );
 
+  const { leftStyle, rightStyle, startLeft, startRight } = useResizablePanels({ defaultLeft: 300, defaultRight: 340 });
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface">
       <div className="flex flex-col gap-2 border-b border-border bg-surface-raised px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:px-4">
@@ -75,8 +78,8 @@ export function VideoEditStudio() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)_340px]">
-        <aside className="min-h-0 overflow-y-auto border-b border-border bg-surface xl:border-b-0 xl:border-r">
+      <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
+        <aside className="min-h-0 overflow-y-auto border-b border-border bg-surface xl:border-b-0 xl:border-r" style={leftStyle}>
           <div className="space-y-3 p-3">
             <ProjectStrip
               projects={projects}
@@ -94,7 +97,9 @@ export function VideoEditStudio() {
           </div>
         </aside>
 
-        <main className="flex min-h-[620px] min-w-0 flex-col bg-surface">
+        <DragHandle onMouseDown={startLeft} />
+
+        <main className="flex min-h-[620px] min-w-0 flex-1 flex-col bg-surface">
           <section className="min-h-0 flex-1 border-b border-border p-3">
             <VideoPreviewCanvas />
           </section>
@@ -103,7 +108,9 @@ export function VideoEditStudio() {
           </section>
         </main>
 
-        <aside className="min-h-0 overflow-y-auto border-t border-border bg-surface-raised xl:border-l xl:border-t-0">
+        <DragHandle onMouseDown={startRight} />
+
+        <aside className="min-h-0 overflow-y-auto border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
           <VideoInspector />
           <div className="px-3 pb-3">
             <VideoRenderPanel />
