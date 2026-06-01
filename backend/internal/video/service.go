@@ -156,6 +156,10 @@ func (s *Service) ListModels(ctx context.Context, provider string, refresh bool)
 	return s.providerRegistry().ListModels(ctx, provider)
 }
 
+func (s *Service) ValidateGeneration(ctx context.Context, req GenerateRequest) GenerateValidationResult {
+	return s.providerRegistry().ValidateGenerateRequest(ctx, req)
+}
+
 func (s *Service) CreateProject(userID, title, provider, model string, width, height, fps int, aspectRatio string) (*models.VideoProject, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -216,17 +220,18 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 	if !provider.Configured() {
 		return nil, nil, nil, fmt.Errorf("%w: no enabled %s provider profile with an API key", ErrProviderUnavailable, providerKey)
 	}
-	if strings.TrimSpace(req.Prompt) == "" {
-		return nil, nil, nil, fmt.Errorf("prompt is required")
-	}
-
 	modelID := strings.TrimSpace(req.Model)
 	if modelID == "" {
 		modelID = registry.DefaultModel(ctx, providerKey)
 	}
-	if modelID == "" || !registry.ValidateModel(ctx, providerKey, modelID) {
-		return nil, nil, nil, fmt.Errorf("%w: %s is not supported by %s", ErrCapabilityUnsupported, modelID, providerKey)
+	req.Provider = providerKey
+	req.Model = modelID
+	validation := registry.ValidateGenerateRequest(ctx, req)
+	if !validation.Valid {
+		return nil, nil, nil, fmt.Errorf("%w: %s", ErrCapabilityUnsupported, validation.ErrorMessage())
 	}
+	req = validation.NormalizedRequest
+	modelID = req.Model
 
 	project, err := s.ensureProject(ctx, userID, req, providerKey, modelID)
 	if err != nil {
@@ -466,17 +471,26 @@ func (s *Service) GenerateAsync(ctx context.Context, userID string, req Generate
 		return nil, nil, fmt.Errorf("%w: unsupported video provider", ErrCapabilityUnsupported)
 	}
 	registry := s.providerRegistry()
-	if _, ok := registry.Provider(providerKey); !ok {
+	provider, ok := registry.Provider(providerKey)
+	if !ok {
 		return nil, nil, fmt.Errorf("%w: no adapter registered for %s", ErrProviderUnavailable, providerKey)
+	}
+	if !provider.Configured() {
+		return nil, nil, fmt.Errorf("%w: no enabled %s provider profile with an API key", ErrProviderUnavailable, providerKey)
 	}
 
 	modelID := strings.TrimSpace(req.Model)
 	if modelID == "" {
 		modelID = registry.DefaultModel(ctx, providerKey)
 	}
-	if strings.TrimSpace(req.Prompt) == "" {
-		return nil, nil, fmt.Errorf("prompt is required")
+	req.Provider = providerKey
+	req.Model = modelID
+	validation := registry.ValidateGenerateRequest(ctx, req)
+	if !validation.Valid {
+		return nil, nil, fmt.Errorf("%w: %s", ErrCapabilityUnsupported, validation.ErrorMessage())
 	}
+	req = validation.NormalizedRequest
+	modelID = req.Model
 
 	project, err := s.ensureProject(ctx, userID, req, providerKey, modelID)
 	if err != nil {

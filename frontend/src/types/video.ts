@@ -28,6 +28,26 @@ export interface VideoModel {
   notes?: string;
 }
 
+export interface VideoGenerationValidationIssue {
+  code: string;
+  field?: string;
+  message: string;
+  severity: 'error' | 'warning' | 'normalization';
+  original?: unknown;
+  normalized?: unknown;
+}
+
+export interface VideoGenerationValidationResult {
+  valid: boolean;
+  provider?: VideoProviderKey;
+  model?: string;
+  capabilities?: VideoCapability[];
+  normalized_request: GenerateVideoRequest;
+  errors: VideoGenerationValidationIssue[];
+  warnings: VideoGenerationValidationIssue[];
+  normalizations: VideoGenerationValidationIssue[];
+}
+
 export interface VideoProviderInfo {
   key: VideoProviderKey;
   display_name: string;
@@ -89,6 +109,9 @@ export interface VideoGenerationDetail {
   input_asset_ids_json?: string;
   input_assets_json?: string;
   output_asset_id?: string;
+  upstream_job_id?: string;
+  upstream_request_id?: string;
+  usage_json?: string;
   asset_url?: string;
   mime_type?: string;
   cost_usd?: number;

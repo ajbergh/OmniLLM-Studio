@@ -152,7 +152,11 @@ type GenerationDetail struct {
 	NegativePrompt    *string    `json:"negative_prompt,omitempty"`
 	SettingsJSON      string     `json:"settings_json,omitempty"`
 	InputAssetIDsJSON string     `json:"input_asset_ids_json,omitempty"`
+	InputAssetsJSON   string     `json:"input_assets_json,omitempty"`
 	OutputAssetID     *string    `json:"output_asset_id,omitempty"`
+	UpstreamJobID     *string    `json:"upstream_job_id,omitempty"`
+	UpstreamReqID     *string    `json:"upstream_request_id,omitempty"`
+	UsageJSON         *string    `json:"usage_json,omitempty"`
 	AssetURL          string     `json:"asset_url,omitempty"`
 	MimeType          string     `json:"mime_type,omitempty"`
 	CostUSD           *float64   `json:"cost_usd,omitempty"`

@@ -2,11 +2,13 @@ import { create } from 'zustand';
 import { toast } from 'sonner';
 import { videoApi } from '../api';
 import type {
+  InputAsset,
   VideoAsset,
   VideoEditPlan,
   VideoExportSettings,
   VideoGenerationDetail,
   VideoGenerationProgress,
+  VideoGenerationValidationResult,
   VideoModel,
   VideoProject,
   VideoPromptForm,
@@ -144,6 +146,41 @@ function parseGenerationSettings(generation: VideoGenerationDetail | null | unde
   }
 }
 
+function parseGenerationInputAssets(inputAssetsJson?: string, inputAssetIdsJson?: string): Partial<VideoPromptForm> {
+  const fields: Partial<VideoPromptForm> = {};
+  if (inputAssetsJson) {
+    try {
+      const parsed = JSON.parse(inputAssetsJson) as InputAsset[];
+      if (Array.isArray(parsed)) {
+        const references: string[] = [];
+        for (const item of parsed) {
+          if (!item?.asset_id) continue;
+          if (item.role === 'start_frame') fields.start_image_asset_id = item.asset_id;
+          if (item.role === 'last_frame') fields.last_frame_asset_id = item.asset_id;
+          if (item.role === 'source_video') fields.source_video_asset_id = item.asset_id;
+          if (item.role === 'reference_image') references.push(item.asset_id);
+        }
+        if (references.length > 0) fields.reference_asset_ids = references;
+        return fields;
+      }
+    } catch {
+      // Fall back to the legacy flat asset ID list below.
+    }
+  }
+
+  if (inputAssetIdsJson) {
+    try {
+      const ids = JSON.parse(inputAssetIdsJson) as string[];
+      if (Array.isArray(ids) && ids[0]) {
+        fields.start_image_asset_id = ids[0];
+      }
+    } catch {
+      return fields;
+    }
+  }
+  return fields;
+}
+
 function assetTrackType(asset?: VideoAsset): VideoTimelineTrackType {
   if (!asset) return 'video';
   if (asset.kind === 'music') return 'music';
@@ -211,6 +248,7 @@ interface VideoStudioState {
   isSavingTimeline: boolean;
   isRendering: boolean;
   generationProgress: VideoGenerationProgress | null;
+  generationValidation: VideoGenerationValidationResult | null;
   error: string | null;
   abortGeneration: (() => void) | null;
   _pollInterval: ReturnType<typeof setInterval> | null;
@@ -227,6 +265,7 @@ interface VideoStudioState {
   enhancePrompt: () => Promise<void>;
   generate: (parentId?: string) => void;
   branchFromGeneration: (generationId: string) => Promise<void>;
+  regenerateFromGeneration: (generationId: string) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
   stopGeneration: () => void;
   cancelGeneration: () => Promise<void>;
@@ -304,6 +343,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   isSavingTimeline: false,
   isRendering: false,
   generationProgress: null,
+  generationValidation: null,
   error: null,
   abortGeneration: null,
   _pollInterval: null,
@@ -336,6 +376,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         modelsByProvider: { ...state.modelsByProvider, [provider]: models },
         selectedProvider: provider,
         selectedModel,
+        generationValidation: null,
       }));
     } catch (err) {
       set({ error: (err as Error).message });
@@ -379,6 +420,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         assets: [],
         timeline: defaultTimeline(project),
         timelineRecord: null,
+        generationValidation: null,
       }));
       await get().loadTimeline(project.id);
       return project;
@@ -410,6 +452,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         selectedClipId: null,
         selectedTrackId: null,
         playheadMs: 0,
+        generationValidation: null,
         isLoading: false,
       }));
       if (detail.project.default_provider) {
@@ -422,17 +465,18 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   },
 
   setProvider: async (provider) => {
-    set({ selectedProvider: provider, selectedModel: null });
+    set({ selectedProvider: provider, selectedModel: null, generationValidation: null });
     await get().loadModels(provider);
   },
 
-  setModel: (model) => set({ selectedModel: model }),
+  setModel: (model) => set({ selectedModel: model, generationValidation: null }),
 
   setPromptField: (key, value) => set((state) => ({
     promptForm: { ...state.promptForm, [key]: value },
+    generationValidation: null,
   })),
 
-  clearPrompt: () => set({ promptForm: cloneForm(), error: null, generationProgress: null }),
+  clearPrompt: () => set({ promptForm: cloneForm(), error: null, generationProgress: null, generationValidation: null }),
 
   enhancePrompt: async () => {
     const { promptForm } = get();
@@ -473,78 +517,116 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       toast.error('Enter a video prompt');
       return;
     }
-    set({
-      isGenerating: true,
-      generationProgress: { stage: 'queued', message: 'Preparing video generation' },
-      error: null,
-    });
-    videoApi.generate({
-      ...promptForm,
-      provider: selectedProvider,
-      model: selectedModel,
-      prompt: promptForm.prompt.trim(),
-      project_id: activeProjectId || undefined,
-      parent_id: parentId,
-    }).then((resp) => {
-      set((state) => ({
-        activeProjectId: resp.project_id,
-        activeGenerationId: resp.generation_id,
-        generations: upsertGeneration(state.generations, resp.generation),
-        generationProgress: { stage: 'running', message: 'Video generation in progress' },
-      }));
-      // Start polling until terminal state
-      const interval = setInterval(async () => {
-        try {
-          const gen = await videoApi.getGeneration(resp.generation_id);
-          set((state) => ({ generations: upsertGeneration(state.generations, gen) }));
-          if (gen.status === 'completed') {
-            clearInterval(interval);
-            set({
-              isGenerating: false,
-              _pollInterval: null,
-              generationProgress: { stage: 'done', message: 'Video generation complete', progress: 1 },
-              activeGenerationId: gen.id,
-              selectedAssetId: gen.output_asset_id || get().selectedAssetId,
-            });
-            if (gen.output_asset_id) {
-              // Reload project assets
-              const proj = get().activeProjectId;
-              if (proj) {
-                videoApi.getProject(proj).then((detail) => {
-                  set({ assets: detail.assets ?? [] });
-                  if (get().promptForm.place_on_timeline && gen.output_asset_id) {
-                    void get().addAssetToTimeline(gen.output_asset_id);
-                  }
-                }).catch(() => { /* non-fatal */ });
-              }
-            }
-            toast.success('Video generation complete');
-          } else if (gen.status === 'failed' || gen.status === 'cancelled') {
-            clearInterval(interval);
-            set({
-              isGenerating: false,
-              _pollInterval: null,
-              generationProgress: null,
-              error: gen.error || `Video generation ${gen.status}`,
-            });
-            toast.error(gen.error || `Video generation ${gen.status}`);
-          } else {
-            set({ generationProgress: { stage: gen.status, message: 'Video generation in progress' } });
-          }
-        } catch {
-          // Polling error is transient — keep trying
+    void (async () => {
+      const baseRequest = {
+        ...promptForm,
+        provider: selectedProvider,
+        model: selectedModel,
+        prompt: promptForm.prompt.trim(),
+        project_id: activeProjectId || undefined,
+        parent_id: parentId,
+      };
+      let generationRequest = baseRequest;
+      try {
+        const validation = await videoApi.validateGeneration(baseRequest);
+        set({ generationValidation: validation });
+        if (!validation.valid) {
+          const message = validation.errors[0]?.message || 'Video generation settings are invalid';
+          set({ error: message, generationProgress: null, isGenerating: false });
+          toast.error(message);
+          return;
         }
-      }, 8000);
-      set({ _pollInterval: interval, abortGeneration: null });
-    }).catch((err: Error) => {
+        generationRequest = {
+          ...baseRequest,
+          ...validation.normalized_request,
+          project_id: activeProjectId || undefined,
+          parent_id: parentId,
+        };
+        if (validation.normalizations.length > 0) {
+          set((state) => ({
+            promptForm: {
+              ...state.promptForm,
+              aspect_ratio: generationRequest.aspect_ratio,
+              duration_seconds: generationRequest.duration_seconds,
+              resolution: generationRequest.resolution,
+              fps: generationRequest.fps,
+            },
+          }));
+          toast.info('Video settings were normalized for the selected model');
+        }
+      } catch (err) {
+        const message = (err as Error).message;
+        set({ error: message, generationProgress: null, isGenerating: false });
+        toast.error(message || 'Could not validate video settings');
+        return;
+      }
+
       set({
-        isGenerating: false,
-        generationProgress: null,
-        error: err.message,
-        abortGeneration: null,
+        isGenerating: true,
+        generationProgress: { stage: 'queued', message: 'Preparing video generation' },
+        error: null,
       });
-      toast.error(err.message || 'Video generation failed');
-    });
+      videoApi.generate(generationRequest).then((resp) => {
+        set((state) => ({
+          activeProjectId: resp.project_id,
+          activeGenerationId: resp.generation_id,
+          generations: upsertGeneration(state.generations, resp.generation),
+          generationProgress: { stage: 'running', message: 'Video generation in progress' },
+        }));
+        // Start polling until terminal state
+        const interval = setInterval(async () => {
+          try {
+            const gen = await videoApi.getGeneration(resp.generation_id);
+            set((state) => ({ generations: upsertGeneration(state.generations, gen) }));
+            if (gen.status === 'completed') {
+              clearInterval(interval);
+              set({
+                isGenerating: false,
+                _pollInterval: null,
+                generationProgress: { stage: 'done', message: 'Video generation complete', progress: 1 },
+                activeGenerationId: gen.id,
+                selectedAssetId: gen.output_asset_id || get().selectedAssetId,
+              });
+              if (gen.output_asset_id) {
+                // Reload project assets
+                const proj = get().activeProjectId;
+                if (proj) {
+                  videoApi.getProject(proj).then((detail) => {
+                    set({ assets: detail.assets ?? [] });
+                    if (get().promptForm.place_on_timeline && gen.output_asset_id) {
+                      void get().addAssetToTimeline(gen.output_asset_id);
+                    }
+                  }).catch(() => { /* non-fatal */ });
+                }
+              }
+              toast.success('Video generation complete');
+            } else if (gen.status === 'failed' || gen.status === 'cancelled') {
+              clearInterval(interval);
+              set({
+                isGenerating: false,
+                _pollInterval: null,
+                generationProgress: null,
+                error: gen.error || `Video generation ${gen.status}`,
+              });
+              toast.error(gen.error || `Video generation ${gen.status}`);
+            } else {
+              set({ generationProgress: { stage: gen.status, message: 'Video generation in progress' } });
+            }
+          } catch {
+            // Polling error is transient — keep trying
+          }
+        }, 8000);
+        set({ _pollInterval: interval, abortGeneration: null });
+      }).catch((err: Error) => {
+        set({
+          isGenerating: false,
+          generationProgress: null,
+          error: err.message,
+          abortGeneration: null,
+        });
+        toast.error(err.message || 'Video generation failed');
+      });
+    })();
   },
 
   branchFromGeneration: async (generationId) => {
@@ -560,6 +642,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         settings_json: branch.settings_json,
         created_at: '',
       });
+      const inputAssets = parseGenerationInputAssets(branch.input_assets_json, branch.input_asset_ids_json);
       set((state) => ({
         activeProjectId: branch.project_id,
         activeGenerationId: branch.parent_id,
@@ -568,11 +651,63 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         promptForm: {
           ...state.promptForm,
           ...settings,
+          start_image_asset_id: undefined,
+          last_frame_asset_id: undefined,
+          source_video_asset_id: undefined,
+          reference_asset_ids: [],
+          ...inputAssets,
           prompt: branch.enhanced_prompt || branch.prompt,
           negative_prompt: branch.negative_prompt || state.promptForm.negative_prompt,
         },
+        generationValidation: null,
       }));
       toast.success('Video prompt branched');
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  },
+
+  regenerateFromGeneration: async (generationId) => {
+    try {
+      if (get().isGenerating) {
+        toast.error('Wait for the current video generation to finish first');
+        return;
+      }
+      const branch = await videoApi.branchGeneration(generationId);
+      const settings = parseGenerationSettings({
+        id: branch.parent_id,
+        project_id: branch.project_id,
+        status: 'completed',
+        provider: branch.provider,
+        model: branch.model,
+        prompt: branch.prompt,
+        settings_json: branch.settings_json,
+        created_at: '',
+      });
+      const inputAssets = parseGenerationInputAssets(branch.input_assets_json, branch.input_asset_ids_json);
+      set((state) => ({
+        activeProjectId: branch.project_id,
+        activeGenerationId: branch.parent_id,
+        selectedProvider: branch.provider,
+        selectedModel: branch.model,
+        promptForm: {
+          ...state.promptForm,
+          ...settings,
+          start_image_asset_id: undefined,
+          last_frame_asset_id: undefined,
+          source_video_asset_id: undefined,
+          reference_asset_ids: [],
+          ...inputAssets,
+          prompt: branch.enhanced_prompt || branch.prompt,
+          negative_prompt: branch.negative_prompt || '',
+          enhance: false,
+          place_on_timeline: false,
+        },
+        generationValidation: null,
+        error: null,
+      }));
+      toast.info('Regenerating with the previous effective prompt and settings');
+      get().generate(branch.parent_id);
     } catch (err) {
       toast.error((err as Error).message);
     }

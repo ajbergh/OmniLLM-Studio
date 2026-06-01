@@ -91,6 +91,16 @@ func (h *VideoHandler) RefreshModels(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, models)
 }
 
+func (h *VideoHandler) ValidateGeneration(w http.ResponseWriter, r *http.Request) {
+	var req video.GenerateRequest
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	validation := h.service.ValidateGeneration(r.Context(), req)
+	respondJSON(w, http.StatusOK, validation)
+}
+
 func (h *VideoHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	projects, err := h.projectRepo.ListForUser(auth.UserIDFromContext(r.Context()))
 	if err != nil {
@@ -318,14 +328,16 @@ func (h *VideoHandler) BranchGeneration(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"parent_id":       generation.ID,
-		"project_id":      generation.ProjectID,
-		"prompt":          generation.Prompt,
-		"enhanced_prompt": generation.EnhancedPrompt,
-		"negative_prompt": generation.NegativePrompt,
-		"provider":        generation.Provider,
-		"model":           generation.Model,
-		"settings_json":   generation.SettingsJSON,
+		"parent_id":            generation.ID,
+		"project_id":           generation.ProjectID,
+		"prompt":               generation.Prompt,
+		"enhanced_prompt":      generation.EnhancedPrompt,
+		"negative_prompt":      generation.NegativePrompt,
+		"provider":             generation.Provider,
+		"model":                generation.Model,
+		"settings_json":        generation.SettingsJSON,
+		"input_asset_ids_json": generation.InputAssetIDsJSON,
+		"input_assets_json":    generation.InputAssetsJSON,
 	})
 }
 
@@ -860,7 +872,11 @@ func (h *VideoHandler) enrichGeneration(generation models.VideoGeneration) video
 		NegativePrompt:    generation.NegativePrompt,
 		SettingsJSON:      generation.SettingsJSON,
 		InputAssetIDsJSON: generation.InputAssetIDsJSON,
+		InputAssetsJSON:   generation.InputAssetsJSON,
 		OutputAssetID:     generation.OutputAssetID,
+		UpstreamJobID:     generation.UpstreamJobID,
+		UpstreamReqID:     generation.UpstreamReqID,
+		UsageJSON:         generation.UsageJSON,
 		CostUSD:           generation.CostUSD,
 		Error:             generation.Error,
 		CreatedAt:         generation.CreatedAt,

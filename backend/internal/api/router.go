@@ -436,6 +436,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 				})
 			})
 			r.Post("/video/generations", videoHandler.Generate)
+			r.Post("/video/generations/validate", videoHandler.ValidateGeneration)
 			r.Get("/video/generations/{generationId}", videoHandler.GetGeneration)
 			r.Post("/video/generations/{generationId}/branch", videoHandler.BranchGeneration)
 			r.Post("/video/generations/{generationId}/send-to-timeline", videoHandler.SendGenerationToTimeline)

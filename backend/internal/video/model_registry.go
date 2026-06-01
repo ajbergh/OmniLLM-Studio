@@ -64,17 +64,22 @@ func (r *ModelRegistry) ListModels(ctx context.Context, provider string) ([]Mode
 }
 
 func (r *ModelRegistry) ValidateModel(ctx context.Context, provider, modelID string) bool {
+	_, ok := r.FindModel(ctx, provider, modelID)
+	return ok
+}
+
+func (r *ModelRegistry) FindModel(ctx context.Context, provider, modelID string) (Model, bool) {
 	models, err := r.ListModels(ctx, provider)
 	if err != nil {
-		return false
+		return Model{}, false
 	}
 	modelID = strings.TrimSpace(modelID)
 	for _, model := range models {
 		if strings.EqualFold(model.ID, modelID) {
-			return true
+			return model, true
 		}
 	}
-	return false
+	return Model{}, false
 }
 
 func (r *ModelRegistry) DefaultModel(ctx context.Context, provider string) string {

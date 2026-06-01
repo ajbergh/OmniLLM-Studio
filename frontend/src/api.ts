@@ -100,6 +100,7 @@ import type {
   VideoAssistantRequest,
   VideoEditPlan,
   VideoGenerationDetail,
+  VideoGenerationValidationResult,
   VideoModel,
   VideoProject,
   VideoProjectDetail,
@@ -1456,6 +1457,8 @@ export const videoApi = {
       provider: VideoProviderKey;
       model: string;
       settings_json?: string;
+      input_asset_ids_json?: string;
+      input_assets_json?: string;
     }>(`/video/generations/${encodeURIComponent(generationId)}/branch`, {
       method: 'POST',
     }),
@@ -1605,6 +1608,12 @@ export const videoApi = {
     apiFetch<{ generation_id: string; status: string }>(
       `/video/generations/${encodeURIComponent(generationId)}/cancel`,
       { method: 'POST' },
+    ),
+
+  validateGeneration: (req: GenerateVideoRequest) =>
+    apiFetch<VideoGenerationValidationResult>(
+      '/video/generations/validate',
+      { method: 'POST', body: JSON.stringify(req) },
     ),
 };
 

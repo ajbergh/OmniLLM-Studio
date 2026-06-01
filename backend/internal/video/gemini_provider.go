@@ -324,6 +324,9 @@ func (p *GeminiProvider) buildPayload(req GenerateRequest) (map[string]any, erro
 	if pg := strings.TrimSpace(req.PersonGeneration); pg != "" {
 		parameters["personGeneration"] = pg
 	}
+	if negativePrompt := strings.TrimSpace(req.NegativePrompt); negativePrompt != "" {
+		parameters["negativePrompt"] = negativePrompt
+	}
 	mergeAllowedVideoSettings(parameters, req.Settings, map[string]bool{
 		"aspectRatio":      true,
 		"durationSeconds":  true,
