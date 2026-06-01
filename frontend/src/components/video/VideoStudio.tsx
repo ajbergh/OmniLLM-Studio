@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Clapperboard,
@@ -13,10 +13,136 @@ import {
   Square,
   WandSparkles,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { videoApi } from '../../api';
-import { useSettingsStore } from '../../stores';
+import { videoAssetUrl } from '../../api';
+import { useCrossoverStore, useSettingsStore } from '../../stores';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import type { VideoAsset, VideoGenerationDetail, VideoProviderKey } from '../../types/video';
+
+// ── Cinematic option lists ────────────────────────────────────────────────────
+const STYLE_OPTIONS = [
+  'cinematic',
+  'documentary',
+  'animation',
+  'hyperrealistic',
+  'vintage film',
+  'sci-fi',
+  'horror',
+  'fantasy',
+  'noir',
+  'nature documentary',
+  'vlog',
+  'commercial',
+  'abstract',
+];
+
+const CAMERA_MOTION_OPTIONS = [
+  'static locked-off',
+  'slow push-in',
+  'slow pull-out',
+  'dolly forward',
+  'dolly backward',
+  'dolly zoom (vertigo)',
+  'pan left',
+  'pan right',
+  'tilt up',
+  'tilt down',
+  'orbit / arc',
+  'tracking follow',
+  'crane up',
+  'crane down',
+  'handheld shake',
+  'whip pan',
+  'dutch tilt',
+  'drone aerial',
+];
+
+const SHOT_TYPE_OPTIONS = [
+  'extreme close-up',
+  'close-up',
+  'medium close-up',
+  'medium shot',
+  'full shot',
+  'wide shot',
+  'extreme wide / establishing',
+  'over-the-shoulder',
+  'point of view (POV)',
+  'high angle',
+  'low angle',
+  'bird\'s-eye overhead',
+  'worm\'s-eye',
+];
+
+const COMPOSITION_OPTIONS = [
+  'rule of thirds',
+  'centered / symmetrical',
+  'leading lines',
+  'golden ratio',
+  'silhouette',
+  'depth layers (foreground + background)',
+  'overhead flat lay',
+  'dutch angle',
+  'frame within a frame',
+];
+
+const LENS_OPTIONS = [
+  'shallow depth of field',
+  'deep focus',
+  'bokeh',
+  'wide angle (barrel distortion)',
+  'telephoto compression',
+  'macro / extreme close',
+  'fisheye',
+  'tilt-shift miniature',
+  'anamorphic lens flare',
+  'soft focus / dreamy',
+];
+
+const LIGHTING_OPTIONS = [
+  'golden hour warm',
+  'blue hour twilight',
+  'overcast soft diffused',
+  'harsh midday sunlight',
+  'studio three-point',
+  'neon-lit night',
+  'candlelight / warm practical',
+  'foggy / desaturated',
+  'backlit silhouette',
+  'hard-contrast noir',
+  'underwater caustics',
+  'volumetric god rays',
+];
+
+const SOUND_EFFECTS_OPTIONS = [
+  'ambient city traffic',
+  'forest ambience',
+  'ocean waves',
+  'footsteps on gravel',
+  'footsteps on wood',
+  'rain on glass',
+  'thunder',
+  'wind',
+  'door creak',
+  'crowd murmur',
+  'machinery hum',
+  'silence',
+];
+
+const AMBIENT_NOISE_OPTIONS = [
+  'quiet room tone',
+  'city traffic',
+  'forest birds',
+  'ocean waves',
+  'rain',
+  'crowd murmur',
+  'wind',
+  'cafe buzz',
+  'night crickets',
+];
+
+const AUTO_VALUE = '__auto__';
+const CUSTOM_VALUE = '__custom__';
 
 export function VideoStudio() {
   const projects = useVideoStudioStore((state) => state.projects);
@@ -46,14 +172,49 @@ export function VideoStudio() {
   const enhancePrompt = useVideoStudioStore((state) => state.enhancePrompt);
   const generate = useVideoStudioStore((state) => state.generate);
   const branchFromGeneration = useVideoStudioStore((state) => state.branchFromGeneration);
-  const stopGeneration = useVideoStudioStore((state) => state.stopGeneration);
+  const cancelGeneration = useVideoStudioStore((state) => state.cancelGeneration);
   const selectAsset = useVideoStudioStore((state) => state.selectAsset);
   const setAppMode = useSettingsStore((state) => state.setAppMode);
+  const { crossoverContext, clearCrossoverContext } = useCrossoverStore();
+
+  // Pending image attachment to import once a project is ready
+  const pendingAttachmentRef = useRef<string | null>(null);
 
   useEffect(() => {
     loadProviders();
     loadProjects();
   }, [loadProviders, loadProjects]);
+
+  // Consume crossover context from Image Studio → Video Studio handoff
+  useEffect(() => {
+    if (!crossoverContext || crossoverContext.type !== 'to-video') return;
+    const { prompt, attachmentId } = crossoverContext.data;
+    clearCrossoverContext();
+    setPromptField('prompt', prompt);
+    if (attachmentId) {
+      pendingAttachmentRef.current = attachmentId;
+    }
+  }, [crossoverContext, clearCrossoverContext, setPromptField]);
+
+  // Once we have an active project, import any pending attachment as start frame
+  useEffect(() => {
+    const attachmentId = pendingAttachmentRef.current;
+    if (!attachmentId || !activeProjectId) return;
+    pendingAttachmentRef.current = null;
+    videoApi.importExternalAsset(activeProjectId, {
+      source_studio: 'attachment',
+      source_id: attachmentId,
+      kind: 'image',
+    }).then((asset) => {
+      setPromptField('start_image_asset_id', asset.id);
+      void videoApi.getProject(activeProjectId).then((detail) => {
+        useVideoStudioStore.setState({ assets: detail.assets ?? [] });
+      });
+      toast.success('Image loaded as start frame');
+    }).catch((err: Error) => {
+      toast.error(`Failed to import image: ${err.message}`);
+    });
+  }, [activeProjectId, setPromptField]);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) || null,
@@ -199,6 +360,85 @@ export function VideoStudio() {
                   </ControlLabel>
                 )}
 
+                {(selectedModelCapabilities.includes('image_to_video') || selectedModelCapabilities.includes('first_last_frame')) && (
+                  <ControlLabel label="Start frame image">
+                    <AssetPicker
+                      value={promptForm.start_image_asset_id}
+                      onChange={(id) => setPromptField('start_image_asset_id', id)}
+                      assets={assets}
+                      accept="image"
+                      placeholder="None — select an image asset"
+                    />
+                    <p className="mt-1 text-[10px] text-text-muted">Image asset from this project to use as the first frame.</p>
+                  </ControlLabel>
+                )}
+
+                {selectedModelCapabilities.includes('first_last_frame') && (
+                  <ControlLabel label="Last frame image">
+                    <AssetPicker
+                      value={promptForm.last_frame_asset_id}
+                      onChange={(id) => setPromptField('last_frame_asset_id', id)}
+                      assets={assets}
+                      accept="image"
+                      placeholder="None — requires a start frame"
+                    />
+                    <p className="mt-1 text-[10px] text-text-muted">Veo 3.1 interpolates between start and last frame. Requires a start frame.</p>
+                  </ControlLabel>
+                )}
+
+                {selectedModelCapabilities.includes('extend_video') && (
+                  <ControlLabel label="Source video to extend">
+                    <AssetPicker
+                      value={promptForm.source_video_asset_id}
+                      onChange={(id) => setPromptField('source_video_asset_id', id)}
+                      assets={assets}
+                      accept="video"
+                      placeholder="None — select a video asset to extend"
+                    />
+                    <p className="mt-1 text-[10px] text-text-muted">Continues from the final frame. Forced to 720p, 8s.</p>
+                  </ControlLabel>
+                )}
+
+                {selectedModelCapabilities.includes('reference_images') && (
+                  <ControlLabel label={`Reference images (${(promptForm.reference_asset_ids ?? []).filter(Boolean).length}/3)`}>
+                    <div className="space-y-1.5">
+                      {[0, 1, 2].map((idx) => (
+                        <AssetPicker
+                          key={idx}
+                          value={(promptForm.reference_asset_ids ?? [])[idx]}
+                          onChange={(id) => {
+                            const current = [...(promptForm.reference_asset_ids ?? [])];
+                            if (id) {
+                              current[idx] = id;
+                            } else {
+                              current.splice(idx, 1);
+                            }
+                            const filtered = current.filter(Boolean);
+                            setPromptField('reference_asset_ids', filtered.length > 0 ? filtered : undefined);
+                          }}
+                          assets={assets}
+                          accept="image"
+                          placeholder={`Reference image ${idx + 1}`}
+                        />
+                      ))}
+                    </div>
+                    <p className="mt-1 text-[10px] text-text-muted">Up to 3 images. Requires 8s duration.</p>
+                  </ControlLabel>
+                )}
+
+                {selectedModelCapabilities.includes('person_generation') && (
+                  <ControlLabel label="Person generation">
+                    <select
+                      value={promptForm.person_generation || 'allow'}
+                      onChange={(event) => setPromptField('person_generation', event.target.value as 'allow' | 'dont_allow')}
+                      className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
+                    >
+                      <option value="allow">Allow</option>
+                      <option value="dont_allow">Don&apos;t allow</option>
+                    </select>
+                  </ControlLabel>
+                )}
+
                 <div className="grid grid-cols-2 gap-2">
                   <ControlLabel label="Aspect">
                     <select
@@ -245,32 +485,113 @@ export function VideoStudio() {
                   </ControlLabel>
                 </div>
 
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                  <ControlLabel label="Camera">
-                    <input
-                      value={promptForm.camera_motion}
-                      onChange={(event) => setPromptField('camera_motion', event.target.value)}
-                      className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text"
-                    />
-                  </ControlLabel>
-                  <ControlLabel label="Shot">
-                    <input
-                      value={promptForm.shot_type}
-                      onChange={(event) => setPromptField('shot_type', event.target.value)}
-                      className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text"
-                    />
-                  </ControlLabel>
-                </div>
+                <details className="rounded-lg border border-border bg-surface-alt">
+                  <summary className="cursor-pointer select-none rounded-lg px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-text-muted hover:bg-surface-hover hover:text-text transition-colors">
+                    Cinematic Controls
+                  </summary>
+                  <div className="space-y-2 px-3 pb-3 pt-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                      <SelectWithCustom
+                        label="Style"
+                        value={promptForm.style_preset}
+                        choices={STYLE_OPTIONS}
+                        customPlaceholder="e.g. impressionist, retro anime"
+                        onChange={(value) => setPromptField('style_preset', value)}
+                      />
+                      <SelectWithCustom
+                        label="Camera motion"
+                        value={promptForm.camera_motion}
+                        choices={CAMERA_MOTION_OPTIONS}
+                        customPlaceholder="e.g. rotating crane"
+                        onChange={(value) => setPromptField('camera_motion', value)}
+                      />
+                      <SelectWithCustom
+                        label="Shot type"
+                        value={promptForm.shot_type}
+                        choices={SHOT_TYPE_OPTIONS}
+                        customPlaceholder="e.g. two-shot"
+                        onChange={(value) => setPromptField('shot_type', value)}
+                      />
+                      <SelectWithCustom
+                        label="Composition"
+                        value={promptForm.composition ?? ''}
+                        choices={COMPOSITION_OPTIONS}
+                        customPlaceholder="e.g. dynamic diagonal"
+                        onChange={(value) => setPromptField('composition', value)}
+                      />
+                      <SelectWithCustom
+                        label="Lens / focus"
+                        value={promptForm.lens_effect ?? ''}
+                        choices={LENS_OPTIONS}
+                        customPlaceholder="e.g. anamorphic streak"
+                        onChange={(value) => setPromptField('lens_effect', value)}
+                      />
+                      <SelectWithCustom
+                        label="Lighting / ambiance"
+                        value={promptForm.lighting ?? ''}
+                        choices={LIGHTING_OPTIONS}
+                        customPlaceholder="e.g. hard rim backlight"
+                        onChange={(value) => setPromptField('lighting', value)}
+                      />
+                    </div>
 
-                <ControlLabel label="Production notes">
-                  <textarea
-                    value={promptForm.production_notes}
-                    onChange={(event) => setPromptField('production_notes', event.target.value)}
-                    rows={3}
-                    className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:border-primary/50 focus:outline-none"
-                    placeholder="Lighting, continuity, style constraints"
-                  />
-                </ControlLabel>
+                    {selectedModelCapabilities.includes('audio_generation') && (
+                      <div className="space-y-2 border-t border-border pt-2">
+                        <p className="text-[10px] uppercase tracking-wide text-text-muted">Audio cues</p>
+                        <ControlLabel label='Dialogue (in quotes)'>
+                          <input
+                            value={promptForm.dialogue ?? ''}
+                            onChange={(event) => setPromptField('dialogue', event.target.value)}
+                            placeholder='"Hello," she whispered.'
+                            className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:border-primary/50 focus:outline-none"
+                          />
+                        </ControlLabel>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                          <SelectWithCustom
+                            label="Sound effects"
+                            value={promptForm.sound_effects ?? ''}
+                            choices={SOUND_EFFECTS_OPTIONS}
+                            customPlaceholder="e.g. thunder crack"
+                            onChange={(value) => setPromptField('sound_effects', value)}
+                          />
+                          <SelectWithCustom
+                            label="Ambient noise"
+                            value={promptForm.ambient_noise ?? ''}
+                            choices={AMBIENT_NOISE_OPTIONS}
+                            customPlaceholder="e.g. distant traffic hum"
+                            onChange={(value) => setPromptField('ambient_noise', value)}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {(selectedModelCapabilities.includes('image_to_video') || selectedModelCapabilities.includes('first_last_frame') || selectedModelCapabilities.includes('extend_video')) && (
+                      <div className="border-t border-border pt-2">
+                        <ControlLabel label="Continuity notes">
+                          <textarea
+                            value={promptForm.continuity_notes ?? ''}
+                            onChange={(event) => setPromptField('continuity_notes', event.target.value)}
+                            rows={2}
+                            className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:border-primary/50 focus:outline-none"
+                            placeholder="Maintain character outfit, match exit direction, seamless loop…"
+                          />
+                        </ControlLabel>
+                      </div>
+                    )}
+
+                    <div className="border-t border-border pt-2">
+                      <ControlLabel label="Production notes">
+                        <textarea
+                          value={promptForm.production_notes}
+                          onChange={(event) => setPromptField('production_notes', event.target.value)}
+                          rows={2}
+                          className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:border-primary/50 focus:outline-none"
+                          placeholder="Any additional directives"
+                        />
+                      </ControlLabel>
+                    </div>
+                  </div>
+                </details>
 
                 {generationProgress && (
                   <div className="rounded-lg border border-primary/20 bg-primary/5 p-2">
@@ -304,11 +625,11 @@ export function VideoStudio() {
                     Generate
                   </button>
                   <button
-                    onClick={isGenerating ? stopGeneration : clearPrompt}
+                    onClick={isGenerating ? () => { void cancelGeneration(); } : clearPrompt}
                     className="min-h-10 rounded-lg border border-border bg-surface px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text inline-flex items-center justify-center gap-1.5"
                   >
                     {isGenerating ? <Square size={13} /> : <RefreshCw size={13} />}
-                    {isGenerating ? 'Stop' : 'Reset'}
+                    {isGenerating ? 'Cancel' : 'Reset'}
                   </button>
                 </div>
               </div>
@@ -326,6 +647,10 @@ export function VideoStudio() {
             activeGenerationId={activeGeneration?.id || null}
             onSelect={(generation) => useVideoStudioStore.setState({ activeGenerationId: generation.id, selectedAssetId: generation.output_asset_id || selectedAssetId })}
             onBranch={(generationId) => { void branchFromGeneration(generationId); }}
+            onExtend={(assetId) => {
+              setPromptField('source_video_asset_id', assetId);
+              toast.success('Source video set — choose a model with extension capability and generate');
+            }}
           />
           <OutputPanel assets={assets} activeAssetId={activeAsset?.id || null} onSelect={selectAsset} />
         </aside>
@@ -474,11 +799,13 @@ function HistoryPanel({
   activeGenerationId,
   onSelect,
   onBranch,
+  onExtend,
 }: {
   generations: VideoGenerationDetail[];
   activeGenerationId: string | null;
   onSelect: (generation: VideoGenerationDetail) => void;
   onBranch: (generationId: string) => void;
+  onExtend: (assetId: string) => void;
 }) {
   return (
     <section className="border-b border-border p-3">
@@ -519,16 +846,31 @@ function HistoryPanel({
               <p className="mt-2 line-clamp-3 text-[11px] leading-relaxed text-text-muted">{generation.prompt}</p>
               <div className="mt-2 flex items-center justify-between gap-2">
                 <span className="text-[10px] text-text-muted">{new Date(generation.created_at).toLocaleTimeString()}</span>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onBranch(generation.id);
-                  }}
-                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-primary hover:bg-primary/10"
-                >
-                  <GitBranch size={11} />
-                  Branch
-                </button>
+                <div className="flex items-center gap-1">
+                  {generation.status === 'completed' && generation.output_asset_id && (
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onExtend(generation.output_asset_id!);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-emerald-400 hover:bg-emerald-400/10"
+                      title="Extend this video"
+                    >
+                      <Scissors size={11} />
+                      Extend
+                    </button>
+                  )}
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onBranch(generation.id);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-primary hover:bg-primary/10"
+                  >
+                    <GitBranch size={11} />
+                    Branch
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -578,11 +920,143 @@ function OutputPanel({
   );
 }
 
+function AssetPicker({
+  value,
+  onChange,
+  assets,
+  accept = 'any',
+  placeholder = 'Select an asset',
+}: {
+  value: string | undefined;
+  onChange: (id: string | undefined) => void;
+  assets: VideoAsset[];
+  accept?: 'image' | 'video' | 'any';
+  placeholder?: string;
+}) {
+  const filtered = assets.filter((a) =>
+    accept === 'image' ? a.kind === 'image' :
+    accept === 'video' ? a.kind === 'video' :
+    true,
+  );
+  const selectedAsset = value ? filtered.find((a) => a.id === value) : undefined;
+  const thumbUrl = selectedAsset ? videoAssetUrl(selectedAsset.id) : undefined;
+  const isImage = selectedAsset?.kind === 'image' || selectedAsset?.mime_type?.startsWith('image/');
+  const isVideo = selectedAsset?.kind === 'video' || selectedAsset?.mime_type?.startsWith('video/');
+
+  return (
+    <div>
+      <select
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value || undefined)}
+        className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:border-primary/50 focus:outline-none"
+      >
+        <option value="">{placeholder}</option>
+        {filtered.map((asset) => (
+          <option key={asset.id} value={asset.id}>
+            {asset.file_name}
+          </option>
+        ))}
+        {filtered.length === 0 && (
+          <option disabled value="">No {accept === 'any' ? '' : accept + ' '}assets in this project</option>
+        )}
+      </select>
+      {thumbUrl && isImage && (
+        <div className="mt-1.5 overflow-hidden rounded-md border border-border bg-black">
+          <img
+            src={thumbUrl}
+            alt={selectedAsset?.file_name}
+            className="max-h-32 w-full object-contain"
+          />
+        </div>
+      )}
+      {thumbUrl && isVideo && (
+        <div className="mt-1.5 overflow-hidden rounded-md border border-border bg-black">
+          <video
+            src={thumbUrl}
+            className="max-h-20 w-full object-contain"
+            muted
+            preload="metadata"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ControlLabel({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
       <span className="mb-1.5 block text-[11px] font-medium text-text-muted">{label}</span>
       {children}
     </label>
+  );
+}
+
+function SelectWithCustom({
+  label,
+  value,
+  choices,
+  onChange,
+  customPlaceholder,
+}: {
+  label: string;
+  value: string;
+  choices: string[];
+  onChange: (value: string) => void;
+  customPlaceholder?: string;
+}) {
+  const normalized = value.trim();
+  const choiceSet = useMemo(() => new Set(choices.map((c) => c.toLowerCase())), [choices]);
+  const isCustom = normalized !== '' && !choiceSet.has(normalized.toLowerCase());
+  const [mode, setMode] = useState<string>(
+    normalized === '' ? AUTO_VALUE : isCustom ? CUSTOM_VALUE : normalized,
+  );
+
+  // Keep mode in sync when the value is changed externally (e.g. clearPrompt)
+  useEffect(() => {
+    if (!normalized) {
+      setMode(AUTO_VALUE);
+    } else if (choiceSet.has(normalized.toLowerCase())) {
+      setMode(normalized);
+    } else {
+      setMode(CUSTOM_VALUE);
+    }
+  }, [normalized, choiceSet]);
+
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-[11px] font-medium text-text-muted">{label}</label>
+      <select
+        value={mode}
+        onChange={(event) => {
+          const next = event.target.value;
+          setMode(next);
+          if (next === AUTO_VALUE) {
+            onChange('');
+          } else if (next === CUSTOM_VALUE) {
+            // keep existing custom text, or clear if it was a known preset
+            if (choiceSet.has(normalized.toLowerCase())) onChange('');
+          } else {
+            onChange(next);
+          }
+        }}
+        className="w-full min-h-10 rounded-lg border border-border bg-surface px-3 text-sm text-text focus:border-primary/50 focus:outline-none"
+      >
+        <option value={AUTO_VALUE}>Auto</option>
+        {choices.map((choice) => (
+          <option key={choice} value={choice}>{choice}</option>
+        ))}
+        <option value={CUSTOM_VALUE}>Custom…</option>
+      </select>
+      {mode === CUSTOM_VALUE && (
+        <input
+          type="text"
+          value={choiceSet.has(normalized.toLowerCase()) ? '' : value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={customPlaceholder ?? 'Enter custom value'}
+          className="w-full min-h-10 rounded-lg border border-border bg-surface px-3 text-sm text-text placeholder:text-text-muted/50 focus:border-primary/50 focus:outline-none"
+        />
+      )}
+    </div>
   );
 }

@@ -100,9 +100,6 @@ import type {
   VideoAssistantRequest,
   VideoEditPlan,
   VideoGenerationDetail,
-  VideoGenerationDone,
-  VideoGenerationError,
-  VideoGenerationProgress,
   VideoModel,
   VideoProject,
   VideoProjectDetail,
@@ -1586,101 +1583,18 @@ export const videoApi = {
       }),
   },
 
-  generate: (
-    req: GenerateVideoRequest,
-    callbacks: {
-      onStarted?: (data: VideoGenerationProgress) => void;
-      onProgress?: (data: VideoGenerationProgress) => void;
-      onDone?: (data: VideoGenerationDone) => void;
-      onError?: (data: VideoGenerationError) => void;
-    },
-  ) => {
-    const controller = new AbortController();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (authToken) {
-      headers.Authorization = `Bearer ${authToken}`;
-    }
+  /** Start async generation. Returns immediately with 202. Poll via getGeneration(). */
+  generate: (req: GenerateVideoRequest) =>
+    apiFetch<{ generation_id: string; project_id: string; status: string; generation: VideoGenerationDetail }>(
+      '/video/generations',
+      { method: 'POST', body: JSON.stringify(req) },
+    ),
 
-    fetch(`${BASE_URL}/video/generations`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(req),
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          const body = await response.json().catch(() => ({ error: response.statusText }));
-          callbacks.onError?.({ error: body.error || `Video generation failed: ${response.status}` });
-          return;
-        }
-        const reader = response.body?.getReader();
-        if (!reader) {
-          callbacks.onError?.({ error: 'No readable stream returned' });
-          return;
-        }
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let currentEvent = 'video_generation_progress';
-        let pendingData = '';
-        let terminalReceived = false;
-
-        const dispatch = (eventType: string, dataStr: string) => {
-          try {
-            const payload = JSON.parse(dataStr);
-            if (eventType === 'video_generation_started') {
-              callbacks.onStarted?.(payload);
-            } else if (eventType === 'video_generation_done') {
-              terminalReceived = true;
-              callbacks.onDone?.(payload);
-            } else if (eventType === 'video_generation_error') {
-              terminalReceived = true;
-              callbacks.onError?.(payload);
-            } else {
-              callbacks.onProgress?.(payload);
-            }
-          } catch {
-            // Ignore malformed SSE frames.
-          }
-        };
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const rawLine of lines) {
-            const line = rawLine.trim();
-            if (!line) {
-              if (pendingData) {
-                dispatch(currentEvent, pendingData);
-                pendingData = '';
-                currentEvent = 'video_generation_progress';
-              }
-              continue;
-            }
-            if (line.startsWith('event:')) {
-              currentEvent = line.slice(6).trim();
-            } else if (line.startsWith('data:')) {
-              pendingData += line.slice(5).trim();
-            }
-          }
-        }
-        if (pendingData) {
-          dispatch(currentEvent, pendingData);
-        }
-        if (!terminalReceived) {
-          callbacks.onError?.({ error: 'Video generation stream closed unexpectedly' });
-        }
-      })
-      .catch((err) => {
-        if (err?.name !== 'AbortError') {
-          callbacks.onError?.({ error: err?.message || 'Video generation failed' });
-        }
-      });
-
-    return { abort: () => controller.abort() };
-  },
+  cancelGeneration: (generationId: string) =>
+    apiFetch<{ generation_id: string; status: string }>(
+      `/video/generations/${encodeURIComponent(generationId)}/cancel`,
+      { method: 'POST' },
+    ),
 };
 
 // ── Crossover Translation ──────────────────────────────────────────────────

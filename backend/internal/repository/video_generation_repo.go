@@ -30,18 +30,21 @@ func (r *VideoGenerationRepo) Create(g *models.VideoGeneration) error {
 	if g.InputAssetIDsJSON == "" {
 		g.InputAssetIDsJSON = "[]"
 	}
+	if g.InputAssetsJSON == "" {
+		g.InputAssetsJSON = "[]"
+	}
 	if g.CreatedAt.IsZero() {
 		g.CreatedAt = time.Now().UTC()
 	}
 	_, err := r.db.Exec(`
 		INSERT INTO video_generations (
 			id, project_id, parent_id, status, provider, model, prompt, enhanced_prompt,
-			negative_prompt, settings_json, input_asset_ids_json, output_asset_id,
+			negative_prompt, settings_json, input_asset_ids_json, input_assets_json, output_asset_id,
 			upstream_job_id, upstream_request_id, usage_json, cost_usd, error, created_at, completed_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		g.ID, g.ProjectID, g.ParentID, g.Status, g.Provider, g.Model, g.Prompt, g.EnhancedPrompt,
-		g.NegativePrompt, g.SettingsJSON, g.InputAssetIDsJSON, g.OutputAssetID,
+		g.NegativePrompt, g.SettingsJSON, g.InputAssetIDsJSON, g.InputAssetsJSON, g.OutputAssetID,
 		g.UpstreamJobID, g.UpstreamReqID, g.UsageJSON, g.CostUSD, g.Error, g.CreatedAt, g.CompletedAt,
 	)
 	if err != nil {
@@ -130,6 +133,37 @@ func (r *VideoGenerationRepo) Delete(id string) error {
 	return nil
 }
 
+// SetUpstreamJobID stores the provider operation name on a pending generation so
+// the async poll goroutine can be recovered after a restart.
+func (r *VideoGenerationRepo) SetUpstreamJobID(id, jobID string) error {
+	_, err := r.db.Exec(`UPDATE video_generations SET upstream_job_id = ? WHERE id = ?`, jobID, id)
+	if err != nil {
+		return fmt.Errorf("set upstream_job_id: %w", err)
+	}
+	return nil
+}
+
+// ListActiveWithUpstreamJob returns all running/pending generations that have an
+// upstream_job_id set.  Used at startup to resume background poll goroutines.
+func (r *VideoGenerationRepo) ListActiveWithUpstreamJob() ([]models.VideoGeneration, error) {
+	rows, err := r.db.Query(
+		videoGenerationSelectSQL + ` WHERE status IN ('pending','running') AND upstream_job_id IS NOT NULL AND upstream_job_id != ''`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list active video generations: %w", err)
+	}
+	defer rows.Close()
+	var result []models.VideoGeneration
+	for rows.Next() {
+		g, err := scanVideoGeneration(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *g)
+	}
+	return result, rows.Err()
+}
+
 type VideoGenerationCompletion struct {
 	OutputAssetID string
 	UpstreamJobID *string
@@ -140,7 +174,7 @@ type VideoGenerationCompletion struct {
 
 const videoGenerationSelectSQL = `
 	SELECT id, project_id, parent_id, status, provider, model, prompt, enhanced_prompt,
-	       negative_prompt, settings_json, input_asset_ids_json, output_asset_id,
+	       negative_prompt, settings_json, input_asset_ids_json, input_assets_json, output_asset_id,
 	       upstream_job_id, upstream_request_id, usage_json, cost_usd, error, created_at, completed_at
 	FROM video_generations`
 
@@ -151,7 +185,7 @@ func scanVideoGeneration(row rowScanner) (*models.VideoGeneration, error) {
 	var completedAt sql.NullTime
 	err := row.Scan(
 		&g.ID, &g.ProjectID, &parentID, &g.Status, &g.Provider, &g.Model, &g.Prompt, &enhancedPrompt,
-		&negativePrompt, &g.SettingsJSON, &g.InputAssetIDsJSON, &outputAssetID,
+		&negativePrompt, &g.SettingsJSON, &g.InputAssetIDsJSON, &g.InputAssetsJSON, &outputAssetID,
 		&jobID, &reqID, &usageJSON, &cost, &errMsg, &g.CreatedAt, &completedAt,
 	)
 	if err == sql.ErrNoRows {

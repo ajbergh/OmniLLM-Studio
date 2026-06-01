@@ -21,19 +21,67 @@ func assembleProviderPrompt(req GenerateRequest) string {
 	if prompt != "" {
 		parts = append(parts, prompt)
 	}
+	if value := strings.TrimSpace(req.StylePreset); value != "" {
+		parts = append(parts, "Style: "+value)
+	}
 	if value := strings.TrimSpace(req.CameraMotion); value != "" {
 		parts = append(parts, "Camera motion: "+value)
 	}
 	if value := strings.TrimSpace(req.ShotType); value != "" {
 		parts = append(parts, "Shot type: "+value)
 	}
-	if value := strings.TrimSpace(req.StylePreset); value != "" {
-		parts = append(parts, "Style: "+value)
+	if value := strings.TrimSpace(req.Composition); value != "" {
+		parts = append(parts, "Composition: "+value)
+	}
+	if value := strings.TrimSpace(req.LensEffect); value != "" {
+		parts = append(parts, "Lens/focus: "+value)
+	}
+	if value := strings.TrimSpace(req.Lighting); value != "" {
+		parts = append(parts, "Lighting: "+value)
+	}
+	if value := strings.TrimSpace(req.Dialogue); value != "" {
+		parts = append(parts, "Dialogue: "+value)
+	}
+	if value := strings.TrimSpace(req.SoundEffects); value != "" {
+		parts = append(parts, "Sound effects: "+value)
+	}
+	if value := strings.TrimSpace(req.AmbientNoise); value != "" {
+		parts = append(parts, "Ambient noise: "+value)
+	}
+	if value := strings.TrimSpace(req.ContinuityNotes); value != "" {
+		parts = append(parts, "Continuity: "+value)
 	}
 	if value := strings.TrimSpace(req.ProductionNotes); value != "" {
 		parts = append(parts, "Production notes: "+value)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// assembleCinematicNotes builds a compact structured summary of the cinematic
+// detail fields on req (style, composition, lens, lighting, audio cues, etc.)
+// for use as the ProductionNotes hint to the LLM prompt enhancer.
+func assembleCinematicNotes(req GenerateRequest) string {
+	type kv struct{ k, v string }
+	fields := []kv{
+		{"Style", req.StylePreset},
+		{"Camera", req.CameraMotion},
+		{"Shot type", req.ShotType},
+		{"Composition", req.Composition},
+		{"Lens/focus", req.LensEffect},
+		{"Lighting", req.Lighting},
+		{"Dialogue", req.Dialogue},
+		{"Sound effects", req.SoundEffects},
+		{"Ambient noise", req.AmbientNoise},
+		{"Continuity", req.ContinuityNotes},
+		{"Production notes", req.ProductionNotes},
+	}
+	var parts []string
+	for _, f := range fields {
+		if v := strings.TrimSpace(f.v); v != "" {
+			parts = append(parts, f.k+": "+v)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func mergeAllowedVideoSettings(target map[string]any, raw json.RawMessage, allowed map[string]bool) {

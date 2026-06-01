@@ -10,7 +10,9 @@ export type VideoCapability =
   | 'negative_prompt'
   | 'seed'
   | 'camera_motion'
-  | 'audio_generation';
+  | 'audio_generation'
+  | 'first_last_frame'
+  | 'person_generation';
 
 export interface VideoModel {
   id: string;
@@ -85,6 +87,7 @@ export interface VideoGenerationDetail {
   negative_prompt?: string;
   settings_json?: string;
   input_asset_ids_json?: string;
+  input_assets_json?: string;
   output_asset_id?: string;
   asset_url?: string;
   mime_type?: string;
@@ -112,8 +115,26 @@ export interface VideoPromptForm {
   shot_type: string;
   style_preset: string;
   production_notes: string;
+  // Cinematic detail fields (assembled into the prompt at generation time)
+  composition?: string;
+  lens_effect?: string;
+  lighting?: string;
+  dialogue?: string;
+  sound_effects?: string;
+  ambient_noise?: string;
+  continuity_notes?: string;
   enhance: boolean;
   place_on_timeline: boolean;
+  start_image_asset_id?: string;
+  last_frame_asset_id?: string;
+  source_video_asset_id?: string;
+  person_generation?: 'allow' | 'dont_allow';
+  reference_asset_ids?: string[];
+}
+
+export interface InputAsset {
+  asset_id: string;
+  role: 'start_frame' | 'last_frame' | 'reference_image' | 'source_video';
 }
 
 export interface GenerateVideoRequest extends VideoPromptForm {
@@ -124,6 +145,10 @@ export interface GenerateVideoRequest extends VideoPromptForm {
   title?: string;
   enhanced_prompt?: string;
   reference_asset_ids?: string[];
+  start_image_asset_id?: string;
+  last_frame_asset_id?: string;
+  source_video_asset_id?: string;
+  person_generation?: 'allow' | 'dont_allow';
 }
 
 export interface VideoGenerationProgress {

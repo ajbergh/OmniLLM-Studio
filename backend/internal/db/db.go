@@ -132,6 +132,7 @@ func versionedMigrations() []Migration {
 		{Version: 37, Name: "video_studio_foundation", SQL: migrationVideoStudioFoundation},
 		{Version: 38, Name: "video_studio_timelines", SQL: migrationVideoStudioTimelines},
 		{Version: 39, Name: "video_studio_render_jobs", SQL: migrationVideoStudioRenderJobs},
+		{Version: 40, Name: "video_generation_input_assets", SQL: migrationVideoGenerationInputAssets},
 	}
 }
 
@@ -767,6 +768,11 @@ CREATE TABLE IF NOT EXISTS video_render_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_video_render_jobs_project ON video_render_jobs(project_id);
 CREATE INDEX IF NOT EXISTS idx_video_render_jobs_status ON video_render_jobs(status);
+`
+
+// V40: Add structured input_assets_json to video_generations for role-tagged assets
+const migrationVideoGenerationInputAssets = `
+ALTER TABLE video_generations ADD COLUMN input_assets_json TEXT NOT NULL DEFAULT '[]';
 `
 
 // V14: Add workspace_id to conversations

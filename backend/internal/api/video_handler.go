@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -261,68 +260,45 @@ func (h *VideoHandler) ImportAssetToTimeline(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// Generate starts a video generation asynchronously and returns 202 with the
+// generation record immediately.  The frontend polls GET /video/generations/{id}
+// until status transitions to "completed" or "failed".
 func (h *VideoHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	var req video.GenerateRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		respondError(w, http.StatusInternalServerError, "streaming unsupported")
-		return
-	}
-	writeEvent := func(event string, payload interface{}) {
-		data, _ := json.Marshal(payload)
-		_, _ = w.Write([]byte("event: " + event + "\n"))
-		_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
-		flusher.Flush()
-	}
-
-	done := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(15 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-r.Context().Done():
-				return
-			case <-done:
-				return
-			case <-ticker.C:
-				writeEvent("video_generation_progress", map[string]string{"stage": "waiting", "message": "Still generating video"})
-			}
-		}
-	}()
-
-	project, generation, asset, err := h.service.Generate(r.Context(), auth.UserIDFromContext(r.Context()), req, func(progress video.GenerationProgress) {
-		if progress.Stage == "started" {
-			writeEvent("video_generation_started", progress)
-			return
-		}
-		writeEvent("video_generation_progress", progress)
-	})
-	close(done)
+	project, generation, err := h.service.GenerateAsync(r.Context(), auth.UserIDFromContext(r.Context()), req)
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, video.ErrCapabilityUnsupported) || errors.Is(err, video.ErrProviderUnavailable) {
 			status = http.StatusBadRequest
 		}
-		writeEvent("video_generation_error", map[string]interface{}{
-			"error":         err.Error(),
-			"status":        status,
-			"project_id":    videoProjectIDOrEmpty(project),
-			"generation_id": videoGenerationIDOrEmpty(generation),
-		})
+		respondError(w, status, err.Error())
 		return
 	}
-	writeEvent("video_generation_done", map[string]interface{}{
-		"project":    project,
-		"generation": h.enrichGeneration(*generation),
-		"asset":      asset,
+	respondJSON(w, http.StatusAccepted, map[string]interface{}{
+		"generation_id": generation.ID,
+		"project_id":    project.ID,
+		"status":        generation.Status,
+		"generation":    h.enrichGeneration(*generation),
+	})
+}
+
+// CancelGeneration cancels a pending or running generation.
+func (h *VideoHandler) CancelGeneration(w http.ResponseWriter, r *http.Request) {
+	generation, ok := h.loadOwnedGeneration(w, r, chi.URLParam(r, "generationId"))
+	if !ok {
+		return
+	}
+	if err := h.service.CancelGeneration(generation.ID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"generation_id": generation.ID,
+		"status":        "cancelled",
 	})
 }
 
@@ -483,7 +459,7 @@ func (h *VideoHandler) EnhancePrompt(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	enhanced := video.EnhancePrompt(req)
+	enhanced := h.service.EnhancePrompt(r.Context(), req)
 	if enhanced == "" {
 		respondError(w, http.StatusBadRequest, "prompt is required")
 		return

@@ -620,7 +620,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 export type CrossoverContext =
   | { type: 'to-music'; data: { prompt: string; genre?: string; mood?: string; instruments?: string[]; tempo?: string; sessionId?: string } }
   | { type: 'to-image'; data: { prompt: string; autoGenerate?: boolean; nonce?: string } }
-  | { type: 'to-video'; data: { prompt: string; nonce?: string } }
+  | { type: 'to-video'; data: { prompt: string; attachmentId?: string; nonce?: string } }
   | null;
 
 interface CrossoverState {

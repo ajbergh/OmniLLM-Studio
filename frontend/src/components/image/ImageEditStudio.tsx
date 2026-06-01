@@ -434,7 +434,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     setGeneratingVideo(true);
     try {
       const result = await crossoverApi.translate.imageToVideo({ prompt: activeNode.instruction });
-      setCrossoverContext({ type: 'to-video', data: { prompt: result.video_prompt } });
+      setCrossoverContext({ type: 'to-video', data: { prompt: result.video_prompt, attachmentId: canvasAttachmentId || undefined } });
       setAppMode('video');
       toast.success('Opening Video Studio with generated prompt');
     } catch (err) {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/models"
@@ -234,11 +235,24 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 
 	enhancedPrompt := strings.TrimSpace(req.EnhancedPrompt)
 	if enhancedPrompt == "" && req.Enhance {
-		enhancedPrompt = EnhancePrompt(EnhancePromptRequest{
+		inputMode := "text-to-video"
+		switch {
+		case req.SourceVideoAssetID != "":
+			inputMode = "extend"
+		case req.LastFrameAssetID != "":
+			inputMode = "first_last_frame"
+		case req.StartImageAssetID != "":
+			inputMode = "image-to-video"
+		case len(req.ReferenceAssetIDs) > 0:
+			inputMode = "reference-images"
+		}
+		enhancedPrompt = EnhancePromptWithLLM(ctx, s.llm, EnhancePromptRequest{
 			Prompt:          req.Prompt,
 			AspectRatio:     req.AspectRatio,
 			DurationSeconds: req.DurationSeconds,
 			NegativePrompt:  req.NegativePrompt,
+			InputMode:       inputMode,
+			ProductionNotes: assembleCinematicNotes(req),
 		})
 	}
 	var enhancedPtr *string
@@ -258,6 +272,26 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 	inputIDsJSONBytes, _ := json.Marshal(req.ReferenceAssetIDs)
 	inputIDsJSON := string(inputIDsJSONBytes)
 
+	// Build structured input_assets_json with roles.
+	var inputAssets []InputAsset
+	if req.StartImageAssetID != "" {
+		inputAssets = append(inputAssets, InputAsset{AssetID: req.StartImageAssetID, Role: RoleStartFrame})
+	}
+	if req.LastFrameAssetID != "" {
+		inputAssets = append(inputAssets, InputAsset{AssetID: req.LastFrameAssetID, Role: RoleLastFrame})
+	}
+	if req.SourceVideoAssetID != "" {
+		inputAssets = append(inputAssets, InputAsset{AssetID: req.SourceVideoAssetID, Role: RoleSourceVideo})
+	}
+	for _, id := range req.ReferenceAssetIDs {
+		inputAssets = append(inputAssets, InputAsset{AssetID: id, Role: RoleReference})
+	}
+	if inputAssets == nil {
+		inputAssets = []InputAsset{}
+	}
+	inputAssetsJSONBytes, _ := json.Marshal(inputAssets)
+	inputAssetsJSON := string(inputAssetsJSONBytes)
+
 	generation := &models.VideoGeneration{
 		ProjectID:         project.ID,
 		ParentID:          parentID,
@@ -269,6 +303,7 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 		NegativePrompt:    negativePtr,
 		SettingsJSON:      settingsJSON,
 		InputAssetIDsJSON: inputIDsJSON,
+		InputAssetsJSON:   inputAssetsJSON,
 	}
 	if err := s.generations.Create(generation); err != nil {
 		return project, nil, nil, err
@@ -299,6 +334,23 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 			}
 		}
 		providerReq.ReferenceAssetPaths = paths
+	}
+
+	// Resolve start frame, last frame, and source video asset IDs to paths.
+	if providerReq.StartImageAssetID != "" {
+		if p, err := s.resolveAssetPath(providerReq.StartImageAssetID); err == nil {
+			providerReq.StartImagePath = p
+		}
+	}
+	if providerReq.LastFrameAssetID != "" {
+		if p, err := s.resolveAssetPath(providerReq.LastFrameAssetID); err == nil {
+			providerReq.LastFramePath = p
+		}
+	}
+	if providerReq.SourceVideoAssetID != "" {
+		if p, err := s.resolveAssetPath(providerReq.SourceVideoAssetID); err == nil {
+			providerReq.SourceVideoPath = p
+		}
 	}
 
 	result, err := provider.Generate(ctx, providerReq, func(p GenerationProgress) {
@@ -381,6 +433,391 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 		_, _, _ = s.ImportAssetToTimeline(ctx, userID, project.ID, TimelineImportAssetRequest{AssetID: asset.ID})
 	}
 	return project, generation, asset, nil
+}
+
+// EnhancePrompt enhances a prompt using LLM if available, falling back to deterministic.
+func (s *Service) EnhancePrompt(ctx context.Context, req EnhancePromptRequest) string {
+	return EnhancePromptWithLLM(ctx, s.llm, req)
+}
+
+// resolveAssetPath looks up a video asset by ID and returns its absolute file
+// path under the attachments directory.
+func (s *Service) resolveAssetPath(assetID string) (string, error) {
+	asset, err := s.assets.GetByID(assetID)
+	if err != nil {
+		return "", err
+	}
+	if asset == nil {
+		return "", fmt.Errorf("asset not found: %s", assetID)
+	}
+	absPath := filepath.Join(s.attachmentsDir, filepath.FromSlash(asset.FilePath))
+	if _, err := os.Stat(absPath); err != nil {
+		return "", fmt.Errorf("asset file not found on disk: %s", absPath)
+	}
+	return absPath, nil
+}
+
+// GenerateAsync creates the generation record, submits the provider operation in
+// the background, and returns immediately.  The caller should poll
+// GET /video/generations/{id} until status is "completed" or "failed".
+func (s *Service) GenerateAsync(ctx context.Context, userID string, req GenerateRequest) (*models.VideoProject, *models.VideoGeneration, error) {
+	providerKey := NormalizeProvider(req.Provider)
+	if providerKey == "" {
+		return nil, nil, fmt.Errorf("%w: unsupported video provider", ErrCapabilityUnsupported)
+	}
+	registry := s.providerRegistry()
+	if _, ok := registry.Provider(providerKey); !ok {
+		return nil, nil, fmt.Errorf("%w: no adapter registered for %s", ErrProviderUnavailable, providerKey)
+	}
+
+	modelID := strings.TrimSpace(req.Model)
+	if modelID == "" {
+		modelID = registry.DefaultModel(ctx, providerKey)
+	}
+	if strings.TrimSpace(req.Prompt) == "" {
+		return nil, nil, fmt.Errorf("prompt is required")
+	}
+
+	project, err := s.ensureProject(ctx, userID, req, providerKey, modelID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Build enhanced prompt (use LLM if available).
+	enhancedPrompt := strings.TrimSpace(req.EnhancedPrompt)
+	if enhancedPrompt == "" && req.Enhance {
+		inputMode := "text-to-video"
+		switch {
+		case req.SourceVideoAssetID != "":
+			inputMode = "extend"
+		case req.LastFrameAssetID != "":
+			inputMode = "first_last_frame"
+		case req.StartImageAssetID != "":
+			inputMode = "image-to-video"
+		case len(req.ReferenceAssetIDs) > 0:
+			inputMode = "reference-images"
+		}
+		enhancedPrompt = EnhancePromptWithLLM(ctx, s.llm, EnhancePromptRequest{
+			Prompt:          req.Prompt,
+			AspectRatio:     req.AspectRatio,
+			DurationSeconds: req.DurationSeconds,
+			NegativePrompt:  req.NegativePrompt,
+			InputMode:       inputMode,
+			ProductionNotes: assembleCinematicNotes(req),
+		})
+	}
+
+	var enhancedPtr, negativePtr, parentID *string
+	if enhancedPrompt != "" {
+		enhancedPtr = &enhancedPrompt
+	}
+	if neg := strings.TrimSpace(req.NegativePrompt); neg != "" {
+		negativePtr = &neg
+	}
+	if strings.TrimSpace(req.ParentID) != "" {
+		parentID = &req.ParentID
+	}
+
+	settingsJSON := buildSettingsJSON(req)
+	inputIDsJSONBytes, _ := json.Marshal(req.ReferenceAssetIDs)
+
+	var inputAssets []InputAsset
+	if req.StartImageAssetID != "" {
+		inputAssets = append(inputAssets, InputAsset{AssetID: req.StartImageAssetID, Role: RoleStartFrame})
+	}
+	if req.LastFrameAssetID != "" {
+		inputAssets = append(inputAssets, InputAsset{AssetID: req.LastFrameAssetID, Role: RoleLastFrame})
+	}
+	if req.SourceVideoAssetID != "" {
+		inputAssets = append(inputAssets, InputAsset{AssetID: req.SourceVideoAssetID, Role: RoleSourceVideo})
+	}
+	for _, id := range req.ReferenceAssetIDs {
+		inputAssets = append(inputAssets, InputAsset{AssetID: id, Role: RoleReference})
+	}
+	if inputAssets == nil {
+		inputAssets = []InputAsset{}
+	}
+	inputAssetsJSONBytes, _ := json.Marshal(inputAssets)
+
+	generation := &models.VideoGeneration{
+		ProjectID:         project.ID,
+		ParentID:          parentID,
+		Status:            StatusPending,
+		Provider:          providerKey,
+		Model:             modelID,
+		Prompt:            strings.TrimSpace(req.Prompt),
+		EnhancedPrompt:    enhancedPtr,
+		NegativePrompt:    negativePtr,
+		SettingsJSON:      settingsJSON,
+		InputAssetIDsJSON: string(inputIDsJSONBytes),
+		InputAssetsJSON:   string(inputAssetsJSONBytes),
+	}
+	if err := s.generations.Create(generation); err != nil {
+		return project, nil, err
+	}
+
+	// Start background generation goroutine.
+	go s.runGenerationBackground(context.Background(), project.ID, generation.ID, modelID, providerKey, req, enhancedPrompt)
+
+	return project, generation, nil
+}
+
+// runGenerationBackground performs the provider submit + poll + download cycle
+// in a background goroutine.  It never panics — all errors are written to the
+// generation record.
+func (s *Service) runGenerationBackground(
+	ctx context.Context,
+	projectID, generationID, modelID, providerKey string,
+	req GenerateRequest,
+	enhancedPrompt string,
+) {
+	fail := func(msg string) {
+		_ = s.generations.MarkFailed(generationID, msg)
+	}
+
+	registry := s.providerRegistry()
+	prov, ok := registry.Provider(providerKey)
+	if !ok {
+		fail("provider not available: " + providerKey)
+		return
+	}
+	gemProv, isGemini := prov.(*GeminiProvider)
+	if !isGemini {
+		// Fall back to synchronous Generate for non-Gemini providers.
+		_, gen, asset, err := s.Generate(ctx, "", req, nil)
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		_ = gen
+		_ = asset
+		return
+	}
+
+	_ = s.generations.MarkRunning(generationID)
+
+	// Resolve paths.
+	providerReq := req
+	providerReq.EnhancedPrompt = enhancedPrompt
+	providerReq.Provider = providerKey
+	providerReq.Model = modelID
+	providerReq.ProjectID = projectID
+	if len(providerReq.ReferenceAssetIDs) > 0 {
+		paths := make([]string, 0, len(providerReq.ReferenceAssetIDs))
+		for _, id := range providerReq.ReferenceAssetIDs {
+			if p, err := s.resolveAssetPath(id); err == nil {
+				paths = append(paths, p)
+			}
+		}
+		providerReq.ReferenceAssetPaths = paths
+	}
+	if providerReq.StartImageAssetID != "" {
+		if p, err := s.resolveAssetPath(providerReq.StartImageAssetID); err == nil {
+			providerReq.StartImagePath = p
+		}
+	}
+	if providerReq.LastFrameAssetID != "" {
+		if p, err := s.resolveAssetPath(providerReq.LastFrameAssetID); err == nil {
+			providerReq.LastFramePath = p
+		}
+	}
+	if providerReq.SourceVideoAssetID != "" {
+		if p, err := s.resolveAssetPath(providerReq.SourceVideoAssetID); err == nil {
+			providerReq.SourceVideoPath = p
+		}
+	}
+
+	opName, err := gemProv.Submit(ctx, providerReq)
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+	_ = s.generations.SetUpstreamJobID(generationID, opName)
+
+	s.pollAndFinalize(ctx, projectID, generationID, modelID, providerKey, gemProv, opName, req)
+}
+
+// pollAndFinalize polls a Gemini operation until done then stores the result.
+func (s *Service) pollAndFinalize(
+	ctx context.Context,
+	projectID, generationID, modelID, providerKey string,
+	gemProv *GeminiProvider,
+	opName string,
+	req GenerateRequest,
+) {
+	fail := func(msg string) {
+		_ = s.generations.MarkFailed(generationID, msg)
+	}
+
+	const maxAttempts = 120
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				fail("generation cancelled")
+				return
+			case <-asyncPollTimer(10):
+			}
+		}
+		done, videoURI, _, err := gemProv.PollOnce(ctx, opName)
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if done {
+			if videoURI == "" {
+				fail("Gemini Veo completed without a video URI")
+				return
+			}
+			data, mimeType, err := gemProv.DownloadVideo(ctx, videoURI)
+			if err != nil {
+				fail(err.Error())
+				return
+			}
+			if mimeType == "" {
+				mimeType = "video/mp4"
+			}
+			s.finalizeGeneration(projectID, generationID, modelID, providerKey, opName, mimeType, data, req)
+			return
+		}
+	}
+	fail("Gemini Veo operation timed out")
+}
+
+// asyncPollTimer returns a channel that fires after d seconds.
+func asyncPollTimer(seconds int) <-chan struct{} {
+	ch := make(chan struct{})
+	go func() {
+		time.Sleep(time.Duration(seconds) * time.Second)
+		close(ch)
+	}()
+	return ch
+}
+
+// finalizeGeneration stores the downloaded video bytes as an asset and marks
+// the generation completed.
+func (s *Service) finalizeGeneration(
+	projectID, generationID, modelID, providerKey, opName, mimeType string,
+	data []byte,
+	req GenerateRequest,
+) {
+	fail := func(msg string) {
+		_ = s.generations.MarkFailed(generationID, msg)
+	}
+
+	resolution := strings.TrimSpace(req.Resolution)
+	if resolution == "" {
+		resolution = "720p"
+	}
+	aspectRatio := strings.TrimSpace(req.AspectRatio)
+	if aspectRatio == "" {
+		aspectRatio = DefaultAspectRatio
+	}
+	duration := defaultInt(req.DurationSeconds, 8)
+
+	fileName := "gemini-" + sanitizePathSegment(req.Model) + extensionForMimeType(mimeType)
+	relativePath, savedFileName, err := s.storage.Write(projectID, generationID, fileName, mimeType, data)
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+
+	width, height := dimensionsForResolution(resolution, aspectRatio)
+	fps := float64(24)
+	durationMS := int64(duration * 1000)
+
+	metadata := map[string]any{
+		"provider":       providerKey,
+		"model":          modelID,
+		"operation_name": opName,
+		"api":            "gemini_predict_long_running",
+	}
+	metaJSONBytes, _ := json.Marshal(metadata)
+
+	asset := &models.VideoAsset{
+		ProjectID:    &projectID,
+		SourceType:   "generation",
+		Kind:         "video",
+		FileName:     savedFileName,
+		FilePath:     relativePath,
+		MimeType:     mimeType,
+		SizeBytes:    int64(len(data)),
+		DurationMS:   &durationMS,
+		Width:        &width,
+		Height:       &height,
+		FPS:          &fps,
+		Provider:     &providerKey,
+		Model:        &modelID,
+		MetadataJSON: string(metaJSONBytes),
+	}
+	if err := s.assets.Create(asset); err != nil {
+		fail(err.Error())
+		return
+	}
+
+	jobStr := opName
+	_ = s.generations.MarkCompleted(generationID, repository.VideoGenerationCompletion{
+		OutputAssetID: asset.ID,
+		UpstreamJobID: &jobStr,
+	})
+
+	if req.PlaceOnTimeline {
+		_, _, _ = s.ImportAssetToTimeline(context.Background(), "", projectID, TimelineImportAssetRequest{AssetID: asset.ID})
+	}
+}
+
+// CancelGeneration marks a generation as cancelled.  If the generation is
+// still in pending/running state, it will not be able to proceed.
+func (s *Service) CancelGeneration(generationID string) error {
+	gen, err := s.generations.GetByID(generationID)
+	if err != nil {
+		return err
+	}
+	if gen == nil {
+		return fmt.Errorf("generation not found: %s", generationID)
+	}
+	if gen.Status == StatusCompleted || gen.Status == StatusFailed || gen.Status == StatusCancelled {
+		return nil // already terminal, no-op
+	}
+	return s.generations.MarkCancelled(generationID)
+}
+
+// RecoverPendingGenerations scans for running/pending generations that have an
+// upstream_job_id and re-spawns their poll goroutines.  Call once at startup.
+func (s *Service) RecoverPendingGenerations() {
+	active, err := s.generations.ListActiveWithUpstreamJob()
+	if err != nil || len(active) == 0 {
+		return
+	}
+	for i := range active {
+		gen := active[i]
+		if gen.UpstreamJobID == nil || *gen.UpstreamJobID == "" {
+			continue
+		}
+		opName := *gen.UpstreamJobID
+		providerKey := gen.Provider
+		modelID := gen.Model
+		projectID := gen.ProjectID
+		generationID := gen.ID
+
+		// Rebuild a minimal request for finalize (duration/resolution from settings).
+		req := GenerateRequest{
+			Provider:        providerKey,
+			Model:           modelID,
+			DurationSeconds: 8,
+			Resolution:      "720p",
+		}
+		registry := s.providerRegistry()
+		prov, ok := registry.Provider(NormalizeProvider(providerKey))
+		if !ok {
+			continue
+		}
+		gemProv, isGemini := prov.(*GeminiProvider)
+		if !isGemini {
+			continue
+		}
+		go s.pollAndFinalize(context.Background(), projectID, generationID, modelID, providerKey, gemProv, opName, req)
+	}
 }
 
 func (s *Service) GetOrCreateTimeline(ctx context.Context, userID, projectID string) (*models.VideoTimeline, TimelineDocument, error) {

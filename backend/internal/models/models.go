@@ -927,25 +927,27 @@ type VideoProject struct {
 }
 
 type VideoGeneration struct {
-	ID                string     `json:"id"`
-	ProjectID         string     `json:"project_id"`
-	ParentID          *string    `json:"parent_id,omitempty"`
-	Status            string     `json:"status"`
-	Provider          string     `json:"provider"`
-	Model             string     `json:"model"`
-	Prompt            string     `json:"prompt"`
-	EnhancedPrompt    *string    `json:"enhanced_prompt,omitempty"`
-	NegativePrompt    *string    `json:"negative_prompt,omitempty"`
-	SettingsJSON      string     `json:"settings_json,omitempty"`
-	InputAssetIDsJSON string     `json:"input_asset_ids_json,omitempty"`
-	OutputAssetID     *string    `json:"output_asset_id,omitempty"`
-	UpstreamJobID     *string    `json:"upstream_job_id,omitempty"`
-	UpstreamReqID     *string    `json:"upstream_request_id,omitempty"`
-	UsageJSON         *string    `json:"usage_json,omitempty"`
-	CostUSD           *float64   `json:"cost_usd,omitempty"`
-	Error             *string    `json:"error,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	CompletedAt       *time.Time `json:"completed_at,omitempty"`
+	ID                string  `json:"id"`
+	ProjectID         string  `json:"project_id"`
+	ParentID          *string `json:"parent_id,omitempty"`
+	Status            string  `json:"status"`
+	Provider          string  `json:"provider"`
+	Model             string  `json:"model"`
+	Prompt            string  `json:"prompt"`
+	EnhancedPrompt    *string `json:"enhanced_prompt,omitempty"`
+	NegativePrompt    *string `json:"negative_prompt,omitempty"`
+	SettingsJSON      string  `json:"settings_json,omitempty"`
+	InputAssetIDsJSON string  `json:"input_asset_ids_json,omitempty"`
+	// InputAssetsJSON holds a JSON array of {"asset_id":"...","role":"..."} objects (V40+).
+	InputAssetsJSON string     `json:"input_assets_json,omitempty"`
+	OutputAssetID   *string    `json:"output_asset_id,omitempty"`
+	UpstreamJobID   *string    `json:"upstream_job_id,omitempty"`
+	UpstreamReqID   *string    `json:"upstream_request_id,omitempty"`
+	UsageJSON       *string    `json:"usage_json,omitempty"`
+	CostUSD         *float64   `json:"cost_usd,omitempty"`
+	Error           *string    `json:"error,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 
 type VideoAsset struct {

@@ -248,6 +248,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	videoService := video.NewService(videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, providerRepo, cfg.AttachmentsDir, llmService)
 	videoService.ConfigureExternalAssetSources(libraryFileRepo, musicSessionRepo, musicAssetRepo, imgAssetRepo, attachRepo, convoRepo, cfg.AttachmentsDir)
 	videoHandler := NewVideoHandler(videoService, videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, convoRepo, attachRepo, fileLibrarySvc, cfg.AttachmentsDir)
+	// Resume any generation poll goroutines that were in-flight when the server last stopped.
+	go videoService.RecoverPendingGenerations()
 	crossoverHandler := NewCrossoverHandler(llmService, providerRepo)
 
 	// Semantic Search
@@ -436,6 +438,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Get("/video/generations/{generationId}", videoHandler.GetGeneration)
 			r.Post("/video/generations/{generationId}/branch", videoHandler.BranchGeneration)
 			r.Post("/video/generations/{generationId}/send-to-timeline", videoHandler.SendGenerationToTimeline)
+			r.Post("/video/generations/{generationId}/cancel", videoHandler.CancelGeneration)
 			r.Get("/video/render-jobs/{jobId}", videoHandler.GetRenderJob)
 			r.Post("/video/render-jobs/{jobId}/cancel", videoHandler.CancelRenderJob)
 			r.Get("/video/assets/{assetId}", videoHandler.GetAsset)
