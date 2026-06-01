@@ -12,6 +12,49 @@ Video Studio is a first-class project workspace for AI video creation. Timeline 
 - Single-output preview and download controls for generated video, image, and audio outputs.
 - **Cross-studio shortcuts** — Image Studio and Music Studio each expose a "Make Video" button that routes the asset (with generated prompt context) into Video Studio via the crossover domain-translation path.
 
+## Creation Panel UI
+
+The creation panel is organized into individually collapsible sections so you can focus on what matters:
+
+| Section | Default | Contents |
+|---------|---------|----------|
+| **Prompt** | Open | Main prompt textarea + negative prompt (when supported) |
+| **Start / Last Frame** | Open | Start frame image, last frame image (Veo interpolation), source video to extend — shown only when the selected model supports these capabilities |
+| **Reference Images** | Closed | Up to 3 reference images for style/subject guidance — shown only for models with `reference_images` capability |
+| **Output Format** | Open | Aspect ratio, duration, resolution, FPS |
+| **Cinematic Controls** | Closed | Full cinematic detail dropdowns (see below) |
+| **Advanced** | Closed | Person generation and future tunables |
+
+## Cinematic Controls
+
+The **Cinematic Controls** section provides Music-Studio-style dropdown selectors for every major creative dimension. Each control offers preset choices plus a **Custom…** free-text entry option.
+
+| Control | Presets | Example custom |
+|---------|---------|----------------|
+| **Style** | cinematic, documentary, animation, hyperrealistic, vintage film, sci-fi, horror, fantasy, noir, nature documentary, vlog, commercial, abstract | `impressionist painting` |
+| **Camera motion** | static locked-off, slow push-in, slow pull-out, dolly forward/backward, dolly zoom, pan left/right, tilt up/down, orbit/arc, tracking follow, crane up/down, handheld shake, whip pan, dutch tilt, drone aerial | `rotating crane` |
+| **Shot type** | ECU through extreme wide shot, OTS, POV, high angle, low angle, bird's eye, worm's eye | `two-shot` |
+| **Composition** | rule of thirds, centered symmetry, leading lines, negative space, framing, golden ratio, diagonal, layered depth, overhead flat lay | `dynamic diagonal` |
+| **Lens / focus** | standard 50mm, wide angle, telephoto, macro, fisheye, tilt-shift, anamorphic, shallow DOF bokeh, deep focus, rack focus | `anamorphic streak` |
+| **Lighting / ambiance** | golden hour, blue hour, midday sun, overcast diffuse, studio three-point, neon night, candlelight, silhouette backlit, fog/mist, underwater caustics, fire glow, moonlight | `hard rim backlight` |
+| **Dialogue** (audio models) | Free text — wrap dialogue in quotes: `"Hello," she whispered.` | |
+| **Sound effects** (audio models) | footsteps on gravel, rain on glass, crowd murmur, door creak, explosion, thunder crack, city traffic, fire crackling, wind, ocean waves, chirping birds, keyboard typing | `thunder crack` |
+| **Ambient noise** (audio models) | forest ambience, urban street, coffee shop, empty concert hall, underwater, wind in trees, night crickets, industrial factory, distant traffic hum | `distant traffic hum` |
+| **Continuity notes** | Free text — shown when the model supports image-to-video, first/last frame, or extend. E.g. `Maintain character outfit, match exit direction, seamless loop…` | |
+| **Production notes** | Free text — additional directives appended to the assembled prompt. | |
+
+All cinematic controls are assembled into the final prompt at generation time — nothing is sent as a separate API parameter. Controls left empty (or set to **Auto**) are omitted.
+
+## Asset Pickers — Thumbnails & Local Upload
+
+Every image/video asset selector in the creation panel includes:
+
+- **Inline thumbnail** — once an asset is selected, its preview renders below the dropdown (images as `max-h-32`, video as a `max-h-20` muted poster frame).
+- **Local file upload (`+` button)** — click the `+` button next to the dropdown to open a native file picker scoped to the appropriate type (`image/*` or `video/*`). The file is uploaded to the project via `POST /v1/video/projects/{projectId}/assets/upload`, automatically selected, and the asset list updates immediately — no page refresh required.
+
+The upload button is available for Start frame, Last frame, Source video to extend, and all three Reference image slots.
+
+
 ## Video Edit Studio Capabilities
 
 - Neutral OmniLLM timeline JSON with video, image, audio, music, text, caption, shape, and callout track types.
@@ -46,6 +89,8 @@ See [VIDEO_RENDERING.md](VIDEO_RENDERING.md) for the full renderer reference.
 ## Cross-Studio Imports
 
 `POST /v1/video/projects/{projectId}/assets/import` accepts File Library, Music Studio, Image Studio, and attachment-backed source IDs. The service resolves the original stored file, checks project/source ownership where the source model supports it, copies the bytes into `<attachments_dir>/video/...`, and stores a `VideoAsset` with `source_studio` and `source_id` metadata.
+
+`POST /v1/video/projects/{projectId}/assets/upload` accepts a raw `multipart/form-data` file upload (max 50 MB, field name `file`). The backend auto-detects the MIME type from the header or file extension, derives `kind` (`image`, `video`, `audio`, `file`), saves the file under a UUID filename in video storage, and creates a `VideoAsset` record with `source_type = "upload"`. This endpoint powers the inline `+` upload button present in every asset picker in the creation panel.
 
 ## Cross-Studio Exports
 

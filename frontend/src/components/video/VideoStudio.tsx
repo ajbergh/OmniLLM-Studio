@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
+  ChevronDown,
   Clapperboard,
   Download,
   Film,
@@ -338,158 +339,177 @@ export function VideoStudio() {
                   </div>
                 </ControlLabel>
 
-                <ControlLabel label="Prompt">
-                  <textarea
-                    value={promptForm.prompt}
-                    onChange={(event) => setPromptField('prompt', event.target.value)}
-                    rows={8}
-                    maxLength={selectedModelInfo?.max_prompt_chars || undefined}
-                    placeholder="Describe a single video: subject, scene, action, camera, lighting, and style."
-                    className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted/50 focus:border-primary/50 focus:outline-none"
-                  />
-                </ControlLabel>
-
-                {selectedModelCapabilities.includes('negative_prompt') && (
-                  <ControlLabel label="Negative prompt">
-                    <input
-                      value={promptForm.negative_prompt}
-                      onChange={(event) => setPromptField('negative_prompt', event.target.value)}
-                      className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:border-primary/50 focus:outline-none"
-                      placeholder="Artifacts to avoid"
+                {/* ── Prompt ── */}
+                <CollapsibleSection label="Prompt" defaultOpen>
+                  <ControlLabel label="Prompt">
+                    <textarea
+                      value={promptForm.prompt}
+                      onChange={(event) => setPromptField('prompt', event.target.value)}
+                      rows={8}
+                      maxLength={selectedModelInfo?.max_prompt_chars || undefined}
+                      placeholder="Describe a single video: subject, scene, action, camera, lighting, and style."
+                      className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted/50 focus:border-primary/50 focus:outline-none"
                     />
                   </ControlLabel>
-                )}
+                  {selectedModelCapabilities.includes('negative_prompt') && (
+                    <ControlLabel label="Negative prompt">
+                      <input
+                        value={promptForm.negative_prompt}
+                        onChange={(event) => setPromptField('negative_prompt', event.target.value)}
+                        className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:border-primary/50 focus:outline-none"
+                        placeholder="Artifacts to avoid"
+                      />
+                    </ControlLabel>
+                  )}
+                </CollapsibleSection>
 
-                {(selectedModelCapabilities.includes('image_to_video') || selectedModelCapabilities.includes('first_last_frame')) && (
-                  <ControlLabel label="Start frame image">
-                    <AssetPicker
-                      value={promptForm.start_image_asset_id}
-                      onChange={(id) => setPromptField('start_image_asset_id', id)}
-                      assets={assets}
-                      accept="image"
-                      placeholder="None — select an image asset"
-                    />
-                    <p className="mt-1 text-[10px] text-text-muted">Image asset from this project to use as the first frame.</p>
-                  </ControlLabel>
-                )}
-
-                {selectedModelCapabilities.includes('first_last_frame') && (
-                  <ControlLabel label="Last frame image">
-                    <AssetPicker
-                      value={promptForm.last_frame_asset_id}
-                      onChange={(id) => setPromptField('last_frame_asset_id', id)}
-                      assets={assets}
-                      accept="image"
-                      placeholder="None — requires a start frame"
-                    />
-                    <p className="mt-1 text-[10px] text-text-muted">Veo 3.1 interpolates between start and last frame. Requires a start frame.</p>
-                  </ControlLabel>
-                )}
-
-                {selectedModelCapabilities.includes('extend_video') && (
-                  <ControlLabel label="Source video to extend">
-                    <AssetPicker
-                      value={promptForm.source_video_asset_id}
-                      onChange={(id) => setPromptField('source_video_asset_id', id)}
-                      assets={assets}
-                      accept="video"
-                      placeholder="None — select a video asset to extend"
-                    />
-                    <p className="mt-1 text-[10px] text-text-muted">Continues from the final frame. Forced to 720p, 8s.</p>
-                  </ControlLabel>
-                )}
-
-                {selectedModelCapabilities.includes('reference_images') && (
-                  <ControlLabel label={`Reference images (${(promptForm.reference_asset_ids ?? []).filter(Boolean).length}/3)`}>
-                    <div className="space-y-1.5">
-                      {[0, 1, 2].map((idx) => (
+                {/* ── Start / Last Frame ── */}
+                {(selectedModelCapabilities.includes('image_to_video') || selectedModelCapabilities.includes('first_last_frame') || selectedModelCapabilities.includes('extend_video')) && (
+                  <CollapsibleSection label="Start / Last Frame" defaultOpen>
+                    {(selectedModelCapabilities.includes('image_to_video') || selectedModelCapabilities.includes('first_last_frame')) && (
+                      <ControlLabel label="Start frame image">
                         <AssetPicker
-                          key={idx}
-                          value={(promptForm.reference_asset_ids ?? [])[idx]}
-                          onChange={(id) => {
-                            const current = [...(promptForm.reference_asset_ids ?? [])];
-                            if (id) {
-                              current[idx] = id;
-                            } else {
-                              current.splice(idx, 1);
-                            }
-                            const filtered = current.filter(Boolean);
-                            setPromptField('reference_asset_ids', filtered.length > 0 ? filtered : undefined);
-                          }}
+                          value={promptForm.start_image_asset_id}
+                          onChange={(id) => setPromptField('start_image_asset_id', id)}
                           assets={assets}
+                          projectId={activeProjectId}
+                          onAssetsChange={(updated) => useVideoStudioStore.setState({ assets: updated })}
                           accept="image"
-                          placeholder={`Reference image ${idx + 1}`}
+                          placeholder="None — select an image asset"
                         />
-                      ))}
-                    </div>
-                    <p className="mt-1 text-[10px] text-text-muted">Up to 3 images. Requires 8s duration.</p>
-                  </ControlLabel>
+                        <p className="mt-1 text-[10px] text-text-muted">Image asset from this project to use as the first frame.</p>
+                      </ControlLabel>
+                    )}
+                    {selectedModelCapabilities.includes('first_last_frame') && (
+                      <ControlLabel label="Last frame image">
+                        <AssetPicker
+                          value={promptForm.last_frame_asset_id}
+                          onChange={(id) => setPromptField('last_frame_asset_id', id)}
+                          assets={assets}
+                          projectId={activeProjectId}
+                          onAssetsChange={(updated) => useVideoStudioStore.setState({ assets: updated })}
+                          accept="image"
+                          placeholder="None — requires a start frame"
+                        />
+                        <p className="mt-1 text-[10px] text-text-muted">Veo 3.1 interpolates between start and last frame. Requires a start frame.</p>
+                      </ControlLabel>
+                    )}
+                    {selectedModelCapabilities.includes('extend_video') && (
+                      <ControlLabel label="Source video to extend">
+                        <AssetPicker
+                          value={promptForm.source_video_asset_id}
+                          onChange={(id) => setPromptField('source_video_asset_id', id)}
+                          assets={assets}
+                          projectId={activeProjectId}
+                          onAssetsChange={(updated) => useVideoStudioStore.setState({ assets: updated })}
+                          accept="video"
+                          placeholder="None — select a video asset to extend"
+                        />
+                        <p className="mt-1 text-[10px] text-text-muted">Continues from the final frame. Forced to 720p, 8s.</p>
+                      </ControlLabel>
+                    )}
+                  </CollapsibleSection>
                 )}
 
+                {/* ── Reference Images ── */}
+                {selectedModelCapabilities.includes('reference_images') && (
+                  <CollapsibleSection label={`Reference Images (${(promptForm.reference_asset_ids ?? []).filter(Boolean).length}/3)`}>
+                    <ControlLabel label="">
+                      <div className="space-y-1.5">
+                        {[0, 1, 2].map((idx) => (
+                          <AssetPicker
+                            key={idx}
+                            value={(promptForm.reference_asset_ids ?? [])[idx]}
+                            onChange={(id) => {
+                              const current = [...(promptForm.reference_asset_ids ?? [])];
+                              if (id) {
+                                current[idx] = id;
+                              } else {
+                                current.splice(idx, 1);
+                              }
+                              const filtered = current.filter(Boolean);
+                              setPromptField('reference_asset_ids', filtered.length > 0 ? filtered : undefined);
+                            }}
+                            assets={assets}
+                            projectId={activeProjectId}
+                            onAssetsChange={(updated) => useVideoStudioStore.setState({ assets: updated })}
+                            accept="image"
+                            placeholder={`Reference image ${idx + 1}`}
+                          />
+                        ))}
+                      </div>
+                      <p className="mt-1 text-[10px] text-text-muted">Up to 3 images. Requires 8s duration.</p>
+                    </ControlLabel>
+                  </CollapsibleSection>
+                )}
+
+                {/* ── Output Format ── */}
+                <CollapsibleSection label="Output Format" defaultOpen>
+                  <div className="grid grid-cols-2 gap-2">
+                    <ControlLabel label="Aspect">
+                      <select
+                        value={promptForm.aspect_ratio}
+                        onChange={(event) => setPromptField('aspect_ratio', event.target.value)}
+                        className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
+                      >
+                        {(selectedModelInfo?.aspect_ratios || ['16:9', '9:16', '1:1']).map((value) => (
+                          <option key={value} value={value}>{value}</option>
+                        ))}
+                      </select>
+                    </ControlLabel>
+                    <ControlLabel label="Duration">
+                      <input
+                        type="number"
+                        min={selectedModelInfo?.duration_min_seconds || 1}
+                        max={selectedModelInfo?.duration_max_seconds || 30}
+                        value={promptForm.duration_seconds}
+                        onChange={(event) => setPromptField('duration_seconds', Math.max(1, Number(event.target.value) || 1))}
+                        className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
+                      />
+                    </ControlLabel>
+                    <ControlLabel label="Resolution">
+                      <select
+                        value={promptForm.resolution}
+                        onChange={(event) => setPromptField('resolution', event.target.value)}
+                        className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
+                      >
+                        {(selectedModelInfo?.resolutions || ['720p', '1080p']).map((value) => (
+                          <option key={value} value={value}>{value}</option>
+                        ))}
+                      </select>
+                    </ControlLabel>
+                    <ControlLabel label="FPS">
+                      <select
+                        value={promptForm.fps}
+                        onChange={(event) => setPromptField('fps', Number(event.target.value))}
+                        className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
+                      >
+                        {(selectedModelInfo?.fps_options || [24, 30]).map((value) => (
+                          <option key={value} value={value}>{value}</option>
+                        ))}
+                      </select>
+                    </ControlLabel>
+                  </div>
+                </CollapsibleSection>
+
+                {/* ── Advanced ── */}
                 {selectedModelCapabilities.includes('person_generation') && (
-                  <ControlLabel label="Person generation">
-                    <select
-                      value={promptForm.person_generation || 'allow'}
-                      onChange={(event) => setPromptField('person_generation', event.target.value as 'allow' | 'dont_allow')}
-                      className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
-                    >
-                      <option value="allow">Allow</option>
-                      <option value="dont_allow">Don&apos;t allow</option>
-                    </select>
-                  </ControlLabel>
+                  <CollapsibleSection label="Advanced">
+                    <ControlLabel label="Person generation">
+                      <select
+                        value={promptForm.person_generation || 'allow'}
+                        onChange={(event) => setPromptField('person_generation', event.target.value as 'allow' | 'dont_allow')}
+                        className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
+                      >
+                        <option value="allow">Allow</option>
+                        <option value="dont_allow">Don&apos;t allow</option>
+                      </select>
+                    </ControlLabel>
+                  </CollapsibleSection>
                 )}
 
-                <div className="grid grid-cols-2 gap-2">
-                  <ControlLabel label="Aspect">
-                    <select
-                      value={promptForm.aspect_ratio}
-                      onChange={(event) => setPromptField('aspect_ratio', event.target.value)}
-                      className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
-                    >
-                      {(selectedModelInfo?.aspect_ratios || ['16:9', '9:16', '1:1']).map((value) => (
-                        <option key={value} value={value}>{value}</option>
-                      ))}
-                    </select>
-                  </ControlLabel>
-                  <ControlLabel label="Duration">
-                    <input
-                      type="number"
-                      min={selectedModelInfo?.duration_min_seconds || 1}
-                      max={selectedModelInfo?.duration_max_seconds || 30}
-                      value={promptForm.duration_seconds}
-                      onChange={(event) => setPromptField('duration_seconds', Math.max(1, Number(event.target.value) || 1))}
-                      className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
-                    />
-                  </ControlLabel>
-                  <ControlLabel label="Resolution">
-                    <select
-                      value={promptForm.resolution}
-                      onChange={(event) => setPromptField('resolution', event.target.value)}
-                      className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
-                    >
-                      {(selectedModelInfo?.resolutions || ['720p', '1080p']).map((value) => (
-                        <option key={value} value={value}>{value}</option>
-                      ))}
-                    </select>
-                  </ControlLabel>
-                  <ControlLabel label="FPS">
-                    <select
-                      value={promptForm.fps}
-                      onChange={(event) => setPromptField('fps', Number(event.target.value))}
-                      className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
-                    >
-                      {(selectedModelInfo?.fps_options || [24, 30]).map((value) => (
-                        <option key={value} value={value}>{value}</option>
-                      ))}
-                    </select>
-                  </ControlLabel>
-                </div>
-
-                <details className="rounded-lg border border-border bg-surface-alt">
-                  <summary className="cursor-pointer select-none rounded-lg px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-text-muted hover:bg-surface-hover hover:text-text transition-colors">
-                    Cinematic Controls
-                  </summary>
-                  <div className="space-y-2 px-3 pb-3 pt-2">
+                <CollapsibleSection label="Cinematic Controls">
+                  <div className="space-y-1">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                       <SelectWithCustom
                         label="Style"
@@ -591,7 +611,7 @@ export function VideoStudio() {
                       </ControlLabel>
                     </div>
                   </div>
-                </details>
+                </CollapsibleSection>
 
                 {generationProgress && (
                   <div className="rounded-lg border border-primary/20 bg-primary/5 p-2">
@@ -924,42 +944,98 @@ function AssetPicker({
   value,
   onChange,
   assets,
+  onAssetsChange,
+  projectId,
   accept = 'any',
   placeholder = 'Select an asset',
 }: {
   value: string | undefined;
   onChange: (id: string | undefined) => void;
   assets: VideoAsset[];
+  onAssetsChange?: (updated: VideoAsset[]) => void;
+  projectId?: string | null;
   accept?: 'image' | 'video' | 'any';
   placeholder?: string;
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const createProject = useVideoStudioStore((state) => state.createProject);
+
   const filtered = assets.filter((a) =>
     accept === 'image' ? a.kind === 'image' :
     accept === 'video' ? a.kind === 'video' :
     true,
   );
-  const selectedAsset = value ? filtered.find((a) => a.id === value) : undefined;
+  const selectedAsset = value ? assets.find((a) => a.id === value) : undefined;
   const thumbUrl = selectedAsset ? videoAssetUrl(selectedAsset.id) : undefined;
   const isImage = selectedAsset?.kind === 'image' || selectedAsset?.mime_type?.startsWith('image/');
   const isVideo = selectedAsset?.kind === 'video' || selectedAsset?.mime_type?.startsWith('video/');
 
+  const acceptAttr = accept === 'image' ? 'image/*' : accept === 'video' ? 'video/*' : 'image/*,video/*';
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      // Auto-create a project if none is selected yet
+      let pid = projectId;
+      if (!pid) {
+        const created = await createProject();
+        pid = created?.id ?? null;
+      }
+      if (!pid) {
+        toast.error('Could not create a project for upload');
+        return;
+      }
+      const asset = await videoApi.uploadAsset(pid, file);
+      if (onAssetsChange) {
+        onAssetsChange([asset, ...assets]);
+      }
+      onChange(asset.id);
+    } catch {
+      toast.error('Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
   return (
     <div>
-      <select
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value || undefined)}
-        className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:border-primary/50 focus:outline-none"
-      >
-        <option value="">{placeholder}</option>
-        {filtered.map((asset) => (
-          <option key={asset.id} value={asset.id}>
-            {asset.file_name}
-          </option>
-        ))}
-        {filtered.length === 0 && (
-          <option disabled value="">No {accept === 'any' ? '' : accept + ' '}assets in this project</option>
-        )}
-      </select>
+      <div className="flex gap-1.5">
+        <select
+          value={value ?? ''}
+          onChange={(e) => onChange(e.target.value || undefined)}
+          className="min-h-10 min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 text-sm text-text focus:border-primary/50 focus:outline-none"
+        >
+          <option value="">{placeholder}</option>
+          {filtered.map((asset) => (
+            <option key={asset.id} value={asset.id}>
+              {asset.file_name}
+            </option>
+          ))}
+          {filtered.length === 0 && (
+            <option disabled value="">No {accept === 'any' ? '' : accept + ' '}assets in this project</option>
+          )}
+        </select>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={acceptAttr}
+          className="hidden"
+          onChange={(e) => { void handleFileChange(e); }}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          title="Upload local file"
+          className="min-h-10 min-w-10 rounded-lg border border-border bg-surface text-text-muted hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-45 inline-flex items-center justify-center shrink-0"
+        >
+          {uploading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+        </button>
+      </div>
       {thumbUrl && isImage && (
         <div className="mt-1.5 overflow-hidden rounded-md border border-border bg-black">
           <img
@@ -986,9 +1062,23 @@ function AssetPicker({
 function ControlLabel({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[11px] font-medium text-text-muted">{label}</span>
+      {label && <span className="mb-1.5 block text-[11px] font-medium text-text-muted">{label}</span>}
       {children}
     </label>
+  );
+}
+
+function CollapsibleSection({ label, children, defaultOpen = false }: { label: string; children: ReactNode; defaultOpen?: boolean }) {
+  return (
+    <details open={defaultOpen} className="group rounded-lg border border-border bg-surface-alt">
+      <summary className="flex cursor-pointer select-none list-none items-center justify-between rounded-lg px-3 py-2 hover:bg-surface-hover transition-colors [&::-webkit-details-marker]:hidden">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-text-muted group-open:text-text transition-colors">{label}</span>
+        <ChevronDown size={13} className="text-text-muted transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="space-y-2 px-3 pb-3 pt-1">
+        {children}
+      </div>
+    </details>
   );
 }
 

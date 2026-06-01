@@ -191,7 +191,9 @@ export async function uploadAttachment(conversationId: string, file: File): Prom
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    // Do NOT set Content-Type for FormData — the browser must set it with the
+    // multipart boundary. Only default to JSON for everything else.
+    ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options?.headers as Record<string, string>),
   };
 
@@ -1488,6 +1490,15 @@ export const videoApi = {
 
   getAsset: (assetId: string) =>
     apiFetch<VideoAsset>(`/video/assets/${encodeURIComponent(assetId)}`),
+
+  uploadAsset: (projectId: string, file: File): Promise<VideoAsset> => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiFetch<VideoAsset>(`/video/projects/${encodeURIComponent(projectId)}/assets/upload`, {
+      method: 'POST',
+      body: form,
+    });
+  },
 
   deleteAsset: (assetId: string) =>
     apiFetch<{ deleted: boolean }>(`/video/assets/${encodeURIComponent(assetId)}`, {

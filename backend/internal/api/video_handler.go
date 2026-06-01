@@ -3,9 +3,11 @@ package api
 import (
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/auth"
@@ -415,6 +417,87 @@ func (h *VideoHandler) DeleteAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
+// UploadAsset accepts a multipart file upload and creates a video asset in the
+// project.  Intended for images used as first/last/reference frames.
+func (h *VideoHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadOwnedProject(w, r, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+
+	const maxUploadSize = 50 << 20 // 50 MB
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		respondError(w, http.StatusBadRequest, "file too large (max 50 MB)")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "missing 'file' field in multipart form")
+		return
+	}
+	defer file.Close()
+
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		if guessed := mime.TypeByExtension(filepath.Ext(header.Filename)); guessed != "" {
+			mimeType = guessed
+		} else {
+			mimeType = "application/octet-stream"
+		}
+	}
+
+	kind := "file"
+	if strings.HasPrefix(mimeType, "image/") {
+		kind = "image"
+	} else if strings.HasPrefix(mimeType, "video/") {
+		kind = "video"
+	} else if strings.HasPrefix(mimeType, "audio/") {
+		kind = "audio"
+	}
+
+	ext := filepath.Ext(header.Filename)
+	storageFilename := uuid.New().String() + ext
+	storagePath := filepath.Join(h.storageDir, storageFilename)
+
+	if err := os.MkdirAll(h.storageDir, 0750); err != nil {
+		respondInternalError(w, err)
+		return
+	}
+
+	out, err := os.Create(storagePath)
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	defer out.Close()
+
+	written, err := io.Copy(out, file)
+	if err != nil {
+		_ = os.Remove(storagePath)
+		respondInternalError(w, err)
+		return
+	}
+
+	asset := &models.VideoAsset{
+		ProjectID:  &project.ID,
+		SourceType: "upload",
+		Kind:       kind,
+		FileName:   header.Filename,
+		FilePath:   storageFilename,
+		MimeType:   mimeType,
+		SizeBytes:  written,
+		CreatedAt:  time.Now().UTC(),
+	}
+	if err := h.assetRepo.Create(asset); err != nil {
+		_ = os.Remove(storagePath)
+		respondInternalError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusCreated, asset)
 }
 
 func (h *VideoHandler) StartRender(w http.ResponseWriter, r *http.Request) {

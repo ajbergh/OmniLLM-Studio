@@ -34,7 +34,7 @@
 | **Conversation Management** | Create, rename, pin, archive, delete, full-text search, per-conversation model override |
 | **Image Studio** | Full canvas editor with generation, editing, inpainting, variant comparison, and branching history |
 | **Music Studio** | Generate, play, download, and manage Gemini Lyria music tracks through OpenRouter or Gemini direct |
-| **Video Studio** | Project-based AI video creation with OpenRouter Video, Gemini Veo, prompt enhancement, history, and output preview |
+| **Video Studio** | Project-based AI video creation with OpenRouter Video, Gemini Veo, cinematic controls, local asset upload, collapsible creation panel, and output preview |
 | **Video Edit Studio** | Timeline editing, multi-asset media bin, preview canvas, inspector, AI edit planning, and FFmpeg render/export |
 | **Markdown Rendering** | Syntax highlighting, KaTeX math, Mermaid diagrams, inline image rendering |
 | **Auto-Titling** | Conversations are automatically titled based on the first exchange |
@@ -102,10 +102,16 @@ A dedicated project workspace for AI video creation. Video Studio includes real 
 
 OpenRouter and Gemini use encrypted provider profiles from Settings. At least one real video provider profile must be configured before generation can run; there is no local mock video provider fallback. Gemini Veo supports reference image input for image-to-video generation.
 
+The creation panel is organized into individually collapsible sections — **Prompt**, **Start / Last Frame**, **Reference Images**, **Output Format**, **Cinematic Controls**, and **Advanced** — so you can keep the interface focused.
+
 | Capability | Description |
 |------------|-------------|
 | **Generation** | Text-to-video generation with capability-driven controls, prompt enhancement, SSE progress, history, and branching |
 | **Reference Image (Gemini)** | Supply an image asset as a reference to guide Gemini Veo image-to-video generation |
+| **Start / Last Frame** | Set the first and/or last frame for image-to-video or interpolation (model capability gated) |
+| **Cinematic Controls** | Music-Studio-style dropdowns for style, camera motion, shot type, composition, lens/focus, lighting/ambiance, audio cues (dialogue, sound effects, ambient noise), and continuity notes — assembled into the final prompt at generation time |
+| **Local File Upload** | `+` button next to every image/video picker — upload directly from disk via `POST /v1/video/projects/{projectId}/assets/upload` (50 MB limit, auto MIME detection) |
+| **Asset Thumbnails** | Selected images and video assets render an inline thumbnail preview below the picker |
 | **Output Preview** | Real `<video>`, `<img>`, and `<audio>` elements for selected outputs |
 | **Cross-Studio Shortcuts** | "Make Video" buttons in Image Studio and Music Studio route assets into Video Studio via domain translation |
 
@@ -233,7 +239,7 @@ Frontend (React/TS)  ──SSE/REST──▶  Backend (Go/Chi)  ──SQL──�
 
 - **Frontend** — Single-page React app with Zustand state management, Tailwind v4 styling, and Framer Motion animations. Includes full-featured Image Studio and Music Studio workspaces.
 - **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image and music generation route through provider-specific adapters, with ESPN-backed sports lookup handled locally before LLM fallback, and go-rod/Chromium available for JS-heavy page rendering and stateful browser sessions.
-- **Database** — SQLite with WAL mode, 39+ versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions/nodes/assets, music sessions/generations/assets, and video projects/generations/assets/timelines/render jobs are stored relationally.
+- **Database** — SQLite with WAL mode, 40+ versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions/nodes/assets, music sessions/generations/assets, and video projects/generations/assets/timelines/render jobs are stored relationally.
 - **Vector store (RAG)** — [`chromem-go`](https://github.com/philippgille/chromem-go) embedded vector DB with collections per conversation, workspace, and global scope. Multi-threaded NN search; zero third-party Go dependencies. Chunk text stays in SQLite (`document_chunks`); chromem stores vectors only. Legacy `document_embeddings` rows lazy-migrate on first retrieval after upgrade.
 - **File Library** — Durable file storage with conversation, workspace, and global scopes. Hybrid retrieval (vector + keyword) with citation-aware results. Dedicated UI panel for managing indexed files.
 
