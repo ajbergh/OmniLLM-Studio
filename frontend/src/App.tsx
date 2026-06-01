@@ -8,6 +8,7 @@ import { ChatView } from './components/ChatView';
 import { ImageEditStudio } from './components/image/ImageEditStudio';
 import { MusicStudio } from './components/music/MusicStudio';
 import { VideoStudio } from './components/video/VideoStudio';
+import { VideoEditStudio } from './components/video/VideoEditStudio';
 import { SettingsPanel } from './components/SettingsPanel';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { LoginScreen } from './components/LoginScreen';
@@ -176,7 +177,7 @@ function App() {
           });
           return;
         }
-        if (appMode === 'video') {
+        if (appMode === 'video' || appMode === 'video-edit') {
           createVideoProject().then(async (project) => {
             if (!project) return;
             await loadVideoProjects();
@@ -361,7 +362,7 @@ function App() {
             <div className="flex min-h-11 items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-text-muted">
-                  {appMode === 'image' ? 'Image Studio' : appMode === 'music' ? 'Music Studio' : appMode === 'video' ? 'Video Studio' : 'Chat Studio'}
+                  {appMode === 'image' ? 'Image Studio' : appMode === 'music' ? 'Music Studio' : appMode === 'video' ? 'Video Studio' : appMode === 'video-edit' ? 'Video Edit Studio' : 'Chat Studio'}
                 </p>
               </div>
 
@@ -423,6 +424,7 @@ function App() {
           {appMode === 'image' && <ImageEditStudio />}
           {appMode === 'music' && <MusicStudio />}
           {appMode === 'video' && <VideoStudio />}
+          {appMode === 'video-edit' && <VideoEditStudio />}
         </main>
 
         <DialogShell

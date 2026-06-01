@@ -17,11 +17,11 @@ type Provider interface {
 
 Video Studio registers providers from encrypted provider profiles:
 
-- `mock` is always configured and produces local placeholder assets.
 - `openrouter` is configured when an enabled OpenRouter provider profile has an API key.
 - `gemini` is configured when an enabled Gemini provider profile has an API key.
 
 Provider profiles keep API keys server-side. The frontend only receives provider status, model metadata, and capability metadata.
+There is no local mock provider fallback; generation requires a configured OpenRouter or Gemini profile.
 
 ## OpenRouter Video
 

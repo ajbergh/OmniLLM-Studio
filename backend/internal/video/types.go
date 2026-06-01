@@ -8,7 +8,6 @@ import (
 type Capability string
 
 const (
-	ProviderMock       = "mock"
 	ProviderOpenRouter = "openrouter"
 	ProviderGemini     = "gemini"
 	ProviderOpenAI     = "openai"
@@ -44,7 +43,6 @@ type ProviderInfo struct {
 	Key         string  `json:"key"`
 	DisplayName string  `json:"display_name"`
 	Configured  bool    `json:"configured"`
-	Mock        bool    `json:"mock"`
 	Models      []Model `json:"models,omitempty"`
 }
 
@@ -144,13 +142,12 @@ type ExternalAssetImportRequest struct {
 }
 
 type ExportSettings struct {
-	Format                 string  `json:"format"`
-	Codec                  string  `json:"codec,omitempty"`
-	Resolution             string  `json:"resolution"`
-	FPS                    int     `json:"fps,omitempty"`
-	Quality                string  `json:"quality,omitempty"`
-	IncludeAudio           bool    `json:"include_audio"`
-	RegisterInFileLibrary  bool    `json:"register_in_file_library,omitempty"`
-	EstimatedDurationMS    int64   `json:"estimated_duration_ms,omitempty"`
-	MockRenderDelaySeconds float64 `json:"mock_render_delay_seconds,omitempty"`
+	Format                string `json:"format"`
+	Codec                 string `json:"codec,omitempty"`
+	Resolution            string `json:"resolution"`
+	FPS                   int    `json:"fps,omitempty"`
+	Quality               string `json:"quality,omitempty"`
+	IncludeAudio          bool   `json:"include_audio"`
+	RegisterInFileLibrary bool   `json:"register_in_file_library,omitempty"`
+	EstimatedDurationMS   int64  `json:"estimated_duration_ms,omitempty"`
 }

@@ -1,4 +1,4 @@
-export type VideoProviderKey = 'mock' | 'openrouter' | 'gemini' | 'openai' | 'custom';
+export type VideoProviderKey = 'openrouter' | 'gemini' | 'openai' | 'custom';
 
 export type VideoCapability =
   | 'text_to_video'
@@ -30,7 +30,6 @@ export interface VideoProviderInfo {
   key: VideoProviderKey;
   display_name: string;
   configured: boolean;
-  mock: boolean;
   models?: VideoModel[];
 }
 

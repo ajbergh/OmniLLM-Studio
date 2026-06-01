@@ -52,7 +52,6 @@ const DEFAULT_EXPORT: VideoExportSettings = {
 };
 
 const DEFAULT_MODELS: Record<VideoProviderKey, string> = {
-  mock: 'mock-video-v1',
   openrouter: '',
   gemini: '',
   openai: '',
@@ -279,9 +278,9 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   generations: [],
   assets: [],
   providers: [],
-  selectedProvider: 'mock',
-  modelsByProvider: { mock: [], openrouter: [], gemini: [], openai: [], custom: [] },
-  selectedModel: 'mock-video-v1',
+  selectedProvider: 'openrouter',
+  modelsByProvider: { openrouter: [], gemini: [], openai: [], custom: [] },
+  selectedModel: null,
   promptForm: cloneForm(),
   timelineRecord: null,
   timeline: null,
@@ -312,10 +311,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       const providers = await videoApi.providers();
       const available = providers.filter((provider) => provider.configured).map((provider) => provider.key);
       const current = get().selectedProvider;
-      const preferredRealProvider = providers.find((provider) => provider.configured && !provider.mock)?.key;
-      const selectedProvider = available.includes(current) && (current !== 'mock' || !preferredRealProvider)
+      const preferredProvider = providers.find((provider) => provider.configured)?.key;
+      const selectedProvider = available.includes(current)
         ? current
-        : preferredRealProvider || available[0] || 'mock';
+        : preferredProvider || providers.find((provider) => provider.key === current)?.key || providers[0]?.key || 'openrouter';
       set({ providers, selectedProvider });
       await get().loadModels(selectedProvider);
     } catch (err) {
@@ -459,9 +458,13 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   },
 
   generate: (parentId) => {
-    const { selectedProvider, selectedModel, promptForm, activeProjectId } = get();
+    const { selectedProvider, selectedModel, promptForm, activeProjectId, providers } = get();
     if (!selectedProvider || !selectedModel) {
       toast.error('Choose a video provider and model');
+      return;
+    }
+    if (!providers.find((provider) => provider.key === selectedProvider)?.configured) {
+      toast.error('Configure an OpenRouter or Gemini video provider first');
       return;
     }
     if (!promptForm.prompt.trim()) {

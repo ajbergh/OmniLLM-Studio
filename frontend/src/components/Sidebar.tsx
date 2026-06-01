@@ -22,6 +22,7 @@ import {
   Files,
   Music2,
   Film,
+  Scissors,
 } from 'lucide-react';
 import { AppIcon } from './AppIcon';
 import { clsx } from 'clsx';
@@ -164,7 +165,7 @@ export function Sidebar() {
     if (!musicStudioEnabled && appMode === 'music') {
       setAppMode('chat');
     }
-    if (!videoStudioEnabled && appMode === 'video') {
+    if (!videoStudioEnabled && (appMode === 'video' || appMode === 'video-edit')) {
       setAppMode('chat');
     }
   }, [appMode, musicStudioEnabled, videoStudioEnabled, setAppMode]);
@@ -183,7 +184,7 @@ export function Sidebar() {
   }, [appMode, loadMusicSessions]);
 
   useEffect(() => {
-    if (appMode === 'video') {
+    if (appMode === 'video' || appMode === 'video-edit') {
       loadVideoProjects();
     }
   }, [appMode, loadVideoProjects]);
@@ -485,9 +486,9 @@ export function Sidebar() {
           <motion.button
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
-            onClick={appMode === 'image' ? handleNewSession : appMode === 'music' ? handleNewMusicSession : appMode === 'video' ? handleNewVideoProject : handleNew}
+            onClick={appMode === 'image' ? handleNewSession : appMode === 'music' ? handleNewMusicSession : appMode === 'video' || appMode === 'video-edit' ? handleNewVideoProject : handleNew}
             className="p-2 rounded-xl hover:bg-surface-hover text-text-muted hover:text-primary transition-colors"
-            aria-label={appMode === 'image' ? 'New image session' : appMode === 'music' ? 'New music session' : appMode === 'video' ? 'New video project' : 'New conversation (Ctrl+N)'}
+            aria-label={appMode === 'image' ? 'New image session' : appMode === 'music' ? 'New music session' : appMode === 'video' || appMode === 'video-edit' ? 'New video project' : 'New conversation (Ctrl+N)'}
           >
             <Plus size={16} />
           </motion.button>
@@ -556,6 +557,20 @@ export function Sidebar() {
             >
               <Film size={14} />
               Video
+            </button>
+          )}
+          {videoStudioEnabled && (
+            <button
+              onClick={() => setAppMode('video-edit')}
+              className={clsx(
+                'min-h-10 px-2 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
+                appMode === 'video-edit'
+                  ? 'bg-primary/20 text-primary shadow-sm'
+                  : 'text-text-muted hover:text-text hover:bg-surface-hover'
+              )}
+            >
+              <Scissors size={14} />
+              Edit
             </button>
           )}
         </div>
@@ -721,7 +736,7 @@ export function Sidebar() {
               </div>
             ))
           )
-        ) : appMode === 'video' ? (
+        ) : appMode === 'video' || appMode === 'video-edit' ? (
           // ── Video Projects List ──
           videoProjects.length === 0 ? (
             <motion.div

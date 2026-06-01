@@ -66,7 +66,7 @@ func NewService(
 		providerProfiles: providerProfiles,
 		attachmentsDir:   attachmentsDir,
 		storage:          NewStorage(attachmentsDir),
-		registry:         NewModelRegistry(NewMockProvider(), NewOpenRouterProvider("", ""), NewGeminiProvider("", "")),
+		registry:         NewModelRegistry(NewOpenRouterProvider("", ""), NewGeminiProvider("", "")),
 		renderer:         NewFFmpegRenderer(""),
 		llm:              llmSvc,
 	}
@@ -137,7 +137,6 @@ func (s *Service) providerRegistry() *ModelRegistry {
 		}
 	}
 	return NewModelRegistry(
-		NewMockProvider(),
 		NewOpenRouterProvider(openRouterBaseURL, openRouterAPIKey),
 		NewGeminiProvider(geminiBaseURL, geminiAPIKey),
 	)
@@ -163,7 +162,7 @@ func (s *Service) CreateProject(userID, title, provider, model string, width, he
 	}
 	provider = NormalizeProvider(provider)
 	if provider == "" {
-		provider = ProviderMock
+		provider = s.defaultProviderKey(context.Background())
 	}
 	registry := s.providerRegistry()
 	if model == "" {
@@ -182,6 +181,25 @@ func (s *Service) CreateProject(userID, title, provider, model string, width, he
 		aspectRatio = DefaultAspectRatio
 	}
 	return s.projects.Create(userID, title, provider, model, width, height, fps, aspectRatio)
+}
+
+func (s *Service) defaultProviderKey(ctx context.Context) string {
+	registry := s.providerRegistry()
+	for _, key := range []string{ProviderOpenRouter, ProviderGemini} {
+		if provider, ok := registry.Provider(key); ok && provider.Configured() {
+			return key
+		}
+	}
+	for _, key := range []string{ProviderOpenRouter, ProviderGemini} {
+		if _, ok := registry.Provider(key); ok {
+			return key
+		}
+	}
+	providers, err := registry.ListProviders(ctx)
+	if err != nil || len(providers) == 0 {
+		return ""
+	}
+	return providers[0].Key
 }
 
 func (s *Service) Generate(ctx context.Context, userID string, req GenerateRequest, progress func(GenerationProgress)) (*models.VideoProject, *models.VideoGeneration, *models.VideoAsset, error) {

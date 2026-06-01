@@ -1,28 +1,22 @@
 import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import {
-  BookMarked,
   Clapperboard,
   Download,
   Film,
   GitBranch,
   Loader2,
-  MessageSquare,
   Plus,
   RefreshCw,
+  Scissors,
   Sparkles,
   Square,
   WandSparkles,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import { videoApi } from '../../api';
+import { useSettingsStore } from '../../stores';
 import { useVideoStudioStore } from '../../stores/videoStudio';
-import { useConversationStore, useCrossoverStore } from '../../stores';
-import type { VideoGenerationDetail, VideoProviderKey } from '../../types/video';
-import { VideoInspector } from './VideoInspector';
-import { VideoPreviewCanvas } from './VideoPreviewCanvas';
-import { VideoRenderPanel } from './VideoRenderPanel';
-import { VideoTimeline } from './timeline/VideoTimeline';
+import type { VideoAsset, VideoGenerationDetail, VideoProviderKey } from '../../types/video';
 
 export function VideoStudio() {
   const projects = useVideoStudioStore((state) => state.projects);
@@ -54,25 +48,12 @@ export function VideoStudio() {
   const branchFromGeneration = useVideoStudioStore((state) => state.branchFromGeneration);
   const stopGeneration = useVideoStudioStore((state) => state.stopGeneration);
   const selectAsset = useVideoStudioStore((state) => state.selectAsset);
-  const addAssetToTimeline = useVideoStudioStore((state) => state.addAssetToTimeline);
-
-  const { crossoverContext, clearCrossoverContext } = useCrossoverStore();
+  const setAppMode = useSettingsStore((state) => state.setAppMode);
 
   useEffect(() => {
     loadProviders();
     loadProjects();
   }, [loadProviders, loadProjects]);
-
-  // Receive crossover context from Image Studio or Music Studio.
-  useEffect(() => {
-    if (!crossoverContext || crossoverContext.type !== 'to-video') return;
-    const { prompt } = crossoverContext.data;
-    clearCrossoverContext();
-    if (prompt) {
-      setPromptField('prompt', prompt);
-      toast.success('Prompt pre-filled from Image/Music Studio');
-    }
-  }, [crossoverContext, clearCrossoverContext, setPromptField]);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) || null,
@@ -83,16 +64,19 @@ export function VideoStudio() {
     [generations, activeGenerationId],
   );
   const activeAsset = useMemo(
-    () => assets.find((asset) => asset.id === selectedAssetId) || assets.find((asset) => asset.id === activeGeneration?.output_asset_id) || assets[0] || null,
+    () => assets.find((asset) => asset.id === selectedAssetId) || assets.find((asset) => asset.id === activeGeneration?.output_asset_id) || null,
     [assets, activeGeneration, selectedAssetId],
   );
   const models = modelsByProvider[selectedProvider] || [];
-  const selectedModelCapabilities = models.find((model) => model.id === selectedModel)?.capabilities || [];
+  const selectedModelInfo = models.find((model) => model.id === selectedModel);
+  const selectedProviderInfo = providers.find((provider) => provider.key === selectedProvider);
+  const selectedProviderConfigured = selectedProviderInfo?.configured ?? false;
+  const selectedModelCapabilities = selectedModelInfo?.capabilities || [];
   const progressPercent = Math.round((generationProgress?.progress || 0) * 100);
 
-  const handleDownload = () => {
-    if (!activeAsset) return;
-    window.open(videoApi.downloadUrl(activeAsset.id), '_blank', 'noopener,noreferrer');
+  const startGeneration = () => {
+    setPromptField('place_on_timeline', false);
+    generate();
   };
 
   return (
@@ -108,23 +92,22 @@ export function VideoStudio() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => { void createProject(); }}
-            className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:text-text hover:bg-surface-hover transition-colors inline-flex items-center gap-1.5"
+            className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text transition-colors inline-flex items-center gap-1.5"
           >
             <Plus size={13} />
             Project
           </button>
           <button
-            onClick={handleDownload}
-            disabled={!activeAsset}
-            className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:text-text hover:bg-surface-hover disabled:opacity-45 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1.5"
+            onClick={() => setAppMode('video-edit')}
+            className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text transition-colors inline-flex items-center gap-1.5"
           >
-            <Download size={13} />
-            Download
+            <Scissors size={13} />
+            Edit Studio
           </button>
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[340px_minmax(0,1fr)_340px]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)_320px]">
         <aside className="min-h-0 overflow-y-auto border-b border-border bg-surface xl:border-b-0 xl:border-r">
           <div className="space-y-3 p-3">
             <ProjectStrip
@@ -139,13 +122,13 @@ export function VideoStudio() {
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Sparkles size={15} className="text-primary" />
-                  <h2 className="text-sm font-semibold text-text">Generate</h2>
+                  <h2 className="text-sm font-semibold text-text">Create Video</h2>
                 </div>
-                {providers.some((provider) => provider.mock) && (
+                {selectedModelInfo?.duration_max_seconds ? (
                   <span className="rounded-md border border-border bg-surface px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted">
-                    Mock ready
+                    {selectedModelInfo.duration_min_seconds || 1}-{selectedModelInfo.duration_max_seconds}s
                   </span>
-                )}
+                ) : null}
               </div>
 
               <div className="space-y-3">
@@ -153,22 +136,28 @@ export function VideoStudio() {
                   <select
                     value={selectedProvider}
                     onChange={(event) => { void setProvider(event.target.value as VideoProviderKey); }}
-                    className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:border-primary/50"
+                    className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:border-primary/50 focus:outline-none"
                   >
                     {providers.map((provider) => (
                       <option key={provider.key} value={provider.key}>
-                        {provider.display_name}
+                        {provider.display_name}{provider.configured ? '' : ' (not configured)'}
                       </option>
                     ))}
                   </select>
                 </ControlLabel>
+
+                {!selectedProviderConfigured && (
+                  <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300/80">
+                    Configure an OpenRouter or Gemini video provider before generating.
+                  </p>
+                )}
 
                 <ControlLabel label="Model">
                   <div className="flex gap-2">
                     <select
                       value={selectedModel || ''}
                       onChange={(event) => setModel(event.target.value)}
-                      className="min-h-10 min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:border-primary/50"
+                      className="min-h-10 min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 text-sm text-text focus:border-primary/50 focus:outline-none"
                     >
                       {models.map((model) => (
                         <option key={model.id} value={model.id}>
@@ -178,7 +167,8 @@ export function VideoStudio() {
                     </select>
                     <button
                       onClick={() => { void useVideoStudioStore.getState().loadModels(selectedProvider, true); }}
-                      className="min-h-10 min-w-10 rounded-lg border border-border bg-surface text-text-muted hover:text-text hover:bg-surface-hover inline-flex items-center justify-center"
+                      disabled={!selectedProvider}
+                      className="min-h-10 min-w-10 rounded-lg border border-border bg-surface text-text-muted hover:bg-surface-hover hover:text-text inline-flex items-center justify-center"
                       aria-label="Refresh video models"
                       title="Refresh video models"
                     >
@@ -191,10 +181,10 @@ export function VideoStudio() {
                   <textarea
                     value={promptForm.prompt}
                     onChange={(event) => setPromptField('prompt', event.target.value)}
-                    rows={7}
-                    maxLength={models.find((model) => model.id === selectedModel)?.max_prompt_chars || undefined}
-                    placeholder="Describe the scene, subject, movement, camera, and style."
-                    className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted/50 focus:outline-none focus:border-primary/50"
+                    rows={8}
+                    maxLength={selectedModelInfo?.max_prompt_chars || undefined}
+                    placeholder="Describe a single video: subject, scene, action, camera, lighting, and style."
+                    className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted/50 focus:border-primary/50 focus:outline-none"
                   />
                 </ControlLabel>
 
@@ -203,7 +193,7 @@ export function VideoStudio() {
                     <input
                       value={promptForm.negative_prompt}
                       onChange={(event) => setPromptField('negative_prompt', event.target.value)}
-                      className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:border-primary/50"
+                      className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:border-primary/50 focus:outline-none"
                       placeholder="Artifacts to avoid"
                     />
                   </ControlLabel>
@@ -216,7 +206,7 @@ export function VideoStudio() {
                       onChange={(event) => setPromptField('aspect_ratio', event.target.value)}
                       className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
                     >
-                      {(models.find((model) => model.id === selectedModel)?.aspect_ratios || ['16:9', '9:16', '1:1']).map((value) => (
+                      {(selectedModelInfo?.aspect_ratios || ['16:9', '9:16', '1:1']).map((value) => (
                         <option key={value} value={value}>{value}</option>
                       ))}
                     </select>
@@ -224,8 +214,8 @@ export function VideoStudio() {
                   <ControlLabel label="Duration">
                     <input
                       type="number"
-                      min={2}
-                      max={30}
+                      min={selectedModelInfo?.duration_min_seconds || 1}
+                      max={selectedModelInfo?.duration_max_seconds || 30}
                       value={promptForm.duration_seconds}
                       onChange={(event) => setPromptField('duration_seconds', Math.max(1, Number(event.target.value) || 1))}
                       className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
@@ -237,7 +227,7 @@ export function VideoStudio() {
                       onChange={(event) => setPromptField('resolution', event.target.value)}
                       className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
                     >
-                      {(models.find((model) => model.id === selectedModel)?.resolutions || ['720p', '1080p']).map((value) => (
+                      {(selectedModelInfo?.resolutions || ['720p', '1080p']).map((value) => (
                         <option key={value} value={value}>{value}</option>
                       ))}
                     </select>
@@ -248,7 +238,7 @@ export function VideoStudio() {
                       onChange={(event) => setPromptField('fps', Number(event.target.value))}
                       className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
                     >
-                      {(models.find((model) => model.id === selectedModel)?.fps_options || [24, 30]).map((value) => (
+                      {(selectedModelInfo?.fps_options || [24, 30]).map((value) => (
                         <option key={value} value={value}>{value}</option>
                       ))}
                     </select>
@@ -277,8 +267,8 @@ export function VideoStudio() {
                     value={promptForm.production_notes}
                     onChange={(event) => setPromptField('production_notes', event.target.value)}
                     rows={3}
-                    className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:border-primary/50"
-                    placeholder="Lighting, mood, continuity, production details"
+                    className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text focus:border-primary/50 focus:outline-none"
+                    placeholder="Lighting, continuity, style constraints"
                   />
                 </ControlLabel>
 
@@ -289,10 +279,7 @@ export function VideoStudio() {
                       <span>{progressPercent > 0 ? `${progressPercent}%` : generationProgress.stage}</span>
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-surface">
-                      <div
-                        className="h-full bg-primary transition-all"
-                        style={{ width: `${Math.max(8, progressPercent)}%` }}
-                      />
+                      <div className="h-full bg-primary transition-all" style={{ width: `${Math.max(8, progressPercent)}%` }} />
                     </div>
                   </div>
                 )}
@@ -303,22 +290,22 @@ export function VideoStudio() {
                   <button
                     onClick={() => { void enhancePrompt(); }}
                     disabled={isEnhancing || isGenerating || !promptForm.prompt.trim()}
-                    className="min-h-10 flex-1 rounded-lg border border-border bg-surface px-3 text-xs font-medium text-text-secondary hover:text-text hover:bg-surface-hover disabled:opacity-45 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
+                    className="min-h-10 flex-1 rounded-lg border border-border bg-surface px-3 text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-45 inline-flex items-center justify-center gap-1.5"
                   >
                     {isEnhancing ? <Loader2 size={14} className="animate-spin" /> : <WandSparkles size={14} />}
                     Enhance
                   </button>
                   <button
-                    onClick={() => generate()}
-                    disabled={isGenerating || !selectedModel || !promptForm.prompt.trim()}
-                    className="btn-primary min-h-10 flex-[2] rounded-lg px-3 text-xs font-medium inline-flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={startGeneration}
+                    disabled={isGenerating || !selectedProviderConfigured || !selectedModel || !promptForm.prompt.trim()}
+                    className="btn-primary min-h-10 flex-[2] rounded-lg px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
                   >
                     {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Clapperboard size={14} />}
                     Generate
                   </button>
                   <button
                     onClick={isGenerating ? stopGeneration : clearPrompt}
-                    className="min-h-10 rounded-lg border border-border bg-surface px-3 text-xs text-text-secondary hover:text-text hover:bg-surface-hover inline-flex items-center justify-center gap-1.5"
+                    className="min-h-10 rounded-lg border border-border bg-surface px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text inline-flex items-center justify-center gap-1.5"
                   >
                     {isGenerating ? <Square size={13} /> : <RefreshCw size={13} />}
                     {isGenerating ? 'Stop' : 'Reset'}
@@ -329,38 +316,97 @@ export function VideoStudio() {
           </div>
         </aside>
 
-        <main className="flex min-h-[620px] min-w-0 flex-col bg-surface">
-          <section className="min-h-0 flex-1 border-b border-border p-3">
-            <VideoPreviewCanvas />
-          </section>
-
-          <section className="h-72 shrink-0 border-b border-border bg-surface-raised p-3">
-            <VideoTimeline />
-          </section>
+        <main className="min-h-0 min-w-0 overflow-y-auto bg-surface p-3">
+          <ResultPreview asset={activeAsset} generation={activeGeneration} onEdit={() => setAppMode('video-edit')} />
         </main>
 
-        <aside className="min-h-0 border-t border-border bg-surface-raised xl:border-l xl:border-t-0">
-          <div className="flex h-full min-h-[520px] flex-col overflow-y-auto">
-            <VideoInspector />
-            <div className="px-3 pb-3">
-              <VideoRenderPanel />
-            </div>
-            <HistoryPanel
-              generations={generations}
-              activeGenerationId={activeGeneration?.id || null}
-              onSelect={(generation) => useVideoStudioStore.setState({ activeGenerationId: generation.id })}
-              onBranch={(generationId) => { void branchFromGeneration(generationId); }}
-            />
-            <AssetPanel
-              assets={assets}
-              activeAssetId={activeAsset?.id || null}
-              onSelect={selectAsset}
-              onAdd={(assetId) => { void addAssetToTimeline(assetId); }}
-            />
-          </div>
+        <aside className="min-h-0 overflow-y-auto border-t border-border bg-surface-raised xl:border-l xl:border-t-0">
+          <HistoryPanel
+            generations={generations}
+            activeGenerationId={activeGeneration?.id || null}
+            onSelect={(generation) => useVideoStudioStore.setState({ activeGenerationId: generation.id, selectedAssetId: generation.output_asset_id || selectedAssetId })}
+            onBranch={(generationId) => { void branchFromGeneration(generationId); }}
+          />
+          <OutputPanel assets={assets} activeAssetId={activeAsset?.id || null} onSelect={selectAsset} />
         </aside>
       </div>
     </div>
+  );
+}
+
+function ResultPreview({
+  asset,
+  generation,
+  onEdit,
+}: {
+  asset: VideoAsset | null;
+  generation: VideoGenerationDetail | null;
+  onEdit: () => void;
+}) {
+  if (!asset) {
+    return (
+      <section className="flex h-full min-h-[560px] items-center justify-center rounded-lg border border-dashed border-border bg-surface-alt">
+        <div className="max-w-sm px-6 text-center">
+          <Film size={34} className="mx-auto mb-4 text-primary" />
+          <h2 className="text-base font-semibold text-text">Create a single video</h2>
+          <p className="mt-2 text-sm leading-relaxed text-text-muted">No output selected.</p>
+        </div>
+      </section>
+    );
+  }
+
+  const url = videoApi.downloadUrl(asset.id);
+  const isVideo = asset.mime_type.startsWith('video/');
+  const isImage = asset.mime_type.startsWith('image/');
+  const isAudio = asset.mime_type.startsWith('audio/');
+
+  return (
+    <section className="flex min-h-[560px] flex-col rounded-lg border border-border bg-surface-alt">
+      <div className="flex flex-col gap-2 border-b border-border p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold text-text">{asset.file_name}</h2>
+          <p className="mt-1 text-xs text-text-muted">{asset.kind} · {asset.mime_type} · {Math.max(1, Math.round(asset.size_bytes / 1024))} KB</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <button
+            onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+            className="min-h-9 rounded-lg border border-border bg-surface px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text inline-flex items-center gap-1.5"
+          >
+            <Download size={13} />
+            Download
+          </button>
+          <button
+            onClick={onEdit}
+            className="btn-primary min-h-9 rounded-lg px-3 text-xs font-medium inline-flex items-center gap-1.5"
+          >
+            <Scissors size={13} />
+            Edit
+          </button>
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-black p-3">
+        {isVideo ? (
+          <video src={url} controls className="max-h-[68vh] max-w-full rounded-md bg-black" />
+        ) : isImage ? (
+          <img src={url} alt={asset.file_name} className="max-h-[68vh] max-w-full rounded-md object-contain" />
+        ) : isAudio ? (
+          <div className="w-full max-w-xl rounded-lg border border-border bg-surface p-4">
+            <audio src={url} controls className="w-full" />
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border bg-surface px-4 py-3 text-sm text-text-muted">
+            Preview is unavailable for this output type.
+          </div>
+        )}
+      </div>
+
+      {generation && (
+        <div className="border-t border-border p-3">
+          <p className="line-clamp-3 text-xs leading-relaxed text-text-muted">{generation.prompt}</p>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -435,14 +481,14 @@ function HistoryPanel({
   onBranch: (generationId: string) => void;
 }) {
   return (
-    <section className="min-h-0 flex-1 overflow-y-auto border-b border-border p-3">
+    <section className="border-b border-border p-3">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-text">History</h2>
-        <span className="text-[11px] text-text-muted">{generations.length} run{generations.length === 1 ? '' : 's'}</span>
+        <h2 className="text-sm font-semibold text-text">Generation History</h2>
+        <span className="text-[11px] text-text-muted">{generations.length}</span>
       </div>
       {generations.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border bg-surface-alt px-3 py-8 text-center text-xs text-text-muted">
-          Generated clips and branches appear here.
+          No generations yet.
         </div>
       ) : (
         <div className="space-y-2">
@@ -458,7 +504,7 @@ function HistoryPanel({
                   onSelect(generation);
                 }
               }}
-              className={`w-full rounded-lg border p-3 text-left transition-colors ${
+              className={`rounded-lg border p-3 text-left transition-colors ${
                 generation.id === activeGenerationId
                   ? 'border-primary/30 bg-primary/10'
                   : 'border-border bg-surface-alt hover:bg-surface-hover'
@@ -492,120 +538,39 @@ function HistoryPanel({
   );
 }
 
-function AssetPanel({
+function OutputPanel({
   assets,
   activeAssetId,
   onSelect,
-  onAdd,
 }: {
-  assets: Array<{ id: string; file_name: string; kind: string; size_bytes: number; mime_type: string }>;
+  assets: VideoAsset[];
   activeAssetId: string | null;
   onSelect: (assetId: string) => void;
-  onAdd: (assetId: string) => void;
 }) {
-  const createConversation = useConversationStore((state) => state.createConversation);
-  const selectConversation = useConversationStore((state) => state.selectConversation);
-
-  const handleSendToChat = async (asset: { id: string; file_name: string }) => {
-    try {
-      const convo = await createConversation(`Video: ${asset.file_name}`);
-      await videoApi.attachAssetToConversation(asset.id, convo.id);
-      selectConversation(convo.id);
-      toast.success('Video asset sent to chat');
-    } catch (err) {
-      toast.error(`Failed to send to chat: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
-  const handleRegisterInLibrary = async (asset: { id: string; file_name: string }) => {
-    try {
-      await videoApi.registerAssetInLibrary(asset.id);
-      toast.success(`"${asset.file_name}" added to File Library`);
-    } catch (err) {
-      toast.error(`Failed to register in library: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
+  const outputAssets = assets.filter((asset) => asset.source_type === 'generation' || asset.kind === 'video');
   return (
-    <section className="min-h-0 border-t border-border p-3">
+    <section className="p-3">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-text">Assets</h2>
-        <span className="text-[11px] text-text-muted">{assets.length} item{assets.length === 1 ? '' : 's'}</span>
+        <h2 className="text-sm font-semibold text-text">Outputs</h2>
+        <span className="text-[11px] text-text-muted">{outputAssets.length}</span>
       </div>
-      {assets.length === 0 ? (
+      {outputAssets.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border bg-surface-alt px-3 py-8 text-center text-xs text-text-muted">
-          Project media bin is empty.
+          No outputs yet.
         </div>
       ) : (
         <div className="space-y-2">
-          {assets.map((asset) => (
-            <div
+          {outputAssets.map((asset) => (
+            <button
               key={asset.id}
-              role="button"
-              tabIndex={0}
               onClick={() => onSelect(asset.id)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  onSelect(asset.id);
-                }
-              }}
-              className={`rounded-lg border p-3 ${
-                asset.id === activeAssetId ? 'border-primary/30 bg-primary/10' : 'border-border bg-surface-alt'
+              className={`w-full rounded-lg border p-3 text-left ${
+                asset.id === activeAssetId ? 'border-primary/30 bg-primary/10' : 'border-border bg-surface-alt hover:bg-surface-hover'
               }`}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-text">{asset.file_name}</p>
-                  <p className="mt-1 text-[10px] text-text-muted">{asset.kind} · {asset.mime_type}</p>
-                </div>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onAdd(asset.id);
-                  }}
-                  className="min-h-8 min-w-8 rounded-lg border border-border bg-surface text-text-muted hover:text-text inline-flex items-center justify-center"
-                  aria-label={`Add ${asset.file_name} to timeline`}
-                  title="Add to timeline"
-                >
-                  <Plus size={13} />
-                </button>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    window.open(videoApi.downloadUrl(asset.id), '_blank', 'noopener,noreferrer');
-                    toast.success('Opening asset download');
-                  }}
-                  className="min-h-8 min-w-8 rounded-lg border border-border bg-surface text-text-muted hover:text-text inline-flex items-center justify-center"
-                  aria-label={`Download ${asset.file_name}`}
-                  title="Download"
-                >
-                  <Download size={13} />
-                </button>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleSendToChat(asset);
-                  }}
-                  className="min-h-8 min-w-8 rounded-lg border border-border bg-surface text-text-muted hover:text-text inline-flex items-center justify-center"
-                  aria-label={`Send ${asset.file_name} to chat`}
-                  title="Send to Chat"
-                >
-                  <MessageSquare size={13} />
-                </button>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleRegisterInLibrary(asset);
-                  }}
-                  className="min-h-8 min-w-8 rounded-lg border border-border bg-surface text-text-muted hover:text-text inline-flex items-center justify-center"
-                  aria-label={`Register ${asset.file_name} in File Library`}
-                  title="Register in File Library"
-                >
-                  <BookMarked size={13} />
-                </button>
-              </div>
-              <p className="mt-2 text-[10px] text-text-muted">{Math.max(1, Math.round(asset.size_bytes / 1024))} KB</p>
-            </div>
+              <span className="block truncate text-xs font-medium text-text">{asset.file_name}</span>
+              <span className="mt-1 block text-[10px] text-text-muted">{asset.kind} · {asset.mime_type}</span>
+            </button>
           ))}
         </div>
       )}

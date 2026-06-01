@@ -48,7 +48,7 @@ func TestImportExternalAssetCopiesFileLibraryBytes(t *testing.T) {
 
 	service := newImportTestService(database, attachmentsDir)
 	service.ConfigureExternalAssetSources(libraryRepo, nil, nil, nil, nil, nil, attachmentsDir)
-	project, err := service.CreateProject("", "Import Test", "mock", "mock-video-v1", 1280, 720, 30, "16:9")
+	project, err := service.CreateProject("", "Import Test", "openrouter", "google/veo-3.1", 1280, 720, 30, "16:9")
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestImportExternalAssetCopiesMusicBytes(t *testing.T) {
 
 	musicSessions := repository.NewMusicSessionRepo(database)
 	musicAssets := repository.NewMusicAssetRepo(database)
-	session, err := musicSessions.Create("", "Track", "mock", "mock")
+	session, err := musicSessions.Create("", "Track", "gemini", "lyria-3-clip-preview")
 	if err != nil {
 		t.Fatalf("create music session: %v", err)
 	}
@@ -112,8 +112,8 @@ func TestImportExternalAssetCopiesMusicBytes(t *testing.T) {
 		MimeType:     "audio/mpeg",
 		SizeBytes:    int64(len(sourceBytes)),
 		DurationMS:   duration,
-		Provider:     "mock",
-		Model:        "mock",
+		Provider:     "gemini",
+		Model:        "lyria-3-clip-preview",
 		MetadataJSON: "{}",
 	}
 	if err := musicAssets.Create(musicAsset); err != nil {
@@ -122,7 +122,7 @@ func TestImportExternalAssetCopiesMusicBytes(t *testing.T) {
 
 	service := newImportTestService(database, attachmentsDir)
 	service.ConfigureExternalAssetSources(nil, musicSessions, musicAssets, nil, nil, nil, attachmentsDir)
-	project, err := service.CreateProject("", "Import Test", "mock", "mock-video-v1", 1280, 720, 30, "16:9")
+	project, err := service.CreateProject("", "Import Test", "openrouter", "google/veo-3.1", 1280, 720, 30, "16:9")
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}

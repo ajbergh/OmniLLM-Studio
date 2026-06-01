@@ -517,13 +517,13 @@ interface SettingsState {
   loading: boolean;
   sidebarOpen: boolean;
   settingsOpen: boolean;
-  appMode: 'chat' | 'image' | 'music' | 'video';
+  appMode: 'chat' | 'image' | 'music' | 'video' | 'video-edit';
 
   fetchSettings: () => Promise<void>;
   updateSettings: (data: Partial<import('../types').AppSettings>) => Promise<void>;
   toggleSidebar: () => void;
   toggleSettings: () => void;
-  setAppMode: (mode: 'chat' | 'image' | 'music' | 'video') => void;
+  setAppMode: (mode: 'chat' | 'image' | 'music' | 'video' | 'video-edit') => void;
 }
 
 const defaultSettings: import('../types').AppSettings = {
@@ -566,12 +566,13 @@ function getInitialSidebarOpen(): boolean {
   return saved === 'true';
 }
 
-function getInitialAppMode(): 'chat' | 'image' | 'music' | 'video' {
+function getInitialAppMode(): 'chat' | 'image' | 'music' | 'video' | 'video-edit' {
   if (typeof window === 'undefined') return 'chat';
   const saved = window.localStorage.getItem('omnillm_app_mode');
   if (saved === 'image') return 'image';
   if (saved === 'music') return 'music';
   if (saved === 'video') return 'video';
+  if (saved === 'video-edit') return 'video-edit';
   return 'chat';
 }
 

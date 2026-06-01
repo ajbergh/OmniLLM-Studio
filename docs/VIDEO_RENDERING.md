@@ -1,6 +1,6 @@
 # Video Rendering
 
-Video Studio separates interactive preview from final export.
+Video Edit Studio separates interactive timeline preview from final export. Video Studio remains focused on AI video creation and selected-output playback.
 
 ## Preview
 
@@ -13,7 +13,7 @@ Asset display in the preview canvas:
 | `video/*` MIME | Native `<video>` element with `src` pointing to the download URL |
 | `image/*` MIME | `<img>` element |
 | Text/caption clip | Inline styled text div |
-| `text/plain` (mock dev asset) | Labelled amber development-placeholder card |
+| `text/plain` asset | Compact text asset card |
 | Any other asset | Generic grey placeholder |
 
 ## Export Jobs
@@ -52,7 +52,7 @@ The following are stored in the timeline JSON and shown in the editor but are **
 
 The inspector panel shows an inline warning when any of these are present on a selected clip, so it is clear that they will not appear in the export.
 
-The `MockRenderer` still exists as a package-local development/test adapter, but it is no longer the default service renderer.
+Render/export uses `NewFFmpegRenderer("")` by default. There is no package-local mock renderer.
 
 ## Production Adapter Direction
 

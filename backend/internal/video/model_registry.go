@@ -49,7 +49,6 @@ func (r *ModelRegistry) ListProviders(ctx context.Context) ([]ProviderInfo, erro
 			Key:         provider.Key(),
 			DisplayName: provider.DisplayName(),
 			Configured:  provider.Configured(),
-			Mock:        provider.Key() == ProviderMock,
 			Models:      models,
 		})
 	}
@@ -88,8 +87,8 @@ func (r *ModelRegistry) DefaultModel(ctx context.Context, provider string) strin
 
 func NormalizeProvider(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "", ProviderMock:
-		return ProviderMock
+	case "":
+		return ""
 	case ProviderOpenRouter:
 		return ProviderOpenRouter
 	case ProviderGemini:

@@ -9,33 +9,6 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/models"
 )
 
-func TestMockRendererProducesPlaceholderAsset(t *testing.T) {
-	renderer := NewMockRenderer()
-	var progressEvents int
-	result, err := renderer.Render(context.Background(), RenderRequest{
-		Project:  models.VideoProject{ID: "project-1", Title: "Demo", Width: 1920, Height: 1080, FPS: 30},
-		Timeline: NewEmptyTimeline(1920, 1080, 30),
-		Settings: ExportSettings{
-			Format:                 "mp4",
-			Resolution:             "project",
-			Quality:                "draft",
-			IncludeAudio:           true,
-			MockRenderDelaySeconds: 0.001,
-		},
-	}, func(RenderProgress) {
-		progressEvents++
-	})
-	if err != nil {
-		t.Fatalf("Render returned error: %v", err)
-	}
-	if result.MimeType != "text/plain" || len(result.Data) == 0 {
-		t.Fatalf("unexpected render result: %+v", result)
-	}
-	if progressEvents == 0 {
-		t.Fatalf("expected progress events")
-	}
-}
-
 func TestFFmpegRendererProducesVideoAsset(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg not installed")
@@ -63,6 +36,7 @@ func TestFFmpegRendererProducesVideoAsset(t *testing.T) {
 			Keyframes: []TimelineKeyframe{},
 		}},
 	})
+	var progressEvents int
 	result, err := renderer.Render(context.Background(), RenderRequest{
 		Project:  models.VideoProject{ID: "project-1", Title: "Demo", Width: 320, Height: 180, FPS: 24},
 		Timeline: timeline,
@@ -72,9 +46,14 @@ func TestFFmpegRendererProducesVideoAsset(t *testing.T) {
 			Quality:      "draft",
 			IncludeAudio: true,
 		},
-	}, nil)
+	}, func(RenderProgress) {
+		progressEvents++
+	})
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
+	}
+	if progressEvents == 0 {
+		t.Fatalf("expected FFmpeg progress events")
 	}
 	if result.MimeType != "video/mp4" || len(result.Data) == 0 {
 		t.Fatalf("unexpected render result: %+v", result)

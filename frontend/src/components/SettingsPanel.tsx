@@ -2189,10 +2189,10 @@ function MusicTab() {
 function VideoTab() {
   const { isEnabled, updateFeature } = useFeatureFlagStore();
   const [enabled, setEnabled] = useState(isEnabled('video_studio'));
-  const [providers, setProviders] = useState<Array<{ key: VideoProviderKey; display_name: string; configured: boolean; mock: boolean }>>([]);
-  const [provider, setProvider] = useState<VideoProviderKey>('mock');
+  const [providers, setProviders] = useState<Array<{ key: VideoProviderKey; display_name: string; configured: boolean }>>([]);
+  const [provider, setProvider] = useState<VideoProviderKey>('openrouter');
   const [models, setModels] = useState<VideoModel[]>([]);
-  const [model, setModel] = useState('mock-video-v1');
+  const [model, setModel] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -2202,13 +2202,15 @@ function VideoTab() {
       const providerStatus = await videoApi.providers();
       setProviders(providerStatus);
       const configured = providerStatus.filter((item) => item.configured);
-      const preferredRealProvider = configured.find((item) => !item.mock)?.key;
-      const currentIsUsable = configured.some((item) => item.key === provider) && (provider !== 'mock' || !preferredRealProvider);
-      const preferredProvider = currentIsUsable ? provider : preferredRealProvider || configured[0]?.key || 'mock';
+      const currentExists = providerStatus.some((item) => item.key === provider);
+      const preferredProvider = configured.find((item) => item.key === provider)?.key
+        || configured[0]?.key
+        || (currentExists ? provider : providerStatus[0]?.key)
+        || 'openrouter';
       setProvider(preferredProvider);
       const loadedModels = await videoApi.listModels(preferredProvider).catch(() => []);
       setModels(loadedModels);
-      setModel((current) => loadedModels.some((item) => item.id === current) ? current : loadedModels[0]?.id || 'mock-video-v1');
+      setModel((current) => loadedModels.some((item) => item.id === current) ? current : loadedModels[0]?.id || '');
     } finally {
       setLoading(false);
     }
@@ -2267,7 +2269,7 @@ function VideoTab() {
           </div>
           <div>
             <h3 className="text-sm font-bold">Video Studio</h3>
-            <p className="text-[11px] text-text-muted">Configure AI video generation and timeline editing availability</p>
+            <p className="text-[11px] text-text-muted">Configure AI video creation and edit workspace availability</p>
           </div>
         </div>
 
@@ -2275,7 +2277,7 @@ function VideoTab() {
           <div className="flex items-center justify-between py-2">
             <div>
               <label className="text-xs font-medium text-text-secondary block">Enable Video Studio</label>
-              <p className="text-[10px] text-text-muted mt-0.5">Shows Video Studio in the app sidebar</p>
+              <p className="text-[10px] text-text-muted mt-0.5">Shows Video Studio and Video Edit Studio in the app sidebar</p>
             </div>
             <button
               type="button"
@@ -2312,13 +2314,13 @@ function VideoTab() {
           <VideoModelSelect
             value={model}
             models={models}
-            fallback="mock-video-v1"
+            fallback=""
             onChange={setModel}
           />
 
           <div className="rounded-xl border border-border bg-surface p-3">
             <p className="text-xs text-text-secondary">
-              OpenRouter Video and direct Gemini Veo use encrypted provider profiles when API keys are configured. The mock provider stays available for local placeholder assets.
+              OpenRouter Video and direct Gemini Veo use encrypted provider profiles. Configure an API key in Providers before generating video.
             </p>
           </div>
 
@@ -2362,19 +2364,25 @@ function VideoModelSelect({
   onChange: (value: string) => void;
 }) {
   const options = models.length > 0 ? models : [{ id: fallback, name: fallback } as VideoModel];
+  const hasModels = models.length > 0;
   return (
     <div>
       <label className="text-xs font-medium text-text-secondary mb-1.5 block">Default video model</label>
       <select
         value={value || fallback}
         onChange={(event) => onChange(event.target.value)}
+        disabled={!hasModels}
         className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50"
       >
-        {options.map((item) => (
-          <option key={item.id} value={item.id}>{item.name || item.id}</option>
-        ))}
+        {hasModels ? (
+          options.map((item) => (
+            <option key={item.id} value={item.id}>{item.name || item.id}</option>
+          ))
+        ) : (
+          <option value="">No video models available</option>
+        )}
       </select>
-      {options[0]?.notes && <p className="mt-1.5 text-[10px] text-text-muted">{options[0].notes}</p>}
+      {hasModels && options[0]?.notes && <p className="mt-1.5 text-[10px] text-text-muted">{options[0].notes}</p>}
     </div>
   );
 }

@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Local-first LLM chat application</strong> — Go backend + React frontend<br/>
-  Multi-provider streaming · Image Studio · Music Studio · Video Studio · RAG · File Library · Agent mode · Branching · Web search · Live sports lookup · Headless Browser · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
+  Multi-provider streaming · Image Studio · Music Studio · Video Studio · Video Edit Studio · RAG · File Library · Agent mode · Branching · Web search · Live sports lookup · Headless Browser · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
 </p>
 
 <p align="center">
@@ -34,7 +34,8 @@
 | **Conversation Management** | Create, rename, pin, archive, delete, full-text search, per-conversation model override |
 | **Image Studio** | Full canvas editor with generation, editing, inpainting, variant comparison, and branching history |
 | **Music Studio** | Generate, play, download, and manage Gemini Lyria music tracks through OpenRouter or Gemini direct |
-| **Video Studio** | Project-based AI video generation, timeline editing, FFmpeg render/export, and cross-studio prompt translation |
+| **Video Studio** | Project-based AI video creation with OpenRouter Video, Gemini Veo, prompt enhancement, history, and output preview |
+| **Video Edit Studio** | Timeline editing, multi-asset media bin, preview canvas, inspector, AI edit planning, and FFmpeg render/export |
 | **Markdown Rendering** | Syntax highlighting, KaTeX math, Mermaid diagrams, inline image rendering |
 | **Auto-Titling** | Conversations are automatically titled based on the first exchange |
 
@@ -97,22 +98,31 @@ Screenshot placeholder: `docs/assets/screenshots/music-studio.png`
 
 ### Video Studio
 
-A dedicated project workspace for AI video generation and lightweight timeline editing. Video Studio includes real OpenRouter Video and direct Gemini Veo 3.1 adapters, live provider/model discovery (Gemini queries `/v1beta/models` at runtime with a static fallback), prompt enhancement, generation history, durable media assets, real backend imports from File Library/Music/Image sources, a neutral timeline JSON model, clip editing, preview, FFmpeg export jobs, an LLM-backed AI assistant, and cross-studio send-to-chat and file-library registration.
+A dedicated project workspace for AI video creation. Video Studio includes real OpenRouter Video and direct Gemini Veo 3.1 adapters, live provider/model discovery (Gemini queries `/v1beta/models` at runtime with a static snapshot fallback), prompt enhancement, generation history, branching, durable generated outputs, single-output preview/download controls, and cross-studio prompt translation from Image Studio and Music Studio.
 
-The built-in `mock` provider is available for local development and writes deterministic placeholder assets under the configured attachments directory. OpenRouter and Gemini use encrypted provider profiles from Settings. Export uses FFmpeg to composite real video/image media alongside text/caption/callout clips; effects, transitions, fade keyframes, and audio mixing are stored in the timeline but not yet applied during render (the inspector shows a warning). Gemini Veo supports reference image input for image-to-video generation.
+OpenRouter and Gemini use encrypted provider profiles from Settings. At least one real video provider profile must be configured before generation can run; there is no local mock video provider fallback. Gemini Veo supports reference image input for image-to-video generation.
 
 | Capability | Description |
 |------------|-------------|
 | **Generation** | Text-to-video generation with capability-driven controls, prompt enhancement, SSE progress, history, and branching |
 | **Reference Image (Gemini)** | Supply an image asset as a reference to guide Gemini Veo image-to-video generation |
+| **Output Preview** | Real `<video>`, `<img>`, and `<audio>` elements for selected outputs |
+| **Cross-Studio Shortcuts** | "Make Video" buttons in Image Studio and Music Studio route assets into Video Studio via domain translation |
+
+### Video Edit Studio
+
+Video Edit Studio owns timeline composition and export for video projects. It uses the same project/assets backend as Video Studio, but keeps the media bin, timeline, preview canvas, inspector, assistant editing tools, and render/export controls out of the creation panel.
+
+| Capability | Description |
+|------------|-------------|
+| **Media Bin** | Generated outputs plus imported File Library, Music Studio, and Image Studio assets |
 | **Timeline** | Multi-track video, image, audio, music, text, caption, shape, and callout timeline with move, trim, split, duplicate, delete, track mute/lock/visibility, fades, volume, effects, transitions, and keyframes |
-| **Preview** | Real `<video>` and `<img>` elements for media assets; labelled amber placeholder for mock dev assets |
+| **Preview** | Timeline preview canvas with real media playback and scrub controls |
 | **Export** | Persistent render jobs — FFmpeg composites real video/image media plus text overlays into durable MP4/WebM |
 | **AI Assistance** | LLM-backed storyboard and edit-plan generation (with deterministic fallbacks); rule-based social-format variants, apply-plan, and validate-plan |
-| **Cross-Studio Imports** | One-click import from File Library, Music Studio, and Image Studio into the Video asset bin |
+| **Cross-Studio Imports** | One-click import from File Library, Music Studio, and Image Studio into the project media bin |
 | **Send to Chat** | Copy any video asset into a conversation attachment and navigate directly to that chat |
 | **Register in Library** | Ingest any video asset into the global File Library scope for RAG retrieval and library search |
-| **Cross-Studio Shortcuts** | "Make Video" buttons in Image Studio and Music Studio route assets into Video Studio via domain translation |
 
 Docs: `docs/VIDEO_STUDIO.md`, `docs/VIDEO_STUDIO_ARCHITECTURE.md`, `docs/VIDEO_PROVIDER_ADAPTERS.md`, `docs/VIDEO_TIMELINE_SCHEMA.md`, and `docs/VIDEO_RENDERING.md`.
 
@@ -192,15 +202,14 @@ Music generation is Lyria-only in v1.
 
 ### Video Models
 
-Video Studio ships with the local mock provider plus real video generation adapters:
+Video Studio registers real video generation adapters:
 
 | Provider | Models | Notes |
 |----------|--------|-------|
-| **Mock** | `mock-video-v1` | Deterministic placeholder generation for local development; no API key required |
 | **OpenRouter Video** | Current `/videos/models` discovery, with built-in snapshot including `google/veo-3.1`, `google/veo-3.1-fast`, `google/veo-3.1-lite`, `x-ai/grok-imagine-video`, `kwaivgi/kling-v3.0-pro`, `kwaivgi/kling-v3.0-std`, `kwaivgi/kling-video-o1`, `minimax/hailuo-2.3`, `bytedance/seedance-2.0-fast`, `bytedance/seedance-2.0`, `alibaba/wan-2.7` | Uses an encrypted OpenRouter provider profile, submits `/videos` jobs, polls the returned URL, and downloads completed video outputs |
 | **Gemini direct** | `veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview` | Uses an encrypted Gemini provider profile and direct Gemini `predictLongRunning` Veo operations |
 
-Setup: open **Settings → Providers** and configure either an OpenRouter API key or a Gemini API key. Then use **Settings → Video** or Video Studio's Generate panel to select the provider/model.
+Setup: open **Settings → Providers** and configure either an OpenRouter API key or a Gemini API key. Then use **Settings → Video** or Video Studio's Generate panel to select the provider/model. If neither provider is configured, generation is disabled until credentials are added.
 
 ---
 
@@ -224,7 +233,7 @@ Frontend (React/TS)  ──SSE/REST──▶  Backend (Go/Chi)  ──SQL──�
 
 - **Frontend** — Single-page React app with Zustand state management, Tailwind v4 styling, and Framer Motion animations. Includes full-featured Image Studio and Music Studio workspaces.
 - **Backend** — Go HTTP server with Chi router, layered into handlers → services → repositories → database. Image and music generation route through provider-specific adapters, with ESPN-backed sports lookup handled locally before LLM fallback, and go-rod/Chromium available for JS-heavy page rendering and stateful browser sessions.
-- **Database** — SQLite with WAL mode, 36 versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions/nodes/assets and music sessions/generations/assets are stored relationally.
+- **Database** — SQLite with WAL mode, 39+ versioned migrations, 21+ indexes, and performance-tuned PRAGMAs. Image sessions/nodes/assets, music sessions/generations/assets, and video projects/generations/assets/timelines/render jobs are stored relationally.
 - **Vector store (RAG)** — [`chromem-go`](https://github.com/philippgille/chromem-go) embedded vector DB with collections per conversation, workspace, and global scope. Multi-threaded NN search; zero third-party Go dependencies. Chunk text stays in SQLite (`document_chunks`); chromem stores vectors only. Legacy `document_embeddings` rows lazy-migrate on first retrieval after upgrade.
 - **File Library** — Durable file storage with conversation, workspace, and global scopes. Hybrid retrieval (vector + keyword) with citation-aware results. Dedicated UI panel for managing indexed files.
 
@@ -421,7 +430,7 @@ OmniLLM-Studio/
 │       ├── bundle/                      # Import/export (conversations, attachments)
 │       ├── config/                      # Environment variable config
 │       ├── crypto/                      # AES-256-GCM encryption
-│       ├── db/                          # SQLite init, 36 versioned migrations
+│       ├── db/                          # SQLite init, versioned migrations
 │       ├── eval/                        # Evaluation harness (scorer, runner)
 │       ├── llm/                         # Provider routing, streaming, embeddings, image and music generation
 │       ├── models/                      # Data models (Go structs + JSON tags)
