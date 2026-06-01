@@ -208,6 +208,11 @@ function AssetPanel({
               key={asset.id}
               role="button"
               tabIndex={0}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setData('application/x-video-asset-id', asset.id);
+                event.dataTransfer.effectAllowed = 'copy';
+              }}
               onClick={() => onSelect(asset.id)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
@@ -215,7 +220,7 @@ function AssetPanel({
                   onSelect(asset.id);
                 }
               }}
-              className={`rounded-lg border p-3 ${
+              className={`cursor-grab rounded-lg border p-3 active:cursor-grabbing ${
                 asset.id === activeAssetId ? 'border-primary/30 bg-primary/10' : 'border-border bg-surface'
               }`}
             >

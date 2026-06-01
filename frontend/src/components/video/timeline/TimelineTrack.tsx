@@ -1,5 +1,5 @@
 import { Eye, EyeOff, Lock, Unlock, Volume2, VolumeX } from 'lucide-react';
-import type { VideoAsset, VideoTimelineTrack as Track } from '../../../types/video';
+import type { VideoAsset, VideoTimelineClip, VideoTimelineTrack as Track, VideoTimelineTrackType } from '../../../types/video';
 import { TimelineClip } from './TimelineClip';
 
 export function TimelineTrack({
@@ -9,6 +9,8 @@ export function TimelineTrack({
   pxPerMs,
   width,
   onMoveClip,
+  onTrimClip,
+  onAddAsset,
   onSelectClip,
   onToggleMute,
   onToggleLock,
@@ -20,6 +22,8 @@ export function TimelineTrack({
   pxPerMs: number;
   width: number;
   onMoveClip: (clipId: string, trackId: string, startMs: number) => void;
+  onTrimClip: (clipId: string, updates: Partial<Pick<VideoTimelineClip, 'start_ms' | 'duration_ms' | 'trim_in_ms' | 'trim_out_ms'>>) => void;
+  onAddAsset: (assetId: string, trackId: string, trackType: VideoTimelineTrackType, startMs: number) => void;
   onSelectClip: (clipId: string, trackId: string) => void;
   onToggleMute: (trackId: string) => void;
   onToggleLock: (trackId: string) => void;
@@ -58,7 +62,7 @@ export function TimelineTrack({
         className="relative bg-surface"
         style={{ width }}
         onDragOver={(event) => {
-          if (!track.locked && event.dataTransfer.types.includes('application/x-video-clip-id')) {
+          if (!track.locked && (event.dataTransfer.types.includes('application/x-video-clip-id') || event.dataTransfer.types.includes('application/x-video-asset-id'))) {
             event.preventDefault();
           }
         }}
@@ -66,10 +70,14 @@ export function TimelineTrack({
           event.preventDefault();
           if (track.locked) return;
           const clipId = event.dataTransfer.getData('application/x-video-clip-id');
-          if (!clipId) return;
+          const assetId = event.dataTransfer.getData('application/x-video-asset-id');
           const rect = event.currentTarget.getBoundingClientRect();
           const startMs = Math.max(0, Math.round((event.clientX - rect.left) / pxPerMs));
-          onMoveClip(clipId, track.id, startMs);
+          if (clipId) {
+            onMoveClip(clipId, track.id, startMs);
+          } else if (assetId) {
+            onAddAsset(assetId, track.id, track.type, startMs);
+          }
         }}
         onClick={() => onSelectClip('', track.id)}
       >
@@ -82,6 +90,7 @@ export function TimelineTrack({
             pxPerMs={pxPerMs}
             trackId={track.id}
             onSelect={onSelectClip}
+            onTrim={onTrimClip}
           />
         ))}
       </div>

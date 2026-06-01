@@ -80,6 +80,18 @@ function cloneTimeline(doc: VideoTimelineDocument): VideoTimelineDocument {
   return JSON.parse(JSON.stringify(doc)) as VideoTimelineDocument;
 }
 
+const TIMELINE_HISTORY_LIMIT = 50;
+
+function withTimelineHistory(
+  state: { timelineUndoStack: VideoTimelineDocument[] },
+  previous: VideoTimelineDocument,
+): { timelineUndoStack: VideoTimelineDocument[]; timelineRedoStack: VideoTimelineDocument[] } {
+  return {
+    timelineUndoStack: [...state.timelineUndoStack, cloneTimeline(previous)].slice(-TIMELINE_HISTORY_LIMIT),
+    timelineRedoStack: [],
+  };
+}
+
 function defaultTimeline(project?: VideoProject | null): VideoTimelineDocument {
   return {
     version: 1,
@@ -229,6 +241,8 @@ interface VideoStudioState {
   promptForm: VideoPromptForm;
   timelineRecord: VideoTimelineRecord | null;
   timeline: VideoTimelineDocument | null;
+  timelineUndoStack: VideoTimelineDocument[];
+  timelineRedoStack: VideoTimelineDocument[];
   selectedClipId: string | null;
   selectedTrackId: string | null;
   playheadMs: number;
@@ -297,6 +311,8 @@ interface VideoStudioState {
   removeClipEffect: (clipId: string, effectId: string) => Promise<void>;
   addClipTransition: (clipId: string, transition: Omit<VideoTimelineTransition, 'id'>) => Promise<void>;
   addKeyframe: (clipId: string, keyframe: Omit<VideoTimelineKeyframe, 'id'>) => Promise<void>;
+  undoTimeline: () => Promise<void>;
+  redoTimeline: () => Promise<void>;
   setExportSetting: <K extends keyof VideoExportSettings>(key: K, value: VideoExportSettings[K]) => void;
   renderTimeline: () => Promise<void>;
   pollRenderJob: (jobId: string) => Promise<void>;
@@ -324,6 +340,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   promptForm: cloneForm(),
   timelineRecord: null,
   timeline: null,
+  timelineUndoStack: [],
+  timelineRedoStack: [],
   selectedClipId: null,
   selectedTrackId: null,
   playheadMs: 0,
@@ -420,6 +438,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         assets: [],
         timeline: defaultTimeline(project),
         timelineRecord: null,
+        timelineUndoStack: [],
+        timelineRedoStack: [],
         generationValidation: null,
       }));
       await get().loadTimeline(project.id);
@@ -452,6 +472,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         selectedClipId: null,
         selectedTrackId: null,
         playheadMs: 0,
+        timelineUndoStack: [],
+        timelineRedoStack: [],
         generationValidation: null,
         isLoading: false,
       }));
@@ -728,6 +750,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
           assets: activeDeleted ? [] : state.assets,
           timeline: activeDeleted ? null : state.timeline,
           timelineRecord: activeDeleted ? null : state.timelineRecord,
+          timelineUndoStack: activeDeleted ? [] : state.timelineUndoStack,
+          timelineRedoStack: activeDeleted ? [] : state.timelineRedoStack,
         };
       });
       toast.success('Video project deleted');
@@ -778,9 +802,21 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     if (!id) return;
     try {
       const detail = await videoApi.getTimeline(id);
-      set({ timelineRecord: detail.timeline, timeline: detail.document, selectedClipId: null, selectedTrackId: null });
+      set({
+        timelineRecord: detail.timeline,
+        timeline: detail.document,
+        timelineUndoStack: [],
+        timelineRedoStack: [],
+        selectedClipId: null,
+        selectedTrackId: null,
+      });
     } catch (err) {
-      set({ timeline: defaultTimeline(get().projects.find((project) => project.id === id)), error: (err as Error).message });
+      set({
+        timeline: defaultTimeline(get().projects.find((project) => project.id === id)),
+        timelineUndoStack: [],
+        timelineRedoStack: [],
+        error: (err as Error).message,
+      });
     }
   },
 
@@ -802,6 +838,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const projectId = get().activeProjectId;
     if (!projectId) return;
     const asset = get().assets.find((item) => item.id === assetId);
+    const previous = get().timeline ? cloneTimeline(get().timeline as VideoTimelineDocument) : null;
     try {
       const detail = await videoApi.importAssetToTimeline(projectId, {
         asset_id: assetId,
@@ -810,7 +847,12 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         start_ms: options.start_ms ?? get().playheadMs,
         duration_ms: options.duration_ms,
       });
-      set({ timelineRecord: detail.timeline, timeline: detail.document, selectedAssetId: assetId });
+      set((state) => ({
+        timelineRecord: detail.timeline,
+        timeline: detail.document,
+        selectedAssetId: assetId,
+        ...(previous ? withTimelineHistory(state, previous) : { timelineRedoStack: [] }),
+      }));
       toast.success('Asset added to timeline');
     } catch (err) {
       toast.error((err as Error).message);
@@ -829,7 +871,12 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     target.clips.push(clip);
     target.clips.sort((a, b) => a.start_ms - b.start_ms);
     recomputeDuration(next);
-    set({ timeline: next, selectedClipId: clip.id, selectedTrackId: target.id });
+    set((state) => ({
+      timeline: next,
+      selectedClipId: clip.id,
+      selectedTrackId: target.id,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -844,7 +891,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     loc.clip.trim_in_ms = Math.max(0, Math.round(updates.trim_in_ms ?? loc.clip.trim_in_ms));
     loc.clip.trim_out_ms = Math.max(loc.clip.trim_in_ms + 100, Math.round(updates.trim_out_ms ?? loc.clip.trim_out_ms ?? loc.clip.duration_ms));
     recomputeDuration(next);
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -871,7 +921,12 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       trim_out_ms: loc.clip.trim_out_ms,
     };
     loc.track.clips.splice(loc.clipIndex, 1, left, right);
-    set({ timeline: recomputeDuration(next), selectedClipId: right.id, selectedTrackId: loc.track.id });
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: right.id,
+      selectedTrackId: loc.track.id,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -883,7 +938,11 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     for (const track of next.tracks) {
       track.clips = track.clips.filter((clip) => clip.id !== id);
     }
-    set({ timeline: recomputeDuration(next), selectedClipId: null });
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: null,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -896,7 +955,12 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     if (!loc) return;
     const copy = { ...loc.clip, id: newId('clip'), start_ms: loc.clip.start_ms + loc.clip.duration_ms + 250 };
     loc.track.clips.splice(loc.clipIndex + 1, 0, copy);
-    set({ timeline: recomputeDuration(next), selectedClipId: copy.id, selectedTrackId: loc.track.id });
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: copy.id,
+      selectedTrackId: loc.track.id,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -913,7 +977,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const track = next.tracks.find((item) => item.id === trackId);
     if (!track) return;
     track.muted = !track.muted;
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -924,7 +991,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const track = next.tracks.find((item) => item.id === trackId);
     if (!track) return;
     track.locked = !track.locked;
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -935,7 +1005,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const track = next.tracks.find((item) => item.id === trackId);
     if (!track) return;
     track.visible = !track.visible;
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -946,7 +1019,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.transform = { ...defaultTransform(), ...(loc.clip.transform || {}), ...transform };
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -957,7 +1033,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.volume = Math.min(2, Math.max(0, volume));
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -969,7 +1048,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     if (!loc) return;
     loc.clip.fade_in_ms = Math.max(0, fade.fade_in_ms ?? loc.clip.fade_in_ms ?? 0);
     loc.clip.fade_out_ms = Math.max(0, fade.fade_out_ms ?? loc.clip.fade_out_ms ?? 0);
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -995,7 +1077,12 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       transitions: [],
     };
     track.clips.push(clip);
-    set({ timeline: recomputeDuration(next), selectedClipId: clip.id, selectedTrackId: track.id });
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: clip.id,
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -1006,7 +1093,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.text = { ...(loc.clip.text || { text: '' }), ...text };
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -1017,7 +1107,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.effects = [...(loc.clip.effects || []), { ...effect, id: newId('effect') }];
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -1028,7 +1121,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.effects = (loc.clip.effects || []).map((effect) => effect.id === effectId ? { ...effect, enabled: !effect.enabled } : effect);
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -1039,7 +1135,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.effects = (loc.clip.effects || []).filter((effect) => effect.id !== effectId);
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -1050,7 +1149,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.transitions = [...(loc.clip.transitions || []), { ...transition, id: newId('transition') }];
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -1061,7 +1163,40 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.keyframes = [...(loc.clip.keyframes || []), { ...keyframe, id: newId('keyframe') }];
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  undoTimeline: async () => {
+    const { timeline, timelineUndoStack, timelineRedoStack, selectedClipId } = get();
+    if (!timeline || timelineUndoStack.length === 0) return;
+    const previous = cloneTimeline(timelineUndoStack[timelineUndoStack.length - 1]);
+    const selected = selectedClipId ? findClip(previous, selectedClipId) : null;
+    set({
+      timeline: previous,
+      timelineUndoStack: timelineUndoStack.slice(0, -1),
+      timelineRedoStack: [...timelineRedoStack, cloneTimeline(timeline)].slice(-TIMELINE_HISTORY_LIMIT),
+      selectedClipId: selected ? selectedClipId : null,
+      selectedTrackId: selected ? selected.track.id : null,
+    });
+    await get().saveTimeline(previous);
+  },
+
+  redoTimeline: async () => {
+    const { timeline, timelineUndoStack, timelineRedoStack, selectedClipId } = get();
+    if (!timeline || timelineRedoStack.length === 0) return;
+    const next = cloneTimeline(timelineRedoStack[timelineRedoStack.length - 1]);
+    const selected = selectedClipId ? findClip(next, selectedClipId) : null;
+    set({
+      timeline: next,
+      timelineUndoStack: [...timelineUndoStack, cloneTimeline(timeline)].slice(-TIMELINE_HISTORY_LIMIT),
+      timelineRedoStack: timelineRedoStack.slice(0, -1),
+      selectedClipId: selected ? selectedClipId : null,
+      selectedTrackId: selected ? selected.track.id : null,
+    });
     await get().saveTimeline(next);
   },
 
@@ -1182,9 +1317,15 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const projectId = get().activeProjectId;
     const plan = get().assistantPlan;
     if (!projectId || !plan) return;
+    const previous = get().timeline ? cloneTimeline(get().timeline as VideoTimelineDocument) : null;
     try {
       const detail = await videoApi.assistant.applyEditPlan(projectId, plan);
-      set({ timelineRecord: detail.timeline, timeline: detail.document, assistantPlan: null });
+      set((state) => ({
+        timelineRecord: detail.timeline,
+        timeline: detail.document,
+        assistantPlan: null,
+        ...(previous ? withTimelineHistory(state, previous) : { timelineRedoStack: [] }),
+      }));
       toast.success('Edit plan applied');
     } catch (err) {
       toast.error((err as Error).message);

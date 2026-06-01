@@ -1,4 +1,4 @@
-import { Copy, Magnet, Pause, Play, Save, Scissors, Trash2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Copy, Magnet, Pause, Play, Redo2, Save, Scissors, Trash2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export function TimelineToolbar({
@@ -6,7 +6,11 @@ export function TimelineToolbar({
   snappingEnabled,
   zoom,
   isSaving,
+  canUndo,
+  canRedo,
   onPlayPause,
+  onUndo,
+  onRedo,
   onSplit,
   onDelete,
   onDuplicate,
@@ -18,7 +22,11 @@ export function TimelineToolbar({
   snappingEnabled: boolean;
   zoom: number;
   isSaving: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
   onPlayPause: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
   onSplit: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
@@ -31,6 +39,13 @@ export function TimelineToolbar({
       <IconButton label={isPlaying ? 'Pause' : 'Play'} onClick={onPlayPause}>
         {isPlaying ? <Pause size={14} /> : <Play size={14} />}
       </IconButton>
+      <IconButton label="Undo" onClick={onUndo} disabled={!canUndo}>
+        <Undo2 size={14} />
+      </IconButton>
+      <IconButton label="Redo" onClick={onRedo} disabled={!canRedo}>
+        <Redo2 size={14} />
+      </IconButton>
+      <span className="mx-1 h-5 w-px bg-border" />
       <IconButton label="Split selected clip" onClick={onSplit}>
         <Scissors size={14} />
       </IconButton>
@@ -62,11 +77,13 @@ export function TimelineToolbar({
 function IconButton({
   label,
   active = false,
+  disabled = false,
   onClick,
   children,
 }: {
   label: string;
   active?: boolean;
+  disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -74,7 +91,8 @@ function IconButton({
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-md border text-text-muted transition-colors hover:text-text ${
+      disabled={disabled}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-md border text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 ${
         active ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-surface'
       }`}
       title={label}

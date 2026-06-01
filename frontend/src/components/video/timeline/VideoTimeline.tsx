@@ -14,12 +14,18 @@ export function VideoTimeline() {
   const isPlaying = useVideoStudioStore((state) => state.isPlaying);
   const snappingEnabled = useVideoStudioStore((state) => state.snappingEnabled);
   const isSavingTimeline = useVideoStudioStore((state) => state.isSavingTimeline);
+  const canUndo = useVideoStudioStore((state) => state.timelineUndoStack.length > 0);
+  const canRedo = useVideoStudioStore((state) => state.timelineRedoStack.length > 0);
   const setPlayhead = useVideoStudioStore((state) => state.setPlayhead);
   const setZoom = useVideoStudioStore((state) => state.setZoom);
   const setPlaying = useVideoStudioStore((state) => state.setPlaying);
   const toggleSnapping = useVideoStudioStore((state) => state.toggleSnapping);
+  const undoTimeline = useVideoStudioStore((state) => state.undoTimeline);
+  const redoTimeline = useVideoStudioStore((state) => state.redoTimeline);
   const selectClip = useVideoStudioStore((state) => state.selectClip);
+  const addAssetToTimeline = useVideoStudioStore((state) => state.addAssetToTimeline);
   const moveClip = useVideoStudioStore((state) => state.moveClip);
+  const trimClip = useVideoStudioStore((state) => state.trimClip);
   const splitClipAtPlayhead = useVideoStudioStore((state) => state.splitClipAtPlayhead);
   const deleteClip = useVideoStudioStore((state) => state.deleteClip);
   const duplicateClip = useVideoStudioStore((state) => state.duplicateClip);
@@ -38,6 +44,15 @@ export function VideoTimeline() {
       if (event.key === ' ') {
         event.preventDefault();
         setPlaying(!useVideoStudioStore.getState().isPlaying);
+      } else if (event.key.toLowerCase() === 'z' && (event.ctrlKey || event.metaKey) && event.shiftKey) {
+        event.preventDefault();
+        void redoTimeline();
+      } else if (event.key.toLowerCase() === 'z' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        void undoTimeline();
+      } else if (event.key.toLowerCase() === 'y' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        void redoTimeline();
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         void deleteClip();
       } else if (event.key.toLowerCase() === 's' && (event.ctrlKey || event.metaKey)) {
@@ -49,7 +64,7 @@ export function VideoTimeline() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [deleteClip, saveTimeline, setPlaying, splitClipAtPlayhead]);
+  }, [deleteClip, redoTimeline, saveTimeline, setPlaying, splitClipAtPlayhead, undoTimeline]);
 
   if (!timeline) {
     return (
@@ -66,7 +81,11 @@ export function VideoTimeline() {
         snappingEnabled={snappingEnabled}
         zoom={zoom}
         isSaving={isSavingTimeline}
+        canUndo={canUndo}
+        canRedo={canRedo}
         onPlayPause={() => setPlaying(!isPlaying)}
+        onUndo={() => { void undoTimeline(); }}
+        onRedo={() => { void redoTimeline(); }}
         onSplit={() => { void splitClipAtPlayhead(); }}
         onDelete={() => { void deleteClip(); }}
         onDuplicate={() => { void duplicateClip(); }}
@@ -97,6 +116,10 @@ export function VideoTimeline() {
             pxPerMs={pxPerMs}
             width={width}
             onMoveClip={(clipId, trackId, startMs) => { void moveClip(clipId, trackId, startMs); }}
+            onTrimClip={(clipId, updates) => { void trimClip(clipId, updates); }}
+            onAddAsset={(assetId, trackId, trackType, startMs) => {
+              void addAssetToTimeline(assetId, { track_id: trackId, track_type: trackType, start_ms: startMs });
+            }}
             onSelectClip={(clipId, trackId) => selectClip(clipId || null, clipId ? trackId : null)}
             onToggleMute={(trackId) => { void toggleTrackMute(trackId); }}
             onToggleLock={(trackId) => { void toggleTrackLock(trackId); }}

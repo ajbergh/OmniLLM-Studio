@@ -10,7 +10,7 @@ The goal is to move Video Studio from a broad working foundation to a production
 
 > **Verification note (2026-06-01):** The baseline below was re-verified against the `main` branch source. File-path anchors and per-phase "Status" callouts were added so the phases reflect what is actually implemented today rather than treating each phase as greenfield. Where a subsystem is more (or less) complete than originally written, the discrepancy is called out explicitly.
 
-> **Implementation progress (2026-06-01):** Phase 1 implementation has started. Added backend provider/model capability validation, a frontend validation preflight, Gemini negative-prompt payload wiring, seed UI exposure, provider documentation updates, and focused backend tests. Phase 2 implementation now includes completed generation actions for timeline/chat/File Library handoff, explicit regenerate-from-history, richer review-card metadata, readable failure diagnostics, enhanced-prompt reuse, and deterministic prompt variants. Phase 3-7 implementation remains pending.
+> **Implementation progress (2026-06-01):** Phase 1 implementation has started. Added backend provider/model capability validation, a frontend validation preflight, Gemini negative-prompt payload wiring, seed UI exposure, provider documentation updates, and focused backend tests. Phase 2 implementation now includes completed generation actions for timeline/chat/File Library handoff, explicit regenerate-from-history, richer review-card metadata, readable failure diagnostics, enhanced-prompt reuse, and deterministic prompt variants. Phase 3 implementation has started with timeline undo/redo, extended keyboard shortcuts, media-bin drag/drop, and clip trim handles. Phase 4-7 implementation remains pending.
 
 ## Current Baseline
 
@@ -220,23 +220,32 @@ Move Video Edit Studio from a partially usable editor to a fully usable timeline
 
 ### Status as of 2026-06-01
 
-The editor already has more than the original draft assumed. Already implemented: timeline **zoom**, **snapping** (toggle, on by default), a partial **keyboard shortcut** set (Space play/pause, Delete, Ctrl+S save, S split-at-playhead), **playhead playback with preview sync** (`VideoPreviewCanvas` scrubs to `playheadMs`), clip move/split/duplicate/delete reducers, and a working **inspector** (transform/opacity/volume/fade/text + effect/transition/keyframe authoring). 
+The editor already has more than the original draft assumed. Already implemented: timeline **zoom**, **snapping** (toggle, on by default), **keyboard shortcuts** (Space play/pause, Delete/Backspace delete, Ctrl+S save, S split-at-playhead, Ctrl+Z undo, Ctrl+Y/Ctrl+Shift+Z redo), **undo/redo history** for timeline mutations, **media-bin drag/drop** into tracks, **clip trim handles**, **playhead playback with preview sync** (`VideoPreviewCanvas` scrubs to `playheadMs`), clip move/split/duplicate/delete reducers, and a working **inspector** (transform/opacity/volume/fade/text + effect/transition/keyframe authoring). 
 
-**Not yet implemented — this is the real Phase 3 work:** undo/redo (no history stack in the store), multi-select, true drag-and-drop from the media bin (the bin uses "Add to timeline" buttons, not drag), media-bin thumbnails/filters/rename/delete, and dedicated trim *handles* (trimming today is done via numeric inputs in the inspector).
+**Not yet implemented — remaining Phase 3 work:** multi-select, media-bin thumbnails/filters/rename/delete, zoom-to-fit, richer clip move affordances, and component-level tests for key timeline interactions.
+
+### Implementation Progress as of 2026-06-01
+
+- **Completed:** Added a bounded timeline undo/redo history stack in `frontend/src/stores/videoStudio.ts`, covering clip moves, trims, split/delete/duplicate, track toggles, inspector edits, text/effect/transition/keyframe edits, media imports, and assistant-applied plans.
+- **Completed:** Added toolbar Undo/Redo controls and Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z shortcuts in the timeline.
+- **Completed:** Media-bin assets are draggable into specific timeline tracks; drops preserve the target track and drop time.
+- **Completed:** Timeline clips now expose start/end trim handles that call the existing `trimClip` reducer and save path.
+- **Verified:** `npm run build` passes after the Phase 3 editor changes.
+- **Remaining:** multi-select, media-bin thumbnail/filter/rename/delete workflow, zoom-to-fit, richer move affordances, and focused timeline interaction tests.
 
 > Note: opacity/fade/transform values authored in the inspector are **not honored by the export renderer yet** (Phase 4). The inspector already shows a warning; keep that warning accurate as Phase 4 lands.
 
 ### Implementation Tasks
 
 1. Add editor interaction fundamentals.
-   - Undo/redo stack. _(missing — highest priority; also a prerequisite for Phase 5 safety rails)_
+   - Undo/redo stack. _(wired — includes assistant-applied plans)_
    - Timeline zoom. _(exists)_
    - Timeline snapping. _(exists)_
    - Multi-select clips. _(missing)_
-   - Keyboard shortcuts. _(partial — extend the existing set)_
-   - Drag/drop media from bin to timeline. _(missing — bin currently uses buttons)_
-   - Better trim handles. _(missing — only numeric trim today)_
-   - Better clip move affordances.
+   - Keyboard shortcuts. _(extended with undo/redo)_
+   - Drag/drop media from bin to timeline. _(wired)_
+   - Better trim handles. _(wired)_
+   - Better clip move affordances. _(remaining)_
 
 2. Improve playback and preview.
    - Timeline playhead playback.
@@ -248,7 +257,7 @@ The editor already has more than the original draft assumed. Already implemented
    - Thumbnail grid/list toggle.
    - Asset type filters.
    - Rename/delete asset actions.
-   - Drag asset into timeline.
+   - Drag asset into timeline. _(wired)_
    - Show source studio/source ID metadata.
 
 4. Improve inspector usability.
