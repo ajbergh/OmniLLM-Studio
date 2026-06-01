@@ -6,7 +6,7 @@
 #   - Go 1.24+
 #   - Node.js 18+
 #   - Wails CLI v2: go install github.com/wailsapp/wails/v2/cmd/wails@latest
-#   - Xcode Command Line Tools: xcode-select --install
+#   - Xcode Command Line Tools: xcode-select --install  (needed by Wails for WebKit/Cocoa — NOT for SQLite)
 #
 # Usage:
 #   ./build-macos.sh              # Build for current architecture
@@ -41,6 +41,9 @@ echo "=========================================="
 echo ""
 
 # --- Check prerequisites ---
+# CGO is required on macOS for Wails WebKit/Cocoa bindings (not for SQLite — we use pure-Go modernc.org/sqlite)
+export CGO_ENABLED=1
+
 for cmd in go node npm wails; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "[ERROR] '$cmd' not found in PATH."

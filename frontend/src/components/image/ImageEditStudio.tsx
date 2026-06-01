@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { DragHandle, useResizablePanels } from '../ResizablePanels';
 import { useImageEditorStore } from '../../stores/imageEditor';
 import { useProviderStore, useConversationStore, useMessageStore, useSettingsStore, useCrossoverStore } from '../../stores';
 import { useMusicStudioStore } from '../../stores/musicStudio';
@@ -11,7 +12,7 @@ import { useImageEditorShortcuts } from './useImageEditorShortcuts';
 import {
   Image, Sparkles, Pencil, X, Undo2, Redo2, Trash2,
   Paintbrush, Eraser, Move, Eye, EyeOff, ImagePlus, XCircle, AlertTriangle,
-  PanelLeft, PanelRight, Upload, MessageSquare, Music2,
+  PanelLeft, PanelRight, Upload, MessageSquare, Music2, Video,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { toast } from 'sonner';
@@ -110,6 +111,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const [lastPromptBeforeEnhance, setLastPromptBeforeEnhance] = useState<string | null>(null);
   const [sendingToChat, setSendingToChat] = useState(false);
   const [generatingSoundtrack, setGeneratingSoundtrack] = useState(false);
+  const [generatingVideo, setGeneratingVideo] = useState(false);
   const refInputRef = useRef<HTMLInputElement>(null);
   const pendingRefType = useRef<'content' | 'style'>('content');
   const canvasRef = useRef<ImageCanvasHandle>(null);
@@ -428,6 +430,21 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     }
   };
 
+  const handleGenerateVideo = async () => {
+    if (!activeNode?.instruction) return;
+    setGeneratingVideo(true);
+    try {
+      const result = await crossoverApi.translate.imageToVideo({ prompt: activeNode.instruction });
+      setCrossoverContext({ type: 'to-video', data: { prompt: result.video_prompt, attachmentId: canvasAttachmentId || undefined } });
+      setAppMode('video');
+      toast.success('Opening Video Studio with generated prompt');
+    } catch (err) {
+      toast.error(`Translation failed: ${(err as Error).message}`);
+    } finally {
+      setGeneratingVideo(false);
+    }
+  };
+
   const handleGenerateSoundtrack = async () => {
     if (!activeNode?.instruction) return;
     setGeneratingSoundtrack(true);
@@ -449,6 +466,8 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
       setGeneratingSoundtrack(false);
     }
   };
+
+  const { leftStyle, rightStyle, startLeft, startRight, isWide } = useResizablePanels({ defaultLeft: 320, defaultRight: 288, breakpoint: 1024 });
 
   if (!conversationId) {
     return (
@@ -578,8 +597,8 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
           'min-h-0 flex-1 flex-col overflow-y-auto border-border bg-surface-raised',
           'border-b lg:border-b-0 lg:border-r',
           mobilePanel === 'prompt' ? 'flex' : 'hidden',
-          leftPanelOpen ? 'lg:flex lg:w-80 lg:flex-none lg:shrink-0' : 'lg:hidden'
-        )}>
+          leftPanelOpen ? 'lg:flex lg:flex-none lg:shrink-0' : 'lg:hidden'
+        )} style={leftPanelOpen ? leftStyle : undefined}>
           <div className="p-4 space-y-4">
             {activeSessionId && (
               <>
@@ -1073,6 +1092,18 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                       <Music2 size={12} />
                       {generatingSoundtrack ? 'Translating…' : 'Soundtrack'}
                     </button>
+                    <button
+                      onClick={handleGenerateVideo}
+                      disabled={generatingVideo || !activeNode?.instruction}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl
+                                 text-xs font-medium text-text-muted bg-surface-hover border border-border
+                                 hover:text-text hover:border-primary/40 transition-colors
+                                 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={activeNode?.instruction ? 'Translate image prompt to video and open Video Studio' : 'Generate an image first'}
+                    >
+                      <Video size={12} />
+                      {generatingVideo ? 'Translating…' : 'Make Video'}
+                    </button>
                   </div>
                 )}
               </>
@@ -1080,6 +1111,8 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
           </div>
         </div>
         )}
+
+        {leftPanelOpen && isWide && <DragHandle visibilityClass="hidden lg:flex" onMouseDown={startLeft} />}
 
         {/* Center — canvas */}
         <div className={clsx(
@@ -1151,14 +1184,16 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
           {/* Zoom controls removed — now provided by CanvasToolbar in ImageCanvas */}
         </div>
 
+        {rightPanelOpen && isWide && <DragHandle visibilityClass="hidden lg:flex" onMouseDown={startRight} />}
+
         {/* Right panel — history */}
         {(rightPanelOpen || mobilePanel === 'history') && (
         <div className={clsx(
           'min-h-0 flex-1 overflow-y-auto border-border bg-surface-raised',
           'border-t lg:border-t-0 lg:border-l',
           mobilePanel === 'history' ? 'block' : 'hidden',
-          rightPanelOpen ? 'lg:block lg:w-72 lg:flex-none lg:shrink-0' : 'lg:hidden'
-        )}>
+          rightPanelOpen ? 'lg:block lg:flex-none lg:shrink-0' : 'lg:hidden'
+        )} style={rightPanelOpen ? rightStyle : undefined}>
           <ImageHistoryPanel
             conversationId={conversationId!}
             nodes={nodes}

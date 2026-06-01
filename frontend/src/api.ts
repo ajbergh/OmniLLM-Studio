@@ -76,6 +76,7 @@ import type {
   CrossoverTranslateRequest,
   CrossoverMusicToImageResponse,
   CrossoverImageToMusicResponse,
+  CrossoverToVideoResponse,
   Attachment,
   RouterSuggestionsResponse,
   RouterTelemetry,
@@ -93,6 +94,24 @@ import type {
   MusicSession,
   MusicSessionDetail,
 } from './types/music';
+import type {
+  GenerateVideoRequest,
+  VideoAsset,
+  VideoAssistantRequest,
+  VideoEditPlan,
+  VideoGenerationDetail,
+  VideoModel,
+  VideoProject,
+  VideoProjectDetail,
+  VideoProviderInfo,
+  VideoProviderKey,
+  VideoRenderJob,
+  VideoSocialVariant,
+  VideoStoryboardResponse,
+  VideoTimelineDetail,
+  VideoTimelineDocument,
+  VideoTimelineRecord,
+} from './types/video';
 
 // In the Wails desktop build the API runs on a real local HTTP server
 // (required for SSE streaming). The Go App.GetAPIBase() binding returns
@@ -149,6 +168,10 @@ export function musicAssetUrl(assetId: string): string {
   return `${BASE_URL}/music/assets/${encodeURIComponent(assetId)}/download`;
 }
 
+export function videoAssetUrl(assetId: string): string {
+  return `${BASE_URL}/video/assets/${encodeURIComponent(assetId)}/download`;
+}
+
 // Upload a file as an attachment scoped to a conversation.
 export async function uploadAttachment(conversationId: string, file: File): Promise<{ id: string }> {
   const formData = new FormData();
@@ -168,7 +191,9 @@ export async function uploadAttachment(conversationId: string, file: File): Prom
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    // Do NOT set Content-Type for FormData — the browser must set it with the
+    // multipart boundary. Only default to JSON for everything else.
+    ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options?.headers as Record<string, string>),
   };
 
@@ -1378,10 +1403,215 @@ export const musicApi = {
     ),
 };
 
+// ── Video Studio ──────────────────────────────────────────────────────────
+
+export const videoApi = {
+  providers: () =>
+    apiFetch<VideoProviderInfo[]>('/video/providers'),
+
+  listModels: (provider: VideoProviderKey) =>
+    apiFetch<VideoModel[]>(`/video/models?provider=${encodeURIComponent(provider)}`),
+
+  refreshModels: (provider: VideoProviderKey) =>
+    apiFetch<VideoModel[]>(`/video/models/refresh?provider=${encodeURIComponent(provider)}`, {
+      method: 'POST',
+    }),
+
+  listProjects: () =>
+    apiFetch<VideoProject[]>('/video/projects'),
+
+  createProject: (data: { title?: string; provider?: VideoProviderKey; model?: string; width?: number; height?: number; fps?: number; aspect_ratio?: string } = {}) =>
+    apiFetch<VideoProject>('/video/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getProject: (projectId: string) =>
+    apiFetch<VideoProjectDetail>(`/video/projects/${encodeURIComponent(projectId)}`),
+
+  updateProject: (projectId: string, data: { title?: string; provider?: VideoProviderKey; model?: string; width?: number; height?: number; fps?: number; aspect_ratio?: string }) =>
+    apiFetch<VideoProject>(`/video/projects/${encodeURIComponent(projectId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  deleteProject: (projectId: string) =>
+    apiFetch<{ deleted: boolean }>(`/video/projects/${encodeURIComponent(projectId)}`, {
+      method: 'DELETE',
+    }),
+
+  listGenerations: (projectId: string) =>
+    apiFetch<VideoGenerationDetail[]>(`/video/projects/${encodeURIComponent(projectId)}/generations`),
+
+  getGeneration: (generationId: string) =>
+    apiFetch<VideoGenerationDetail>(`/video/generations/${encodeURIComponent(generationId)}`),
+
+  branchGeneration: (generationId: string) =>
+    apiFetch<{
+      parent_id: string;
+      project_id: string;
+      prompt: string;
+      enhanced_prompt?: string;
+      negative_prompt?: string;
+      provider: VideoProviderKey;
+      model: string;
+      settings_json?: string;
+    }>(`/video/generations/${encodeURIComponent(generationId)}/branch`, {
+      method: 'POST',
+    }),
+
+  sendGenerationToTimeline: (generationId: string) =>
+    apiFetch<{ project_id: string; asset_id?: string; timeline: VideoTimelineRecord; document: VideoTimelineDocument }>(
+      `/video/generations/${encodeURIComponent(generationId)}/send-to-timeline`,
+      { method: 'POST' },
+    ),
+
+  listAssets: (projectId: string) =>
+    apiFetch<VideoAsset[]>(`/video/projects/${encodeURIComponent(projectId)}/assets`),
+
+  importExternalAsset: (projectId: string, data: {
+    source_studio: string;
+    source_id: string;
+    source_type?: string;
+    kind?: VideoAsset['kind'];
+    file_name?: string;
+    mime_type?: string;
+    size_bytes?: number;
+    duration_ms?: number;
+    width?: number;
+    height?: number;
+    fps?: number;
+    metadata?: Record<string, unknown>;
+  }) =>
+    apiFetch<VideoAsset>(`/video/projects/${encodeURIComponent(projectId)}/assets/import`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getAsset: (assetId: string) =>
+    apiFetch<VideoAsset>(`/video/assets/${encodeURIComponent(assetId)}`),
+
+  uploadAsset: (projectId: string, file: File): Promise<VideoAsset> => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiFetch<VideoAsset>(`/video/projects/${encodeURIComponent(projectId)}/assets/upload`, {
+      method: 'POST',
+      body: form,
+    });
+  },
+
+  deleteAsset: (assetId: string) =>
+    apiFetch<{ deleted: boolean }>(`/video/assets/${encodeURIComponent(assetId)}`, {
+      method: 'DELETE',
+    }),
+
+  attachAssetToConversation: (assetId: string, conversationId: string) =>
+    apiFetch<{ id: string; conversation_id: string; type: string; mime_type: string }>(
+      `/video/assets/${encodeURIComponent(assetId)}/attach-to-conversation`,
+      { method: 'POST', body: JSON.stringify({ conversation_id: conversationId }) },
+    ),
+
+  registerAssetInLibrary: (assetId: string) =>
+    apiFetch<{ id: string; display_name: string; scope: string }>(
+      `/video/assets/${encodeURIComponent(assetId)}/register-in-library`,
+      { method: 'POST', body: JSON.stringify({}) },
+    ),
+
+  downloadUrl: (assetId: string) => videoAssetUrl(assetId),
+
+  enhancePrompt: (data: { prompt: string; aspect_ratio?: string; duration_seconds?: number; negative_prompt?: string }) =>
+    apiFetch<{ prompt: string }>('/video/enhance-prompt', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getTimeline: (projectId: string) =>
+    apiFetch<VideoTimelineDetail>(`/video/projects/${encodeURIComponent(projectId)}/timeline`),
+
+  saveTimeline: (projectId: string, document: VideoTimelineDocument) =>
+    apiFetch<VideoTimelineDetail>(`/video/projects/${encodeURIComponent(projectId)}/timeline`, {
+      method: 'PUT',
+      body: JSON.stringify(document),
+    }),
+
+  importAssetToTimeline: (projectId: string, data: { asset_id: string; track_id?: string; track_type?: string; start_ms?: number; duration_ms?: number }) =>
+    apiFetch<VideoTimelineDetail>(`/video/projects/${encodeURIComponent(projectId)}/timeline/import-asset`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  renderTimeline: (projectId: string, data: {
+    format: 'mp4' | 'webm';
+    codec?: string;
+    resolution: '720p' | '1080p' | 'project';
+    fps?: number;
+    quality?: 'draft' | 'standard' | 'high';
+    include_audio: boolean;
+    register_in_file_library?: boolean;
+  }) =>
+    apiFetch<VideoRenderJob>(`/video/projects/${encodeURIComponent(projectId)}/render`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getRenderJob: (jobId: string) =>
+    apiFetch<VideoRenderJob>(`/video/render-jobs/${encodeURIComponent(jobId)}`),
+
+  cancelRenderJob: (jobId: string) =>
+    apiFetch<VideoRenderJob>(`/video/render-jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: 'POST',
+    }),
+
+  assistant: {
+    storyboard: (projectId: string, data: VideoAssistantRequest) =>
+      apiFetch<VideoStoryboardResponse>(`/video/projects/${encodeURIComponent(projectId)}/assistant/storyboard`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    timelinePlan: (projectId: string, data: VideoAssistantRequest) =>
+      apiFetch<VideoEditPlan>(`/video/projects/${encodeURIComponent(projectId)}/assistant/timeline-plan`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    editPlan: (projectId: string, data: VideoAssistantRequest) =>
+      apiFetch<VideoEditPlan>(`/video/projects/${encodeURIComponent(projectId)}/assistant/edit-plan`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    applyEditPlan: (projectId: string, data: VideoEditPlan) =>
+      apiFetch<VideoTimelineDetail>(`/video/projects/${encodeURIComponent(projectId)}/assistant/apply-edit-plan`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    socialVariants: (projectId: string, data: VideoAssistantRequest) =>
+      apiFetch<VideoSocialVariant[]>(`/video/projects/${encodeURIComponent(projectId)}/assistant/social-variants`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
+
+  /** Start async generation. Returns immediately with 202. Poll via getGeneration(). */
+  generate: (req: GenerateVideoRequest) =>
+    apiFetch<{ generation_id: string; project_id: string; status: string; generation: VideoGenerationDetail }>(
+      '/video/generations',
+      { method: 'POST', body: JSON.stringify(req) },
+    ),
+
+  cancelGeneration: (generationId: string) =>
+    apiFetch<{ generation_id: string; status: string }>(
+      `/video/generations/${encodeURIComponent(generationId)}/cancel`,
+      { method: 'POST' },
+    ),
+};
+
 // ── Crossover Translation ──────────────────────────────────────────────────
 
 export const crossoverApi = {
-  /** Translate a domain prompt between music and image studios via LLM. */
+  /** Translate a domain prompt between studios via LLM. */
   translate: {
     musicToImage: (content: CrossoverTranslateRequest['content']) =>
       apiFetch<CrossoverMusicToImageResponse>('/crossover/translate', {
@@ -1400,6 +1630,36 @@ export const crossoverApi = {
       apiFetch<CrossoverImageToMusicResponse>('/crossover/translate', {
         method: 'POST',
         body: JSON.stringify({ source: 'chat', target: 'music', content }),
+      }),
+
+    imageToVideo: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverToVideoResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'image', target: 'video', content } satisfies CrossoverTranslateRequest),
+      }),
+
+    musicToVideo: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverToVideoResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'music', target: 'video', content } satisfies CrossoverTranslateRequest),
+      }),
+
+    chatToVideo: (content: { prompt: string }) =>
+      apiFetch<CrossoverToVideoResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'chat', target: 'video', content } satisfies CrossoverTranslateRequest),
+      }),
+
+    videoToImage: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverMusicToImageResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'video', target: 'image', content } satisfies CrossoverTranslateRequest),
+      }),
+
+    videoToMusic: (content: CrossoverTranslateRequest['content']) =>
+      apiFetch<CrossoverImageToMusicResponse>('/crossover/translate', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'video', target: 'music', content } satisfies CrossoverTranslateRequest),
       }),
   },
 };

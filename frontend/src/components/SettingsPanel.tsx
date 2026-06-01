@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
-import { api, authApi, browserApi, mcpApi, musicApi, setAuthToken } from '../api';
-import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, Github, Calculator, Link2, Search, Music2, Route as RouteIcon } from 'lucide-react';
+import { api, authApi, browserApi, mcpApi, musicApi, videoApi, setAuthToken } from '../api';
+import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, Github, Calculator, Link2, Search, Music2, Film, Route as RouteIcon } from 'lucide-react';
 import type { BrowserSession, BrowserStatus, CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, ToolPolicy, UpdateMCPServerRequest } from '../types';
 import type { MusicModel, MusicProviderKey } from '../types/music';
+import type { VideoModel, VideoProviderKey } from '../types/video';
 import { useTheme, THEMES } from '../theme';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -36,7 +37,7 @@ function FreeModelBadge() {
   );
 }
 
-type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'routing' | 'music' | 'tools' | 'mcp' | 'pricing' | 'auth';
+type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'routing' | 'music' | 'video' | 'tools' | 'mcp' | 'pricing' | 'auth';
 
 const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'providers', label: 'Providers' },
@@ -45,6 +46,7 @@ const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'rag', label: 'RAG' },
   { key: 'routing', label: 'Routing' },
   { key: 'music', label: 'Music' },
+  { key: 'video', label: 'Video' },
   { key: 'tools', label: 'Tools' },
   { key: 'mcp', label: 'MCP' },
   { key: 'pricing', label: 'Pricing' },
@@ -234,6 +236,16 @@ export function SettingsPanel() {
                     transition={{ duration: 0.2 }}
                   >
                     <MusicTab />
+                  </motion.div>
+                ) : tab === 'video' ? (
+                  <motion.div
+                    key="video"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <VideoTab />
                   </motion.div>
                 ) : tab === 'tools' ? (
                   <motion.div
@@ -2166,6 +2178,211 @@ function MusicTab() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ============================================
+// Video Studio Settings Tab
+// ============================================
+
+function VideoTab() {
+  const { isEnabled, updateFeature } = useFeatureFlagStore();
+  const [enabled, setEnabled] = useState(isEnabled('video_studio'));
+  const [providers, setProviders] = useState<Array<{ key: VideoProviderKey; display_name: string; configured: boolean }>>([]);
+  const [provider, setProvider] = useState<VideoProviderKey>('openrouter');
+  const [models, setModels] = useState<VideoModel[]>([]);
+  const [model, setModel] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const loadVideoSettings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const providerStatus = await videoApi.providers();
+      setProviders(providerStatus);
+      const configured = providerStatus.filter((item) => item.configured);
+      const currentExists = providerStatus.some((item) => item.key === provider);
+      const preferredProvider = configured.find((item) => item.key === provider)?.key
+        || configured[0]?.key
+        || (currentExists ? provider : providerStatus[0]?.key)
+        || 'openrouter';
+      setProvider(preferredProvider);
+      const loadedModels = await videoApi.listModels(preferredProvider).catch(() => []);
+      setModels(loadedModels);
+      setModel((current) => loadedModels.some((item) => item.id === current) ? current : loadedModels[0]?.id || '');
+    } finally {
+      setLoading(false);
+    }
+  }, [provider]);
+
+  useEffect(() => {
+    setEnabled(isEnabled('video_studio'));
+  }, [isEnabled]);
+
+  useEffect(() => {
+    loadVideoSettings();
+  }, [loadVideoSettings]);
+
+  const handleProviderChange = async (nextProvider: VideoProviderKey) => {
+    setProvider(nextProvider);
+    setLoading(true);
+    try {
+      const loadedModels = await videoApi.listModels(nextProvider).catch(() => []);
+      setModels(loadedModels);
+      setModel(loadedModels[0]?.id || '');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const refreshModels = async () => {
+    setLoading(true);
+    try {
+      const loadedModels = await videoApi.refreshModels(provider).catch(() => []);
+      setModels(loadedModels);
+      setModel((current) => loadedModels.some((item) => item.id === current) ? current : loadedModels[0]?.id || '');
+      toast.success('Video model list refreshed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveVideoSettings = async () => {
+    setSaving(true);
+    try {
+      await updateFeature('video_studio', enabled);
+      toast.success('Video Studio settings saved');
+    } catch {
+      toast.error('Failed to save Video Studio settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-emerald-500/20 flex items-center justify-center shadow-md shadow-cyan-500/10">
+            <Film size={18} className="text-cyan-300" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold">Video Studio</h3>
+            <p className="text-[11px] text-text-muted">Configure AI video creation and edit workspace availability</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between py-2">
+            <div>
+              <label className="text-xs font-medium text-text-secondary block">Enable Video Studio</label>
+              <p className="text-[10px] text-text-muted mt-0.5">Shows Video Studio and Video Edit Studio in the app sidebar</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEnabled((value) => !value)}
+              className={`relative w-10 h-5 rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-border'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : ''}`} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium text-text-secondary mb-1.5 block">Default provider</label>
+              <select
+                value={provider}
+                onChange={(event) => { void handleProviderChange(event.target.value as VideoProviderKey); }}
+                className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50"
+              >
+                {providers.map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {item.display_name} {item.configured ? '' : '(not configured)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-text-secondary mb-1.5 block">Output directory</label>
+              <div className="min-h-10 rounded-xl border border-border bg-surface px-3 py-2 text-xs text-text-muted">
+                OMNILLM_ATTACHMENTS_DIR/video
+              </div>
+            </div>
+          </div>
+
+          <VideoModelSelect
+            value={model}
+            models={models}
+            fallback=""
+            onChange={setModel}
+          />
+
+          <div className="rounded-xl border border-border bg-surface p-3">
+            <p className="text-xs text-text-secondary">
+              OpenRouter Video and direct Gemini Veo use encrypted provider profiles. Configure an API key in Providers before generating video.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={refreshModels}
+              disabled={loading}
+              className="min-h-10 flex items-center justify-center gap-2 px-4 rounded-xl border border-border bg-surface text-sm text-text-secondary hover:text-text hover:bg-surface-hover disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+              Refresh Video Models
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={saveVideoSettings}
+              disabled={saving}
+              className="min-h-10 flex items-center justify-center gap-2 px-4 rounded-xl btn-primary text-sm font-medium disabled:opacity-50"
+            >
+              {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+              Save Video Settings
+            </motion.button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VideoModelSelect({
+  value,
+  models,
+  fallback,
+  onChange,
+}: {
+  value: string;
+  models: VideoModel[];
+  fallback: string;
+  onChange: (value: string) => void;
+}) {
+  const options = models.length > 0 ? models : [{ id: fallback, name: fallback } as VideoModel];
+  const hasModels = models.length > 0;
+  return (
+    <div>
+      <label className="text-xs font-medium text-text-secondary mb-1.5 block">Default video model</label>
+      <select
+        value={value || fallback}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={!hasModels}
+        className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary/50"
+      >
+        {hasModels ? (
+          options.map((item) => (
+            <option key={item.id} value={item.id}>{item.name || item.id}</option>
+          ))
+        ) : (
+          <option value="">No video models available</option>
+        )}
+      </select>
+      {hasModels && options[0]?.notes && <p className="mt-1.5 text-[10px] text-text-muted">{options[0].notes}</p>}
     </div>
   );
 }

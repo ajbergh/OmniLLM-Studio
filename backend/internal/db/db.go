@@ -6,7 +6,7 @@ import (
 	"log"
 
 	"github.com/ajbergh/omnillm-studio/internal/crypto"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Migration represents a single versioned schema migration.
@@ -22,7 +22,7 @@ func Open(path string) (*sql.DB, error) {
 		"%s?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on&_synchronous=NORMAL&_cache_size=-64000&_mmap_size=268435456&_temp_store=MEMORY&_journal_size_limit=67108864",
 		path,
 	)
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
@@ -129,6 +129,10 @@ func versionedMigrations() []Migration {
 		{Version: 34, Name: "workspace_project_context", SQL: migrationWorkspaceProjectContext},
 		{Version: 35, Name: "browser_sessions_and_flag", SQL: migrationBrowserSessionsAndFlag},
 		{Version: 36, Name: "music_studio", SQL: migrationMusicStudio},
+		{Version: 37, Name: "video_studio_foundation", SQL: migrationVideoStudioFoundation},
+		{Version: 38, Name: "video_studio_timelines", SQL: migrationVideoStudioTimelines},
+		{Version: 39, Name: "video_studio_render_jobs", SQL: migrationVideoStudioRenderJobs},
+		{Version: 40, Name: "video_generation_input_assets", SQL: migrationVideoGenerationInputAssets},
 	}
 }
 
@@ -641,6 +645,134 @@ INSERT INTO settings (key, value_json) VALUES
 	('auto_enhance_music_prompts', 'false'),
 	('save_music_generation_metadata', 'true')
 ON CONFLICT(key) DO NOTHING;
+`
+
+// V37: Video Studio projects, generations, assets, and feature flag.
+const migrationVideoStudioFoundation = `
+CREATE TABLE IF NOT EXISTS video_projects (
+	id TEXT PRIMARY KEY,
+	user_id TEXT,
+	title TEXT NOT NULL,
+	active_timeline_id TEXT,
+	default_provider TEXT,
+	default_model TEXT,
+	width INTEGER NOT NULL DEFAULT 1920,
+	height INTEGER NOT NULL DEFAULT 1080,
+	fps INTEGER NOT NULL DEFAULT 30,
+	duration_ms INTEGER NOT NULL DEFAULT 0,
+	aspect_ratio TEXT NOT NULL DEFAULT '16:9',
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS video_generations (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	parent_id TEXT,
+	status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','completed','failed','cancelled')),
+	provider TEXT NOT NULL,
+	model TEXT NOT NULL,
+	prompt TEXT NOT NULL,
+	enhanced_prompt TEXT,
+	negative_prompt TEXT,
+	settings_json TEXT NOT NULL DEFAULT '{}',
+	input_asset_ids_json TEXT NOT NULL DEFAULT '[]',
+	output_asset_id TEXT,
+	upstream_job_id TEXT,
+	upstream_request_id TEXT,
+	usage_json TEXT,
+	cost_usd REAL,
+	error TEXT,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	completed_at DATETIME,
+	FOREIGN KEY (project_id) REFERENCES video_projects(id) ON DELETE CASCADE,
+	FOREIGN KEY (parent_id) REFERENCES video_generations(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS video_assets (
+	id TEXT PRIMARY KEY,
+	project_id TEXT,
+	source_type TEXT NOT NULL,
+	source_studio TEXT,
+	source_id TEXT,
+	kind TEXT NOT NULL CHECK(kind IN ('video','image','audio','music','text','caption','export','other')),
+	file_name TEXT NOT NULL,
+	file_path TEXT NOT NULL,
+	mime_type TEXT NOT NULL,
+	size_bytes INTEGER NOT NULL DEFAULT 0,
+	duration_ms INTEGER,
+	width INTEGER,
+	height INTEGER,
+	fps REAL,
+	thumbnail_path TEXT,
+	waveform_path TEXT,
+	provider TEXT,
+	model TEXT,
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	FOREIGN KEY (project_id) REFERENCES video_projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_projects_user ON video_projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_video_projects_updated_at ON video_projects(updated_at);
+CREATE INDEX IF NOT EXISTS idx_video_generations_project ON video_generations(project_id);
+CREATE INDEX IF NOT EXISTS idx_video_generations_parent ON video_generations(parent_id);
+CREATE INDEX IF NOT EXISTS idx_video_generations_status ON video_generations(status);
+CREATE INDEX IF NOT EXISTS idx_video_assets_project ON video_assets(project_id);
+CREATE INDEX IF NOT EXISTS idx_video_assets_kind ON video_assets(kind);
+
+INSERT INTO feature_flags (key, enabled, metadata)
+VALUES ('video_studio', 1, '{"label":"Video Studio","description":"AI video generation and timeline editing."}')
+ON CONFLICT(key) DO NOTHING;
+`
+
+// V38: Video Studio neutral timeline persistence.
+const migrationVideoStudioTimelines = `
+CREATE TABLE IF NOT EXISTS video_timelines (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	name TEXT NOT NULL DEFAULT 'Main Timeline',
+	active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+	timeline_json TEXT NOT NULL DEFAULT '{}',
+	duration_ms INTEGER NOT NULL DEFAULT 0,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	FOREIGN KEY (project_id) REFERENCES video_projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_timelines_project ON video_timelines(project_id);
+CREATE INDEX IF NOT EXISTS idx_video_timelines_active ON video_timelines(project_id, active);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_timelines_one_active ON video_timelines(project_id) WHERE active = 1;
+`
+
+// V39: Video Studio render/export jobs.
+const migrationVideoStudioRenderJobs = `
+CREATE TABLE IF NOT EXISTS video_render_jobs (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	timeline_id TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','completed','failed','cancelled')),
+	progress REAL NOT NULL DEFAULT 0,
+	settings_json TEXT NOT NULL DEFAULT '{}',
+	output_asset_id TEXT,
+	error TEXT,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	started_at DATETIME,
+	completed_at DATETIME,
+	FOREIGN KEY (project_id) REFERENCES video_projects(id) ON DELETE CASCADE,
+	FOREIGN KEY (timeline_id) REFERENCES video_timelines(id) ON DELETE CASCADE,
+	FOREIGN KEY (output_asset_id) REFERENCES video_assets(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_render_jobs_project ON video_render_jobs(project_id);
+CREATE INDEX IF NOT EXISTS idx_video_render_jobs_status ON video_render_jobs(status);
+`
+
+// V40: Add structured input_assets_json to video_generations for role-tagged assets
+const migrationVideoGenerationInputAssets = `
+ALTER TABLE video_generations ADD COLUMN input_assets_json TEXT NOT NULL DEFAULT '[]';
 `
 
 // V14: Add workspace_id to conversations

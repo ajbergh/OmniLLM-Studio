@@ -517,13 +517,13 @@ interface SettingsState {
   loading: boolean;
   sidebarOpen: boolean;
   settingsOpen: boolean;
-  appMode: 'chat' | 'image' | 'music';
+  appMode: 'chat' | 'image' | 'music' | 'video' | 'video-edit';
 
   fetchSettings: () => Promise<void>;
   updateSettings: (data: Partial<import('../types').AppSettings>) => Promise<void>;
   toggleSidebar: () => void;
   toggleSettings: () => void;
-  setAppMode: (mode: 'chat' | 'image' | 'music') => void;
+  setAppMode: (mode: 'chat' | 'image' | 'music' | 'video' | 'video-edit') => void;
 }
 
 const defaultSettings: import('../types').AppSettings = {
@@ -566,11 +566,13 @@ function getInitialSidebarOpen(): boolean {
   return saved === 'true';
 }
 
-function getInitialAppMode(): 'chat' | 'image' | 'music' {
+function getInitialAppMode(): 'chat' | 'image' | 'music' | 'video' | 'video-edit' {
   if (typeof window === 'undefined') return 'chat';
   const saved = window.localStorage.getItem('omnillm_app_mode');
   if (saved === 'image') return 'image';
   if (saved === 'music') return 'music';
+  if (saved === 'video') return 'video';
+  if (saved === 'video-edit') return 'video-edit';
   return 'chat';
 }
 
@@ -618,6 +620,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 export type CrossoverContext =
   | { type: 'to-music'; data: { prompt: string; genre?: string; mood?: string; instruments?: string[]; tempo?: string; sessionId?: string } }
   | { type: 'to-image'; data: { prompt: string; autoGenerate?: boolean; nonce?: string } }
+  | { type: 'to-video'; data: { prompt: string; attachmentId?: string; nonce?: string } }
   | null;
 
 interface CrossoverState {

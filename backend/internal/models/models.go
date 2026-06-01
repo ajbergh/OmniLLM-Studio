@@ -906,3 +906,94 @@ type MusicAsset struct {
 	MetadataJSON string    `json:"metadata_json,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
+
+// ── Video Studio ────────────────────────────────────────────────────────
+
+type VideoProject struct {
+	ID               string    `json:"id"`
+	UserID           *string   `json:"user_id,omitempty"`
+	Title            string    `json:"title"`
+	ActiveTimelineID *string   `json:"active_timeline_id,omitempty"`
+	DefaultProvider  *string   `json:"default_provider,omitempty"`
+	DefaultModel     *string   `json:"default_model,omitempty"`
+	Width            int       `json:"width"`
+	Height           int       `json:"height"`
+	FPS              int       `json:"fps"`
+	DurationMS       int64     `json:"duration_ms"`
+	AspectRatio      string    `json:"aspect_ratio"`
+	MetadataJSON     string    `json:"metadata_json,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type VideoGeneration struct {
+	ID                string  `json:"id"`
+	ProjectID         string  `json:"project_id"`
+	ParentID          *string `json:"parent_id,omitempty"`
+	Status            string  `json:"status"`
+	Provider          string  `json:"provider"`
+	Model             string  `json:"model"`
+	Prompt            string  `json:"prompt"`
+	EnhancedPrompt    *string `json:"enhanced_prompt,omitempty"`
+	NegativePrompt    *string `json:"negative_prompt,omitempty"`
+	SettingsJSON      string  `json:"settings_json,omitempty"`
+	InputAssetIDsJSON string  `json:"input_asset_ids_json,omitempty"`
+	// InputAssetsJSON holds a JSON array of {"asset_id":"...","role":"..."} objects (V40+).
+	InputAssetsJSON string     `json:"input_assets_json,omitempty"`
+	OutputAssetID   *string    `json:"output_asset_id,omitempty"`
+	UpstreamJobID   *string    `json:"upstream_job_id,omitempty"`
+	UpstreamReqID   *string    `json:"upstream_request_id,omitempty"`
+	UsageJSON       *string    `json:"usage_json,omitempty"`
+	CostUSD         *float64   `json:"cost_usd,omitempty"`
+	Error           *string    `json:"error,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+}
+
+type VideoAsset struct {
+	ID            string    `json:"id"`
+	ProjectID     *string   `json:"project_id,omitempty"`
+	SourceType    string    `json:"source_type"`
+	SourceStudio  *string   `json:"source_studio,omitempty"`
+	SourceID      *string   `json:"source_id,omitempty"`
+	Kind          string    `json:"kind"`
+	FileName      string    `json:"file_name"`
+	FilePath      string    `json:"file_path"`
+	MimeType      string    `json:"mime_type"`
+	SizeBytes     int64     `json:"size_bytes"`
+	DurationMS    *int64    `json:"duration_ms,omitempty"`
+	Width         *int      `json:"width,omitempty"`
+	Height        *int      `json:"height,omitempty"`
+	FPS           *float64  `json:"fps,omitempty"`
+	ThumbnailPath *string   `json:"thumbnail_path,omitempty"`
+	WaveformPath  *string   `json:"waveform_path,omitempty"`
+	Provider      *string   `json:"provider,omitempty"`
+	Model         *string   `json:"model,omitempty"`
+	MetadataJSON  string    `json:"metadata_json,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type VideoTimeline struct {
+	ID           string    `json:"id"`
+	ProjectID    string    `json:"project_id"`
+	Name         string    `json:"name"`
+	Active       bool      `json:"active"`
+	TimelineJSON string    `json:"timeline_json"`
+	DurationMS   int64     `json:"duration_ms"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type VideoRenderJob struct {
+	ID            string     `json:"id"`
+	ProjectID     string     `json:"project_id"`
+	TimelineID    string     `json:"timeline_id"`
+	Status        string     `json:"status"`
+	Progress      float64    `json:"progress"`
+	SettingsJSON  string     `json:"settings_json"`
+	OutputAssetID *string    `json:"output_asset_id,omitempty"`
+	Error         *string    `json:"error,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+}

@@ -6,8 +6,8 @@ REM Requirements:
 REM   - Go 1.24+
 REM   - Node.js 18+
 REM   - Wails CLI v2: go install github.com/wailsapp/wails/v2/cmd/wails@latest
-REM   - GCC (MinGW-w64) for CGO/SQLite
 REM   - WebView2 runtime (ships with Win10 1803+)
+REM   No GCC/CGO required — uses modernc.org/sqlite (pure Go) + Wails v2 Go WebView2 loader
 REM
 REM Usage:
 REM   build-windows.bat           -> Windows x64 (amd64)
@@ -17,6 +17,15 @@ setlocal enabledelayedexpansion
 
 set SCRIPT_DIR=%~dp0
 set PROJECT_ROOT=%SCRIPT_DIR%..
+
+REM --- Ensure Go user bin (GOPATH\bin) is on PATH so wails.exe is found ---
+for /f "tokens=*" %%i in ('go env GOPATH 2^>nul') do set GOPATH_DIR=%%i
+if not "%GOPATH_DIR%"=="" set PATH=%GOPATH_DIR%\bin;%PATH%
+REM Fallback: also add the conventional %USERPROFILE%\go\bin
+set PATH=%USERPROFILE%\go\bin;%PATH%
+
+REM --- Disable CGO — pure-Go SQLite (modernc.org/sqlite) + Wails v2 Go WebView2 loader ---
+set CGO_ENABLED=0
 
 REM --- Architecture ---
 set ARCH=%1
