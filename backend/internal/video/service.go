@@ -1354,11 +1354,40 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 		_ = s.renderJobs.UpdateProgress(job.ID, p.Progress)
 	})
 	if err != nil {
+		var renderErr *RenderError
+		if errors.As(err, &renderErr) {
+			diag := map[string]any{
+				"ffmpeg_command": renderErr.Command,
+				"ffmpeg_stderr":  truncateForMetadata(renderErr.Stderr, 8192),
+			}
+			if diagJSON, marshalErr := json.Marshal(diag); marshalErr == nil {
+				_ = s.renderJobs.SetMetadata(job.ID, string(diagJSON))
+			}
+		}
 		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
 		return
 	}
 	if s.renderJobCancelled(job.ID) {
 		return
+	}
+	jobMeta := map[string]any{}
+	for k, v := range result.Metadata {
+		jobMeta[k] = v
+	}
+	jobMeta["output_duration_ms"] = result.DurationMS
+	jobMeta["output_width"] = result.Width
+	jobMeta["output_height"] = result.Height
+	jobMeta["output_fps"] = result.FPS
+	if settings.EstimatedDurationMS > 0 {
+		jobMeta["estimated_duration_ms"] = settings.EstimatedDurationMS
+		diff := result.DurationMS - settings.EstimatedDurationMS
+		if diff < 0 {
+			diff = -diff
+		}
+		jobMeta["duration_matches_estimate"] = diff <= 1500
+	}
+	if jobMetaJSON, marshalErr := json.Marshal(jobMeta); marshalErr == nil {
+		_ = s.renderJobs.SetMetadata(job.ID, string(jobMetaJSON))
 	}
 	relativePath, fileName, err := s.storage.Write(project.ID, job.ID, result.FileName, result.MimeType, result.Data)
 	if err != nil {
@@ -1399,6 +1428,33 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 func (s *Service) renderJobCancelled(jobID string) bool {
 	job, err := s.renderJobs.GetByID(jobID)
 	return err == nil && job != nil && job.Status == "cancelled"
+}
+
+// truncateForMetadata caps diagnostic strings persisted in job metadata.
+func truncateForMetadata(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "… (truncated)"
+}
+
+// RendererCapabilities reports which timeline features the active renderer
+// honors at export time. The frontend derives export-fidelity warnings from it.
+func (s *Service) RendererCapabilities() RendererCapabilities {
+	return FFmpegRendererCapabilities()
+}
+
+// RecoverInterruptedRenderJobs marks render jobs that were queued or running
+// when the process exited as failed, so they don't appear stuck forever.
+// Call once at startup.
+func (s *Service) RecoverInterruptedRenderJobs() {
+	jobs, err := s.renderJobs.ListActive()
+	if err != nil {
+		return
+	}
+	for _, job := range jobs {
+		_ = s.renderJobs.MarkFailed(job.ID, "render interrupted by application restart — start a new export")
+	}
 }
 
 // firstEnabledChatProvider returns the name of the first enabled LLM provider, or "".
@@ -1476,14 +1532,24 @@ func validateExportSettings(settings ExportSettings, project models.VideoProject
 		return ExportSettings{}, fmt.Errorf("unsupported export format")
 	}
 	settings.Codec = strings.ToLower(strings.TrimSpace(settings.Codec))
+	settings.Preset = strings.ToLower(strings.TrimSpace(settings.Preset))
 	settings.Resolution = strings.ToLower(strings.TrimSpace(settings.Resolution))
 	if settings.Resolution == "" {
 		settings.Resolution = "project"
 	}
 	switch settings.Resolution {
 	case "project", "720p", "1080p":
+	case "custom":
+		if settings.Width <= 0 || settings.Height <= 0 {
+			return ExportSettings{}, fmt.Errorf("custom export resolution requires width and height")
+		}
 	default:
 		return ExportSettings{}, fmt.Errorf("unsupported export resolution")
+	}
+	if settings.Width != 0 || settings.Height != 0 {
+		if settings.Width < 16 || settings.Height < 16 || settings.Width > 7680 || settings.Height > 7680 {
+			return ExportSettings{}, fmt.Errorf("export width/height must be between 16 and 7680 pixels")
+		}
 	}
 	if settings.FPS <= 0 {
 		settings.FPS = project.FPS

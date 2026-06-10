@@ -1,6 +1,6 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DragHandle, useResizablePanels } from '../ResizablePanels';
-import { Download, Film, Loader2, Plus, Scissors } from 'lucide-react';
+import { Check, Download, Film, LayoutGrid, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { videoApi } from '../../api';
 import { useSettingsStore } from '../../stores';
@@ -25,12 +25,16 @@ export function VideoEditStudio() {
   const selectAsset = useVideoStudioStore((state) => state.selectAsset);
   const addAssetToTimeline = useVideoStudioStore((state) => state.addAssetToTimeline);
   const addTextClip = useVideoStudioStore((state) => state.addTextClip);
+  const renameAsset = useVideoStudioStore((state) => state.renameAsset);
+  const deleteAsset = useVideoStudioStore((state) => state.deleteAsset);
+  const loadRendererCapabilities = useVideoStudioStore((state) => state.loadRendererCapabilities);
   const setAppMode = useSettingsStore((state) => state.setAppMode);
 
   useEffect(() => {
     loadProviders();
     loadProjects();
-  }, [loadProviders, loadProjects]);
+    void loadRendererCapabilities();
+  }, [loadProviders, loadProjects, loadRendererCapabilities]);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) || null,
@@ -93,6 +97,8 @@ export function VideoEditStudio() {
               activeAssetId={activeAsset?.id || null}
               onSelect={selectAsset}
               onAdd={(assetId) => { void addAssetToTimeline(assetId); }}
+              onRename={(assetId, name) => { void renameAsset(assetId, name); }}
+              onDelete={(assetId) => { void deleteAsset(assetId); }}
             />
           </div>
         </aside>
@@ -180,30 +186,188 @@ function ProjectStrip({
   );
 }
 
+const ASSET_FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'video', label: 'Video' },
+  { key: 'image', label: 'Image' },
+  { key: 'audio', label: 'Audio' },
+  { key: 'export', label: 'Exports' },
+] as const;
+
+type AssetFilterKey = (typeof ASSET_FILTERS)[number]['key'];
+
+function assetMatchesFilter(asset: VideoAsset, filter: AssetFilterKey): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'audio') return asset.kind === 'audio' || asset.kind === 'music';
+  return asset.kind === filter;
+}
+
+function AssetThumbnail({ asset, className }: { asset: VideoAsset; className: string }) {
+  const url = videoApi.downloadUrl(asset.id);
+  if (asset.kind === 'image') {
+    return <img src={url} alt={asset.file_name} loading="lazy" className={`${className} object-cover`} />;
+  }
+  if (asset.kind === 'video' || asset.kind === 'export') {
+    return <video src={url} muted preload="metadata" className={`${className} object-cover`} />;
+  }
+  return (
+    <div className={`${className} flex items-center justify-center text-text-muted`}>
+      <Music2 size={16} />
+    </div>
+  );
+}
+
 function AssetPanel({
   assets,
   activeAssetId,
   onSelect,
   onAdd,
+  onRename,
+  onDelete,
 }: {
   assets: VideoAsset[];
   activeAssetId: string | null;
   onSelect: (assetId: string) => void;
   onAdd: (assetId: string) => void;
+  onRename: (assetId: string, fileName: string) => void;
+  onDelete: (assetId: string) => void;
 }) {
+  const [view, setView] = useState<'list' | 'grid'>('list');
+  const [filter, setFilter] = useState<AssetFilterKey>('all');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+
+  const filtered = assets.filter((asset) => assetMatchesFilter(asset, filter));
+
+  const commitRename = (assetId: string) => {
+    if (editingName.trim()) onRename(assetId, editingName);
+    setEditingId(null);
+  };
+
+  const actionButtons = (asset: VideoAsset) => (
+    <>
+      <button
+        onClick={(event) => {
+          event.stopPropagation();
+          onAdd(asset.id);
+        }}
+        className="min-h-7 min-w-7 rounded-md border border-border bg-surface-alt text-text-muted hover:text-text inline-flex items-center justify-center"
+        aria-label={`Add ${asset.file_name} to timeline`}
+        title="Add to timeline"
+      >
+        <Plus size={12} />
+      </button>
+      <button
+        onClick={(event) => {
+          event.stopPropagation();
+          setEditingId(asset.id);
+          setEditingName(asset.file_name);
+        }}
+        className="min-h-7 min-w-7 rounded-md border border-border bg-surface-alt text-text-muted hover:text-text inline-flex items-center justify-center"
+        aria-label={`Rename ${asset.file_name}`}
+        title="Rename"
+      >
+        <Pencil size={12} />
+      </button>
+      <button
+        onClick={(event) => {
+          event.stopPropagation();
+          window.open(videoApi.downloadUrl(asset.id), '_blank', 'noopener,noreferrer');
+          toast.success('Opening asset download');
+        }}
+        className="min-h-7 min-w-7 rounded-md border border-border bg-surface-alt text-text-muted hover:text-text inline-flex items-center justify-center"
+        aria-label={`Download ${asset.file_name}`}
+        title="Download"
+      >
+        <Download size={12} />
+      </button>
+      <button
+        onClick={(event) => {
+          event.stopPropagation();
+          if (window.confirm(`Delete "${asset.file_name}"? Clips using it will stop rendering.`)) {
+            onDelete(asset.id);
+          }
+        }}
+        className="min-h-7 min-w-7 rounded-md border border-border bg-surface-alt text-text-muted hover:text-red-400 inline-flex items-center justify-center"
+        aria-label={`Delete ${asset.file_name}`}
+        title="Delete"
+      >
+        <Trash2 size={12} />
+      </button>
+    </>
+  );
+
+  const nameOrEditor = (asset: VideoAsset) =>
+    editingId === asset.id ? (
+      <span className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+        <input
+          value={editingName}
+          autoFocus
+          onChange={(event) => setEditingName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') commitRename(asset.id);
+            if (event.key === 'Escape') setEditingId(null);
+          }}
+          className="min-h-7 w-full min-w-0 rounded-md border border-border bg-surface px-2 text-xs text-text"
+          aria-label="Asset name"
+        />
+        <button onClick={() => commitRename(asset.id)} className="rounded p-1 text-text-muted hover:text-text" title="Save name" aria-label="Save name">
+          <Check size={12} />
+        </button>
+        <button onClick={() => setEditingId(null)} className="rounded p-1 text-text-muted hover:text-text" title="Cancel rename" aria-label="Cancel rename">
+          <X size={12} />
+        </button>
+      </span>
+    ) : (
+      <p className="truncate text-xs font-medium text-text">{asset.file_name}</p>
+    );
+
+  const sourceLine = (asset: VideoAsset) => {
+    const bits = [asset.kind, asset.source_type];
+    if (asset.source_studio) bits.push(`from ${asset.source_studio}`);
+    if (asset.duration_ms) bits.push(`${Math.round(asset.duration_ms / 100) / 10}s`);
+    bits.push(`${Math.max(1, Math.round(asset.size_bytes / 1024))} KB`);
+    return bits.filter(Boolean).join(' · ');
+  };
+
   return (
     <section className="rounded-lg border border-border bg-surface-alt p-3">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-text">Media Bin</h2>
-        <span className="text-[11px] text-text-muted">{assets.length}</span>
-      </div>
-      {assets.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-8 text-center text-xs text-text-muted">
-          No media yet.
+        <div className="flex items-center gap-1">
+          <span className="text-[11px] text-text-muted">{filtered.length}</span>
+          <button
+            onClick={() => setView(view === 'list' ? 'grid' : 'list')}
+            className="rounded-md border border-border bg-surface p-1.5 text-text-muted hover:text-text"
+            title={view === 'list' ? 'Grid view' : 'List view'}
+            aria-label={view === 'list' ? 'Switch to grid view' : 'Switch to list view'}
+          >
+            {view === 'list' ? <LayoutGrid size={12} /> : <List size={12} />}
+          </button>
         </div>
-      ) : (
-        <div className="space-y-2">
-          {assets.map((asset) => (
+      </div>
+      <div className="mb-3 flex flex-wrap gap-1">
+        {ASSET_FILTERS.map((item) => (
+          <button
+            key={item.key}
+            onClick={() => setFilter(item.key)}
+            className={`rounded-md border px-2 py-0.5 text-[10px] transition-colors ${
+              filter === item.key
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-border bg-surface text-text-muted hover:text-text'
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      {filtered.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-8 text-center text-xs text-text-muted">
+          {assets.length === 0 ? 'No media yet.' : 'No media matches this filter.'}
+        </div>
+      ) : view === 'grid' ? (
+        <div className="grid grid-cols-2 gap-2">
+          {filtered.map((asset) => (
             <div
               key={asset.id}
               role="button"
@@ -220,42 +384,48 @@ function AssetPanel({
                   onSelect(asset.id);
                 }
               }}
-              className={`cursor-grab rounded-lg border p-3 active:cursor-grabbing ${
+              className={`cursor-grab overflow-hidden rounded-lg border active:cursor-grabbing ${
                 asset.id === activeAssetId ? 'border-primary/30 bg-primary/10' : 'border-border bg-surface'
               }`}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-text">{asset.file_name}</p>
-                  <p className="mt-1 text-[10px] text-text-muted">{asset.kind} · {asset.mime_type}</p>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onAdd(asset.id);
-                    }}
-                    className="min-h-8 min-w-8 rounded-lg border border-border bg-surface-alt text-text-muted hover:text-text inline-flex items-center justify-center"
-                    aria-label={`Add ${asset.file_name} to timeline`}
-                    title="Add to timeline"
-                  >
-                    <Plus size={13} />
-                  </button>
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      window.open(videoApi.downloadUrl(asset.id), '_blank', 'noopener,noreferrer');
-                      toast.success('Opening asset download');
-                    }}
-                    className="min-h-8 min-w-8 rounded-lg border border-border bg-surface-alt text-text-muted hover:text-text inline-flex items-center justify-center"
-                    aria-label={`Download ${asset.file_name}`}
-                    title="Download"
-                  >
-                    <Download size={13} />
-                  </button>
-                </div>
+              <AssetThumbnail asset={asset} className="h-16 w-full bg-black/40" />
+              <div className="p-2">
+                {nameOrEditor(asset)}
+                <p className="mt-1 truncate text-[10px] text-text-muted">{sourceLine(asset)}</p>
+                <div className="mt-1.5 flex gap-1">{actionButtons(asset)}</div>
               </div>
-              <p className="mt-2 text-[10px] text-text-muted">{Math.max(1, Math.round(asset.size_bytes / 1024))} KB</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((asset) => (
+            <div
+              key={asset.id}
+              role="button"
+              tabIndex={0}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setData('application/x-video-asset-id', asset.id);
+                event.dataTransfer.effectAllowed = 'copy';
+              }}
+              onClick={() => onSelect(asset.id)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onSelect(asset.id);
+                }
+              }}
+              className={`flex cursor-grab items-start gap-2 rounded-lg border p-2 active:cursor-grabbing ${
+                asset.id === activeAssetId ? 'border-primary/30 bg-primary/10' : 'border-border bg-surface'
+              }`}
+            >
+              <AssetThumbnail asset={asset} className="h-12 w-16 shrink-0 rounded-md bg-black/40" />
+              <div className="min-w-0 flex-1">
+                {nameOrEditor(asset)}
+                <p className="mt-1 truncate text-[10px] text-text-muted">{sourceLine(asset)}</p>
+                <div className="mt-1.5 flex gap-1">{actionButtons(asset)}</div>
+              </div>
             </div>
           ))}
         </div>

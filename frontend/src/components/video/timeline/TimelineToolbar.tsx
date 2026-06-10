@@ -1,4 +1,4 @@
-import { Copy, Magnet, Pause, Play, Redo2, Save, Scissors, Trash2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Copy, Magnet, Maximize2, Pause, Play, Redo2, Save, Scissors, Trash2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export function TimelineToolbar({
@@ -16,6 +16,7 @@ export function TimelineToolbar({
   onDuplicate,
   onSave,
   onZoom,
+  onZoomToFit,
   onToggleSnap,
 }: {
   isPlaying: boolean;
@@ -32,6 +33,7 @@ export function TimelineToolbar({
   onDuplicate: () => void;
   onSave: () => void;
   onZoom: (zoom: number) => void;
+  onZoomToFit: () => void;
   onToggleSnap: () => void;
 }) {
   return (
@@ -62,6 +64,9 @@ export function TimelineToolbar({
       <span className="w-10 text-center text-[11px] text-text-muted">{Math.round(zoom * 100)}%</span>
       <IconButton label="Zoom in" onClick={() => onZoom(zoom + 0.2)}>
         <ZoomIn size={14} />
+      </IconButton>
+      <IconButton label="Zoom to fit" onClick={onZoomToFit}>
+        <Maximize2 size={14} />
       </IconButton>
       <IconButton label={snappingEnabled ? 'Disable snapping' : 'Enable snapping'} onClick={onToggleSnap} active={snappingEnabled}>
         <Magnet size={14} />

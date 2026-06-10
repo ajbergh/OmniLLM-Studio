@@ -99,6 +99,7 @@ import type {
   VideoAsset,
   VideoAssistantRequest,
   VideoEditPlan,
+  VideoExportSettings,
   VideoGenerationDetail,
   VideoGenerationValidationResult,
   VideoModel,
@@ -106,6 +107,7 @@ import type {
   VideoProjectDetail,
   VideoProviderInfo,
   VideoProviderKey,
+  VideoRendererCapabilities,
   VideoRenderJob,
   VideoSocialVariant,
   VideoStoryboardResponse,
@@ -1543,15 +1545,7 @@ export const videoApi = {
       body: JSON.stringify(data),
     }),
 
-  renderTimeline: (projectId: string, data: {
-    format: 'mp4' | 'webm';
-    codec?: string;
-    resolution: '720p' | '1080p' | 'project';
-    fps?: number;
-    quality?: 'draft' | 'standard' | 'high';
-    include_audio: boolean;
-    register_in_file_library?: boolean;
-  }) =>
+  renderTimeline: (projectId: string, data: VideoExportSettings) =>
     apiFetch<VideoRenderJob>(`/video/projects/${encodeURIComponent(projectId)}/render`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1563,6 +1557,15 @@ export const videoApi = {
   cancelRenderJob: (jobId: string) =>
     apiFetch<VideoRenderJob>(`/video/render-jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: 'POST',
+    }),
+
+  rendererCapabilities: () =>
+    apiFetch<VideoRendererCapabilities>('/video/render/capabilities'),
+
+  updateAsset: (assetId: string, data: { file_name: string }) =>
+    apiFetch<VideoAsset>(`/video/assets/${encodeURIComponent(assetId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
     }),
 
   assistant: {

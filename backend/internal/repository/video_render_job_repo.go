@@ -27,17 +27,20 @@ func (r *VideoRenderJobRepo) Create(j *models.VideoRenderJob) error {
 	if j.SettingsJSON == "" {
 		j.SettingsJSON = "{}"
 	}
+	if j.MetadataJSON == "" {
+		j.MetadataJSON = "{}"
+	}
 	if j.CreatedAt.IsZero() {
 		j.CreatedAt = time.Now().UTC()
 	}
 	_, err := r.db.Exec(`
 		INSERT INTO video_render_jobs (
 			id, project_id, timeline_id, status, progress, settings_json,
-			output_asset_id, error, created_at, started_at, completed_at
+			output_asset_id, error, metadata_json, created_at, started_at, completed_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		j.ID, j.ProjectID, j.TimelineID, j.Status, j.Progress, j.SettingsJSON,
-		j.OutputAssetID, j.Error, j.CreatedAt, j.StartedAt, j.CompletedAt,
+		j.OutputAssetID, j.Error, j.MetadataJSON, j.CreatedAt, j.StartedAt, j.CompletedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create video render job: %w", err)
@@ -139,9 +142,39 @@ func (r *VideoRenderJobRepo) MarkCancelled(id string) error {
 	return nil
 }
 
+// SetMetadata stores render diagnostics (FFmpeg command, stderr, probe info).
+func (r *VideoRenderJobRepo) SetMetadata(id, metadataJSON string) error {
+	if metadataJSON == "" {
+		metadataJSON = "{}"
+	}
+	if _, err := r.db.Exec(`UPDATE video_render_jobs SET metadata_json = ? WHERE id = ?`, metadataJSON, id); err != nil {
+		return fmt.Errorf("set video render job metadata: %w", err)
+	}
+	return nil
+}
+
+// ListActive returns jobs still queued or running (used for restart recovery).
+func (r *VideoRenderJobRepo) ListActive() ([]models.VideoRenderJob, error) {
+	rows, err := r.db.Query(videoRenderJobSelectSQL + ` WHERE status IN ('queued','running') ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list active video render jobs: %w", err)
+	}
+	defer rows.Close()
+
+	jobs := make([]models.VideoRenderJob, 0)
+	for rows.Next() {
+		job, err := scanVideoRenderJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, *job)
+	}
+	return jobs, rows.Err()
+}
+
 const videoRenderJobSelectSQL = `
 	SELECT id, project_id, timeline_id, status, progress, settings_json,
-	       output_asset_id, error, created_at, started_at, completed_at
+	       output_asset_id, error, metadata_json, created_at, started_at, completed_at
 	FROM video_render_jobs`
 
 func scanVideoRenderJob(row rowScanner) (*models.VideoRenderJob, error) {
@@ -150,7 +183,7 @@ func scanVideoRenderJob(row rowScanner) (*models.VideoRenderJob, error) {
 	var startedAt, completedAt sql.NullTime
 	err := row.Scan(
 		&j.ID, &j.ProjectID, &j.TimelineID, &j.Status, &j.Progress, &j.SettingsJSON,
-		&outputAssetID, &errMsg, &j.CreatedAt, &startedAt, &completedAt,
+		&outputAssetID, &errMsg, &j.MetadataJSON, &j.CreatedAt, &startedAt, &completedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil

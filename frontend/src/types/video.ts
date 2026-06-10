@@ -315,11 +315,15 @@ export interface VideoTimelineDetail {
 export interface VideoExportSettings {
   format: 'mp4' | 'webm';
   codec?: 'h264' | 'h265' | 'vp9';
-  resolution: '720p' | '1080p' | 'project';
+  resolution: '720p' | '1080p' | 'project' | 'custom';
+  preset?: string;
+  width?: number;
+  height?: number;
   fps?: number;
   quality?: 'draft' | 'standard' | 'high';
   include_audio: boolean;
   register_in_file_library?: boolean;
+  estimated_duration_ms?: number;
 }
 
 export interface VideoRenderJob {
@@ -331,15 +335,32 @@ export interface VideoRenderJob {
   settings_json: string;
   output_asset_id?: string;
   error?: string;
+  metadata_json?: string;
   created_at: string;
   started_at?: string;
   completed_at?: string;
+}
+
+export interface VideoRendererFeatureSupport {
+  feature: string;
+  label: string;
+  supported: boolean;
+  partial?: boolean;
+  notes?: string;
+}
+
+export interface VideoRendererCapabilities {
+  renderer: string;
+  formats: string[];
+  features: VideoRendererFeatureSupport[];
 }
 
 export interface VideoAssistantRequest {
   prompt?: string;
   instruction?: string;
   timeline?: VideoTimelineDocument;
+  selected_clip_id?: string;
+  playhead_ms?: number;
 }
 
 export interface VideoStoryboardScene {
@@ -373,6 +394,10 @@ export interface VideoEditOperation {
 export interface VideoEditPlan {
   summary: string;
   operations: VideoEditOperation[];
+  /** Human-readable per-operation descriptions for valid operations. */
+  preview?: string[];
+  /** Operations that failed validation against the current timeline (skipped on apply). */
+  issues?: string[];
 }
 
 export interface VideoSocialVariant {

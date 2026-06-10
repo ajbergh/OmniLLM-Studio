@@ -2,6 +2,10 @@ package api
 
 import (
 	"errors"
+	"image"
+	_ "image/gif"  // register decoder for upload dimension checks
+	_ "image/jpeg" // register decoder for upload dimension checks
+	_ "image/png"  // register decoder for upload dimension checks
 	"io"
 	"mime"
 	"net/http"
@@ -416,6 +420,41 @@ func (h *VideoHandler) DownloadAsset(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, fullPath)
 }
 
+// UpdateAsset updates editable asset fields (currently the display file name).
+func (h *VideoHandler) UpdateAsset(w http.ResponseWriter, r *http.Request) {
+	asset, ok := h.loadOwnedAsset(w, r, chi.URLParam(r, "assetId"))
+	if !ok {
+		return
+	}
+	var req struct {
+		FileName string `json:"file_name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	name := strings.TrimSpace(req.FileName)
+	if name == "" {
+		respondError(w, http.StatusBadRequest, "file_name is required")
+		return
+	}
+	if len(name) > 255 {
+		respondError(w, http.StatusBadRequest, "file_name must be 255 characters or fewer")
+		return
+	}
+	if err := h.assetRepo.UpdateFileName(asset.ID, name); err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	asset.FileName = name
+	respondJSON(w, http.StatusOK, asset)
+}
+
+// RendererCapabilities reports which timeline features the export renderer honors.
+func (h *VideoHandler) RendererCapabilities(w http.ResponseWriter, r *http.Request) {
+	respondJSON(w, http.StatusOK, h.service.RendererCapabilities())
+}
+
 func (h *VideoHandler) DeleteAsset(w http.ResponseWriter, r *http.Request) {
 	asset, ok := h.loadOwnedAsset(w, r, chi.URLParam(r, "assetId"))
 	if !ok {
@@ -431,18 +470,26 @@ func (h *VideoHandler) DeleteAsset(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
+// Per-kind upload size limits for video studio assets.
+const (
+	videoUploadMaxImageBytes = 25 << 20  // 25 MB
+	videoUploadMaxAudioBytes = 100 << 20 // 100 MB
+	videoUploadMaxVideoBytes = 500 << 20 // 500 MB
+	videoUploadMaxImageDim   = 8192      // pixels per side
+)
+
 // UploadAsset accepts a multipart file upload and creates a video asset in the
-// project.  Intended for images used as first/last/reference frames.
+// project.  Uploaded bytes are MIME-sniffed and validated per asset kind before
+// the asset record is created.
 func (h *VideoHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 	project, ok := h.loadOwnedProject(w, r, chi.URLParam(r, "projectId"))
 	if !ok {
 		return
 	}
 
-	const maxUploadSize = 50 << 20 // 50 MB
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
-		respondError(w, http.StatusBadRequest, "file too large (max 50 MB)")
+	r.Body = http.MaxBytesReader(w, r.Body, videoUploadMaxVideoBytes+(1<<20))
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		respondError(w, http.StatusBadRequest, "file too large (max 500 MB)")
 		return
 	}
 
@@ -453,22 +500,79 @@ func (h *VideoHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	mimeType := header.Header.Get("Content-Type")
-	if mimeType == "" || mimeType == "application/octet-stream" {
-		if guessed := mime.TypeByExtension(filepath.Ext(header.Filename)); guessed != "" {
-			mimeType = guessed
-		} else {
-			mimeType = "application/octet-stream"
+	// Sniff the real content type from the first bytes instead of trusting the
+	// declared Content-Type header alone.
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(file, head)
+	head = head[:n]
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	sniffed := strings.ToLower(strings.TrimSpace(strings.SplitN(http.DetectContentType(head), ";", 2)[0]))
+
+	declared := strings.ToLower(strings.TrimSpace(strings.SplitN(header.Header.Get("Content-Type"), ";", 2)[0]))
+	if declared == "" || declared == "application/octet-stream" {
+		if guessed := mime.TypeByExtension(strings.ToLower(filepath.Ext(header.Filename))); guessed != "" {
+			declared = strings.ToLower(strings.TrimSpace(strings.SplitN(guessed, ";", 2)[0]))
 		}
 	}
 
-	kind := "file"
-	if strings.HasPrefix(mimeType, "image/") {
+	// Prefer the sniffed type when it is specific; fall back to the declared
+	// type for container formats the sniffer cannot identify (e.g. .mov).
+	mimeType := sniffed
+	if sniffed == "application/octet-stream" || sniffed == "text/plain" || sniffed == "application/ogg" {
+		if declared != "" {
+			mimeType = declared
+		}
+	}
+
+	var kind string
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
 		kind = "image"
-	} else if strings.HasPrefix(mimeType, "video/") {
+	case strings.HasPrefix(mimeType, "video/"):
 		kind = "video"
-	} else if strings.HasPrefix(mimeType, "audio/") {
+	case strings.HasPrefix(mimeType, "audio/"):
 		kind = "audio"
+	default:
+		respondError(w, http.StatusBadRequest, "unsupported file type — upload an image, video, or audio file")
+		return
+	}
+
+	// When both sniffed and declared types are specific, they must agree on the
+	// top-level kind (a renamed .html file declared as image/png is rejected).
+	if sniffed != "application/octet-stream" && declared != "" &&
+		strings.SplitN(sniffed, "/", 2)[0] != strings.SplitN(declared, "/", 2)[0] &&
+		sniffed != "text/plain" && sniffed != "application/ogg" {
+		respondError(w, http.StatusBadRequest, "file content does not match its declared type")
+		return
+	}
+
+	sizeLimit := int64(videoUploadMaxVideoBytes)
+	limitLabel := "500 MB"
+	switch kind {
+	case "image":
+		sizeLimit = videoUploadMaxImageBytes
+		limitLabel = "25 MB"
+	case "audio":
+		sizeLimit = videoUploadMaxAudioBytes
+		limitLabel = "100 MB"
+	}
+
+	var width, height *int
+	if kind == "image" {
+		if cfg, _, err := image.DecodeConfig(file); err == nil {
+			if cfg.Width > videoUploadMaxImageDim || cfg.Height > videoUploadMaxImageDim {
+				respondError(w, http.StatusBadRequest, "image dimensions exceed 8192×8192 pixels")
+				return
+			}
+			width, height = &cfg.Width, &cfg.Height
+		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			respondInternalError(w, err)
+			return
+		}
 	}
 
 	ext := filepath.Ext(header.Filename)
@@ -487,10 +591,15 @@ func (h *VideoHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	defer out.Close()
 
-	written, err := io.Copy(out, file)
+	written, err := io.Copy(out, io.LimitReader(file, sizeLimit+1))
 	if err != nil {
 		_ = os.Remove(storagePath)
 		respondInternalError(w, err)
+		return
+	}
+	if written > sizeLimit {
+		_ = os.Remove(storagePath)
+		respondError(w, http.StatusBadRequest, kind+" uploads are limited to "+limitLabel)
 		return
 	}
 
@@ -502,6 +611,8 @@ func (h *VideoHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 		FilePath:   storageFilename,
 		MimeType:   mimeType,
 		SizeBytes:  written,
+		Width:      width,
+		Height:     height,
 		CreatedAt:  time.Now().UTC(),
 	}
 	if err := h.assetRepo.Create(asset); err != nil {

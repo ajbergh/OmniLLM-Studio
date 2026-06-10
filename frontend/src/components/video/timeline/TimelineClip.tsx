@@ -20,7 +20,7 @@ export function TimelineClip({
   selected: boolean;
   pxPerMs: number;
   trackId: string;
-  onSelect: (clipId: string, trackId: string) => void;
+  onSelect: (clipId: string, trackId: string, additive?: boolean) => void;
   onTrim: (clipId: string, updates: Partial<Pick<Clip, 'start_ms' | 'duration_ms' | 'trim_in_ms' | 'trim_out_ms'>>) => void;
 }) {
   const left = clip.start_ms * pxPerMs;
@@ -74,16 +74,20 @@ export function TimelineClip({
       draggable
       onDragStart={(event) => {
         event.dataTransfer.setData('application/x-video-clip-id', clip.id);
+        // Remember where inside the clip the drag started so drops keep the
+        // grabbed point under the cursor instead of jumping to the clip start.
+        const rect = event.currentTarget.getBoundingClientRect();
+        event.dataTransfer.setData('application/x-video-clip-grab-offset', String(Math.round(event.clientX - rect.left)));
         event.dataTransfer.effectAllowed = 'move';
       }}
       onClick={(event) => {
         event.stopPropagation();
-        onSelect(clip.id, trackId);
+        onSelect(clip.id, trackId, event.ctrlKey || event.metaKey || event.shiftKey);
       }}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          onSelect(clip.id, trackId);
+          onSelect(clip.id, trackId, event.ctrlKey || event.metaKey || event.shiftKey);
         }
       }}
       className={`absolute top-1 h-9 rounded-md border px-2 text-left text-[11px] transition-colors ${tone} ${

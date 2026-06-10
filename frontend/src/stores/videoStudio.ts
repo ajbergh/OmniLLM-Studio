@@ -14,6 +14,7 @@ import type {
   VideoPromptForm,
   VideoProviderInfo,
   VideoProviderKey,
+  VideoRendererCapabilities,
   VideoRenderJob,
   VideoSocialVariant,
   VideoStoryboardResponse,
@@ -244,11 +245,13 @@ interface VideoStudioState {
   timelineUndoStack: VideoTimelineDocument[];
   timelineRedoStack: VideoTimelineDocument[];
   selectedClipId: string | null;
+  selectedClipIds: string[];
   selectedTrackId: string | null;
   playheadMs: number;
   zoom: number;
   isPlaying: boolean;
   snappingEnabled: boolean;
+  rendererCapabilities: VideoRendererCapabilities | null;
   renderJobs: VideoRenderJob[];
   activeRenderJobId: string | null;
   exportSettings: VideoExportSettings;
@@ -293,9 +296,13 @@ interface VideoStudioState {
   splitClipAtPlayhead: () => Promise<void>;
   deleteClip: (clipId?: string) => Promise<void>;
   duplicateClip: (clipId?: string) => Promise<void>;
-  selectClip: (clipId: string | null, trackId?: string | null) => void;
+  selectClip: (clipId: string | null, trackId?: string | null, additive?: boolean) => void;
+  renameAsset: (assetId: string, fileName: string) => Promise<void>;
+  deleteAsset: (assetId: string) => Promise<void>;
+  loadRendererCapabilities: () => Promise<void>;
   setPlayhead: (timeMs: number) => void;
   setZoom: (zoom: number) => void;
+  zoomToFit: (containerWidth: number) => void;
   setPlaying: (playing: boolean) => void;
   toggleSnapping: () => void;
   toggleTrackMute: (trackId: string) => Promise<void>;
@@ -343,11 +350,13 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   timelineUndoStack: [],
   timelineRedoStack: [],
   selectedClipId: null,
+  selectedClipIds: [],
   selectedTrackId: null,
   playheadMs: 0,
   zoom: 1,
   isPlaying: false,
   snappingEnabled: true,
+  rendererCapabilities: null,
   renderJobs: [],
   activeRenderJobId: null,
   exportSettings: { ...DEFAULT_EXPORT },
@@ -470,6 +479,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         timeline: defaultTimeline(detail.project),
         timelineRecord: null,
         selectedClipId: null,
+        selectedClipIds: [],
         selectedTrackId: null,
         playheadMs: 0,
         timelineUndoStack: [],
@@ -808,6 +818,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         timelineUndoStack: [],
         timelineRedoStack: [],
         selectedClipId: null,
+        selectedClipIds: [],
         selectedTrackId: null,
       });
     } catch (err) {
@@ -874,6 +885,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     set((state) => ({
       timeline: next,
       selectedClipId: clip.id,
+      selectedClipIds: [clip.id],
       selectedTrackId: target.id,
       ...withTimelineHistory(state, current),
     }));
@@ -924,6 +936,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     set((state) => ({
       timeline: recomputeDuration(next),
       selectedClipId: right.id,
+      selectedClipIds: [right.id],
       selectedTrackId: loc.track.id,
       ...withTimelineHistory(state, current),
     }));
@@ -932,15 +945,23 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
 
   deleteClip: async (clipId) => {
     const current = get().timeline;
-    const id = clipId || get().selectedClipId;
-    if (!current || !id) return;
+    const ids = clipId
+      ? [clipId]
+      : get().selectedClipIds.length > 0
+        ? get().selectedClipIds
+        : get().selectedClipId
+          ? [get().selectedClipId as string]
+          : [];
+    if (!current || ids.length === 0) return;
+    const idSet = new Set(ids);
     const next = cloneTimeline(current);
     for (const track of next.tracks) {
-      track.clips = track.clips.filter((clip) => clip.id !== id);
+      track.clips = track.clips.filter((clip) => !idSet.has(clip.id));
     }
     set((state) => ({
       timeline: recomputeDuration(next),
       selectedClipId: null,
+      selectedClipIds: [],
       ...withTimelineHistory(state, current),
     }));
     await get().saveTimeline(next);
@@ -948,25 +969,97 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
 
   duplicateClip: async (clipId) => {
     const current = get().timeline;
-    const id = clipId || get().selectedClipId;
-    if (!current || !id) return;
+    const ids = clipId
+      ? [clipId]
+      : get().selectedClipIds.length > 0
+        ? get().selectedClipIds
+        : get().selectedClipId
+          ? [get().selectedClipId as string]
+          : [];
+    if (!current || ids.length === 0) return;
     const next = cloneTimeline(current);
-    const loc = findClip(next, id);
-    if (!loc) return;
-    const copy = { ...loc.clip, id: newId('clip'), start_ms: loc.clip.start_ms + loc.clip.duration_ms + 250 };
-    loc.track.clips.splice(loc.clipIndex + 1, 0, copy);
+    const copies: { id: string; trackId: string }[] = [];
+    for (const id of ids) {
+      const loc = findClip(next, id);
+      if (!loc) continue;
+      const copy = { ...loc.clip, id: newId('clip'), start_ms: loc.clip.start_ms + loc.clip.duration_ms + 250 };
+      loc.track.clips.splice(loc.clipIndex + 1, 0, copy);
+      copies.push({ id: copy.id, trackId: loc.track.id });
+    }
+    if (copies.length === 0) return;
     set((state) => ({
       timeline: recomputeDuration(next),
-      selectedClipId: copy.id,
-      selectedTrackId: loc.track.id,
+      selectedClipId: copies[copies.length - 1].id,
+      selectedClipIds: copies.map((copy) => copy.id),
+      selectedTrackId: copies[copies.length - 1].trackId,
       ...withTimelineHistory(state, current),
     }));
     await get().saveTimeline(next);
   },
 
-  selectClip: (clipId, trackId = null) => set({ selectedClipId: clipId, selectedTrackId: trackId }),
+  selectClip: (clipId, trackId = null, additive = false) => set((state) => {
+    if (!clipId) {
+      return { selectedClipId: null, selectedClipIds: [], selectedTrackId: trackId };
+    }
+    if (additive) {
+      const already = state.selectedClipIds.includes(clipId);
+      const selectedClipIds = already
+        ? state.selectedClipIds.filter((id) => id !== clipId)
+        : [...state.selectedClipIds, clipId];
+      return {
+        selectedClipIds,
+        selectedClipId: already ? selectedClipIds[selectedClipIds.length - 1] || null : clipId,
+        selectedTrackId: trackId,
+      };
+    }
+    return { selectedClipId: clipId, selectedClipIds: [clipId], selectedTrackId: trackId };
+  }),
+
+  renameAsset: async (assetId, fileName) => {
+    const name = fileName.trim();
+    if (!name) return;
+    try {
+      const updated = await videoApi.updateAsset(assetId, { file_name: name });
+      set((state) => ({
+        assets: state.assets.map((asset) => (asset.id === assetId ? updated : asset)),
+      }));
+      toast.success('Asset renamed');
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  },
+
+  deleteAsset: async (assetId) => {
+    try {
+      await videoApi.deleteAsset(assetId);
+      set((state) => ({
+        assets: state.assets.filter((asset) => asset.id !== assetId),
+        selectedAssetId: state.selectedAssetId === assetId ? null : state.selectedAssetId,
+      }));
+      toast.success('Asset deleted');
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  },
+
+  loadRendererCapabilities: async () => {
+    if (get().rendererCapabilities) return;
+    try {
+      const rendererCapabilities = await videoApi.rendererCapabilities();
+      set({ rendererCapabilities });
+    } catch {
+      // Non-fatal — the inspector falls back to a generic warning.
+    }
+  },
+
   setPlayhead: (timeMs) => set((state) => ({ playheadMs: Math.max(0, Math.min(timeMs, state.timeline?.duration_ms || timeMs)) })),
   setZoom: (zoom) => set({ zoom: Math.min(4, Math.max(0.35, zoom)) }),
+  zoomToFit: (containerWidth) => {
+    const duration = get().timeline?.duration_ms || 30000;
+    if (containerWidth <= 0 || duration <= 0) return;
+    // Base scale is 0.02 px/ms at zoom 1 (see VideoTimeline pxPerMs).
+    get().setZoom(containerWidth / (duration * 0.02));
+  },
   setPlaying: (playing) => set({ isPlaying: playing }),
   toggleSnapping: () => set((state) => ({ snappingEnabled: !state.snappingEnabled })),
 
@@ -1175,13 +1268,14 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     if (!timeline || timelineUndoStack.length === 0) return;
     const previous = cloneTimeline(timelineUndoStack[timelineUndoStack.length - 1]);
     const selected = selectedClipId ? findClip(previous, selectedClipId) : null;
-    set({
+    set((state) => ({
       timeline: previous,
       timelineUndoStack: timelineUndoStack.slice(0, -1),
       timelineRedoStack: [...timelineRedoStack, cloneTimeline(timeline)].slice(-TIMELINE_HISTORY_LIMIT),
       selectedClipId: selected ? selectedClipId : null,
+      selectedClipIds: state.selectedClipIds.filter((id) => findClip(previous, id)),
       selectedTrackId: selected ? selected.track.id : null,
-    });
+    }));
     await get().saveTimeline(previous);
   },
 
@@ -1190,13 +1284,14 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     if (!timeline || timelineRedoStack.length === 0) return;
     const next = cloneTimeline(timelineRedoStack[timelineRedoStack.length - 1]);
     const selected = selectedClipId ? findClip(next, selectedClipId) : null;
-    set({
+    set((state) => ({
       timeline: next,
       timelineUndoStack: [...timelineUndoStack, cloneTimeline(timeline)].slice(-TIMELINE_HISTORY_LIMIT),
       timelineRedoStack: timelineRedoStack.slice(0, -1),
       selectedClipId: selected ? selectedClipId : null,
+      selectedClipIds: state.selectedClipIds.filter((id) => findClip(next, id)),
       selectedTrackId: selected ? selected.track.id : null,
-    });
+    }));
     await get().saveTimeline(next);
   },
 
@@ -1210,7 +1305,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     set({ isRendering: true, error: null });
     try {
       await get().saveTimeline();
-      const job = await videoApi.renderTimeline(projectId, get().exportSettings);
+      const job = await videoApi.renderTimeline(projectId, {
+        ...get().exportSettings,
+        estimated_duration_ms: get().timeline?.duration_ms,
+      });
       set((state) => ({
         renderJobs: upsertRenderJob(state.renderJobs, job),
         activeRenderJobId: job.id,
@@ -1291,6 +1389,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         prompt: get().promptForm.prompt,
         instruction: get().assistantInstruction,
         timeline: get().timeline || undefined,
+        selected_clip_id: get().selectedClipId || undefined,
+        playhead_ms: get().playheadMs || undefined,
       });
       set({ assistantPlan });
     } catch (err) {
@@ -1306,6 +1406,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         prompt: get().promptForm.prompt,
         instruction: get().assistantInstruction,
         timeline: get().timeline || undefined,
+        selected_clip_id: get().selectedClipId || undefined,
+        playhead_ms: get().playheadMs || undefined,
       });
       set({ assistantPlan });
     } catch (err) {
@@ -1326,7 +1428,11 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         assistantPlan: null,
         ...(previous ? withTimelineHistory(state, previous) : { timelineRedoStack: [] }),
       }));
-      toast.success('Edit plan applied');
+      if (plan.issues && plan.issues.length > 0) {
+        toast.info(`Edit plan applied — ${plan.issues.length} invalid operation${plan.issues.length === 1 ? '' : 's'} skipped`);
+      } else {
+        toast.success('Edit plan applied');
+      }
     } catch (err) {
       toast.error((err as Error).message);
     }
@@ -1340,6 +1446,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         prompt: get().promptForm.prompt,
         instruction: get().assistantInstruction,
         timeline: get().timeline || undefined,
+        selected_clip_id: get().selectedClipId || undefined,
+        playhead_ms: get().playheadMs || undefined,
       });
       set({ socialVariants });
     } catch (err) {

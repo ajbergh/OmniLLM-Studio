@@ -46,6 +46,26 @@ export function RenderJobStatus({
         <div className="h-full bg-primary" style={{ width: `${Math.max(3, progress)}%` }} />
       </div>
       {job.error && <p className="mt-2 text-[10px] text-danger">{job.error}</p>}
+      {job.status === 'failed' && job.metadata_json && job.metadata_json !== '{}' && (
+        <details className="mt-1.5">
+          <summary className="cursor-pointer text-[10px] text-text-muted hover:text-text">FFmpeg diagnostics</summary>
+          <pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap break-all rounded-md bg-surface p-2 text-[9px] text-text-muted">
+            {formatDiagnostics(job.metadata_json)}
+          </pre>
+        </details>
+      )}
     </div>
   );
+}
+
+function formatDiagnostics(metadataJson: string): string {
+  try {
+    const meta = JSON.parse(metadataJson) as Record<string, unknown>;
+    const lines: string[] = [];
+    if (typeof meta.ffmpeg_command === 'string') lines.push(`$ ${meta.ffmpeg_command}`);
+    if (typeof meta.ffmpeg_stderr === 'string' && meta.ffmpeg_stderr.trim()) lines.push(meta.ffmpeg_stderr.trim());
+    return lines.join('\n\n') || metadataJson;
+  } catch {
+    return metadataJson;
+  }
 }

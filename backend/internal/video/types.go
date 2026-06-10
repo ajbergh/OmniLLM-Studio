@@ -197,9 +197,15 @@ type ExternalAssetImportRequest struct {
 }
 
 type ExportSettings struct {
-	Format                string `json:"format"`
-	Codec                 string `json:"codec,omitempty"`
-	Resolution            string `json:"resolution"`
+	Format     string `json:"format"`
+	Codec      string `json:"codec,omitempty"`
+	Resolution string `json:"resolution"`
+	// Preset is an advisory label for the chosen export preset
+	// (e.g. "youtube_16_9", "shorts_9_16", "square_1_1", "custom").
+	Preset string `json:"preset,omitempty"`
+	// Width/Height override Resolution when both are set (custom export size).
+	Width                 int    `json:"width,omitempty"`
+	Height                int    `json:"height,omitempty"`
 	FPS                   int    `json:"fps,omitempty"`
 	Quality               string `json:"quality,omitempty"`
 	IncludeAudio          bool   `json:"include_audio"`

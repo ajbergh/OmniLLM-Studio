@@ -13,9 +13,21 @@ function selectedClip(): VideoTimelineClip | null {
   return null;
 }
 
+const QUICK_WORKFLOWS = [
+  { label: '30s social cut', instruction: 'Create a 30-second social cut' },
+  { label: '15s teaser', instruction: 'Create a 15-second teaser' },
+  { label: 'Vertical 9:16', instruction: 'Convert the timeline to vertical 9:16' },
+  { label: 'Square 1:1', instruction: 'Convert the timeline to square 1:1' },
+  { label: 'Title card', instruction: 'Add a title card at the start' },
+  { label: 'Lower third', instruction: 'Add a lower third caption at the playhead' },
+  { label: 'Captions', instruction: 'Add captions from the prompt text' },
+  { label: 'Tighten pacing', instruction: 'Tighten pacing and remove trailing dead space' },
+];
+
 export function VideoInspector() {
   const timeline = useVideoStudioStore((state) => state.timeline);
   const selectedClipId = useVideoStudioStore((state) => state.selectedClipId);
+  const rendererCapabilities = useVideoStudioStore((state) => state.rendererCapabilities);
   const assistantInstruction = useVideoStudioStore((state) => state.assistantInstruction);
   const assistantPlan = useVideoStudioStore((state) => state.assistantPlan);
   const storyboard = useVideoStudioStore((state) => state.storyboard);
@@ -56,11 +68,46 @@ export function VideoInspector() {
           <button className="inline-flex min-h-8 items-center justify-center rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary hover:text-text" onClick={() => { void requestEditPlan(); }}>Edit plan</button>
           <button className="inline-flex min-h-8 items-center justify-center rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary hover:text-text" onClick={() => { void requestSocialVariants(); }}>Variants</button>
         </div>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {QUICK_WORKFLOWS.map((workflow) => (
+            <button
+              key={workflow.label}
+              onClick={() => {
+                setAssistantInstruction(workflow.instruction);
+                void requestEditPlan();
+              }}
+              className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[10px] text-text-muted hover:text-text"
+              title={workflow.instruction}
+            >
+              {workflow.label}
+            </button>
+          ))}
+        </div>
         {assistantPlan && (
           <div className="mt-3 rounded-lg border border-primary/25 bg-primary/10 p-2">
             <p className="text-xs font-medium text-text">{assistantPlan.summary}</p>
-            <p className="mt-1 text-[11px] text-text-muted">{assistantPlan.operations.length} validated operation{assistantPlan.operations.length === 1 ? '' : 's'}</p>
-            <button className="mt-2 min-h-8 rounded-md bg-primary px-2 text-xs font-medium text-white" onClick={() => { void applyAssistantPlan(); }}>
+            <p className="mt-1 text-[11px] text-text-muted">
+              {(assistantPlan.preview?.length ?? assistantPlan.operations.length)} valid operation{(assistantPlan.preview?.length ?? assistantPlan.operations.length) === 1 ? '' : 's'}
+            </p>
+            {assistantPlan.preview && assistantPlan.preview.length > 0 && (
+              <ul className="mt-1.5 space-y-0.5">
+                {assistantPlan.preview.map((line, index) => (
+                  <li key={index} className="text-[10px] text-text-secondary">• {line}</li>
+                ))}
+              </ul>
+            )}
+            {assistantPlan.issues && assistantPlan.issues.length > 0 && (
+              <ul className="mt-1.5 space-y-0.5">
+                {assistantPlan.issues.map((line, index) => (
+                  <li key={index} className="text-[10px] text-amber-400/80">⚠ {line} (will be skipped)</li>
+                ))}
+              </ul>
+            )}
+            <button
+              className="mt-2 min-h-8 rounded-md bg-primary px-2 text-xs font-medium text-white disabled:opacity-50"
+              disabled={(assistantPlan.preview?.length ?? assistantPlan.operations.length) === 0}
+              onClick={() => { void applyAssistantPlan(); }}
+            >
               Apply
             </button>
           </div>
@@ -152,9 +199,21 @@ export function VideoInspector() {
                 Keyframe
               </button>
             </div>
-            <p className="rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-400/70" title="Effects, transitions, fades, opacity, and keyframes are stored in the timeline JSON but are not yet applied by the FFmpeg renderer during video export.">
-              ⚠ Effects &amp; transitions not yet rendered in export
-            </p>
+            {(() => {
+              const limited = (rendererCapabilities?.features || []).filter((f) => !f.supported || f.partial);
+              if (rendererCapabilities && limited.length === 0) return null;
+              const text = limited.length > 0
+                ? `Limited at export: ${limited.map((f) => f.label).join(', ')}`
+                : 'Some effects & transitions may not be rendered in export';
+              const tooltip = limited.length > 0
+                ? limited.map((f) => `${f.label}${f.notes ? ` — ${f.notes}` : ''}`).join('\n')
+                : 'Renderer capability information is unavailable.';
+              return (
+                <p className="rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-400/70" title={tooltip}>
+                  ⚠ {text}
+                </p>
+              );
+            })()}
             <div className="space-y-1">
               {clip.effects.map((effect) => (
                 <div key={effect.id} className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] text-text-muted">

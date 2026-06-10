@@ -38,6 +38,20 @@ type resolvedClip struct {
 	isAudio  bool
 }
 
+// RenderError carries FFmpeg diagnostics for failed renders so they can be
+// persisted in render job metadata.
+type RenderError struct {
+	Command string
+	Stderr  string
+	Err     error
+}
+
+func (e *RenderError) Error() string {
+	return fmt.Sprintf("ffmpeg render failed: %v: %s", e.Err, responseSnippet([]byte(e.Stderr)))
+}
+
+func (e *RenderError) Unwrap() error { return e.Err }
+
 type RenderProgress struct {
 	Stage    string  `json:"stage"`
 	Message  string  `json:"message"`
@@ -174,10 +188,11 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 	if progress != nil {
 		progress(RenderProgress{Stage: "encoding", Message: "Encoding video export with FFmpeg", Progress: 0.65})
 	}
+	commandStr := "ffmpeg " + strings.Join(args, " ")
 	cmd := exec.CommandContext(ctx, binary, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("ffmpeg render failed: %w: %s", err, responseSnippet(output))
+		return nil, &RenderError{Command: commandStr, Stderr: string(output), Err: err}
 	}
 	data, err := os.ReadFile(outputPath)
 	if err != nil {
@@ -202,18 +217,23 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		Height:     height,
 		FPS:        float64(fps),
 		Metadata: map[string]any{
-			"renderer":      "ffmpeg",
-			"format":        format,
-			"quality":       req.Settings.Quality,
-			"include_audio": req.Settings.IncludeAudio,
-			"text_clips":    countTextClips(req.Timeline),
+			"renderer":             "ffmpeg",
+			"format":               format,
+			"quality":              req.Settings.Quality,
+			"include_audio":        req.Settings.IncludeAudio,
+			"text_clips":           countTextClips(req.Timeline),
+			"ffmpeg_command":       commandStr,
+			"timeline_duration_ms": req.Timeline.DurationMS,
 		},
 	}, nil
 }
 
 func renderDimensions(req RenderRequest) (int, int) {
+	if req.Settings.Width > 0 && req.Settings.Height > 0 {
+		return evenDimension(req.Settings.Width), evenDimension(req.Settings.Height)
+	}
 	resolution := strings.ToLower(strings.TrimSpace(req.Settings.Resolution))
-	if resolution == "" || resolution == "project" {
+	if resolution == "" || resolution == "project" || resolution == "custom" {
 		width := req.Timeline.Canvas.Width
 		height := req.Timeline.Canvas.Height
 		if width <= 0 {
@@ -291,9 +311,6 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 	}
 	var result []resolvedClip
 	for _, track := range req.Timeline.Tracks {
-		if !track.Visible || track.Muted {
-			continue
-		}
 		for _, clip := range track.Clips {
 			if clip.AssetID == "" || clip.DurationMS <= 0 {
 				continue
@@ -313,6 +330,13 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 				isVideo:  strings.HasPrefix(mime, "video/"),
 				isImage:  strings.HasPrefix(mime, "image/"),
 				isAudio:  strings.HasPrefix(mime, "audio/"),
+			}
+			// Hidden tracks contribute no video; muted tracks contribute no audio.
+			if (rc.isVideo || rc.isImage) && !track.Visible {
+				continue
+			}
+			if rc.isAudio && track.Muted {
+				continue
 			}
 			if rc.isVideo || rc.isImage || rc.isAudio {
 				result = append(result, rc)
@@ -336,9 +360,6 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 	prevV := "[base_v]"
 	parts = append(parts, "[0:v]setpts=PTS-STARTPTS[base_v]")
 
-	scaleChain := fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2",
-		width, height, width, height)
-
 	for _, rc := range clips {
 		if !rc.isVideo && !rc.isImage {
 			continue
@@ -349,17 +370,37 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 		endS := float64(rc.clip.StartMS+rc.clip.DurationMS) / 1000.0
 		trimInS := float64(rc.clip.TrimInMS) / 1000.0
 		durS := float64(rc.clip.DurationMS) / 1000.0
+		tr := parseClipTransform(rc.clip.Transform)
 
-		var srcFilter string
+		var chain []string
 		if rc.isImage {
-			srcFilter = fmt.Sprintf("[%d:v]loop=loop=-1:size=1:start=0,trim=duration=%.3f,setpts=PTS-STARTPTS,%s%s",
-				rc.inputIdx, durS, scaleChain, cLabel)
+			chain = append(chain, "loop=loop=-1:size=1:start=0", fmt.Sprintf("trim=duration=%.3f", durS), "setpts=PTS-STARTPTS")
 		} else {
-			srcFilter = fmt.Sprintf("[%d:v]trim=start=%.3f:duration=%.3f,setpts=PTS-STARTPTS,%s%s",
-				rc.inputIdx, trimInS, durS, scaleChain, cLabel)
+			chain = append(chain, fmt.Sprintf("trim=start=%.3f:duration=%.3f", trimInS, durS), "setpts=PTS-STARTPTS")
 		}
-		overlayFilter := fmt.Sprintf("%s%soverlay=enable='between(t\\,%.3f\\,%.3f)':x=0:y=0%s",
-			prevV, cLabel, startS, endS, ovLabel)
+		if tr.hasCrop {
+			chain = append(chain, fmt.Sprintf("crop=iw*%.4f:ih*%.4f:iw*%.4f:ih*%.4f",
+				1-tr.cropLeft-tr.cropRight, 1-tr.cropTop-tr.cropBottom, tr.cropLeft, tr.cropTop))
+		}
+		scaledW := maxInt(2, int(float64(width)*tr.scale+0.5))
+		scaledH := maxInt(2, int(float64(height)*tr.scale+0.5))
+		chain = append(chain, fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease", scaledW, scaledH))
+		chain = append(chain, effectFilters(rc.clip.Effects)...)
+		chain = append(chain, "format=rgba")
+		if tr.opacity < 1 {
+			chain = append(chain, fmt.Sprintf("colorchannelmixer=aa=%.3f", tr.opacity))
+		}
+		fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
+		if fadeInS > 0 {
+			chain = append(chain, fmt.Sprintf("fade=t=in:st=0:d=%.3f:alpha=1", fadeInS))
+		}
+		if fadeOutS > 0 {
+			chain = append(chain, fmt.Sprintf("fade=t=out:st=%.3f:d=%.3f:alpha=1", durS-fadeOutS, fadeOutS))
+		}
+
+		srcFilter := fmt.Sprintf("[%d:v]%s%s", rc.inputIdx, strings.Join(chain, ","), cLabel)
+		overlayFilter := fmt.Sprintf("%s%soverlay=enable='between(t\\,%.3f\\,%.3f)':x='(W-w)/2%+.0f':y='(H-h)/2%+.0f'%s",
+			prevV, cLabel, startS, endS, tr.x, tr.y, ovLabel)
 
 		parts = append(parts, srcFilter, overlayFilter)
 		prevV = ovLabel
@@ -400,8 +441,22 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 		trimInS := float64(rc.clip.TrimInMS) / 1000.0
 		durS := float64(rc.clip.DurationMS) / 1000.0
 		startMS := rc.clip.StartMS
-		parts = append(parts, fmt.Sprintf("[%d:a]atrim=start=%.3f:duration=%.3f,asetpts=PTS-STARTPTS,adelay=%d|%d%s",
-			rc.inputIdx, trimInS, durS, startMS, startMS, aLabel))
+		chain := []string{
+			fmt.Sprintf("atrim=start=%.3f:duration=%.3f", trimInS, durS),
+			"asetpts=PTS-STARTPTS",
+		}
+		if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
+			chain = append(chain, fmt.Sprintf("volume=%.3f", clampFloat(*rc.clip.Volume, 0, 2)))
+		}
+		fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
+		if fadeInS > 0 {
+			chain = append(chain, fmt.Sprintf("afade=t=in:st=0:d=%.3f", fadeInS))
+		}
+		if fadeOutS > 0 {
+			chain = append(chain, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f", durS-fadeOutS, fadeOutS))
+		}
+		chain = append(chain, fmt.Sprintf("adelay=%d|%d", startMS, startMS))
+		parts = append(parts, fmt.Sprintf("[%d:a]%s%s", rc.inputIdx, strings.Join(chain, ","), aLabel))
 		aLabels = append(aLabels, aLabel)
 	}
 	if len(aLabels) > 1 {
@@ -474,6 +529,126 @@ func drawTextFilter(clip TimelineClip, text TimelineText, width, height int) str
 		parts = append(parts, "borderw=2", "bordercolor="+ffmpegColor(text.Stroke, "black"))
 	}
 	return strings.Join(parts, ":")
+}
+
+// clipRenderTransform is the subset of clip transform values the renderer honors.
+type clipRenderTransform struct {
+	x, y                                     float64
+	scale                                    float64
+	opacity                                  float64
+	cropTop, cropRight, cropBottom, cropLeft float64
+	hasCrop                                  bool
+}
+
+// parseClipTransform extracts renderable transform values with safe defaults.
+// Crop values are fractions of the source frame (0–0.95 per edge).
+func parseClipTransform(transform map[string]any) clipRenderTransform {
+	tr := clipRenderTransform{scale: 1, opacity: 1}
+	if transform == nil {
+		return tr
+	}
+	if v, ok := numericTransform(transform, "x"); ok {
+		tr.x = v
+	}
+	if v, ok := numericTransform(transform, "y"); ok {
+		tr.y = v
+	}
+	if v, ok := numericTransform(transform, "scale"); ok && v > 0 {
+		tr.scale = clampFloat(v, 0.05, 4)
+	}
+	if v, ok := numericTransform(transform, "opacity"); ok {
+		tr.opacity = clampFloat(v, 0, 1)
+	}
+	if crop, ok := transform["crop"].(map[string]any); ok {
+		tr.cropTop = clampFloat(numericOrZero(crop, "top"), 0, 0.95)
+		tr.cropRight = clampFloat(numericOrZero(crop, "right"), 0, 0.95)
+		tr.cropBottom = clampFloat(numericOrZero(crop, "bottom"), 0, 0.95)
+		tr.cropLeft = clampFloat(numericOrZero(crop, "left"), 0, 0.95)
+		if tr.cropTop+tr.cropBottom < 0.95 && tr.cropLeft+tr.cropRight < 0.95 &&
+			(tr.cropTop > 0 || tr.cropRight > 0 || tr.cropBottom > 0 || tr.cropLeft > 0) {
+			tr.hasCrop = true
+		}
+	}
+	return tr
+}
+
+func numericOrZero(values map[string]any, key string) float64 {
+	v, _ := numericTransform(values, key)
+	return v
+}
+
+func clampFloat(value, min, max float64) float64 {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+// clipFadeSeconds combines explicit fade_in/fade_out with fade-style
+// transitions (fade, crossfade, dip_to_black), each capped at half the clip
+// duration. Slide/wipe/zoom transitions are not rendered.
+func clipFadeSeconds(clip TimelineClip) (fadeIn, fadeOut float64) {
+	fadeInMS := clip.FadeInMS
+	fadeOutMS := clip.FadeOutMS
+	for _, transition := range clip.Transitions {
+		switch strings.ToLower(strings.TrimSpace(transition.Type)) {
+		case "fade", "crossfade", "dip_to_black":
+			if transition.DurationMS > fadeInMS {
+				fadeInMS = transition.DurationMS
+			}
+			if transition.DurationMS > fadeOutMS {
+				fadeOutMS = transition.DurationMS
+			}
+		}
+	}
+	half := clip.DurationMS / 2
+	if fadeInMS > half {
+		fadeInMS = half
+	}
+	if fadeOutMS > half {
+		fadeOutMS = half
+	}
+	return float64(fadeInMS) / 1000.0, float64(fadeOutMS) / 1000.0
+}
+
+// effectFilters maps enabled clip effects onto FFmpeg filters. Unsupported
+// effect types are skipped (see FFmpegRendererCapabilities).
+func effectFilters(effects []TimelineEffect) []string {
+	var filters []string
+	for _, effect := range effects {
+		if !effect.Enabled {
+			continue
+		}
+		amount, hasAmount := numericTransform(effect.Params, "amount")
+		switch strings.ToLower(strings.TrimSpace(effect.Type)) {
+		case "brightness":
+			if !hasAmount {
+				amount = 1
+			}
+			filters = append(filters, fmt.Sprintf("eq=brightness=%.3f", clampFloat(amount-1, -1, 1)))
+		case "contrast":
+			if !hasAmount {
+				amount = 1
+			}
+			filters = append(filters, fmt.Sprintf("eq=contrast=%.3f", clampFloat(amount, 0, 3)))
+		case "saturation":
+			if !hasAmount {
+				amount = 1
+			}
+			filters = append(filters, fmt.Sprintf("eq=saturation=%.3f", clampFloat(amount, 0, 3)))
+		case "grayscale":
+			filters = append(filters, "hue=s=0")
+		case "blur":
+			if !hasAmount || amount <= 0 {
+				amount = 2
+			}
+			filters = append(filters, fmt.Sprintf("boxblur=%.0f", clampFloat(amount, 1, 30)))
+		}
+	}
+	return filters
 }
 
 func numericTransform(transform map[string]any, key string) (float64, bool) {

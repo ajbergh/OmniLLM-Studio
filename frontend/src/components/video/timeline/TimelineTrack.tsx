@@ -2,12 +2,30 @@ import { Eye, EyeOff, Lock, Unlock, Volume2, VolumeX } from 'lucide-react';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineTrack as Track, VideoTimelineTrackType } from '../../../types/video';
 import { TimelineClip } from './TimelineClip';
 
+// Snap a drop position to nearby clip edges / playhead within this pixel radius.
+const SNAP_RADIUS_PX = 8;
+
+function snapToPoints(startMs: number, snapPointsMs: number[], pxPerMs: number): number {
+  let best = startMs;
+  let bestDistPx = SNAP_RADIUS_PX + 1;
+  for (const point of snapPointsMs) {
+    const distPx = Math.abs(point - startMs) * pxPerMs;
+    if (distPx < bestDistPx) {
+      best = point;
+      bestDistPx = distPx;
+    }
+  }
+  return best;
+}
+
 export function TimelineTrack({
   track,
   assets,
-  selectedClipId,
+  selectedClipIds,
   pxPerMs,
   width,
+  snappingEnabled,
+  snapPointsMs,
   onMoveClip,
   onTrimClip,
   onAddAsset,
@@ -18,13 +36,15 @@ export function TimelineTrack({
 }: {
   track: Track;
   assets: VideoAsset[];
-  selectedClipId: string | null;
+  selectedClipIds: string[];
   pxPerMs: number;
   width: number;
+  snappingEnabled: boolean;
+  snapPointsMs: number[];
   onMoveClip: (clipId: string, trackId: string, startMs: number) => void;
   onTrimClip: (clipId: string, updates: Partial<Pick<VideoTimelineClip, 'start_ms' | 'duration_ms' | 'trim_in_ms' | 'trim_out_ms'>>) => void;
   onAddAsset: (assetId: string, trackId: string, trackType: VideoTimelineTrackType, startMs: number) => void;
-  onSelectClip: (clipId: string, trackId: string) => void;
+  onSelectClip: (clipId: string, trackId: string, additive?: boolean) => void;
   onToggleMute: (trackId: string) => void;
   onToggleLock: (trackId: string) => void;
   onToggleVisibility: (trackId: string) => void;
@@ -71,8 +91,12 @@ export function TimelineTrack({
           if (track.locked) return;
           const clipId = event.dataTransfer.getData('application/x-video-clip-id');
           const assetId = event.dataTransfer.getData('application/x-video-asset-id');
+          const grabOffsetPx = Number(event.dataTransfer.getData('application/x-video-clip-grab-offset')) || 0;
           const rect = event.currentTarget.getBoundingClientRect();
-          const startMs = Math.max(0, Math.round((event.clientX - rect.left) / pxPerMs));
+          let startMs = Math.max(0, Math.round((event.clientX - rect.left - grabOffsetPx) / pxPerMs));
+          if (snappingEnabled) {
+            startMs = Math.max(0, snapToPoints(startMs, snapPointsMs, pxPerMs));
+          }
           if (clipId) {
             onMoveClip(clipId, track.id, startMs);
           } else if (assetId) {
@@ -86,7 +110,7 @@ export function TimelineTrack({
             key={clip.id}
             clip={clip}
             asset={assets.find((asset) => asset.id === clip.asset_id)}
-            selected={selectedClipId === clip.id}
+            selected={selectedClipIds.includes(clip.id)}
             pxPerMs={pxPerMs}
             trackId={track.id}
             onSelect={onSelectClip}

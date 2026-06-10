@@ -1,6 +1,6 @@
 # Video Studio Next Phases
 
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-10_
 
 ## Purpose
 
@@ -10,7 +10,9 @@ The goal is to move Video Studio from a broad working foundation to a production
 
 > **Verification note (2026-06-01):** The baseline below was re-verified against the `main` branch source. File-path anchors and per-phase "Status" callouts were added so the phases reflect what is actually implemented today rather than treating each phase as greenfield. Where a subsystem is more (or less) complete than originally written, the discrepancy is called out explicitly.
 
-> **Implementation progress (2026-06-01):** Phase 1 implementation has started. Added backend provider/model capability validation, a frontend validation preflight, Gemini negative-prompt payload wiring, seed UI exposure, provider documentation updates, and focused backend tests. Phase 2 implementation now includes completed generation actions for timeline/chat/File Library handoff, explicit regenerate-from-history, richer review-card metadata, readable failure diagnostics, enhanced-prompt reuse, and deterministic prompt variants. Phase 3 implementation has started with timeline undo/redo, extended keyboard shortcuts, media-bin drag/drop, and clip trim handles. Phase 4-7 implementation remains pending.
+> **Implementation progress (2026-06-01):** Phase 1 implementation has started. Added backend provider/model capability validation, a frontend validation preflight, Gemini negative-prompt payload wiring, seed UI exposure, provider documentation updates, and focused backend tests. Phase 2 implementation now includes completed generation actions for timeline/chat/File Library handoff, explicit regenerate-from-history, richer review-card metadata, readable failure diagnostics, enhanced-prompt reuse, and deterministic prompt variants. Phase 3 implementation has started with timeline undo/redo, extended keyboard shortcuts, media-bin drag/drop, and clip trim handles.
+>
+> **Implementation progress (2026-06-10):** Phase 3 is now substantially complete (multi-select, snapping drops with grab-offset moves, zoom-to-fit, media-bin grid/list + filters + thumbnails + rename/delete + source metadata, empty-state onboarding). Phase 4 landed: renderer capability metadata endpoint with derived frontend warnings, FFmpeg export support for positioning, cropping, opacity, video/audio fades, fade-style transitions, basic effects, per-clip volume, hidden/muted track semantics, export presets (16:9/9:16/1:1/custom), and FFmpeg command/stderr diagnostics persisted in render job metadata (migration V41). Phase 5 landed: assistant edit planning now receives structured timeline/asset/selection/renderer-capability context, plans carry per-operation previews and validation issues, apply is partial-tolerant, move_clip/delete_clip operations are supported, and quick workflow buttons exist in the inspector. Phase 6 progressed: upload MIME sniffing + per-kind size/dimension limits, and interrupted render jobs are failed cleanly on restart (generation recovery already existed). Remaining: keyframes/rotation/true xfade at export, track solo, storage hygiene + observability (Phase 6 tasks 2/4/5), frontend component tests, and Phase 7 provider expansion.
 
 ## Current Baseline
 
@@ -26,7 +28,7 @@ Video Studio has a strong architectural base. Backend lives in [backend/internal
 - Cross-studio asset flow via `ImportExternalAsset` (`service.go`) resolving `file_library`, `music`, `image`, and `attachment` sources. **UI caveat:** only Image Studio has a wired handoff (auto-loads as start frame); there is no in-UI picker to pull from Music Studio or other studios yet.
 - Upload/import support for local assets.
 - Neutral timeline JSON ([timeline.go](backend/internal/video/timeline.go), `TimelineDocument` v1) for video, image, audio, music, text, caption, shape, and callout track types.
-- FFmpeg-backed render/export jobs ([renderer.go](backend/internal/video/renderer.go)). **Fidelity caveat:** the renderer composites clip trim, ordering, scaling, fixed-position overlay (`x=0:y=0`), `drawtext` for text/caption/callout, and multi-track audio mix (`atrim`/`adelay`/`amix`). It does **not** yet apply opacity, fades, arbitrary transforms/positioning, transitions, effects, or keyframes — these are stored in the timeline JSON but dropped at export (the inspector shows a standing warning to this effect). This is the core driver for Phase 4.
+- FFmpeg-backed render/export jobs ([renderer.go](backend/internal/video/renderer.go)). As of 2026-06-10 the renderer composites clip trim, ordering, scaling, **positioning (transform x/y/scale)**, **fractional cropping**, **opacity**, **video/audio fade in/out**, **fade-style transitions (alpha-fade approximation)**, **basic effects (brightness/contrast/saturation/blur/grayscale)**, `drawtext` for text/caption/callout, per-clip **volume**, and multi-track audio mix. Still dropped at export: keyframes, rotation, slide/wipe/zoom transitions, and track solo. Capability reporting lives in [renderer_capabilities.go](backend/internal/video/renderer_capabilities.go) (`GET /v1/video/render/capabilities`) and the inspector/export warnings are derived from it.
 - Assistant endpoints for storyboard, timeline-plan, edit-plan, apply-edit-plan, and social-variants ([assistant.go](backend/internal/video/assistant.go)), with deterministic fallbacks; surfaced in the inspector UI.
 - Video-to-chat (`attach-to-conversation`) and File Library registration (`register-in-library`) endpoints exist on the backend, in [frontend/src/api.ts](frontend/src/api.ts), and are now exposed as generation history actions (see Phase 2).
 
@@ -222,7 +224,7 @@ Move Video Edit Studio from a partially usable editor to a fully usable timeline
 
 The editor already has more than the original draft assumed. Already implemented: timeline **zoom**, **snapping** (toggle, on by default), **keyboard shortcuts** (Space play/pause, Delete/Backspace delete, Ctrl+S save, S split-at-playhead, Ctrl+Z undo, Ctrl+Y/Ctrl+Shift+Z redo), **undo/redo history** for timeline mutations, **media-bin drag/drop** into tracks, **clip trim handles**, **playhead playback with preview sync** (`VideoPreviewCanvas` scrubs to `playheadMs`), clip move/split/duplicate/delete reducers, and a working **inspector** (transform/opacity/volume/fade/text + effect/transition/keyframe authoring). 
 
-**Not yet implemented — remaining Phase 3 work:** multi-select, media-bin thumbnails/filters/rename/delete, zoom-to-fit, richer clip move affordances, and component-level tests for key timeline interactions.
+**Not yet implemented — remaining Phase 3 work:** ~~multi-select, media-bin thumbnails/filters/rename/delete, zoom-to-fit, richer clip move affordances~~ _(landed 2026-06-10)_, and component-level tests for key timeline interactions (still pending a frontend unit-test harness).
 
 ### Implementation Progress as of 2026-06-01
 
@@ -230,22 +232,27 @@ The editor already has more than the original draft assumed. Already implemented
 - **Completed:** Added toolbar Undo/Redo controls and Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z shortcuts in the timeline.
 - **Completed:** Media-bin assets are draggable into specific timeline tracks; drops preserve the target track and drop time.
 - **Completed:** Timeline clips now expose start/end trim handles that call the existing `trimClip` reducer and save path.
+- **Completed (2026-06-10):** Multi-select via Ctrl/Cmd/Shift-click with multi-clip delete/duplicate (`selectedClipIds` in the store), Escape clears selection.
+- **Completed (2026-06-10):** Drops snap to clip edges and the playhead when snapping is on, and clip drags preserve the grab offset so moves don't jump to the cursor.
+- **Completed (2026-06-10):** Zoom-to-fit toolbar action sized to the visible timeline width.
+- **Completed (2026-06-10):** Media bin grid/list toggle, asset-type filters, image/video thumbnails, inline rename (new `PATCH /v1/video/assets/{id}`), delete with confirm, and source studio/type/duration/size metadata.
+- **Completed (2026-06-10):** Empty-timeline onboarding hint.
 - **Verified:** `npm run build` passes after the Phase 3 editor changes.
-- **Remaining:** multi-select, media-bin thumbnail/filter/rename/delete workflow, zoom-to-fit, richer move affordances, and focused timeline interaction tests.
+- **Remaining:** focused timeline interaction tests (blocked on adding a frontend unit-test harness).
 
-> Note: opacity/fade/transform values authored in the inspector are **not honored by the export renderer yet** (Phase 4). The inspector already shows a warning; keep that warning accurate as Phase 4 lands.
+> Note: opacity, fades, position/scale, crop, basic effects, and fade-style transitions **are now honored by the export renderer** (Phase 4, 2026-06-10). Keyframes and rotation are still preview-only; the inspector warning is now derived from the renderer capability endpoint so it stays accurate automatically.
 
 ### Implementation Tasks
 
 1. Add editor interaction fundamentals.
    - Undo/redo stack. _(wired — includes assistant-applied plans)_
    - Timeline zoom. _(exists)_
-   - Timeline snapping. _(exists)_
-   - Multi-select clips. _(missing)_
-   - Keyboard shortcuts. _(extended with undo/redo)_
+   - Timeline snapping. _(exists; drops now snap to clip edges and playhead)_
+   - Multi-select clips. _(wired — Ctrl/Cmd/Shift-click, multi delete/duplicate, Escape clears)_
+   - Keyboard shortcuts. _(extended with undo/redo and Escape)_
    - Drag/drop media from bin to timeline. _(wired)_
    - Better trim handles. _(wired)_
-   - Better clip move affordances. _(remaining)_
+   - Better clip move affordances. _(wired — grab-offset preserved on drag, snap on drop)_
 
 2. Improve playback and preview.
    - Timeline playhead playback.
@@ -254,11 +261,11 @@ The editor already has more than the original draft assumed. Already implemented
    - Preview reflects transforms, opacity, text, and basic clip timing.
 
 3. Improve media bin workflow.
-   - Thumbnail grid/list toggle.
-   - Asset type filters.
-   - Rename/delete asset actions.
+   - Thumbnail grid/list toggle. _(wired)_
+   - Asset type filters. _(wired)_
+   - Rename/delete asset actions. _(wired — rename uses new `PATCH /v1/video/assets/{id}`)_
    - Drag asset into timeline. _(wired)_
-   - Show source studio/source ID metadata.
+   - Show source studio/source ID metadata. _(wired)_
 
 4. Improve inspector usability.
    - Clip timing controls.
@@ -269,12 +276,12 @@ The editor already has more than the original draft assumed. Already implemented
    - Warnings for settings not yet supported by export.
 
 5. Add timeline usability polish.
-   - Track headers.
-   - Track lock/mute/solo visibility flags.
-   - Clip duration labels.
-   - Time ruler.
-   - Zoom-to-fit.
-   - Empty-state onboarding.
+   - Track headers. _(exists)_
+   - Track lock/mute/solo visibility flags. _(lock/mute/visibility exist; solo needs a schema field)_
+   - Clip duration labels. _(exists)_
+   - Time ruler. _(exists)_
+   - Zoom-to-fit. _(wired)_
+   - Empty-state onboarding. _(wired)_
 
 ### Acceptance Criteria
 
@@ -300,25 +307,39 @@ Make exported videos match the timeline preview more closely.
 
 ### Current Gap
 
-The timeline JSON stores effects, transitions, fades, opacity, keyframes, transforms, and audio information, but the FFmpeg renderer ([renderer.go](backend/internal/video/renderer.go)) honors only a subset. This is a confirmed gap, not a hypothetical one: the inspector ships a standing warning — _"Effects, transitions, fades, opacity, and keyframes are stored in the timeline JSON but are not yet applied by the FFmpeg renderer during video export."_
+The timeline JSON stores effects, transitions, fades, opacity, keyframes, transforms, and audio information, but the FFmpeg renderer ([renderer.go](backend/internal/video/renderer.go)) historically honored only a subset.
 
-Verified renderer behavior as of 2026-06-01:
+Verified renderer behavior as of 2026-06-10:
 
 | Timeline feature | Rendered today? |
 |---|---|
 | Clip trim (`trim_in_ms`/`trim_out_ms`) | ✅ |
 | Clip ordering / timing (`overlay enable=between(...)`) | ✅ |
-| Video/image scaling | ✅ |
-| Positioning / transform | ❌ overlay is hardcoded `x=0:y=0` |
-| Cropping | ❌ |
-| Opacity | ❌ |
-| Fade in/out (video) | ❌ |
+| Video/image scaling (incl. transform `scale`) | ✅ |
+| Positioning / transform (`x`/`y` offset from center) | ✅ |
+| Cropping (fractional `transform.crop`) | ✅ |
+| Rotation | ❌ preview-only |
+| Opacity (`colorchannelmixer`) | ✅ |
+| Fade in/out (video, alpha fades) | ✅ |
 | Text / caption / callout (`drawtext`) | ✅ |
-| Transitions | ❌ |
-| Effects / keyframes | ❌ |
-| Multi-track audio mix (`atrim`/`adelay`/`amix`) | ✅ (basic) |
+| Transitions | ⚠ fade/crossfade/dip_to_black rendered as alpha fades; slide/wipe/zoom dropped |
+| Effects | ⚠ brightness/contrast/saturation/blur/grayscale render; others dropped |
+| Keyframes | ❌ |
+| Multi-track audio mix (`atrim`/`adelay`/`amix`) | ✅ |
+| Per-clip volume / audio fades | ✅ |
+| Track hide (video) / mute (audio) | ✅ |
+| Track solo | ❌ not in timeline schema |
 
-So tasks below that read as "add" are in two buckets: **accuracy hardening** for what already renders (trim, ordering, scaling, text, audio mix) and **net-new** for what is dropped (positioning/crop, opacity, fades, transitions, effects, keyframes).
+### Implementation Progress as of 2026-06-10
+
+- **Completed:** Renderer capability metadata in [renderer_capabilities.go](backend/internal/video/renderer_capabilities.go), exposed at `GET /v1/video/render/capabilities`; inspector and export-panel warnings are derived from it instead of hardcoded copy.
+- **Completed:** Filter-graph rewrite in `buildFilterComplex` — per-clip transform (position/scale), fractional crop, opacity, video alpha fades, fade-style transition approximation, effect filters, per-clip audio volume, and audio fades.
+- **Completed:** Hidden tracks now drop only video; muted tracks drop only audio.
+- **Completed:** Export presets — Project/720p/1080p plus YouTube 16:9, Shorts 9:16, Square 1:1, and custom width/height/FPS (`ExportSettings.Preset/Width/Height`, frontend preset selector).
+- **Completed:** Render diagnostics — migration V41 adds `video_render_jobs.metadata_json`; the FFmpeg command is stored for successful renders and command + stderr for failures (`RenderError`); failed jobs show a collapsible "FFmpeg diagnostics" view; output dimensions/duration and estimated-duration match are recorded.
+- **Completed:** Interrupted render jobs (queued/running at process exit) are marked failed at startup (`RecoverInterruptedRenderJobs`).
+- **Verified:** `go test ./internal/video` covers filter construction (transform/opacity/fades/effects/volume), transition fallback, fade capping, crop parsing, custom dimensions, export settings validation, capability matrix, and track hide/mute semantics.
+- **Remaining:** keyframe animation, rotation, true `xfade` transitions, track solo (needs a schema field), and ffprobe-based media probe metadata.
 
 ### Implementation Tasks
 
@@ -384,7 +405,17 @@ Move the assistant from generic storyboard/edit suggestions to concrete timeline
 
 The assistant scaffolding exists end-to-end: five endpoints (`storyboard`, `timeline-plan`, `edit-plan`, `apply-edit-plan`, `social-variants`) in [assistant.go](backend/internal/video/assistant.go) with deterministic fallbacks, `api.ts` wrappers, and inspector UI that renders storyboards, edit-plan summaries (with an Apply button), and social-variant badges. The work here is **depth and safety**, not plumbing: feeding real timeline/asset/track/selection context into planning, validating each operation, and producing human-readable previews before apply.
 
-> **Cross-phase dependency:** task 4's "Keep undo/redo compatible with assistant-applied plans" and the acceptance criterion "Assistant-applied edits are undoable" both presuppose the **Phase 3 undo/redo stack, which does not exist yet**. Either sequence Phase 3's undo/redo before this phase, or descope undoability from Phase 5's acceptance criteria.
+> **Cross-phase dependency:** resolved — the Phase 3 undo/redo stack exists and covers assistant-applied plans.
+
+### Implementation Progress as of 2026-06-10
+
+- **Completed:** Edit planning receives structured context — canvas/duration, asset list, track/clip structure, selected clip, playhead, and renderer capability limitations (`timelineContextSummary`); the LLM prompt forbids inventing clip/track ids.
+- **Completed:** `ValidateEditPlanOperations` checks every operation against the current timeline; plans return `preview` (human-readable per-op lines) and `issues` (rejected operations) which the inspector renders before Apply.
+- **Completed:** `ApplyEditPlan` applies only the valid subset (partial application) and errors clearly when nothing is applicable; the frontend reports skipped operations.
+- **Completed:** New `move_clip` and `delete_clip` operations; deterministic fallback now also covers 15-second teaser, lower thirds, captions, and tighten-pacing (trims trailing dead space).
+- **Completed:** Quick workflow buttons in the inspector (30s social cut, 15s teaser, vertical 9:16, square 1:1, title card, lower third, captions, tighten pacing).
+- **Completed:** Social variants use the actual timeline state (canvas FPS, content-capped duration) and return validated plans.
+- **Remaining:** storyboard-to-timeline builder, richer LLM workflows that target specific clips by content, and asset-ownership validation beyond project scoping.
 
 ### Implementation Tasks
 
@@ -440,6 +471,14 @@ Make the Video Edit Studio assistant timeline-aware. Pass structured project, as
 ### Objective
 
 Make Video Studio resilient across app restarts, provider failures, large assets, and long-running jobs.
+
+### Implementation Progress as of 2026-06-10
+
+- **Already existed:** `RecoverPendingGenerations` re-spawns Gemini poll goroutines for pending/running generations with an upstream job ID at startup.
+- **Completed:** `RecoverInterruptedRenderJobs` marks render jobs orphaned by a restart as failed with a clear message.
+- **Completed:** Upload validation — content is MIME-sniffed (`http.DetectContentType`) and must agree with the declared type; only image/video/audio kinds are accepted; per-kind size limits (image 25 MB, audio 100 MB, video 500 MB); image dimensions are checked (≤ 8192×8192) and stored on the asset.
+- **Completed (overlap with Phase 4):** FFmpeg command/stderr diagnostics persisted on failed render jobs.
+- **Remaining:** upstream cancellation mapping, transient download retries, video duration limits (needs ffprobe), storage hygiene/orphan cleanup + accounting, and structured request-ID logging/metrics.
 
 ### Implementation Tasks
 
