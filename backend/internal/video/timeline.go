@@ -3,6 +3,7 @@ package video
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/ajbergh/omnillm-studio/internal/models"
@@ -18,6 +19,77 @@ const (
 	TrackTypeCaption = "caption"
 	TrackTypeShape   = "shape"
 	TrackTypeCallout = "callout"
+)
+
+// CurrentTimelineVersion is the newest timeline document version this build
+// can read and write. Documents from future builds fail with an actionable
+// error instead of being silently mangled.
+const CurrentTimelineVersion = 1
+
+const (
+	EffectTypeBlur           = "blur"
+	EffectTypeBrightness     = "brightness"
+	EffectTypeContrast       = "contrast"
+	EffectTypeSaturation     = "saturation"
+	EffectTypeGrayscale      = "grayscale"
+	EffectTypeShadow         = "shadow"
+	EffectTypeBackgroundBlur = "background_blur"
+	EffectTypeChromaKey      = "chroma_key"
+	EffectTypeSharpen        = "sharpen"
+	EffectTypeVignette       = "vignette"
+)
+
+const (
+	TransitionTypeFade       = "fade"
+	TransitionTypeCrossfade  = "crossfade"
+	TransitionTypeDipToBlack = "dip_to_black"
+	TransitionTypeSlide      = "slide"
+	TransitionTypeWipe       = "wipe"
+	TransitionTypeZoom       = "zoom"
+)
+
+var knownEffectTypes = map[string]bool{
+	EffectTypeBlur:           true,
+	EffectTypeBrightness:     true,
+	EffectTypeContrast:       true,
+	EffectTypeSaturation:     true,
+	EffectTypeGrayscale:      true,
+	EffectTypeShadow:         true,
+	EffectTypeBackgroundBlur: true,
+	EffectTypeChromaKey:      true,
+	EffectTypeSharpen:        true,
+	EffectTypeVignette:       true,
+}
+
+var knownTransitionTypes = map[string]bool{
+	TransitionTypeFade:       true,
+	TransitionTypeCrossfade:  true,
+	TransitionTypeDipToBlack: true,
+	TransitionTypeSlide:      true,
+	TransitionTypeWipe:       true,
+	TransitionTypeZoom:       true,
+}
+
+var knownKeyframeProperties = map[string]bool{
+	"x":        true,
+	"y":        true,
+	"scale":    true,
+	"rotation": true,
+	"opacity":  true,
+	"volume":   true,
+}
+
+var knownKeyframeEasings = map[string]bool{
+	"linear":      true,
+	"ease-in":     true,
+	"ease-out":    true,
+	"ease-in-out": true,
+	"step":        true,
+}
+
+const (
+	minTrackHeight = 32
+	maxTrackHeight = 160
 )
 
 type TimelineDocument struct {
@@ -43,6 +115,7 @@ type TimelineTrack struct {
 	Locked  bool           `json:"locked"`
 	Muted   bool           `json:"muted"`
 	Visible bool           `json:"visible"`
+	Height  *int           `json:"height,omitempty"`
 	Clips   []TimelineClip `json:"clips"`
 }
 
@@ -53,6 +126,8 @@ type TimelineClip struct {
 	DurationMS  int64                `json:"duration_ms"`
 	TrimInMS    int64                `json:"trim_in_ms"`
 	TrimOutMS   int64                `json:"trim_out_ms"`
+	ZIndex      *int                 `json:"z_index,omitempty"`
+	GroupID     string               `json:"group_id,omitempty"`
 	Transform   map[string]any       `json:"transform,omitempty"`
 	Volume      *float64             `json:"volume,omitempty"`
 	FadeInMS    int64                `json:"fade_in_ms,omitempty"`
@@ -70,14 +145,20 @@ type TimelineMarker struct {
 }
 
 type TimelineText struct {
-	Text       string         `json:"text"`
-	FontSize   int            `json:"font_size,omitempty"`
-	FontWeight string         `json:"font_weight,omitempty"`
-	Color      string         `json:"color,omitempty"`
-	Background string         `json:"background,omitempty"`
-	Stroke     string         `json:"stroke,omitempty"`
-	Shadow     bool           `json:"shadow,omitempty"`
-	Params     map[string]any `json:"params,omitempty"`
+	Text          string         `json:"text"`
+	FontFamily    string         `json:"font_family,omitempty"`
+	FontSize      int            `json:"font_size,omitempty"`
+	FontWeight    string         `json:"font_weight,omitempty"`
+	Color         string         `json:"color,omitempty"`
+	Background    string         `json:"background,omitempty"`
+	Stroke        string         `json:"stroke,omitempty"`
+	StrokeWidth   float64        `json:"stroke_width,omitempty"`
+	Shadow        bool           `json:"shadow,omitempty"`
+	TextAlign     string         `json:"text_align,omitempty"`
+	LineHeight    float64        `json:"line_height,omitempty"`
+	LetterSpacing float64        `json:"letter_spacing,omitempty"`
+	BorderRadius  float64        `json:"border_radius,omitempty"`
+	Params        map[string]any `json:"params,omitempty"`
 }
 
 type TimelineEffect struct {
@@ -163,12 +244,28 @@ func TimelineFromJSON(raw string, fallback TimelineDocument) (TimelineDocument, 
 	return ValidateTimelineDocument(doc)
 }
 
-func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
+// UpgradeTimelineDocument normalizes the document version and applies
+// stepwise upgrades for older versions. All schema changes so far have been
+// additive (optional fields), so version 1 is still current; when the first
+// breaking change lands, chain v1->v2 (etc.) upgraders here and bump
+// CurrentTimelineVersion.
+func UpgradeTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 	if doc.Version == 0 {
 		doc.Version = 1
 	}
-	if doc.Version != 1 {
+	if doc.Version > CurrentTimelineVersion {
+		return TimelineDocument{}, fmt.Errorf("unsupported timeline version %d: this build supports versions up to %d — upgrade OmniLLM Studio to open this timeline", doc.Version, CurrentTimelineVersion)
+	}
+	if doc.Version < 1 {
 		return TimelineDocument{}, fmt.Errorf("unsupported timeline version %d", doc.Version)
+	}
+	return doc, nil
+}
+
+func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
+	doc, err := UpgradeTimelineDocument(doc)
+	if err != nil {
+		return TimelineDocument{}, err
 	}
 	if doc.Canvas.Width <= 0 {
 		doc.Canvas.Width = DefaultProjectWidth
@@ -188,6 +285,25 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 	if doc.Markers == nil {
 		doc.Markers = []TimelineMarker{}
 	}
+	markerIDs := map[string]bool{}
+	for mi := range doc.Markers {
+		marker := &doc.Markers[mi]
+		marker.ID = strings.TrimSpace(marker.ID)
+		if marker.ID == "" {
+			marker.ID = "marker-" + uuid.New().String()
+		}
+		if markerIDs[marker.ID] {
+			return TimelineDocument{}, fmt.Errorf("duplicate marker id %q", marker.ID)
+		}
+		markerIDs[marker.ID] = true
+		if marker.TimeMS < 0 {
+			marker.TimeMS = 0
+		}
+		marker.Label = strings.TrimSpace(marker.Label)
+	}
+	sort.SliceStable(doc.Markers, func(i, j int) bool {
+		return doc.Markers[i].TimeMS < doc.Markers[j].TimeMS
+	})
 	if doc.Tracks == nil {
 		doc.Tracks = []TimelineTrack{}
 	}
@@ -210,6 +326,16 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 		}
 		if strings.TrimSpace(track.Name) == "" {
 			track.Name = defaultTrackName(track.Type, ti+1)
+		}
+		if track.Height != nil {
+			height := *track.Height
+			if height < minTrackHeight {
+				height = minTrackHeight
+			}
+			if height > maxTrackHeight {
+				height = maxTrackHeight
+			}
+			track.Height = &height
 		}
 		if track.Clips == nil {
 			track.Clips = []TimelineClip{}
@@ -236,6 +362,7 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 			if clip.TrimOutMS == 0 {
 				clip.TrimOutMS = clip.TrimInMS + clip.DurationMS
 			}
+			clip.GroupID = strings.TrimSpace(clip.GroupID)
 			if clip.Transform == nil && track.Type != TrackTypeAudio && track.Type != TrackTypeMusic {
 				clip.Transform = defaultTransform()
 			}
@@ -248,17 +375,62 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 			if clip.Transitions == nil {
 				clip.Transitions = []TimelineTransition{}
 			}
+			effectIDs := map[string]bool{}
 			for ei := range clip.Effects {
-				if clip.Effects[ei].ID == "" {
-					clip.Effects[ei].ID = "effect-" + uuid.New().String()
+				effect := &clip.Effects[ei]
+				if effect.ID == "" {
+					effect.ID = "effect-" + uuid.New().String()
 				}
-				if clip.Effects[ei].Params == nil {
-					clip.Effects[ei].Params = map[string]any{}
+				if effectIDs[effect.ID] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has duplicate effect id %q", clip.ID, effect.ID)
+				}
+				effectIDs[effect.ID] = true
+				effect.Type = strings.ToLower(strings.TrimSpace(effect.Type))
+				if !knownEffectTypes[effect.Type] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has unsupported effect type %q", clip.ID, effect.Type)
+				}
+				if effect.Params == nil {
+					effect.Params = map[string]any{}
 				}
 			}
+			transitionIDs := map[string]bool{}
+			for xi := range clip.Transitions {
+				transition := &clip.Transitions[xi]
+				if transition.ID == "" {
+					transition.ID = "transition-" + uuid.New().String()
+				}
+				if transitionIDs[transition.ID] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has duplicate transition id %q", clip.ID, transition.ID)
+				}
+				transitionIDs[transition.ID] = true
+				transition.Type = strings.ToLower(strings.TrimSpace(transition.Type))
+				if !knownTransitionTypes[transition.Type] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has unsupported transition type %q", clip.ID, transition.Type)
+				}
+				if transition.DurationMS <= 0 {
+					return TimelineDocument{}, fmt.Errorf("clip %q transition %q duration_ms must be greater than zero", clip.ID, transition.ID)
+				}
+			}
+			keyframeIDs := map[string]bool{}
 			for ki := range clip.Keyframes {
-				if clip.Keyframes[ki].ID == "" {
-					clip.Keyframes[ki].ID = "keyframe-" + uuid.New().String()
+				keyframe := &clip.Keyframes[ki]
+				if keyframe.ID == "" {
+					keyframe.ID = "keyframe-" + uuid.New().String()
+				}
+				if keyframeIDs[keyframe.ID] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has duplicate keyframe id %q", clip.ID, keyframe.ID)
+				}
+				keyframeIDs[keyframe.ID] = true
+				keyframe.Property = strings.ToLower(strings.TrimSpace(keyframe.Property))
+				if !knownKeyframeProperties[keyframe.Property] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has unsupported keyframe property %q", clip.ID, keyframe.Property)
+				}
+				if keyframe.TimeMS < 0 {
+					return TimelineDocument{}, fmt.Errorf("clip %q keyframe %q time_ms cannot be negative", clip.ID, keyframe.ID)
+				}
+				keyframe.Easing = strings.ToLower(strings.TrimSpace(keyframe.Easing))
+				if keyframe.Easing != "" && !knownKeyframeEasings[keyframe.Easing] {
+					keyframe.Easing = "linear"
 				}
 			}
 			if end := clip.StartMS + clip.DurationMS; end > maxEnd {

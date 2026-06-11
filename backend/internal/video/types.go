@@ -10,6 +10,7 @@ type Capability string
 const (
 	ProviderOpenRouter = "openrouter"
 	ProviderGemini     = "gemini"
+	ProviderLuma       = "luma"
 	ProviderOpenAI     = "openai"
 	ProviderCustom     = "custom"
 

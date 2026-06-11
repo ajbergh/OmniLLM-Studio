@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Type } from 'lucide-react';
+import { ArrowDown, ArrowUp, Plus, Sparkles, Trash2, Type } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import type { VideoTimelineClip } from '../../types/video';
@@ -38,8 +38,15 @@ export function VideoInspector() {
   const updateClipFade = useVideoStudioStore((state) => state.updateClipFade);
   const updateClipText = useVideoStudioStore((state) => state.updateClipText);
   const addClipEffect = useVideoStudioStore((state) => state.addClipEffect);
+  const toggleClipEffect = useVideoStudioStore((state) => state.toggleClipEffect);
+  const removeClipEffect = useVideoStudioStore((state) => state.removeClipEffect);
   const addClipTransition = useVideoStudioStore((state) => state.addClipTransition);
+  const removeClipTransition = useVideoStudioStore((state) => state.removeClipTransition);
   const addKeyframe = useVideoStudioStore((state) => state.addKeyframe);
+  const removeKeyframe = useVideoStudioStore((state) => state.removeKeyframe);
+  const bringClipForward = useVideoStudioStore((state) => state.bringClipForward);
+  const sendClipBackward = useVideoStudioStore((state) => state.sendClipBackward);
+  const setCanvas = useVideoStudioStore((state) => state.setCanvas);
   const addTextClip = useVideoStudioStore((state) => state.addTextClip);
   const requestStoryboard = useVideoStudioStore((state) => state.requestStoryboard);
   const requestEditPlan = useVideoStudioStore((state) => state.requestEditPlan);
@@ -147,13 +154,115 @@ export function VideoInspector() {
           </button>
         </div>
         {!clip ? (
-          <div className="rounded-lg border border-dashed border-border bg-surface-alt p-4 text-center text-xs text-text-muted">
-            {timeline ? 'Select a clip to edit.' : 'No timeline loaded.'}
-          </div>
+          !timeline ? (
+            <div className="rounded-lg border border-dashed border-border bg-surface-alt p-4 text-center text-xs text-text-muted">
+              No timeline loaded.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-[11px] text-text-muted">Select a clip to edit it, or adjust the project canvas.</p>
+              <Field label="Canvas preset">
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    { label: '16:9', width: 1920, height: 1080 },
+                    { label: '9:16', width: 1080, height: 1920 },
+                    { label: '1:1', width: 1080, height: 1080 },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      className={`rounded-md border px-2 py-1 text-[10px] ${
+                        timeline.canvas.width === preset.width && timeline.canvas.height === preset.height
+                          ? 'border-primary/40 bg-primary/10 text-primary'
+                          : 'border-border bg-surface-alt text-text-muted hover:text-text'
+                      }`}
+                      onClick={() => { void setCanvas({ width: preset.width, height: preset.height }); }}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              {/* Commit on blur so typing doesn't save + push undo per keystroke. */}
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Width">
+                  <input
+                    type="number"
+                    min={16}
+                    key={`w-${timeline.canvas.width}`}
+                    defaultValue={timeline.canvas.width}
+                    onBlur={(event) => {
+                      const width = Number(event.target.value);
+                      if (Number.isFinite(width) && width !== timeline.canvas.width) void setCanvas({ width });
+                    }}
+                    onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                    className="min-h-9 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                  />
+                </Field>
+                <Field label="Height">
+                  <input
+                    type="number"
+                    min={16}
+                    key={`h-${timeline.canvas.height}`}
+                    defaultValue={timeline.canvas.height}
+                    onBlur={(event) => {
+                      const height = Number(event.target.value);
+                      if (Number.isFinite(height) && height !== timeline.canvas.height) void setCanvas({ height });
+                    }}
+                    onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                    className="min-h-9 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                  />
+                </Field>
+                <Field label="FPS">
+                  <input
+                    type="number"
+                    min={1}
+                    max={120}
+                    key={`fps-${timeline.canvas.fps}`}
+                    defaultValue={timeline.canvas.fps}
+                    onBlur={(event) => {
+                      const fps = Number(event.target.value);
+                      if (Number.isFinite(fps) && fps !== timeline.canvas.fps) void setCanvas({ fps });
+                    }}
+                    onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                    className="min-h-9 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                  />
+                </Field>
+                <Field label="Background">
+                  <input
+                    type="color"
+                    key={`bg-${timeline.canvas.background}`}
+                    defaultValue={/^#[0-9a-fA-F]{6}$/.test(timeline.canvas.background) ? timeline.canvas.background : '#000000'}
+                    onBlur={(event) => {
+                      if (event.target.value !== timeline.canvas.background) void setCanvas({ background: event.target.value });
+                    }}
+                    className="h-9 w-full cursor-pointer rounded-md border border-border bg-surface-alt"
+                  />
+                </Field>
+              </div>
+            </div>
+          )
         ) : (
           <div className="space-y-3">
             <Field label="Start">
               <span className="text-xs text-text-secondary">{Math.round(clip.start_ms / 100) / 10}s</span>
+            </Field>
+            <Field label={`Layer order: ${clip.z_index ?? 0}`}>
+              <div className="flex gap-2">
+                <button
+                  className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary hover:text-text"
+                  onClick={() => { void bringClipForward(selectedClipId as string); }}
+                >
+                  <ArrowUp size={12} />
+                  Forward
+                </button>
+                <button
+                  className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary hover:text-text"
+                  onClick={() => { void sendClipBackward(selectedClipId as string); }}
+                >
+                  <ArrowDown size={12} />
+                  Backward
+                </button>
+              </div>
             </Field>
             {clip.transform && (
               <>
@@ -216,13 +325,50 @@ export function VideoInspector() {
             })()}
             <div className="space-y-1">
               {clip.effects.map((effect) => (
-                <div key={effect.id} className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] text-text-muted">
-                  {effect.type} · {effect.enabled ? 'on' : 'off'}
+                <div key={effect.id} className="flex items-center gap-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] text-text-muted">
+                  <button
+                    className="min-w-0 flex-1 truncate text-left hover:text-text"
+                    title={effect.enabled ? 'Disable effect' : 'Enable effect'}
+                    onClick={() => { void toggleClipEffect(selectedClipId as string, effect.id); }}
+                  >
+                    {effect.type} · {effect.enabled ? 'on' : 'off'}
+                  </button>
+                  <button
+                    className="rounded p-0.5 hover:text-text"
+                    title="Remove effect"
+                    aria-label={`Remove ${effect.type} effect`}
+                    onClick={() => { void removeClipEffect(selectedClipId as string, effect.id); }}
+                  >
+                    <Trash2 size={11} />
+                  </button>
                 </div>
               ))}
               {(clip.transitions || []).map((transition) => (
-                <div key={transition.id} className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] text-text-muted">
-                  {transition.type} · {transition.duration_ms}ms
+                <div key={transition.id} className="flex items-center gap-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] text-text-muted">
+                  <span className="min-w-0 flex-1 truncate">{transition.type} · {transition.duration_ms}ms</span>
+                  <button
+                    className="rounded p-0.5 hover:text-text"
+                    title="Remove transition"
+                    aria-label={`Remove ${transition.type} transition`}
+                    onClick={() => { void removeClipTransition(selectedClipId as string, transition.id); }}
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              ))}
+              {clip.keyframes.map((keyframe) => (
+                <div key={keyframe.id} className="flex items-center gap-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] text-text-muted">
+                  <span className="min-w-0 flex-1 truncate">
+                    {keyframe.property} @ {Math.round(keyframe.time_ms / 100) / 10}s = {Math.round(keyframe.value * 100) / 100}
+                  </span>
+                  <button
+                    className="rounded p-0.5 hover:text-text"
+                    title="Remove keyframe"
+                    aria-label={`Remove ${keyframe.property} keyframe`}
+                    onClick={() => { void removeKeyframe(selectedClipId as string, keyframe.id); }}
+                  >
+                    <Trash2 size={11} />
+                  </button>
                 </div>
               ))}
             </div>

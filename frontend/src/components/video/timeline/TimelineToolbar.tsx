@@ -1,4 +1,4 @@
-import { Copy, Magnet, Maximize2, Pause, Play, Redo2, Save, Scissors, Trash2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Copy, HelpCircle, Magnet, Maximize2, MousePointer2, Pause, Play, Redo2, Save, Scissors, Slice, Trash2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export function TimelineToolbar({
@@ -8,6 +8,7 @@ export function TimelineToolbar({
   isSaving,
   canUndo,
   canRedo,
+  toolMode,
   onPlayPause,
   onUndo,
   onRedo,
@@ -18,6 +19,8 @@ export function TimelineToolbar({
   onZoom,
   onZoomToFit,
   onToggleSnap,
+  onSetToolMode,
+  onHelp,
 }: {
   isPlaying: boolean;
   snappingEnabled: boolean;
@@ -25,6 +28,7 @@ export function TimelineToolbar({
   isSaving: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  toolMode: 'select' | 'blade';
   onPlayPause: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -35,6 +39,8 @@ export function TimelineToolbar({
   onZoom: (zoom: number) => void;
   onZoomToFit: () => void;
   onToggleSnap: () => void;
+  onSetToolMode: (mode: 'select' | 'blade') => void;
+  onHelp: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-border bg-surface-alt px-2 py-1.5">
@@ -46,6 +52,13 @@ export function TimelineToolbar({
       </IconButton>
       <IconButton label="Redo" onClick={onRedo} disabled={!canRedo}>
         <Redo2 size={14} />
+      </IconButton>
+      <span className="mx-1 h-5 w-px bg-border" />
+      <IconButton label="Select tool (V)" onClick={() => onSetToolMode('select')} active={toolMode === 'select'}>
+        <MousePointer2 size={14} />
+      </IconButton>
+      <IconButton label="Blade tool — click a clip to split (C)" onClick={() => onSetToolMode('blade')} active={toolMode === 'blade'}>
+        <Slice size={14} />
       </IconButton>
       <span className="mx-1 h-5 w-px bg-border" />
       <IconButton label="Split selected clip" onClick={onSplit}>
@@ -74,6 +87,9 @@ export function TimelineToolbar({
       <span className="mx-1 h-5 w-px bg-border" />
       <IconButton label="Save timeline" onClick={onSave} active={isSaving}>
         <Save size={14} className={isSaving ? 'animate-pulse' : ''} />
+      </IconButton>
+      <IconButton label="Keyboard shortcuts (?)" onClick={onHelp}>
+        <HelpCircle size={14} />
       </IconButton>
     </div>
   );

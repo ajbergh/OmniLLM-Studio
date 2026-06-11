@@ -37,20 +37,28 @@ Current FFmpeg export coverage:
 - Canvas size, background color, duration, FPS, format, quality, and optional silent audio.
 - **Video asset compositing** — video clips with `asset_id` pointing to a real video file are overlaid on the canvas at the correct start/duration using FFmpeg `-itsoffset` and `overlay` filter graph entries.
 - **Image asset compositing** — image clips are overlaid on the canvas at the correct start/duration using FFmpeg `overlay` filters.
+- **Per-clip transform** — `x`/`y` position offset, `scale`, and fractional `crop` (`{top, right, bottom, left}`, 0–0.95 each).
+- **Opacity** — applied via `colorchannelmixer`.
+- **Fades** — video fade in/out as alpha fades; audio fade in/out via `afade`.
+- **Transitions (fade-style)** — `fade`, `crossfade`, and `dip_to_black` are rendered as alpha fades.
+- **Effects** — `brightness`, `contrast`, `saturation`, `blur`, and `grayscale` map to FFmpeg filters.
+- **Audio/music mixing** — per-clip `volume`, timeline placement via `adelay`, and multi-track `amix` mixdown.
+- **Track semantics** — hidden tracks drop their video; muted tracks drop their audio.
 - Text/caption/callout clips with timing, font size, text color, optional background box, stroke, and shadow.
+- Render diagnostics — the FFmpeg command (and stderr on failure) is persisted in `video_render_jobs.metadata_json`.
 - Clear render failure if `ffmpeg` is unavailable or returns an encoding error.
 
 ### Not yet rendered in export
 
 The following are stored in the timeline JSON and shown in the editor but are **not yet applied by the FFmpeg renderer**:
 
-- Effects (blur, brightness, contrast, saturation, etc.)
-- Transitions (cross-fade, wipe, etc.)
-- Opacity/fade keyframes
-- Audio/music clip mixing
-- Per-clip transform (scale, rotation, crop) beyond canvas placement
+- Keyframe animation
+- Rotation
+- `slide`/`wipe`/`zoom` transitions (true `xfade` directional transitions)
+- `chroma_key`, `shadow`, and `background_blur` effects
+- Track solo (not yet in the timeline schema)
 
-The inspector panel shows an inline warning when any of these are present on a selected clip, so it is clear that they will not appear in the export.
+Renderer support is reported by `GET /v1/video/render/capabilities` (see `backend/internal/video/renderer_capabilities.go`). The inspector and render panel derive their export-fidelity warnings from that endpoint, so warnings stay accurate as renderer support evolves.
 
 Render/export uses `NewFFmpegRenderer("")` by default. There is no package-local mock renderer.
 

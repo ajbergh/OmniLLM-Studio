@@ -12,16 +12,22 @@ export function TimelineClip({
   selected,
   pxPerMs,
   trackId,
+  toolMode = 'select',
   onSelect,
   onTrim,
+  onSplitAt,
+  onContextMenu,
 }: {
   clip: Clip;
   asset?: VideoAsset;
   selected: boolean;
   pxPerMs: number;
   trackId: string;
+  toolMode?: 'select' | 'blade';
   onSelect: (clipId: string, trackId: string, additive?: boolean) => void;
   onTrim: (clipId: string, updates: Partial<Pick<Clip, 'start_ms' | 'duration_ms' | 'trim_in_ms' | 'trim_out_ms'>>) => void;
+  onSplitAt?: (clipId: string, timeMs: number) => void;
+  onContextMenu?: (clipId: string, trackId: string, clientX: number, clientY: number) => void;
 }) {
   const left = clip.start_ms * pxPerMs;
   const width = Math.max(36, clip.duration_ms * pxPerMs);
@@ -82,7 +88,18 @@ export function TimelineClip({
       }}
       onClick={(event) => {
         event.stopPropagation();
+        if (toolMode === 'blade' && onSplitAt) {
+          const rect = event.currentTarget.getBoundingClientRect();
+          onSplitAt(clip.id, clip.start_ms + Math.round((event.clientX - rect.left) / pxPerMs));
+          return;
+        }
         onSelect(clip.id, trackId, event.ctrlKey || event.metaKey || event.shiftKey);
+      }}
+      onContextMenu={(event) => {
+        if (!onContextMenu) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onContextMenu(clip.id, trackId, event.clientX, event.clientY);
       }}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -92,7 +109,7 @@ export function TimelineClip({
       }}
       className={`absolute top-1 h-9 rounded-md border px-2 text-left text-[11px] transition-colors ${tone} ${
         selected ? 'ring-2 ring-primary ring-offset-1 ring-offset-surface' : ''
-      }`}
+      } ${toolMode === 'blade' ? 'cursor-crosshair' : ''}`}
       style={{ left, width }}
       title={clipLabel(clip, asset)}
     >

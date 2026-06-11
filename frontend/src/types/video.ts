@@ -1,4 +1,4 @@
-export type VideoProviderKey = 'openrouter' | 'gemini' | 'openai' | 'custom';
+export type VideoProviderKey = 'openrouter' | 'gemini' | 'luma' | 'openai' | 'custom';
 
 export type VideoCapability =
   | 'text_to_video'
@@ -223,18 +223,34 @@ export interface VideoTimelineTransform {
 
 export interface VideoTimelineText {
   text: string;
+  font_family?: string;
   font_size?: number;
   font_weight?: string;
   color?: string;
   background?: string;
   stroke?: string;
+  stroke_width?: number;
   shadow?: boolean;
+  text_align?: 'left' | 'center' | 'right';
+  line_height?: number;
+  letter_spacing?: number;
+  border_radius?: number;
   params?: Record<string, unknown>;
 }
 
 export interface VideoTimelineEffect {
   id: string;
-  type: 'blur' | 'brightness' | 'contrast' | 'saturation' | 'grayscale' | 'shadow' | 'background_blur' | 'chroma_key';
+  type:
+    | 'blur'
+    | 'brightness'
+    | 'contrast'
+    | 'saturation'
+    | 'grayscale'
+    | 'shadow'
+    | 'background_blur'
+    | 'chroma_key'
+    | 'sharpen'
+    | 'vignette';
   enabled: boolean;
   params: Record<string, unknown>;
 }
@@ -251,7 +267,7 @@ export interface VideoTimelineKeyframe {
   property: 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume';
   time_ms: number;
   value: number;
-  easing?: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+  easing?: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'step';
 }
 
 export interface VideoTimelineClip {
@@ -261,6 +277,8 @@ export interface VideoTimelineClip {
   duration_ms: number;
   trim_in_ms: number;
   trim_out_ms: number;
+  z_index?: number;
+  group_id?: string;
   transform?: VideoTimelineTransform;
   volume?: number;
   fade_in_ms?: number;
@@ -278,6 +296,7 @@ export interface VideoTimelineTrack {
   locked: boolean;
   muted: boolean;
   visible: boolean;
+  height?: number;
   clips: VideoTimelineClip[];
 }
 

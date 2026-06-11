@@ -16,21 +16,36 @@ function seedImageSessionFixture(title: string): SeedFixture {
   const backendDir = path.join(repoRoot, 'backend');
   const fixtureImage = path.join(backendDir, 'cmd', 'desktop', 'build', 'appicon.png');
 
-  const raw = execFileSync(
-    'go',
-    ['run', './cmd/playwrightseed', '--title', title, '--image', fixtureImage],
-    {
-      cwd: backendDir,
-      encoding: 'utf-8',
-      env: {
-        ...process.env,
-        OMNILLM_DB_PATH: process.env.OMNILLM_PLAYWRIGHT_DB_PATH,
-        OMNILLM_ATTACHMENTS_DIR: process.env.OMNILLM_PLAYWRIGHT_ATTACHMENTS_DIR,
-      },
+  // Parallel workers seed against the same SQLite file, so retry on SQLITE_BUSY.
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const raw = execFileSync(
+        'go',
+        ['run', './cmd/playwrightseed', '--title', title, '--image', fixtureImage],
+        {
+          cwd: backendDir,
+          encoding: 'utf-8',
+          env: {
+            ...process.env,
+            OMNILLM_DB_PATH: process.env.OMNILLM_PLAYWRIGHT_DB_PATH,
+            OMNILLM_ATTACHMENTS_DIR: process.env.OMNILLM_PLAYWRIGHT_ATTACHMENTS_DIR,
+          },
+        }
+      );
+      return JSON.parse(raw.trim()) as SeedFixture;
+    } catch (error) {
+      lastError = error;
+      const message = String(error);
+      if (!message.includes('database is locked') && !message.includes('SQLITE_BUSY')) throw error;
+      const waitMs = 250 * (attempt + 1);
+      const start = Date.now();
+      while (Date.now() - start < waitMs) {
+        // busy-wait; execFileSync flows are synchronous
+      }
     }
-  );
-
-  return JSON.parse(raw.trim()) as SeedFixture;
+  }
+  throw lastError;
 }
 
 test('floating canvas toolbar responds in image edit mode', async ({ page, browserName }) => {
@@ -43,13 +58,15 @@ test('floating canvas toolbar responds in image edit mode', async ({ page, brows
 
   await page.goto('/');
 
-  await page.getByRole('button', { name: 'Image Studio' }).click();
-  await expect(page.getByText(fixture.title)).toBeVisible();
+  await page.getByRole('button', { name: 'Image', exact: true }).click();
+  await expect(page.getByText(fixture.title).first()).toBeVisible();
 
-  await page.getByText(fixture.title).click();
+  await page.getByText(fixture.title).first().click();
   await expect(page.getByText('Image Edit Studio')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Edit' }).click();
+  // The sidebar also has an exact "Edit" button (Video Edit Studio); the studio's
+  // Edit mode tab renders later in the DOM.
+  await page.getByRole('button', { name: 'Edit', exact: true }).last().click();
 
   const toolbar = page.getByTestId('image-canvas-toolbar');
   const zoomValue = page.getByTestId('canvas-zoom-value');
@@ -98,10 +115,10 @@ test('AI enhance rewrites and can undo an image studio prompt', async ({ page, b
 
   await page.goto('/');
 
-  await page.getByRole('button', { name: 'Image Studio' }).click();
-  await expect(page.getByText(fixture.title)).toBeVisible();
+  await page.getByRole('button', { name: 'Image', exact: true }).click();
+  await expect(page.getByText(fixture.title).first()).toBeVisible();
 
-  await page.getByText(fixture.title).click();
+  await page.getByText(fixture.title).first().click();
   await expect(page.getByText('Image Edit Studio')).toBeVisible();
 
   const promptInput = page.getByPlaceholder('Describe the image you want to generate...');

@@ -1,9 +1,12 @@
+import { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, Lock, Unlock, Volume2, VolumeX } from 'lucide-react';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineTrack as Track, VideoTimelineTrackType } from '../../../types/video';
 import { TimelineClip } from './TimelineClip';
 
 // Snap a drop position to nearby clip edges / playhead within this pixel radius.
 const SNAP_RADIUS_PX = 8;
+const DEFAULT_TRACK_HEIGHT = 52;
+const TRACK_HEIGHT_STEP = 16;
 
 function snapToPoints(startMs: number, snapPointsMs: number[], pxPerMs: number): number {
   let best = startMs;
@@ -20,6 +23,8 @@ function snapToPoints(startMs: number, snapPointsMs: number[], pxPerMs: number):
 
 export function TimelineTrack({
   track,
+  trackIndex,
+  trackCount,
   assets,
   selectedClipIds,
   pxPerMs,
@@ -33,8 +38,17 @@ export function TimelineTrack({
   onToggleMute,
   onToggleLock,
   onToggleVisibility,
+  onRenameTrack,
+  onReorderTrack,
+  onRemoveTrack,
+  onSetTrackHeight,
+  toolMode = 'select',
+  onSplitAt,
+  onClipContextMenu,
 }: {
   track: Track;
+  trackIndex: number;
+  trackCount: number;
   assets: VideoAsset[];
   selectedClipIds: string[];
   pxPerMs: number;
@@ -48,11 +62,75 @@ export function TimelineTrack({
   onToggleMute: (trackId: string) => void;
   onToggleLock: (trackId: string) => void;
   onToggleVisibility: (trackId: string) => void;
+  onRenameTrack: (trackId: string, name: string) => void;
+  onReorderTrack: (trackId: string, targetIndex: number) => void;
+  onRemoveTrack: (trackId: string) => void;
+  onSetTrackHeight: (trackId: string, height: number) => void;
+  toolMode?: 'select' | 'blade';
+  onSplitAt?: (clipId: string, timeMs: number) => void;
+  onClipContextMenu?: (clipId: string, trackId: string, clientX: number, clientY: number) => void;
 }) {
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState(track.name);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [dropGuideX, setDropGuideX] = useState<number | null>(null);
+  const headerRef = useRef<HTMLDivElement | null>(null);
+  const trackHeight = track.height || DEFAULT_TRACK_HEIGHT;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!headerRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [menuOpen]);
+
+  const commitRename = () => {
+    setRenaming(false);
+    if (draftName.trim() && draftName.trim() !== track.name) {
+      onRenameTrack(track.id, draftName);
+    }
+  };
+
   return (
-    <div className="grid min-h-[52px] grid-cols-[116px_minmax(0,1fr)] border-b border-border last:border-b-0">
-      <div className="flex min-w-0 items-center gap-1 border-r border-border bg-surface-alt px-2">
-        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-text-secondary">{track.name}</span>
+    <div className="grid grid-cols-[116px_minmax(0,1fr)] border-b border-border last:border-b-0" style={{ minHeight: trackHeight }}>
+      <div
+        ref={headerRef}
+        className="relative flex min-w-0 items-center gap-1 border-r border-border bg-surface-alt px-2"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setMenuOpen(true);
+        }}
+      >
+        {renaming ? (
+          <input
+            autoFocus
+            className="min-w-0 flex-1 rounded border border-border bg-surface px-1 text-[11px] text-text"
+            value={draftName}
+            onChange={(event) => setDraftName(event.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitRename();
+              if (event.key === 'Escape') {
+                setDraftName(track.name);
+                setRenaming(false);
+              }
+              event.stopPropagation();
+            }}
+          />
+        ) : (
+          <span
+            className="min-w-0 flex-1 truncate text-[11px] font-medium text-text-secondary"
+            title={`${track.name} — double-click to rename, right-click for track options`}
+            onDoubleClick={() => {
+              setDraftName(track.name);
+              setRenaming(true);
+            }}
+          >
+            {track.name}
+          </span>
+        )}
         <button
           onClick={() => onToggleMute(track.id)}
           className="rounded p-1 text-text-muted hover:text-text"
@@ -77,6 +155,30 @@ export function TimelineTrack({
         >
           {track.visible ? <Eye size={12} /> : <EyeOff size={12} />}
         </button>
+        {menuOpen && (
+          <div className="absolute left-1 top-full z-30 w-36 rounded-md border border-border bg-surface p-1 shadow-lg">
+            {[
+              { label: 'Rename', disabled: false, action: () => { setDraftName(track.name); setRenaming(true); } },
+              { label: 'Move up', disabled: trackIndex === 0, action: () => onReorderTrack(track.id, trackIndex - 1) },
+              { label: 'Move down', disabled: trackIndex >= trackCount - 1, action: () => onReorderTrack(track.id, trackIndex + 1) },
+              { label: 'Increase height', disabled: false, action: () => onSetTrackHeight(track.id, trackHeight + TRACK_HEIGHT_STEP) },
+              { label: 'Decrease height', disabled: false, action: () => onSetTrackHeight(track.id, trackHeight - TRACK_HEIGHT_STEP) },
+              { label: 'Remove track', disabled: false, action: () => onRemoveTrack(track.id) },
+            ].map((item) => (
+              <button
+                key={item.label}
+                disabled={item.disabled}
+                className="block w-full rounded px-2 py-1 text-left text-[11px] text-text-secondary hover:bg-surface-alt hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => {
+                  setMenuOpen(false);
+                  item.action();
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <div
         className="relative bg-surface"
@@ -84,10 +186,20 @@ export function TimelineTrack({
         onDragOver={(event) => {
           if (!track.locked && (event.dataTransfer.types.includes('application/x-video-clip-id') || event.dataTransfer.types.includes('application/x-video-asset-id'))) {
             event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            // Without the grab offset (unavailable during dragover) the guide marks
+            // the cursor position, snapped to the same targets the drop will use.
+            let guideMs = Math.max(0, Math.round((event.clientX - rect.left) / pxPerMs));
+            if (snappingEnabled) {
+              guideMs = Math.max(0, snapToPoints(guideMs, snapPointsMs, pxPerMs));
+            }
+            setDropGuideX(guideMs * pxPerMs);
           }
         }}
+        onDragLeave={() => setDropGuideX(null)}
         onDrop={(event) => {
           event.preventDefault();
+          setDropGuideX(null);
           if (track.locked) return;
           const clipId = event.dataTransfer.getData('application/x-video-clip-id');
           const assetId = event.dataTransfer.getData('application/x-video-asset-id');
@@ -105,6 +217,9 @@ export function TimelineTrack({
         }}
         onClick={() => onSelectClip('', track.id)}
       >
+        {dropGuideX !== null && (
+          <div className="pointer-events-none absolute top-0 z-10 h-full w-px bg-primary/80" style={{ left: dropGuideX }} />
+        )}
         {track.clips.map((clip) => (
           <TimelineClip
             key={clip.id}
@@ -113,8 +228,11 @@ export function TimelineTrack({
             selected={selectedClipIds.includes(clip.id)}
             pxPerMs={pxPerMs}
             trackId={track.id}
+            toolMode={toolMode}
             onSelect={onSelectClip}
             onTrim={onTrimClip}
+            onSplitAt={onSplitAt}
+            onContextMenu={onClipContextMenu}
           />
         ))}
       </div>

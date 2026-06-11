@@ -516,25 +516,9 @@ func (p *GeminiProvider) operationURL(operationName string) string {
 }
 
 func (p *GeminiProvider) downloadVideo(ctx context.Context, videoURI string) ([]byte, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.mediaURL(videoURI), nil)
-	if err != nil {
-		return nil, "", err
-	}
-	req.Header.Set("x-goog-api-key", p.apiKey)
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("download Gemini Veo video: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderJSONBytes))
-		return nil, "", fmt.Errorf("Gemini video download returned %s: %s", resp.Status, responseSnippet(body))
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxProviderDownloadBytes))
-	if err != nil {
-		return nil, "", fmt.Errorf("read Gemini video download: %w", err)
-	}
-	return data, strings.TrimSpace(resp.Header.Get("Content-Type")), nil
+	return downloadWithRetry(ctx, p.client, p.mediaURL(videoURI), "Gemini", map[string]string{
+		"x-goog-api-key": p.apiKey,
+	})
 }
 
 func (p *GeminiProvider) mediaURL(videoURI string) string {

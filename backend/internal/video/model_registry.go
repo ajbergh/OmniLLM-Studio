@@ -98,6 +98,8 @@ func NormalizeProvider(provider string) string {
 		return ProviderOpenRouter
 	case ProviderGemini:
 		return ProviderGemini
+	case ProviderLuma:
+		return ProviderLuma
 	case ProviderOpenAI:
 		return ProviderOpenAI
 	case ProviderCustom:

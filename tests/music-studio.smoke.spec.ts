@@ -48,15 +48,15 @@ test('music studio renders Lyria-only controls without console errors', async ({
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Music Studio' }).click();
+  await page.getByRole('button', { name: 'Music', exact: true }).click();
 
   await expect(page.getByText('Music Studio').first()).toBeVisible();
   await expect(page.getByText('Describe a song and generate to start.')).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Music provider' })).toHaveValue('openrouter');
-  await expect(page.getByRole('combobox', { name: 'Lyria model' })).toHaveValue('google/lyria-3-clip-preview');
+  await expect(page.getByRole('combobox', { name: 'Music model' })).toHaveValue('google/lyria-3-clip-preview');
 
   await page.getByRole('combobox', { name: 'Music provider' }).selectOption('gemini');
-  await expect(page.getByRole('combobox', { name: 'Lyria model' })).toHaveValue('lyria-3-clip-preview');
+  await expect(page.getByRole('combobox', { name: 'Music model' })).toHaveValue('lyria-3-clip-preview');
 
   const generateButton = page.getByRole('button', { name: /Generate Track/i });
   await expect(generateButton).toBeDisabled();

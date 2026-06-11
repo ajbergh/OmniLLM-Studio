@@ -13,6 +13,8 @@ The goal is to move Video Studio from a broad working foundation to a production
 > **Implementation progress (2026-06-01):** Phase 1 implementation has started. Added backend provider/model capability validation, a frontend validation preflight, Gemini negative-prompt payload wiring, seed UI exposure, provider documentation updates, and focused backend tests. Phase 2 implementation now includes completed generation actions for timeline/chat/File Library handoff, explicit regenerate-from-history, richer review-card metadata, readable failure diagnostics, enhanced-prompt reuse, and deterministic prompt variants. Phase 3 implementation has started with timeline undo/redo, extended keyboard shortcuts, media-bin drag/drop, and clip trim handles.
 >
 > **Implementation progress (2026-06-10):** Phase 3 is now substantially complete (multi-select, snapping drops with grab-offset moves, zoom-to-fit, media-bin grid/list + filters + thumbnails + rename/delete + source metadata, empty-state onboarding). Phase 4 landed: renderer capability metadata endpoint with derived frontend warnings, FFmpeg export support for positioning, cropping, opacity, video/audio fades, fade-style transitions, basic effects, per-clip volume, hidden/muted track semantics, export presets (16:9/9:16/1:1/custom), and FFmpeg command/stderr diagnostics persisted in render job metadata (migration V41). Phase 5 landed: assistant edit planning now receives structured timeline/asset/selection/renderer-capability context, plans carry per-operation previews and validation issues, apply is partial-tolerant, move_clip/delete_clip operations are supported, and quick workflow buttons exist in the inspector. Phase 6 progressed: upload MIME sniffing + per-kind size/dimension limits, and interrupted render jobs are failed cleanly on restart (generation recovery already existed). Remaining: keyframes/rotation/true xfade at export, track solo, storage hygiene + observability (Phase 6 tasks 2/4/5), frontend component tests, and Phase 7 provider expansion.
+>
+> **Implementation progress (2026-06-10, Phase 7 start):** Phase 7 readiness was reviewed against the recommended order — Gemini hardening (✅ Phase 1), provider-agnostic validation/capability metadata (✅ `validation.go` works entirely off model capabilities and metadata), and live OpenRouter end-to-end verification (manual; requires real keys, tracked as an open checklist item rather than a code blocker). The first new provider landed: **Luma Dream Machine** (`luma_provider.go`) — static ray-2/ray-flash-2/ray-1-6 catalog, honest text-to-video-only capabilities (Luma image keyframes need public URLs), submit/poll/download with error mapping, mocked tests, profile-based configuration, and capability-driven frontend controls with no impact while unconfigured. Phase 6 also progressed: video downloads for all three providers now retry transient failures (429/5xx/network) with backoff via a shared helper.
 
 ## Current Baseline
 
@@ -20,7 +22,7 @@ Video Studio has a strong architectural base. Backend lives in [backend/internal
 
 - Project-based AI video creation workspace behind the `video_studio` feature flag (seeded enabled in [backend/internal/db/db.go](backend/internal/db/db.go) migration V37).
 - Separate Video Studio and Video Edit Studio workspaces (`VideoStudio.tsx`, `VideoEditStudio.tsx`), switched by `appMode` in [frontend/src/App.tsx](frontend/src/App.tsx).
-- Real provider adapters for OpenRouter Video ([openrouter_provider.go](backend/internal/video/openrouter_provider.go)) and direct Gemini Veo 3.1 ([gemini_provider.go](backend/internal/video/gemini_provider.go)), behind a `video.Provider` interface ([provider.go](backend/internal/video/provider.go)).
+- Real provider adapters for OpenRouter Video ([openrouter_provider.go](backend/internal/video/openrouter_provider.go)), direct Gemini Veo 3.1 ([gemini_provider.go](backend/internal/video/gemini_provider.go)), and Luma Dream Machine ([luma_provider.go](backend/internal/video/luma_provider.go)), behind a `video.Provider` interface ([provider.go](backend/internal/video/provider.go)). All adapters share a transient-failure retry helper for output downloads ([provider_download.go](backend/internal/video/provider_download.go)).
 - Provider and model discovery with static fallbacks (`KnownOpenRouterVideoModels()`, `KnownGeminiVeoModels()`); model lookup/validation in `model_registry.go`, plus a Phase 1 provider capability validation layer (`validation.go`) that returns structured errors, warnings, normalizations, and a normalized request before generation.
 - Generation history, branching metadata, durable generated assets, and output preview/download. Persistence spans five tables: `video_projects`, `video_generations`, `video_assets`, `video_timelines`, `video_render_jobs`.
 - Gemini Veo request support for aspect ratio, duration, resolution, start frame, last frame, source-video extension, reference images (≤3), person generation, negative prompt, and **seed**. Seed is now exposed in the Video Studio advanced controls for models advertising the `seed` capability.
@@ -478,7 +480,8 @@ Make Video Studio resilient across app restarts, provider failures, large assets
 - **Completed:** `RecoverInterruptedRenderJobs` marks render jobs orphaned by a restart as failed with a clear message.
 - **Completed:** Upload validation — content is MIME-sniffed (`http.DetectContentType`) and must agree with the declared type; only image/video/audio kinds are accepted; per-kind size limits (image 25 MB, audio 100 MB, video 500 MB); image dimensions are checked (≤ 8192×8192) and stored on the asset.
 - **Completed (overlap with Phase 4):** FFmpeg command/stderr diagnostics persisted on failed render jobs.
-- **Remaining:** upstream cancellation mapping, transient download retries, video duration limits (needs ffprobe), storage hygiene/orphan cleanup + accounting, and structured request-ID logging/metrics.
+- **Completed (2026-06-10):** Transient download retries — Gemini, OpenRouter, and Luma video downloads share `downloadWithRetry` (3 attempts, linear backoff, retries network errors/429/5xx; client errors fail immediately).
+- **Remaining:** upstream cancellation mapping, video duration limits (needs ffprobe), storage hygiene/orphan cleanup + accounting, and structured request-ID logging/metrics.
 
 ### Implementation Tasks
 
@@ -537,14 +540,24 @@ Add more video generation providers only after Gemini/OpenRouter paths and the e
 
 ### Recommended Order
 
-1. Finish Gemini Veo 3.1 hardening.
-2. Verify OpenRouter video end-to-end.
-3. Add provider-agnostic validation and capability metadata.
-4. Add one new provider at a time.
+1. Finish Gemini Veo 3.1 hardening. _(done — Phase 1)_
+2. Verify OpenRouter video end-to-end. _(open — manual live verification with real keys; not a code blocker for adding isolated adapters)_
+3. Add provider-agnostic validation and capability metadata. _(done — `validation.go` + `Model` metadata + `Capabilities()`)_
+4. Add one new provider at a time. _(started — Luma landed 2026-06-10)_
+
+### Implementation Progress as of 2026-06-10
+
+- **Completed:** Luma Dream Machine adapter ([luma_provider.go](backend/internal/video/luma_provider.go)) using the existing `video.Provider` abstraction — `POST /generations` submit, `GET /generations/{id}` poll with `failure_reason` error mapping, CDN asset download via the shared retry helper, and upstream generation ID preservation.
+- **Completed:** Static capability mapping — ray-2 / ray-flash-2 / ray-1-6 with per-model aspect ratios, resolutions, duration ranges, and notes. Capabilities are intentionally text-to-video-only: Luma image keyframes require publicly hosted URLs (local assets can't be sent) and extension references prior Luma generation IDs, so validation rejects start/last frame, source video, and reference images for Luma models before any upstream call.
+- **Completed:** Discrete duration handling — validation clamps to the 5–9s model range, then the adapter rounds to Luma's `"5s"`/`"9s"` values at payload time; legacy ray-1-6 omits resolution/duration parameters entirely.
+- **Completed:** Wiring — `ProviderLuma` key, `NormalizeProvider`, profile-based registry construction (a `luma` provider profile supplies the API key), default-provider ordering, frontend `VideoProviderKey`/store maps, and a Luma entry in the Settings provider types. No provider-native formats are persisted; frontend controls remain capability-driven.
+- **Completed:** Mocked tests (`luma_provider_test.go`) — payload construction (ray-2 vs legacy), duration rounding, full submit→poll→download flow against `httptest`, failure-state error mapping, unconfigured-key error, validation integration (image inputs rejected, duration normalized), and download-retry behavior (recovers from 5xx, does not retry 404).
+- **Completed:** `docs/VIDEO_PROVIDER_ADAPTERS.md` documents the Luma adapter, payload, and limitations.
+- **Remaining:** live verification of OpenRouter and Luma with real API keys, provider-specific UI hints (capability badges, estimated cost/time), and further providers (Runway, Pika, Kling-direct, Stability) one at a time.
 
 Potential future providers:
 
-- Luma.
+- ~~Luma.~~ _(landed 2026-06-10)_
 - Runway.
 - Pika.
 - Kling.
@@ -553,7 +566,7 @@ Potential future providers:
 
 ### Implementation Tasks
 
-1. Add provider capability mapping.
+1. Add provider capability mapping. _(done for Luma — input modes, aspect ratios, durations, resolutions, and audio behavior are all expressed through `Model` metadata + capabilities)_
    - Supported input modes.
    - Supported aspect ratios.
    - Supported durations.
@@ -562,14 +575,14 @@ Potential future providers:
    - Source video limits.
    - Audio/dialogue behavior.
 
-2. Add provider-specific tests.
+2. Add provider-specific tests. _(done for Luma — payload, submit/poll/download, error mapping; Luma exposes no cost/usage or multi-output fields)_
    - Payload construction.
    - Submit/poll/download.
    - Error mapping.
    - Cost/usage metadata.
    - Multi-output handling.
 
-3. Add provider-specific UI hints.
+3. Add provider-specific UI hints. _(partial — model notes render from `Model.Notes`; capability badges and cost/time estimates remain)_
    - Model notes.
    - Capability badges.
    - Estimated generation time/cost where possible.
@@ -592,13 +605,13 @@ Add the next video provider only after Gemini and OpenRouter generation paths ar
 
 ## Recommended Execution Order
 
-1. Phase 1 — Gemini/provider validation.
-2. Phase 2 — Generation review and iteration workflow. _(front-loaded: ~3 of the headline actions are already-built endpoints awaiting UI wiring — fast wins.)_
-3. Phase 3 — Timeline editor usability. _(land undo/redo here; Phase 5 depends on it.)_
-4. Phase 4 — Render fidelity.
-5. Phase 5 — Timeline-aware assistant. _(depends on Phase 3 undo/redo for the "assistant edits are undoable" criterion.)_
-6. Phase 6 — Production hardening.
-7. Phase 7 — Provider expansion.
+1. Phase 1 — Gemini/provider validation. _(complete except frontend component tests)_
+2. Phase 2 — Generation review and iteration workflow. _(complete except frame-extraction and soundtrack asset-role shortcuts)_
+3. Phase 3 — Timeline editor usability. _(complete except component-level interaction tests)_
+4. Phase 4 — Render fidelity. _(complete except keyframes, rotation, true xfade, track solo, ffprobe probe)_
+5. Phase 5 — Timeline-aware assistant. _(core complete; storyboard-to-timeline remains)_
+6. Phase 6 — Production hardening. _(partial: upload validation, restart recovery, download retries, render diagnostics done; cancellation mapping, storage hygiene, observability remain)_
+7. Phase 7 — Provider expansion. _(started: Luma landed; live OpenRouter/Luma verification and further providers remain)_
 
 ## Guiding Principle
 

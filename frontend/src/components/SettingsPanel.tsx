@@ -22,6 +22,7 @@ const PROVIDER_TYPES = [
   { value: 'together', label: 'Together AI', icon: Cpu, color: 'from-indigo-500/20 to-blue-500/20', iconColor: 'text-indigo-400' },
   { value: 'mistral', label: 'Mistral AI', icon: Globe, color: 'from-cyan-500/20 to-teal-500/20', iconColor: 'text-cyan-400' },
   { value: 'elevenlabs', label: 'ElevenLabs', icon: Music2, color: 'from-violet-500/20 to-purple-500/20', iconColor: 'text-violet-400' },
+  { value: 'luma', label: 'Luma (Dream Machine)', icon: Globe, color: 'from-teal-500/20 to-emerald-500/20', iconColor: 'text-teal-400' },
   { value: 'custom', label: 'Custom (OpenAI-compatible)', icon: Server, color: 'from-gray-500/20 to-slate-500/20', iconColor: 'text-gray-400' },
 ];
 

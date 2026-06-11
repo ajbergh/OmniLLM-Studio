@@ -19,9 +19,10 @@ Video Studio registers providers from encrypted provider profiles:
 
 - `openrouter` is configured when an enabled OpenRouter provider profile has an API key.
 - `gemini` is configured when an enabled Gemini provider profile has an API key.
+- `luma` is configured when an enabled Luma provider profile has an API key.
 
 Provider profiles keep API keys server-side. The frontend only receives provider status, model metadata, and capability metadata.
-There is no local mock provider fallback; generation requires a configured OpenRouter or Gemini profile.
+There is no local mock provider fallback; generation requires a configured OpenRouter, Gemini, or Luma profile.
 
 ## OpenRouter Video
 
@@ -86,6 +87,34 @@ Normalization rules currently surfaced by validation:
 - `veo-3.1-lite-generate-preview`
 
 If a Gemini profile has the OpenAI-compatible `/openai` suffix in its base URL, the video adapter trims that suffix because Veo uses the direct Gemini REST API.
+
+## Luma Dream Machine
+
+`NewLumaProvider()` uses the Luma Dream Machine generations API (`https://api.lumalabs.ai/dream-machine/v1`):
+
+- Generation submit: `POST /generations` with `Authorization: Bearer <key>`
+- Job polling: `GET /generations/{id}` until `state` is `completed` or `failed` (`failure_reason` is mapped into the generation error)
+- Output retrieval: `assets.video` CDN URL (no auth header), downloaded with the shared retry helper
+
+Request payload:
+
+```json
+{
+  "prompt": "...",
+  "model": "ray-2",
+  "aspect_ratio": "16:9",
+  "resolution": "1080p",
+  "duration": "9s"
+}
+```
+
+Adapter-specific behavior:
+
+- **Static model catalog.** Luma has no model discovery endpoint; `KnownLumaVideoModels()` (ray-2, ray-flash-2, ray-1-6) is the source of truth.
+- **Text-to-video only.** Luma image keyframes (`keyframes.frame0/frame1`) require publicly hosted HTTPS URLs, which local Video Studio assets cannot provide, and video extension references prior Luma generation IDs. The adapter therefore advertises only `text_to_video`; capability validation rejects start frame, last frame, source video, and reference images for Luma models before any upstream call.
+- **Discrete durations.** ray-2 family models accept `"5s"` or `"9s"`; the requested duration is rounded (≥ 7s → 9s) at payload time, and validation clamps to the 5–9s model range first.
+- **Legacy ray-1-6** does not accept `resolution`/`duration` parameters; the adapter omits them.
+- An optional `loop` boolean passes through from raw generation settings.
 
 ## Generation Validation
 

@@ -64,6 +64,7 @@ const DEFAULT_EXPORT: VideoExportSettings = {
 const DEFAULT_MODELS: Record<VideoProviderKey, string> = {
   openrouter: '',
   gemini: '',
+  luma: '',
   openai: '',
   custom: '',
 };
@@ -251,6 +252,7 @@ interface VideoStudioState {
   zoom: number;
   isPlaying: boolean;
   snappingEnabled: boolean;
+  toolMode: 'select' | 'blade';
   rendererCapabilities: VideoRendererCapabilities | null;
   renderJobs: VideoRenderJob[];
   activeRenderJobId: string | null;
@@ -299,6 +301,7 @@ interface VideoStudioState {
   selectClip: (clipId: string | null, trackId?: string | null, additive?: boolean) => void;
   renameAsset: (assetId: string, fileName: string) => Promise<void>;
   deleteAsset: (assetId: string) => Promise<void>;
+  uploadAsset: (file: File) => Promise<void>;
   loadRendererCapabilities: () => Promise<void>;
   setPlayhead: (timeMs: number) => void;
   setZoom: (zoom: number) => void;
@@ -317,7 +320,30 @@ interface VideoStudioState {
   toggleClipEffect: (clipId: string, effectId: string) => Promise<void>;
   removeClipEffect: (clipId: string, effectId: string) => Promise<void>;
   addClipTransition: (clipId: string, transition: Omit<VideoTimelineTransition, 'id'>) => Promise<void>;
+  updateClipTransition: (clipId: string, transitionId: string, patch: Partial<Omit<VideoTimelineTransition, 'id'>>) => Promise<void>;
+  removeClipTransition: (clipId: string, transitionId: string) => Promise<void>;
+  updateClipEffect: (clipId: string, effectId: string, patch: Partial<Omit<VideoTimelineEffect, 'id'>>) => Promise<void>;
   addKeyframe: (clipId: string, keyframe: Omit<VideoTimelineKeyframe, 'id'>) => Promise<void>;
+  updateKeyframe: (clipId: string, keyframeId: string, patch: Partial<Omit<VideoTimelineKeyframe, 'id'>>) => Promise<void>;
+  removeKeyframe: (clipId: string, keyframeId: string) => Promise<void>;
+  addTrack: (type: VideoTimelineTrackType, name?: string) => Promise<void>;
+  removeTrack: (trackId: string) => Promise<void>;
+  renameTrack: (trackId: string, name: string) => Promise<void>;
+  reorderTrack: (trackId: string, targetIndex: number) => Promise<void>;
+  setTrackHeight: (trackId: string, height: number) => Promise<void>;
+  addMarker: (timeMs?: number, label?: string) => Promise<void>;
+  removeMarker: (markerId: string) => Promise<void>;
+  updateClipZIndex: (clipId: string, zIndex: number) => Promise<void>;
+  bringClipForward: (clipId?: string) => Promise<void>;
+  sendClipBackward: (clipId?: string) => Promise<void>;
+  nudgeSelection: (deltaMs: number) => Promise<void>;
+  setCanvas: (patch: Partial<VideoTimelineDocument['canvas']>) => Promise<void>;
+  splitClipAt: (clipId: string, timeMs: number) => Promise<void>;
+  trimClipEdgeToPlayhead: (edge: 'start' | 'end') => Promise<void>;
+  groupClips: (clipIds?: string[]) => Promise<void>;
+  ungroupClips: (groupId?: string) => Promise<void>;
+  alignSelection: (mode: 'start' | 'end' | 'distribute') => Promise<void>;
+  setToolMode: (mode: 'select' | 'blade') => void;
   undoTimeline: () => Promise<void>;
   redoTimeline: () => Promise<void>;
   setExportSetting: <K extends keyof VideoExportSettings>(key: K, value: VideoExportSettings[K]) => void;
@@ -342,7 +368,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   assets: [],
   providers: [],
   selectedProvider: 'openrouter',
-  modelsByProvider: { openrouter: [], gemini: [], openai: [], custom: [] },
+  modelsByProvider: { openrouter: [], gemini: [], luma: [], openai: [], custom: [] },
   selectedModel: null,
   promptForm: cloneForm(),
   timelineRecord: null,
@@ -356,6 +382,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   zoom: 1,
   isPlaying: false,
   snappingEnabled: true,
+  toolMode: 'select',
   rendererCapabilities: null,
   renderJobs: [],
   activeRenderJobId: null,
@@ -542,7 +569,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       return;
     }
     if (!providers.find((provider) => provider.key === selectedProvider)?.configured) {
-      toast.error('Configure an OpenRouter or Gemini video provider first');
+      toast.error('Configure a video provider (OpenRouter, Gemini, or Luma) first');
       return;
     }
     if (!promptForm.prompt.trim()) {
@@ -911,23 +938,27 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   },
 
   splitClipAtPlayhead: async () => {
-    const current = get().timeline;
     const clipId = get().selectedClipId;
+    if (!clipId) return;
+    await get().splitClipAt(clipId, get().playheadMs);
+  },
+
+  splitClipAt: async (clipId, timeMs) => {
+    const current = get().timeline;
     if (!current || !clipId) return;
     const next = cloneTimeline(current);
     const loc = findClip(next, clipId);
     if (!loc) return;
-    const splitAt = get().playheadMs;
-    const offset = splitAt - loc.clip.start_ms;
+    const offset = timeMs - loc.clip.start_ms;
     if (offset <= 0 || offset >= loc.clip.duration_ms) {
-      toast.error('Move the playhead inside the selected clip');
+      toast.error('Split point must be inside the clip');
       return;
     }
     const left = { ...loc.clip, duration_ms: offset, trim_out_ms: loc.clip.trim_in_ms + offset };
     const right = {
       ...loc.clip,
       id: newId('clip'),
-      start_ms: splitAt,
+      start_ms: timeMs,
       duration_ms: loc.clip.duration_ms - offset,
       trim_in_ms: loc.clip.trim_in_ms + offset,
       trim_out_ms: loc.clip.trim_out_ms,
@@ -942,6 +973,118 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     }));
     await get().saveTimeline(next);
   },
+
+  trimClipEdgeToPlayhead: async (edge) => {
+    const current = get().timeline;
+    const clipId = get().selectedClipId;
+    if (!current || !clipId) return;
+    const loc = findClip(current, clipId);
+    if (!loc) return;
+    const playhead = get().playheadMs;
+    const offset = playhead - loc.clip.start_ms;
+    if (offset <= 0 || offset >= loc.clip.duration_ms) {
+      toast.error('Move the playhead inside the selected clip');
+      return;
+    }
+    if (edge === 'start') {
+      await get().trimClip(clipId, {
+        start_ms: playhead,
+        duration_ms: loc.clip.duration_ms - offset,
+        trim_in_ms: loc.clip.trim_in_ms + offset,
+        trim_out_ms: loc.clip.trim_out_ms,
+      });
+    } else {
+      await get().trimClip(clipId, {
+        duration_ms: offset,
+        trim_out_ms: loc.clip.trim_in_ms + offset,
+      });
+    }
+  },
+
+  groupClips: async (clipIds) => {
+    const current = get().timeline;
+    const ids = clipIds && clipIds.length > 0 ? clipIds : get().selectedClipIds;
+    if (!current) return;
+    if (ids.length < 2) {
+      toast.error('Select at least two clips to group');
+      return;
+    }
+    const next = cloneTimeline(current);
+    const groupId = newId('group');
+    for (const id of ids) {
+      const loc = findClip(next, id);
+      if (loc) loc.clip.group_id = groupId;
+    }
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  ungroupClips: async (groupId) => {
+    const current = get().timeline;
+    if (!current) return;
+    let target = groupId;
+    if (!target) {
+      const selectedId = get().selectedClipId;
+      const loc = selectedId ? findClip(current, selectedId) : null;
+      target = loc?.clip.group_id;
+    }
+    if (!target) return;
+    const next = cloneTimeline(current);
+    for (const track of next.tracks) {
+      for (const clip of track.clips) {
+        if (clip.group_id === target) delete clip.group_id;
+      }
+    }
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  alignSelection: async (mode) => {
+    const current = get().timeline;
+    const ids = get().selectedClipIds;
+    if (!current) return;
+    if (ids.length < 2) {
+      toast.error('Select at least two clips');
+      return;
+    }
+    const next = cloneTimeline(current);
+    const locs = ids
+      .map((id) => findClip(next, id))
+      .filter((loc): loc is NonNullable<typeof loc> => Boolean(loc));
+    if (locs.length < 2) return;
+    if (mode === 'start') {
+      const minStart = Math.min(...locs.map((loc) => loc.clip.start_ms));
+      for (const loc of locs) loc.clip.start_ms = minStart;
+    } else if (mode === 'end') {
+      const maxEnd = Math.max(...locs.map((loc) => loc.clip.start_ms + loc.clip.duration_ms));
+      for (const loc of locs) loc.clip.start_ms = Math.max(0, maxEnd - loc.clip.duration_ms);
+    } else {
+      const sorted = [...locs].sort((a, b) => a.clip.start_ms - b.clip.start_ms);
+      const span = sorted[sorted.length - 1].clip.start_ms - sorted[0].clip.start_ms;
+      if (sorted.length > 2 && span > 0) {
+        const step = span / (sorted.length - 1);
+        sorted.forEach((loc, index) => {
+          loc.clip.start_ms = Math.round(sorted[0].clip.start_ms + step * index);
+        });
+      }
+    }
+    for (const track of next.tracks) {
+      track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    }
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  setToolMode: (mode) => set({ toolMode: mode }),
 
   deleteClip: async (clipId) => {
     const current = get().timeline;
@@ -1012,7 +1155,21 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         selectedTrackId: trackId,
       };
     }
-    return { selectedClipId: clipId, selectedClipIds: [clipId], selectedTrackId: trackId };
+    // Clicking a grouped clip selects the whole group.
+    let selectedClipIds = [clipId];
+    if (state.timeline) {
+      const loc = findClip(state.timeline, clipId);
+      const groupId = loc?.clip.group_id;
+      if (groupId) {
+        selectedClipIds = [];
+        for (const track of state.timeline.tracks) {
+          for (const clip of track.clips) {
+            if (clip.group_id === groupId) selectedClipIds.push(clip.id);
+          }
+        }
+      }
+    }
+    return { selectedClipId: clipId, selectedClipIds, selectedTrackId: trackId };
   }),
 
   renameAsset: async (assetId, fileName) => {
@@ -1037,6 +1194,24 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         selectedAssetId: state.selectedAssetId === assetId ? null : state.selectedAssetId,
       }));
       toast.success('Asset deleted');
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  },
+
+  uploadAsset: async (file) => {
+    const projectId = get().activeProjectId;
+    if (!projectId) {
+      toast.error('Select or create a project first');
+      return;
+    }
+    try {
+      const asset = await videoApi.uploadAsset(projectId, file);
+      set((state) => ({
+        assets: [asset, ...state.assets],
+        selectedAssetId: asset.id,
+      }));
+      toast.success(`Uploaded ${asset.file_name}`);
     } catch (err) {
       toast.error((err as Error).message);
     }
@@ -1256,6 +1431,273 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.keyframes = [...(loc.clip.keyframes || []), { ...keyframe, id: newId('keyframe') }];
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  updateClipTransition: async (clipId, transitionId, patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.transitions = (loc.clip.transitions || []).map((transition) =>
+      transition.id === transitionId ? { ...transition, ...patch } : transition,
+    );
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  removeClipTransition: async (clipId, transitionId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.transitions = (loc.clip.transitions || []).filter((transition) => transition.id !== transitionId);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  updateClipEffect: async (clipId, effectId, patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.effects = (loc.clip.effects || []).map((effect) =>
+      effect.id === effectId ? { ...effect, ...patch, params: { ...effect.params, ...(patch.params || {}) } } : effect,
+    );
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  updateKeyframe: async (clipId, keyframeId, patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.keyframes = (loc.clip.keyframes || []).map((keyframe) =>
+      keyframe.id === keyframeId ? { ...keyframe, ...patch, time_ms: Math.max(0, patch.time_ms ?? keyframe.time_ms) } : keyframe,
+    );
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  removeKeyframe: async (clipId, keyframeId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.keyframes = (loc.clip.keyframes || []).filter((keyframe) => keyframe.id !== keyframeId);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  addTrack: async (type, name) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const count = next.tracks.filter((track) => track.type === type).length;
+    const track: VideoTimelineTrack = {
+      id: newId('track'),
+      type,
+      name: name?.trim() || `${type.charAt(0).toUpperCase()}${type.slice(1)} ${count + 1}`,
+      locked: false,
+      muted: false,
+      visible: true,
+      clips: [],
+    };
+    next.tracks.push(track);
+    set((state) => ({
+      timeline: next,
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  removeTrack: async (trackId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const track = current.tracks.find((item) => item.id === trackId);
+    if (!track) return;
+    const next = cloneTimeline(current);
+    next.tracks = next.tracks.filter((item) => item.id !== trackId);
+    const removedClipIds = new Set(track.clips.map((clip) => clip.id));
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedTrackId: state.selectedTrackId === trackId ? null : state.selectedTrackId,
+      selectedClipId: state.selectedClipId && removedClipIds.has(state.selectedClipId) ? null : state.selectedClipId,
+      selectedClipIds: state.selectedClipIds.filter((id) => !removedClipIds.has(id)),
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  renameTrack: async (trackId, name) => {
+    const trimmed = name.trim();
+    const current = get().timeline;
+    if (!current || !trimmed) return;
+    const next = cloneTimeline(current);
+    const track = next.tracks.find((item) => item.id === trackId);
+    if (!track || track.name === trimmed) return;
+    track.name = trimmed;
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  reorderTrack: async (trackId, targetIndex) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const fromIndex = next.tracks.findIndex((item) => item.id === trackId);
+    if (fromIndex === -1) return;
+    const toIndex = Math.max(0, Math.min(next.tracks.length - 1, targetIndex));
+    if (toIndex === fromIndex) return;
+    const [track] = next.tracks.splice(fromIndex, 1);
+    next.tracks.splice(toIndex, 0, track);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  setTrackHeight: async (trackId, height) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const track = next.tracks.find((item) => item.id === trackId);
+    if (!track) return;
+    track.height = Math.max(32, Math.min(160, Math.round(height)));
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  addMarker: async (timeMs, label) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const time = Math.max(0, Math.round(timeMs ?? get().playheadMs));
+    next.markers = [...(next.markers || []), { id: newId('marker'), time_ms: time, label: label?.trim() || `Marker ${(next.markers?.length || 0) + 1}` }];
+    next.markers.sort((a, b) => a.time_ms - b.time_ms);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  removeMarker: async (markerId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    next.markers = (next.markers || []).filter((marker) => marker.id !== markerId);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  updateClipZIndex: async (clipId, zIndex) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.z_index = Math.round(zIndex);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  bringClipForward: async (clipId) => {
+    const id = clipId || get().selectedClipId;
+    if (!id) return;
+    const clip = get().timeline ? findClip(get().timeline as VideoTimelineDocument, id) : null;
+    if (!clip) return;
+    await get().updateClipZIndex(id, (clip.clip.z_index ?? 0) + 1);
+  },
+
+  sendClipBackward: async (clipId) => {
+    const id = clipId || get().selectedClipId;
+    if (!id) return;
+    const clip = get().timeline ? findClip(get().timeline as VideoTimelineDocument, id) : null;
+    if (!clip) return;
+    await get().updateClipZIndex(id, (clip.clip.z_index ?? 0) - 1);
+  },
+
+  nudgeSelection: async (deltaMs) => {
+    const current = get().timeline;
+    const ids = get().selectedClipIds.length > 0
+      ? get().selectedClipIds
+      : get().selectedClipId
+        ? [get().selectedClipId as string]
+        : [];
+    if (!current || ids.length === 0 || !Number.isFinite(deltaMs) || deltaMs === 0) return;
+    const next = cloneTimeline(current);
+    let moved = false;
+    for (const id of ids) {
+      const loc = findClip(next, id);
+      if (!loc || loc.track.locked) continue;
+      const start = Math.max(0, loc.clip.start_ms + Math.round(deltaMs));
+      if (start !== loc.clip.start_ms) {
+        loc.clip.start_ms = start;
+        moved = true;
+      }
+    }
+    if (!moved) return;
+    for (const track of next.tracks) {
+      track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    }
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  setCanvas: async (patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    next.canvas = {
+      ...next.canvas,
+      ...patch,
+      width: Math.max(16, Math.round(patch.width ?? next.canvas.width)),
+      height: Math.max(16, Math.round(patch.height ?? next.canvas.height)),
+      fps: Math.max(1, Math.min(120, Math.round(patch.fps ?? next.canvas.fps))),
+    };
     set((state) => ({
       timeline: next,
       ...withTimelineHistory(state, current),

@@ -634,7 +634,7 @@ export function VideoStudio() {
 
                 {!selectedProviderConfigured && (
                   <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300/80">
-                    Configure an OpenRouter or Gemini video provider before generating.
+                    Configure a video provider (OpenRouter, Gemini, or Luma) in Settings before generating.
                   </p>
                 )}
 

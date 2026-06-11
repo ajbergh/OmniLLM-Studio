@@ -270,27 +270,11 @@ func (p *OpenRouterProvider) pollJob(ctx context.Context, pollingURL string, pro
 }
 
 func (p *OpenRouterProvider) downloadVideo(ctx context.Context, downloadURL string) ([]byte, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
-	if err != nil {
-		return nil, "", err
-	}
+	headers := map[string]string{}
 	if strings.Contains(downloadURL, "/api/v1/videos/") {
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+		headers["Authorization"] = "Bearer " + p.apiKey
 	}
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("download OpenRouter video: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderJSONBytes))
-		return nil, "", fmt.Errorf("OpenRouter video download returned %s: %s", resp.Status, responseSnippet(body))
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxProviderDownloadBytes))
-	if err != nil {
-		return nil, "", fmt.Errorf("read OpenRouter video download: %w", err)
-	}
-	return data, strings.TrimSpace(resp.Header.Get("Content-Type")), nil
+	return downloadWithRetry(ctx, p.client, downloadURL, "OpenRouter", headers)
 }
 
 type openRouterModelsResponse struct {

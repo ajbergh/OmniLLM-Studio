@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { DragHandle, useResizablePanels } from '../ResizablePanels';
-import { Check, Download, Film, LayoutGrid, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, X } from 'lucide-react';
+import { Check, Download, Film, LayoutGrid, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { videoApi } from '../../api';
 import { useSettingsStore } from '../../stores';
@@ -27,6 +27,7 @@ export function VideoEditStudio() {
   const addTextClip = useVideoStudioStore((state) => state.addTextClip);
   const renameAsset = useVideoStudioStore((state) => state.renameAsset);
   const deleteAsset = useVideoStudioStore((state) => state.deleteAsset);
+  const uploadAsset = useVideoStudioStore((state) => state.uploadAsset);
   const loadRendererCapabilities = useVideoStudioStore((state) => state.loadRendererCapabilities);
   const setAppMode = useSettingsStore((state) => state.setAppMode);
 
@@ -99,6 +100,7 @@ export function VideoEditStudio() {
               onAdd={(assetId) => { void addAssetToTimeline(assetId); }}
               onRename={(assetId, name) => { void renameAsset(assetId, name); }}
               onDelete={(assetId) => { void deleteAsset(assetId); }}
+              onUpload={uploadAsset}
             />
           </div>
         </aside>
@@ -224,6 +226,7 @@ function AssetPanel({
   onAdd,
   onRename,
   onDelete,
+  onUpload,
 }: {
   assets: VideoAsset[];
   activeAssetId: string | null;
@@ -231,11 +234,27 @@ function AssetPanel({
   onAdd: (assetId: string) => void;
   onRename: (assetId: string, fileName: string) => void;
   onDelete: (assetId: string) => void;
+  onUpload: (file: File) => Promise<void>;
 }) {
   const [view, setView] = useState<'list' | 'grid'>('list');
   const [filter, setFilter] = useState<AssetFilterKey>('all');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFiles = async (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(list)) {
+        await onUpload(file);
+      }
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const filtered = assets.filter((asset) => assetMatchesFilter(asset, filter));
 
@@ -336,6 +355,23 @@ function AssetPanel({
         <h2 className="text-sm font-semibold text-text">Media Bin</h2>
         <div className="flex items-center gap-1">
           <span className="text-[11px] text-text-muted">{filtered.length}</span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="video/*,image/*,audio/*"
+            className="hidden"
+            onChange={(event) => { void handleFiles(event.target.files); }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="rounded-md border border-border bg-surface p-1.5 text-text-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-45"
+            title="Upload local media (video, image, audio)"
+            aria-label="Upload local media"
+          >
+            {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+          </button>
           <button
             onClick={() => setView(view === 'list' ? 'grid' : 'list')}
             className="rounded-md border border-border bg-surface p-1.5 text-text-muted hover:text-text"

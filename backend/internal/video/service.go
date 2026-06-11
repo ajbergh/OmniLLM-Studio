@@ -67,7 +67,7 @@ func NewService(
 		providerProfiles: providerProfiles,
 		attachmentsDir:   attachmentsDir,
 		storage:          NewStorage(attachmentsDir),
-		registry:         NewModelRegistry(NewOpenRouterProvider("", ""), NewGeminiProvider("", "")),
+		registry:         NewModelRegistry(NewOpenRouterProvider("", ""), NewGeminiProvider("", ""), NewLumaProvider("", "")),
 		renderer:         NewFFmpegRenderer(""),
 		llm:              llmSvc,
 	}
@@ -104,6 +104,7 @@ func (s *Service) providerRegistry() *ModelRegistry {
 	}
 	var openRouterBaseURL, openRouterAPIKey string
 	var geminiBaseURL, geminiAPIKey string
+	var lumaBaseURL, lumaAPIKey string
 	profiles, err := s.providerProfiles.List()
 	if err == nil {
 		for i := range profiles {
@@ -112,7 +113,7 @@ func (s *Service) providerRegistry() *ModelRegistry {
 				continue
 			}
 			providerType := NormalizeProvider(profile.Type)
-			if providerType != ProviderOpenRouter && providerType != ProviderGemini {
+			if providerType != ProviderOpenRouter && providerType != ProviderGemini && providerType != ProviderLuma {
 				continue
 			}
 			apiKey, keyErr := s.providerProfiles.GetAPIKey(profile.ID)
@@ -134,12 +135,18 @@ func (s *Service) providerRegistry() *ModelRegistry {
 					geminiBaseURL = baseURL
 					geminiAPIKey = strings.TrimSpace(apiKey)
 				}
+			case ProviderLuma:
+				if lumaAPIKey == "" {
+					lumaBaseURL = baseURL
+					lumaAPIKey = strings.TrimSpace(apiKey)
+				}
 			}
 		}
 	}
 	return NewModelRegistry(
 		NewOpenRouterProvider(openRouterBaseURL, openRouterAPIKey),
 		NewGeminiProvider(geminiBaseURL, geminiAPIKey),
+		NewLumaProvider(lumaBaseURL, lumaAPIKey),
 	)
 }
 
@@ -190,12 +197,12 @@ func (s *Service) CreateProject(userID, title, provider, model string, width, he
 
 func (s *Service) defaultProviderKey(ctx context.Context) string {
 	registry := s.providerRegistry()
-	for _, key := range []string{ProviderOpenRouter, ProviderGemini} {
+	for _, key := range []string{ProviderOpenRouter, ProviderGemini, ProviderLuma} {
 		if provider, ok := registry.Provider(key); ok && provider.Configured() {
 			return key
 		}
 	}
-	for _, key := range []string{ProviderOpenRouter, ProviderGemini} {
+	for _, key := range []string{ProviderOpenRouter, ProviderGemini, ProviderLuma} {
 		if _, ok := registry.Provider(key); ok {
 			return key
 		}
