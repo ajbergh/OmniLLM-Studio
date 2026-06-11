@@ -124,14 +124,19 @@ type TimelineTrack struct {
 }
 
 type TimelineClip struct {
-	ID          string               `json:"id"`
-	AssetID     string               `json:"asset_id,omitempty"`
-	StartMS     int64                `json:"start_ms"`
-	DurationMS  int64                `json:"duration_ms"`
-	TrimInMS    int64                `json:"trim_in_ms"`
-	TrimOutMS   int64                `json:"trim_out_ms"`
-	ZIndex      *int                 `json:"z_index,omitempty"`
-	GroupID     string               `json:"group_id,omitempty"`
+	ID         string `json:"id"`
+	AssetID    string `json:"asset_id,omitempty"`
+	StartMS    int64  `json:"start_ms"`
+	DurationMS int64  `json:"duration_ms"`
+	TrimInMS   int64  `json:"trim_in_ms"`
+	TrimOutMS  int64  `json:"trim_out_ms"`
+	ZIndex     *int   `json:"z_index,omitempty"`
+	GroupID    string `json:"group_id,omitempty"`
+	// Muted silences this clip's audio contribution without touching Volume.
+	Muted bool `json:"muted,omitempty"`
+	// AudioOnly suppresses a clip's visual output so a video asset can act as
+	// a detached audio clip.
+	AudioOnly   bool                 `json:"audio_only,omitempty"`
 	Transform   map[string]any       `json:"transform,omitempty"`
 	Volume      *float64             `json:"volume,omitempty"`
 	FadeInMS    int64                `json:"fade_in_ms,omitempty"`

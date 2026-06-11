@@ -133,12 +133,9 @@ func ProbeMetadataJSON(probe *MediaProbe) string {
 	if probe.AudioSampleRate > 0 {
 		meta["audio_sample_rate"] = probe.AudioSampleRate
 	}
-	if probe.HasAudio {
-		meta["has_audio"] = true
-	}
-	if len(meta) == 0 {
-		return ""
-	}
+	// Always recorded so renders can trust it without re-probing — false
+	// means "probed and confirmed silent", absence means "never probed".
+	meta["has_audio"] = probe.HasAudio
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return ""

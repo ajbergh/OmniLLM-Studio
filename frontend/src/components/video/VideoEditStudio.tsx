@@ -337,6 +337,7 @@ function AssetPanel({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const timeline = useVideoStudioStore((state) => state.timeline);
   const addAssetToTimeline = useVideoStudioStore((state) => state.addAssetToTimeline);
+  const addAssetAsMusicBed = useVideoStudioStore((state) => state.addAssetAsMusicBed);
   const addTrack = useVideoStudioStore((state) => state.addTrack);
   const setAppMode = useSettingsStore((state) => state.setAppMode);
   const createConversation = useConversationStore((state) => state.createConversation);
@@ -687,6 +688,9 @@ function AssetPanel({
               })();
             },
           },
+          ...(asset.kind === 'audio' || asset.kind === 'music'
+            ? [{ label: 'Add as music bed (full length)', action: () => { void addAssetAsMusicBed(asset.id); } }]
+            : []),
           'divider',
           { label: 'Rename', action: () => { setEditingId(asset.id); setEditingName(asset.file_name); } },
           { label: 'Download', action: () => { window.open(videoApi.downloadUrl(asset.id), '_blank', 'noopener,noreferrer'); } },

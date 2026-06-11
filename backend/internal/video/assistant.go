@@ -58,6 +58,8 @@ type EditOperation struct {
 	Width      int    `json:"width,omitempty"`
 	Height     int    `json:"height,omitempty"`
 	FPS        int    `json:"fps,omitempty"`
+	// Volume is a pointer so set_volume can distinguish "mute" (0) from unset.
+	Volume *float64 `json:"volume,omitempty"`
 }
 
 type SocialVariant struct {
@@ -311,17 +313,20 @@ Output ONLY a JSON object matching this schema (no markdown, no explanation):
       "text": "<optional text content>",
       "width": <optional integer>,
       "height": <optional integer>,
-      "fps": <optional integer>
+      "fps": <optional integer>,
+      "volume": <optional number 0-2>
     }
   ]
 }
-Valid operation types: set_canvas, set_duration, add_text_clip, move_clip, trim_clip, delete_clip.
+Valid operation types: set_canvas, set_duration, add_text_clip, move_clip, trim_clip, delete_clip, set_volume, add_marker.
 - set_canvas: provide width, height, fps
 - set_duration: provide duration_ms
 - add_text_clip: provide track_id, start_ms, duration_ms, text
 - move_clip: provide clip_id, start_ms, and optionally track_id
 - trim_clip: provide clip_id and duration_ms (optionally start_ms)
 - delete_clip: provide clip_id
+- set_volume: provide clip_id and volume (0 mutes, 1 is unity, up to 2)
+- add_marker: provide start_ms and optionally text as the marker label
 Reference ONLY clip ids and track ids that appear in the timeline context. Never invent ids.
 Only include fields relevant to the operation type. Do not include null or zero values for optional fields.`
 
@@ -597,6 +602,32 @@ func ValidateEditPlanOperations(doc TimelineDocument, plan EditPlan) (valid []Ed
 			}
 			valid = append(valid, op)
 			preview = append(preview, fmt.Sprintf("Add text %q at %.1fs for %.1fs", op.Text, float64(maxInt64(0, op.StartMS))/1000, float64(duration)/1000))
+		case "set_volume":
+			if op.ClipID == "" || op.Volume == nil {
+				issues = append(issues, describeIdx+": requires clip_id and volume")
+				continue
+			}
+			if *op.Volume < 0 || *op.Volume > 2 {
+				issues = append(issues, describeIdx+": volume must be between 0 and 2")
+				continue
+			}
+			if _, _, ok := findTimelineClip(doc, op.ClipID); !ok {
+				issues = append(issues, describeIdx+": clip "+op.ClipID+" does not exist in the timeline")
+				continue
+			}
+			valid = append(valid, op)
+			preview = append(preview, fmt.Sprintf("Set clip %s volume to %.0f%%", clipLabel(op.ClipID), *op.Volume*100))
+		case "add_marker":
+			if op.StartMS < 0 {
+				issues = append(issues, describeIdx+": start_ms cannot be negative")
+				continue
+			}
+			label := strings.TrimSpace(op.Text)
+			if label == "" {
+				label = "Marker"
+			}
+			valid = append(valid, op)
+			preview = append(preview, fmt.Sprintf("Add marker %q at %.1fs", label, float64(op.StartMS)/1000))
 		default:
 			issues = append(issues, describeIdx+": unsupported operation type")
 		}
@@ -732,6 +763,32 @@ func ApplyEditPlanToTimeline(doc TimelineDocument, plan EditPlan) (TimelineDocum
 				Transform:  defaultTransform(),
 				Effects:    []TimelineEffect{},
 				Keyframes:  []TimelineKeyframe{},
+			})
+		case "set_volume":
+			if op.ClipID == "" || op.Volume == nil {
+				return TimelineDocument{}, fmt.Errorf("set_volume requires clip_id and volume")
+			}
+			ti, ci, ok := findTimelineClip(doc, op.ClipID)
+			if !ok {
+				return TimelineDocument{}, fmt.Errorf("clip %q not found", op.ClipID)
+			}
+			volume := *op.Volume
+			if volume < 0 {
+				volume = 0
+			}
+			if volume > 2 {
+				volume = 2
+			}
+			doc.Tracks[ti].Clips[ci].Volume = &volume
+		case "add_marker":
+			label := strings.TrimSpace(op.Text)
+			if label == "" {
+				label = fmt.Sprintf("Marker %d", len(doc.Markers)+1)
+			}
+			doc.Markers = append(doc.Markers, TimelineMarker{
+				ID:     "marker-" + uuid.New().String(),
+				TimeMS: maxInt64(0, op.StartMS),
+				Label:  label,
 			})
 		default:
 			return TimelineDocument{}, fmt.Errorf("unsupported edit operation %q", op.Type)

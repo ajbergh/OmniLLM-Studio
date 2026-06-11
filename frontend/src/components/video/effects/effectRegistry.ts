@@ -31,8 +31,8 @@ export function numberParam(params: Record<string, unknown> | undefined, key: st
 }
 
 // Export support must track backend/internal/video/renderer.go — the renderer
-// maps brightness/contrast/saturation/blur/grayscale/sharpen/vignette and
-// skips shadow/background_blur/chroma_key.
+// maps brightness/contrast/saturation/blur/grayscale/sharpen/vignette/
+// chroma_key and skips shadow/background_blur.
 export const EFFECT_DEFINITIONS: EffectDefinition[] = [
   {
     type: 'brightness',
@@ -98,10 +98,15 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
     previewFilter: () => null,
   },
   {
+    // Keys out green (or params.color) at export via FFmpeg chromakey; CSS
+    // cannot preview it, so the canvas shows the unkeyed frame.
     type: 'chroma_key',
-    label: 'Chroma key',
-    exportSupported: false,
-    params: [],
+    label: 'Chroma key (export only)',
+    exportSupported: true,
+    params: [
+      { key: 'similarity', label: 'Similarity', min: 0.01, max: 1, step: 0.01, defaultValue: 0.3 },
+      { key: 'blend', label: 'Blend', min: 0, max: 0.5, step: 0.01, defaultValue: 0.05 },
+    ],
     previewFilter: () => null,
   },
 ];

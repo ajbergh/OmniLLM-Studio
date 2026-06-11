@@ -40,6 +40,7 @@ func TestBuildFilterComplexHonorsTransformOpacityAndFades(t *testing.T) {
 		{
 			inputIdx: 2,
 			isAudio:  true,
+			hasAudio: true,
 			clip: TimelineClip{
 				ID:         "clip-audio",
 				AssetID:    "asset-audio",
@@ -103,8 +104,121 @@ func TestBuildFilterComplexTransitionFallsBackToAlphaFade(t *testing.T) {
 	if !strings.Contains(filterStr, "fade=t=out:st=3.200:d=0.800:alpha=1") {
 		t.Errorf("expected crossfade rendered as alpha fade-out: %s", filterStr)
 	}
-	if strings.Contains(filterStr, "1.200") {
-		t.Errorf("slide transition should not contribute fades: %s", filterStr)
+	// Slide renders as an animated overlay position, not as a fade.
+	if strings.Contains(filterStr, "fade=t=in:st=0:d=1.200") {
+		t.Errorf("slide transition must not contribute fades: %s", filterStr)
+	}
+	if !strings.Contains(filterStr, "-W*(1-min(max((t-0.000)/1.200\\,0)\\,1))") {
+		t.Errorf("expected slide-in overlay position expression: %s", filterStr)
+	}
+}
+
+func TestSlideTransitionExprDirections(t *testing.T) {
+	base := TimelineClip{ID: "c", DurationMS: 4000, Transitions: []TimelineTransition{{ID: "tr", Type: "slide", DurationMS: 1000, Direction: "down"}}}
+	xOff, yOff := slideTransitionExpr(base, 2, 6)
+	if xOff != "" {
+		t.Errorf("vertical slide should not move x: %q", xOff)
+	}
+	if !strings.Contains(yOff, "H*(1-min(max((t-2.000)/1.000\\,0)\\,1))") || !strings.Contains(yOff, "-H*min(max((t-5.000)/1.000\\,0)\\,1)") {
+		t.Errorf("down slide expression wrong: %q", yOff)
+	}
+
+	base.Transitions[0].Direction = "right"
+	xOff, yOff = slideTransitionExpr(base, 0, 4)
+	if yOff != "" || !strings.HasPrefix(xOff, "W*(1-") {
+		t.Errorf("right slide expression wrong: x=%q y=%q", xOff, yOff)
+	}
+
+	none, _ := slideTransitionExpr(TimelineClip{DurationMS: 1000}, 0, 1)
+	if none != "" {
+		t.Errorf("clip without slide should yield no offsets: %q", none)
+	}
+}
+
+func TestBuildFilterComplexVolumeKeyframesAndVideoAudio(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	volume := 0.8
+	clips := []resolvedClip{{
+		inputIdx: 1,
+		isVideo:  true,
+		hasAudio: true, // video asset with an audio stream joins the mixdown
+		clip: TimelineClip{
+			ID:         "clip-video",
+			AssetID:    "asset-video",
+			StartMS:    1000,
+			DurationMS: 4000,
+			Volume:     &volume,
+			Keyframes: []TimelineKeyframe{
+				{ID: "kf-1", Property: "volume", TimeMS: 0, Value: 0},
+				{ID: "kf-2", Property: "volume", TimeMS: 2000, Value: 1},
+			},
+		},
+	}}
+	filterStr, videoLabel, audioLabel := buildFilterComplex(doc, clips, 1920, 1080)
+	if videoLabel == "" || audioLabel == "" {
+		t.Fatalf("expected video and audio labels, got %q / %q", videoLabel, audioLabel)
+	}
+	// Keyframed volume exports as a frame-evaluated expression and overrides
+	// the static volume.
+	if !strings.Contains(filterStr, "volume=volume='") || !strings.Contains(filterStr, ":eval=frame") {
+		t.Errorf("expected volume keyframe expression: %s", filterStr)
+	}
+	if strings.Contains(filterStr, "volume=0.800") {
+		t.Errorf("static volume must not apply when volume keyframes exist: %s", filterStr)
+	}
+	if !strings.Contains(filterStr, "adelay=1000|1000") {
+		t.Errorf("video audio should be delayed to the clip start: %s", filterStr)
+	}
+}
+
+func TestEffectFiltersChromaKey(t *testing.T) {
+	filters := effectFilters([]TimelineEffect{{
+		ID: "fx", Type: "chroma_key", Enabled: true,
+		Params: map[string]any{"color": "#00ff00", "similarity": 0.4, "blend": 0.1},
+	}})
+	if len(filters) != 1 || !strings.HasPrefix(filters[0], "chromakey=") {
+		t.Fatalf("expected chromakey filter, got %v", filters)
+	}
+	if !strings.Contains(filters[0], "0.400") || !strings.Contains(filters[0], "0.100") {
+		t.Errorf("chromakey params not applied: %s", filters[0])
+	}
+	defaults := effectFilters([]TimelineEffect{{ID: "fx", Type: "chroma_key", Enabled: true, Params: map[string]any{}}})
+	if len(defaults) != 1 || !strings.Contains(defaults[0], "0x00FF00") {
+		t.Errorf("expected green default key color, got %v", defaults)
+	}
+}
+
+func TestResolveMediaClipsClipMuteAndAudioOnly(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"a.mp3", "b.mp4"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("stub"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	doc := NewEmptyTimeline(1280, 720, 30)
+	doc.Tracks = []TimelineTrack{
+		{ID: "l1", Type: TrackTypeLayer, Visible: true, Clips: []TimelineClip{
+			{ID: "c-muted-audio", AssetID: "a1", DurationMS: 1000, Muted: true},
+			// audio_only video keeps its (metadata-confirmed) audio but
+			// contributes no visuals.
+			{ID: "c-detached", AssetID: "a2", DurationMS: 1000, AudioOnly: true},
+		}},
+	}
+	req := RenderRequest{
+		Timeline:       doc,
+		AttachmentsDir: dir,
+		Assets: map[string]models.VideoAsset{
+			"a1": {ID: "a1", FilePath: "a.mp3", MimeType: "audio/mpeg"},
+			"a2": {ID: "a2", FilePath: "b.mp4", MimeType: "video/mp4", MetadataJSON: `{"has_audio":true}`},
+		},
+	}
+	clips := resolveMediaClips(req)
+	if len(clips) != 1 {
+		t.Fatalf("expected only the detached audio clip, got %+v", clips)
+	}
+	rc := clips[0]
+	if rc.clip.ID != "c-detached" || rc.isVideo || !rc.hasAudio {
+		t.Errorf("audio_only video clip should be audio-only: %+v", rc)
 	}
 }
 

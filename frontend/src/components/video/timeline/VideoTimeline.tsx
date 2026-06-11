@@ -96,6 +96,10 @@ export function VideoTimeline() {
   const hasClipboard = useVideoStudioStore((state) => Boolean(state.clipClipboard?.length));
   const hasAttributeClipboard = useVideoStudioStore((state) => Boolean(state.attributeClipboard));
   const addTextClip = useVideoStudioStore((state) => state.addTextClip);
+  const toggleClipMute = useVideoStudioStore((state) => state.toggleClipMute);
+  const detachClipAudio = useVideoStudioStore((state) => state.detachClipAudio);
+  const followPlayhead = useVideoStudioStore((state) => state.followPlayhead);
+  const toggleFollowPlayhead = useVideoStudioStore((state) => state.toggleFollowPlayhead);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const addTrackRef = useRef<HTMLDivElement | null>(null);
@@ -145,9 +149,9 @@ export function VideoTimeline() {
     return () => node.removeEventListener('wheel', onWheel);
   }, [setZoom]);
 
-  // Keep the playhead in view while playing.
+  // Keep the playhead in view while playing (toggleable follow mode).
   useEffect(() => {
-    if (!isPlaying) return;
+    if (!isPlaying || !followPlayhead) return;
     const node = scrollRef.current;
     if (!node) return;
     const playheadX = TRACK_HEADER_WIDTH + playheadMs * pxPerMs;
@@ -155,7 +159,7 @@ export function VideoTimeline() {
     if (playheadX > viewRight - 80 || playheadX < node.scrollLeft + TRACK_HEADER_WIDTH) {
       node.scrollLeft = Math.max(0, playheadX - TRACK_HEADER_WIDTH - 40);
     }
-  }, [playheadMs, isPlaying, pxPerMs]);
+  }, [playheadMs, isPlaying, pxPerMs, followPlayhead]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -386,7 +390,12 @@ export function VideoTimeline() {
             'divider',
             { label: 'Add fade in/out', action: () => { void updateClipFade(menu.clipId, { fade_in_ms: 500, fade_out_ms: 500 }); } },
             { label: 'Add fade transition', action: () => { void addClipTransition(menu.clipId, { type: 'fade', duration_ms: 500 }); } },
+            { label: menuClip.muted ? 'Unmute clip' : 'Mute clip', action: () => { void toggleClipMute(menu.clipId); } },
           ];
+          const menuAsset = menuClip.asset_id ? assets.find((asset) => asset.id === menuClip.asset_id) : undefined;
+          if (menuAsset?.mime_type.startsWith('video/') && !menuClip.audio_only) {
+            items.push({ label: 'Detach audio', action: () => { void detachClipAudio(menu.clipId); } });
+          }
           if (multi && !menuClip.group_id) items.push({ label: `Group ${selectedClipIds.length} clips`, action: () => { void groupClips(); } });
           if (menuClip.group_id) items.push({ label: 'Ungroup', action: () => { void ungroupClips(menuClip.group_id); } });
           if (multi) {
@@ -476,6 +485,7 @@ export function VideoTimeline() {
             'divider',
             { label: 'Set project duration to here', action: () => { void setTimelineDuration(menu.timeMs); } },
             { label: 'Zoom to fit', shortcut: 'F', action: handleZoomToFit },
+            { label: followPlayhead ? 'Disable follow playhead' : 'Follow playhead while playing', action: toggleFollowPlayhead },
           ];
         }
         return <ContextMenu position={{ x: menu.x, y: menu.y }} items={items} onClose={() => setMenu(null)} />;

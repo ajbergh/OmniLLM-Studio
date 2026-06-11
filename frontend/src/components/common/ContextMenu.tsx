@@ -143,6 +143,8 @@ export function ContextMenu({ position, items, onClose }: {
             role="menuitem"
             disabled={item.disabled}
             aria-disabled={item.disabled || undefined}
+            aria-label={item.label}
+            aria-keyshortcuts={item.shortcut}
             className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[11px] ${
               item.danger ? 'text-red-400 hover:bg-red-500/10 hover:text-red-300' : 'text-text-secondary hover:bg-surface-alt hover:text-text'
             } ${index === activeIndex ? (item.danger ? 'bg-red-500/10 text-red-300' : 'bg-surface-alt text-text') : ''} disabled:cursor-not-allowed disabled:opacity-40`}
@@ -152,9 +154,9 @@ export function ContextMenu({ position, items, onClose }: {
               item.action();
             }}
           >
-            {item.icon && <span className="shrink-0 text-text-muted">{item.icon}</span>}
+            {item.icon && <span className="shrink-0 text-text-muted" aria-hidden="true">{item.icon}</span>}
             <span className="min-w-0 flex-1 truncate">{item.label}</span>
-            {item.shortcut && <span className="shrink-0 font-mono text-[9px] text-text-muted">{item.shortcut}</span>}
+            {item.shortcut && <span className="shrink-0 font-mono text-[9px] text-text-muted" aria-hidden="true">{item.shortcut}</span>}
           </button>
         ),
       )}

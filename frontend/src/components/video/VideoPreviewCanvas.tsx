@@ -134,8 +134,8 @@ export function VideoPreviewCanvas() {
     .filter(({ track }) => track.visible && VISUAL_TRACK_TYPES.includes(track.type))
     .filter(({ clip }) => playheadMs >= clip.start_ms && playheadMs < clip.start_ms + clip.duration_ms)
     .map((entry) => ({ ...entry, asset: entry.clip.asset_id ? assets.find((item) => item.id === entry.clip.asset_id) : undefined }))
-    // Audio-only clips on generic layers contribute no visuals.
-    .filter(({ clip, asset }) => Boolean(clip.text) || !asset || !asset.mime_type.startsWith('audio/'))
+    // Audio-only and detached-audio clips contribute no visuals.
+    .filter(({ clip, asset }) => !clip.audio_only && (Boolean(clip.text) || !asset || !asset.mime_type.startsWith('audio/')))
     .sort((a, b) => (a.trackIndex - b.trackIndex) || ((a.clip.z_index ?? 0) - (b.clip.z_index ?? 0)));
 
   // Audio clips active at the playhead mount hidden <audio> elements so the
@@ -146,8 +146,11 @@ export function VideoPreviewCanvas() {
     .flatMap((track) => track.clips)
     .filter((clip) => playheadMs >= clip.start_ms && playheadMs < clip.start_ms + clip.duration_ms)
     .map((clip) => ({ clip, asset: clip.asset_id ? assets.find((item) => item.id === clip.asset_id) : undefined }))
+    // Audio assets play directly; detached-audio (audio_only) video clips
+    // play their soundtrack through a hidden <audio> element too.
     .filter((entry): entry is { clip: VideoTimelineClip; asset: VideoAsset } =>
-      Boolean(entry.asset && entry.asset.mime_type.startsWith('audio/')));
+      Boolean(entry.asset && !entry.clip.muted &&
+        (entry.asset.mime_type.startsWith('audio/') || (entry.clip.audio_only && entry.asset.mime_type.startsWith('video/')))));
 
   layersRef.current = layers;
   audioLayersRef.current = audioLayers;
@@ -445,7 +448,7 @@ export function VideoPreviewCanvas() {
           controls={false}
           playsInline
           autoPlay={false}
-          muted={track.muted}
+          muted={track.muted || Boolean(clip.muted)}
           aria-label={asset.file_name}
         />
       );

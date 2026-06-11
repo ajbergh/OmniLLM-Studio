@@ -38,6 +38,9 @@ type resolvedClip struct {
 	isVideo    bool
 	isImage    bool
 	isAudio    bool
+	// hasAudio reports whether a video asset carries an audio stream that
+	// should join the mixdown (always true for audio assets).
+	hasAudio bool
 }
 
 // RenderError carries FFmpeg diagnostics for failed renders so they can be
@@ -314,6 +317,8 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 		return nil
 	}
 	var result []resolvedClip
+	// One audio-stream lookup per asset, not per clip.
+	audioProbeCache := map[string]bool{}
 	for trackIndex, track := range req.Timeline.Tracks {
 		for _, clip := range track.Clips {
 			if clip.AssetID == "" || clip.DurationMS <= 0 {
@@ -336,14 +341,30 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 				isImage:    strings.HasPrefix(mime, "image/"),
 				isAudio:    strings.HasPrefix(mime, "audio/"),
 			}
-			// Hidden tracks contribute no video; muted tracks contribute no audio.
+			if rc.isAudio {
+				rc.hasAudio = true
+			} else if rc.isVideo {
+				if cached, ok := audioProbeCache[clip.AssetID]; ok {
+					rc.hasAudio = cached
+				} else {
+					rc.hasAudio = videoAssetHasAudio(asset, fullPath)
+					audioProbeCache[clip.AssetID] = rc.hasAudio
+				}
+			}
+			// An audio-only clip turns a video asset into a detached audio clip.
+			if rc.clip.AudioOnly {
+				rc.isVideo, rc.isImage = false, false
+			}
+			// Hidden tracks contribute no video; muted tracks (and muted clips)
+			// contribute no audio.
 			if (rc.isVideo || rc.isImage) && !track.Visible {
-				continue
+				// Video clips on hidden tracks still contribute their audio.
+				rc.isVideo, rc.isImage = false, false
 			}
-			if rc.isAudio && track.Muted {
-				continue
+			if track.Muted || rc.clip.Muted {
+				rc.hasAudio = false
 			}
-			if rc.isVideo || rc.isImage || rc.isAudio {
+			if rc.isVideo || rc.isImage || rc.hasAudio {
 				result = append(result, rc)
 			}
 		}
@@ -369,6 +390,26 @@ func clipZIndex(clip TimelineClip) int {
 		return *clip.ZIndex
 	}
 	return 0
+}
+
+// videoAssetHasAudio reports whether a video asset carries an audio stream.
+// Prefers the has_audio flag probed at ingest; falls back to a one-off
+// ffprobe. Defaults to false when neither source is conclusive so the filter
+// graph never maps a missing audio stream (which would fail the render).
+func videoAssetHasAudio(asset models.VideoAsset, fullPath string) bool {
+	if strings.TrimSpace(asset.MetadataJSON) != "" {
+		var meta struct {
+			HasAudio *bool `json:"has_audio"`
+		}
+		if err := json.Unmarshal([]byte(asset.MetadataJSON), &meta); err == nil && meta.HasAudio != nil {
+			return *meta.HasAudio
+		}
+	}
+	probe, err := ProbeMedia(context.Background(), fullPath)
+	if err != nil || probe == nil {
+		return false
+	}
+	return probe.HasAudio
 }
 
 // buildFilterComplex constructs an FFmpeg -filter_complex expression that composites
@@ -480,6 +521,14 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 		if expr := positionKeyframeExpr(rc.clip.Keyframes, "y", startS); expr != "" {
 			yExpr = "(H-h)/2+" + expr
 		}
+		if slideX, slideY := slideTransitionExpr(rc.clip, startS, endS); slideX != "" || slideY != "" {
+			if slideX != "" {
+				xExpr = fmt.Sprintf("(%s)+(%s)", xExpr, slideX)
+			}
+			if slideY != "" {
+				yExpr = fmt.Sprintf("(%s)+(%s)", yExpr, slideY)
+			}
+		}
 		overlayFilter := fmt.Sprintf("%s%soverlay=enable='between(t\\,%.3f\\,%.3f)':x='%s':y='%s'%s",
 			prevV, cLabel, startS, endS, xExpr, yExpr, ovLabel)
 
@@ -490,9 +539,11 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 	videoLabel = prevV
 
 	// ── Audio clips ─────────────────────────────────────────────────────────
+	// hasAudio covers audio assets and video assets with an audio stream;
+	// muted tracks/clips were already dropped in resolveMediaClips.
 	var aLabels []string
 	for _, rc := range clips {
-		if !rc.isAudio {
+		if !rc.hasAudio {
 			continue
 		}
 		aLabel := fmt.Sprintf("[a%d]", rc.inputIdx)
@@ -503,7 +554,11 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 			fmt.Sprintf("atrim=start=%.3f:duration=%.3f", trimInS, durS),
 			"asetpts=PTS-STARTPTS",
 		}
-		if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
+		// Volume keyframes override the static volume (matching the preview).
+		// asetpts rebased the stream to 0, so keyframe time is `t` directly.
+		if expr := positionKeyframeExpr(rc.clip.Keyframes, "volume", 0); expr != "" {
+			chain = append(chain, fmt.Sprintf("volume=volume='%s':eval=frame", expr))
+		} else if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
 			chain = append(chain, fmt.Sprintf("volume=%.3f", clampFloat(*rc.clip.Volume, 0, 2)))
 		}
 		fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
@@ -703,9 +758,42 @@ func clampFloat(value, min, max float64) float64 {
 	return value
 }
 
+// slideTransitionExpr builds overlay x/y offset expressions for a clip's
+// first slide transition: the clip enters from `direction` over the
+// transition duration and exits toward the opposite edge (continuing the
+// motion), mirroring how fade-family transitions apply to both clip edges.
+// Returns ("", "") when the clip has no slide transition.
+func slideTransitionExpr(clip TimelineClip, startS, endS float64) (xOff, yOff string) {
+	for _, transition := range clip.Transitions {
+		if !strings.EqualFold(strings.TrimSpace(transition.Type), TransitionTypeSlide) || transition.DurationMS <= 0 {
+			continue
+		}
+		d := math.Min(float64(transition.DurationMS)/1000.0, (endS-startS)/2)
+		if d <= 0 {
+			return "", ""
+		}
+		// 0→1 over the first/last d seconds of the clip.
+		inProg := fmt.Sprintf("min(max((t-%.3f)/%.3f\\,0)\\,1)", startS, d)
+		outProg := fmt.Sprintf("min(max((t-%.3f)/%.3f\\,0)\\,1)", endS-d, d)
+		switch strings.ToLower(strings.TrimSpace(transition.Direction)) {
+		case "right":
+			xOff = fmt.Sprintf("W*(1-%s)-W*%s", inProg, outProg)
+		case "up":
+			yOff = fmt.Sprintf("-H*(1-%s)+H*%s", inProg, outProg)
+		case "down":
+			yOff = fmt.Sprintf("H*(1-%s)-H*%s", inProg, outProg)
+		default: // left
+			xOff = fmt.Sprintf("-W*(1-%s)+W*%s", inProg, outProg)
+		}
+		return xOff, yOff
+	}
+	return "", ""
+}
+
 // clipFadeSeconds combines explicit fade_in/fade_out with fade-style
 // transitions (fade, crossfade, dip_to_black), each capped at half the clip
-// duration. Slide/wipe/zoom transitions are not rendered.
+// duration. Slide renders as animated overlay position; wipe/zoom are not
+// rendered.
 func clipFadeSeconds(clip TimelineClip) (fadeIn, fadeOut float64) {
 	fadeInMS := clip.FadeInMS
 	fadeOutMS := clip.FadeOutMS
@@ -774,6 +862,20 @@ func effectFilters(effects []TimelineEffect) []string {
 			if strength := clampFloat(amount, 0, 1); strength > 0 {
 				filters = append(filters, fmt.Sprintf("vignette=a=%.4f", strength*math.Pi/2))
 			}
+		case "chroma_key":
+			// Runs before format=rgba in the chain, so the keyed-out region
+			// stays transparent through the overlay composite.
+			color := "0x00FF00"
+			if v, ok := effect.Params["color"].(string); ok && strings.TrimSpace(v) != "" {
+				color = ffmpegColor(v, "0x00FF00")
+			}
+			similarity, ok := numericTransform(effect.Params, "similarity")
+			if !ok || similarity <= 0 {
+				similarity = 0.3
+			}
+			blend := numericOrZero(effect.Params, "blend")
+			filters = append(filters, fmt.Sprintf("chromakey=%s:%.3f:%.3f",
+				color, clampFloat(similarity, 0.01, 1), clampFloat(blend, 0, 0.5)))
 		}
 	}
 	return filters

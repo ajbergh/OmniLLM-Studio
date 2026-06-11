@@ -95,6 +95,7 @@ export function VideoInspector() {
   const trimClip = useVideoStudioStore((state) => state.trimClip);
   const updateClipTransform = useVideoStudioStore((state) => state.updateClipTransform);
   const updateClipVolume = useVideoStudioStore((state) => state.updateClipVolume);
+  const toggleClipMute = useVideoStudioStore((state) => state.toggleClipMute);
   const updateClipFade = useVideoStudioStore((state) => state.updateClipFade);
   const updateClipText = useVideoStudioStore((state) => state.updateClipText);
   const addClipEffect = useVideoStudioStore((state) => state.addClipEffect);
@@ -121,6 +122,7 @@ export function VideoInspector() {
   const modeFeatures = editorModeFeatures(editorMode);
   const clip = selectedClip();
   const [rowMenu, setRowMenu] = useState<{ kind: 'effect' | 'transition' | 'keyframe'; id: string; x: number; y: number } | null>(null);
+  const [planMenu, setPlanMenu] = useState<{ x: number; y: number } | null>(null);
 
   return (
     <div className="min-h-0 overflow-y-auto p-3">
@@ -159,7 +161,13 @@ export function VideoInspector() {
           ))}
         </div>
         {assistantPlan && (
-          <div className="mt-3 rounded-lg border border-primary/25 bg-primary/10 p-2">
+          <div
+            className="mt-3 rounded-lg border border-primary/25 bg-primary/10 p-2"
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setPlanMenu({ x: event.clientX, y: event.clientY });
+            }}
+          >
             <p className="text-xs font-medium text-text">{assistantPlan.summary}</p>
             <p className="mt-1 text-[11px] text-text-muted">
               {(assistantPlan.preview?.length ?? assistantPlan.operations.length)} valid operation{(assistantPlan.preview?.length ?? assistantPlan.operations.length) === 1 ? '' : 's'}
@@ -421,7 +429,16 @@ export function VideoInspector() {
               </>
             )}
             {clip.volume !== undefined && (
-              <Slider label="Volume" min={0} max={2} step={0.05} value={clip.volume} onChange={(value) => { void updateClipVolume(selectedClipId as string, value); }} />
+              <>
+                <Slider label="Volume" min={0} max={2} step={0.05} value={clip.volume} onChange={(value) => { void updateClipVolume(selectedClipId as string, value); }} />
+                <button
+                  onClick={() => { void toggleClipMute(clip.id); }}
+                  className={`min-h-8 w-full rounded-md border px-2 text-xs ${clip.muted ? 'border-amber-400/40 bg-amber-400/10 text-amber-300' : 'border-border bg-surface-alt text-text-muted hover:text-text'}`}
+                  title="Silence this clip without changing its volume"
+                >
+                  {clip.muted ? 'Clip muted — click to unmute' : 'Mute clip'}
+                </button>
+              </>
             )}
             <Slider label="Fade in" min={0} max={5000} step={100} value={clip.fade_in_ms || 0} onChange={(value) => { void updateClipFade(selectedClipId as string, { fade_in_ms: value }); }} />
             <Slider label="Fade out" min={0} max={5000} step={100} value={clip.fade_out_ms || 0} onChange={(value) => { void updateClipFade(selectedClipId as string, { fade_out_ms: value }); }} />
@@ -819,6 +836,21 @@ export function VideoInspector() {
           </div>
         )}
       </section>
+      {planMenu && assistantPlan && (() => {
+        const items: ContextMenuEntry[] = [
+          {
+            label: 'Apply plan',
+            disabled: (assistantPlan.preview?.length ?? assistantPlan.operations.length) === 0,
+            action: () => { void applyAssistantPlan(); },
+          },
+          'divider',
+          { label: 'Copy plan JSON', action: () => { void navigator.clipboard.writeText(JSON.stringify(assistantPlan, null, 2)); } },
+          { label: 'Copy summary', action: () => { void navigator.clipboard.writeText([assistantPlan.summary, ...(assistantPlan.preview || [])].join('\n')); } },
+          'divider',
+          { label: 'Dismiss plan', danger: true, action: () => useVideoStudioStore.setState({ assistantPlan: null }) },
+        ];
+        return <ContextMenu position={planMenu} items={items} onClose={() => setPlanMenu(null)} />;
+      })()}
       {rowMenu && clip && (() => {
         let items: ContextMenuEntry[] = [];
         if (rowMenu.kind === 'effect') {

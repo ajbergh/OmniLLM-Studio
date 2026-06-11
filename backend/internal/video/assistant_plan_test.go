@@ -79,6 +79,33 @@ func TestApplyEditPlanToTimelineMoveAndDelete(t *testing.T) {
 	}
 }
 
+func TestEditPlanVolumeAndMarkerOperations(t *testing.T) {
+	doc := planTestDoc()
+	half := 0.5
+	tooLoud := 3.0
+	valid, preview, issues := ValidateEditPlanOperations(doc, EditPlan{Operations: []EditOperation{
+		{Type: "set_volume", ClipID: "clip-a", Volume: &half},
+		{Type: "set_volume", ClipID: "clip-a", Volume: &tooLoud},
+		{Type: "set_volume", ClipID: "clip-missing", Volume: &half},
+		{Type: "add_marker", StartMS: 2500, Text: "Beat"},
+	}})
+	if len(valid) != 2 || len(preview) != 2 || len(issues) != 2 {
+		t.Fatalf("validation = %d valid / %d issues, want 2/2 (%v)", len(valid), len(issues), issues)
+	}
+
+	updated, err := ApplyEditPlanToTimeline(doc, EditPlan{Operations: valid})
+	if err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
+	ti, ci, ok := findTimelineClip(updated, "clip-a")
+	if !ok || updated.Tracks[ti].Clips[ci].Volume == nil || *updated.Tracks[ti].Clips[ci].Volume != 0.5 {
+		t.Fatalf("clip volume not applied: %+v", updated.Tracks[ti].Clips[ci])
+	}
+	if len(updated.Markers) != 1 || updated.Markers[0].TimeMS != 2500 || updated.Markers[0].Label != "Beat" {
+		t.Fatalf("marker not applied: %+v", updated.Markers)
+	}
+}
+
 func TestTimelineContextSummaryIncludesStructure(t *testing.T) {
 	doc := planTestDoc()
 	durationMS := int64(5000)

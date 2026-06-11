@@ -292,6 +292,8 @@ interface VideoStudioState {
   // Ephemeral playback solo — only this track contributes preview audio.
   // Not persisted to the timeline document and ignored by export.
   soloTrackId: string | null;
+  // Auto-scroll the timeline to keep the playhead in view during playback.
+  followPlayhead: boolean;
   clipClipboard: Array<{ clip: VideoTimelineClip; trackId: string }> | null;
   attributeClipboard: Partial<Pick<VideoTimelineClip, 'transform' | 'volume' | 'fade_in_ms' | 'fade_out_ms' | 'effects' | 'transitions' | 'text'>> | null;
   playheadMs: number;
@@ -399,6 +401,10 @@ interface VideoStudioState {
   pasteClipAttributes: (clipId?: string) => Promise<void>;
   setTimelineDuration: (durationMs: number) => Promise<void>;
   splitAllAtPlayhead: () => Promise<void>;
+  toggleClipMute: (clipId?: string) => Promise<void>;
+  detachClipAudio: (clipId: string) => Promise<void>;
+  addAssetAsMusicBed: (assetId: string) => Promise<void>;
+  toggleFollowPlayhead: () => void;
   addMarker: (timeMs?: number, label?: string) => Promise<void>;
   removeMarker: (markerId: string) => Promise<void>;
   updateClipZIndex: (clipId: string, zIndex: number) => Promise<void>;
@@ -453,6 +459,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   selectedClipIds: [],
   selectedTrackId: null,
   soloTrackId: null,
+  followPlayhead: true,
   clipClipboard: null,
   attributeClipboard: null,
   playheadMs: 0,
@@ -2187,6 +2194,73 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
     await get().saveTimeline(next);
   },
+
+  toggleClipMute: async (clipId) => {
+    const id = clipId ?? get().selectedClipId;
+    const current = get().timeline;
+    if (!current || !id) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, id);
+    if (!loc) return;
+    loc.clip.muted = !loc.clip.muted;
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  detachClipAudio: async (clipId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc || loc.clip.audio_only) return;
+    // The original keeps its visuals but goes silent; an audio-only twin
+    // lands on a new layer directly below so it can be edited independently.
+    const twin = JSON.parse(JSON.stringify(loc.clip)) as VideoTimelineClip;
+    twin.id = newId('clip');
+    twin.audio_only = true;
+    twin.muted = false;
+    twin.transform = undefined;
+    twin.text = undefined;
+    twin.effects = [];
+    twin.transitions = [];
+    twin.keyframes = (loc.clip.keyframes || [])
+      .filter((keyframe) => keyframe.property === 'volume')
+      .map((keyframe) => ({ ...keyframe, id: newId('keyframe') }));
+    delete twin.group_id;
+    loc.clip.muted = true;
+    const track: VideoTimelineTrack = {
+      id: newId('track'),
+      type: 'layer',
+      name: 'Detached audio',
+      locked: false,
+      muted: false,
+      visible: true,
+      clips: [twin],
+    };
+    next.tracks.splice(loc.trackIndex, 0, track);
+    set((state) => ({
+      timeline: next,
+      selectedClipId: twin.id,
+      selectedClipIds: [twin.id],
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+    toast.success('Audio detached to a new layer');
+  },
+
+  addAssetAsMusicBed: async (assetId) => {
+    // Music beds run the full timeline on the bottom (background) layer.
+    const timeline = get().timeline;
+    const bottom = timeline?.tracks.find((track) => !track.locked);
+    await get().addAssetToTimeline(assetId, {
+      track_id: bottom?.id,
+      start_ms: 0,
+      duration_ms: timeline && timeline.duration_ms > 0 ? timeline.duration_ms : undefined,
+    });
+  },
+
+  toggleFollowPlayhead: () => set((state) => ({ followPlayhead: !state.followPlayhead })),
 
   addMarker: async (timeMs, label) => {
     const current = get().timeline;

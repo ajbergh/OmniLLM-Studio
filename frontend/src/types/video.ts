@@ -282,6 +282,10 @@ export interface VideoTimelineClip {
   trim_out_ms: number;
   z_index?: number;
   group_id?: string;
+  /** Silences this clip's audio without touching volume. */
+  muted?: boolean;
+  /** Suppresses visuals so a video asset acts as detached audio. */
+  audio_only?: boolean;
   transform?: VideoTimelineTransform;
   volume?: number;
   fade_in_ms?: number;
