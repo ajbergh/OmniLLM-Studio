@@ -99,12 +99,15 @@ import type {
   VideoAsset,
   VideoAssistantRequest,
   VideoEditPlan,
+  VideoExportSettings,
   VideoGenerationDetail,
+  VideoGenerationValidationResult,
   VideoModel,
   VideoProject,
   VideoProjectDetail,
   VideoProviderInfo,
   VideoProviderKey,
+  VideoRendererCapabilities,
   VideoRenderJob,
   VideoSocialVariant,
   VideoStoryboardResponse,
@@ -143,8 +146,9 @@ export async function initAPIBase(): Promise<void> {
   }
 }
 
-// Auth token management
-let authToken: string | null = localStorage.getItem('omnillm_auth_token');
+// Auth token management (guarded so the module loads outside a browser,
+// e.g. in node-based unit tests).
+let authToken: string | null = typeof localStorage === 'undefined' ? null : localStorage.getItem('omnillm_auth_token');
 
 export function setAuthToken(token: string | null): void {
   authToken = token;
@@ -170,6 +174,10 @@ export function musicAssetUrl(assetId: string): string {
 
 export function videoAssetUrl(assetId: string): string {
   return `${BASE_URL}/video/assets/${encodeURIComponent(assetId)}/download`;
+}
+
+export function videoAssetArtifactUrl(assetId: string, artifact: 'thumbnail' | 'waveform'): string {
+  return `${BASE_URL}/video/assets/${encodeURIComponent(assetId)}/artifacts/${artifact}`;
 }
 
 // Upload a file as an attachment scoped to a conversation.
@@ -1440,6 +1448,12 @@ export const videoApi = {
       method: 'DELETE',
     }),
 
+  duplicateProject: (projectId: string) =>
+    apiFetch<VideoProject>(`/video/projects/${encodeURIComponent(projectId)}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+
   listGenerations: (projectId: string) =>
     apiFetch<VideoGenerationDetail[]>(`/video/projects/${encodeURIComponent(projectId)}/generations`),
 
@@ -1456,6 +1470,8 @@ export const videoApi = {
       provider: VideoProviderKey;
       model: string;
       settings_json?: string;
+      input_asset_ids_json?: string;
+      input_assets_json?: string;
     }>(`/video/generations/${encodeURIComponent(generationId)}/branch`, {
       method: 'POST',
     }),
@@ -1519,6 +1535,8 @@ export const videoApi = {
 
   downloadUrl: (assetId: string) => videoAssetUrl(assetId),
 
+  artifactUrl: (assetId: string, artifact: 'thumbnail' | 'waveform') => videoAssetArtifactUrl(assetId, artifact),
+
   enhancePrompt: (data: { prompt: string; aspect_ratio?: string; duration_seconds?: number; negative_prompt?: string }) =>
     apiFetch<{ prompt: string }>('/video/enhance-prompt', {
       method: 'POST',
@@ -1540,15 +1558,7 @@ export const videoApi = {
       body: JSON.stringify(data),
     }),
 
-  renderTimeline: (projectId: string, data: {
-    format: 'mp4' | 'webm';
-    codec?: string;
-    resolution: '720p' | '1080p' | 'project';
-    fps?: number;
-    quality?: 'draft' | 'standard' | 'high';
-    include_audio: boolean;
-    register_in_file_library?: boolean;
-  }) =>
+  renderTimeline: (projectId: string, data: VideoExportSettings) =>
     apiFetch<VideoRenderJob>(`/video/projects/${encodeURIComponent(projectId)}/render`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1560,6 +1570,15 @@ export const videoApi = {
   cancelRenderJob: (jobId: string) =>
     apiFetch<VideoRenderJob>(`/video/render-jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: 'POST',
+    }),
+
+  rendererCapabilities: () =>
+    apiFetch<VideoRendererCapabilities>('/video/render/capabilities'),
+
+  updateAsset: (assetId: string, data: { file_name: string }) =>
+    apiFetch<VideoAsset>(`/video/assets/${encodeURIComponent(assetId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
     }),
 
   assistant: {
@@ -1605,6 +1624,12 @@ export const videoApi = {
     apiFetch<{ generation_id: string; status: string }>(
       `/video/generations/${encodeURIComponent(generationId)}/cancel`,
       { method: 'POST' },
+    ),
+
+  validateGeneration: (req: GenerateVideoRequest) =>
+    apiFetch<VideoGenerationValidationResult>(
+      '/video/generations/validate',
+      { method: 'POST', body: JSON.stringify(req) },
     ),
 };
 

@@ -3,6 +3,7 @@ package video
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/ajbergh/omnillm-studio/internal/models"
@@ -10,6 +11,10 @@ import (
 )
 
 const (
+	// TrackTypeLayer is a generic ordered layer that accepts any clip kind.
+	// Media behavior (visual/audio, defaults, render treatment) comes from the
+	// clip and its asset, not the track. Higher array indices stack on top.
+	TrackTypeLayer   = "layer"
 	TrackTypeVideo   = "video"
 	TrackTypeImage   = "image"
 	TrackTypeAudio   = "audio"
@@ -18,6 +23,92 @@ const (
 	TrackTypeCaption = "caption"
 	TrackTypeShape   = "shape"
 	TrackTypeCallout = "callout"
+)
+
+// CurrentTimelineVersion is the newest timeline document version this build
+// can read and write. Documents from future builds fail with an actionable
+// error instead of being silently mangled.
+const CurrentTimelineVersion = 1
+
+const (
+	EffectTypeBlur           = "blur"
+	EffectTypeBrightness     = "brightness"
+	EffectTypeContrast       = "contrast"
+	EffectTypeSaturation     = "saturation"
+	EffectTypeGrayscale      = "grayscale"
+	EffectTypeShadow         = "shadow"
+	EffectTypeBackgroundBlur = "background_blur"
+	EffectTypeChromaKey      = "chroma_key"
+	EffectTypeSharpen        = "sharpen"
+	EffectTypeVignette       = "vignette"
+)
+
+const (
+	TransitionTypeFade       = "fade"
+	TransitionTypeCrossfade  = "crossfade"
+	TransitionTypeDipToBlack = "dip_to_black"
+	TransitionTypeSlide      = "slide"
+	TransitionTypeWipe       = "wipe"
+	TransitionTypeZoom       = "zoom"
+)
+
+const (
+	// ShapeKindRectangle draws an outlined box; ShapeKindHighlight a filled
+	// translucent box. Both export via FFmpeg drawbox. ShapeKindBlur blurs
+	// the composited region beneath it (redaction) via crop+boxblur+overlay.
+	ShapeKindRectangle = "rectangle"
+	ShapeKindHighlight = "highlight"
+	ShapeKindBlur      = "blur"
+)
+
+var knownShapeKinds = map[string]bool{
+	ShapeKindRectangle: true,
+	ShapeKindHighlight: true,
+	ShapeKindBlur:      true,
+}
+
+var knownEffectTypes = map[string]bool{
+	EffectTypeBlur:           true,
+	EffectTypeBrightness:     true,
+	EffectTypeContrast:       true,
+	EffectTypeSaturation:     true,
+	EffectTypeGrayscale:      true,
+	EffectTypeShadow:         true,
+	EffectTypeBackgroundBlur: true,
+	EffectTypeChromaKey:      true,
+	EffectTypeSharpen:        true,
+	EffectTypeVignette:       true,
+}
+
+var knownTransitionTypes = map[string]bool{
+	TransitionTypeFade:       true,
+	TransitionTypeCrossfade:  true,
+	TransitionTypeDipToBlack: true,
+	TransitionTypeSlide:      true,
+	TransitionTypeWipe:       true,
+	TransitionTypeZoom:       true,
+}
+
+var knownKeyframeProperties = map[string]bool{
+	"x":        true,
+	"y":        true,
+	"scale":    true,
+	"rotation": true,
+	"opacity":  true,
+	"volume":   true,
+}
+
+var knownKeyframeEasings = map[string]bool{
+	"linear":      true,
+	"ease-in":     true,
+	"ease-out":    true,
+	"ease-in-out": true,
+	"step":        true,
+}
+
+const (
+	minTrackHeight = 32
+	maxTrackHeight = 160
 )
 
 type TimelineDocument struct {
@@ -43,24 +134,46 @@ type TimelineTrack struct {
 	Locked  bool           `json:"locked"`
 	Muted   bool           `json:"muted"`
 	Visible bool           `json:"visible"`
+	Height  *int           `json:"height,omitempty"`
 	Clips   []TimelineClip `json:"clips"`
 }
 
 type TimelineClip struct {
-	ID          string               `json:"id"`
-	AssetID     string               `json:"asset_id,omitempty"`
-	StartMS     int64                `json:"start_ms"`
-	DurationMS  int64                `json:"duration_ms"`
-	TrimInMS    int64                `json:"trim_in_ms"`
-	TrimOutMS   int64                `json:"trim_out_ms"`
+	ID         string `json:"id"`
+	AssetID    string `json:"asset_id,omitempty"`
+	StartMS    int64  `json:"start_ms"`
+	DurationMS int64  `json:"duration_ms"`
+	TrimInMS   int64  `json:"trim_in_ms"`
+	TrimOutMS  int64  `json:"trim_out_ms"`
+	ZIndex     *int   `json:"z_index,omitempty"`
+	GroupID    string `json:"group_id,omitempty"`
+	// Muted silences this clip's audio contribution without touching Volume.
+	Muted bool `json:"muted,omitempty"`
+	// AudioOnly suppresses a clip's visual output so a video asset can act as
+	// a detached audio clip.
+	AudioOnly   bool                 `json:"audio_only,omitempty"`
 	Transform   map[string]any       `json:"transform,omitempty"`
 	Volume      *float64             `json:"volume,omitempty"`
 	FadeInMS    int64                `json:"fade_in_ms,omitempty"`
 	FadeOutMS   int64                `json:"fade_out_ms,omitempty"`
 	Text        *TimelineText        `json:"text,omitempty"`
+	Shape       *TimelineShape       `json:"shape,omitempty"`
 	Effects     []TimelineEffect     `json:"effects"`
 	Transitions []TimelineTransition `json:"transitions,omitempty"`
 	Keyframes   []TimelineKeyframe   `json:"keyframes"`
+}
+
+// TimelineShape is a parameterized callout/annotation box. Dimensions are in
+// canvas pixels; position comes from the clip transform like any visual clip.
+type TimelineShape struct {
+	Kind        string  `json:"kind"`
+	Width       int     `json:"width,omitempty"`
+	Height      int     `json:"height,omitempty"`
+	Fill        string  `json:"fill,omitempty"`
+	Stroke      string  `json:"stroke,omitempty"`
+	StrokeWidth float64 `json:"stroke_width,omitempty"`
+	// BlurRadius applies to blur-region shapes (clamped 1–50, default 12).
+	BlurRadius float64 `json:"blur_radius,omitempty"`
 }
 
 type TimelineMarker struct {
@@ -70,14 +183,20 @@ type TimelineMarker struct {
 }
 
 type TimelineText struct {
-	Text       string         `json:"text"`
-	FontSize   int            `json:"font_size,omitempty"`
-	FontWeight string         `json:"font_weight,omitempty"`
-	Color      string         `json:"color,omitempty"`
-	Background string         `json:"background,omitempty"`
-	Stroke     string         `json:"stroke,omitempty"`
-	Shadow     bool           `json:"shadow,omitempty"`
-	Params     map[string]any `json:"params,omitempty"`
+	Text          string         `json:"text"`
+	FontFamily    string         `json:"font_family,omitempty"`
+	FontSize      int            `json:"font_size,omitempty"`
+	FontWeight    string         `json:"font_weight,omitempty"`
+	Color         string         `json:"color,omitempty"`
+	Background    string         `json:"background,omitempty"`
+	Stroke        string         `json:"stroke,omitempty"`
+	StrokeWidth   float64        `json:"stroke_width,omitempty"`
+	Shadow        bool           `json:"shadow,omitempty"`
+	TextAlign     string         `json:"text_align,omitempty"`
+	LineHeight    float64        `json:"line_height,omitempty"`
+	LetterSpacing float64        `json:"letter_spacing,omitempty"`
+	BorderRadius  float64        `json:"border_radius,omitempty"`
+	Params        map[string]any `json:"params,omitempty"`
 }
 
 type TimelineEffect struct {
@@ -129,11 +248,13 @@ func NewEmptyTimeline(width, height, fps int) TimelineDocument {
 			Background: "#000000",
 		},
 		DurationMS: 30000,
+		// Generic layers: index 0 (Layer 1) is the background; later layers
+		// stack on top, matching the preview compositor and FFmpeg renderer.
 		Tracks: []TimelineTrack{
-			{ID: "track-video-1", Type: TrackTypeVideo, Name: "Video 1", Visible: true, Clips: []TimelineClip{}},
-			{ID: "track-overlay-1", Type: TrackTypeImage, Name: "Overlay 1", Visible: true, Clips: []TimelineClip{}},
-			{ID: "track-audio-1", Type: TrackTypeAudio, Name: "Audio 1", Visible: true, Clips: []TimelineClip{}},
-			{ID: "track-text-1", Type: TrackTypeText, Name: "Text 1", Visible: true, Clips: []TimelineClip{}},
+			{ID: "track-layer-1", Type: TrackTypeLayer, Name: "Layer 1", Visible: true, Clips: []TimelineClip{}},
+			{ID: "track-layer-2", Type: TrackTypeLayer, Name: "Layer 2", Visible: true, Clips: []TimelineClip{}},
+			{ID: "track-layer-3", Type: TrackTypeLayer, Name: "Layer 3", Visible: true, Clips: []TimelineClip{}},
+			{ID: "track-layer-4", Type: TrackTypeLayer, Name: "Layer 4", Visible: true, Clips: []TimelineClip{}},
 		},
 		Markers:  []TimelineMarker{},
 		Metadata: map[string]any{},
@@ -163,12 +284,28 @@ func TimelineFromJSON(raw string, fallback TimelineDocument) (TimelineDocument, 
 	return ValidateTimelineDocument(doc)
 }
 
-func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
+// UpgradeTimelineDocument normalizes the document version and applies
+// stepwise upgrades for older versions. All schema changes so far have been
+// additive (optional fields), so version 1 is still current; when the first
+// breaking change lands, chain v1->v2 (etc.) upgraders here and bump
+// CurrentTimelineVersion.
+func UpgradeTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 	if doc.Version == 0 {
 		doc.Version = 1
 	}
-	if doc.Version != 1 {
+	if doc.Version > CurrentTimelineVersion {
+		return TimelineDocument{}, fmt.Errorf("unsupported timeline version %d: this build supports versions up to %d — upgrade OmniLLM Studio to open this timeline", doc.Version, CurrentTimelineVersion)
+	}
+	if doc.Version < 1 {
 		return TimelineDocument{}, fmt.Errorf("unsupported timeline version %d", doc.Version)
+	}
+	return doc, nil
+}
+
+func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
+	doc, err := UpgradeTimelineDocument(doc)
+	if err != nil {
+		return TimelineDocument{}, err
 	}
 	if doc.Canvas.Width <= 0 {
 		doc.Canvas.Width = DefaultProjectWidth
@@ -188,6 +325,25 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 	if doc.Markers == nil {
 		doc.Markers = []TimelineMarker{}
 	}
+	markerIDs := map[string]bool{}
+	for mi := range doc.Markers {
+		marker := &doc.Markers[mi]
+		marker.ID = strings.TrimSpace(marker.ID)
+		if marker.ID == "" {
+			marker.ID = "marker-" + uuid.New().String()
+		}
+		if markerIDs[marker.ID] {
+			return TimelineDocument{}, fmt.Errorf("duplicate marker id %q", marker.ID)
+		}
+		markerIDs[marker.ID] = true
+		if marker.TimeMS < 0 {
+			marker.TimeMS = 0
+		}
+		marker.Label = strings.TrimSpace(marker.Label)
+	}
+	sort.SliceStable(doc.Markers, func(i, j int) bool {
+		return doc.Markers[i].TimeMS < doc.Markers[j].TimeMS
+	})
 	if doc.Tracks == nil {
 		doc.Tracks = []TimelineTrack{}
 	}
@@ -210,6 +366,16 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 		}
 		if strings.TrimSpace(track.Name) == "" {
 			track.Name = defaultTrackName(track.Type, ti+1)
+		}
+		if track.Height != nil {
+			height := *track.Height
+			if height < minTrackHeight {
+				height = minTrackHeight
+			}
+			if height > maxTrackHeight {
+				height = maxTrackHeight
+			}
+			track.Height = &height
 		}
 		if track.Clips == nil {
 			track.Clips = []TimelineClip{}
@@ -236,8 +402,34 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 			if clip.TrimOutMS == 0 {
 				clip.TrimOutMS = clip.TrimInMS + clip.DurationMS
 			}
+			clip.GroupID = strings.TrimSpace(clip.GroupID)
 			if clip.Transform == nil && track.Type != TrackTypeAudio && track.Type != TrackTypeMusic {
 				clip.Transform = defaultTransform()
+			}
+			if clip.Shape != nil {
+				clip.Shape.Kind = strings.ToLower(strings.TrimSpace(clip.Shape.Kind))
+				if !knownShapeKinds[clip.Shape.Kind] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has unsupported shape kind %q", clip.ID, clip.Shape.Kind)
+				}
+				if clip.Shape.Width <= 0 {
+					clip.Shape.Width = 320
+				}
+				if clip.Shape.Height <= 0 {
+					clip.Shape.Height = 180
+				}
+				if clip.Shape.Width > 8192 {
+					clip.Shape.Width = 8192
+				}
+				if clip.Shape.Height > 8192 {
+					clip.Shape.Height = 8192
+				}
+				clip.Shape.StrokeWidth = clampFloat(clip.Shape.StrokeWidth, 0, 100)
+				if clip.Shape.Kind == ShapeKindBlur {
+					if clip.Shape.BlurRadius <= 0 {
+						clip.Shape.BlurRadius = 12
+					}
+					clip.Shape.BlurRadius = clampFloat(clip.Shape.BlurRadius, 1, 50)
+				}
 			}
 			if clip.Effects == nil {
 				clip.Effects = []TimelineEffect{}
@@ -248,17 +440,62 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 			if clip.Transitions == nil {
 				clip.Transitions = []TimelineTransition{}
 			}
+			effectIDs := map[string]bool{}
 			for ei := range clip.Effects {
-				if clip.Effects[ei].ID == "" {
-					clip.Effects[ei].ID = "effect-" + uuid.New().String()
+				effect := &clip.Effects[ei]
+				if effect.ID == "" {
+					effect.ID = "effect-" + uuid.New().String()
 				}
-				if clip.Effects[ei].Params == nil {
-					clip.Effects[ei].Params = map[string]any{}
+				if effectIDs[effect.ID] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has duplicate effect id %q", clip.ID, effect.ID)
+				}
+				effectIDs[effect.ID] = true
+				effect.Type = strings.ToLower(strings.TrimSpace(effect.Type))
+				if !knownEffectTypes[effect.Type] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has unsupported effect type %q", clip.ID, effect.Type)
+				}
+				if effect.Params == nil {
+					effect.Params = map[string]any{}
 				}
 			}
+			transitionIDs := map[string]bool{}
+			for xi := range clip.Transitions {
+				transition := &clip.Transitions[xi]
+				if transition.ID == "" {
+					transition.ID = "transition-" + uuid.New().String()
+				}
+				if transitionIDs[transition.ID] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has duplicate transition id %q", clip.ID, transition.ID)
+				}
+				transitionIDs[transition.ID] = true
+				transition.Type = strings.ToLower(strings.TrimSpace(transition.Type))
+				if !knownTransitionTypes[transition.Type] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has unsupported transition type %q", clip.ID, transition.Type)
+				}
+				if transition.DurationMS <= 0 {
+					return TimelineDocument{}, fmt.Errorf("clip %q transition %q duration_ms must be greater than zero", clip.ID, transition.ID)
+				}
+			}
+			keyframeIDs := map[string]bool{}
 			for ki := range clip.Keyframes {
-				if clip.Keyframes[ki].ID == "" {
-					clip.Keyframes[ki].ID = "keyframe-" + uuid.New().String()
+				keyframe := &clip.Keyframes[ki]
+				if keyframe.ID == "" {
+					keyframe.ID = "keyframe-" + uuid.New().String()
+				}
+				if keyframeIDs[keyframe.ID] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has duplicate keyframe id %q", clip.ID, keyframe.ID)
+				}
+				keyframeIDs[keyframe.ID] = true
+				keyframe.Property = strings.ToLower(strings.TrimSpace(keyframe.Property))
+				if !knownKeyframeProperties[keyframe.Property] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has unsupported keyframe property %q", clip.ID, keyframe.Property)
+				}
+				if keyframe.TimeMS < 0 {
+					return TimelineDocument{}, fmt.Errorf("clip %q keyframe %q time_ms cannot be negative", clip.ID, keyframe.ID)
+				}
+				keyframe.Easing = strings.ToLower(strings.TrimSpace(keyframe.Easing))
+				if keyframe.Easing != "" && !knownKeyframeEasings[keyframe.Easing] {
+					keyframe.Easing = "linear"
 				}
 			}
 			if end := clip.StartMS + clip.DurationMS; end > maxEnd {
@@ -280,13 +517,7 @@ func AddAssetToTimeline(doc TimelineDocument, asset models.VideoAsset, req Timel
 	if err != nil {
 		return TimelineDocument{}, TimelineClip{}, err
 	}
-	trackType := normalizeTrackType(req.TrackType)
-	if trackType == "" {
-		trackType = trackTypeForAssetKind(asset.Kind)
-	}
-	if trackType == "" {
-		return TimelineDocument{}, TimelineClip{}, fmt.Errorf("unsupported asset kind %q", asset.Kind)
-	}
+	kind := kindForAssetOrMime(asset)
 
 	trackIndex := -1
 	if req.TrackID != "" {
@@ -299,22 +530,37 @@ func AddAssetToTimeline(doc TimelineDocument, asset models.VideoAsset, req Timel
 		if trackIndex == -1 {
 			return TimelineDocument{}, TimelineClip{}, fmt.Errorf("track not found")
 		}
-		if !trackAcceptsKind(doc.Tracks[trackIndex].Type, asset.Kind) {
-			return TimelineDocument{}, TimelineClip{}, fmt.Errorf("asset kind %q is not compatible with %s track", asset.Kind, doc.Tracks[trackIndex].Type)
+		// Any clip kind is accepted on an explicit target track; only a lock
+		// blocks placement.
+		if doc.Tracks[trackIndex].Locked {
+			return TimelineDocument{}, TimelineClip{}, fmt.Errorf("track %q is locked", doc.Tracks[trackIndex].Name)
 		}
 	} else {
-		for i := range doc.Tracks {
-			if !doc.Tracks[i].Locked && trackAcceptsKind(doc.Tracks[i].Type, asset.Kind) {
-				trackIndex = i
-				break
+		// Honor a legacy track_type hint first, then prefer tracks that
+		// naturally accept the kind (generic layers accept everything, so new
+		// timelines pick the first unlocked layer).
+		if requested := normalizeTrackType(req.TrackType); requested != "" {
+			for i := range doc.Tracks {
+				if !doc.Tracks[i].Locked && doc.Tracks[i].Type == requested {
+					trackIndex = i
+					break
+				}
+			}
+		}
+		if trackIndex == -1 {
+			for i := range doc.Tracks {
+				if !doc.Tracks[i].Locked && trackAcceptsKind(doc.Tracks[i].Type, kind) {
+					trackIndex = i
+					break
+				}
 			}
 		}
 	}
 	if trackIndex == -1 {
 		doc.Tracks = append(doc.Tracks, TimelineTrack{
-			ID:      fmt.Sprintf("track-%s-%d", trackType, len(doc.Tracks)+1),
-			Type:    trackType,
-			Name:    defaultTrackName(trackType, len(doc.Tracks)+1),
+			ID:      "track-" + uuid.New().String(),
+			Type:    TrackTypeLayer,
+			Name:    fmt.Sprintf("Layer %d", len(doc.Tracks)+1),
 			Visible: true,
 			Clips:   []TimelineClip{},
 		})
@@ -330,7 +576,7 @@ func AddAssetToTimeline(doc TimelineDocument, asset models.VideoAsset, req Timel
 		duration = *asset.DurationMS
 	}
 	if duration <= 0 {
-		duration = defaultDurationForTrack(trackType)
+		duration = defaultDurationForAssetKind(kind)
 	}
 	trimOut := duration
 	volume := 1.0
@@ -344,10 +590,11 @@ func AddAssetToTimeline(doc TimelineDocument, asset models.VideoAsset, req Timel
 		Effects:    []TimelineEffect{},
 		Keyframes:  []TimelineKeyframe{},
 	}
-	if trackType == TrackTypeAudio || trackType == TrackTypeMusic {
-		clip.Volume = &volume
-	} else {
+	if isVisualAssetKind(kind) {
 		clip.Transform = defaultTransform()
+	}
+	if isAudioAssetKind(kind) {
+		clip.Volume = &volume
 	}
 	doc.Tracks[trackIndex].Clips = append(doc.Tracks[trackIndex].Clips, clip)
 	if end := clip.StartMS + clip.DurationMS; end > doc.DurationMS {
@@ -420,6 +667,8 @@ func defaultTransform() map[string]any {
 
 func normalizeTrackType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case TrackTypeLayer:
+		return TrackTypeLayer
 	case TrackTypeVideo:
 		return TrackTypeVideo
 	case TrackTypeImage, "overlay":
@@ -460,8 +709,15 @@ func trackTypeForAssetKind(kind string) string {
 	}
 }
 
+// trackAcceptsKind reports whether a track naturally accepts an asset kind.
+// Generic layers accept everything; for legacy typed tracks this preserves
+// the old media routing. Used only for automatic placement preference — an
+// explicit track_id bypasses it entirely.
 func trackAcceptsKind(trackType, kind string) bool {
 	trackType = normalizeTrackType(trackType)
+	if trackType == TrackTypeLayer {
+		return true
+	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "video":
 		return trackType == TrackTypeVideo
@@ -482,6 +738,8 @@ func trackAcceptsKind(trackType, kind string) bool {
 
 func defaultTrackName(trackType string, index int) string {
 	switch trackType {
+	case TrackTypeLayer:
+		return fmt.Sprintf("Layer %d", index)
 	case TrackTypeVideo:
 		return fmt.Sprintf("Video %d", index)
 	case TrackTypeImage:
@@ -503,14 +761,56 @@ func defaultTrackName(trackType string, index int) string {
 	}
 }
 
-func defaultDurationForTrack(trackType string) int64 {
-	switch trackType {
-	case TrackTypeImage, TrackTypeText, TrackTypeCaption, TrackTypeShape, TrackTypeCallout:
+func defaultDurationForAssetKind(kind string) int64 {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "image", "text", "caption", "shape", "callout":
 		return 5000
-	case TrackTypeAudio, TrackTypeMusic:
+	case "audio", "music":
 		return 30000
 	default:
 		return 8000
+	}
+}
+
+// kindForAssetOrMime returns the effective asset kind, falling back to the
+// MIME type prefix when the kind column is empty.
+func kindForAssetOrMime(asset models.VideoAsset) string {
+	if kind := strings.ToLower(strings.TrimSpace(asset.Kind)); kind != "" {
+		return kind
+	}
+	mime := strings.ToLower(strings.TrimSpace(asset.MimeType))
+	switch {
+	case strings.HasPrefix(mime, "video/"):
+		return "video"
+	case strings.HasPrefix(mime, "image/"):
+		return "image"
+	case strings.HasPrefix(mime, "audio/"):
+		return "audio"
+	default:
+		return "other"
+	}
+}
+
+// isVisualAssetKind reports whether clips of this kind produce visual output.
+// Unknown kinds default to visual — a spurious transform on a non-visual clip
+// is harmless, while a missing one degrades editing.
+func isVisualAssetKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "audio", "music":
+		return false
+	default:
+		return true
+	}
+}
+
+// isAudioAssetKind reports whether clips of this kind can contribute audio to
+// the mix. Video and export assets carry audio streams.
+func isAudioAssetKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "audio", "music", "video", "export":
+		return true
+	default:
+		return false
 	}
 }
 

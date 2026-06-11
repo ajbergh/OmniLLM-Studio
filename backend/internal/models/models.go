@@ -993,6 +993,7 @@ type VideoRenderJob struct {
 	SettingsJSON  string     `json:"settings_json"`
 	OutputAssetID *string    `json:"output_asset_id,omitempty"`
 	Error         *string    `json:"error,omitempty"`
+	MetadataJSON  string     `json:"metadata_json,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	StartedAt     *time.Time `json:"started_at,omitempty"`
 	CompletedAt   *time.Time `json:"completed_at,omitempty"`

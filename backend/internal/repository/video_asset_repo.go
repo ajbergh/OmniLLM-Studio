@@ -81,6 +81,24 @@ func (r *VideoAssetRepo) ListByProject(projectID string) ([]models.VideoAsset, e
 	return assets, rows.Err()
 }
 
+// UpdateFileName renames the display file name of an asset (the file on disk
+// keeps its storage name).
+func (r *VideoAssetRepo) UpdateFileName(id, fileName string) error {
+	if _, err := r.db.Exec(`UPDATE video_assets SET file_name = ? WHERE id = ?`, fileName, id); err != nil {
+		return fmt.Errorf("rename video asset: %w", err)
+	}
+	return nil
+}
+
+// UpdateArtifacts records generated thumbnail/waveform paths (lazy backfill
+// for assets ingested before artifact generation existed).
+func (r *VideoAssetRepo) UpdateArtifacts(id string, thumbnailPath, waveformPath *string) error {
+	if _, err := r.db.Exec(`UPDATE video_assets SET thumbnail_path = ?, waveform_path = ? WHERE id = ?`, thumbnailPath, waveformPath, id); err != nil {
+		return fmt.Errorf("update video asset artifacts: %w", err)
+	}
+	return nil
+}
+
 func (r *VideoAssetRepo) Delete(id string) error {
 	if _, err := r.db.Exec(`DELETE FROM video_assets WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete video asset: %w", err)

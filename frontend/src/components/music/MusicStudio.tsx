@@ -3,6 +3,7 @@ import { DragHandle, useResizablePanels } from '../ResizablePanels';
 import { Music, PanelRight, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useConversationStore, useMessageStore, useSettingsStore, useCrossoverStore } from '../../stores';
+import { useVideoStudioStore } from '../../stores/videoStudio';
 import { useMusicStudioStore } from '../../stores/musicStudio';
 import { useImageEditorStore } from '../../stores/imageEditor';
 import { musicApi, api, crossoverApi } from '../../api';
@@ -119,6 +120,19 @@ export function MusicStudio() {
     }
   };
 
+  const handleAddToVideoProject = async (generation: MusicGenerationDetail) => {
+    if (!generation.asset_id) {
+      toast.error('No audio asset available yet');
+      return;
+    }
+    const asset = await useVideoStudioStore.getState().importMusicAsset(generation.asset_id, generation.title);
+    if (asset) {
+      toast.success(`"${generation.title || asset.file_name}" added to the video project media bin`, {
+        action: { label: 'Open editor', onClick: () => setAppMode('video-edit') },
+      });
+    }
+  };
+
   const handleGenerateVideo = async (generation: MusicGenerationDetail) => {
     if (!generation.prompt) return;
     try {
@@ -221,6 +235,7 @@ export function MusicStudio() {
             onSendToChat={handleSendToChat}
             onGenerateAlbumArt={handleGenerateAlbumArt}
             onSendToVideo={handleGenerateVideo}
+            onAddToVideoProject={handleAddToVideoProject}
           />
         </main>
 

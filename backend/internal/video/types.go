@@ -10,6 +10,7 @@ type Capability string
 const (
 	ProviderOpenRouter = "openrouter"
 	ProviderGemini     = "gemini"
+	ProviderLuma       = "luma"
 	ProviderOpenAI     = "openai"
 	ProviderCustom     = "custom"
 
@@ -152,7 +153,11 @@ type GenerationDetail struct {
 	NegativePrompt    *string    `json:"negative_prompt,omitempty"`
 	SettingsJSON      string     `json:"settings_json,omitempty"`
 	InputAssetIDsJSON string     `json:"input_asset_ids_json,omitempty"`
+	InputAssetsJSON   string     `json:"input_assets_json,omitempty"`
 	OutputAssetID     *string    `json:"output_asset_id,omitempty"`
+	UpstreamJobID     *string    `json:"upstream_job_id,omitempty"`
+	UpstreamReqID     *string    `json:"upstream_request_id,omitempty"`
+	UsageJSON         *string    `json:"usage_json,omitempty"`
 	AssetURL          string     `json:"asset_url,omitempty"`
 	MimeType          string     `json:"mime_type,omitempty"`
 	CostUSD           *float64   `json:"cost_usd,omitempty"`
@@ -193,9 +198,15 @@ type ExternalAssetImportRequest struct {
 }
 
 type ExportSettings struct {
-	Format                string `json:"format"`
-	Codec                 string `json:"codec,omitempty"`
-	Resolution            string `json:"resolution"`
+	Format     string `json:"format"`
+	Codec      string `json:"codec,omitempty"`
+	Resolution string `json:"resolution"`
+	// Preset is an advisory label for the chosen export preset
+	// (e.g. "youtube_16_9", "shorts_9_16", "square_1_1", "custom").
+	Preset string `json:"preset,omitempty"`
+	// Width/Height override Resolution when both are set (custom export size).
+	Width                 int    `json:"width,omitempty"`
+	Height                int    `json:"height,omitempty"`
 	FPS                   int    `json:"fps,omitempty"`
 	Quality               string `json:"quality,omitempty"`
 	IncludeAudio          bool   `json:"include_audio"`

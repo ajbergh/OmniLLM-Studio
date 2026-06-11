@@ -18,8 +18,16 @@ type Migration struct {
 
 // Open initializes a SQLite database connection.
 func Open(path string) (*sql.DB, error) {
+	// modernc.org/sqlite only understands `_pragma=name(value)` query
+	// parameters — mattn-style `_journal_mode=WAL&_busy_timeout=...` params are
+	// silently ignored by this driver, which left the database running without
+	// WAL or a busy timeout until 2026-06-10.
+	//
+	// foreign_keys stays OFF deliberately: the schema declares FK constraints
+	// but they have never been enforced under this driver; enabling them needs
+	// a dedicated audit of delete paths and existing orphaned rows first.
 	dsn := fmt.Sprintf(
-		"%s?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on&_synchronous=NORMAL&_cache_size=-64000&_mmap_size=268435456&_temp_store=MEMORY&_journal_size_limit=67108864",
+		"%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-64000)&_pragma=mmap_size(268435456)&_pragma=temp_store(MEMORY)&_pragma=journal_size_limit(67108864)",
 		path,
 	)
 	db, err := sql.Open("sqlite", dsn)
@@ -133,6 +141,7 @@ func versionedMigrations() []Migration {
 		{Version: 38, Name: "video_studio_timelines", SQL: migrationVideoStudioTimelines},
 		{Version: 39, Name: "video_studio_render_jobs", SQL: migrationVideoStudioRenderJobs},
 		{Version: 40, Name: "video_generation_input_assets", SQL: migrationVideoGenerationInputAssets},
+		{Version: 41, Name: "video_render_job_metadata", SQL: migrationVideoRenderJobMetadata},
 	}
 }
 
@@ -773,6 +782,11 @@ CREATE INDEX IF NOT EXISTS idx_video_render_jobs_status ON video_render_jobs(sta
 // V40: Add structured input_assets_json to video_generations for role-tagged assets
 const migrationVideoGenerationInputAssets = `
 ALTER TABLE video_generations ADD COLUMN input_assets_json TEXT NOT NULL DEFAULT '[]';
+`
+
+// V41: render job diagnostics metadata (FFmpeg command, stderr, probe info)
+const migrationVideoRenderJobMetadata = `
+ALTER TABLE video_render_jobs ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}';
 `
 
 // V14: Add workspace_id to conversations

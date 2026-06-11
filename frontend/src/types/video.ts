@@ -1,4 +1,4 @@
-export type VideoProviderKey = 'openrouter' | 'gemini' | 'openai' | 'custom';
+export type VideoProviderKey = 'openrouter' | 'gemini' | 'luma' | 'openai' | 'custom';
 
 export type VideoCapability =
   | 'text_to_video'
@@ -26,6 +26,26 @@ export interface VideoModel {
   fps_options?: number[];
   max_prompt_chars?: number;
   notes?: string;
+}
+
+export interface VideoGenerationValidationIssue {
+  code: string;
+  field?: string;
+  message: string;
+  severity: 'error' | 'warning' | 'normalization';
+  original?: unknown;
+  normalized?: unknown;
+}
+
+export interface VideoGenerationValidationResult {
+  valid: boolean;
+  provider?: VideoProviderKey;
+  model?: string;
+  capabilities?: VideoCapability[];
+  normalized_request: GenerateVideoRequest;
+  errors: VideoGenerationValidationIssue[];
+  warnings: VideoGenerationValidationIssue[];
+  normalizations: VideoGenerationValidationIssue[];
 }
 
 export interface VideoProviderInfo {
@@ -89,6 +109,9 @@ export interface VideoGenerationDetail {
   input_asset_ids_json?: string;
   input_assets_json?: string;
   output_asset_id?: string;
+  upstream_job_id?: string;
+  upstream_request_id?: string;
+  usage_json?: string;
   asset_url?: string;
   mime_type?: string;
   cost_usd?: number;
@@ -173,6 +196,9 @@ export interface VideoGenerationError {
 }
 
 export type VideoTimelineTrackType =
+  // Generic ordered layer — accepts any clip kind; media behavior comes from
+  // the clip and asset. Later tracks in the array stack on top.
+  | 'layer'
   | 'video'
   | 'image'
   | 'audio'
@@ -200,18 +226,46 @@ export interface VideoTimelineTransform {
 
 export interface VideoTimelineText {
   text: string;
+  font_family?: string;
   font_size?: number;
   font_weight?: string;
   color?: string;
   background?: string;
   stroke?: string;
+  stroke_width?: number;
   shadow?: boolean;
+  text_align?: 'left' | 'center' | 'right';
+  line_height?: number;
+  letter_spacing?: number;
+  border_radius?: number;
   params?: Record<string, unknown>;
+}
+
+/** Parameterized callout/annotation box; dimensions in canvas pixels, position via the clip transform. */
+export interface VideoTimelineShape {
+  kind: 'rectangle' | 'highlight' | 'blur';
+  width?: number;
+  height?: number;
+  fill?: string;
+  stroke?: string;
+  stroke_width?: number;
+  /** Blur-region radius (1–50, default 12). */
+  blur_radius?: number;
 }
 
 export interface VideoTimelineEffect {
   id: string;
-  type: 'blur' | 'brightness' | 'contrast' | 'saturation' | 'grayscale' | 'shadow' | 'background_blur' | 'chroma_key';
+  type:
+    | 'blur'
+    | 'brightness'
+    | 'contrast'
+    | 'saturation'
+    | 'grayscale'
+    | 'shadow'
+    | 'background_blur'
+    | 'chroma_key'
+    | 'sharpen'
+    | 'vignette';
   enabled: boolean;
   params: Record<string, unknown>;
 }
@@ -228,7 +282,7 @@ export interface VideoTimelineKeyframe {
   property: 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume';
   time_ms: number;
   value: number;
-  easing?: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+  easing?: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'step';
 }
 
 export interface VideoTimelineClip {
@@ -238,11 +292,18 @@ export interface VideoTimelineClip {
   duration_ms: number;
   trim_in_ms: number;
   trim_out_ms: number;
+  z_index?: number;
+  group_id?: string;
+  /** Silences this clip's audio without touching volume. */
+  muted?: boolean;
+  /** Suppresses visuals so a video asset acts as detached audio. */
+  audio_only?: boolean;
   transform?: VideoTimelineTransform;
   volume?: number;
   fade_in_ms?: number;
   fade_out_ms?: number;
   text?: VideoTimelineText;
+  shape?: VideoTimelineShape;
   effects: VideoTimelineEffect[];
   transitions?: VideoTimelineTransition[];
   keyframes: VideoTimelineKeyframe[];
@@ -255,6 +316,7 @@ export interface VideoTimelineTrack {
   locked: boolean;
   muted: boolean;
   visible: boolean;
+  height?: number;
   clips: VideoTimelineClip[];
 }
 
@@ -292,11 +354,15 @@ export interface VideoTimelineDetail {
 export interface VideoExportSettings {
   format: 'mp4' | 'webm';
   codec?: 'h264' | 'h265' | 'vp9';
-  resolution: '720p' | '1080p' | 'project';
+  resolution: '720p' | '1080p' | 'project' | 'custom';
+  preset?: string;
+  width?: number;
+  height?: number;
   fps?: number;
   quality?: 'draft' | 'standard' | 'high';
   include_audio: boolean;
   register_in_file_library?: boolean;
+  estimated_duration_ms?: number;
 }
 
 export interface VideoRenderJob {
@@ -308,15 +374,32 @@ export interface VideoRenderJob {
   settings_json: string;
   output_asset_id?: string;
   error?: string;
+  metadata_json?: string;
   created_at: string;
   started_at?: string;
   completed_at?: string;
+}
+
+export interface VideoRendererFeatureSupport {
+  feature: string;
+  label: string;
+  supported: boolean;
+  partial?: boolean;
+  notes?: string;
+}
+
+export interface VideoRendererCapabilities {
+  renderer: string;
+  formats: string[];
+  features: VideoRendererFeatureSupport[];
 }
 
 export interface VideoAssistantRequest {
   prompt?: string;
   instruction?: string;
   timeline?: VideoTimelineDocument;
+  selected_clip_id?: string;
+  playhead_ms?: number;
 }
 
 export interface VideoStoryboardScene {
@@ -350,6 +433,10 @@ export interface VideoEditOperation {
 export interface VideoEditPlan {
   summary: string;
   operations: VideoEditOperation[];
+  /** Human-readable per-operation descriptions for valid operations. */
+  preview?: string[];
+  /** Operations that failed validation against the current timeline (skipped on apply). */
+  issues?: string[];
 }
 
 export interface VideoSocialVariant {

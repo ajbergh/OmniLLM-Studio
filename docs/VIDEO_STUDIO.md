@@ -10,7 +10,7 @@ Video Studio is a first-class project workspace for AI video creation. Timeline 
 - Prompt enhancement, generation history, branching metadata, and durable assets.
 - Gemini Veo supports **reference image input** (image-to-video): supply an image asset ID via `ReferenceAssetIDs` and the Gemini adapter base64-encodes the first image and embeds it into the `predictLongRunning` request.
 - Single-output preview and download controls for generated video, image, and audio outputs.
-- **Cross-studio shortcuts** — Image Studio and Music Studio each expose a "Make Video" button that routes the asset (with generated prompt context) into Video Studio via the crossover domain-translation path.
+- **Cross-studio shortcuts** — Image Studio and Music Studio each expose a "Make Video" button that routes the asset (with generated prompt context) into Video Studio via the crossover domain-translation path. Music Studio additionally has an **"Add to Video Project"** button on completed tracks that imports the audio asset directly into the active video project's media bin (creating a project when none is active) via `POST /v1/video/projects/{id}/assets/import` with `source_studio: "music"` — ready to drag onto a music/audio track in Video Edit Studio.
 
 ## Creation Panel UI
 
@@ -57,11 +57,20 @@ The upload button is available for Start frame, Last frame, Source video to exte
 
 ## Video Edit Studio Capabilities
 
-- Neutral OmniLLM timeline JSON with video, image, audio, music, text, caption, shape, and callout track types.
-- Asset placement, clip move, trim, split, delete, duplicate, fades, volume, transforms, effects, transitions, text clips, and keyframes.
-- Preview canvas shows real `<video>` elements for video assets, `<img>` for image assets, and a compact card for text or unsupported asset types.
-- FFmpeg-backed render/export jobs that composite real video and image media alongside text/caption/callout clips into durable MP4/WebM export assets.
-- **AI-backed assistant** — storyboard and edit-plan endpoints call the LLM (using the first enabled chat provider) when configured; deterministic fallbacks are used when no LLM is available. Social-variant, timeline-plan, apply-plan, and validate-plan endpoints remain rule-based.
+- Neutral OmniLLM timeline JSON built on **generic ordered layers** (`layer` track type) that accept any clip kind — media behavior comes from the asset, not the track. Legacy typed tracks (video, image, audio, music, text, caption, shape, callout) remain loadable. The layer list displays foreground-on-top; later tracks in the document stack above earlier ones in preview and export.
+- Layer-based timeline: clip move (group-aware), trim, split (playhead, blade tool, or split-all), duplicate, delete, copy/cut/paste (Ctrl+C/X/V, paste-at-playhead or paste-here), copy/paste clip attributes, multi-select (modifiers, Ctrl+A, before/after playhead, all-on-layer), grouping, align/distribute, markers, snapping with drop guides, undo/redo, zoom (buttons, `+`/`-`/`F`, Ctrl+wheel), layer add/remove/rename/reorder/duplicate/clear/solo (preview audio), sticky headers, drag-to-resize row height, and a `?` shortcut overlay.
+- **Context menus everywhere** via a shared accessible component (`frontend/src/components/common/ContextMenu.tsx`, portal-based, keyboard-navigable, Shift+F10): timeline clips, layer headers, empty lanes (time-aware paste/insert), the ruler (markers, split-all, duration, selection), the preview canvas (fit/fill/center/reset, z-order, select-underneath), media-bin assets (add/rename/download/send-to-chat/register-in-library/delete with in-use warnings), inspector effect/transition/keyframe rows, and render jobs (copy error/diagnostics, retry, cancel).
+- Preview canvas composites **all visible tracks** at the playhead (track order + z-index) with transforms, opacity, fades, crop, CSS-filter effects, keyframe animation, and styled text; on-canvas drag/scale/rotate/crop editing with snap-to-center, safe-area/grid guides, and a fullscreen toggle.
+- Inspector with timecode-capable timing fields (start/end/duration/trim-in), numeric X/Y + fit/fill/center/reset transform actions, text styling controls (size, weight, color, background, alignment, shadow, title/lower-third/subtitle presets), registry-driven effect/transition/keyframe editors (param sliders, reorder, per-type export-support chips), and a project Canvas section (presets, dimensions, FPS, background) when nothing is selected.
+- Callout shapes: highlight boxes (filled, translucent), rectangle callouts (outlined, optional centered label), and blur/redaction regions (CSS backdrop-filter in preview, crop+boxblur subgraph at export) — created from the preview-canvas or lane context menus and edited in the inspector (dimensions, fill/stroke, blur radius).
+- Marquee selection: drag on empty lane space sweeps a rectangle; intersecting clips become the selection.
+- Captions panel: segment editor (retime/split/merge/delete), SRT/WebVTT import/export, and style presets — captions are ordinary clips on caption tracks.
+- Media bin: search, sort, type filters, grid/list views, server-generated poster thumbnails and audio waveform images (FFmpeg, best-effort, served from `GET /v1/video/assets/{assetId}/artifacts/{thumbnail|waveform}`), in-use badges, rename/delete, button or drag-and-drop local upload (uploads are ffprobe-enriched with duration/dimensions/FPS/codec/audio details when ffprobe is installed), and drag-to-timeline. Audio clips show their waveform in the timeline.
+- Starter templates (16:9/9:16/1:1, title + lower third, captioned talking head, slideshow) that create real timeline JSON via the header Templates menu.
+- Project workflow: `POST /v1/video/projects/{projectId}/duplicate` copies a project with all asset files (artifacts regenerated) and its timeline (asset references remapped, clip IDs preserved); reachable from the project-strip context menu, and social-variant chips can spawn a duplicated project with the variant's plan applied. Collapsible/resizable side panels persist widths; the media bin header shows per-project storage usage.
+- Audio workflows: per-clip volume with exportable volume keyframes, clip mute (independent of volume), detach-audio-from-video (audio-only twin on a new layer), one-click full-length music beds from audio assets, ephemeral layer solo for preview monitoring, and waveforms on timeline clips.
+- FFmpeg-backed render/export jobs that composite real video and image media alongside text/caption/callout clips into durable MP4/WebM export assets — layer-ordered stacking, slide transitions, chroma key, and audio mixdown that includes video-clip soundtracks.
+- **AI-backed assistant** — storyboard and edit-plan endpoints call the LLM (using the first enabled chat provider) when configured; deterministic fallbacks are used when no LLM is available. Social-variant, timeline-plan, apply-plan, and validate-plan endpoints remain rule-based. Plans return the validated operation subset with one preview line per operation; the editor offers per-operation checkboxes so a subset can be applied.
 - Crossover translation support for image, music, chat, and video domains.
 - Backend asset import that copies real bytes from File Library records, Music Studio assets, and Image/attachment-backed sources into Video Studio storage while preserving source metadata.
 - **Video-to-Chat** — `POST /v1/video/assets/{assetId}/attach-to-conversation` copies a video asset into a conversation as an attachment, sends it to the chat view, and navigates there.
@@ -82,7 +91,7 @@ Both providers include a built-in model snapshot so the UI shows expected capabi
 
 ## Rendering
 
-Video Edit Studio exports through persisted backend render jobs. The default renderer uses FFmpeg to composite real video and image media, text/caption/callout clips, and canvas settings into durable MP4/WebM export assets. Effects, transitions, fades, opacity keyframes, and audio mixing are stored in the timeline JSON but are not yet applied during FFmpeg export — the inspector shows an inline warning for this.
+Video Edit Studio exports through persisted backend render jobs. The default renderer uses FFmpeg to composite real video and image media, text/caption/callout clips, and canvas settings into durable MP4/WebM export assets — including transforms (position/scale/rotation/crop), opacity, fades, fade-style transitions, most effects, position keyframes, audio mixing, and text styling. Remaining gaps (e.g. scale/opacity keyframes, slide/wipe/zoom transitions) are reported by `GET /v1/video/render/capabilities`, which drives the inspector's export-fidelity warnings.
 
 See [VIDEO_RENDERING.md](VIDEO_RENDERING.md) for the full renderer reference.
 
@@ -90,7 +99,7 @@ See [VIDEO_RENDERING.md](VIDEO_RENDERING.md) for the full renderer reference.
 
 `POST /v1/video/projects/{projectId}/assets/import` accepts File Library, Music Studio, Image Studio, and attachment-backed source IDs. The service resolves the original stored file, checks project/source ownership where the source model supports it, copies the bytes into `<attachments_dir>/video/...`, and stores a `VideoAsset` with `source_studio` and `source_id` metadata.
 
-`POST /v1/video/projects/{projectId}/assets/upload` accepts a raw `multipart/form-data` file upload (max 50 MB, field name `file`). The backend auto-detects the MIME type from the header or file extension, derives `kind` (`image`, `video`, `audio`, `file`), saves the file under a UUID filename in video storage, and creates a `VideoAsset` record with `source_type = "upload"`. This endpoint powers the inline `+` upload button present in every asset picker in the creation panel.
+`POST /v1/video/projects/{projectId}/assets/upload` accepts a raw `multipart/form-data` file upload (field name `file`; per-kind limits: image 25 MB, audio 100 MB, video 500 MB). The backend sniffs the MIME type from the file content (rejecting kind mismatches), derives `kind` (`image`, `video`, `audio`), saves the file under a UUID filename in video storage, enriches video/audio assets with duration/dimensions/FPS via `ffprobe` when available, and creates a `VideoAsset` record with `source_type = "upload"`. This endpoint powers the creation-panel asset pickers' `+` buttons and the Edit Studio media bin's upload button and drag-and-drop.
 
 ## Cross-Studio Exports
 

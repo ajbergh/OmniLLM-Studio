@@ -1,17 +1,32 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { videoApi } from '../api';
+import { CAPTION_PRESETS, parseCaptions, serializeSrt, serializeVtt } from '../components/video/captions/captionUtils';
+import type { CaptionCue, CaptionPresetKey } from '../components/video/captions/captionUtils';
+import { TIMELINE_TEMPLATES } from '../components/video/templates/timelineTemplates';
+import type { EditorModeKey } from '../components/video/editorModes';
+
+const EDITOR_MODE_STORAGE_KEY = 'omnillm-video-editor-mode';
+
+function initialEditorMode(): EditorModeKey {
+  if (typeof window === 'undefined') return 'full';
+  const stored = window.localStorage.getItem(EDITOR_MODE_STORAGE_KEY);
+  return stored === 'simple_trim' || stored === 'captions_only' || stored === 'social_clip' ? stored : 'full';
+}
 import type {
+  InputAsset,
   VideoAsset,
   VideoEditPlan,
   VideoExportSettings,
   VideoGenerationDetail,
   VideoGenerationProgress,
+  VideoGenerationValidationResult,
   VideoModel,
   VideoProject,
   VideoPromptForm,
   VideoProviderInfo,
   VideoProviderKey,
+  VideoRendererCapabilities,
   VideoRenderJob,
   VideoSocialVariant,
   VideoStoryboardResponse,
@@ -20,6 +35,7 @@ import type {
   VideoTimelineEffect,
   VideoTimelineKeyframe,
   VideoTimelineRecord,
+  VideoTimelineShape,
   VideoTimelineTrack,
   VideoTimelineTrackType,
   VideoTimelineTransform,
@@ -61,6 +77,7 @@ const DEFAULT_EXPORT: VideoExportSettings = {
 const DEFAULT_MODELS: Record<VideoProviderKey, string> = {
   openrouter: '',
   gemini: '',
+  luma: '',
   openai: '',
   custom: '',
 };
@@ -78,6 +95,18 @@ function cloneTimeline(doc: VideoTimelineDocument): VideoTimelineDocument {
   return JSON.parse(JSON.stringify(doc)) as VideoTimelineDocument;
 }
 
+const TIMELINE_HISTORY_LIMIT = 50;
+
+function withTimelineHistory(
+  state: { timelineUndoStack: VideoTimelineDocument[] },
+  previous: VideoTimelineDocument,
+): { timelineUndoStack: VideoTimelineDocument[]; timelineRedoStack: VideoTimelineDocument[] } {
+  return {
+    timelineUndoStack: [...state.timelineUndoStack, cloneTimeline(previous)].slice(-TIMELINE_HISTORY_LIMIT),
+    timelineRedoStack: [],
+  };
+}
+
 function defaultTimeline(project?: VideoProject | null): VideoTimelineDocument {
   return {
     version: 1,
@@ -88,11 +117,13 @@ function defaultTimeline(project?: VideoProject | null): VideoTimelineDocument {
       background: '#000000',
     },
     duration_ms: Math.max(project?.duration_ms || 0, 30000),
+    // Generic layers, matching the backend's NewEmptyTimeline: index 0 is the
+    // background; later layers stack on top.
     tracks: [
-      { id: 'track-video-1', type: 'video', name: 'Video 1', locked: false, muted: false, visible: true, clips: [] },
-      { id: 'track-overlay-1', type: 'image', name: 'Overlay 1', locked: false, muted: false, visible: true, clips: [] },
-      { id: 'track-audio-1', type: 'audio', name: 'Audio 1', locked: false, muted: false, visible: true, clips: [] },
-      { id: 'track-text-1', type: 'text', name: 'Text 1', locked: false, muted: false, visible: true, clips: [] },
+      { id: 'track-layer-1', type: 'layer', name: 'Layer 1', locked: false, muted: false, visible: true, clips: [] },
+      { id: 'track-layer-2', type: 'layer', name: 'Layer 2', locked: false, muted: false, visible: true, clips: [] },
+      { id: 'track-layer-3', type: 'layer', name: 'Layer 3', locked: false, muted: false, visible: true, clips: [] },
+      { id: 'track-layer-4', type: 'layer', name: 'Layer 4', locked: false, muted: false, visible: true, clips: [] },
     ],
     markers: [],
     metadata: {},
@@ -144,6 +175,41 @@ function parseGenerationSettings(generation: VideoGenerationDetail | null | unde
   }
 }
 
+function parseGenerationInputAssets(inputAssetsJson?: string, inputAssetIdsJson?: string): Partial<VideoPromptForm> {
+  const fields: Partial<VideoPromptForm> = {};
+  if (inputAssetsJson) {
+    try {
+      const parsed = JSON.parse(inputAssetsJson) as InputAsset[];
+      if (Array.isArray(parsed)) {
+        const references: string[] = [];
+        for (const item of parsed) {
+          if (!item?.asset_id) continue;
+          if (item.role === 'start_frame') fields.start_image_asset_id = item.asset_id;
+          if (item.role === 'last_frame') fields.last_frame_asset_id = item.asset_id;
+          if (item.role === 'source_video') fields.source_video_asset_id = item.asset_id;
+          if (item.role === 'reference_image') references.push(item.asset_id);
+        }
+        if (references.length > 0) fields.reference_asset_ids = references;
+        return fields;
+      }
+    } catch {
+      // Fall back to the legacy flat asset ID list below.
+    }
+  }
+
+  if (inputAssetIdsJson) {
+    try {
+      const ids = JSON.parse(inputAssetIdsJson) as string[];
+      if (Array.isArray(ids) && ids[0]) {
+        fields.start_image_asset_id = ids[0];
+      }
+    } catch {
+      return fields;
+    }
+  }
+  return fields;
+}
+
 function assetTrackType(asset?: VideoAsset): VideoTimelineTrackType {
   if (!asset) return 'video';
   if (asset.kind === 'music') return 'music';
@@ -156,6 +222,33 @@ function assetTrackType(asset?: VideoAsset): VideoTimelineTrackType {
 
 function defaultTransform(): VideoTimelineTransform {
   return { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
+}
+
+function ensureCaptionTrack(doc: VideoTimelineDocument): VideoTimelineTrack {
+  let track = doc.tracks.find((item) => item.type === 'caption');
+  if (!track) {
+    track = { id: newId('track'), type: 'caption', name: 'Captions 1', locked: false, muted: false, visible: true, clips: [] };
+    doc.tracks.push(track);
+  }
+  return track;
+}
+
+function captionClipFromCue(cue: CaptionCue, canvas: VideoTimelineDocument['canvas']): VideoTimelineClip {
+  const preset = CAPTION_PRESETS[0];
+  const position = preset.position(canvas);
+  const duration = Math.max(100, cue.end_ms - cue.start_ms);
+  return {
+    id: newId('clip'),
+    start_ms: Math.max(0, cue.start_ms),
+    duration_ms: duration,
+    trim_in_ms: 0,
+    trim_out_ms: duration,
+    transform: { ...defaultTransform(), x: position.x, y: position.y },
+    text: { text: cue.text, ...preset.text },
+    effects: [],
+    keyframes: [],
+    transitions: [],
+  };
 }
 
 function recomputeDuration(doc: VideoTimelineDocument): VideoTimelineDocument {
@@ -192,12 +285,25 @@ interface VideoStudioState {
   promptForm: VideoPromptForm;
   timelineRecord: VideoTimelineRecord | null;
   timeline: VideoTimelineDocument | null;
+  timelineUndoStack: VideoTimelineDocument[];
+  timelineRedoStack: VideoTimelineDocument[];
   selectedClipId: string | null;
+  selectedClipIds: string[];
   selectedTrackId: string | null;
+  // Ephemeral playback solo — only this track contributes preview audio.
+  // Not persisted to the timeline document and ignored by export.
+  soloTrackId: string | null;
+  // Auto-scroll the timeline to keep the playhead in view during playback.
+  followPlayhead: boolean;
+  clipClipboard: Array<{ clip: VideoTimelineClip; trackId: string }> | null;
+  attributeClipboard: Partial<Pick<VideoTimelineClip, 'transform' | 'volume' | 'fade_in_ms' | 'fade_out_ms' | 'effects' | 'transitions' | 'text'>> | null;
   playheadMs: number;
   zoom: number;
   isPlaying: boolean;
   snappingEnabled: boolean;
+  toolMode: 'select' | 'blade';
+  editorMode: EditorModeKey;
+  rendererCapabilities: VideoRendererCapabilities | null;
   renderJobs: VideoRenderJob[];
   activeRenderJobId: string | null;
   exportSettings: VideoExportSettings;
@@ -211,14 +317,18 @@ interface VideoStudioState {
   isSavingTimeline: boolean;
   isRendering: boolean;
   generationProgress: VideoGenerationProgress | null;
+  generationValidation: VideoGenerationValidationResult | null;
   error: string | null;
   abortGeneration: (() => void) | null;
   _pollInterval: ReturnType<typeof setInterval> | null;
+  _renderPollTimeout: number | null;
+  _saveSeq: number;
 
   loadProviders: () => Promise<void>;
   loadModels: (provider: VideoProviderKey, refresh?: boolean) => Promise<void>;
   loadProjects: () => Promise<void>;
   createProject: (title?: string) => Promise<VideoProject | null>;
+  createProjectFromTemplate: (templateKey: string) => Promise<void>;
   selectProject: (projectId: string) => Promise<void>;
   setProvider: (provider: VideoProviderKey) => Promise<void>;
   setModel: (model: string) => void;
@@ -227,6 +337,7 @@ interface VideoStudioState {
   enhancePrompt: () => Promise<void>;
   generate: (parentId?: string) => void;
   branchFromGeneration: (generationId: string) => Promise<void>;
+  regenerateFromGeneration: (generationId: string) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
   stopGeneration: () => void;
   cancelGeneration: () => Promise<void>;
@@ -240,9 +351,15 @@ interface VideoStudioState {
   splitClipAtPlayhead: () => Promise<void>;
   deleteClip: (clipId?: string) => Promise<void>;
   duplicateClip: (clipId?: string) => Promise<void>;
-  selectClip: (clipId: string | null, trackId?: string | null) => void;
+  selectClip: (clipId: string | null, trackId?: string | null, additive?: boolean) => void;
+  renameAsset: (assetId: string, fileName: string) => Promise<void>;
+  deleteAsset: (assetId: string) => Promise<void>;
+  uploadAsset: (file: File) => Promise<void>;
+  importMusicAsset: (musicAssetId: string, title?: string) => Promise<VideoAsset | null>;
+  loadRendererCapabilities: () => Promise<void>;
   setPlayhead: (timeMs: number) => void;
   setZoom: (zoom: number) => void;
+  zoomToFit: (containerWidth: number) => void;
   setPlaying: (playing: boolean) => void;
   toggleSnapping: () => void;
   toggleTrackMute: (trackId: string) => Promise<void>;
@@ -251,13 +368,70 @@ interface VideoStudioState {
   updateClipTransform: (clipId: string, transform: Partial<VideoTimelineTransform>) => Promise<void>;
   updateClipVolume: (clipId: string, volume: number) => Promise<void>;
   updateClipFade: (clipId: string, fade: { fade_in_ms?: number; fade_out_ms?: number }) => Promise<void>;
-  addTextClip: (text?: string) => Promise<void>;
+  addTextClip: (text?: string, options?: { trackId?: string; startMs?: number }) => Promise<void>;
+  addShapeClip: (kind: VideoTimelineShape['kind'], options?: { trackId?: string; startMs?: number }) => Promise<void>;
+  updateClipShape: (clipId: string, patch: Partial<VideoTimelineShape>) => Promise<void>;
   updateClipText: (clipId: string, text: Partial<NonNullable<VideoTimelineClip['text']>>) => Promise<void>;
   addClipEffect: (clipId: string, effect: Omit<VideoTimelineEffect, 'id'>) => Promise<void>;
   toggleClipEffect: (clipId: string, effectId: string) => Promise<void>;
   removeClipEffect: (clipId: string, effectId: string) => Promise<void>;
   addClipTransition: (clipId: string, transition: Omit<VideoTimelineTransition, 'id'>) => Promise<void>;
+  updateClipTransition: (clipId: string, transitionId: string, patch: Partial<Omit<VideoTimelineTransition, 'id'>>) => Promise<void>;
+  removeClipTransition: (clipId: string, transitionId: string) => Promise<void>;
+  updateClipEffect: (clipId: string, effectId: string, patch: Partial<Omit<VideoTimelineEffect, 'id'>>) => Promise<void>;
+  reorderClipEffect: (clipId: string, effectId: string, direction: -1 | 1) => Promise<void>;
   addKeyframe: (clipId: string, keyframe: Omit<VideoTimelineKeyframe, 'id'>) => Promise<void>;
+  updateKeyframe: (clipId: string, keyframeId: string, patch: Partial<Omit<VideoTimelineKeyframe, 'id'>>) => Promise<void>;
+  removeKeyframe: (clipId: string, keyframeId: string) => Promise<void>;
+  addTrack: (type?: VideoTimelineTrackType, name?: string) => Promise<void>;
+  removeTrack: (trackId: string) => Promise<void>;
+  renameTrack: (trackId: string, name: string) => Promise<void>;
+  reorderTrack: (trackId: string, targetIndex: number) => Promise<void>;
+  setTrackHeight: (trackId: string, height: number) => Promise<void>;
+  duplicateTrack: (trackId: string) => Promise<void>;
+  insertTrackAdjacent: (trackId: string, where: 'above' | 'below') => Promise<void>;
+  clearTrack: (trackId: string) => Promise<void>;
+  toggleTrackSolo: (trackId: string) => void;
+  moveTrackToEdge: (trackId: string, edge: 'top' | 'bottom') => Promise<void>;
+  selectClipsOnTrack: (trackId: string) => void;
+  setSelectedClips: (ids: string[]) => void;
+  selectClipsRelativeToPlayhead: (which: 'before' | 'after') => void;
+  selectAllClips: () => void;
+  moveClipToAdjacentTrack: (clipId: string, direction: 'above' | 'below') => Promise<void>;
+  copySelection: (clipId?: string) => void;
+  cutSelection: (clipId?: string) => Promise<void>;
+  pasteClips: (atMs?: number, trackId?: string) => Promise<void>;
+  copyClipAttributes: (clipId?: string) => void;
+  pasteClipAttributes: (clipId?: string) => Promise<void>;
+  setTimelineDuration: (durationMs: number) => Promise<void>;
+  splitAllAtPlayhead: () => Promise<void>;
+  toggleClipMute: (clipId?: string) => Promise<void>;
+  detachClipAudio: (clipId: string) => Promise<void>;
+  addAssetAsMusicBed: (assetId: string) => Promise<void>;
+  toggleFollowPlayhead: () => void;
+  duplicateProject: (projectId?: string) => Promise<void>;
+  createProjectFromVariant: (variant: VideoSocialVariant) => Promise<void>;
+  addMarker: (timeMs?: number, label?: string) => Promise<void>;
+  removeMarker: (markerId: string) => Promise<void>;
+  updateClipZIndex: (clipId: string, zIndex: number) => Promise<void>;
+  bringClipForward: (clipId?: string) => Promise<void>;
+  sendClipBackward: (clipId?: string) => Promise<void>;
+  nudgeSelection: (deltaMs: number) => Promise<void>;
+  setCanvas: (patch: Partial<VideoTimelineDocument['canvas']>) => Promise<void>;
+  splitClipAt: (clipId: string, timeMs: number) => Promise<void>;
+  trimClipEdgeToPlayhead: (edge: 'start' | 'end') => Promise<void>;
+  groupClips: (clipIds?: string[]) => Promise<void>;
+  ungroupClips: (groupId?: string) => Promise<void>;
+  alignSelection: (mode: 'start' | 'end' | 'distribute') => Promise<void>;
+  setToolMode: (mode: 'select' | 'blade') => void;
+  setEditorMode: (mode: EditorModeKey) => void;
+  addCaptionSegment: (text?: string) => Promise<void>;
+  importCaptions: (raw: string) => Promise<void>;
+  exportCaptions: (format: 'srt' | 'vtt') => string | null;
+  mergeCaptionClipWithNext: (clipId: string) => Promise<void>;
+  applyCaptionPreset: (preset: CaptionPresetKey) => Promise<void>;
+  undoTimeline: () => Promise<void>;
+  redoTimeline: () => Promise<void>;
   setExportSetting: <K extends keyof VideoExportSettings>(key: K, value: VideoExportSettings[K]) => void;
   renderTimeline: () => Promise<void>;
   pollRenderJob: (jobId: string) => Promise<void>;
@@ -267,7 +441,7 @@ interface VideoStudioState {
   requestStoryboard: () => Promise<void>;
   requestEditPlan: () => Promise<void>;
   requestTimelinePlan: () => Promise<void>;
-  applyAssistantPlan: () => Promise<void>;
+  applyAssistantPlan: (selectedIndices?: number[]) => Promise<void>;
   requestSocialVariants: () => Promise<void>;
 }
 
@@ -280,17 +454,27 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   assets: [],
   providers: [],
   selectedProvider: 'openrouter',
-  modelsByProvider: { openrouter: [], gemini: [], openai: [], custom: [] },
+  modelsByProvider: { openrouter: [], gemini: [], luma: [], openai: [], custom: [] },
   selectedModel: null,
   promptForm: cloneForm(),
   timelineRecord: null,
   timeline: null,
+  timelineUndoStack: [],
+  timelineRedoStack: [],
   selectedClipId: null,
+  selectedClipIds: [],
   selectedTrackId: null,
+  soloTrackId: null,
+  followPlayhead: true,
+  clipClipboard: null,
+  attributeClipboard: null,
   playheadMs: 0,
   zoom: 1,
   isPlaying: false,
   snappingEnabled: true,
+  toolMode: 'select',
+  editorMode: initialEditorMode(),
+  rendererCapabilities: null,
   renderJobs: [],
   activeRenderJobId: null,
   exportSettings: { ...DEFAULT_EXPORT },
@@ -304,9 +488,12 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   isSavingTimeline: false,
   isRendering: false,
   generationProgress: null,
+  generationValidation: null,
   error: null,
   abortGeneration: null,
   _pollInterval: null,
+  _renderPollTimeout: null,
+  _saveSeq: 0,
 
   loadProviders: async () => {
     try {
@@ -336,6 +523,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         modelsByProvider: { ...state.modelsByProvider, [provider]: models },
         selectedProvider: provider,
         selectedModel,
+        generationValidation: null,
       }));
     } catch (err) {
       set({ error: (err as Error).message });
@@ -379,6 +567,9 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         assets: [],
         timeline: defaultTimeline(project),
         timelineRecord: null,
+        timelineUndoStack: [],
+        timelineRedoStack: [],
+        generationValidation: null,
       }));
       await get().loadTimeline(project.id);
       return project;
@@ -389,8 +580,33 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     }
   },
 
+  createProjectFromTemplate: async (templateKey) => {
+    const template = TIMELINE_TEMPLATES.find((item) => item.key === templateKey);
+    if (!template) return;
+    const project = await get().createProject(`${template.label} project`);
+    if (!project) return;
+    const document = template.build();
+    set({ timeline: document, timelineUndoStack: [], timelineRedoStack: [], selectedClipId: null, selectedClipIds: [], selectedTrackId: null });
+    await get().saveTimeline(document);
+    toast.success(`Created project from "${template.label}" template`);
+  },
+
   selectProject: async (projectId) => {
-    set({ isLoading: true, error: null });
+    // Stop generation/render polls from the previous project — left running
+    // they would keep injecting the old project's data into the new one.
+    const { _pollInterval, _renderPollTimeout } = get();
+    if (_pollInterval) clearInterval(_pollInterval);
+    if (_renderPollTimeout) clearTimeout(_renderPollTimeout);
+    set({
+      isLoading: true,
+      error: null,
+      _pollInterval: null,
+      _renderPollTimeout: null,
+      isGenerating: false,
+      generationProgress: null,
+      activeRenderJobId: null,
+      renderJobs: [],
+    });
     try {
       const detail = await videoApi.getProject(projectId);
       const gens = detail.generations ?? [];
@@ -408,8 +624,12 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         timeline: defaultTimeline(detail.project),
         timelineRecord: null,
         selectedClipId: null,
+        selectedClipIds: [],
         selectedTrackId: null,
         playheadMs: 0,
+        timelineUndoStack: [],
+        timelineRedoStack: [],
+        generationValidation: null,
         isLoading: false,
       }));
       if (detail.project.default_provider) {
@@ -422,17 +642,18 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   },
 
   setProvider: async (provider) => {
-    set({ selectedProvider: provider, selectedModel: null });
+    set({ selectedProvider: provider, selectedModel: null, generationValidation: null });
     await get().loadModels(provider);
   },
 
-  setModel: (model) => set({ selectedModel: model }),
+  setModel: (model) => set({ selectedModel: model, generationValidation: null }),
 
   setPromptField: (key, value) => set((state) => ({
     promptForm: { ...state.promptForm, [key]: value },
+    generationValidation: null,
   })),
 
-  clearPrompt: () => set({ promptForm: cloneForm(), error: null, generationProgress: null }),
+  clearPrompt: () => set({ promptForm: cloneForm(), error: null, generationProgress: null, generationValidation: null }),
 
   enhancePrompt: async () => {
     const { promptForm } = get();
@@ -466,85 +687,123 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       return;
     }
     if (!providers.find((provider) => provider.key === selectedProvider)?.configured) {
-      toast.error('Configure an OpenRouter or Gemini video provider first');
+      toast.error('Configure a video provider (OpenRouter, Gemini, or Luma) first');
       return;
     }
     if (!promptForm.prompt.trim()) {
       toast.error('Enter a video prompt');
       return;
     }
-    set({
-      isGenerating: true,
-      generationProgress: { stage: 'queued', message: 'Preparing video generation' },
-      error: null,
-    });
-    videoApi.generate({
-      ...promptForm,
-      provider: selectedProvider,
-      model: selectedModel,
-      prompt: promptForm.prompt.trim(),
-      project_id: activeProjectId || undefined,
-      parent_id: parentId,
-    }).then((resp) => {
-      set((state) => ({
-        activeProjectId: resp.project_id,
-        activeGenerationId: resp.generation_id,
-        generations: upsertGeneration(state.generations, resp.generation),
-        generationProgress: { stage: 'running', message: 'Video generation in progress' },
-      }));
-      // Start polling until terminal state
-      const interval = setInterval(async () => {
-        try {
-          const gen = await videoApi.getGeneration(resp.generation_id);
-          set((state) => ({ generations: upsertGeneration(state.generations, gen) }));
-          if (gen.status === 'completed') {
-            clearInterval(interval);
-            set({
-              isGenerating: false,
-              _pollInterval: null,
-              generationProgress: { stage: 'done', message: 'Video generation complete', progress: 1 },
-              activeGenerationId: gen.id,
-              selectedAssetId: gen.output_asset_id || get().selectedAssetId,
-            });
-            if (gen.output_asset_id) {
-              // Reload project assets
-              const proj = get().activeProjectId;
-              if (proj) {
-                videoApi.getProject(proj).then((detail) => {
-                  set({ assets: detail.assets ?? [] });
-                  if (get().promptForm.place_on_timeline && gen.output_asset_id) {
-                    void get().addAssetToTimeline(gen.output_asset_id);
-                  }
-                }).catch(() => { /* non-fatal */ });
-              }
-            }
-            toast.success('Video generation complete');
-          } else if (gen.status === 'failed' || gen.status === 'cancelled') {
-            clearInterval(interval);
-            set({
-              isGenerating: false,
-              _pollInterval: null,
-              generationProgress: null,
-              error: gen.error || `Video generation ${gen.status}`,
-            });
-            toast.error(gen.error || `Video generation ${gen.status}`);
-          } else {
-            set({ generationProgress: { stage: gen.status, message: 'Video generation in progress' } });
-          }
-        } catch {
-          // Polling error is transient — keep trying
+    void (async () => {
+      const baseRequest = {
+        ...promptForm,
+        provider: selectedProvider,
+        model: selectedModel,
+        prompt: promptForm.prompt.trim(),
+        project_id: activeProjectId || undefined,
+        parent_id: parentId,
+      };
+      let generationRequest = baseRequest;
+      try {
+        const validation = await videoApi.validateGeneration(baseRequest);
+        set({ generationValidation: validation });
+        if (!validation.valid) {
+          const message = validation.errors[0]?.message || 'Video generation settings are invalid';
+          set({ error: message, generationProgress: null, isGenerating: false });
+          toast.error(message);
+          return;
         }
-      }, 8000);
-      set({ _pollInterval: interval, abortGeneration: null });
-    }).catch((err: Error) => {
+        generationRequest = {
+          ...baseRequest,
+          ...validation.normalized_request,
+          project_id: activeProjectId || undefined,
+          parent_id: parentId,
+        };
+        if (validation.normalizations.length > 0) {
+          set((state) => ({
+            promptForm: {
+              ...state.promptForm,
+              aspect_ratio: generationRequest.aspect_ratio,
+              duration_seconds: generationRequest.duration_seconds,
+              resolution: generationRequest.resolution,
+              fps: generationRequest.fps,
+            },
+          }));
+          toast.info('Video settings were normalized for the selected model');
+        }
+      } catch (err) {
+        const message = (err as Error).message;
+        set({ error: message, generationProgress: null, isGenerating: false });
+        toast.error(message || 'Could not validate video settings');
+        return;
+      }
+
       set({
-        isGenerating: false,
-        generationProgress: null,
-        error: err.message,
-        abortGeneration: null,
+        isGenerating: true,
+        generationProgress: { stage: 'queued', message: 'Preparing video generation' },
+        error: null,
       });
-      toast.error(err.message || 'Video generation failed');
-    });
+      videoApi.generate(generationRequest).then((resp) => {
+        set((state) => ({
+          activeProjectId: resp.project_id,
+          activeGenerationId: resp.generation_id,
+          generations: upsertGeneration(state.generations, resp.generation),
+          generationProgress: { stage: 'running', message: 'Video generation in progress' },
+        }));
+        // Start polling until terminal state
+        const interval = setInterval(async () => {
+          try {
+            const gen = await videoApi.getGeneration(resp.generation_id);
+            set((state) => ({ generations: upsertGeneration(state.generations, gen) }));
+            if (gen.status === 'completed') {
+              clearInterval(interval);
+              set({
+                isGenerating: false,
+                _pollInterval: null,
+                generationProgress: { stage: 'done', message: 'Video generation complete', progress: 1 },
+                activeGenerationId: gen.id,
+                selectedAssetId: gen.output_asset_id || get().selectedAssetId,
+              });
+              if (gen.output_asset_id) {
+                // Reload project assets
+                const proj = get().activeProjectId;
+                if (proj) {
+                  videoApi.getProject(proj).then((detail) => {
+                    set({ assets: detail.assets ?? [] });
+                    if (get().promptForm.place_on_timeline && gen.output_asset_id) {
+                      void get().addAssetToTimeline(gen.output_asset_id);
+                    }
+                  }).catch(() => { /* non-fatal */ });
+                }
+              }
+              toast.success('Video generation complete');
+            } else if (gen.status === 'failed' || gen.status === 'cancelled') {
+              clearInterval(interval);
+              set({
+                isGenerating: false,
+                _pollInterval: null,
+                generationProgress: null,
+                error: gen.error || `Video generation ${gen.status}`,
+              });
+              toast.error(gen.error || `Video generation ${gen.status}`);
+            } else {
+              set({ generationProgress: { stage: gen.status, message: 'Video generation in progress' } });
+            }
+          } catch {
+            // Polling error is transient — keep trying
+          }
+        }, 8000);
+        set({ _pollInterval: interval, abortGeneration: null });
+      }).catch((err: Error) => {
+        set({
+          isGenerating: false,
+          generationProgress: null,
+          error: err.message,
+          abortGeneration: null,
+        });
+        toast.error(err.message || 'Video generation failed');
+      });
+    })();
   },
 
   branchFromGeneration: async (generationId) => {
@@ -560,6 +819,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         settings_json: branch.settings_json,
         created_at: '',
       });
+      const inputAssets = parseGenerationInputAssets(branch.input_assets_json, branch.input_asset_ids_json);
       set((state) => ({
         activeProjectId: branch.project_id,
         activeGenerationId: branch.parent_id,
@@ -568,11 +828,63 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         promptForm: {
           ...state.promptForm,
           ...settings,
+          start_image_asset_id: undefined,
+          last_frame_asset_id: undefined,
+          source_video_asset_id: undefined,
+          reference_asset_ids: [],
+          ...inputAssets,
           prompt: branch.enhanced_prompt || branch.prompt,
           negative_prompt: branch.negative_prompt || state.promptForm.negative_prompt,
         },
+        generationValidation: null,
       }));
       toast.success('Video prompt branched');
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  },
+
+  regenerateFromGeneration: async (generationId) => {
+    try {
+      if (get().isGenerating) {
+        toast.error('Wait for the current video generation to finish first');
+        return;
+      }
+      const branch = await videoApi.branchGeneration(generationId);
+      const settings = parseGenerationSettings({
+        id: branch.parent_id,
+        project_id: branch.project_id,
+        status: 'completed',
+        provider: branch.provider,
+        model: branch.model,
+        prompt: branch.prompt,
+        settings_json: branch.settings_json,
+        created_at: '',
+      });
+      const inputAssets = parseGenerationInputAssets(branch.input_assets_json, branch.input_asset_ids_json);
+      set((state) => ({
+        activeProjectId: branch.project_id,
+        activeGenerationId: branch.parent_id,
+        selectedProvider: branch.provider,
+        selectedModel: branch.model,
+        promptForm: {
+          ...state.promptForm,
+          ...settings,
+          start_image_asset_id: undefined,
+          last_frame_asset_id: undefined,
+          source_video_asset_id: undefined,
+          reference_asset_ids: [],
+          ...inputAssets,
+          prompt: branch.enhanced_prompt || branch.prompt,
+          negative_prompt: branch.negative_prompt || '',
+          enhance: false,
+          place_on_timeline: false,
+        },
+        generationValidation: null,
+        error: null,
+      }));
+      toast.info('Regenerating with the previous effective prompt and settings');
+      get().generate(branch.parent_id);
     } catch (err) {
       toast.error((err as Error).message);
     }
@@ -593,6 +905,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
           assets: activeDeleted ? [] : state.assets,
           timeline: activeDeleted ? null : state.timeline,
           timelineRecord: activeDeleted ? null : state.timelineRecord,
+          timelineUndoStack: activeDeleted ? [] : state.timelineUndoStack,
+          timelineRedoStack: activeDeleted ? [] : state.timelineRedoStack,
         };
       });
       toast.success('Video project deleted');
@@ -643,9 +957,22 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     if (!id) return;
     try {
       const detail = await videoApi.getTimeline(id);
-      set({ timelineRecord: detail.timeline, timeline: detail.document, selectedClipId: null, selectedTrackId: null });
+      set({
+        timelineRecord: detail.timeline,
+        timeline: detail.document,
+        timelineUndoStack: [],
+        timelineRedoStack: [],
+        selectedClipId: null,
+        selectedClipIds: [],
+        selectedTrackId: null,
+      });
     } catch (err) {
-      set({ timeline: defaultTimeline(get().projects.find((project) => project.id === id)), error: (err as Error).message });
+      set({
+        timeline: defaultTimeline(get().projects.find((project) => project.id === id)),
+        timelineUndoStack: [],
+        timelineRedoStack: [],
+        error: (err as Error).message,
+      });
     }
   },
 
@@ -653,12 +980,23 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const projectId = get().activeProjectId;
     const doc = document || get().timeline;
     if (!projectId || !doc) return;
-    set({ isSavingTimeline: true });
+    const seq = get()._saveSeq + 1;
+    set({ isSavingTimeline: true, _saveSeq: seq });
     try {
       const detail = await videoApi.saveTimeline(projectId, doc);
-      set({ timelineRecord: detail.timeline, timeline: detail.document, isSavingTimeline: false });
+      // Only the latest save's response may update local state — applying an
+      // older response (rapid consecutive edits, out-of-order replies) would
+      // clobber newer local edits.
+      if (get()._saveSeq !== seq) return;
+      if (get().activeProjectId === projectId) {
+        set({ timelineRecord: detail.timeline, timeline: detail.document, isSavingTimeline: false });
+      } else {
+        set({ isSavingTimeline: false });
+      }
     } catch (err) {
-      set({ isSavingTimeline: false, error: (err as Error).message });
+      if (get()._saveSeq === seq) {
+        set({ isSavingTimeline: false, error: (err as Error).message });
+      }
       toast.error('Could not save timeline');
     }
   },
@@ -667,15 +1005,26 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const projectId = get().activeProjectId;
     if (!projectId) return;
     const asset = get().assets.find((item) => item.id === assetId);
+    const previous = get().timeline ? cloneTimeline(get().timeline as VideoTimelineDocument) : null;
+    // Without an explicit target, prefer the selected layer; the backend
+    // otherwise picks the first unlocked track that accepts the asset.
+    const selectedTrack = !options.track_id && get().selectedTrackId
+      ? get().timeline?.tracks.find((track) => track.id === get().selectedTrackId && !track.locked)
+      : undefined;
     try {
       const detail = await videoApi.importAssetToTimeline(projectId, {
         asset_id: assetId,
-        track_id: options.track_id,
+        track_id: options.track_id ?? selectedTrack?.id,
         track_type: options.track_type || assetTrackType(asset),
         start_ms: options.start_ms ?? get().playheadMs,
         duration_ms: options.duration_ms,
       });
-      set({ timelineRecord: detail.timeline, timeline: detail.document, selectedAssetId: assetId });
+      set((state) => ({
+        timelineRecord: detail.timeline,
+        timeline: detail.document,
+        selectedAssetId: assetId,
+        ...(previous ? withTimelineHistory(state, previous) : { timelineRedoStack: [] }),
+      }));
       toast.success('Asset added to timeline');
     } catch (err) {
       toast.error((err as Error).message);
@@ -688,13 +1037,33 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const next = cloneTimeline(current);
     const loc = findClip(next, clipId);
     if (!loc) return;
+    const newStart = Math.max(0, Math.round(startMs));
+    const delta = newStart - loc.clip.start_ms;
+    // When the dragged clip is part of the current selection (including a
+    // group selection), the rest of the selection shifts by the same delta on
+    // their own tracks.
+    const selected = get().selectedClipIds;
+    const companions = selected.includes(clipId) ? selected.filter((id) => id !== clipId) : [];
     const [clip] = loc.track.clips.splice(loc.clipIndex, 1);
-    clip.start_ms = Math.max(0, Math.round(startMs));
+    clip.start_ms = newStart;
     const target = next.tracks.find((track) => track.id === trackId) || loc.track;
     target.clips.push(clip);
-    target.clips.sort((a, b) => a.start_ms - b.start_ms);
+    for (const companionId of companions) {
+      const companion = findClip(next, companionId);
+      if (!companion || companion.track.locked) continue;
+      companion.clip.start_ms = Math.max(0, companion.clip.start_ms + delta);
+    }
+    for (const track of next.tracks) {
+      track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    }
     recomputeDuration(next);
-    set({ timeline: next, selectedClipId: clip.id, selectedTrackId: target.id });
+    set((state) => ({
+      timeline: next,
+      selectedClipId: clip.id,
+      selectedClipIds: companions.length > 0 ? selected : [clip.id],
+      selectedTrackId: target.id,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -709,65 +1078,477 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     loc.clip.trim_in_ms = Math.max(0, Math.round(updates.trim_in_ms ?? loc.clip.trim_in_ms));
     loc.clip.trim_out_ms = Math.max(loc.clip.trim_in_ms + 100, Math.round(updates.trim_out_ms ?? loc.clip.trim_out_ms ?? loc.clip.duration_ms));
     recomputeDuration(next);
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
   splitClipAtPlayhead: async () => {
-    const current = get().timeline;
     const clipId = get().selectedClipId;
+    if (!clipId) return;
+    await get().splitClipAt(clipId, get().playheadMs);
+  },
+
+  splitClipAt: async (clipId, timeMs) => {
+    const current = get().timeline;
     if (!current || !clipId) return;
     const next = cloneTimeline(current);
     const loc = findClip(next, clipId);
     if (!loc) return;
-    const splitAt = get().playheadMs;
-    const offset = splitAt - loc.clip.start_ms;
+    const offset = timeMs - loc.clip.start_ms;
+    if (offset <= 0 || offset >= loc.clip.duration_ms) {
+      toast.error('Split point must be inside the clip');
+      return;
+    }
+    // Keyframes are clip-relative: the left half keeps keyframes up to the
+    // split point; the right half keeps the rest rebased to its new start.
+    // Fades split with their edge — fade-in stays left, fade-out stays right.
+    const keyframes = loc.clip.keyframes || [];
+    const left = {
+      ...loc.clip,
+      duration_ms: offset,
+      trim_out_ms: loc.clip.trim_in_ms + offset,
+      fade_out_ms: undefined,
+      keyframes: keyframes.filter((keyframe) => keyframe.time_ms <= offset),
+    };
+    const right = {
+      ...loc.clip,
+      id: newId('clip'),
+      start_ms: timeMs,
+      duration_ms: loc.clip.duration_ms - offset,
+      trim_in_ms: loc.clip.trim_in_ms + offset,
+      trim_out_ms: loc.clip.trim_out_ms,
+      fade_in_ms: undefined,
+      keyframes: keyframes
+        .filter((keyframe) => keyframe.time_ms >= offset)
+        .map((keyframe) => ({ ...keyframe, id: newId('keyframe'), time_ms: keyframe.time_ms - offset })),
+    };
+    loc.track.clips.splice(loc.clipIndex, 1, left, right);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: right.id,
+      selectedClipIds: [right.id],
+      selectedTrackId: loc.track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  trimClipEdgeToPlayhead: async (edge) => {
+    const current = get().timeline;
+    const clipId = get().selectedClipId;
+    if (!current || !clipId) return;
+    const loc = findClip(current, clipId);
+    if (!loc) return;
+    const playhead = get().playheadMs;
+    const offset = playhead - loc.clip.start_ms;
     if (offset <= 0 || offset >= loc.clip.duration_ms) {
       toast.error('Move the playhead inside the selected clip');
       return;
     }
-    const left = { ...loc.clip, duration_ms: offset, trim_out_ms: loc.clip.trim_in_ms + offset };
-    const right = {
-      ...loc.clip,
-      id: newId('clip'),
-      start_ms: splitAt,
-      duration_ms: loc.clip.duration_ms - offset,
-      trim_in_ms: loc.clip.trim_in_ms + offset,
-      trim_out_ms: loc.clip.trim_out_ms,
+    if (edge === 'start') {
+      await get().trimClip(clipId, {
+        start_ms: playhead,
+        duration_ms: loc.clip.duration_ms - offset,
+        trim_in_ms: loc.clip.trim_in_ms + offset,
+        trim_out_ms: loc.clip.trim_out_ms,
+      });
+    } else {
+      await get().trimClip(clipId, {
+        duration_ms: offset,
+        trim_out_ms: loc.clip.trim_in_ms + offset,
+      });
+    }
+  },
+
+  groupClips: async (clipIds) => {
+    const current = get().timeline;
+    const ids = clipIds && clipIds.length > 0 ? clipIds : get().selectedClipIds;
+    if (!current) return;
+    if (ids.length < 2) {
+      toast.error('Select at least two clips to group');
+      return;
+    }
+    const next = cloneTimeline(current);
+    const groupId = newId('group');
+    for (const id of ids) {
+      const loc = findClip(next, id);
+      if (loc) loc.clip.group_id = groupId;
+    }
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  ungroupClips: async (groupId) => {
+    const current = get().timeline;
+    if (!current) return;
+    let target = groupId;
+    if (!target) {
+      const selectedId = get().selectedClipId;
+      const loc = selectedId ? findClip(current, selectedId) : null;
+      target = loc?.clip.group_id;
+    }
+    if (!target) return;
+    const next = cloneTimeline(current);
+    for (const track of next.tracks) {
+      for (const clip of track.clips) {
+        if (clip.group_id === target) delete clip.group_id;
+      }
+    }
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  alignSelection: async (mode) => {
+    const current = get().timeline;
+    const ids = get().selectedClipIds;
+    if (!current) return;
+    if (ids.length < 2) {
+      toast.error('Select at least two clips');
+      return;
+    }
+    const next = cloneTimeline(current);
+    const locs = ids
+      .map((id) => findClip(next, id))
+      .filter((loc): loc is NonNullable<typeof loc> => Boolean(loc));
+    if (locs.length < 2) return;
+    if (mode === 'start') {
+      const minStart = Math.min(...locs.map((loc) => loc.clip.start_ms));
+      for (const loc of locs) loc.clip.start_ms = minStart;
+    } else if (mode === 'end') {
+      const maxEnd = Math.max(...locs.map((loc) => loc.clip.start_ms + loc.clip.duration_ms));
+      for (const loc of locs) loc.clip.start_ms = Math.max(0, maxEnd - loc.clip.duration_ms);
+    } else {
+      const sorted = [...locs].sort((a, b) => a.clip.start_ms - b.clip.start_ms);
+      const span = sorted[sorted.length - 1].clip.start_ms - sorted[0].clip.start_ms;
+      if (sorted.length > 2 && span > 0) {
+        const step = span / (sorted.length - 1);
+        sorted.forEach((loc, index) => {
+          loc.clip.start_ms = Math.round(sorted[0].clip.start_ms + step * index);
+        });
+      }
+    }
+    for (const track of next.tracks) {
+      track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    }
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  setToolMode: (mode) => set({ toolMode: mode }),
+
+  setEditorMode: (mode) => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(EDITOR_MODE_STORAGE_KEY, mode);
+    }
+    set({ editorMode: mode });
+  },
+
+  addCaptionSegment: async (text = 'New caption') => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const track = ensureCaptionTrack(next);
+    const start = Math.max(0, Math.round(get().playheadMs));
+    const clip = captionClipFromCue({ start_ms: start, end_ms: start + 2000, text }, next.canvas);
+    track.clips.push(clip);
+    track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: clip.id,
+      selectedClipIds: [clip.id],
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  importCaptions: async (raw) => {
+    const current = get().timeline;
+    if (!current) return;
+    const cues = parseCaptions(raw);
+    if (cues.length === 0) {
+      toast.error('No caption cues found in the file');
+      return;
+    }
+    const next = cloneTimeline(current);
+    const track = ensureCaptionTrack(next);
+    for (const cue of cues) {
+      track.clips.push(captionClipFromCue(cue, next.canvas));
+    }
+    track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+    toast.success(`Imported ${cues.length} caption${cues.length === 1 ? '' : 's'}`);
+  },
+
+  exportCaptions: (format) => {
+    const timeline = get().timeline;
+    if (!timeline) return null;
+    const cues: CaptionCue[] = timeline.tracks
+      .filter((track) => track.type === 'caption')
+      .flatMap((track) => track.clips)
+      .filter((clip) => clip.text?.text?.trim())
+      .map((clip) => ({
+        start_ms: clip.start_ms,
+        end_ms: clip.start_ms + clip.duration_ms,
+        text: clip.text?.text || '',
+      }))
+      .sort((a, b) => a.start_ms - b.start_ms);
+    if (cues.length === 0) {
+      toast.error('No caption clips to export');
+      return null;
+    }
+    return format === 'srt' ? serializeSrt(cues) : serializeVtt(cues);
+  },
+
+  mergeCaptionClipWithNext: async (clipId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    const following = loc.track.clips
+      .filter((clip) => clip.id !== clipId && clip.start_ms >= loc.clip.start_ms)
+      .sort((a, b) => a.start_ms - b.start_ms)[0];
+    if (!following) {
+      toast.error('No following caption to merge with');
+      return;
+    }
+    const end = Math.max(loc.clip.start_ms + loc.clip.duration_ms, following.start_ms + following.duration_ms);
+    loc.clip.duration_ms = end - loc.clip.start_ms;
+    loc.clip.trim_out_ms = loc.clip.trim_in_ms + loc.clip.duration_ms;
+    loc.clip.text = {
+      ...(loc.clip.text || { text: '' }),
+      text: [loc.clip.text?.text || '', following.text?.text || ''].filter(Boolean).join('\n'),
     };
-    loc.track.clips.splice(loc.clipIndex, 1, left, right);
-    set({ timeline: recomputeDuration(next), selectedClipId: right.id, selectedTrackId: loc.track.id });
+    loc.track.clips = loc.track.clips.filter((clip) => clip.id !== following.id);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: loc.clip.id,
+      selectedClipIds: [loc.clip.id],
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  applyCaptionPreset: async (presetKey) => {
+    const current = get().timeline;
+    if (!current) return;
+    const preset = CAPTION_PRESETS.find((item) => item.key === presetKey);
+    if (!preset) return;
+    const hasCaptions = current.tracks.some((track) => track.type === 'caption' && track.clips.length > 0);
+    if (!hasCaptions) {
+      toast.error('No caption clips yet');
+      return;
+    }
+    const next = cloneTimeline(current);
+    const position = preset.position(next.canvas);
+    for (const track of next.tracks) {
+      if (track.type !== 'caption') continue;
+      for (const clip of track.clips) {
+        clip.text = { ...(clip.text || { text: '' }), ...preset.text };
+        clip.transform = { ...defaultTransform(), ...(clip.transform || {}), x: position.x, y: position.y };
+      }
+    }
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
   deleteClip: async (clipId) => {
     const current = get().timeline;
-    const id = clipId || get().selectedClipId;
-    if (!current || !id) return;
+    const ids = clipId
+      ? [clipId]
+      : get().selectedClipIds.length > 0
+        ? get().selectedClipIds
+        : get().selectedClipId
+          ? [get().selectedClipId as string]
+          : [];
+    if (!current || ids.length === 0) return;
+    const idSet = new Set(ids);
     const next = cloneTimeline(current);
     for (const track of next.tracks) {
-      track.clips = track.clips.filter((clip) => clip.id !== id);
+      track.clips = track.clips.filter((clip) => !idSet.has(clip.id));
     }
-    set({ timeline: recomputeDuration(next), selectedClipId: null });
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: null,
+      selectedClipIds: [],
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
   duplicateClip: async (clipId) => {
     const current = get().timeline;
-    const id = clipId || get().selectedClipId;
-    if (!current || !id) return;
+    const ids = clipId
+      ? [clipId]
+      : get().selectedClipIds.length > 0
+        ? get().selectedClipIds
+        : get().selectedClipId
+          ? [get().selectedClipId as string]
+          : [];
+    if (!current || ids.length === 0) return;
     const next = cloneTimeline(current);
-    const loc = findClip(next, id);
-    if (!loc) return;
-    const copy = { ...loc.clip, id: newId('clip'), start_ms: loc.clip.start_ms + loc.clip.duration_ms + 250 };
-    loc.track.clips.splice(loc.clipIndex + 1, 0, copy);
-    set({ timeline: recomputeDuration(next), selectedClipId: copy.id, selectedTrackId: loc.track.id });
+    const copies: { id: string; trackId: string }[] = [];
+    for (const id of ids) {
+      const loc = findClip(next, id);
+      if (!loc) continue;
+      const copy = { ...loc.clip, id: newId('clip'), start_ms: loc.clip.start_ms + loc.clip.duration_ms + 250 };
+      loc.track.clips.splice(loc.clipIndex + 1, 0, copy);
+      copies.push({ id: copy.id, trackId: loc.track.id });
+    }
+    if (copies.length === 0) return;
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: copies[copies.length - 1].id,
+      selectedClipIds: copies.map((copy) => copy.id),
+      selectedTrackId: copies[copies.length - 1].trackId,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
-  selectClip: (clipId, trackId = null) => set({ selectedClipId: clipId, selectedTrackId: trackId }),
+  selectClip: (clipId, trackId = null, additive = false) => set((state) => {
+    if (!clipId) {
+      return { selectedClipId: null, selectedClipIds: [], selectedTrackId: trackId };
+    }
+    if (additive) {
+      const already = state.selectedClipIds.includes(clipId);
+      const selectedClipIds = already
+        ? state.selectedClipIds.filter((id) => id !== clipId)
+        : [...state.selectedClipIds, clipId];
+      return {
+        selectedClipIds,
+        selectedClipId: already ? selectedClipIds[selectedClipIds.length - 1] || null : clipId,
+        selectedTrackId: trackId,
+      };
+    }
+    // Clicking a grouped clip selects the whole group.
+    let selectedClipIds = [clipId];
+    if (state.timeline) {
+      const loc = findClip(state.timeline, clipId);
+      const groupId = loc?.clip.group_id;
+      if (groupId) {
+        selectedClipIds = [];
+        for (const track of state.timeline.tracks) {
+          for (const clip of track.clips) {
+            if (clip.group_id === groupId) selectedClipIds.push(clip.id);
+          }
+        }
+      }
+    }
+    return { selectedClipId: clipId, selectedClipIds, selectedTrackId: trackId };
+  }),
+
+  renameAsset: async (assetId, fileName) => {
+    const name = fileName.trim();
+    if (!name) return;
+    try {
+      const updated = await videoApi.updateAsset(assetId, { file_name: name });
+      set((state) => ({
+        assets: state.assets.map((asset) => (asset.id === assetId ? updated : asset)),
+      }));
+      toast.success('Asset renamed');
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  },
+
+  deleteAsset: async (assetId) => {
+    try {
+      await videoApi.deleteAsset(assetId);
+      set((state) => ({
+        assets: state.assets.filter((asset) => asset.id !== assetId),
+        selectedAssetId: state.selectedAssetId === assetId ? null : state.selectedAssetId,
+      }));
+      toast.success('Asset deleted');
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  },
+
+  uploadAsset: async (file) => {
+    const projectId = get().activeProjectId;
+    if (!projectId) {
+      toast.error('Select or create a project first');
+      return;
+    }
+    try {
+      const asset = await videoApi.uploadAsset(projectId, file);
+      set((state) => ({
+        assets: [asset, ...state.assets],
+        selectedAssetId: asset.id,
+      }));
+      toast.success(`Uploaded ${asset.file_name}`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  },
+
+  importMusicAsset: async (musicAssetId, title) => {
+    // Cross-studio handoff (e.g. Music Studio → media bin): import into the
+    // active video project, creating one when none is selected yet.
+    let projectId = get().activeProjectId;
+    if (!projectId) {
+      const project = await get().createProject(title ? `${title} video` : undefined);
+      projectId = project?.id ?? null;
+    }
+    if (!projectId) return null;
+    try {
+      const asset = await videoApi.importExternalAsset(projectId, {
+        source_studio: 'music',
+        source_id: musicAssetId,
+      });
+      if (get().activeProjectId === projectId) {
+        set((state) => ({
+          assets: [asset, ...state.assets.filter((item) => item.id !== asset.id)],
+          selectedAssetId: asset.id,
+        }));
+      }
+      return asset;
+    } catch (err) {
+      toast.error((err as Error).message);
+      return null;
+    }
+  },
+
+  loadRendererCapabilities: async () => {
+    if (get().rendererCapabilities) return;
+    try {
+      const rendererCapabilities = await videoApi.rendererCapabilities();
+      set({ rendererCapabilities });
+    } catch {
+      // Non-fatal — the inspector falls back to a generic warning.
+    }
+  },
+
   setPlayhead: (timeMs) => set((state) => ({ playheadMs: Math.max(0, Math.min(timeMs, state.timeline?.duration_ms || timeMs)) })),
   setZoom: (zoom) => set({ zoom: Math.min(4, Math.max(0.35, zoom)) }),
+  zoomToFit: (containerWidth) => {
+    const duration = get().timeline?.duration_ms || 30000;
+    if (containerWidth <= 0 || duration <= 0) return;
+    // Base scale is 0.02 px/ms at zoom 1 (see VideoTimeline pxPerMs).
+    get().setZoom(containerWidth / (duration * 0.02));
+  },
   setPlaying: (playing) => set({ isPlaying: playing }),
   toggleSnapping: () => set((state) => ({ snappingEnabled: !state.snappingEnabled })),
 
@@ -778,7 +1559,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const track = next.tracks.find((item) => item.id === trackId);
     if (!track) return;
     track.muted = !track.muted;
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -789,7 +1573,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const track = next.tracks.find((item) => item.id === trackId);
     if (!track) return;
     track.locked = !track.locked;
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -800,7 +1587,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const track = next.tracks.find((item) => item.id === trackId);
     if (!track) return;
     track.visible = !track.visible;
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -811,7 +1601,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.transform = { ...defaultTransform(), ...(loc.clip.transform || {}), ...transform };
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -822,7 +1615,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.volume = Math.min(2, Math.max(0, volume));
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -834,22 +1630,29 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     if (!loc) return;
     loc.clip.fade_in_ms = Math.max(0, fade.fade_in_ms ?? loc.clip.fade_in_ms ?? 0);
     loc.clip.fade_out_ms = Math.max(0, fade.fade_out_ms ?? loc.clip.fade_out_ms ?? 0);
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
-  addTextClip: async (text = 'Title card') => {
+  addTextClip: async (text = 'Title card', options = {}) => {
     const current = get().timeline;
     if (!current) return;
     const next = cloneTimeline(current);
-    let track = next.tracks.find((item) => item.type === 'text');
+    // Explicit target first, then the topmost (foreground) unlocked generic
+    // layer, then a legacy text track, then a new layer on top.
+    let track = (options.trackId ? next.tracks.find((item) => item.id === options.trackId && !item.locked) : undefined)
+      ?? [...next.tracks].reverse().find((item) => item.type === 'layer' && !item.locked)
+      ?? next.tracks.find((item) => item.type === 'text' && !item.locked);
     if (!track) {
-      track = { id: 'track-text-1', type: 'text', name: 'Text 1', locked: false, muted: false, visible: true, clips: [] };
+      track = { id: newId('track'), type: 'layer', name: `Layer ${next.tracks.length + 1}`, locked: false, muted: false, visible: true, clips: [] };
       next.tracks.push(track);
     }
     const clip: VideoTimelineClip = {
       id: newId('clip'),
-      start_ms: get().playheadMs,
+      start_ms: Math.max(0, Math.round(options.startMs ?? get().playheadMs)),
       duration_ms: 3000,
       trim_in_ms: 0,
       trim_out_ms: 3000,
@@ -860,7 +1663,12 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       transitions: [],
     };
     track.clips.push(clip);
-    set({ timeline: recomputeDuration(next), selectedClipId: clip.id, selectedTrackId: track.id });
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: clip.id,
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -871,7 +1679,66 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.text = { ...(loc.clip.text || { text: '' }), ...text };
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  addShapeClip: async (kind, options = {}) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    let track = (options.trackId ? next.tracks.find((item) => item.id === options.trackId && !item.locked) : undefined)
+      ?? [...next.tracks].reverse().find((item) => item.type === 'layer' && !item.locked);
+    if (!track) {
+      track = { id: newId('track'), type: 'layer', name: `Layer ${next.tracks.length + 1}`, locked: false, muted: false, visible: true, clips: [] };
+      next.tracks.push(track);
+    }
+    const canvas = next.canvas;
+    const size = { width: Math.round(canvas.width / 3), height: Math.round(canvas.height / 4) };
+    // Highlights default translucent via the transform; rectangles outline;
+    // blur regions redact whatever composites beneath them.
+    const shape: VideoTimelineShape = kind === 'highlight'
+      ? { kind, ...size, fill: '#facc15' }
+      : kind === 'blur'
+        ? { kind, ...size, blur_radius: 12 }
+        : { kind, ...size, stroke: '#f59e0b', stroke_width: 6 };
+    const clip: VideoTimelineClip = {
+      id: newId('clip'),
+      start_ms: Math.max(0, Math.round(options.startMs ?? get().playheadMs)),
+      duration_ms: 4000,
+      trim_in_ms: 0,
+      trim_out_ms: 4000,
+      transform: { ...defaultTransform(), opacity: kind === 'highlight' ? 0.4 : 1 },
+      shape,
+      effects: [],
+      keyframes: [],
+      transitions: [],
+    };
+    track.clips.push(clip);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: clip.id,
+      selectedClipIds: [clip.id],
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  updateClipShape: async (clipId, patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc || !loc.clip.shape) return;
+    loc.clip.shape = { ...loc.clip.shape, ...patch };
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -882,7 +1749,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.effects = [...(loc.clip.effects || []), { ...effect, id: newId('effect') }];
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -893,7 +1763,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.effects = (loc.clip.effects || []).map((effect) => effect.id === effectId ? { ...effect, enabled: !effect.enabled } : effect);
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -904,7 +1777,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.effects = (loc.clip.effects || []).filter((effect) => effect.id !== effectId);
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -915,7 +1791,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.transitions = [...(loc.clip.transitions || []), { ...transition, id: newId('transition') }];
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
     await get().saveTimeline(next);
   },
 
@@ -926,7 +1805,692 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc) return;
     loc.clip.keyframes = [...(loc.clip.keyframes || []), { ...keyframe, id: newId('keyframe') }];
-    set({ timeline: next });
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  updateClipTransition: async (clipId, transitionId, patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.transitions = (loc.clip.transitions || []).map((transition) =>
+      transition.id === transitionId ? { ...transition, ...patch } : transition,
+    );
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  removeClipTransition: async (clipId, transitionId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.transitions = (loc.clip.transitions || []).filter((transition) => transition.id !== transitionId);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  updateClipEffect: async (clipId, effectId, patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.effects = (loc.clip.effects || []).map((effect) =>
+      effect.id === effectId ? { ...effect, ...patch, params: { ...effect.params, ...(patch.params || {}) } } : effect,
+    );
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  reorderClipEffect: async (clipId, effectId, direction) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    const effects = loc.clip.effects || [];
+    const index = effects.findIndex((effect) => effect.id === effectId);
+    const targetIndex = index + direction;
+    if (index === -1 || targetIndex < 0 || targetIndex >= effects.length) return;
+    [effects[index], effects[targetIndex]] = [effects[targetIndex], effects[index]];
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  updateKeyframe: async (clipId, keyframeId, patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.keyframes = (loc.clip.keyframes || []).map((keyframe) =>
+      keyframe.id === keyframeId ? { ...keyframe, ...patch, time_ms: Math.max(0, patch.time_ms ?? keyframe.time_ms) } : keyframe,
+    );
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  removeKeyframe: async (clipId, keyframeId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.keyframes = (loc.clip.keyframes || []).filter((keyframe) => keyframe.id !== keyframeId);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  addTrack: async (type = 'layer', name) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const count = next.tracks.filter((track) => track.type === type).length;
+    const defaultName = type === 'layer' ? `Layer ${next.tracks.length + 1}` : `${type.charAt(0).toUpperCase()}${type.slice(1)} ${count + 1}`;
+    const track: VideoTimelineTrack = {
+      id: newId('track'),
+      type,
+      name: name?.trim() || defaultName,
+      locked: false,
+      muted: false,
+      visible: true,
+      clips: [],
+    };
+    next.tracks.push(track);
+    set((state) => ({
+      timeline: next,
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  removeTrack: async (trackId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const track = current.tracks.find((item) => item.id === trackId);
+    if (!track) return;
+    const next = cloneTimeline(current);
+    next.tracks = next.tracks.filter((item) => item.id !== trackId);
+    const removedClipIds = new Set(track.clips.map((clip) => clip.id));
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedTrackId: state.selectedTrackId === trackId ? null : state.selectedTrackId,
+      selectedClipId: state.selectedClipId && removedClipIds.has(state.selectedClipId) ? null : state.selectedClipId,
+      selectedClipIds: state.selectedClipIds.filter((id) => !removedClipIds.has(id)),
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  renameTrack: async (trackId, name) => {
+    const trimmed = name.trim();
+    const current = get().timeline;
+    if (!current || !trimmed) return;
+    const next = cloneTimeline(current);
+    const track = next.tracks.find((item) => item.id === trackId);
+    if (!track || track.name === trimmed) return;
+    track.name = trimmed;
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  reorderTrack: async (trackId, targetIndex) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const fromIndex = next.tracks.findIndex((item) => item.id === trackId);
+    if (fromIndex === -1) return;
+    const toIndex = Math.max(0, Math.min(next.tracks.length - 1, targetIndex));
+    if (toIndex === fromIndex) return;
+    const [track] = next.tracks.splice(fromIndex, 1);
+    next.tracks.splice(toIndex, 0, track);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  setTrackHeight: async (trackId, height) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const track = next.tracks.find((item) => item.id === trackId);
+    if (!track) return;
+    track.height = Math.max(32, Math.min(160, Math.round(height)));
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  duplicateTrack: async (trackId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const index = next.tracks.findIndex((item) => item.id === trackId);
+    if (index === -1) return;
+    const copy = JSON.parse(JSON.stringify(next.tracks[index])) as VideoTimelineTrack;
+    copy.id = newId('track');
+    copy.name = `${copy.name} copy`;
+    for (const clip of copy.clips) {
+      clip.id = newId('clip');
+      delete clip.group_id;
+      clip.effects = (clip.effects || []).map((effect) => ({ ...effect, id: newId('effect') }));
+      clip.keyframes = (clip.keyframes || []).map((keyframe) => ({ ...keyframe, id: newId('keyframe') }));
+      clip.transitions = (clip.transitions || []).map((transition) => ({ ...transition, id: newId('transition') }));
+    }
+    // Insert directly above the source — toward the foreground.
+    next.tracks.splice(index + 1, 0, copy);
+    set((state) => ({
+      timeline: next,
+      selectedTrackId: copy.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  insertTrackAdjacent: async (trackId, where) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const index = next.tracks.findIndex((item) => item.id === trackId);
+    if (index === -1) return;
+    const track: VideoTimelineTrack = {
+      id: newId('track'),
+      type: 'layer',
+      name: `Layer ${next.tracks.length + 1}`,
+      locked: false,
+      muted: false,
+      visible: true,
+      clips: [],
+    };
+    // "above" = toward the foreground = higher array index.
+    next.tracks.splice(where === 'above' ? index + 1 : index, 0, track);
+    set((state) => ({
+      timeline: next,
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  clearTrack: async (trackId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const target = next.tracks.find((item) => item.id === trackId);
+    if (!target || target.clips.length === 0) return;
+    const removed = new Set(target.clips.map((clip) => clip.id));
+    target.clips = [];
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: state.selectedClipId && removed.has(state.selectedClipId) ? null : state.selectedClipId,
+      selectedClipIds: state.selectedClipIds.filter((id) => !removed.has(id)),
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  toggleTrackSolo: (trackId) => set((state) => ({ soloTrackId: state.soloTrackId === trackId ? null : trackId })),
+
+  moveTrackToEdge: async (trackId, edge) => {
+    const current = get().timeline;
+    if (!current) return;
+    await get().reorderTrack(trackId, edge === 'top' ? current.tracks.length - 1 : 0);
+  },
+
+  setSelectedClips: (ids) => set({
+    selectedClipIds: ids,
+    selectedClipId: ids[ids.length - 1] || null,
+  }),
+
+  selectClipsOnTrack: (trackId) => set((state) => {
+    const track = state.timeline?.tracks.find((item) => item.id === trackId);
+    if (!track || track.clips.length === 0) return {};
+    const ids = track.clips.map((clip) => clip.id);
+    return { selectedClipIds: ids, selectedClipId: ids[ids.length - 1], selectedTrackId: trackId };
+  }),
+
+  selectClipsRelativeToPlayhead: (which) => set((state) => {
+    if (!state.timeline) return {};
+    const playhead = state.playheadMs;
+    const ids: string[] = [];
+    for (const track of state.timeline.tracks) {
+      for (const clip of track.clips) {
+        const matches = which === 'before'
+          ? clip.start_ms < playhead
+          : clip.start_ms + clip.duration_ms > playhead;
+        if (matches) ids.push(clip.id);
+      }
+    }
+    return { selectedClipIds: ids, selectedClipId: ids[ids.length - 1] || null };
+  }),
+
+  selectAllClips: () => set((state) => {
+    if (!state.timeline) return {};
+    const ids = state.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id));
+    return { selectedClipIds: ids, selectedClipId: ids[ids.length - 1] || null };
+  }),
+
+  moveClipToAdjacentTrack: async (clipId, direction) => {
+    const current = get().timeline;
+    if (!current) return;
+    const loc = findClip(current, clipId);
+    if (!loc) return;
+    // "above" = toward the foreground (higher array index; the UI shows the
+    // track list reversed).
+    const target = current.tracks[loc.trackIndex + (direction === 'above' ? 1 : -1)];
+    if (!target || target.locked) return;
+    await get().moveClip(clipId, target.id, loc.clip.start_ms);
+  },
+
+  copySelection: (clipId) => set((state) => {
+    const ids = clipId
+      ? [clipId]
+      : state.selectedClipIds.length > 0
+        ? state.selectedClipIds
+        : state.selectedClipId
+          ? [state.selectedClipId]
+          : [];
+    if (!state.timeline || ids.length === 0) return {};
+    const entries: Array<{ clip: VideoTimelineClip; trackId: string }> = [];
+    for (const id of ids) {
+      const loc = findClip(state.timeline, id);
+      if (loc) entries.push({ clip: JSON.parse(JSON.stringify(loc.clip)) as VideoTimelineClip, trackId: loc.track.id });
+    }
+    return entries.length > 0 ? { clipClipboard: entries } : {};
+  }),
+
+  cutSelection: async (clipId) => {
+    get().copySelection(clipId);
+    if (!get().clipClipboard?.length) return;
+    await get().deleteClip(clipId);
+  },
+
+  pasteClips: async (atMs, trackId) => {
+    const current = get().timeline;
+    const clipboard = get().clipClipboard;
+    if (!current || !clipboard || clipboard.length === 0) return;
+    const next = cloneTimeline(current);
+    const pasteAt = Math.max(0, Math.round(atMs ?? get().playheadMs));
+    const earliest = Math.min(...clipboard.map((entry) => entry.clip.start_ms));
+    const newIds: string[] = [];
+    let lastTrackId: string | null = null;
+    for (const entry of clipboard) {
+      const clip = JSON.parse(JSON.stringify(entry.clip)) as VideoTimelineClip;
+      clip.id = newId('clip');
+      delete clip.group_id;
+      clip.effects = (clip.effects || []).map((effect) => ({ ...effect, id: newId('effect') }));
+      clip.keyframes = (clip.keyframes || []).map((keyframe) => ({ ...keyframe, id: newId('keyframe') }));
+      clip.transitions = (clip.transitions || []).map((transition) => ({ ...transition, id: newId('transition') }));
+      clip.start_ms = pasteAt + (entry.clip.start_ms - earliest);
+      const target = (trackId ? next.tracks.find((track) => track.id === trackId && !track.locked) : undefined)
+        ?? next.tracks.find((track) => track.id === entry.trackId && !track.locked)
+        ?? next.tracks.find((track) => !track.locked);
+      if (!target) continue;
+      target.clips.push(clip);
+      target.clips.sort((a, b) => a.start_ms - b.start_ms);
+      newIds.push(clip.id);
+      lastTrackId = target.id;
+    }
+    if (newIds.length === 0) return;
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipIds: newIds,
+      selectedClipId: newIds[newIds.length - 1],
+      selectedTrackId: lastTrackId,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  copyClipAttributes: (clipId) => set((state) => {
+    const id = clipId ?? state.selectedClipId;
+    if (!state.timeline || !id) return {};
+    const loc = findClip(state.timeline, id);
+    if (!loc) return {};
+    const { transform, volume, fade_in_ms, fade_out_ms, effects, transitions, text } =
+      JSON.parse(JSON.stringify(loc.clip)) as VideoTimelineClip;
+    return { attributeClipboard: { transform, volume, fade_in_ms, fade_out_ms, effects, transitions, text } };
+  }),
+
+  pasteClipAttributes: async (clipId) => {
+    const attrs = get().attributeClipboard;
+    const current = get().timeline;
+    if (!attrs || !current) return;
+    const ids = clipId
+      ? [clipId]
+      : get().selectedClipIds.length > 0
+        ? get().selectedClipIds
+        : get().selectedClipId
+          ? [get().selectedClipId as string]
+          : [];
+    if (ids.length === 0) return;
+    const next = cloneTimeline(current);
+    let applied = false;
+    for (const id of ids) {
+      const loc = findClip(next, id);
+      if (!loc) continue;
+      if (attrs.transform) loc.clip.transform = JSON.parse(JSON.stringify(attrs.transform));
+      if (attrs.volume !== undefined) loc.clip.volume = attrs.volume;
+      if (attrs.fade_in_ms !== undefined) loc.clip.fade_in_ms = attrs.fade_in_ms;
+      if (attrs.fade_out_ms !== undefined) loc.clip.fade_out_ms = attrs.fade_out_ms;
+      if (attrs.effects) loc.clip.effects = attrs.effects.map((effect) => ({ ...(JSON.parse(JSON.stringify(effect)) as VideoTimelineEffect), id: newId('effect') }));
+      if (attrs.transitions) loc.clip.transitions = attrs.transitions.map((transition) => ({ ...(JSON.parse(JSON.stringify(transition)) as VideoTimelineTransition), id: newId('transition') }));
+      // Styling pastes onto clips that already have text; their content is kept.
+      if (attrs.text && loc.clip.text) loc.clip.text = { ...(JSON.parse(JSON.stringify(attrs.text)) as NonNullable<VideoTimelineClip['text']>), text: loc.clip.text.text };
+      applied = true;
+    }
+    if (!applied) return;
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  setTimelineDuration: async (durationMs) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    next.duration_ms = Math.max(1000, Math.round(durationMs));
+    // Never shrink below the last clip end.
+    recomputeDuration(next);
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  splitAllAtPlayhead: async () => {
+    const current = get().timeline;
+    if (!current) return;
+    const playhead = get().playheadMs;
+    const next = cloneTimeline(current);
+    let split = false;
+    for (const track of next.tracks) {
+      if (track.locked) continue;
+      const result: VideoTimelineClip[] = [];
+      for (const clip of track.clips) {
+        const offset = playhead - clip.start_ms;
+        if (offset <= 0 || offset >= clip.duration_ms) {
+          result.push(clip);
+          continue;
+        }
+        const left = clip;
+        const right = JSON.parse(JSON.stringify(clip)) as VideoTimelineClip;
+        right.id = newId('clip');
+        right.start_ms = playhead;
+        right.duration_ms = clip.duration_ms - offset;
+        right.trim_in_ms = left.trim_in_ms + offset;
+        right.trim_out_ms = clip.trim_out_ms;
+        left.duration_ms = offset;
+        left.trim_out_ms = left.trim_in_ms + offset;
+        result.push(left, right);
+        split = true;
+      }
+      track.clips = result;
+    }
+    if (!split) return;
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  toggleClipMute: async (clipId) => {
+    const id = clipId ?? get().selectedClipId;
+    const current = get().timeline;
+    if (!current || !id) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, id);
+    if (!loc) return;
+    loc.clip.muted = !loc.clip.muted;
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  detachClipAudio: async (clipId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc || loc.clip.audio_only) return;
+    // The original keeps its visuals but goes silent; an audio-only twin
+    // lands on a new layer directly below so it can be edited independently.
+    const twin = JSON.parse(JSON.stringify(loc.clip)) as VideoTimelineClip;
+    twin.id = newId('clip');
+    twin.audio_only = true;
+    twin.muted = false;
+    twin.transform = undefined;
+    twin.text = undefined;
+    twin.effects = [];
+    twin.transitions = [];
+    twin.keyframes = (loc.clip.keyframes || [])
+      .filter((keyframe) => keyframe.property === 'volume')
+      .map((keyframe) => ({ ...keyframe, id: newId('keyframe') }));
+    delete twin.group_id;
+    loc.clip.muted = true;
+    const track: VideoTimelineTrack = {
+      id: newId('track'),
+      type: 'layer',
+      name: 'Detached audio',
+      locked: false,
+      muted: false,
+      visible: true,
+      clips: [twin],
+    };
+    next.tracks.splice(loc.trackIndex, 0, track);
+    set((state) => ({
+      timeline: next,
+      selectedClipId: twin.id,
+      selectedClipIds: [twin.id],
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+    toast.success('Audio detached to a new layer');
+  },
+
+  addAssetAsMusicBed: async (assetId) => {
+    // Music beds run the full timeline on the bottom (background) layer.
+    const timeline = get().timeline;
+    const bottom = timeline?.tracks.find((track) => !track.locked);
+    await get().addAssetToTimeline(assetId, {
+      track_id: bottom?.id,
+      start_ms: 0,
+      duration_ms: timeline && timeline.duration_ms > 0 ? timeline.duration_ms : undefined,
+    });
+  },
+
+  toggleFollowPlayhead: () => set((state) => ({ followPlayhead: !state.followPlayhead })),
+
+  duplicateProject: async (projectId) => {
+    const id = projectId ?? get().activeProjectId;
+    if (!id) return;
+    try {
+      const copy = await videoApi.duplicateProject(id);
+      await get().loadProjects();
+      await get().selectProject(copy.id);
+      toast.success('Project duplicated');
+    } catch (err) {
+      toast.error(`Failed to duplicate project: ${(err as Error).message}`);
+    }
+  },
+
+  createProjectFromVariant: async (variant) => {
+    const sourceId = get().activeProjectId;
+    if (!sourceId) return;
+    try {
+      const copy = await videoApi.duplicateProject(sourceId);
+      // Clip IDs survive duplication, so the variant's plan applies cleanly
+      // to the copied timeline.
+      await videoApi.assistant.applyEditPlan(copy.id, variant.plan);
+      await get().loadProjects();
+      await get().selectProject(copy.id);
+      toast.success(`Created "${variant.name}" variant project`);
+    } catch (err) {
+      toast.error(`Failed to create variant project: ${(err as Error).message}`);
+    }
+  },
+
+  addMarker: async (timeMs, label) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const time = Math.max(0, Math.round(timeMs ?? get().playheadMs));
+    next.markers = [...(next.markers || []), { id: newId('marker'), time_ms: time, label: label?.trim() || `Marker ${(next.markers?.length || 0) + 1}` }];
+    next.markers.sort((a, b) => a.time_ms - b.time_ms);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  removeMarker: async (markerId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    next.markers = (next.markers || []).filter((marker) => marker.id !== markerId);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  updateClipZIndex: async (clipId, zIndex) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    loc.clip.z_index = Math.round(zIndex);
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  bringClipForward: async (clipId) => {
+    const id = clipId || get().selectedClipId;
+    if (!id) return;
+    const clip = get().timeline ? findClip(get().timeline as VideoTimelineDocument, id) : null;
+    if (!clip) return;
+    await get().updateClipZIndex(id, (clip.clip.z_index ?? 0) + 1);
+  },
+
+  sendClipBackward: async (clipId) => {
+    const id = clipId || get().selectedClipId;
+    if (!id) return;
+    const clip = get().timeline ? findClip(get().timeline as VideoTimelineDocument, id) : null;
+    if (!clip) return;
+    await get().updateClipZIndex(id, (clip.clip.z_index ?? 0) - 1);
+  },
+
+  nudgeSelection: async (deltaMs) => {
+    const current = get().timeline;
+    const ids = get().selectedClipIds.length > 0
+      ? get().selectedClipIds
+      : get().selectedClipId
+        ? [get().selectedClipId as string]
+        : [];
+    if (!current || ids.length === 0 || !Number.isFinite(deltaMs) || deltaMs === 0) return;
+    const next = cloneTimeline(current);
+    let moved = false;
+    for (const id of ids) {
+      const loc = findClip(next, id);
+      if (!loc || loc.track.locked) continue;
+      const start = Math.max(0, loc.clip.start_ms + Math.round(deltaMs));
+      if (start !== loc.clip.start_ms) {
+        loc.clip.start_ms = start;
+        moved = true;
+      }
+    }
+    if (!moved) return;
+    for (const track of next.tracks) {
+      track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    }
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  setCanvas: async (patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    next.canvas = {
+      ...next.canvas,
+      ...patch,
+      width: Math.max(16, Math.round(patch.width ?? next.canvas.width)),
+      height: Math.max(16, Math.round(patch.height ?? next.canvas.height)),
+      fps: Math.max(1, Math.min(120, Math.round(patch.fps ?? next.canvas.fps))),
+    };
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  undoTimeline: async () => {
+    const { timeline, timelineUndoStack, timelineRedoStack, selectedClipId } = get();
+    if (!timeline || timelineUndoStack.length === 0) return;
+    const previous = cloneTimeline(timelineUndoStack[timelineUndoStack.length - 1]);
+    const selected = selectedClipId ? findClip(previous, selectedClipId) : null;
+    set((state) => ({
+      timeline: previous,
+      timelineUndoStack: timelineUndoStack.slice(0, -1),
+      timelineRedoStack: [...timelineRedoStack, cloneTimeline(timeline)].slice(-TIMELINE_HISTORY_LIMIT),
+      selectedClipId: selected ? selectedClipId : null,
+      selectedClipIds: state.selectedClipIds.filter((id) => findClip(previous, id)),
+      selectedTrackId: selected ? selected.track.id : null,
+    }));
+    await get().saveTimeline(previous);
+  },
+
+  redoTimeline: async () => {
+    const { timeline, timelineUndoStack, timelineRedoStack, selectedClipId } = get();
+    if (!timeline || timelineRedoStack.length === 0) return;
+    const next = cloneTimeline(timelineRedoStack[timelineRedoStack.length - 1]);
+    const selected = selectedClipId ? findClip(next, selectedClipId) : null;
+    set((state) => ({
+      timeline: next,
+      timelineUndoStack: [...timelineUndoStack, cloneTimeline(timeline)].slice(-TIMELINE_HISTORY_LIMIT),
+      timelineRedoStack: timelineRedoStack.slice(0, -1),
+      selectedClipId: selected ? selectedClipId : null,
+      selectedClipIds: state.selectedClipIds.filter((id) => findClip(next, id)),
+      selectedTrackId: selected ? selected.track.id : null,
+    }));
     await get().saveTimeline(next);
   },
 
@@ -940,7 +2504,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     set({ isRendering: true, error: null });
     try {
       await get().saveTimeline();
-      const job = await videoApi.renderTimeline(projectId, get().exportSettings);
+      const job = await videoApi.renderTimeline(projectId, {
+        ...get().exportSettings,
+        estimated_duration_ms: get().timeline?.duration_ms,
+      });
       set((state) => ({
         renderJobs: upsertRenderJob(state.renderJobs, job),
         activeRenderJobId: job.id,
@@ -957,11 +2524,16 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   pollRenderJob: async (jobId) => {
     try {
       const job = await videoApi.getRenderJob(jobId);
+      // The user may have switched projects while this poll was in flight —
+      // don't inject another project's render job into the current state.
+      if (get().activeProjectId !== job.project_id) return;
       set((state) => ({ renderJobs: upsertRenderJob(state.renderJobs, job), activeRenderJobId: job.id }));
       if (job.status === 'completed') {
-        if (get().activeProjectId) {
-          const assets = await videoApi.listAssets(get().activeProjectId as string);
-          set({ assets, selectedAssetId: job.output_asset_id || get().selectedAssetId });
+        if (get().activeProjectId === job.project_id) {
+          const assets = await videoApi.listAssets(job.project_id);
+          if (get().activeProjectId === job.project_id) {
+            set({ assets, selectedAssetId: job.output_asset_id || get().selectedAssetId });
+          }
         }
         toast.success('Render complete');
         return;
@@ -970,7 +2542,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         if (job.error) toast.error(job.error);
         return;
       }
-      window.setTimeout(() => { void get().pollRenderJob(jobId); }, 1000);
+      const timeout = window.setTimeout(() => { void get().pollRenderJob(jobId); }, 1000);
+      set({ _renderPollTimeout: timeout });
     } catch (err) {
       set({ error: (err as Error).message });
     }
@@ -1021,6 +2594,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         prompt: get().promptForm.prompt,
         instruction: get().assistantInstruction,
         timeline: get().timeline || undefined,
+        selected_clip_id: get().selectedClipId || undefined,
+        playhead_ms: get().playheadMs || undefined,
       });
       set({ assistantPlan });
     } catch (err) {
@@ -1036,6 +2611,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         prompt: get().promptForm.prompt,
         instruction: get().assistantInstruction,
         timeline: get().timeline || undefined,
+        selected_clip_id: get().selectedClipId || undefined,
+        playhead_ms: get().playheadMs || undefined,
       });
       set({ assistantPlan });
     } catch (err) {
@@ -1043,14 +2620,30 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     }
   },
 
-  applyAssistantPlan: async () => {
+  applyAssistantPlan: async (selectedIndices) => {
     const projectId = get().activeProjectId;
     const plan = get().assistantPlan;
     if (!projectId || !plan) return;
+    // The backend annotates plans so operations[i] ↔ preview[i]; a selection
+    // applies just those operations.
+    const operations = selectedIndices
+      ? plan.operations.filter((_, index) => selectedIndices.includes(index))
+      : plan.operations;
+    if (operations.length === 0) return;
+    const previous = get().timeline ? cloneTimeline(get().timeline as VideoTimelineDocument) : null;
     try {
-      const detail = await videoApi.assistant.applyEditPlan(projectId, plan);
-      set({ timelineRecord: detail.timeline, timeline: detail.document, assistantPlan: null });
-      toast.success('Edit plan applied');
+      const detail = await videoApi.assistant.applyEditPlan(projectId, { ...plan, operations });
+      set((state) => ({
+        timelineRecord: detail.timeline,
+        timeline: detail.document,
+        assistantPlan: null,
+        ...(previous ? withTimelineHistory(state, previous) : { timelineRedoStack: [] }),
+      }));
+      if (plan.issues && plan.issues.length > 0) {
+        toast.info(`Edit plan applied — ${plan.issues.length} invalid operation${plan.issues.length === 1 ? '' : 's'} skipped`);
+      } else {
+        toast.success('Edit plan applied');
+      }
     } catch (err) {
       toast.error((err as Error).message);
     }
@@ -1064,6 +2657,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         prompt: get().promptForm.prompt,
         instruction: get().assistantInstruction,
         timeline: get().timeline || undefined,
+        selected_clip_id: get().selectedClipId || undefined,
+        playhead_ms: get().playheadMs || undefined,
       });
       set({ socialVariants });
     } catch (err) {

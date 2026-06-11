@@ -7,7 +7,10 @@ import {
   Download,
   Film,
   GitBranch,
+  Library,
+  ListPlus,
   Loader2,
+  MessageSquare,
   Plus,
   RefreshCw,
   Scissors,
@@ -16,11 +19,19 @@ import {
   WandSparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { videoApi } from '../../api';
-import { videoAssetUrl } from '../../api';
-import { useCrossoverStore, useSettingsStore } from '../../stores';
+import { api, videoApi, videoAssetUrl } from '../../api';
+import { useConversationStore, useCrossoverStore, useMessageStore, useSettingsStore } from '../../stores';
 import { useVideoStudioStore } from '../../stores/videoStudio';
-import type { VideoAsset, VideoGenerationDetail, VideoProviderKey } from '../../types/video';
+import type {
+  InputAsset,
+  VideoAsset,
+  VideoCapability,
+  VideoGenerationDetail,
+  VideoGenerationValidationIssue,
+  VideoModel,
+  VideoPromptForm,
+  VideoProviderKey,
+} from '../../types/video';
 
 // ── Cinematic option lists ────────────────────────────────────────────────────
 const STYLE_OPTIONS = [
@@ -146,6 +157,216 @@ const AMBIENT_NOISE_OPTIONS = [
 const AUTO_VALUE = '__auto__';
 const CUSTOM_VALUE = '__custom__';
 
+type PromptVariantKind = 'cinematic' | 'social' | 'product' | 'explainer' | 'documentary';
+
+const PROMPT_VARIANTS: Array<{ kind: PromptVariantKind; label: string; aspectRatio?: string }> = [
+  { kind: 'cinematic', label: 'Cinematic' },
+  { kind: 'social', label: 'Social', aspectRatio: '9:16' },
+  { kind: 'product', label: 'Product' },
+  { kind: 'explainer', label: 'Explainer' },
+  { kind: 'documentary', label: 'Documentary' },
+];
+
+function buildClientGenerationValidation(
+  provider: VideoProviderKey,
+  model: VideoModel | undefined,
+  form: VideoPromptForm,
+): {
+  errors: VideoGenerationValidationIssue[];
+  warnings: VideoGenerationValidationIssue[];
+  normalizations: VideoGenerationValidationIssue[];
+} {
+  const errors: VideoGenerationValidationIssue[] = [];
+  const warnings: VideoGenerationValidationIssue[] = [];
+  const normalizations: VideoGenerationValidationIssue[] = [];
+  if (!model) return { errors, warnings, normalizations };
+
+  const caps = model.capabilities || [];
+  const hasCap = (capability: VideoCapability) => caps.includes(capability);
+  const addError = (field: string, code: string, message: string) => {
+    errors.push({ field, code, message, severity: 'error' });
+  };
+  const addWarning = (field: string, code: string, message: string) => {
+    warnings.push({ field, code, message, severity: 'warning' });
+  };
+  const addNormalization = (field: string, code: string, message: string, original: unknown, normalized: unknown) => {
+    normalizations.push({ field, code, message, severity: 'normalization', original, normalized });
+  };
+
+  const referenceIds = (form.reference_asset_ids ?? []).filter(Boolean);
+  const hasStartImage = Boolean(form.start_image_asset_id);
+  const hasLastFrame = Boolean(form.last_frame_asset_id);
+  const hasSourceVideo = Boolean(form.source_video_asset_id);
+  const hasReferenceImages = referenceIds.length > 0;
+
+  if (hasLastFrame && !hasStartImage) {
+    addError('last_frame_asset_id', 'last_frame_requires_start_frame', 'Choose a start frame before choosing a last frame.');
+  }
+  if (hasSourceVideo && (hasStartImage || hasLastFrame || hasReferenceImages)) {
+    addError('source_video_asset_id', 'source_video_exclusive', 'Source-video extension cannot be combined with start frame, last frame, or reference images.');
+  }
+  if (hasStartImage && !hasCap('image_to_video')) {
+    addError('start_image_asset_id', 'image_to_video_unsupported', `${model.name} does not support start-frame image generation.`);
+  }
+  if (hasLastFrame && !hasCap('first_last_frame')) {
+    addError('last_frame_asset_id', 'first_last_frame_unsupported', `${model.name} does not support first/last-frame interpolation.`);
+  }
+  if (hasSourceVideo && !hasCap('extend_video')) {
+    addError('source_video_asset_id', 'source_video_unsupported', `${model.name} does not support source-video extension.`);
+  }
+  if (hasReferenceImages && !hasCap('reference_images')) {
+    addError('reference_asset_ids', 'reference_images_unsupported', `${model.name} does not support reference images.`);
+  }
+  if (referenceIds.length > 3) {
+    addError('reference_asset_ids', 'too_many_reference_images', 'Use no more than 3 reference images for this provider.');
+  }
+  if (form.negative_prompt?.trim() && !hasCap('negative_prompt')) {
+    addError('negative_prompt', 'negative_prompt_unsupported', `${model.name} does not support negative prompts.`);
+  }
+  if (form.seed !== undefined && !hasCap('seed')) {
+    addError('seed', 'seed_unsupported', `${model.name} does not expose deterministic seed control.`);
+  }
+  if (form.person_generation && !hasCap('person_generation')) {
+    addError('person_generation', 'person_generation_unsupported', `${model.name} does not support person-generation policy controls.`);
+  }
+
+  const hasAudioCues = Boolean(form.dialogue?.trim() || form.sound_effects?.trim() || form.ambient_noise?.trim());
+  if (hasAudioCues && provider === 'gemini') {
+    addWarning('dialogue', 'gemini_audio_prompt_only', 'Gemini Veo dialogue and sound cues are added to the prompt; there is no separate native audio toggle.');
+  } else if (hasAudioCues && !hasCap('audio_generation')) {
+    addError('dialogue', 'audio_controls_unsupported', `${model.name} does not support audio or dialogue generation controls.`);
+  }
+
+  const aspectRatio = form.aspect_ratio || '16:9';
+  if (model.aspect_ratios?.length && !model.aspect_ratios.some((value) => value.toLowerCase() === aspectRatio.toLowerCase())) {
+    addError('aspect_ratio', 'aspect_ratio_unsupported', `${model.name} does not support aspect ratio ${aspectRatio}.`);
+  }
+
+  let resolution = form.resolution || (model.resolutions?.includes('720p') ? '720p' : model.resolutions?.[0] || '720p');
+  if (hasSourceVideo && provider === 'gemini' && resolution.toLowerCase() !== '720p') {
+    addNormalization('resolution', 'source_video_resolution_normalized', 'Gemini Veo source-video extension exports at 720p.', resolution, '720p');
+    resolution = '720p';
+  }
+  if (model.resolutions?.length && !model.resolutions.some((value) => value.toLowerCase() === resolution.toLowerCase())) {
+    addError('resolution', 'resolution_unsupported', `${model.name} does not support ${resolution} output.`);
+  }
+
+  let duration = form.duration_seconds || 8;
+  if (model.duration_min_seconds && duration < model.duration_min_seconds) {
+    addNormalization('duration_seconds', 'duration_min_normalized', `Duration will be raised to ${model.duration_min_seconds} seconds.`, duration, model.duration_min_seconds);
+    duration = model.duration_min_seconds;
+  }
+  if (model.duration_max_seconds && duration > model.duration_max_seconds) {
+    addNormalization('duration_seconds', 'duration_max_normalized', `Duration will be capped at ${model.duration_max_seconds} seconds.`, duration, model.duration_max_seconds);
+    duration = model.duration_max_seconds;
+  }
+  if (provider === 'gemini') {
+    const needsEightSeconds = hasSourceVideo || hasLastFrame || hasReferenceImages || resolution.toLowerCase() === '1080p' || resolution.toLowerCase() === '4k';
+    if (needsEightSeconds && duration !== 8) {
+      addNormalization('duration_seconds', 'gemini_duration_normalized', 'Gemini Veo will use 8 seconds for this mode and resolution.', duration, 8);
+    }
+  }
+
+  if (model.fps_options?.length && form.fps && !model.fps_options.includes(form.fps)) {
+    addNormalization('fps', 'fps_normalized', `${model.name} exports at ${model.fps_options[0]} fps.`, form.fps, model.fps_options[0]);
+  }
+
+  return { errors, warnings, normalizations };
+}
+
+function parseGenerationJSON<T>(value?: string): T | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as T;
+    return parsed ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getGenerationSettings(generation: VideoGenerationDetail): Partial<VideoPromptForm> {
+  const parsed = parseGenerationJSON<Partial<VideoPromptForm>>(generation.settings_json);
+  return parsed && typeof parsed === 'object' ? parsed : {};
+}
+
+function getGenerationInputAssets(generation: VideoGenerationDetail): InputAsset[] {
+  const parsed = parseGenerationJSON<InputAsset[]>(generation.input_assets_json);
+  if (Array.isArray(parsed)) return parsed.filter((asset) => Boolean(asset?.asset_id && asset.role));
+  const ids = parseGenerationJSON<string[]>(generation.input_asset_ids_json);
+  if (Array.isArray(ids)) {
+    return ids.filter(Boolean).map((asset_id) => ({ asset_id, role: 'start_frame' as const }));
+  }
+  return [];
+}
+
+function getGenerationInputMode(inputAssets: InputAsset[]): string {
+  const roles = new Set(inputAssets.map((asset) => asset.role));
+  if (roles.has('source_video')) return 'Extend';
+  if (roles.has('start_frame') && roles.has('last_frame')) return 'First/last';
+  if (roles.has('start_frame')) return 'Image-to-video';
+  if (roles.has('reference_image')) return 'References';
+  return 'Text-to-video';
+}
+
+function formatSettingSummary(settings: Partial<VideoPromptForm>): string {
+  const parts = [
+    settings.aspect_ratio,
+    settings.duration_seconds ? `${settings.duration_seconds}s` : '',
+    settings.resolution,
+    settings.fps ? `${settings.fps} fps` : '',
+    settings.seed !== undefined ? `seed ${settings.seed}` : '',
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(' · ') : 'Default settings';
+}
+
+function formatCost(cost?: number): string | null {
+  if (typeof cost !== 'number') return null;
+  return `$${cost.toFixed(cost > 0 && cost < 1 ? 4 : 2)}`;
+}
+
+function compactID(value?: string): string | null {
+  if (!value) return null;
+  return value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
+}
+
+function formatInputAssetSummary(inputAssets: InputAsset[]): string | null {
+  if (inputAssets.length === 0) return null;
+  const labels: Record<InputAsset['role'], string> = {
+    start_frame: 'start',
+    last_frame: 'last',
+    reference_image: 'ref',
+    source_video: 'source',
+  };
+  const counts = inputAssets.reduce<Record<string, number>>((acc, asset) => {
+    acc[asset.role] = (acc[asset.role] || 0) + 1;
+    return acc;
+  }, {});
+  return Object.entries(counts).map(([role, count]) => `${labels[role as InputAsset['role']] || role}${count > 1 ? ` x${count}` : ''}`).join(' · ');
+}
+
+function formatUsageSummary(usageJson?: string): string | null {
+  const usage = parseGenerationJSON<Record<string, unknown>>(usageJson);
+  if (!usage || typeof usage !== 'object') return null;
+  const candidates = ['total_tokens', 'input_tokens', 'output_tokens', 'prompt_tokens', 'completion_tokens'];
+  const parts = candidates
+    .filter((key) => typeof usage[key] === 'number' || typeof usage[key] === 'string')
+    .slice(0, 3)
+    .map((key) => `${key.replace(/_/g, ' ')} ${String(usage[key])}`);
+  return parts.length > 0 ? parts.join(' · ') : 'usage captured';
+}
+
+function buildPromptVariant(prompt: string, kind: PromptVariantKind): string {
+  const seed = prompt.trim();
+  const suffixes: Record<PromptVariantKind, string> = {
+    cinematic: 'Reframe it as a polished cinematic sequence with deliberate camera movement, layered lighting, atmospheric detail, and a clear visual beginning, middle, and end.',
+    social: 'Reframe it as a vertical short-form hook with immediate motion in the first second, bold readable subject framing, and a loopable ending.',
+    product: 'Reframe it as a premium product spot with the object clearly visible, controlled reflections, tactile detail, and a confident final hero shot.',
+    explainer: 'Reframe it as a clean explainer sequence with simple visual beats, clear cause-and-effect motion, and room for concise on-screen labels.',
+    documentary: 'Reframe it as a natural documentary moment with observational camera language, grounded lighting, realistic pacing, and environmental context.',
+  };
+  return `${seed}\n\n${suffixes[kind]}`;
+}
+
 export function VideoStudio() {
   const projects = useVideoStudioStore((state) => state.projects);
   const activeProjectId = useVideoStudioStore((state) => state.activeProjectId);
@@ -162,6 +383,7 @@ export function VideoStudio() {
   const isGenerating = useVideoStudioStore((state) => state.isGenerating);
   const isEnhancing = useVideoStudioStore((state) => state.isEnhancing);
   const generationProgress = useVideoStudioStore((state) => state.generationProgress);
+  const generationValidation = useVideoStudioStore((state) => state.generationValidation);
   const error = useVideoStudioStore((state) => state.error);
   const loadProviders = useVideoStudioStore((state) => state.loadProviders);
   const loadProjects = useVideoStudioStore((state) => state.loadProjects);
@@ -174,9 +396,14 @@ export function VideoStudio() {
   const enhancePrompt = useVideoStudioStore((state) => state.enhancePrompt);
   const generate = useVideoStudioStore((state) => state.generate);
   const branchFromGeneration = useVideoStudioStore((state) => state.branchFromGeneration);
+  const regenerateFromGeneration = useVideoStudioStore((state) => state.regenerateFromGeneration);
   const cancelGeneration = useVideoStudioStore((state) => state.cancelGeneration);
   const selectAsset = useVideoStudioStore((state) => state.selectAsset);
   const setAppMode = useSettingsStore((state) => state.setAppMode);
+  const createConversation = useConversationStore((state) => state.createConversation);
+  const selectConversation = useConversationStore((state) => state.selectConversation);
+  const clearMessages = useMessageStore((state) => state.clearMessages);
+  const fetchMessages = useMessageStore((state) => state.fetchMessages);
   const { crossoverContext, clearCrossoverContext } = useCrossoverStore();
 
   // Pending image attachment to import once a project is ready
@@ -236,10 +463,104 @@ export function VideoStudio() {
   const selectedProviderConfigured = selectedProviderInfo?.configured ?? false;
   const selectedModelCapabilities = selectedModelInfo?.capabilities || [];
   const progressPercent = Math.round((generationProgress?.progress || 0) * 100);
+  const clientValidation = useMemo(
+    () => buildClientGenerationValidation(selectedProvider, selectedModelInfo, promptForm),
+    [selectedProvider, selectedModelInfo, promptForm],
+  );
+  const visibleValidation = generationValidation && generationValidation.provider === selectedProvider && generationValidation.model === selectedModel
+    ? generationValidation
+    : clientValidation;
+  const validationErrors = visibleValidation.errors ?? [];
+  const validationWarnings = visibleValidation.warnings ?? [];
+  const validationNormalizations = visibleValidation.normalizations ?? [];
 
   const startGeneration = () => {
     setPromptField('place_on_timeline', false);
     generate();
+  };
+
+  const handleSendGenerationToTimeline = async (generation: VideoGenerationDetail) => {
+    if (!generation.output_asset_id) {
+      toast.error('No generated video asset is available');
+      return;
+    }
+    try {
+      const detail = await videoApi.sendGenerationToTimeline(generation.id);
+      useVideoStudioStore.setState({
+        timelineRecord: detail.timeline,
+        timeline: detail.document,
+        selectedAssetId: detail.asset_id || generation.output_asset_id,
+      });
+      setAppMode('video-edit');
+      toast.success('Video sent to timeline');
+    } catch (err) {
+      toast.error(`Failed to send to timeline: ${(err as Error).message}`);
+    }
+  };
+
+  const handleRegisterAssetInLibrary = async (generation: VideoGenerationDetail) => {
+    if (!generation.output_asset_id) {
+      toast.error('No generated video asset is available');
+      return;
+    }
+    try {
+      const file = await videoApi.registerAssetInLibrary(generation.output_asset_id);
+      toast.success(`Registered ${file.display_name || 'video'} in File Library`);
+    } catch (err) {
+      toast.error(`Failed to register in File Library: ${(err as Error).message}`);
+    }
+  };
+
+  const handleSendGenerationToChat = async (generation: VideoGenerationDetail) => {
+    if (!generation.output_asset_id) {
+      toast.error('No generated video asset is available');
+      return;
+    }
+    try {
+      const asset = assets.find((item) => item.id === generation.output_asset_id);
+      const title = asset?.file_name || generation.model || 'Video output';
+      const convo = await createConversation(`Video: ${title}`);
+      const attachment = await videoApi.attachAssetToConversation(generation.output_asset_id, convo.id);
+      const content = [
+        generation.prompt && `Video prompt: ${generation.prompt}`,
+        generation.enhanced_prompt && `Enhanced prompt:\n${generation.enhanced_prompt}`,
+        `Video output\n/v1/attachments/${attachment.id}/download`,
+      ].filter(Boolean).join('\n\n');
+      await api.sendMessage(convo.id, { content, no_reply: true });
+      selectConversation(convo.id);
+      clearMessages();
+      await fetchMessages(convo.id);
+      setAppMode('chat');
+      toast.success('Video sent to chat');
+    } catch (err) {
+      toast.error(`Failed to send to chat: ${(err as Error).message}`);
+    }
+  };
+
+  const handleUseEnhancedPrompt = (generation: VideoGenerationDetail) => {
+    if (!generation.enhanced_prompt?.trim()) return;
+    const settings = getGenerationSettings(generation);
+    setPromptField('prompt', generation.enhanced_prompt.trim());
+    setPromptField('enhance', false);
+    if (settings.aspect_ratio) setPromptField('aspect_ratio', settings.aspect_ratio);
+    if (settings.duration_seconds) setPromptField('duration_seconds', settings.duration_seconds);
+    if (settings.resolution) setPromptField('resolution', settings.resolution);
+    if (settings.fps) setPromptField('fps', settings.fps);
+    toast.success('Enhanced prompt loaded');
+  };
+
+  const handleUsePromptVariant = (generation: VideoGenerationDetail, kind: PromptVariantKind) => {
+    const basePrompt = (generation.enhanced_prompt || generation.prompt).trim();
+    if (!basePrompt) return;
+    const settings = getGenerationSettings(generation);
+    const variant = PROMPT_VARIANTS.find((item) => item.kind === kind);
+    setPromptField('prompt', buildPromptVariant(basePrompt, kind));
+    setPromptField('enhance', false);
+    if (settings.duration_seconds) setPromptField('duration_seconds', settings.duration_seconds);
+    if (settings.resolution) setPromptField('resolution', settings.resolution);
+    if (settings.fps) setPromptField('fps', settings.fps);
+    setPromptField('aspect_ratio', variant?.aspectRatio || settings.aspect_ratio || promptForm.aspect_ratio);
+    toast.success(`${variant?.label || 'Prompt'} variant loaded`);
   };
 
   const { leftStyle, rightStyle, startLeft, startRight } = useResizablePanels({ defaultLeft: 360, defaultRight: 320 });
@@ -313,7 +634,7 @@ export function VideoStudio() {
 
                 {!selectedProviderConfigured && (
                   <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300/80">
-                    Configure an OpenRouter or Gemini video provider before generating.
+                    Configure a video provider (OpenRouter, Gemini, or Luma) in Settings before generating.
                   </p>
                 )}
 
@@ -496,18 +817,36 @@ export function VideoStudio() {
                 </CollapsibleSection>
 
                 {/* ── Advanced ── */}
-                {selectedModelCapabilities.includes('person_generation') && (
+                {(selectedModelCapabilities.includes('person_generation') || selectedModelCapabilities.includes('seed')) && (
                   <CollapsibleSection label="Advanced">
-                    <ControlLabel label="Person generation">
-                      <select
-                        value={promptForm.person_generation || 'allow'}
-                        onChange={(event) => setPromptField('person_generation', event.target.value as 'allow' | 'dont_allow')}
-                        className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
-                      >
-                        <option value="allow">Allow</option>
-                        <option value="dont_allow">Don&apos;t allow</option>
-                      </select>
-                    </ControlLabel>
+                    <div className="space-y-2">
+                      {selectedModelCapabilities.includes('person_generation') && (
+                        <ControlLabel label="Person generation">
+                          <select
+                            value={promptForm.person_generation || 'allow'}
+                            onChange={(event) => setPromptField('person_generation', event.target.value as 'allow' | 'dont_allow')}
+                            className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
+                          >
+                            <option value="allow">Allow</option>
+                            <option value="dont_allow">Don&apos;t allow</option>
+                          </select>
+                        </ControlLabel>
+                      )}
+                      {selectedModelCapabilities.includes('seed') && (
+                        <ControlLabel label="Seed">
+                          <input
+                            type="number"
+                            value={promptForm.seed ?? ''}
+                            onChange={(event) => {
+                              const value = event.target.value.trim();
+                              setPromptField('seed', value === '' ? undefined : Number(value));
+                            }}
+                            placeholder="Optional deterministic seed"
+                            className="min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:border-primary/50 focus:outline-none"
+                          />
+                        </ControlLabel>
+                      )}
+                    </div>
                   </CollapsibleSection>
                 )}
 
@@ -628,6 +967,12 @@ export function VideoStudio() {
                   </div>
                 )}
 
+                <ValidationMessages
+                  errors={validationErrors}
+                  warnings={validationWarnings}
+                  normalizations={validationNormalizations}
+                />
+
                 {error && <p className="rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-xs text-danger">{error}</p>}
 
                 <div className="flex flex-wrap gap-2">
@@ -641,7 +986,7 @@ export function VideoStudio() {
                   </button>
                   <button
                     onClick={startGeneration}
-                    disabled={isGenerating || !selectedProviderConfigured || !selectedModel || !promptForm.prompt.trim()}
+                    disabled={isGenerating || !selectedProviderConfigured || !selectedModel || !promptForm.prompt.trim() || validationErrors.length > 0}
                     className="btn-primary min-h-10 flex-[2] rounded-lg px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
                   >
                     {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Clapperboard size={14} />}
@@ -663,7 +1008,13 @@ export function VideoStudio() {
         <DragHandle onMouseDown={startLeft} />
 
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-surface p-3">
-          <ResultPreview asset={activeAsset} generation={activeGeneration} onEdit={() => setAppMode('video-edit')} />
+          <ResultPreview
+            asset={activeAsset}
+            generation={activeGeneration}
+            onEdit={() => setAppMode('video-edit')}
+            onUseEnhancedPrompt={handleUseEnhancedPrompt}
+            onUsePromptVariant={handleUsePromptVariant}
+          />
         </main>
 
         <DragHandle onMouseDown={startRight} />
@@ -672,12 +1023,18 @@ export function VideoStudio() {
           <HistoryPanel
             generations={generations}
             activeGenerationId={activeGeneration?.id || null}
+            isGenerating={isGenerating}
             onSelect={(generation) => useVideoStudioStore.setState({ activeGenerationId: generation.id, selectedAssetId: generation.output_asset_id || selectedAssetId })}
             onBranch={(generationId) => { void branchFromGeneration(generationId); }}
+            onRegenerate={(generationId) => { void regenerateFromGeneration(generationId); }}
+            onUseEnhancedPrompt={handleUseEnhancedPrompt}
             onExtend={(assetId) => {
               setPromptField('source_video_asset_id', assetId);
               toast.success('Source video set — choose a model with extension capability and generate');
             }}
+            onSendToTimeline={(generation) => { void handleSendGenerationToTimeline(generation); }}
+            onSendToChat={(generation) => { void handleSendGenerationToChat(generation); }}
+            onRegisterInLibrary={(generation) => { void handleRegisterAssetInLibrary(generation); }}
           />
           <OutputPanel assets={assets} activeAssetId={activeAsset?.id || null} onSelect={selectAsset} />
         </aside>
@@ -690,10 +1047,14 @@ function ResultPreview({
   asset,
   generation,
   onEdit,
+  onUseEnhancedPrompt,
+  onUsePromptVariant,
 }: {
   asset: VideoAsset | null;
   generation: VideoGenerationDetail | null;
   onEdit: () => void;
+  onUseEnhancedPrompt: (generation: VideoGenerationDetail) => void;
+  onUsePromptVariant: (generation: VideoGenerationDetail, kind: PromptVariantKind) => void;
 }) {
   if (!asset) {
     return (
@@ -754,8 +1115,38 @@ function ResultPreview({
       </div>
 
       {generation && (
-        <div className="border-t border-border p-3">
-          <p className="line-clamp-3 text-xs leading-relaxed text-text-muted">{generation.prompt}</p>
+        <div className="space-y-2 border-t border-border p-3">
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-wide text-text-muted">Original prompt</div>
+            <p className="line-clamp-3 text-xs leading-relaxed text-text-muted">{generation.prompt}</p>
+          </div>
+          {generation.enhanced_prompt && generation.enhanced_prompt !== generation.prompt && (
+            <div className="rounded-md border border-primary/20 bg-primary/5 p-2">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-[10px] uppercase tracking-wide text-primary">Enhanced prompt</span>
+                <button
+                  onClick={() => onUseEnhancedPrompt(generation)}
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-primary hover:bg-primary/10"
+                >
+                  <WandSparkles size={11} />
+                  Use
+                </button>
+              </div>
+              <p className="line-clamp-3 text-xs leading-relaxed text-text-secondary">{generation.enhanced_prompt}</p>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            {PROMPT_VARIANTS.map((variant) => (
+              <button
+                key={variant.kind}
+                onClick={() => onUsePromptVariant(generation, variant.kind)}
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-[10px] text-text-secondary hover:bg-surface-hover hover:text-text"
+              >
+                <Sparkles size={10} />
+                {variant.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </section>
@@ -824,15 +1215,27 @@ function ProjectStrip({
 function HistoryPanel({
   generations,
   activeGenerationId,
+  isGenerating,
   onSelect,
   onBranch,
+  onRegenerate,
+  onUseEnhancedPrompt,
   onExtend,
+  onSendToTimeline,
+  onSendToChat,
+  onRegisterInLibrary,
 }: {
   generations: VideoGenerationDetail[];
   activeGenerationId: string | null;
+  isGenerating: boolean;
   onSelect: (generation: VideoGenerationDetail) => void;
   onBranch: (generationId: string) => void;
+  onRegenerate: (generationId: string) => void;
+  onUseEnhancedPrompt: (generation: VideoGenerationDetail) => void;
   onExtend: (assetId: string) => void;
+  onSendToTimeline: (generation: VideoGenerationDetail) => void;
+  onSendToChat: (generation: VideoGenerationDetail) => void;
+  onRegisterInLibrary: (generation: VideoGenerationDetail) => void;
 }) {
   return (
     <section className="border-b border-border p-3">
@@ -846,61 +1249,152 @@ function HistoryPanel({
         </div>
       ) : (
         <div className="space-y-2">
-          {generations.slice().reverse().map((generation) => (
-            <div
-              key={generation.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => onSelect(generation)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  onSelect(generation);
-                }
-              }}
-              className={`rounded-lg border p-3 text-left transition-colors ${
-                generation.id === activeGenerationId
-                  ? 'border-primary/30 bg-primary/10'
-                  : 'border-border bg-surface-alt hover:bg-surface-hover'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-xs font-medium text-text">{generation.model}</span>
-                <span className="rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted">
-                  {generation.status}
-                </span>
-              </div>
-              <p className="mt-2 line-clamp-3 text-[11px] leading-relaxed text-text-muted">{generation.prompt}</p>
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <span className="text-[10px] text-text-muted">{new Date(generation.created_at).toLocaleTimeString()}</span>
-                <div className="flex items-center gap-1">
-                  {generation.status === 'completed' && generation.output_asset_id && (
+          {generations.slice().reverse().map((generation) => {
+            const settings = getGenerationSettings(generation);
+            const inputAssets = getGenerationInputAssets(generation);
+            const inputMode = getGenerationInputMode(inputAssets);
+            const inputAssetSummary = formatInputAssetSummary(inputAssets);
+            const cost = formatCost(generation.cost_usd);
+            const upstream = compactID(generation.upstream_job_id || generation.upstream_request_id);
+            const usage = formatUsageSummary(generation.usage_json);
+            const metadataBadges = [generation.provider, inputMode, formatSettingSummary(settings), cost, upstream ? `job ${upstream}` : '', usage]
+              .filter((item): item is string => Boolean(item));
+            return (
+              <div
+                key={generation.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => onSelect(generation)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onSelect(generation);
+                  }
+                }}
+                className={`rounded-lg border p-3 text-left transition-colors ${
+                  generation.id === activeGenerationId
+                    ? 'border-primary/30 bg-primary/10'
+                    : 'border-border bg-surface-alt hover:bg-surface-hover'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-text">{generation.model}</span>
+                  <span className="rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted">
+                    {generation.status}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {metadataBadges.map((item) => (
+                    <span key={item} className="rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted">
+                      {item}
+                    </span>
+                  ))}
+                </div>
+                {inputAssetSummary && (
+                  <p className="mt-1 truncate text-[10px] text-text-muted">Inputs: {inputAssetSummary}</p>
+                )}
+                <p className="mt-2 line-clamp-3 text-[11px] leading-relaxed text-text-muted">{generation.prompt}</p>
+                {generation.enhanced_prompt && generation.enhanced_prompt !== generation.prompt && (
+                  <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-text-secondary">
+                    Enhanced: {generation.enhanced_prompt}
+                  </p>
+                )}
+                {generation.error && (
+                  <div className="mt-2 rounded-md border border-danger/20 bg-danger-soft px-2 py-1.5 text-[10px] leading-relaxed text-danger">
+                    {generation.error}
+                  </div>
+                )}
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-text-muted">{new Date(generation.created_at).toLocaleTimeString()}</span>
+                  <div className="flex flex-wrap items-center justify-end gap-1">
+                    {generation.status === 'completed' && generation.output_asset_id && (
+                      <>
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSendToTimeline(generation);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-sky-300 hover:bg-sky-400/10"
+                          title="Send to timeline"
+                        >
+                          <ListPlus size={11} />
+                          Timeline
+                        </button>
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSendToChat(generation);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-violet-300 hover:bg-violet-400/10"
+                          title="Send to chat"
+                        >
+                          <MessageSquare size={11} />
+                          Chat
+                        </button>
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onRegisterInLibrary(generation);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-amber-300 hover:bg-amber-400/10"
+                          title="Register in File Library"
+                        >
+                          <Library size={11} />
+                          Library
+                        </button>
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onExtend(generation.output_asset_id!);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-emerald-400 hover:bg-emerald-400/10"
+                          title="Extend this video"
+                        >
+                          <Scissors size={11} />
+                          Extend
+                        </button>
+                      </>
+                    )}
+                    {generation.enhanced_prompt && generation.enhanced_prompt !== generation.prompt && (
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onUseEnhancedPrompt(generation);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-primary hover:bg-primary/10"
+                        title="Use enhanced prompt"
+                      >
+                        <WandSparkles size={11} />
+                        Use
+                      </button>
+                    )}
                     <button
                       onClick={(event) => {
                         event.stopPropagation();
-                        onExtend(generation.output_asset_id!);
+                        onRegenerate(generation.id);
                       }}
-                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-emerald-400 hover:bg-emerald-400/10"
-                      title="Extend this video"
+                      disabled={isGenerating}
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-text-secondary hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-45"
+                      title="Regenerate with same settings"
                     >
-                      <Scissors size={11} />
-                      Extend
+                      <RefreshCw size={11} />
+                      Regen
                     </button>
-                  )}
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onBranch(generation.id);
-                    }}
-                    className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-primary hover:bg-primary/10"
-                  >
-                    <GitBranch size={11} />
-                    Branch
-                  </button>
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onBranch(generation.id);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-primary hover:bg-primary/10"
+                    >
+                      <GitBranch size={11} />
+                      Branch
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
@@ -1072,6 +1566,35 @@ function ControlLabel({ label, children }: { label: string; children: ReactNode 
       {label && <span className="mb-1.5 block text-[11px] font-medium text-text-muted">{label}</span>}
       {children}
     </label>
+  );
+}
+
+function ValidationMessages({
+  errors,
+  warnings,
+  normalizations,
+}: {
+  errors: VideoGenerationValidationIssue[];
+  warnings: VideoGenerationValidationIssue[];
+  normalizations: VideoGenerationValidationIssue[];
+}) {
+  const issues = [...errors, ...normalizations, ...warnings];
+  if (issues.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      {issues.map((issue) => {
+        const tone = issue.severity === 'error'
+          ? 'border-danger/20 bg-danger-soft text-danger'
+          : issue.severity === 'normalization'
+            ? 'border-sky-400/20 bg-sky-400/5 text-sky-200'
+            : 'border-amber-500/20 bg-amber-500/5 text-amber-300/90';
+        return (
+          <p key={`${issue.severity}-${issue.code}-${issue.field ?? ''}`} className={`rounded-lg border px-3 py-2 text-xs ${tone}`}>
+            {issue.message}
+          </p>
+        );
+      })}
+    </div>
   );
 }
 

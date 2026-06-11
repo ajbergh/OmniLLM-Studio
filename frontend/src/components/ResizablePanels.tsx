@@ -30,6 +30,8 @@ interface UseResizablePanelsOptions {
    * @default 1280  (xl)
    */
   breakpoint?: number;
+  /** When set, panel widths persist to localStorage under this key. */
+  storageKey?: string;
 }
 
 export interface UseResizablePanelsResult {
@@ -61,9 +63,16 @@ export function useResizablePanels({
   defaultRight,
   minWidth = 160,
   breakpoint = 1280,
+  storageKey,
 }: UseResizablePanelsOptions): UseResizablePanelsResult {
-  const [leftW, setLeftW] = useState(defaultLeft);
-  const [rightW, setRightW] = useState(defaultRight);
+  const readStored = (side: 'left' | 'right', fallback: number): number => {
+    if (!storageKey || typeof window === 'undefined') return fallback;
+    const raw = window.localStorage.getItem(`${storageKey}:${side}`);
+    const value = raw ? Number(raw) : NaN;
+    return Number.isFinite(value) && value >= minWidth ? value : fallback;
+  };
+  const [leftW, setLeftW] = useState(() => readStored('left', defaultLeft));
+  const [rightW, setRightW] = useState(() => readStored('right', defaultRight));
   const [isWide, setIsWide] = useState(
     () => typeof window !== 'undefined' && window.innerWidth >= breakpoint,
   );
@@ -87,14 +96,27 @@ export function useResizablePanels({
         setRightW(Math.max(minWidth, drag.startW - dx));
       }
     };
-    const onUp = () => { dragRef.current = null; };
+    const onUp = () => {
+      if (dragRef.current && storageKey) {
+        // Persist once per drag, not per mousemove.
+        setLeftW((value) => {
+          window.localStorage.setItem(`${storageKey}:left`, String(value));
+          return value;
+        });
+        setRightW((value) => {
+          window.localStorage.setItem(`${storageKey}:right`, String(value));
+          return value;
+        });
+      }
+      dragRef.current = null;
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [minWidth]);
+  }, [minWidth, storageKey]);
 
   const startLeft = useCallback((e: React.MouseEvent) => {
     e.preventDefault();

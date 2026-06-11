@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Local-first LLM chat application</strong> — Go backend + React frontend<br/>
+  <strong>OmniLLM-Studio - A Local-first LLM chat application</strong> — Go backend + React frontend<br/>
   Multi-provider streaming · Image Studio · Music Studio · Video Studio · Video Edit Studio · RAG · File Library · Agent mode · Branching · Web search · Live sports lookup · Headless Browser · Artifact export (.docx .xlsx .csv .pdf .md .html .json .yaml) · Encrypted secrets
 </p>
 

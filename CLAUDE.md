@@ -23,6 +23,7 @@ npm install
 npm run dev          # Vite dev server on :5173, proxies /v1/* to :8080
 npm run build        # tsc -b && vite build
 npm run lint         # eslint .
+npm run test:unit    # vitest store-level unit tests (node environment)
 ```
 
 ### Both at once
@@ -36,7 +37,7 @@ scripts/start-wails-dev.bat  # Wails hot-reload desktop dev
 ### Playwright smoke tests (root)
 
 ```bash
-npm run test:smoke           # Headless Chromium against the image-editor smoke spec
+npm run test:smoke           # Headless Chromium: video-editor, image-editor, and music-studio specs
 npm run test:smoke:headed    # Same with browser visible
 ```
 
@@ -130,7 +131,7 @@ Zustand stores in [frontend/src/stores/index.ts](frontend/src/stores/index.ts) �
 
 - Repository tests use in-memory SQLite via the `newTestDB` helper (open `":memory:"` then `db.Migrate`).
 - Internal-package tests (e.g. `rag/chunker_test.go`) use the same package to access unexported helpers.
-- No frontend unit-test framework is configured — Playwright smoke tests at the repo root cover the image editor.
+- Frontend unit tests use vitest (`frontend/vitest.config.ts`, node environment) — store-level coverage lives next to the store (e.g. `src/stores/videoStudio.test.ts`). Playwright smoke tests at the repo root cover the video, image, and music editors.
 
 ## Environment variables
 

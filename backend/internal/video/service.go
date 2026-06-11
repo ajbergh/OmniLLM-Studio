@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/llm"
@@ -46,6 +47,12 @@ type Service struct {
 	registry         *ModelRegistry
 	renderer         Renderer
 	llm              llmCompleter // optional — nil = deterministic fallback
+
+	// renderCancels maps running render job IDs to their context cancel funcs
+	// so CancelRenderJob can actually stop the FFmpeg process, not just flip
+	// the DB status.
+	renderCancelsMu sync.Mutex
+	renderCancels   map[string]context.CancelFunc
 }
 
 func NewService(
@@ -67,9 +74,10 @@ func NewService(
 		providerProfiles: providerProfiles,
 		attachmentsDir:   attachmentsDir,
 		storage:          NewStorage(attachmentsDir),
-		registry:         NewModelRegistry(NewOpenRouterProvider("", ""), NewGeminiProvider("", "")),
+		registry:         NewModelRegistry(NewOpenRouterProvider("", ""), NewGeminiProvider("", ""), NewLumaProvider("", "")),
 		renderer:         NewFFmpegRenderer(""),
 		llm:              llmSvc,
+		renderCancels:    map[string]context.CancelFunc{},
 	}
 }
 
@@ -104,6 +112,7 @@ func (s *Service) providerRegistry() *ModelRegistry {
 	}
 	var openRouterBaseURL, openRouterAPIKey string
 	var geminiBaseURL, geminiAPIKey string
+	var lumaBaseURL, lumaAPIKey string
 	profiles, err := s.providerProfiles.List()
 	if err == nil {
 		for i := range profiles {
@@ -112,7 +121,7 @@ func (s *Service) providerRegistry() *ModelRegistry {
 				continue
 			}
 			providerType := NormalizeProvider(profile.Type)
-			if providerType != ProviderOpenRouter && providerType != ProviderGemini {
+			if providerType != ProviderOpenRouter && providerType != ProviderGemini && providerType != ProviderLuma {
 				continue
 			}
 			apiKey, keyErr := s.providerProfiles.GetAPIKey(profile.ID)
@@ -134,12 +143,18 @@ func (s *Service) providerRegistry() *ModelRegistry {
 					geminiBaseURL = baseURL
 					geminiAPIKey = strings.TrimSpace(apiKey)
 				}
+			case ProviderLuma:
+				if lumaAPIKey == "" {
+					lumaBaseURL = baseURL
+					lumaAPIKey = strings.TrimSpace(apiKey)
+				}
 			}
 		}
 	}
 	return NewModelRegistry(
 		NewOpenRouterProvider(openRouterBaseURL, openRouterAPIKey),
 		NewGeminiProvider(geminiBaseURL, geminiAPIKey),
+		NewLumaProvider(lumaBaseURL, lumaAPIKey),
 	)
 }
 
@@ -154,6 +169,10 @@ func (s *Service) ListModels(ctx context.Context, provider string, refresh bool)
 		return nil, fmt.Errorf("%w: unsupported provider", ErrCapabilityUnsupported)
 	}
 	return s.providerRegistry().ListModels(ctx, provider)
+}
+
+func (s *Service) ValidateGeneration(ctx context.Context, req GenerateRequest) GenerateValidationResult {
+	return s.providerRegistry().ValidateGenerateRequest(ctx, req)
 }
 
 func (s *Service) CreateProject(userID, title, provider, model string, width, height, fps int, aspectRatio string) (*models.VideoProject, error) {
@@ -186,12 +205,12 @@ func (s *Service) CreateProject(userID, title, provider, model string, width, he
 
 func (s *Service) defaultProviderKey(ctx context.Context) string {
 	registry := s.providerRegistry()
-	for _, key := range []string{ProviderOpenRouter, ProviderGemini} {
+	for _, key := range []string{ProviderOpenRouter, ProviderGemini, ProviderLuma} {
 		if provider, ok := registry.Provider(key); ok && provider.Configured() {
 			return key
 		}
 	}
-	for _, key := range []string{ProviderOpenRouter, ProviderGemini} {
+	for _, key := range []string{ProviderOpenRouter, ProviderGemini, ProviderLuma} {
 		if _, ok := registry.Provider(key); ok {
 			return key
 		}
@@ -216,17 +235,18 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 	if !provider.Configured() {
 		return nil, nil, nil, fmt.Errorf("%w: no enabled %s provider profile with an API key", ErrProviderUnavailable, providerKey)
 	}
-	if strings.TrimSpace(req.Prompt) == "" {
-		return nil, nil, nil, fmt.Errorf("prompt is required")
-	}
-
 	modelID := strings.TrimSpace(req.Model)
 	if modelID == "" {
 		modelID = registry.DefaultModel(ctx, providerKey)
 	}
-	if modelID == "" || !registry.ValidateModel(ctx, providerKey, modelID) {
-		return nil, nil, nil, fmt.Errorf("%w: %s is not supported by %s", ErrCapabilityUnsupported, modelID, providerKey)
+	req.Provider = providerKey
+	req.Model = modelID
+	validation := registry.ValidateGenerateRequest(ctx, req)
+	if !validation.Valid {
+		return nil, nil, nil, fmt.Errorf("%w: %s", ErrCapabilityUnsupported, validation.ErrorMessage())
 	}
+	req = validation.NormalizedRequest
+	modelID = req.Model
 
 	project, err := s.ensureProject(ctx, userID, req, providerKey, modelID)
 	if err != nil {
@@ -404,6 +424,7 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 		Model:        &modelID,
 		MetadataJSON: metaJSON,
 	}
+	s.attachAssetArtifacts(ctx, asset)
 	if err := s.assets.Create(asset); err != nil {
 		_ = s.generations.MarkFailed(generation.ID, err.Error())
 		return project, generation, nil, err
@@ -440,6 +461,104 @@ func (s *Service) EnhancePrompt(ctx context.Context, req EnhancePromptRequest) s
 	return EnhancePromptWithLLM(ctx, s.llm, req)
 }
 
+// DuplicateProject copies a project: same settings, every asset's file bytes
+// copied into the new project's storage (artifacts regenerated), and the
+// active timeline cloned with asset references remapped to the copies. Clip
+// IDs are preserved so saved assistant plans still target them.
+func (s *Service) DuplicateProject(ctx context.Context, userID, projectID string) (*models.VideoProject, error) {
+	source, err := s.ensureProjectOwned(userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	provider := ""
+	if source.DefaultProvider != nil {
+		provider = *source.DefaultProvider
+	}
+	model := ""
+	if source.DefaultModel != nil {
+		model = *source.DefaultModel
+	}
+	copyProject, err := s.projects.Create(userID, source.Title+" copy", provider, model, source.Width, source.Height, source.FPS, source.AspectRatio)
+	if err != nil {
+		return nil, err
+	}
+
+	// Copy assets; assets whose files are missing on disk are skipped and
+	// their clips keep a dangling reference (same as deleting the asset).
+	assets, err := s.assets.ListByProject(projectID)
+	if err != nil {
+		return nil, err
+	}
+	idMap := map[string]string{}
+	for i := range assets {
+		src := assets[i]
+		data, readErr := os.ReadFile(filepath.Join(s.attachmentsDir, filepath.FromSlash(src.FilePath)))
+		if readErr != nil {
+			continue
+		}
+		relPath, _, writeErr := s.storage.Write(copyProject.ID, "copy-"+src.ID, src.FileName, src.MimeType, data)
+		if writeErr != nil {
+			continue
+		}
+		projectRef := copyProject.ID
+		dup := &models.VideoAsset{
+			ProjectID:    &projectRef,
+			SourceType:   src.SourceType,
+			SourceStudio: src.SourceStudio,
+			SourceID:     src.SourceID,
+			Kind:         src.Kind,
+			FileName:     src.FileName,
+			FilePath:     relPath,
+			MimeType:     src.MimeType,
+			SizeBytes:    int64(len(data)),
+			DurationMS:   src.DurationMS,
+			Width:        src.Width,
+			Height:       src.Height,
+			FPS:          src.FPS,
+			Provider:     src.Provider,
+			Model:        src.Model,
+			MetadataJSON: src.MetadataJSON,
+		}
+		s.attachAssetArtifacts(ctx, dup)
+		if createErr := s.assets.Create(dup); createErr != nil {
+			continue
+		}
+		idMap[src.ID] = dup.ID
+	}
+
+	_, doc, err := s.GetOrCreateTimeline(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for ti := range doc.Tracks {
+		for ci := range doc.Tracks[ti].Clips {
+			if mapped, ok := idMap[doc.Tracks[ti].Clips[ci].AssetID]; ok {
+				doc.Tracks[ti].Clips[ci].AssetID = mapped
+			}
+		}
+	}
+	if _, _, err := s.SaveTimeline(ctx, userID, copyProject.ID, doc); err != nil {
+		return nil, err
+	}
+	return copyProject, nil
+}
+
+// attachAssetArtifacts generates a thumbnail/waveform next to the asset file
+// and fills the corresponding fields. Best-effort — silently skipped without
+// FFmpeg.
+func (s *Service) attachAssetArtifacts(ctx context.Context, asset *models.VideoAsset) {
+	if asset == nil || asset.FilePath == "" {
+		return
+	}
+	thumbRel, waveRel := GenerateAssetArtifacts(ctx, s.attachmentsDir, asset.FilePath, asset.MimeType)
+	if thumbRel != "" {
+		asset.ThumbnailPath = &thumbRel
+	}
+	if waveRel != "" {
+		asset.WaveformPath = &waveRel
+	}
+}
+
 // resolveAssetPath looks up a video asset by ID and returns its absolute file
 // path under the attachments directory.
 func (s *Service) resolveAssetPath(assetID string) (string, error) {
@@ -466,17 +585,26 @@ func (s *Service) GenerateAsync(ctx context.Context, userID string, req Generate
 		return nil, nil, fmt.Errorf("%w: unsupported video provider", ErrCapabilityUnsupported)
 	}
 	registry := s.providerRegistry()
-	if _, ok := registry.Provider(providerKey); !ok {
+	provider, ok := registry.Provider(providerKey)
+	if !ok {
 		return nil, nil, fmt.Errorf("%w: no adapter registered for %s", ErrProviderUnavailable, providerKey)
+	}
+	if !provider.Configured() {
+		return nil, nil, fmt.Errorf("%w: no enabled %s provider profile with an API key", ErrProviderUnavailable, providerKey)
 	}
 
 	modelID := strings.TrimSpace(req.Model)
 	if modelID == "" {
 		modelID = registry.DefaultModel(ctx, providerKey)
 	}
-	if strings.TrimSpace(req.Prompt) == "" {
-		return nil, nil, fmt.Errorf("prompt is required")
+	req.Provider = providerKey
+	req.Model = modelID
+	validation := registry.ValidateGenerateRequest(ctx, req)
+	if !validation.Valid {
+		return nil, nil, fmt.Errorf("%w: %s", ErrCapabilityUnsupported, validation.ErrorMessage())
 	}
+	req = validation.NormalizedRequest
+	modelID = req.Model
 
 	project, err := s.ensureProject(ctx, userID, req, providerKey, modelID)
 	if err != nil {
@@ -557,7 +685,7 @@ func (s *Service) GenerateAsync(ctx context.Context, userID string, req Generate
 	}
 
 	// Start background generation goroutine.
-	go s.runGenerationBackground(context.Background(), project.ID, generation.ID, modelID, providerKey, req, enhancedPrompt)
+	go s.runGenerationBackground(context.Background(), userID, project.ID, generation.ID, modelID, providerKey, req, enhancedPrompt)
 
 	return project, generation, nil
 }
@@ -567,7 +695,7 @@ func (s *Service) GenerateAsync(ctx context.Context, userID string, req Generate
 // generation record.
 func (s *Service) runGenerationBackground(
 	ctx context.Context,
-	projectID, generationID, modelID, providerKey string,
+	userID, projectID, generationID, modelID, providerKey string,
 	req GenerateRequest,
 	enhancedPrompt string,
 ) {
@@ -583,14 +711,16 @@ func (s *Service) runGenerationBackground(
 	}
 	gemProv, isGemini := prov.(*GeminiProvider)
 	if !isGemini {
-		// Fall back to synchronous Generate for non-Gemini providers.
-		_, gen, asset, err := s.Generate(ctx, "", req, nil)
+		// Fall back to synchronous Generate for non-Gemini providers, under
+		// the requesting user (not ""). Generate creates and completes its own
+		// generation record, so retire the pending async row instead of
+		// leaving it stuck forever.
+		_, _, _, err := s.Generate(ctx, userID, req, nil)
 		if err != nil {
 			fail(err.Error())
 			return
 		}
-		_ = gen
-		_ = asset
+		_ = s.generations.MarkCancelled(generationID)
 		return
 	}
 
@@ -658,6 +788,12 @@ func (s *Service) pollAndFinalize(
 				return
 			case <-asyncPollTimer(10):
 			}
+		}
+		// CancelGeneration flips the DB status (the poll context is
+		// Background and never fires Done): stop polling and keep the
+		// cancelled status rather than clobbering it later.
+		if gen, err := s.generations.GetByID(generationID); err == nil && gen != nil && gen.Status == StatusCancelled {
+			return
 		}
 		done, videoURI, _, err := gemProv.PollOnce(ctx, opName)
 		if err != nil {
@@ -750,6 +886,7 @@ func (s *Service) finalizeGeneration(
 		Model:        &modelID,
 		MetadataJSON: string(metaJSONBytes),
 	}
+	s.attachAssetArtifacts(context.Background(), asset)
 	if err := s.assets.Create(asset); err != nil {
 		fail(err.Error())
 		return
@@ -1027,10 +1164,10 @@ func (s *Service) ImportExternalAsset(ctx context.Context, userID, projectID str
 	if asset.SizeBytes == 0 {
 		asset.SizeBytes = resolved.sizeBytes
 	}
+	s.attachAssetArtifacts(ctx, asset)
 	if err := s.assets.Create(asset); err != nil {
 		return nil, err
 	}
-	_ = ctx
 	return asset, nil
 }
 
@@ -1260,7 +1397,22 @@ func (s *Service) StartRender(ctx context.Context, userID, projectID string, set
 	if err := s.renderJobs.Create(job); err != nil {
 		return nil, err
 	}
-	go s.runRenderJob(context.Background(), job.ID)
+	// A cancellable context lets CancelRenderJob kill the FFmpeg process; the
+	// job still survives request lifetimes (parent is Background, not the
+	// HTTP request context).
+	renderCtx, cancel := context.WithCancel(context.Background())
+	s.renderCancelsMu.Lock()
+	s.renderCancels[job.ID] = cancel
+	s.renderCancelsMu.Unlock()
+	go func() {
+		defer func() {
+			s.renderCancelsMu.Lock()
+			delete(s.renderCancels, job.ID)
+			s.renderCancelsMu.Unlock()
+			cancel()
+		}()
+		s.runRenderJob(renderCtx, job.ID)
+	}()
 	return job, nil
 }
 
@@ -1288,6 +1440,12 @@ func (s *Service) CancelRenderJob(userID, jobID string) (*models.VideoRenderJob,
 	}
 	if err := s.renderJobs.MarkCancelled(job.ID); err != nil {
 		return nil, err
+	}
+	s.renderCancelsMu.Lock()
+	cancel := s.renderCancels[job.ID]
+	s.renderCancelsMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 	return s.renderJobs.GetByID(job.ID)
 }
@@ -1319,7 +1477,10 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 		return
 	}
 	var settings ExportSettings
-	_ = json.Unmarshal([]byte(job.SettingsJSON), &settings)
+	if err := json.Unmarshal([]byte(job.SettingsJSON), &settings); err != nil {
+		_ = s.renderJobs.MarkFailed(job.ID, "invalid render settings: "+err.Error())
+		return
+	}
 	settings, _ = validateExportSettings(settings, *project)
 
 	// Resolve asset map for media compositing.
@@ -1340,11 +1501,45 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 		_ = s.renderJobs.UpdateProgress(job.ID, p.Progress)
 	})
 	if err != nil {
+		// A cancelled job errors out of the renderer (killed FFmpeg) — keep
+		// the cancelled status instead of overwriting it with failed.
+		if ctx.Err() != nil || s.renderJobCancelled(job.ID) {
+			return
+		}
+		var renderErr *RenderError
+		if errors.As(err, &renderErr) {
+			diag := map[string]any{
+				"ffmpeg_command": renderErr.Command,
+				"ffmpeg_stderr":  truncateForMetadata(renderErr.Stderr, 8192),
+			}
+			if diagJSON, marshalErr := json.Marshal(diag); marshalErr == nil {
+				_ = s.renderJobs.SetMetadata(job.ID, string(diagJSON))
+			}
+		}
 		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
 		return
 	}
 	if s.renderJobCancelled(job.ID) {
 		return
+	}
+	jobMeta := map[string]any{}
+	for k, v := range result.Metadata {
+		jobMeta[k] = v
+	}
+	jobMeta["output_duration_ms"] = result.DurationMS
+	jobMeta["output_width"] = result.Width
+	jobMeta["output_height"] = result.Height
+	jobMeta["output_fps"] = result.FPS
+	if settings.EstimatedDurationMS > 0 {
+		jobMeta["estimated_duration_ms"] = settings.EstimatedDurationMS
+		diff := result.DurationMS - settings.EstimatedDurationMS
+		if diff < 0 {
+			diff = -diff
+		}
+		jobMeta["duration_matches_estimate"] = diff <= 1500
+	}
+	if jobMetaJSON, marshalErr := json.Marshal(jobMeta); marshalErr == nil {
+		_ = s.renderJobs.SetMetadata(job.ID, string(jobMetaJSON))
 	}
 	relativePath, fileName, err := s.storage.Write(project.ID, job.ID, result.FileName, result.MimeType, result.Data)
 	if err != nil {
@@ -1375,6 +1570,7 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 		FPS:          &result.FPS,
 		MetadataJSON: metaJSON,
 	}
+	s.attachAssetArtifacts(context.Background(), asset)
 	if err := s.assets.Create(asset); err != nil {
 		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
 		return
@@ -1385,6 +1581,33 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 func (s *Service) renderJobCancelled(jobID string) bool {
 	job, err := s.renderJobs.GetByID(jobID)
 	return err == nil && job != nil && job.Status == "cancelled"
+}
+
+// truncateForMetadata caps diagnostic strings persisted in job metadata.
+func truncateForMetadata(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "… (truncated)"
+}
+
+// RendererCapabilities reports which timeline features the active renderer
+// honors at export time. The frontend derives export-fidelity warnings from it.
+func (s *Service) RendererCapabilities() RendererCapabilities {
+	return FFmpegRendererCapabilities()
+}
+
+// RecoverInterruptedRenderJobs marks render jobs that were queued or running
+// when the process exited as failed, so they don't appear stuck forever.
+// Call once at startup.
+func (s *Service) RecoverInterruptedRenderJobs() {
+	jobs, err := s.renderJobs.ListActive()
+	if err != nil {
+		return
+	}
+	for _, job := range jobs {
+		_ = s.renderJobs.MarkFailed(job.ID, "render interrupted by application restart — start a new export")
+	}
 }
 
 // firstEnabledChatProvider returns the name of the first enabled LLM provider, or "".
@@ -1462,14 +1685,24 @@ func validateExportSettings(settings ExportSettings, project models.VideoProject
 		return ExportSettings{}, fmt.Errorf("unsupported export format")
 	}
 	settings.Codec = strings.ToLower(strings.TrimSpace(settings.Codec))
+	settings.Preset = strings.ToLower(strings.TrimSpace(settings.Preset))
 	settings.Resolution = strings.ToLower(strings.TrimSpace(settings.Resolution))
 	if settings.Resolution == "" {
 		settings.Resolution = "project"
 	}
 	switch settings.Resolution {
 	case "project", "720p", "1080p":
+	case "custom":
+		if settings.Width <= 0 || settings.Height <= 0 {
+			return ExportSettings{}, fmt.Errorf("custom export resolution requires width and height")
+		}
 	default:
 		return ExportSettings{}, fmt.Errorf("unsupported export resolution")
+	}
+	if settings.Width != 0 || settings.Height != 0 {
+		if settings.Width < 16 || settings.Height < 16 || settings.Width > 7680 || settings.Height > 7680 {
+			return ExportSettings{}, fmt.Errorf("export width/height must be between 16 and 7680 pixels")
+		}
 	}
 	if settings.FPS <= 0 {
 		settings.FPS = project.FPS

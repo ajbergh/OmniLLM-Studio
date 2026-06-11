@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,13 +31,31 @@ type RenderRequest struct {
 
 // resolvedClip is a timeline clip with its asset file path resolved to an absolute path.
 type resolvedClip struct {
-	inputIdx int
-	clip     TimelineClip
-	filePath string
-	isVideo  bool
-	isImage  bool
-	isAudio  bool
+	inputIdx   int
+	trackIndex int
+	clip       TimelineClip
+	filePath   string
+	isVideo    bool
+	isImage    bool
+	isAudio    bool
+	// hasAudio reports whether a video asset carries an audio stream that
+	// should join the mixdown (always true for audio assets).
+	hasAudio bool
 }
+
+// RenderError carries FFmpeg diagnostics for failed renders so they can be
+// persisted in render job metadata.
+type RenderError struct {
+	Command string
+	Stderr  string
+	Err     error
+}
+
+func (e *RenderError) Error() string {
+	return fmt.Sprintf("ffmpeg render failed: %v: %s", e.Err, responseSnippet([]byte(e.Stderr)))
+}
+
+func (e *RenderError) Unwrap() error { return e.Err }
 
 type RenderProgress struct {
 	Stage    string  `json:"stage"`
@@ -174,10 +193,11 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 	if progress != nil {
 		progress(RenderProgress{Stage: "encoding", Message: "Encoding video export with FFmpeg", Progress: 0.65})
 	}
+	commandStr := "ffmpeg " + strings.Join(args, " ")
 	cmd := exec.CommandContext(ctx, binary, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("ffmpeg render failed: %w: %s", err, responseSnippet(output))
+		return nil, &RenderError{Command: commandStr, Stderr: string(output), Err: err}
 	}
 	data, err := os.ReadFile(outputPath)
 	if err != nil {
@@ -202,18 +222,23 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		Height:     height,
 		FPS:        float64(fps),
 		Metadata: map[string]any{
-			"renderer":      "ffmpeg",
-			"format":        format,
-			"quality":       req.Settings.Quality,
-			"include_audio": req.Settings.IncludeAudio,
-			"text_clips":    countTextClips(req.Timeline),
+			"renderer":             "ffmpeg",
+			"format":               format,
+			"quality":              req.Settings.Quality,
+			"include_audio":        req.Settings.IncludeAudio,
+			"text_clips":           countTextClips(req.Timeline),
+			"ffmpeg_command":       commandStr,
+			"timeline_duration_ms": req.Timeline.DurationMS,
 		},
 	}, nil
 }
 
 func renderDimensions(req RenderRequest) (int, int) {
+	if req.Settings.Width > 0 && req.Settings.Height > 0 {
+		return evenDimension(req.Settings.Width), evenDimension(req.Settings.Height)
+	}
 	resolution := strings.ToLower(strings.TrimSpace(req.Settings.Resolution))
-	if resolution == "" || resolution == "project" {
+	if resolution == "" || resolution == "project" || resolution == "custom" {
 		width := req.Timeline.Canvas.Width
 		height := req.Timeline.Canvas.Height
 		if width <= 0 {
@@ -284,16 +309,17 @@ func appendFFmpegCodecArgs(args []string, format string, settings ExportSettings
 }
 
 // resolveMediaClips iterates the timeline tracks and returns all clips that
-// reference a known asset with a valid file on disk, in ascending start-time order.
+// reference a known asset with a valid file on disk, in track stacking order
+// (later tracks composite on top, matching the preview), then z-index, then
+// start time.
 func resolveMediaClips(req RenderRequest) []resolvedClip {
 	if req.AttachmentsDir == "" || len(req.Assets) == 0 {
 		return nil
 	}
 	var result []resolvedClip
-	for _, track := range req.Timeline.Tracks {
-		if !track.Visible || track.Muted {
-			continue
-		}
+	// One audio-stream lookup per asset, not per clip.
+	audioProbeCache := map[string]bool{}
+	for trackIndex, track := range req.Timeline.Tracks {
 		for _, clip := range track.Clips {
 			if clip.AssetID == "" || clip.DurationMS <= 0 {
 				continue
@@ -308,21 +334,82 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 			}
 			mime := strings.ToLower(strings.TrimSpace(strings.SplitN(asset.MimeType, ";", 2)[0]))
 			rc := resolvedClip{
-				clip:     clip,
-				filePath: fullPath,
-				isVideo:  strings.HasPrefix(mime, "video/"),
-				isImage:  strings.HasPrefix(mime, "image/"),
-				isAudio:  strings.HasPrefix(mime, "audio/"),
+				trackIndex: trackIndex,
+				clip:       clip,
+				filePath:   fullPath,
+				isVideo:    strings.HasPrefix(mime, "video/"),
+				isImage:    strings.HasPrefix(mime, "image/"),
+				isAudio:    strings.HasPrefix(mime, "audio/"),
 			}
-			if rc.isVideo || rc.isImage || rc.isAudio {
+			if rc.isAudio {
+				rc.hasAudio = true
+			} else if rc.isVideo {
+				if cached, ok := audioProbeCache[clip.AssetID]; ok {
+					rc.hasAudio = cached
+				} else {
+					rc.hasAudio = videoAssetHasAudio(asset, fullPath)
+					audioProbeCache[clip.AssetID] = rc.hasAudio
+				}
+			}
+			// An audio-only clip turns a video asset into a detached audio clip.
+			if rc.clip.AudioOnly {
+				rc.isVideo, rc.isImage = false, false
+			}
+			// Hidden tracks contribute no video; muted tracks (and muted clips)
+			// contribute no audio.
+			if (rc.isVideo || rc.isImage) && !track.Visible {
+				// Video clips on hidden tracks still contribute their audio.
+				rc.isVideo, rc.isImage = false, false
+			}
+			if track.Muted || rc.clip.Muted {
+				rc.hasAudio = false
+			}
+			if rc.isVideo || rc.isImage || rc.hasAudio {
 				result = append(result, rc)
 			}
 		}
 	}
-	sort.Slice(result, func(i, j int) bool {
+	// Layer order controls visual stacking; start time only controls when a
+	// clip is enabled. Sorting by start time here would let an early clip on a
+	// top layer composite below a later clip on a bottom layer.
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].trackIndex != result[j].trackIndex {
+			return result[i].trackIndex < result[j].trackIndex
+		}
+		zi, zj := clipZIndex(result[i].clip), clipZIndex(result[j].clip)
+		if zi != zj {
+			return zi < zj
+		}
 		return result[i].clip.StartMS < result[j].clip.StartMS
 	})
 	return result
+}
+
+func clipZIndex(clip TimelineClip) int {
+	if clip.ZIndex != nil {
+		return *clip.ZIndex
+	}
+	return 0
+}
+
+// videoAssetHasAudio reports whether a video asset carries an audio stream.
+// Prefers the has_audio flag probed at ingest; falls back to a one-off
+// ffprobe. Defaults to false when neither source is conclusive so the filter
+// graph never maps a missing audio stream (which would fail the render).
+func videoAssetHasAudio(asset models.VideoAsset, fullPath string) bool {
+	if strings.TrimSpace(asset.MetadataJSON) != "" {
+		var meta struct {
+			HasAudio *bool `json:"has_audio"`
+		}
+		if err := json.Unmarshal([]byte(asset.MetadataJSON), &meta); err == nil && meta.HasAudio != nil {
+			return *meta.HasAudio
+		}
+	}
+	probe, err := ProbeMedia(context.Background(), fullPath)
+	if err != nil || probe == nil {
+		return false
+	}
+	return probe.HasAudio
 }
 
 // buildFilterComplex constructs an FFmpeg -filter_complex expression that composites
@@ -332,76 +419,179 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, height int) (filterStr, videoLabel, audioLabel string) {
 	var parts []string
 
-	// ── Video / image overlays ──────────────────────────────────────────────
-	prevV := "[base_v]"
-	parts = append(parts, "[0:v]setpts=PTS-STARTPTS[base_v]")
-
-	scaleChain := fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2",
-		width, height, width, height)
-
-	for _, rc := range clips {
-		if !rc.isVideo && !rc.isImage {
+	// ── Visual chain: media overlays and text interleaved in layer order ────
+	// One ordered list so a text clip on a lower layer composites beneath
+	// media on a higher layer, matching the preview compositor. Mute only
+	// silences audio; hidden tracks drop their text and visuals.
+	type visualItem struct {
+		media      *resolvedClip // nil for text items
+		clip       TimelineClip
+		trackIndex int
+	}
+	var items []visualItem
+	for i := range clips {
+		if clips[i].isVideo || clips[i].isImage {
+			items = append(items, visualItem{media: &clips[i], clip: clips[i].clip, trackIndex: clips[i].trackIndex})
+		}
+	}
+	for trackIndex, track := range doc.Tracks {
+		if !track.Visible {
 			continue
 		}
+		for _, clip := range track.Clips {
+			hasText := clip.Text != nil && strings.TrimSpace(clip.Text.Text) != ""
+			if !hasText && clip.Shape == nil {
+				continue
+			}
+			items = append(items, visualItem{clip: clip, trackIndex: trackIndex})
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].trackIndex != items[j].trackIndex {
+			return items[i].trackIndex < items[j].trackIndex
+		}
+		zi, zj := clipZIndex(items[i].clip), clipZIndex(items[j].clip)
+		if zi != zj {
+			return zi < zj
+		}
+		return items[i].clip.StartMS < items[j].clip.StartMS
+	})
+
+	prevV := "[base_v]"
+	parts = append(parts, "[0:v]setpts=PTS-STARTPTS[base_v]")
+	textIdx := 0
+
+	for _, item := range items {
+		if item.media == nil {
+			// A callout can carry both a shape and a label: the box composites
+			// beneath its own text.
+			if item.clip.Shape != nil && item.clip.Shape.Kind == ShapeKindBlur {
+				if blurParts, outLabel := blurRegionParts(prevV, item.clip, *item.clip.Shape, width, height, textIdx); len(blurParts) > 0 {
+					parts = append(parts, blurParts...)
+					prevV = outLabel
+					textIdx++
+				}
+			} else if item.clip.Shape != nil {
+				if filter := drawBoxFilter(item.clip, *item.clip.Shape, width, height); filter != "" {
+					outLabel := fmt.Sprintf("[t%d_v]", textIdx)
+					parts = append(parts, prevV+filter+outLabel)
+					prevV = outLabel
+					textIdx++
+				}
+			}
+			if item.clip.Text != nil && strings.TrimSpace(item.clip.Text.Text) != "" {
+				if filter := drawTextFilter(item.clip, *item.clip.Text, width, height); filter != "" {
+					outLabel := fmt.Sprintf("[t%d_v]", textIdx)
+					parts = append(parts, prevV+filter+outLabel)
+					prevV = outLabel
+					textIdx++
+				}
+			}
+			continue
+		}
+		rc := *item.media
 		cLabel := fmt.Sprintf("[c%d_v]", rc.inputIdx)
 		ovLabel := fmt.Sprintf("[ov%d_v]", rc.inputIdx)
 		startS := float64(rc.clip.StartMS) / 1000.0
 		endS := float64(rc.clip.StartMS+rc.clip.DurationMS) / 1000.0
 		trimInS := float64(rc.clip.TrimInMS) / 1000.0
 		durS := float64(rc.clip.DurationMS) / 1000.0
+		tr := parseClipTransform(rc.clip.Transform)
 
-		var srcFilter string
+		var chain []string
 		if rc.isImage {
-			srcFilter = fmt.Sprintf("[%d:v]loop=loop=-1:size=1:start=0,trim=duration=%.3f,setpts=PTS-STARTPTS,%s%s",
-				rc.inputIdx, durS, scaleChain, cLabel)
+			chain = append(chain, "loop=loop=-1:size=1:start=0", fmt.Sprintf("trim=duration=%.3f", durS), "setpts=PTS-STARTPTS")
 		} else {
-			srcFilter = fmt.Sprintf("[%d:v]trim=start=%.3f:duration=%.3f,setpts=PTS-STARTPTS,%s%s",
-				rc.inputIdx, trimInS, durS, scaleChain, cLabel)
+			chain = append(chain, fmt.Sprintf("trim=start=%.3f:duration=%.3f", trimInS, durS), "setpts=PTS-STARTPTS")
 		}
-		overlayFilter := fmt.Sprintf("%s%soverlay=enable='between(t\\,%.3f\\,%.3f)':x=0:y=0%s",
-			prevV, cLabel, startS, endS, ovLabel)
+		if tr.hasCrop {
+			chain = append(chain, fmt.Sprintf("crop=iw*%.4f:ih*%.4f:iw*%.4f:ih*%.4f",
+				1-tr.cropLeft-tr.cropRight, 1-tr.cropTop-tr.cropBottom, tr.cropLeft, tr.cropTop))
+		}
+		scaledW := maxInt(2, int(float64(width)*tr.scale+0.5))
+		scaledH := maxInt(2, int(float64(height)*tr.scale+0.5))
+		chain = append(chain, fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease", scaledW, scaledH))
+		chain = append(chain, effectFilters(rc.clip.Effects)...)
+		chain = append(chain, "format=rgba")
+		if expr := positionKeyframeExpr(rc.clip.Keyframes, "rotation", 0); expr != "" {
+			// rotate evaluates the angle per frame; after setpts the stream's
+			// t is clip-relative, matching keyframe times. A fixed diagonal
+			// bounding box keeps the output size constant while rotating.
+			chain = append(chain, fmt.Sprintf("rotate=a='(%s)*PI/180':c=black@0:ow='hypot(iw\\,ih)':oh=ow", expr))
+		} else if tr.rotation != 0 {
+			// Rotate after format=rgba so the expanded corners stay transparent.
+			rad := tr.rotation * math.Pi / 180.0
+			chain = append(chain, fmt.Sprintf("rotate=%.6f:c=black@0:ow=rotw(%.6f):oh=roth(%.6f)", rad, rad, rad))
+		}
+		if tr.opacity < 1 {
+			chain = append(chain, fmt.Sprintf("colorchannelmixer=aa=%.3f", tr.opacity))
+		}
+		fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
+		if fadeInS > 0 {
+			chain = append(chain, fmt.Sprintf("fade=t=in:st=0:d=%.3f:alpha=1", fadeInS))
+		}
+		if fadeOutS > 0 {
+			chain = append(chain, fmt.Sprintf("fade=t=out:st=%.3f:d=%.3f:alpha=1", durS-fadeOutS, fadeOutS))
+		}
+
+		srcFilter := fmt.Sprintf("[%d:v]%s%s", rc.inputIdx, strings.Join(chain, ","), cLabel)
+		xExpr := fmt.Sprintf("(W-w)/2%+.0f", tr.x)
+		if expr := positionKeyframeExpr(rc.clip.Keyframes, "x", startS); expr != "" {
+			xExpr = "(W-w)/2+" + expr
+		}
+		yExpr := fmt.Sprintf("(H-h)/2%+.0f", tr.y)
+		if expr := positionKeyframeExpr(rc.clip.Keyframes, "y", startS); expr != "" {
+			yExpr = "(H-h)/2+" + expr
+		}
+		if slideX, slideY := slideTransitionExpr(rc.clip, startS, endS); slideX != "" || slideY != "" {
+			if slideX != "" {
+				xExpr = fmt.Sprintf("(%s)+(%s)", xExpr, slideX)
+			}
+			if slideY != "" {
+				yExpr = fmt.Sprintf("(%s)+(%s)", yExpr, slideY)
+			}
+		}
+		overlayFilter := fmt.Sprintf("%s%soverlay=enable='between(t\\,%.3f\\,%.3f)':x='%s':y='%s'%s",
+			prevV, cLabel, startS, endS, xExpr, yExpr, ovLabel)
 
 		parts = append(parts, srcFilter, overlayFilter)
 		prevV = ovLabel
 	}
 
-	// ── Text / caption / callout overlays ──────────────────────────────────
-	textIdx := 0
-	for _, track := range doc.Tracks {
-		if !track.Visible || track.Muted {
-			continue
-		}
-		if track.Type != TrackTypeText && track.Type != TrackTypeCaption && track.Type != TrackTypeCallout {
-			continue
-		}
-		for _, clip := range track.Clips {
-			if clip.Text == nil || strings.TrimSpace(clip.Text.Text) == "" {
-				continue
-			}
-			filter := drawTextFilter(clip, *clip.Text, width, height)
-			if filter == "" {
-				continue
-			}
-			outLabel := fmt.Sprintf("[t%d_v]", textIdx)
-			parts = append(parts, prevV+filter+outLabel)
-			prevV = outLabel
-			textIdx++
-		}
-	}
 	videoLabel = prevV
 
 	// ── Audio clips ─────────────────────────────────────────────────────────
+	// hasAudio covers audio assets and video assets with an audio stream;
+	// muted tracks/clips were already dropped in resolveMediaClips.
 	var aLabels []string
 	for _, rc := range clips {
-		if !rc.isAudio {
+		if !rc.hasAudio {
 			continue
 		}
 		aLabel := fmt.Sprintf("[a%d]", rc.inputIdx)
 		trimInS := float64(rc.clip.TrimInMS) / 1000.0
 		durS := float64(rc.clip.DurationMS) / 1000.0
 		startMS := rc.clip.StartMS
-		parts = append(parts, fmt.Sprintf("[%d:a]atrim=start=%.3f:duration=%.3f,asetpts=PTS-STARTPTS,adelay=%d|%d%s",
-			rc.inputIdx, trimInS, durS, startMS, startMS, aLabel))
+		chain := []string{
+			fmt.Sprintf("atrim=start=%.3f:duration=%.3f", trimInS, durS),
+			"asetpts=PTS-STARTPTS",
+		}
+		// Volume keyframes override the static volume (matching the preview).
+		// asetpts rebased the stream to 0, so keyframe time is `t` directly.
+		if expr := positionKeyframeExpr(rc.clip.Keyframes, "volume", 0); expr != "" {
+			chain = append(chain, fmt.Sprintf("volume=volume='%s':eval=frame", expr))
+		} else if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
+			chain = append(chain, fmt.Sprintf("volume=%.3f", clampFloat(*rc.clip.Volume, 0, 2)))
+		}
+		fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
+		if fadeInS > 0 {
+			chain = append(chain, fmt.Sprintf("afade=t=in:st=0:d=%.3f", fadeInS))
+		}
+		if fadeOutS > 0 {
+			chain = append(chain, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f", durS-fadeOutS, fadeOutS))
+		}
+		chain = append(chain, fmt.Sprintf("adelay=%d|%d", startMS, startMS))
+		parts = append(parts, fmt.Sprintf("[%d:a]%s%s", rc.inputIdx, strings.Join(chain, ","), aLabel))
 		aLabels = append(aLabels, aLabel)
 	}
 	if len(aLabels) > 1 {
@@ -418,10 +608,15 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 func ffmpegVideoFilters(doc TimelineDocument, width, height int) string {
 	var filters []string
 	for _, track := range doc.Tracks {
-		if !track.Visible || track.Muted || (track.Type != TrackTypeText && track.Type != TrackTypeCaption && track.Type != TrackTypeCallout) {
+		if !track.Visible {
 			continue
 		}
 		for _, clip := range track.Clips {
+			if clip.Shape != nil {
+				if filter := drawBoxFilter(clip, *clip.Shape, width, height); filter != "" {
+					filters = append(filters, filter)
+				}
+			}
 			if clip.Text == nil || strings.TrimSpace(clip.Text.Text) == "" {
 				continue
 			}
@@ -434,10 +629,97 @@ func ffmpegVideoFilters(doc TimelineDocument, width, height int) string {
 	return strings.Join(filters, ",")
 }
 
+// blurRegionParts blurs the composited frame beneath a blur-region shape:
+// the chain so far splits, the region crops out and blurs, and the blurred
+// patch overlays back at the same position during the clip's window. Returns
+// the graph parts and the chain's new output label.
+func blurRegionParts(prev string, clip TimelineClip, shape TimelineShape, width, height, idx int) ([]string, string) {
+	tr := parseClipTransform(clip.Transform)
+	boxW := shape.Width
+	boxH := shape.Height
+	if boxW <= 0 || boxH <= 0 {
+		return nil, ""
+	}
+	if tr.scale != 1 {
+		boxW = maxInt(2, int(float64(boxW)*tr.scale+0.5))
+		boxH = maxInt(2, int(float64(boxH)*tr.scale+0.5))
+	}
+	// crop requires the region fully inside the frame.
+	if boxW > width {
+		boxW = width
+	}
+	if boxH > height {
+		boxH = height
+	}
+	x := (width-boxW)/2 + int(tr.x)
+	y := (height-boxH)/2 + int(tr.y)
+	x = maxInt(0, minInt(x, width-boxW))
+	y = maxInt(0, minInt(y, height-boxH))
+	radius := int(shape.BlurRadius + 0.5)
+	if radius <= 0 {
+		radius = 12
+	}
+	startS := float64(clip.StartMS) / 1000.0
+	endS := float64(clip.StartMS+clip.DurationMS) / 1000.0
+	srcLabel := fmt.Sprintf("[bbs%d]", idx)
+	baseLabel := fmt.Sprintf("[bbb%d]", idx)
+	blurLabel := fmt.Sprintf("[bbl%d]", idx)
+	outLabel := fmt.Sprintf("[t%d_v]", idx)
+	return []string{
+		prev + "split" + srcLabel + baseLabel,
+		fmt.Sprintf("%scrop=%d:%d:%d:%d,boxblur=%d%s", srcLabel, boxW, boxH, x, y, radius, blurLabel),
+		fmt.Sprintf("%s%soverlay=%d:%d:enable='between(t\\,%.3f\\,%.3f)'%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),
+	}, outLabel
+}
+
+// drawBoxFilter renders a rectangle or highlight shape via FFmpeg drawbox.
+// Position derives from the clip transform (offsets from canvas center) and
+// scale multiplies the shape dimensions, matching the preview. The static
+// transform opacity folds into the box color's alpha.
+func drawBoxFilter(clip TimelineClip, shape TimelineShape, width, height int) string {
+	tr := parseClipTransform(clip.Transform)
+	boxW := shape.Width
+	boxH := shape.Height
+	if boxW <= 0 || boxH <= 0 {
+		return ""
+	}
+	if tr.scale != 1 {
+		boxW = maxInt(2, int(float64(boxW)*tr.scale+0.5))
+		boxH = maxInt(2, int(float64(boxH)*tr.scale+0.5))
+	}
+	x := (width-boxW)/2 + int(tr.x)
+	y := (height-boxH)/2 + int(tr.y)
+	startS := float64(clip.StartMS) / 1000.0
+	endS := float64(clip.StartMS+clip.DurationMS) / 1000.0
+	opacity := clampFloat(tr.opacity, 0, 1)
+	if opacity <= 0 {
+		return ""
+	}
+	enable := fmt.Sprintf("enable='between(t\\,%.3f\\,%.3f)'", startS, endS)
+	switch shape.Kind {
+	case ShapeKindHighlight:
+		color := ffmpegColor(shape.Fill, "0xFACC15")
+		return fmt.Sprintf("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@%.3f:t=fill:%s", x, y, boxW, boxH, color, opacity, enable)
+	case ShapeKindRectangle:
+		color := ffmpegColor(shape.Stroke, "0xF59E0B")
+		thickness := int(shape.StrokeWidth + 0.5)
+		if thickness <= 0 {
+			thickness = 4
+		}
+		return fmt.Sprintf("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@%.3f:t=%d:%s", x, y, boxW, boxH, color, opacity, thickness, enable)
+	default:
+		return ""
+	}
+}
+
 func drawTextFilter(clip TimelineClip, text TimelineText, width, height int) string {
 	fontSize := text.FontSize
 	if fontSize <= 0 {
 		fontSize = maxInt(24, height/18)
+	}
+	// The preview scales text layers by transform.scale; match it at export.
+	if scale, ok := numericTransform(clip.Transform, "scale"); ok && scale > 0 && scale != 1 {
+		fontSize = int(float64(fontSize)*clampFloat(scale, 0.05, 4) + 0.5)
 	}
 	if fontSize < 8 {
 		fontSize = 8
@@ -464,6 +746,20 @@ func drawTextFilter(clip TimelineClip, text TimelineText, width, height int) str
 		"y=" + y,
 		fmt.Sprintf("enable='between(t\\,%.3f\\,%.3f)'", start, end),
 	}
+	if alpha := drawTextAlphaExpr(clip, start, end); alpha != "" {
+		parts = append(parts, "alpha='"+alpha+"'")
+	}
+	if family := strings.TrimSpace(text.FontFamily); family != "" {
+		// Fontconfig resolves the closest installed match, so an unknown
+		// family degrades to a fallback font instead of failing the render.
+		parts = append(parts, "font='"+escapeDrawText(family)+"'")
+	}
+	if text.LineHeight > 0 && text.LineHeight != 1 {
+		spacing := int(clampFloat((text.LineHeight-1)*float64(fontSize), float64(-fontSize), float64(3*fontSize)))
+		if spacing != 0 {
+			parts = append(parts, fmt.Sprintf("line_spacing=%d", spacing))
+		}
+	}
 	if text.Background != "" {
 		parts = append(parts, "box=1", "boxcolor="+ffmpegColor(text.Background, "black")+"@0.55", "boxborderw=18")
 	}
@@ -471,9 +767,266 @@ func drawTextFilter(clip TimelineClip, text TimelineText, width, height int) str
 		parts = append(parts, "shadowcolor=black@0.65", "shadowx=2", "shadowy=2")
 	}
 	if text.Stroke != "" {
-		parts = append(parts, "borderw=2", "bordercolor="+ffmpegColor(text.Stroke, "black"))
+		borderWidth := 2.0
+		if text.StrokeWidth > 0 {
+			borderWidth = clampFloat(text.StrokeWidth, 1, 20)
+		}
+		parts = append(parts, fmt.Sprintf("borderw=%.0f", borderWidth), "bordercolor="+ffmpegColor(text.Stroke, "black"))
 	}
 	return strings.Join(parts, ":")
+}
+
+// drawTextAlphaExpr builds a drawtext alpha expression applying the clip's
+// static opacity and fade in/out (matching the preview), or "" when the text
+// is fully opaque with no fades. Commas are escaped for the filter graph.
+func drawTextAlphaExpr(clip TimelineClip, startS, endS float64) string {
+	opacity := 1.0
+	if v, ok := numericTransform(clip.Transform, "opacity"); ok {
+		opacity = clampFloat(v, 0, 1)
+	}
+	fadeInS, fadeOutS := clipFadeSeconds(clip)
+	if opacity >= 1 && fadeInS <= 0 && fadeOutS <= 0 {
+		return ""
+	}
+	var fade string
+	switch {
+	case fadeInS > 0 && fadeOutS > 0:
+		fade = fmt.Sprintf("clip(min((t-%.3f)/%.3f,(%.3f-t)/%.3f),0,1)", startS, fadeInS, endS, fadeOutS)
+	case fadeInS > 0:
+		fade = fmt.Sprintf("clip((t-%.3f)/%.3f,0,1)", startS, fadeInS)
+	case fadeOutS > 0:
+		fade = fmt.Sprintf("clip((%.3f-t)/%.3f,0,1)", endS, fadeOutS)
+	}
+	expr := fmt.Sprintf("%.3f", opacity)
+	if fade != "" {
+		if opacity < 1 {
+			expr = fmt.Sprintf("%.3f*%s", opacity, fade)
+		} else {
+			expr = fade
+		}
+	}
+	return strings.ReplaceAll(expr, ",", "\\,")
+}
+
+// clipRenderTransform is the subset of clip transform values the renderer honors.
+type clipRenderTransform struct {
+	x, y                                     float64
+	scale                                    float64
+	rotation                                 float64
+	opacity                                  float64
+	cropTop, cropRight, cropBottom, cropLeft float64
+	hasCrop                                  bool
+}
+
+// parseClipTransform extracts renderable transform values with safe defaults.
+// Crop values are fractions of the source frame (0–0.95 per edge).
+func parseClipTransform(transform map[string]any) clipRenderTransform {
+	tr := clipRenderTransform{scale: 1, opacity: 1}
+	if transform == nil {
+		return tr
+	}
+	if v, ok := numericTransform(transform, "x"); ok {
+		tr.x = v
+	}
+	if v, ok := numericTransform(transform, "y"); ok {
+		tr.y = v
+	}
+	if v, ok := numericTransform(transform, "rotation"); ok {
+		tr.rotation = math.Mod(v, 360)
+	}
+	if v, ok := numericTransform(transform, "scale"); ok && v > 0 {
+		tr.scale = clampFloat(v, 0.05, 4)
+	}
+	if v, ok := numericTransform(transform, "opacity"); ok {
+		tr.opacity = clampFloat(v, 0, 1)
+	}
+	if crop, ok := transform["crop"].(map[string]any); ok {
+		tr.cropTop = clampFloat(numericOrZero(crop, "top"), 0, 0.95)
+		tr.cropRight = clampFloat(numericOrZero(crop, "right"), 0, 0.95)
+		tr.cropBottom = clampFloat(numericOrZero(crop, "bottom"), 0, 0.95)
+		tr.cropLeft = clampFloat(numericOrZero(crop, "left"), 0, 0.95)
+		if tr.cropTop+tr.cropBottom < 0.95 && tr.cropLeft+tr.cropRight < 0.95 &&
+			(tr.cropTop > 0 || tr.cropRight > 0 || tr.cropBottom > 0 || tr.cropLeft > 0) {
+			tr.hasCrop = true
+		}
+	}
+	return tr
+}
+
+func numericOrZero(values map[string]any, key string) float64 {
+	v, _ := numericTransform(values, key)
+	return v
+}
+
+func clampFloat(value, min, max float64) float64 {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+// slideTransitionExpr builds overlay x/y offset expressions for a clip's
+// first slide transition: the clip enters from `direction` over the
+// transition duration and exits toward the opposite edge (continuing the
+// motion), mirroring how fade-family transitions apply to both clip edges.
+// Returns ("", "") when the clip has no slide transition.
+func slideTransitionExpr(clip TimelineClip, startS, endS float64) (xOff, yOff string) {
+	for _, transition := range clip.Transitions {
+		if !strings.EqualFold(strings.TrimSpace(transition.Type), TransitionTypeSlide) || transition.DurationMS <= 0 {
+			continue
+		}
+		d := math.Min(float64(transition.DurationMS)/1000.0, (endS-startS)/2)
+		if d <= 0 {
+			return "", ""
+		}
+		// 0→1 over the first/last d seconds of the clip.
+		inProg := fmt.Sprintf("min(max((t-%.3f)/%.3f\\,0)\\,1)", startS, d)
+		outProg := fmt.Sprintf("min(max((t-%.3f)/%.3f\\,0)\\,1)", endS-d, d)
+		switch strings.ToLower(strings.TrimSpace(transition.Direction)) {
+		case "right":
+			xOff = fmt.Sprintf("W*(1-%s)-W*%s", inProg, outProg)
+		case "up":
+			yOff = fmt.Sprintf("-H*(1-%s)+H*%s", inProg, outProg)
+		case "down":
+			yOff = fmt.Sprintf("H*(1-%s)-H*%s", inProg, outProg)
+		default: // left
+			xOff = fmt.Sprintf("-W*(1-%s)+W*%s", inProg, outProg)
+		}
+		return xOff, yOff
+	}
+	return "", ""
+}
+
+// clipFadeSeconds combines explicit fade_in/fade_out with fade-style
+// transitions (fade, crossfade, dip_to_black), each capped at half the clip
+// duration. Slide renders as animated overlay position; wipe/zoom are not
+// rendered.
+func clipFadeSeconds(clip TimelineClip) (fadeIn, fadeOut float64) {
+	fadeInMS := clip.FadeInMS
+	fadeOutMS := clip.FadeOutMS
+	for _, transition := range clip.Transitions {
+		switch strings.ToLower(strings.TrimSpace(transition.Type)) {
+		case "fade", "crossfade", "dip_to_black":
+			if transition.DurationMS > fadeInMS {
+				fadeInMS = transition.DurationMS
+			}
+			if transition.DurationMS > fadeOutMS {
+				fadeOutMS = transition.DurationMS
+			}
+		}
+	}
+	half := clip.DurationMS / 2
+	if fadeInMS > half {
+		fadeInMS = half
+	}
+	if fadeOutMS > half {
+		fadeOutMS = half
+	}
+	return float64(fadeInMS) / 1000.0, float64(fadeOutMS) / 1000.0
+}
+
+// effectFilters maps enabled clip effects onto FFmpeg filters. Unsupported
+// effect types are skipped (see FFmpegRendererCapabilities).
+func effectFilters(effects []TimelineEffect) []string {
+	var filters []string
+	for _, effect := range effects {
+		if !effect.Enabled {
+			continue
+		}
+		amount, hasAmount := numericTransform(effect.Params, "amount")
+		switch strings.ToLower(strings.TrimSpace(effect.Type)) {
+		case "brightness":
+			if !hasAmount {
+				amount = 1
+			}
+			filters = append(filters, fmt.Sprintf("eq=brightness=%.3f", clampFloat(amount-1, -1, 1)))
+		case "contrast":
+			if !hasAmount {
+				amount = 1
+			}
+			filters = append(filters, fmt.Sprintf("eq=contrast=%.3f", clampFloat(amount, 0, 3)))
+		case "saturation":
+			if !hasAmount {
+				amount = 1
+			}
+			filters = append(filters, fmt.Sprintf("eq=saturation=%.3f", clampFloat(amount, 0, 3)))
+		case "grayscale":
+			filters = append(filters, "hue=s=0")
+		case "blur":
+			if !hasAmount || amount <= 0 {
+				amount = 2
+			}
+			filters = append(filters, fmt.Sprintf("boxblur=%.0f", clampFloat(amount, 1, 30)))
+		case "sharpen":
+			if !hasAmount || amount <= 0 {
+				amount = 1
+			}
+			filters = append(filters, fmt.Sprintf("unsharp=5:5:%.2f", clampFloat(amount, 0, 3)))
+		case "vignette":
+			if !hasAmount {
+				amount = 0.4
+			}
+			if strength := clampFloat(amount, 0, 1); strength > 0 {
+				filters = append(filters, fmt.Sprintf("vignette=a=%.4f", strength*math.Pi/2))
+			}
+		case "chroma_key":
+			// Runs before format=rgba in the chain, so the keyed-out region
+			// stays transparent through the overlay composite.
+			color := "0x00FF00"
+			if v, ok := effect.Params["color"].(string); ok && strings.TrimSpace(v) != "" {
+				color = ffmpegColor(v, "0x00FF00")
+			}
+			similarity, ok := numericTransform(effect.Params, "similarity")
+			if !ok || similarity <= 0 {
+				similarity = 0.3
+			}
+			blend := numericOrZero(effect.Params, "blend")
+			filters = append(filters, fmt.Sprintf("chromakey=%s:%.3f:%.3f",
+				color, clampFloat(similarity, 0.01, 1), clampFloat(blend, 0, 0.5)))
+		}
+	}
+	return filters
+}
+
+// positionKeyframeExpr builds a piecewise-linear FFmpeg time expression for a
+// keyframed position property. Keyframe time_ms is clip-relative; clipStartS
+// converts segment boundaries to output-timeline seconds (overlay expressions
+// evaluate `t` in output time). The value holds flat before the first and
+// after the last keyframe. Easing curves are approximated linearly at export.
+// Returns "" when the property has no keyframes.
+func positionKeyframeExpr(keyframes []TimelineKeyframe, property string, clipStartS float64) string {
+	var points []TimelineKeyframe
+	for _, keyframe := range keyframes {
+		if strings.EqualFold(strings.TrimSpace(keyframe.Property), property) {
+			points = append(points, keyframe)
+		}
+	}
+	if len(points) == 0 {
+		return ""
+	}
+	sort.Slice(points, func(i, j int) bool { return points[i].TimeMS < points[j].TimeMS })
+	if len(points) == 1 {
+		return fmt.Sprintf("%.3f", points[0].Value)
+	}
+	expr := fmt.Sprintf("%.3f", points[len(points)-1].Value)
+	for i := len(points) - 1; i >= 1; i-- {
+		prev, next := points[i-1], points[i]
+		t0 := clipStartS + float64(prev.TimeMS)/1000.0
+		t1 := clipStartS + float64(next.TimeMS)/1000.0
+		span := t1 - t0
+		var segment string
+		if span <= 0 {
+			segment = fmt.Sprintf("%.3f", next.Value)
+		} else {
+			segment = fmt.Sprintf("(%.3f+(%.3f)*(t-%.3f)/%.3f)", prev.Value, next.Value-prev.Value, t0, span)
+		}
+		expr = fmt.Sprintf("if(lt(t,%.3f),%s,%s)", t1, segment, expr)
+	}
+	expr = fmt.Sprintf("if(lt(t,%.3f),%.3f,%s)", clipStartS+float64(points[0].TimeMS)/1000.0, points[0].Value, expr)
+	return strings.ReplaceAll(expr, ",", "\\,")
 }
 
 func numericTransform(transform map[string]any, key string) (float64, bool) {
@@ -555,9 +1108,6 @@ func escapeDrawText(value string) string {
 func countTextClips(doc TimelineDocument) int {
 	count := 0
 	for _, track := range doc.Tracks {
-		if track.Type != TrackTypeText && track.Type != TrackTypeCaption && track.Type != TrackTypeCallout {
-			continue
-		}
 		for _, clip := range track.Clips {
 			if clip.Text != nil && strings.TrimSpace(clip.Text.Text) != "" {
 				count++
@@ -569,6 +1119,13 @@ func countTextClips(doc TimelineDocument) int {
 
 func maxInt(a, b int) int {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func minInt(a, b int) int {
+	if a < b {
 		return a
 	}
 	return b
