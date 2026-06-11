@@ -1,3 +1,14 @@
+// Package video implements Video Studio (AI generation across provider
+// adapters) and Video Edit Studio (neutral timeline documents, FFmpeg
+// rendering, assistant edit planning).
+//
+// This file defines the timeline document schema and its invariants:
+// ValidateTimelineDocument normalizes and rejects documents before they are
+// saved or rendered, UpgradeTimelineDocument steps older schema versions
+// forward, and pure transforms (SliceTimelineRange, StripCaptionOverlays)
+// derive render-time variants without mutating the source document. The
+// frontend mirror of these structs lives in frontend/src/types/video.ts and
+// must stay field-for-field in sync (snake_case JSON).
 package video
 
 import (

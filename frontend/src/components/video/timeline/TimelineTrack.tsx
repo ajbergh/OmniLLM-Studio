@@ -1,3 +1,8 @@
+/**
+ * One timeline layer row: a sticky header (rename, mute/lock/visibility, solo
+ * badge, drag-to-resize height) plus the clip lane, which handles asset/clip
+ * drag-and-drop with snapping to clip edges, markers, and the playhead.
+ */
 import { useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Eye, EyeOff, Lock, Unlock, Volume2, VolumeX } from 'lucide-react';

@@ -1,3 +1,9 @@
+/**
+ * Video Edit Studio shell: header (editor modes, templates, text, record),
+ * project strip + media bin on the left, preview canvas over the timeline in
+ * the center, and a tabbed right rail (Properties / Assistant / Captions /
+ * Export) whose tabs follow the editor mode's feature gates.
+ */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DragHandle, useResizablePanels } from '../ResizablePanels';
 import { Check, ChevronLeft, ChevronRight, Circle, Download, Film, LayoutGrid, LayoutTemplate, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, Upload, X } from 'lucide-react';

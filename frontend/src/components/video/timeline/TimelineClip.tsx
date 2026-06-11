@@ -1,3 +1,11 @@
+/**
+ * A single timeline clip: kind icon + label, thumbnail/waveform backdrop,
+ * state badges (muted, audio-only, grouped, transitions), fade ramps with
+ * draggable fade handles, keyframe diamonds, transition regions, a volume
+ * envelope with drag-editable volume keyframes, and trim handles with their
+ * own context menu. All drags preview locally and commit one store action on
+ * pointer-up (one undo entry, one save).
+ */
 import { useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Film, Image as ImageIcon, Link2, Music2, Square, Type, VolumeX } from 'lucide-react';

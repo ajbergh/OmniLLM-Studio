@@ -1,3 +1,13 @@
+/**
+ * Capture modal for screen (getDisplayMedia), camera, and voiceover
+ * (getUserMedia) recordings via MediaRecorder: device pickers, optional mic
+ * mix-in for screen shares, countdown, level meter, pause/resume, and a
+ * review step that uploads the take to the media bin and optionally places it
+ * on the timeline at the playhead. Environments without capture APIs get an
+ * honest unsupported message — nothing is faked. Browser APIs expose no
+ * cursor coordinates, so cursor metadata (see the timeline schema) is not
+ * collected here yet.
+ */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, Circle, Mic, Monitor, Pause, Play, Square, X } from 'lucide-react';

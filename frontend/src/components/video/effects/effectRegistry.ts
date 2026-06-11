@@ -1,3 +1,8 @@
+/**
+ * Effect registry — the single source of truth for the effect browser,
+ * inspector rows, preview CSS filters, and export-support badges. Export
+ * support must track backend/internal/video/renderer.go.
+ */
 import type { VideoTimelineEffect } from '../../../types/video';
 
 export type EffectTypeKey = VideoTimelineEffect['type'];

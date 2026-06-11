@@ -1,3 +1,9 @@
+/**
+ * Frontend-derived diffs for assistant plan operations: resolves each
+ * operation's target against the live timeline and computes a before→after
+ * summary so users can judge a plan before applying it. Purely informational
+ * — validation and application stay backend-side.
+ */
 import type { VideoAsset, VideoEditOperation, VideoTimelineDocument } from '../../types/video';
 
 export interface OperationDiff {

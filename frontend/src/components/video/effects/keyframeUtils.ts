@@ -1,3 +1,8 @@
+/**
+ * Keyframe sampling shared by the preview canvas, timeline clip envelopes,
+ * and the keyframe lane. Easing curves apply in the preview only — the
+ * FFmpeg export interpolates linearly (see renderer capabilities).
+ */
 import type { VideoTimelineKeyframe } from '../../../types/video';
 
 export type KeyframeProperty = VideoTimelineKeyframe['property'];

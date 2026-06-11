@@ -136,11 +136,10 @@ export function validateExport(
     }
   }
 
-  // Track-solo never exports — surface it when active capability data agrees.
-  const soloFeature = capabilities?.features.find((feature) => feature.feature === 'track_solo');
-  if (soloFeature && !soloFeature.supported) {
-    // Informational only when the user actually relies on solo is unknowable
-    // here (solo is ephemeral), so leave it to the capability footer.
+  // Track solo is ephemeral preview state, so whether the user relies on it
+  // is unknowable here — the capability footer covers that warning instead.
+  if (!capabilities) {
+    warnings.push('Renderer capability data is unavailable — export-fidelity warnings may be incomplete');
   }
 
   return { errors, warnings };

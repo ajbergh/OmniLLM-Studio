@@ -1,3 +1,12 @@
+/**
+ * Transcript-style caption editor: searchable rows (click to seek) with
+ * inline text/timing edits, validation warnings, speaker chips, split/merge/
+ * duplicate/shift commands (buttons + row context menu), SRT/VTT import and
+ * export, and style presets — applying a preset also becomes the project
+ * default for new/imported captions. Captions are ordinary clips on caption
+ * tracks; AI caption generation stays an honest disabled button until a
+ * transcription provider exists.
+ */
 import { useRef, useState } from 'react';
 import { AlertTriangle, ChevronsLeft, ChevronsRight, Download, Loader2, Plus, Scissors, Search, Sparkles, Subtitles, Trash2, Upload } from 'lucide-react';
 import { useVideoStudioStore } from '../../stores/videoStudio';

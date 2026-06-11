@@ -1,3 +1,9 @@
+/**
+ * Caption utilities shared by the caption panel and the store: SRT/WebVTT
+ * parsing and serialization, plus the style presets (the backend mirrors the
+ * serialization in backend/internal/video/captions.go for render-time
+ * sidecar files — keep formats in sync).
+ */
 import type { VideoTimelineCanvas, VideoTimelineText } from '../../../types/video';
 
 export interface CaptionCue {

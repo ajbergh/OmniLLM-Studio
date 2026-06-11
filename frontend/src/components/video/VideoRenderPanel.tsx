@@ -1,3 +1,11 @@
+/**
+ * Export panel: format/preset/FPS/quality plus an advanced section (codec
+ * incl. H.265, audio bitrate, caption burn-in and SRT/VTT sidecar, export
+ * range). Render runs through the exportValidation checklist first — errors
+ * block, warnings can be acknowledged ("Render anyway"). Shows the full job
+ * history and a "timeline changed since last render" banner driven by the
+ * store's save/render sequence counters.
+ */
 import { useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Clapperboard, Loader2 } from 'lucide-react';
 import { useVideoStudioStore } from '../../stores/videoStudio';

@@ -1,3 +1,15 @@
+// FFmpeg-backed timeline renderer. Builds a single filter_complex graph that
+// composites media, text, and annotation clips in layer order (matching the
+// preview), mixes audio with per-clip volume/fade/keyframe envelopes, and
+// encodes via libx264/libx265/libvpx-vp9. Export settings can slice a
+// timeline range and strip caption burn-in before the graph is built.
+//
+// Every supported/partial/skipped feature here must be reflected in
+// renderer_capabilities.go — that matrix drives the editor's export-fidelity
+// warnings, so an unreported gap is a silent lie to the user. FFmpeg
+// arguments are constructed as discrete argv entries; never interpolate
+// untrusted strings into a shell command.
+
 package video
 
 import (

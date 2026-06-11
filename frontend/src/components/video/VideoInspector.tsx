@@ -1,3 +1,12 @@
+/**
+ * Right-rail inspector. Two sections selectable via the `section` prop (the
+ * studio's rail tabs render them separately): "assistant" — instruction box,
+ * recipe library, plan preview with per-operation checkboxes and before→after
+ * diffs, storyboard, and variant comparison cards; "properties" — timing,
+ * transform + numeric crop, audio/fades, text styling, annotation controls
+ * and presets, effect/transition browsers, motion presets, and keyframe rows.
+ * Editor-mode feature gates hide whole groups.
+ */
 import { ArrowDown, ArrowUp, Sparkles, Trash2, Type } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';

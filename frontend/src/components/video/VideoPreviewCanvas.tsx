@@ -1,3 +1,14 @@
+/**
+ * Preview canvas: composites every visible track at the playhead (track order
+ * + z-index) with transforms, fades, crop, effects, keyframes, and text, and
+ * doubles as the direct-manipulation surface — 8-handle resize (uniform scale
+ * for media/text, true width/height for shapes) with Shift/Alt/Ctrl
+ * modifiers, rotation, smart-guide snapping against the stage and other
+ * layers, double-click inline text editing, an 8-handle crop mode with
+ * explicit apply/cancel, and a cursor-metadata overlay. Drags preview via
+ * liveTransform and commit once on pointer-up; playback advances the store
+ * playhead via rAF and keeps mounted <video>/<audio> elements in sync.
+ */
 import { Check, Crop, Crosshair, Grid3x3, Maximize2, Minimize2, Pause, Play, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';

@@ -1373,6 +1373,9 @@ func (s *Service) resolveAttachmentAsset(userID, sourceID string, req ExternalAs
 	}, nil
 }
 
+// StartRender validates the export settings against the project, persists a
+// queued render job, and launches the render in a background goroutine that
+// outlives the HTTP request. The returned job is immediately pollable.
 func (s *Service) StartRender(ctx context.Context, userID, projectID string, settings ExportSettings) (*models.VideoRenderJob, error) {
 	project, err := s.ensureProjectOwned(userID, projectID)
 	if err != nil {
@@ -1450,6 +1453,12 @@ func (s *Service) CancelRenderJob(userID, jobID string) (*models.VideoRenderJob,
 	return s.renderJobs.GetByID(job.ID)
 }
 
+// runRenderJob executes one render job end-to-end: load the project/timeline/
+// settings, invoke the renderer (progress updates stream into the job row),
+// persist the output as an export asset, optionally write an SRT/VTT caption
+// sidecar asset, and mark the job completed. Failures keep FFmpeg diagnostics
+// in the job metadata; a cancelled job keeps its cancelled status rather than
+// being overwritten as failed.
 func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 	job, err := s.renderJobs.GetByID(jobID)
 	if err != nil || job == nil {
@@ -1717,6 +1726,10 @@ func (s *Service) ensureProjectOwned(userID, projectID string) (*models.VideoPro
 	return project, nil
 }
 
+// validateExportSettings normalizes and bounds-checks user-supplied export
+// settings (format/codec pairing, resolution, FPS, quality, caption sidecar
+// format, export range ordering, audio bitrate) before a job is persisted, so
+// invalid combinations fail the request instead of the render.
 func validateExportSettings(settings ExportSettings, project models.VideoProject) (ExportSettings, error) {
 	settings.Format = strings.ToLower(strings.TrimSpace(settings.Format))
 	if settings.Format == "" {

@@ -1,3 +1,9 @@
+/**
+ * One render-job card: status/progress/elapsed, expandable settings summary
+ * and job metadata, FFmpeg diagnostics for failures, and a context menu
+ * (download, retry with this job's stored settings, register output in the
+ * File Library, copy error/diagnostics/ID, cancel).
+ */
 import { useState } from 'react';
 import { Download, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';

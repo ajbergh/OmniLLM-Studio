@@ -1,3 +1,12 @@
+/**
+ * Timeline container: owns keyboard shortcuts (guarded against inputs and
+ * documented in the `?` help modal), every timeline context menu (clip, trim
+ * edge, transition region, layer header, lane, ruler), marquee selection,
+ * snap-point collection, the layer-first add menu, ripple-aware trim/delete
+ * routing, and the app-native dialogs that replaced window.confirm/prompt.
+ * Tracks render reversed so the last document track (foreground) is the top
+ * row, matching the preview/export stacking order.
+ */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Plus } from 'lucide-react';
