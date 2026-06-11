@@ -615,6 +615,26 @@ func (h *VideoHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 		Height:     height,
 		CreatedAt:  time.Now().UTC(),
 	}
+	// Best-effort metadata enrichment: real duration/dimensions/FPS make
+	// timeline placement accurate. Uploads succeed without ffprobe installed.
+	if kind == "video" || kind == "audio" {
+		if probe, err := video.ProbeMedia(r.Context(), storagePath); err == nil && probe != nil {
+			if probe.DurationMS > 0 {
+				asset.DurationMS = &probe.DurationMS
+			}
+			if kind == "video" {
+				if probe.Width > 0 {
+					asset.Width = &probe.Width
+				}
+				if probe.Height > 0 {
+					asset.Height = &probe.Height
+				}
+				if probe.FPS > 0 {
+					asset.FPS = &probe.FPS
+				}
+			}
+		}
+	}
 	if err := h.assetRepo.Create(asset); err != nil {
 		_ = os.Remove(storagePath)
 		respondInternalError(w, err)

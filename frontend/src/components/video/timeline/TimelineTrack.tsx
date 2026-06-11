@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Eye, EyeOff, Lock, Unlock, Volume2, VolumeX } from 'lucide-react';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineTrack as Track, VideoTimelineTrackType } from '../../../types/video';
 import { TimelineClip } from './TimelineClip';
@@ -74,8 +75,35 @@ export function TimelineTrack({
   const [draftName, setDraftName] = useState(track.name);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropGuideX, setDropGuideX] = useState<number | null>(null);
+  const [liveHeight, setLiveHeight] = useState<number | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
-  const trackHeight = track.height || DEFAULT_TRACK_HEIGHT;
+  const trackHeight = liveHeight ?? track.height ?? DEFAULT_TRACK_HEIGHT;
+
+  // Drag the strip at the bottom of the header to resize; commit once on release.
+  const beginHeightDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const pointerId = event.pointerId;
+    const startY = event.clientY;
+    const base = track.height || DEFAULT_TRACK_HEIGHT;
+    const onMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
+      setLiveHeight(Math.max(32, Math.min(160, Math.round(base + (moveEvent.clientY - startY)))));
+    };
+    const onUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== pointerId) return;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setLiveHeight((height) => {
+        if (height !== null && height !== (track.height || DEFAULT_TRACK_HEIGHT)) {
+          onSetTrackHeight(track.id, height);
+        }
+        return null;
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -97,7 +125,7 @@ export function TimelineTrack({
     <div className="grid grid-cols-[116px_minmax(0,1fr)] border-b border-border last:border-b-0" style={{ minHeight: trackHeight }}>
       <div
         ref={headerRef}
-        className="relative flex min-w-0 items-center gap-1 border-r border-border bg-surface-alt px-2"
+        className="sticky left-0 z-20 flex min-w-0 items-center gap-1 border-r border-border bg-surface-alt px-2"
         onContextMenu={(event) => {
           event.preventDefault();
           setMenuOpen(true);
@@ -155,6 +183,11 @@ export function TimelineTrack({
         >
           {track.visible ? <Eye size={12} /> : <EyeOff size={12} />}
         </button>
+        <div
+          className="absolute inset-x-0 bottom-0 h-1.5 cursor-ns-resize hover:bg-primary/30"
+          onPointerDown={beginHeightDrag}
+          title="Drag to resize track height"
+        />
         {menuOpen && (
           <div className="absolute left-1 top-full z-30 w-36 rounded-md border border-border bg-surface p-1 shadow-lg">
             {[

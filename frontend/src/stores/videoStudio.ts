@@ -1,6 +1,18 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { videoApi } from '../api';
+import { CAPTION_PRESETS, parseCaptions, serializeSrt, serializeVtt } from '../components/video/captions/captionUtils';
+import type { CaptionCue, CaptionPresetKey } from '../components/video/captions/captionUtils';
+import { TIMELINE_TEMPLATES } from '../components/video/templates/timelineTemplates';
+import type { EditorModeKey } from '../components/video/editorModes';
+
+const EDITOR_MODE_STORAGE_KEY = 'omnillm-video-editor-mode';
+
+function initialEditorMode(): EditorModeKey {
+  if (typeof window === 'undefined') return 'full';
+  const stored = window.localStorage.getItem(EDITOR_MODE_STORAGE_KEY);
+  return stored === 'simple_trim' || stored === 'captions_only' || stored === 'social_clip' ? stored : 'full';
+}
 import type {
   InputAsset,
   VideoAsset,
@@ -209,6 +221,33 @@ function defaultTransform(): VideoTimelineTransform {
   return { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
 }
 
+function ensureCaptionTrack(doc: VideoTimelineDocument): VideoTimelineTrack {
+  let track = doc.tracks.find((item) => item.type === 'caption');
+  if (!track) {
+    track = { id: newId('track'), type: 'caption', name: 'Captions 1', locked: false, muted: false, visible: true, clips: [] };
+    doc.tracks.push(track);
+  }
+  return track;
+}
+
+function captionClipFromCue(cue: CaptionCue, canvas: VideoTimelineDocument['canvas']): VideoTimelineClip {
+  const preset = CAPTION_PRESETS[0];
+  const position = preset.position(canvas);
+  const duration = Math.max(100, cue.end_ms - cue.start_ms);
+  return {
+    id: newId('clip'),
+    start_ms: Math.max(0, cue.start_ms),
+    duration_ms: duration,
+    trim_in_ms: 0,
+    trim_out_ms: duration,
+    transform: { ...defaultTransform(), x: position.x, y: position.y },
+    text: { text: cue.text, ...preset.text },
+    effects: [],
+    keyframes: [],
+    transitions: [],
+  };
+}
+
 function recomputeDuration(doc: VideoTimelineDocument): VideoTimelineDocument {
   let end = 0;
   for (const track of doc.tracks) {
@@ -253,6 +292,7 @@ interface VideoStudioState {
   isPlaying: boolean;
   snappingEnabled: boolean;
   toolMode: 'select' | 'blade';
+  editorMode: EditorModeKey;
   rendererCapabilities: VideoRendererCapabilities | null;
   renderJobs: VideoRenderJob[];
   activeRenderJobId: string | null;
@@ -276,6 +316,7 @@ interface VideoStudioState {
   loadModels: (provider: VideoProviderKey, refresh?: boolean) => Promise<void>;
   loadProjects: () => Promise<void>;
   createProject: (title?: string) => Promise<VideoProject | null>;
+  createProjectFromTemplate: (templateKey: string) => Promise<void>;
   selectProject: (projectId: string) => Promise<void>;
   setProvider: (provider: VideoProviderKey) => Promise<void>;
   setModel: (model: string) => void;
@@ -323,6 +364,7 @@ interface VideoStudioState {
   updateClipTransition: (clipId: string, transitionId: string, patch: Partial<Omit<VideoTimelineTransition, 'id'>>) => Promise<void>;
   removeClipTransition: (clipId: string, transitionId: string) => Promise<void>;
   updateClipEffect: (clipId: string, effectId: string, patch: Partial<Omit<VideoTimelineEffect, 'id'>>) => Promise<void>;
+  reorderClipEffect: (clipId: string, effectId: string, direction: -1 | 1) => Promise<void>;
   addKeyframe: (clipId: string, keyframe: Omit<VideoTimelineKeyframe, 'id'>) => Promise<void>;
   updateKeyframe: (clipId: string, keyframeId: string, patch: Partial<Omit<VideoTimelineKeyframe, 'id'>>) => Promise<void>;
   removeKeyframe: (clipId: string, keyframeId: string) => Promise<void>;
@@ -344,6 +386,12 @@ interface VideoStudioState {
   ungroupClips: (groupId?: string) => Promise<void>;
   alignSelection: (mode: 'start' | 'end' | 'distribute') => Promise<void>;
   setToolMode: (mode: 'select' | 'blade') => void;
+  setEditorMode: (mode: EditorModeKey) => void;
+  addCaptionSegment: (text?: string) => Promise<void>;
+  importCaptions: (raw: string) => Promise<void>;
+  exportCaptions: (format: 'srt' | 'vtt') => string | null;
+  mergeCaptionClipWithNext: (clipId: string) => Promise<void>;
+  applyCaptionPreset: (preset: CaptionPresetKey) => Promise<void>;
   undoTimeline: () => Promise<void>;
   redoTimeline: () => Promise<void>;
   setExportSetting: <K extends keyof VideoExportSettings>(key: K, value: VideoExportSettings[K]) => void;
@@ -383,6 +431,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   isPlaying: false,
   snappingEnabled: true,
   toolMode: 'select',
+  editorMode: initialEditorMode(),
   rendererCapabilities: null,
   renderJobs: [],
   activeRenderJobId: null,
@@ -485,6 +534,17 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       toast.error('Could not create video project');
       return null;
     }
+  },
+
+  createProjectFromTemplate: async (templateKey) => {
+    const template = TIMELINE_TEMPLATES.find((item) => item.key === templateKey);
+    if (!template) return;
+    const project = await get().createProject(`${template.label} project`);
+    if (!project) return;
+    const document = template.build();
+    set({ timeline: document, timelineUndoStack: [], timelineRedoStack: [], selectedClipId: null, selectedClipIds: [], selectedTrackId: null });
+    await get().saveTimeline(document);
+    toast.success(`Created project from "${template.label}" template`);
   },
 
   selectProject: async (projectId) => {
@@ -903,16 +963,30 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const next = cloneTimeline(current);
     const loc = findClip(next, clipId);
     if (!loc) return;
+    const newStart = Math.max(0, Math.round(startMs));
+    const delta = newStart - loc.clip.start_ms;
+    // When the dragged clip is part of the current selection (including a
+    // group selection), the rest of the selection shifts by the same delta on
+    // their own tracks.
+    const selected = get().selectedClipIds;
+    const companions = selected.includes(clipId) ? selected.filter((id) => id !== clipId) : [];
     const [clip] = loc.track.clips.splice(loc.clipIndex, 1);
-    clip.start_ms = Math.max(0, Math.round(startMs));
+    clip.start_ms = newStart;
     const target = next.tracks.find((track) => track.id === trackId) || loc.track;
     target.clips.push(clip);
-    target.clips.sort((a, b) => a.start_ms - b.start_ms);
+    for (const companionId of companions) {
+      const companion = findClip(next, companionId);
+      if (!companion || companion.track.locked) continue;
+      companion.clip.start_ms = Math.max(0, companion.clip.start_ms + delta);
+    }
+    for (const track of next.tracks) {
+      track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    }
     recomputeDuration(next);
     set((state) => ({
       timeline: next,
       selectedClipId: clip.id,
-      selectedClipIds: [clip.id],
+      selectedClipIds: companions.length > 0 ? selected : [clip.id],
       selectedTrackId: target.id,
       ...withTimelineHistory(state, current),
     }));
@@ -1085,6 +1159,131 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   },
 
   setToolMode: (mode) => set({ toolMode: mode }),
+
+  setEditorMode: (mode) => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(EDITOR_MODE_STORAGE_KEY, mode);
+    }
+    set({ editorMode: mode });
+  },
+
+  addCaptionSegment: async (text = 'New caption') => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const track = ensureCaptionTrack(next);
+    const start = Math.max(0, Math.round(get().playheadMs));
+    const clip = captionClipFromCue({ start_ms: start, end_ms: start + 2000, text }, next.canvas);
+    track.clips.push(clip);
+    track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: clip.id,
+      selectedClipIds: [clip.id],
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  importCaptions: async (raw) => {
+    const current = get().timeline;
+    if (!current) return;
+    const cues = parseCaptions(raw);
+    if (cues.length === 0) {
+      toast.error('No caption cues found in the file');
+      return;
+    }
+    const next = cloneTimeline(current);
+    const track = ensureCaptionTrack(next);
+    for (const cue of cues) {
+      track.clips.push(captionClipFromCue(cue, next.canvas));
+    }
+    track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+    toast.success(`Imported ${cues.length} caption${cues.length === 1 ? '' : 's'}`);
+  },
+
+  exportCaptions: (format) => {
+    const timeline = get().timeline;
+    if (!timeline) return null;
+    const cues: CaptionCue[] = timeline.tracks
+      .filter((track) => track.type === 'caption')
+      .flatMap((track) => track.clips)
+      .filter((clip) => clip.text?.text?.trim())
+      .map((clip) => ({
+        start_ms: clip.start_ms,
+        end_ms: clip.start_ms + clip.duration_ms,
+        text: clip.text?.text || '',
+      }))
+      .sort((a, b) => a.start_ms - b.start_ms);
+    if (cues.length === 0) {
+      toast.error('No caption clips to export');
+      return null;
+    }
+    return format === 'srt' ? serializeSrt(cues) : serializeVtt(cues);
+  },
+
+  mergeCaptionClipWithNext: async (clipId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    const following = loc.track.clips
+      .filter((clip) => clip.id !== clipId && clip.start_ms >= loc.clip.start_ms)
+      .sort((a, b) => a.start_ms - b.start_ms)[0];
+    if (!following) {
+      toast.error('No following caption to merge with');
+      return;
+    }
+    const end = Math.max(loc.clip.start_ms + loc.clip.duration_ms, following.start_ms + following.duration_ms);
+    loc.clip.duration_ms = end - loc.clip.start_ms;
+    loc.clip.trim_out_ms = loc.clip.trim_in_ms + loc.clip.duration_ms;
+    loc.clip.text = {
+      ...(loc.clip.text || { text: '' }),
+      text: [loc.clip.text?.text || '', following.text?.text || ''].filter(Boolean).join('\n'),
+    };
+    loc.track.clips = loc.track.clips.filter((clip) => clip.id !== following.id);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: loc.clip.id,
+      selectedClipIds: [loc.clip.id],
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  applyCaptionPreset: async (presetKey) => {
+    const current = get().timeline;
+    if (!current) return;
+    const preset = CAPTION_PRESETS.find((item) => item.key === presetKey);
+    if (!preset) return;
+    const hasCaptions = current.tracks.some((track) => track.type === 'caption' && track.clips.length > 0);
+    if (!hasCaptions) {
+      toast.error('No caption clips yet');
+      return;
+    }
+    const next = cloneTimeline(current);
+    const position = preset.position(next.canvas);
+    for (const track of next.tracks) {
+      if (track.type !== 'caption') continue;
+      for (const clip of track.clips) {
+        clip.text = { ...(clip.text || { text: '' }), ...preset.text };
+        clip.transform = { ...defaultTransform(), ...(clip.transform || {}), x: position.x, y: position.y };
+      }
+    }
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
 
   deleteClip: async (clipId) => {
     const current = get().timeline;
@@ -1477,6 +1676,24 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     loc.clip.effects = (loc.clip.effects || []).map((effect) =>
       effect.id === effectId ? { ...effect, ...patch, params: { ...effect.params, ...(patch.params || {}) } } : effect,
     );
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  reorderClipEffect: async (clipId, effectId, direction) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc) return;
+    const effects = loc.clip.effects || [];
+    const index = effects.findIndex((effect) => effect.id === effectId);
+    const targetIndex = index + direction;
+    if (index === -1 || targetIndex < 0 || targetIndex >= effects.length) return;
+    [effects[index], effects[targetIndex]] = [effects[targetIndex], effects[index]];
     set((state) => ({
       timeline: next,
       ...withTimelineHistory(state, current),

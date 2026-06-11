@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { useVideoStudioStore } from '../../../stores/videoStudio';
+import { editorModeFeatures } from '../editorModes';
 import type { VideoTimelineTrackType } from '../../../types/video';
 import { TimelinePlayhead } from './TimelinePlayhead';
 import { TimelineRuler } from './TimelineRuler';
@@ -9,6 +10,14 @@ import { TimelineTrack } from './TimelineTrack';
 
 const TRACK_HEADER_WIDTH = 116;
 const ADDABLE_TRACK_TYPES: VideoTimelineTrackType[] = ['video', 'image', 'audio', 'music', 'text', 'caption'];
+
+function formatTimecode(ms: number, fps: number): string {
+  const clamped = Math.max(0, ms);
+  const minutes = Math.floor(clamped / 60_000);
+  const seconds = Math.floor((clamped % 60_000) / 1000);
+  const frames = Math.floor(((clamped % 1000) / 1000) * Math.max(1, fps));
+  return `${minutes}:${String(seconds).padStart(2, '0')}.${String(frames).padStart(2, '0')}`;
+}
 
 export function VideoTimeline() {
   const timeline = useVideoStudioStore((state) => state.timeline);
@@ -49,6 +58,7 @@ export function VideoTimeline() {
   const nudgeSelection = useVideoStudioStore((state) => state.nudgeSelection);
   const toolMode = useVideoStudioStore((state) => state.toolMode);
   const setToolMode = useVideoStudioStore((state) => state.setToolMode);
+  const editorMode = useVideoStudioStore((state) => state.editorMode);
   const splitClipAt = useVideoStudioStore((state) => state.splitClipAt);
   const trimClipEdgeToPlayhead = useVideoStudioStore((state) => state.trimClipEdgeToPlayhead);
   const groupClips = useVideoStudioStore((state) => state.groupClips);
@@ -98,6 +108,33 @@ export function VideoTimeline() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [clipMenu]);
+
+  // Ctrl/Cmd + wheel zooms the timeline (native listener — React's synthetic
+  // wheel handler can't preventDefault on passive listeners).
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+      setZoom(useVideoStudioStore.getState().zoom * factor);
+    };
+    node.addEventListener('wheel', onWheel, { passive: false });
+    return () => node.removeEventListener('wheel', onWheel);
+  }, [setZoom]);
+
+  // Keep the playhead in view while playing.
+  useEffect(() => {
+    if (!isPlaying) return;
+    const node = scrollRef.current;
+    if (!node) return;
+    const playheadX = TRACK_HEADER_WIDTH + playheadMs * pxPerMs;
+    const viewRight = node.scrollLeft + node.clientWidth;
+    if (playheadX > viewRight - 80 || playheadX < node.scrollLeft + TRACK_HEADER_WIDTH) {
+      node.scrollLeft = Math.max(0, playheadX - TRACK_HEADER_WIDTH - 40);
+    }
+  }, [playheadMs, isPlaying, pxPerMs]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -193,12 +230,13 @@ export function VideoTimeline() {
         onToggleSnap={toggleSnapping}
         onSetToolMode={setToolMode}
         onHelp={() => setShowHelp(true)}
+        timecode={`${formatTimecode(playheadMs, timeline.canvas.fps)} / ${formatTimecode(timeline.duration_ms, timeline.canvas.fps)}`}
       />
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
         <div className="grid grid-cols-[116px_minmax(0,1fr)]">
-          <div ref={addTrackRef} className="relative flex h-8 items-center border-b border-r border-border bg-surface-alt px-1">
+          <div ref={addTrackRef} className="sticky left-0 z-20 flex h-8 items-center border-b border-r border-border bg-surface-alt px-1">
             <button
-              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text"
+              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text ${editorModeFeatures(editorMode).addTrack ? '' : 'invisible'}`}
               title="Add track"
               aria-label="Add track"
               onClick={() => setAddTrackOpen((open) => !open)}
@@ -206,7 +244,7 @@ export function VideoTimeline() {
               <Plus size={11} />
               Track
             </button>
-            {addTrackOpen && (
+            {addTrackOpen && editorModeFeatures(editorMode).addTrack && (
               <div className="absolute left-1 top-full z-30 w-32 rounded-md border border-border bg-surface p-1 shadow-lg">
                 {ADDABLE_TRACK_TYPES.map((type) => (
                   <button
@@ -235,7 +273,7 @@ export function VideoTimeline() {
           </div>
         </div>
         <div className="grid grid-cols-[116px_minmax(0,1fr)]">
-          <div className="border-r border-border bg-surface-alt" />
+          <div className="sticky left-0 z-20 border-r border-border bg-surface-alt" />
           <div className="relative">
             <TimelinePlayhead x={playheadMs * pxPerMs} />
           </div>

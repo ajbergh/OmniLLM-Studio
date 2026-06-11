@@ -18,8 +18,16 @@ type Migration struct {
 
 // Open initializes a SQLite database connection.
 func Open(path string) (*sql.DB, error) {
+	// modernc.org/sqlite only understands `_pragma=name(value)` query
+	// parameters — mattn-style `_journal_mode=WAL&_busy_timeout=...` params are
+	// silently ignored by this driver, which left the database running without
+	// WAL or a busy timeout until 2026-06-10.
+	//
+	// foreign_keys stays OFF deliberately: the schema declares FK constraints
+	// but they have never been enforced under this driver; enabling them needs
+	// a dedicated audit of delete paths and existing orphaned rows first.
 	dsn := fmt.Sprintf(
-		"%s?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on&_synchronous=NORMAL&_cache_size=-64000&_mmap_size=268435456&_temp_store=MEMORY&_journal_size_limit=67108864",
+		"%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-64000)&_pragma=mmap_size(268435456)&_pragma=temp_store(MEMORY)&_pragma=journal_size_limit(67108864)",
 		path,
 	)
 	db, err := sql.Open("sqlite", dsn)

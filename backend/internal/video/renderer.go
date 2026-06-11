@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -387,6 +388,11 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 		chain = append(chain, fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease", scaledW, scaledH))
 		chain = append(chain, effectFilters(rc.clip.Effects)...)
 		chain = append(chain, "format=rgba")
+		if tr.rotation != 0 {
+			// Rotate after format=rgba so the expanded corners stay transparent.
+			rad := tr.rotation * math.Pi / 180.0
+			chain = append(chain, fmt.Sprintf("rotate=%.6f:c=black@0:ow=rotw(%.6f):oh=roth(%.6f)", rad, rad, rad))
+		}
 		if tr.opacity < 1 {
 			chain = append(chain, fmt.Sprintf("colorchannelmixer=aa=%.3f", tr.opacity))
 		}
@@ -399,8 +405,16 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 		}
 
 		srcFilter := fmt.Sprintf("[%d:v]%s%s", rc.inputIdx, strings.Join(chain, ","), cLabel)
-		overlayFilter := fmt.Sprintf("%s%soverlay=enable='between(t\\,%.3f\\,%.3f)':x='(W-w)/2%+.0f':y='(H-h)/2%+.0f'%s",
-			prevV, cLabel, startS, endS, tr.x, tr.y, ovLabel)
+		xExpr := fmt.Sprintf("(W-w)/2%+.0f", tr.x)
+		if expr := positionKeyframeExpr(rc.clip.Keyframes, "x", startS); expr != "" {
+			xExpr = "(W-w)/2+" + expr
+		}
+		yExpr := fmt.Sprintf("(H-h)/2%+.0f", tr.y)
+		if expr := positionKeyframeExpr(rc.clip.Keyframes, "y", startS); expr != "" {
+			yExpr = "(H-h)/2+" + expr
+		}
+		overlayFilter := fmt.Sprintf("%s%soverlay=enable='between(t\\,%.3f\\,%.3f)':x='%s':y='%s'%s",
+			prevV, cLabel, startS, endS, xExpr, yExpr, ovLabel)
 
 		parts = append(parts, srcFilter, overlayFilter)
 		prevV = ovLabel
@@ -519,6 +533,17 @@ func drawTextFilter(clip TimelineClip, text TimelineText, width, height int) str
 		"y=" + y,
 		fmt.Sprintf("enable='between(t\\,%.3f\\,%.3f)'", start, end),
 	}
+	if family := strings.TrimSpace(text.FontFamily); family != "" {
+		// Fontconfig resolves the closest installed match, so an unknown
+		// family degrades to a fallback font instead of failing the render.
+		parts = append(parts, "font='"+escapeDrawText(family)+"'")
+	}
+	if text.LineHeight > 0 && text.LineHeight != 1 {
+		spacing := int(clampFloat((text.LineHeight-1)*float64(fontSize), float64(-fontSize), float64(3*fontSize)))
+		if spacing != 0 {
+			parts = append(parts, fmt.Sprintf("line_spacing=%d", spacing))
+		}
+	}
 	if text.Background != "" {
 		parts = append(parts, "box=1", "boxcolor="+ffmpegColor(text.Background, "black")+"@0.55", "boxborderw=18")
 	}
@@ -526,7 +551,11 @@ func drawTextFilter(clip TimelineClip, text TimelineText, width, height int) str
 		parts = append(parts, "shadowcolor=black@0.65", "shadowx=2", "shadowy=2")
 	}
 	if text.Stroke != "" {
-		parts = append(parts, "borderw=2", "bordercolor="+ffmpegColor(text.Stroke, "black"))
+		borderWidth := 2.0
+		if text.StrokeWidth > 0 {
+			borderWidth = clampFloat(text.StrokeWidth, 1, 20)
+		}
+		parts = append(parts, fmt.Sprintf("borderw=%.0f", borderWidth), "bordercolor="+ffmpegColor(text.Stroke, "black"))
 	}
 	return strings.Join(parts, ":")
 }
@@ -535,6 +564,7 @@ func drawTextFilter(clip TimelineClip, text TimelineText, width, height int) str
 type clipRenderTransform struct {
 	x, y                                     float64
 	scale                                    float64
+	rotation                                 float64
 	opacity                                  float64
 	cropTop, cropRight, cropBottom, cropLeft float64
 	hasCrop                                  bool
@@ -552,6 +582,9 @@ func parseClipTransform(transform map[string]any) clipRenderTransform {
 	}
 	if v, ok := numericTransform(transform, "y"); ok {
 		tr.y = v
+	}
+	if v, ok := numericTransform(transform, "rotation"); ok {
+		tr.rotation = math.Mod(v, 360)
 	}
 	if v, ok := numericTransform(transform, "scale"); ok && v > 0 {
 		tr.scale = clampFloat(v, 0.05, 4)
@@ -646,9 +679,59 @@ func effectFilters(effects []TimelineEffect) []string {
 				amount = 2
 			}
 			filters = append(filters, fmt.Sprintf("boxblur=%.0f", clampFloat(amount, 1, 30)))
+		case "sharpen":
+			if !hasAmount || amount <= 0 {
+				amount = 1
+			}
+			filters = append(filters, fmt.Sprintf("unsharp=5:5:%.2f", clampFloat(amount, 0, 3)))
+		case "vignette":
+			if !hasAmount {
+				amount = 0.4
+			}
+			if strength := clampFloat(amount, 0, 1); strength > 0 {
+				filters = append(filters, fmt.Sprintf("vignette=a=%.4f", strength*math.Pi/2))
+			}
 		}
 	}
 	return filters
+}
+
+// positionKeyframeExpr builds a piecewise-linear FFmpeg time expression for a
+// keyframed position property. Keyframe time_ms is clip-relative; clipStartS
+// converts segment boundaries to output-timeline seconds (overlay expressions
+// evaluate `t` in output time). The value holds flat before the first and
+// after the last keyframe. Easing curves are approximated linearly at export.
+// Returns "" when the property has no keyframes.
+func positionKeyframeExpr(keyframes []TimelineKeyframe, property string, clipStartS float64) string {
+	var points []TimelineKeyframe
+	for _, keyframe := range keyframes {
+		if strings.EqualFold(strings.TrimSpace(keyframe.Property), property) {
+			points = append(points, keyframe)
+		}
+	}
+	if len(points) == 0 {
+		return ""
+	}
+	sort.Slice(points, func(i, j int) bool { return points[i].TimeMS < points[j].TimeMS })
+	if len(points) == 1 {
+		return fmt.Sprintf("%.3f", points[0].Value)
+	}
+	expr := fmt.Sprintf("%.3f", points[len(points)-1].Value)
+	for i := len(points) - 1; i >= 1; i-- {
+		prev, next := points[i-1], points[i]
+		t0 := clipStartS + float64(prev.TimeMS)/1000.0
+		t1 := clipStartS + float64(next.TimeMS)/1000.0
+		span := t1 - t0
+		var segment string
+		if span <= 0 {
+			segment = fmt.Sprintf("%.3f", next.Value)
+		} else {
+			segment = fmt.Sprintf("(%.3f+(%.3f)*(t-%.3f)/%.3f)", prev.Value, next.Value-prev.Value, t0, span)
+		}
+		expr = fmt.Sprintf("if(lt(t,%.3f),%s,%s)", t1, segment, expr)
+	}
+	expr = fmt.Sprintf("if(lt(t,%.3f),%.3f,%s)", clipStartS+float64(points[0].TimeMS)/1000.0, points[0].Value, expr)
+	return strings.ReplaceAll(expr, ",", "\\,")
 }
 
 func numericTransform(transform map[string]any, key string) (float64, bool) {

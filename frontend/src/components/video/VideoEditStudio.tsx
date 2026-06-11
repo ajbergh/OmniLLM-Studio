@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DragHandle, useResizablePanels } from '../ResizablePanels';
-import { Check, Download, Film, LayoutGrid, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, Upload, X } from 'lucide-react';
+import { Check, Download, Film, LayoutGrid, LayoutTemplate, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { videoApi } from '../../api';
 import { useSettingsStore } from '../../stores';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import type { VideoAsset } from '../../types/video';
+import { VideoCaptionPanel } from './VideoCaptionPanel';
 import { VideoInspector } from './VideoInspector';
 import { VideoPreviewCanvas } from './VideoPreviewCanvas';
 import { VideoRenderPanel } from './VideoRenderPanel';
 import { VideoTimeline } from './timeline/VideoTimeline';
+import { TIMELINE_TEMPLATES } from './templates/timelineTemplates';
+import { EDITOR_MODES, editorModeFeatures } from './editorModes';
+import type { EditorModeKey } from './editorModes';
 
 export function VideoEditStudio() {
   const projects = useVideoStudioStore((state) => state.projects);
@@ -28,8 +32,23 @@ export function VideoEditStudio() {
   const renameAsset = useVideoStudioStore((state) => state.renameAsset);
   const deleteAsset = useVideoStudioStore((state) => state.deleteAsset);
   const uploadAsset = useVideoStudioStore((state) => state.uploadAsset);
+  const createProjectFromTemplate = useVideoStudioStore((state) => state.createProjectFromTemplate);
   const loadRendererCapabilities = useVideoStudioStore((state) => state.loadRendererCapabilities);
+  const editorMode = useVideoStudioStore((state) => state.editorMode);
+  const setEditorMode = useVideoStudioStore((state) => state.setEditorMode);
   const setAppMode = useSettingsStore((state) => state.setAppMode);
+  const modeFeatures = editorModeFeatures(editorMode);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const templatesRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!templatesOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!templatesRef.current?.contains(event.target as Node)) setTemplatesOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [templatesOpen]);
 
   useEffect(() => {
     loadProviders();
@@ -59,6 +78,17 @@ export function VideoEditStudio() {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={editorMode}
+            onChange={(event) => setEditorMode(event.target.value as EditorModeKey)}
+            className="min-h-9 rounded-lg border border-border bg-surface-alt px-2 text-xs text-text-secondary hover:text-text"
+            aria-label="Editor mode"
+            title={EDITOR_MODES.find((mode) => mode.key === editorMode)?.description}
+          >
+            {EDITOR_MODES.map((mode) => (
+              <option key={mode.key} value={mode.key}>{mode.label}</option>
+            ))}
+          </select>
           <button
             onClick={() => setAppMode('video')}
             className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text transition-colors inline-flex items-center gap-1.5"
@@ -73,6 +103,36 @@ export function VideoEditStudio() {
             <Plus size={13} />
             Project
           </button>
+          {modeFeatures.templates && (
+          <div ref={templatesRef} className="relative">
+            <button
+              onClick={() => setTemplatesOpen((open) => !open)}
+              className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text transition-colors inline-flex items-center gap-1.5"
+              title="Create a new project from a starter template"
+            >
+              <LayoutTemplate size={13} />
+              Templates
+            </button>
+            {templatesOpen && (
+              <div className="absolute right-0 top-full z-40 mt-1 w-64 rounded-md border border-border bg-surface p-1 shadow-xl">
+                {TIMELINE_TEMPLATES.map((template) => (
+                  <button
+                    key={template.key}
+                    className="block w-full rounded px-2 py-1.5 text-left hover:bg-surface-alt"
+                    onClick={() => {
+                      setTemplatesOpen(false);
+                      void createProjectFromTemplate(template.key);
+                    }}
+                  >
+                    <span className="block text-xs font-medium text-text">{template.label}</span>
+                    <span className="block text-[10px] text-text-muted">{template.description}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          )}
+          {modeFeatures.addTextClip && (
           <button
             onClick={() => { void addTextClip(); }}
             disabled={!timeline}
@@ -80,6 +140,7 @@ export function VideoEditStudio() {
           >
             Text
           </button>
+          )}
         </div>
       </div>
 
@@ -120,6 +181,11 @@ export function VideoEditStudio() {
 
         <aside className="min-h-0 overflow-y-auto border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
           <VideoInspector />
+          {modeFeatures.captionsPanel && (
+            <div className="px-3 pb-3">
+              <VideoCaptionPanel />
+            </div>
+          )}
           <div className="px-3 pb-3">
             <VideoRenderPanel />
           </div>
@@ -238,9 +304,12 @@ function AssetPanel({
 }) {
   const [view, setView] = useState<'list' | 'grid'>('list');
   const [filter, setFilter] = useState<AssetFilterKey>('all');
+  const [query, setQuery] = useState('');
+  const [sortKey, setSortKey] = useState<'newest' | 'name' | 'duration' | 'size'>('newest');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFiles = async (list: FileList | null) => {
@@ -256,7 +325,21 @@ function AssetPanel({
     }
   };
 
-  const filtered = assets.filter((asset) => assetMatchesFilter(asset, filter));
+  const filtered = assets
+    .filter((asset) => assetMatchesFilter(asset, filter))
+    .filter((asset) => !query.trim() || asset.file_name.toLowerCase().includes(query.trim().toLowerCase()))
+    .sort((a, b) => {
+      switch (sortKey) {
+        case 'name':
+          return a.file_name.localeCompare(b.file_name);
+        case 'duration':
+          return (b.duration_ms || 0) - (a.duration_ms || 0);
+        case 'size':
+          return b.size_bytes - a.size_bytes;
+        default:
+          return b.created_at.localeCompare(a.created_at);
+      }
+    });
 
   const commitRename = (assetId: string) => {
     if (editingName.trim()) onRename(assetId, editingName);
@@ -350,7 +433,23 @@ function AssetPanel({
   };
 
   return (
-    <section className="rounded-lg border border-border bg-surface-alt p-3">
+    <section
+      className={`rounded-lg border p-3 transition-colors ${dragOver ? 'border-primary/60 bg-primary/5' : 'border-border bg-surface-alt'}`}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('Files')) {
+          event.preventDefault();
+          setDragOver(true);
+        }
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(event) => {
+        if (event.dataTransfer.types.includes('Files')) {
+          event.preventDefault();
+          setDragOver(false);
+          void handleFiles(event.dataTransfer.files);
+        }
+      }}
+    >
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-text">Media Bin</h2>
         <div className="flex items-center gap-1">
@@ -381,6 +480,27 @@ function AssetPanel({
             {view === 'list' ? <LayoutGrid size={12} /> : <List size={12} />}
           </button>
         </div>
+      </div>
+      <div className="mb-2 flex items-center gap-1.5">
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search media..."
+          className="min-h-8 min-w-0 flex-1 rounded-md border border-border bg-surface px-2 text-xs text-text focus:border-primary/50 focus:outline-none"
+          aria-label="Search media bin"
+        />
+        <select
+          value={sortKey}
+          onChange={(event) => setSortKey(event.target.value as typeof sortKey)}
+          className="min-h-8 rounded-md border border-border bg-surface px-1.5 text-[11px] text-text-secondary"
+          aria-label="Sort media bin"
+          title="Sort media"
+        >
+          <option value="newest">Newest</option>
+          <option value="name">Name</option>
+          <option value="duration">Duration</option>
+          <option value="size">Size</option>
+        </select>
       </div>
       <div className="mb-3 flex flex-wrap gap-1">
         {ASSET_FILTERS.map((item) => (

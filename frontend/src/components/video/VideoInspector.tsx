@@ -1,7 +1,11 @@
-import { ArrowDown, ArrowUp, Plus, Sparkles, Trash2, Type } from 'lucide-react';
+import { ArrowDown, ArrowUp, Sparkles, Trash2, Type } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useVideoStudioStore } from '../../stores/videoStudio';
-import type { VideoTimelineClip } from '../../types/video';
+import { editorModeFeatures } from './editorModes';
+import { EFFECT_DEFINITIONS, defaultEffectParams, effectDefinition, numberParam } from './effects/effectRegistry';
+import { KEYFRAME_EASINGS, KEYFRAME_PROPERTIES } from './effects/keyframeUtils';
+import { TRANSITION_DEFINITIONS, transitionDefinition } from './effects/transitionRegistry';
+import type { VideoTimelineClip, VideoTimelineKeyframe } from '../../types/video';
 
 function selectedClip(): VideoTimelineClip | null {
   const { timeline, selectedClipId } = useVideoStudioStore.getState();
@@ -26,6 +30,7 @@ const QUICK_WORKFLOWS = [
 
 export function VideoInspector() {
   const timeline = useVideoStudioStore((state) => state.timeline);
+  const playheadMs = useVideoStudioStore((state) => state.playheadMs);
   const selectedClipId = useVideoStudioStore((state) => state.selectedClipId);
   const rendererCapabilities = useVideoStudioStore((state) => state.rendererCapabilities);
   const assistantInstruction = useVideoStudioStore((state) => state.assistantInstruction);
@@ -40,9 +45,13 @@ export function VideoInspector() {
   const addClipEffect = useVideoStudioStore((state) => state.addClipEffect);
   const toggleClipEffect = useVideoStudioStore((state) => state.toggleClipEffect);
   const removeClipEffect = useVideoStudioStore((state) => state.removeClipEffect);
+  const updateClipEffect = useVideoStudioStore((state) => state.updateClipEffect);
+  const reorderClipEffect = useVideoStudioStore((state) => state.reorderClipEffect);
   const addClipTransition = useVideoStudioStore((state) => state.addClipTransition);
+  const updateClipTransition = useVideoStudioStore((state) => state.updateClipTransition);
   const removeClipTransition = useVideoStudioStore((state) => state.removeClipTransition);
   const addKeyframe = useVideoStudioStore((state) => state.addKeyframe);
+  const updateKeyframe = useVideoStudioStore((state) => state.updateKeyframe);
   const removeKeyframe = useVideoStudioStore((state) => state.removeKeyframe);
   const bringClipForward = useVideoStudioStore((state) => state.bringClipForward);
   const sendClipBackward = useVideoStudioStore((state) => state.sendClipBackward);
@@ -53,10 +62,13 @@ export function VideoInspector() {
   const requestTimelinePlan = useVideoStudioStore((state) => state.requestTimelinePlan);
   const applyAssistantPlan = useVideoStudioStore((state) => state.applyAssistantPlan);
   const requestSocialVariants = useVideoStudioStore((state) => state.requestSocialVariants);
+  const editorMode = useVideoStudioStore((state) => state.editorMode);
+  const modeFeatures = editorModeFeatures(editorMode);
   const clip = selectedClip();
 
   return (
     <div className="min-h-0 overflow-y-auto p-3">
+      {modeFeatures.assistant && (
       <section className="rounded-lg border border-border bg-surface p-3">
         <div className="mb-3 flex items-center gap-2">
           <Sparkles size={14} className="text-primary" />
@@ -140,6 +152,7 @@ export function VideoInspector() {
           </div>
         )}
       </section>
+      )}
 
       <section className="mt-3 rounded-lg border border-border bg-surface p-3">
         <div className="mb-3 flex items-center justify-between">
@@ -157,6 +170,10 @@ export function VideoInspector() {
           !timeline ? (
             <div className="rounded-lg border border-dashed border-border bg-surface-alt p-4 text-center text-xs text-text-muted">
               No timeline loaded.
+            </div>
+          ) : !modeFeatures.canvasControls ? (
+            <div className="rounded-lg border border-dashed border-border bg-surface-alt p-4 text-center text-xs text-text-muted">
+              Select a clip to edit.
             </div>
           ) : (
             <div className="space-y-3">
@@ -246,6 +263,7 @@ export function VideoInspector() {
             <Field label="Start">
               <span className="text-xs text-text-secondary">{Math.round(clip.start_ms / 100) / 10}s</span>
             </Field>
+            {modeFeatures.transformControls && (
             <Field label={`Layer order: ${clip.z_index ?? 0}`}>
               <div className="flex gap-2">
                 <button
@@ -264,7 +282,8 @@ export function VideoInspector() {
                 </button>
               </div>
             </Field>
-            {clip.transform && (
+            )}
+            {modeFeatures.transformControls && clip.transform && (
               <>
                 <Slider label="Scale" min={0.25} max={3} step={0.05} value={clip.transform.scale} onChange={(value) => { void updateClipTransform(selectedClipId as string, { scale: value }); }} />
                 <Slider label="Opacity" min={0} max={1} step={0.05} value={clip.transform.opacity} onChange={(value) => { void updateClipTransform(selectedClipId as string, { opacity: value }); }} />
@@ -285,29 +304,69 @@ export function VideoInspector() {
                 />
               </Field>
             )}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                className="inline-flex min-h-8 items-center justify-center gap-1 rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary hover:text-text"
-                onClick={() => { void addClipEffect(selectedClipId as string, { type: 'brightness', enabled: true, params: { amount: 1.1 } }); }}
+            {modeFeatures.effectControls && (
+            <div className="grid grid-cols-1 gap-2">
+              <select
+                value=""
+                onChange={(event) => {
+                  const definition = effectDefinition(event.target.value);
+                  if (!definition) return;
+                  void addClipEffect(selectedClipId as string, { type: definition.type, enabled: true, params: defaultEffectParams(definition) });
+                }}
+                className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary"
+                aria-label="Add effect"
               >
-                <Plus size={12} />
-                Effect
-              </button>
-              <button
-                className="inline-flex min-h-8 items-center justify-center gap-1 rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary hover:text-text"
-                onClick={() => { void addClipTransition(selectedClipId as string, { type: 'fade', duration_ms: 500 }); }}
+                <option value="">+ Add effect…</option>
+                {EFFECT_DEFINITIONS.map((definition) => (
+                  <option key={definition.type} value={definition.type}>
+                    {definition.label}{definition.exportSupported ? '' : ' (preview only)'}
+                  </option>
+                ))}
+              </select>
+              <select
+                value=""
+                onChange={(event) => {
+                  const definition = transitionDefinition(event.target.value);
+                  if (!definition) return;
+                  void addClipTransition(selectedClipId as string, {
+                    type: definition.type,
+                    duration_ms: definition.defaultDurationMs,
+                    ...(definition.supportsDirection ? { direction: 'left' as const } : {}),
+                  });
+                }}
+                className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary"
+                aria-label="Add transition"
               >
-                <Plus size={12} />
-                Transition
-              </button>
-              <button
-                className="col-span-2 inline-flex min-h-8 items-center justify-center gap-1 rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary hover:text-text"
-                onClick={() => { void addKeyframe(selectedClipId as string, { property: 'opacity', time_ms: Math.max(0, clip.start_ms), value: clip.transform?.opacity ?? 1, easing: 'ease-in-out' }); }}
+                <option value="">+ Add transition…</option>
+                {TRANSITION_DEFINITIONS.map((definition) => (
+                  <option key={definition.type} value={definition.type}>
+                    {definition.label}{definition.exportSupported ? '' : ' (preview only)'}
+                  </option>
+                ))}
+              </select>
+              <select
+                value=""
+                onChange={(event) => {
+                  const property = event.target.value as VideoTimelineKeyframe['property'];
+                  if (!KEYFRAME_PROPERTIES.includes(property)) return;
+                  const currentValue =
+                    property === 'volume'
+                      ? clip.volume ?? 1
+                      : clip.transform?.[property] ?? (property === 'scale' || property === 'opacity' ? 1 : 0);
+                  // Keyframe times are clip-relative (measured from clip start).
+                  const timeMs = Math.max(0, Math.min(clip.duration_ms, Math.round(playheadMs - clip.start_ms)));
+                  void addKeyframe(selectedClipId as string, { property, time_ms: timeMs, value: currentValue, easing: 'ease-in-out' });
+                }}
+                className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary"
+                aria-label="Add keyframe at playhead"
               >
-                <Plus size={12} />
-                Keyframe
-              </button>
+                <option value="">+ Add keyframe at playhead…</option>
+                {KEYFRAME_PROPERTIES.map((property) => (
+                  <option key={property} value={property}>{property}</option>
+                ))}
+              </select>
             </div>
+            )}
             {(() => {
               const limited = (rendererCapabilities?.features || []).filter((f) => !f.supported || f.partial);
               if (rendererCapabilities && limited.length === 0) return null;
@@ -323,55 +382,201 @@ export function VideoInspector() {
                 </p>
               );
             })()}
+            {modeFeatures.effectControls && (
             <div className="space-y-1">
-              {clip.effects.map((effect) => (
-                <div key={effect.id} className="flex items-center gap-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] text-text-muted">
-                  <button
-                    className="min-w-0 flex-1 truncate text-left hover:text-text"
-                    title={effect.enabled ? 'Disable effect' : 'Enable effect'}
-                    onClick={() => { void toggleClipEffect(selectedClipId as string, effect.id); }}
-                  >
-                    {effect.type} · {effect.enabled ? 'on' : 'off'}
-                  </button>
-                  <button
-                    className="rounded p-0.5 hover:text-text"
-                    title="Remove effect"
-                    aria-label={`Remove ${effect.type} effect`}
-                    onClick={() => { void removeClipEffect(selectedClipId as string, effect.id); }}
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-              ))}
-              {(clip.transitions || []).map((transition) => (
-                <div key={transition.id} className="flex items-center gap-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] text-text-muted">
-                  <span className="min-w-0 flex-1 truncate">{transition.type} · {transition.duration_ms}ms</span>
-                  <button
-                    className="rounded p-0.5 hover:text-text"
-                    title="Remove transition"
-                    aria-label={`Remove ${transition.type} transition`}
-                    onClick={() => { void removeClipTransition(selectedClipId as string, transition.id); }}
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-              ))}
+              {clip.effects.map((effect, effectIndex) => {
+                const definition = effectDefinition(effect.type);
+                return (
+                  <div key={effect.id} className="rounded-md border border-border bg-surface-alt px-2 py-1.5 text-[11px] text-text-muted">
+                    <div className="flex items-center gap-1">
+                      <button
+                        className="min-w-0 flex-1 truncate text-left hover:text-text"
+                        title={effect.enabled ? 'Disable effect' : 'Enable effect'}
+                        onClick={() => { void toggleClipEffect(selectedClipId as string, effect.id); }}
+                      >
+                        {definition?.label || effect.type} · {effect.enabled ? 'on' : 'off'}
+                      </button>
+                      {definition && !definition.exportSupported && (
+                        <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-400/90" title="Not applied by the FFmpeg renderer at export yet">
+                          preview only
+                        </span>
+                      )}
+                      <button
+                        className="rounded p-0.5 hover:text-text disabled:cursor-not-allowed disabled:opacity-30"
+                        disabled={effectIndex === 0}
+                        title="Apply earlier"
+                        aria-label={`Move ${effect.type} effect up`}
+                        onClick={() => { void reorderClipEffect(selectedClipId as string, effect.id, -1); }}
+                      >
+                        <ArrowUp size={11} />
+                      </button>
+                      <button
+                        className="rounded p-0.5 hover:text-text disabled:cursor-not-allowed disabled:opacity-30"
+                        disabled={effectIndex >= clip.effects.length - 1}
+                        title="Apply later"
+                        aria-label={`Move ${effect.type} effect down`}
+                        onClick={() => { void reorderClipEffect(selectedClipId as string, effect.id, 1); }}
+                      >
+                        <ArrowDown size={11} />
+                      </button>
+                      <button
+                        className="rounded p-0.5 hover:text-text"
+                        title="Remove effect"
+                        aria-label={`Remove ${effect.type} effect`}
+                        onClick={() => { void removeClipEffect(selectedClipId as string, effect.id); }}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                    {definition?.params.map((param) => {
+                      const value = numberParam(effect.params, param.key, param.defaultValue);
+                      return (
+                        <label key={param.key} className="mt-1 block">
+                          <span className="block text-[10px]">{param.label}: {Math.round(value * 100) / 100}</span>
+                          <input
+                            type="range"
+                            min={param.min}
+                            max={param.max}
+                            step={param.step}
+                            value={value}
+                            onChange={(event) => {
+                              void updateClipEffect(selectedClipId as string, effect.id, { params: { [param.key]: Number(event.target.value) } });
+                            }}
+                            className="w-full"
+                            aria-label={`${definition.label} ${param.label}`}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+              {(clip.transitions || []).map((transition) => {
+                const definition = transitionDefinition(transition.type);
+                return (
+                  <div key={transition.id} className="rounded-md border border-border bg-surface-alt px-2 py-1.5 text-[11px] text-text-muted">
+                    <div className="flex items-center gap-1">
+                      <span className="min-w-0 flex-1 truncate">{definition?.label || transition.type}</span>
+                      {definition && !definition.exportSupported && (
+                        <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-400/90" title="Not applied by the FFmpeg renderer at export yet">
+                          preview only
+                        </span>
+                      )}
+                      {definition?.exportNote && definition.exportSupported && (
+                        <span className="rounded bg-surface px-1 py-0.5 text-[9px]" title={definition.exportNote}>≈ export</span>
+                      )}
+                      <button
+                        className="rounded p-0.5 hover:text-text"
+                        title="Remove transition"
+                        aria-label={`Remove ${transition.type} transition`}
+                        onClick={() => { void removeClipTransition(selectedClipId as string, transition.id); }}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <label className="flex items-center gap-1">
+                        <span className="text-[10px]">Duration</span>
+                        <input
+                          type="number"
+                          min={100}
+                          step={100}
+                          key={`${transition.id}-${transition.duration_ms}`}
+                          defaultValue={transition.duration_ms}
+                          onBlur={(event) => {
+                            const duration = Math.max(100, Math.round(Number(event.target.value)));
+                            if (Number.isFinite(duration) && duration !== transition.duration_ms) {
+                              void updateClipTransition(selectedClipId as string, transition.id, { duration_ms: duration });
+                            }
+                          }}
+                          onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                          className="w-16 rounded border border-border bg-surface px-1 py-0.5 text-[10px]"
+                          aria-label={`${transition.type} duration ms`}
+                        />
+                        <span className="text-[10px]">ms</span>
+                      </label>
+                      {definition?.supportsDirection && (
+                        <select
+                          value={transition.direction || 'left'}
+                          onChange={(event) => {
+                            void updateClipTransition(selectedClipId as string, transition.id, { direction: event.target.value as 'left' | 'right' | 'up' | 'down' });
+                          }}
+                          className="rounded border border-border bg-surface px-1 py-0.5 text-[10px]"
+                          aria-label={`${transition.type} direction`}
+                        >
+                          {(['left', 'right', 'up', 'down'] as const).map((direction) => (
+                            <option key={direction} value={direction}>{direction}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
               {clip.keyframes.map((keyframe) => (
-                <div key={keyframe.id} className="flex items-center gap-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] text-text-muted">
-                  <span className="min-w-0 flex-1 truncate">
-                    {keyframe.property} @ {Math.round(keyframe.time_ms / 100) / 10}s = {Math.round(keyframe.value * 100) / 100}
-                  </span>
-                  <button
-                    className="rounded p-0.5 hover:text-text"
-                    title="Remove keyframe"
-                    aria-label={`Remove ${keyframe.property} keyframe`}
-                    onClick={() => { void removeKeyframe(selectedClipId as string, keyframe.id); }}
-                  >
-                    <Trash2 size={11} />
-                  </button>
+                <div key={keyframe.id} className="rounded-md border border-border bg-surface-alt px-2 py-1.5 text-[11px] text-text-muted">
+                  <div className="flex items-center gap-1">
+                    <span className="min-w-0 flex-1 truncate">{keyframe.property} keyframe</span>
+                    <button
+                      className="rounded p-0.5 hover:text-text"
+                      title="Remove keyframe"
+                      aria-label={`Remove ${keyframe.property} keyframe`}
+                      onClick={() => { void removeKeyframe(selectedClipId as string, keyframe.id); }}
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                  <div className="mt-1 flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      key={`t-${keyframe.id}-${keyframe.time_ms}`}
+                      defaultValue={Math.round(keyframe.time_ms / 100) / 10}
+                      onBlur={(event) => {
+                        const timeMs = Math.max(0, Math.round(Number(event.target.value) * 1000));
+                        if (Number.isFinite(timeMs) && timeMs !== keyframe.time_ms) {
+                          void updateKeyframe(selectedClipId as string, keyframe.id, { time_ms: timeMs });
+                        }
+                      }}
+                      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                      className="w-14 rounded border border-border bg-surface px-1 py-0.5 text-[10px]"
+                      aria-label={`${keyframe.property} keyframe time seconds (from clip start)`}
+                      title="Time in seconds from clip start"
+                    />
+                    <span className="text-[10px]">s =</span>
+                    <input
+                      type="number"
+                      step={0.05}
+                      key={`v-${keyframe.id}-${keyframe.value}`}
+                      defaultValue={keyframe.value}
+                      onBlur={(event) => {
+                        const value = Number(event.target.value);
+                        if (Number.isFinite(value) && value !== keyframe.value) {
+                          void updateKeyframe(selectedClipId as string, keyframe.id, { value });
+                        }
+                      }}
+                      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                      className="w-16 rounded border border-border bg-surface px-1 py-0.5 text-[10px]"
+                      aria-label={`${keyframe.property} keyframe value`}
+                    />
+                    <select
+                      value={keyframe.easing || 'linear'}
+                      onChange={(event) => {
+                        void updateKeyframe(selectedClipId as string, keyframe.id, { easing: event.target.value as VideoTimelineKeyframe['easing'] });
+                      }}
+                      className="flex-1 rounded border border-border bg-surface px-1 py-0.5 text-[10px]"
+                      aria-label={`${keyframe.property} keyframe easing`}
+                    >
+                      {KEYFRAME_EASINGS.map((easing) => (
+                        <option key={easing} value={easing}>{easing}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               ))}
             </div>
+            )}
           </div>
         )}
       </section>

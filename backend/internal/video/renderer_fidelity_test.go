@@ -161,6 +161,50 @@ func TestValidateExportSettingsCustomResolution(t *testing.T) {
 	}
 }
 
+func TestBuildFilterComplexRotationNewEffectsAndPositionKeyframes(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	clips := []resolvedClip{{
+		inputIdx: 1,
+		isVideo:  true,
+		clip: TimelineClip{
+			ID:         "clip-video",
+			AssetID:    "asset-video",
+			StartMS:    2000,
+			DurationMS: 4000,
+			Transform: map[string]any{
+				"rotation": float64(90),
+			},
+			Effects: []TimelineEffect{
+				{ID: "fx-sharpen", Type: "sharpen", Enabled: true, Params: map[string]any{"amount": 1.5}},
+				{ID: "fx-vignette", Type: "vignette", Enabled: true, Params: map[string]any{"amount": 0.5}},
+			},
+			// Keyframe times are clip-relative; the clip starts at 2s, so the
+			// segment boundaries land at 2s and 4s on the output timeline.
+			Keyframes: []TimelineKeyframe{
+				{ID: "kf-1", Property: "x", TimeMS: 0, Value: 0},
+				{ID: "kf-2", Property: "x", TimeMS: 2000, Value: 300},
+			},
+		},
+	}}
+
+	filterStr, _, _ := buildFilterComplex(doc, clips, 1920, 1080)
+
+	for _, expect := range []string{
+		"rotate=1.570796:c=black@0:ow=rotw(1.570796):oh=roth(1.570796)",
+		"unsharp=5:5:1.50",
+		"vignette=a=0.7854",
+		"x='(W-w)/2+if(lt(t\\,2.000)\\,0.000\\,if(lt(t\\,4.000)\\,(0.000+(300.000)*(t-2.000)/2.000)\\,300.000))'",
+	} {
+		if !strings.Contains(filterStr, expect) {
+			t.Errorf("filter_complex missing %q\nfull: %s", expect, filterStr)
+		}
+	}
+	// y has no keyframes — the static offset form must remain.
+	if !strings.Contains(filterStr, "y='(H-h)/2+0'") {
+		t.Errorf("expected static y placement, got: %s", filterStr)
+	}
+}
+
 func TestFFmpegRendererCapabilitiesMatrix(t *testing.T) {
 	caps := FFmpegRendererCapabilities()
 	byFeature := map[string]RendererFeatureSupport{}
@@ -173,8 +217,11 @@ func TestFFmpegRendererCapabilitiesMatrix(t *testing.T) {
 	if !byFeature[RendererFeaturePositioning].Supported {
 		t.Errorf("positioning should be reported as supported")
 	}
-	if byFeature[RendererFeatureKeyframes].Supported {
-		t.Errorf("keyframes should be reported as unsupported")
+	if !byFeature[RendererFeatureKeyframes].Supported || !byFeature[RendererFeatureKeyframes].Partial {
+		t.Errorf("keyframes should be reported as partially supported (position only)")
+	}
+	if !byFeature[RendererFeatureRotation].Supported {
+		t.Errorf("rotation should be reported as supported")
 	}
 	if !byFeature[RendererFeatureTransitions].Partial {
 		t.Errorf("transitions should be reported as partial")

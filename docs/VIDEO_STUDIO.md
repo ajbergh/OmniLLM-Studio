@@ -58,8 +58,12 @@ The upload button is available for Start frame, Last frame, Source video to exte
 ## Video Edit Studio Capabilities
 
 - Neutral OmniLLM timeline JSON with video, image, audio, music, text, caption, shape, and callout track types.
-- Asset placement, clip move, trim, split, delete, duplicate, fades, volume, transforms, effects, transitions, text clips, and keyframes.
-- Preview canvas shows real `<video>` elements for video assets, `<img>` for image assets, and a compact card for text or unsupported asset types.
+- Multi-track timeline: clip move (group-aware), trim, split (playhead or blade tool), duplicate, delete, multi-select, grouping, align/distribute, markers, snapping with drop guides, undo/redo, zoom (buttons, `+`/`-`, Ctrl+wheel), sticky track headers, drag-to-resize track height, track add/remove/rename/reorder, clip context menu, and a `?` shortcut overlay.
+- Preview canvas composites **all visible tracks** at the playhead (track order + z-index) with transforms, opacity, fades, crop, CSS-filter effects, keyframe animation, and styled text; on-canvas drag/scale/rotate/crop editing with snap-to-center and safe-area/grid guides.
+- Inspector with registry-driven effect/transition/keyframe editors (param sliders, reorder, per-type export-support chips) and a project Canvas section (presets, dimensions, FPS, background) when nothing is selected.
+- Captions panel: segment editor (retime/split/merge/delete), SRT/WebVTT import/export, and style presets — captions are ordinary clips on caption tracks.
+- Media bin: search, sort, type filters, grid/list views, thumbnails, rename/delete, button or drag-and-drop local upload (video/audio uploads are ffprobe-enriched with duration/dimensions/FPS when ffprobe is installed), and drag-to-timeline.
+- Starter templates (16:9/9:16/1:1, title + lower third, captioned talking head, slideshow) that create real timeline JSON via the header Templates menu.
 - FFmpeg-backed render/export jobs that composite real video and image media alongside text/caption/callout clips into durable MP4/WebM export assets.
 - **AI-backed assistant** — storyboard and edit-plan endpoints call the LLM (using the first enabled chat provider) when configured; deterministic fallbacks are used when no LLM is available. Social-variant, timeline-plan, apply-plan, and validate-plan endpoints remain rule-based.
 - Crossover translation support for image, music, chat, and video domains.
@@ -82,7 +86,7 @@ Both providers include a built-in model snapshot so the UI shows expected capabi
 
 ## Rendering
 
-Video Edit Studio exports through persisted backend render jobs. The default renderer uses FFmpeg to composite real video and image media, text/caption/callout clips, and canvas settings into durable MP4/WebM export assets. Effects, transitions, fades, opacity keyframes, and audio mixing are stored in the timeline JSON but are not yet applied during FFmpeg export — the inspector shows an inline warning for this.
+Video Edit Studio exports through persisted backend render jobs. The default renderer uses FFmpeg to composite real video and image media, text/caption/callout clips, and canvas settings into durable MP4/WebM export assets — including transforms (position/scale/rotation/crop), opacity, fades, fade-style transitions, most effects, position keyframes, audio mixing, and text styling. Remaining gaps (e.g. scale/opacity keyframes, slide/wipe/zoom transitions) are reported by `GET /v1/video/render/capabilities`, which drives the inspector's export-fidelity warnings.
 
 See [VIDEO_RENDERING.md](VIDEO_RENDERING.md) for the full renderer reference.
 
@@ -90,7 +94,7 @@ See [VIDEO_RENDERING.md](VIDEO_RENDERING.md) for the full renderer reference.
 
 `POST /v1/video/projects/{projectId}/assets/import` accepts File Library, Music Studio, Image Studio, and attachment-backed source IDs. The service resolves the original stored file, checks project/source ownership where the source model supports it, copies the bytes into `<attachments_dir>/video/...`, and stores a `VideoAsset` with `source_studio` and `source_id` metadata.
 
-`POST /v1/video/projects/{projectId}/assets/upload` accepts a raw `multipart/form-data` file upload (max 50 MB, field name `file`). The backend auto-detects the MIME type from the header or file extension, derives `kind` (`image`, `video`, `audio`, `file`), saves the file under a UUID filename in video storage, and creates a `VideoAsset` record with `source_type = "upload"`. This endpoint powers the inline `+` upload button present in every asset picker in the creation panel.
+`POST /v1/video/projects/{projectId}/assets/upload` accepts a raw `multipart/form-data` file upload (field name `file`; per-kind limits: image 25 MB, audio 100 MB, video 500 MB). The backend sniffs the MIME type from the file content (rejecting kind mismatches), derives `kind` (`image`, `video`, `audio`), saves the file under a UUID filename in video storage, enriches video/audio assets with duration/dimensions/FPS via `ffprobe` when available, and creates a `VideoAsset` record with `source_type = "upload"`. This endpoint powers the creation-panel asset pickers' `+` buttons and the Edit Studio media bin's upload button and drag-and-drop.
 
 ## Cross-Studio Exports
 

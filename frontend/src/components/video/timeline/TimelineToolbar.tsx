@@ -21,6 +21,7 @@ export function TimelineToolbar({
   onToggleSnap,
   onSetToolMode,
   onHelp,
+  timecode,
 }: {
   isPlaying: boolean;
   snappingEnabled: boolean;
@@ -41,12 +42,18 @@ export function TimelineToolbar({
   onToggleSnap: () => void;
   onSetToolMode: (mode: 'select' | 'blade') => void;
   onHelp: () => void;
+  timecode?: string;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-border bg-surface-alt px-2 py-1.5">
       <IconButton label={isPlaying ? 'Pause' : 'Play'} onClick={onPlayPause}>
         {isPlaying ? <Pause size={14} /> : <Play size={14} />}
       </IconButton>
+      {timecode && (
+        <span className="mx-1 font-mono text-[11px] tabular-nums text-text-secondary" title="Playhead / total (min:sec.frames)">
+          {timecode}
+        </span>
+      )}
       <IconButton label="Undo" onClick={onUndo} disabled={!canUndo}>
         <Undo2 size={14} />
       </IconButton>

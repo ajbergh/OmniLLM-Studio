@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { videoApi } from '../../api';
 import { useVideoStudioStore } from '../../stores/videoStudio';
+import { composePreviewFilter } from './effects/effectRegistry';
+import { sampleKeyframes } from './effects/keyframeUtils';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineTrack } from '../../types/video';
 
 function formatTime(ms: number): string {
@@ -72,7 +74,9 @@ export function VideoPreviewCanvas() {
   const rafRef = useRef<number | null>(null);
   const timelineDurationRef = useRef<number>(0);
   const videoRefs = useRef(new Map<string, HTMLVideoElement>());
+  const audioRefs = useRef(new Map<string, HTMLAudioElement>());
   const layersRef = useRef<LayerEntry[]>([]);
+  const audioLayersRef = useRef<Array<{ clip: VideoTimelineClip; asset: VideoAsset }>>([]);
   const fitRef = useRef<HTMLDivElement | null>(null);
   const [stageSize, setStageSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [showGrid, setShowGrid] = useState(false);
@@ -96,7 +100,18 @@ export function VideoPreviewCanvas() {
     .map((entry) => ({ ...entry, asset: entry.clip.asset_id ? assets.find((item) => item.id === entry.clip.asset_id) : undefined }))
     .sort((a, b) => (a.trackIndex - b.trackIndex) || ((a.clip.z_index ?? 0) - (b.clip.z_index ?? 0)));
 
+  // Audio/music clips active at the playhead mount hidden <audio> elements so
+  // the preview is audible. Muted tracks contribute no audio (matching export).
+  const audioLayers = (timeline?.tracks || [])
+    .filter((track) => (track.type === 'audio' || track.type === 'music') && !track.muted)
+    .flatMap((track) => track.clips)
+    .filter((clip) => playheadMs >= clip.start_ms && playheadMs < clip.start_ms + clip.duration_ms)
+    .map((clip) => ({ clip, asset: clip.asset_id ? assets.find((item) => item.id === clip.asset_id) : undefined }))
+    .filter((entry): entry is { clip: VideoTimelineClip; asset: VideoAsset } =>
+      Boolean(entry.asset && entry.asset.mime_type.startsWith('audio/')));
+
   layersRef.current = layers;
+  audioLayersRef.current = audioLayers;
   timelineDurationRef.current = timeline?.duration_ms ?? 0;
 
   // Topmost video layers get real <video> elements, up to the cap.
@@ -166,31 +181,39 @@ export function VideoPreviewCanvas() {
     };
   }, [isPlaying, setPlayhead, setPlaying]);
 
-  // Play/pause every mounted clip video; seek to the correct trim offset on play start.
+  // Keep every mounted media element in sync with the playhead on every tick.
+  // This is what starts clips that mount mid-playback: a clip whose element
+  // appears after play began is paused, so the next tick seeks it to its trim
+  // offset and plays it (previously only clips mounted at play-start played).
+  // While paused it doubles as the scrub-seek path.
   useEffect(() => {
-    const playhead = useVideoStudioStore.getState().playheadMs;
-    for (const [clipId, video] of videoRefs.current) {
-      const entry = layersRef.current.find((layer) => layer.clip.id === clipId);
-      if (!entry) continue;
+    const syncElement = (element: HTMLMediaElement, clip: VideoTimelineClip) => {
+      const target = ((clip.trim_in_ms ?? 0) + Math.max(0, playheadMs - clip.start_ms)) / 1000;
       if (isPlaying) {
-        video.currentTime = ((entry.clip.trim_in_ms ?? 0) + Math.max(0, playhead - entry.clip.start_ms)) / 1000;
-        video.play().catch(() => { /* autoplay policy */ });
+        if (element.paused && !element.ended) {
+          element.currentTime = target;
+          element.play().catch(() => { /* autoplay policy */ });
+        } else if (Math.abs(element.currentTime - target) > 0.35) {
+          // Drift correction (tab throttling, slow decode).
+          element.currentTime = target;
+        }
       } else {
-        video.pause();
+        if (!element.paused) element.pause();
+        if (Math.abs(element.currentTime - target) > 0.05) {
+          element.currentTime = target;
+        }
       }
-    }
-  }, [isPlaying]);
-
-  // Seek mounted clip videos while paused (scrubbing).
-  useEffect(() => {
-    if (isPlaying) return;
+    };
     for (const [clipId, video] of videoRefs.current) {
       const entry = layersRef.current.find((layer) => layer.clip.id === clipId);
+      if (entry) syncElement(video, entry.clip);
+    }
+    for (const [clipId, audio] of audioRefs.current) {
+      const entry = audioLayersRef.current.find((layer) => layer.clip.id === clipId);
       if (!entry) continue;
-      const target = ((entry.clip.trim_in_ms ?? 0) + Math.max(0, playheadMs - entry.clip.start_ms)) / 1000;
-      if (Math.abs(video.currentTime - target) > 0.05) {
-        video.currentTime = target;
-      }
+      // Element volume caps at 1; clip volumes above 1 only boost at export.
+      audio.volume = Math.min(1, Math.max(0, (entry.clip.volume ?? 1) * fadeFactor(entry.clip, playheadMs)));
+      syncElement(audio, entry.clip);
     }
   }, [playheadMs, isPlaying]);
 
@@ -327,6 +350,13 @@ export function VideoPreviewCanvas() {
   const renderLayer = (entry: LayerEntry) => {
     const { clip, track, asset } = entry;
     const transform = { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, ...(clip.transform || {}) };
+    // Keyframes (clip-relative time) override static transform values; an
+    // in-flight canvas drag overrides both.
+    const clipTimeMs = playheadMs - clip.start_ms;
+    for (const property of ['x', 'y', 'scale', 'rotation', 'opacity'] as const) {
+      const sampled = sampleKeyframes(clip.keyframes, property, clipTimeMs);
+      if (sampled !== null) transform[property] = sampled;
+    }
     if (liveTransform && liveTransform.clipId === clip.id) {
       Object.assign(transform, liveTransform.patch);
     }
@@ -350,6 +380,7 @@ export function VideoPreviewCanvas() {
       maxWidth: stageSize.width,
       transform: `translate(-50%, -50%) translate(${transform.x * stageScale}px, ${transform.y * stageScale}px) scale(${transform.scale}) rotate(${inCropEdit ? 0 : transform.rotation}deg)`,
       opacity,
+      filter: composePreviewFilter(clip.effects),
     };
 
     let content = null;
@@ -492,6 +523,20 @@ export function VideoPreviewCanvas() {
 
   return (
     <div className="flex h-full min-h-[320px] flex-col rounded-lg border border-border bg-black">
+      <div className="hidden">
+        {audioLayers.map(({ clip, asset }) => (
+          <audio
+            key={clip.id}
+            ref={(node) => {
+              if (node) audioRefs.current.set(clip.id, node);
+              else audioRefs.current.delete(clip.id);
+            }}
+            src={videoApi.downloadUrl(asset.id)}
+            preload="auto"
+            aria-hidden="true"
+          />
+        ))}
+      </div>
       <div className="flex items-center justify-between border-b border-white/10 px-3 py-2 text-xs text-white/70">
         <span>Preview</span>
         <div className="flex items-center gap-1">
