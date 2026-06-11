@@ -311,6 +311,8 @@ interface VideoStudioState {
   error: string | null;
   abortGeneration: (() => void) | null;
   _pollInterval: ReturnType<typeof setInterval> | null;
+  _renderPollTimeout: number | null;
+  _saveSeq: number;
 
   loadProviders: () => Promise<void>;
   loadModels: (provider: VideoProviderKey, refresh?: boolean) => Promise<void>;
@@ -343,6 +345,7 @@ interface VideoStudioState {
   renameAsset: (assetId: string, fileName: string) => Promise<void>;
   deleteAsset: (assetId: string) => Promise<void>;
   uploadAsset: (file: File) => Promise<void>;
+  importMusicAsset: (musicAssetId: string, title?: string) => Promise<VideoAsset | null>;
   loadRendererCapabilities: () => Promise<void>;
   setPlayhead: (timeMs: number) => void;
   setZoom: (zoom: number) => void;
@@ -450,6 +453,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   error: null,
   abortGeneration: null,
   _pollInterval: null,
+  _renderPollTimeout: null,
+  _saveSeq: 0,
 
   loadProviders: async () => {
     try {
@@ -548,7 +553,21 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   },
 
   selectProject: async (projectId) => {
-    set({ isLoading: true, error: null });
+    // Stop generation/render polls from the previous project — left running
+    // they would keep injecting the old project's data into the new one.
+    const { _pollInterval, _renderPollTimeout } = get();
+    if (_pollInterval) clearInterval(_pollInterval);
+    if (_renderPollTimeout) clearTimeout(_renderPollTimeout);
+    set({
+      isLoading: true,
+      error: null,
+      _pollInterval: null,
+      _renderPollTimeout: null,
+      isGenerating: false,
+      generationProgress: null,
+      activeRenderJobId: null,
+      renderJobs: [],
+    });
     try {
       const detail = await videoApi.getProject(projectId);
       const gens = detail.generations ?? [];
@@ -922,12 +941,23 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const projectId = get().activeProjectId;
     const doc = document || get().timeline;
     if (!projectId || !doc) return;
-    set({ isSavingTimeline: true });
+    const seq = get()._saveSeq + 1;
+    set({ isSavingTimeline: true, _saveSeq: seq });
     try {
       const detail = await videoApi.saveTimeline(projectId, doc);
-      set({ timelineRecord: detail.timeline, timeline: detail.document, isSavingTimeline: false });
+      // Only the latest save's response may update local state — applying an
+      // older response (rapid consecutive edits, out-of-order replies) would
+      // clobber newer local edits.
+      if (get()._saveSeq !== seq) return;
+      if (get().activeProjectId === projectId) {
+        set({ timelineRecord: detail.timeline, timeline: detail.document, isSavingTimeline: false });
+      } else {
+        set({ isSavingTimeline: false });
+      }
     } catch (err) {
-      set({ isSavingTimeline: false, error: (err as Error).message });
+      if (get()._saveSeq === seq) {
+        set({ isSavingTimeline: false, error: (err as Error).message });
+      }
       toast.error('Could not save timeline');
     }
   },
@@ -1028,7 +1058,17 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       toast.error('Split point must be inside the clip');
       return;
     }
-    const left = { ...loc.clip, duration_ms: offset, trim_out_ms: loc.clip.trim_in_ms + offset };
+    // Keyframes are clip-relative: the left half keeps keyframes up to the
+    // split point; the right half keeps the rest rebased to its new start.
+    // Fades split with their edge — fade-in stays left, fade-out stays right.
+    const keyframes = loc.clip.keyframes || [];
+    const left = {
+      ...loc.clip,
+      duration_ms: offset,
+      trim_out_ms: loc.clip.trim_in_ms + offset,
+      fade_out_ms: undefined,
+      keyframes: keyframes.filter((keyframe) => keyframe.time_ms <= offset),
+    };
     const right = {
       ...loc.clip,
       id: newId('clip'),
@@ -1036,6 +1076,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       duration_ms: loc.clip.duration_ms - offset,
       trim_in_ms: loc.clip.trim_in_ms + offset,
       trim_out_ms: loc.clip.trim_out_ms,
+      fade_in_ms: undefined,
+      keyframes: keyframes
+        .filter((keyframe) => keyframe.time_ms >= offset)
+        .map((keyframe) => ({ ...keyframe, id: newId('keyframe'), time_ms: keyframe.time_ms - offset })),
     };
     loc.track.clips.splice(loc.clipIndex, 1, left, right);
     set((state) => ({
@@ -1413,6 +1457,33 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       toast.success(`Uploaded ${asset.file_name}`);
     } catch (err) {
       toast.error((err as Error).message);
+    }
+  },
+
+  importMusicAsset: async (musicAssetId, title) => {
+    // Cross-studio handoff (e.g. Music Studio → media bin): import into the
+    // active video project, creating one when none is selected yet.
+    let projectId = get().activeProjectId;
+    if (!projectId) {
+      const project = await get().createProject(title ? `${title} video` : undefined);
+      projectId = project?.id ?? null;
+    }
+    if (!projectId) return null;
+    try {
+      const asset = await videoApi.importExternalAsset(projectId, {
+        source_studio: 'music',
+        source_id: musicAssetId,
+      });
+      if (get().activeProjectId === projectId) {
+        set((state) => ({
+          assets: [asset, ...state.assets.filter((item) => item.id !== asset.id)],
+          selectedAssetId: asset.id,
+        }));
+      }
+      return asset;
+    } catch (err) {
+      toast.error((err as Error).message);
+      return null;
     }
   },
 
@@ -1984,11 +2055,16 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   pollRenderJob: async (jobId) => {
     try {
       const job = await videoApi.getRenderJob(jobId);
+      // The user may have switched projects while this poll was in flight —
+      // don't inject another project's render job into the current state.
+      if (get().activeProjectId !== job.project_id) return;
       set((state) => ({ renderJobs: upsertRenderJob(state.renderJobs, job), activeRenderJobId: job.id }));
       if (job.status === 'completed') {
-        if (get().activeProjectId) {
-          const assets = await videoApi.listAssets(get().activeProjectId as string);
-          set({ assets, selectedAssetId: job.output_asset_id || get().selectedAssetId });
+        if (get().activeProjectId === job.project_id) {
+          const assets = await videoApi.listAssets(job.project_id);
+          if (get().activeProjectId === job.project_id) {
+            set({ assets, selectedAssetId: job.output_asset_id || get().selectedAssetId });
+          }
         }
         toast.success('Render complete');
         return;
@@ -1997,7 +2073,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         if (job.error) toast.error(job.error);
         return;
       }
-      window.setTimeout(() => { void get().pollRenderJob(jobId); }, 1000);
+      const timeout = window.setTimeout(() => { void get().pollRenderJob(jobId); }, 1000);
+      set({ _renderPollTimeout: timeout });
     } catch (err) {
       set({ error: (err as Error).message });
     }

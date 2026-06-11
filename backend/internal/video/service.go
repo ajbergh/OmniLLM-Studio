@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/llm"
@@ -46,6 +47,12 @@ type Service struct {
 	registry         *ModelRegistry
 	renderer         Renderer
 	llm              llmCompleter // optional — nil = deterministic fallback
+
+	// renderCancels maps running render job IDs to their context cancel funcs
+	// so CancelRenderJob can actually stop the FFmpeg process, not just flip
+	// the DB status.
+	renderCancelsMu sync.Mutex
+	renderCancels   map[string]context.CancelFunc
 }
 
 func NewService(
@@ -70,6 +77,7 @@ func NewService(
 		registry:         NewModelRegistry(NewOpenRouterProvider("", ""), NewGeminiProvider("", ""), NewLumaProvider("", "")),
 		renderer:         NewFFmpegRenderer(""),
 		llm:              llmSvc,
+		renderCancels:    map[string]context.CancelFunc{},
 	}
 }
 
@@ -578,7 +586,7 @@ func (s *Service) GenerateAsync(ctx context.Context, userID string, req Generate
 	}
 
 	// Start background generation goroutine.
-	go s.runGenerationBackground(context.Background(), project.ID, generation.ID, modelID, providerKey, req, enhancedPrompt)
+	go s.runGenerationBackground(context.Background(), userID, project.ID, generation.ID, modelID, providerKey, req, enhancedPrompt)
 
 	return project, generation, nil
 }
@@ -588,7 +596,7 @@ func (s *Service) GenerateAsync(ctx context.Context, userID string, req Generate
 // generation record.
 func (s *Service) runGenerationBackground(
 	ctx context.Context,
-	projectID, generationID, modelID, providerKey string,
+	userID, projectID, generationID, modelID, providerKey string,
 	req GenerateRequest,
 	enhancedPrompt string,
 ) {
@@ -604,14 +612,16 @@ func (s *Service) runGenerationBackground(
 	}
 	gemProv, isGemini := prov.(*GeminiProvider)
 	if !isGemini {
-		// Fall back to synchronous Generate for non-Gemini providers.
-		_, gen, asset, err := s.Generate(ctx, "", req, nil)
+		// Fall back to synchronous Generate for non-Gemini providers, under
+		// the requesting user (not ""). Generate creates and completes its own
+		// generation record, so retire the pending async row instead of
+		// leaving it stuck forever.
+		_, _, _, err := s.Generate(ctx, userID, req, nil)
 		if err != nil {
 			fail(err.Error())
 			return
 		}
-		_ = gen
-		_ = asset
+		_ = s.generations.MarkCancelled(generationID)
 		return
 	}
 
@@ -679,6 +689,12 @@ func (s *Service) pollAndFinalize(
 				return
 			case <-asyncPollTimer(10):
 			}
+		}
+		// CancelGeneration flips the DB status (the poll context is
+		// Background and never fires Done): stop polling and keep the
+		// cancelled status rather than clobbering it later.
+		if gen, err := s.generations.GetByID(generationID); err == nil && gen != nil && gen.Status == StatusCancelled {
+			return
 		}
 		done, videoURI, _, err := gemProv.PollOnce(ctx, opName)
 		if err != nil {
@@ -1281,7 +1297,22 @@ func (s *Service) StartRender(ctx context.Context, userID, projectID string, set
 	if err := s.renderJobs.Create(job); err != nil {
 		return nil, err
 	}
-	go s.runRenderJob(context.Background(), job.ID)
+	// A cancellable context lets CancelRenderJob kill the FFmpeg process; the
+	// job still survives request lifetimes (parent is Background, not the
+	// HTTP request context).
+	renderCtx, cancel := context.WithCancel(context.Background())
+	s.renderCancelsMu.Lock()
+	s.renderCancels[job.ID] = cancel
+	s.renderCancelsMu.Unlock()
+	go func() {
+		defer func() {
+			s.renderCancelsMu.Lock()
+			delete(s.renderCancels, job.ID)
+			s.renderCancelsMu.Unlock()
+			cancel()
+		}()
+		s.runRenderJob(renderCtx, job.ID)
+	}()
 	return job, nil
 }
 
@@ -1309,6 +1340,12 @@ func (s *Service) CancelRenderJob(userID, jobID string) (*models.VideoRenderJob,
 	}
 	if err := s.renderJobs.MarkCancelled(job.ID); err != nil {
 		return nil, err
+	}
+	s.renderCancelsMu.Lock()
+	cancel := s.renderCancels[job.ID]
+	s.renderCancelsMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 	return s.renderJobs.GetByID(job.ID)
 }
@@ -1340,7 +1377,10 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 		return
 	}
 	var settings ExportSettings
-	_ = json.Unmarshal([]byte(job.SettingsJSON), &settings)
+	if err := json.Unmarshal([]byte(job.SettingsJSON), &settings); err != nil {
+		_ = s.renderJobs.MarkFailed(job.ID, "invalid render settings: "+err.Error())
+		return
+	}
 	settings, _ = validateExportSettings(settings, *project)
 
 	// Resolve asset map for media compositing.
@@ -1361,6 +1401,11 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 		_ = s.renderJobs.UpdateProgress(job.ID, p.Progress)
 	})
 	if err != nil {
+		// A cancelled job errors out of the renderer (killed FFmpeg) — keep
+		// the cancelled status instead of overwriting it with failed.
+		if ctx.Err() != nil || s.renderJobCancelled(job.ID) {
+			return
+		}
 		var renderErr *RenderError
 		if errors.As(err, &renderErr) {
 			diag := map[string]any{

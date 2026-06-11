@@ -76,6 +76,9 @@ export function TimelineTrack({
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropGuideX, setDropGuideX] = useState<number | null>(null);
   const [liveHeight, setLiveHeight] = useState<number | null>(null);
+  // Mirrors liveHeight so pointer-up can commit without a side effect inside
+  // a setState updater (StrictMode runs updaters twice in dev).
+  const liveHeightRef = useRef<number | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const trackHeight = liveHeight ?? track.height ?? DEFAULT_TRACK_HEIGHT;
 
@@ -88,18 +91,20 @@ export function TimelineTrack({
     const base = track.height || DEFAULT_TRACK_HEIGHT;
     const onMove = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId !== pointerId) return;
-      setLiveHeight(Math.max(32, Math.min(160, Math.round(base + (moveEvent.clientY - startY)))));
+      const next = Math.max(32, Math.min(160, Math.round(base + (moveEvent.clientY - startY))));
+      liveHeightRef.current = next;
+      setLiveHeight(next);
     };
     const onUp = (upEvent: PointerEvent) => {
       if (upEvent.pointerId !== pointerId) return;
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
-      setLiveHeight((height) => {
-        if (height !== null && height !== (track.height || DEFAULT_TRACK_HEIGHT)) {
-          onSetTrackHeight(track.id, height);
-        }
-        return null;
-      });
+      const height = liveHeightRef.current;
+      if (height !== null && height !== (track.height || DEFAULT_TRACK_HEIGHT)) {
+        onSetTrackHeight(track.id, height);
+      }
+      liveHeightRef.current = null;
+      setLiveHeight(null);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);

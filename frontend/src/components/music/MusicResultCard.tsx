@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Copy, GitBranch, MessageSquare, Music2, Image, Video } from 'lucide-react';
+import { Clapperboard, Copy, GitBranch, MessageSquare, Music2, Image, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { clsx } from 'clsx';
 import { musicAssetUrl } from '../../api';
@@ -18,6 +18,7 @@ interface MusicResultCardProps {
   onSendToChat: (generation: MusicGenerationDetail) => void;
   onGenerateAlbumArt?: (generation: MusicGenerationDetail) => void;
   onSendToVideo?: (generation: MusicGenerationDetail) => void;
+  onAddToVideoProject?: (generation: MusicGenerationDetail) => void;
 }
 
 const TABS: Array<{ key: ResultTab; label: string }> = [
@@ -36,6 +37,7 @@ export function MusicResultCard({
   onSendToChat,
   onGenerateAlbumArt,
   onSendToVideo,
+  onAddToVideoProject,
 }: MusicResultCardProps) {
   const [tab, setTab] = useState<ResultTab>('lyrics');
   const assetUrl = generation?.asset_id ? musicAssetUrl(generation.asset_id) : undefined;
@@ -138,6 +140,16 @@ export function MusicResultCard({
               >
                 <Video size={14} />
                 Make Video
+              </button>
+            )}
+            {onAddToVideoProject && generation.status === 'completed' && Boolean(generation.asset_id) && (
+              <button
+                onClick={() => onAddToVideoProject(generation)}
+                className="min-h-10 inline-flex items-center gap-2 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:text-text hover:bg-surface-hover transition-colors"
+                title="Add this track to the current video project's media bin (creates a project if needed)"
+              >
+                <Clapperboard size={14} />
+                Add to Video Project
               </button>
             )}
           </div>

@@ -10,7 +10,7 @@ Video Studio is a first-class project workspace for AI video creation. Timeline 
 - Prompt enhancement, generation history, branching metadata, and durable assets.
 - Gemini Veo supports **reference image input** (image-to-video): supply an image asset ID via `ReferenceAssetIDs` and the Gemini adapter base64-encodes the first image and embeds it into the `predictLongRunning` request.
 - Single-output preview and download controls for generated video, image, and audio outputs.
-- **Cross-studio shortcuts** — Image Studio and Music Studio each expose a "Make Video" button that routes the asset (with generated prompt context) into Video Studio via the crossover domain-translation path.
+- **Cross-studio shortcuts** — Image Studio and Music Studio each expose a "Make Video" button that routes the asset (with generated prompt context) into Video Studio via the crossover domain-translation path. Music Studio additionally has an **"Add to Video Project"** button on completed tracks that imports the audio asset directly into the active video project's media bin (creating a project when none is active) via `POST /v1/video/projects/{id}/assets/import` with `source_studio: "music"` — ready to drag onto a music/audio track in Video Edit Studio.
 
 ## Creation Panel UI
 

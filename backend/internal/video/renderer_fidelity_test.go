@@ -205,6 +205,44 @@ func TestBuildFilterComplexRotationNewEffectsAndPositionKeyframes(t *testing.T) 
 	}
 }
 
+func TestDrawTextHonorsMuteScaleAndFades(t *testing.T) {
+	// Muted tracks keep their text at export — mute only silences audio.
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks = []TimelineTrack{{
+		ID: "t-text", Type: TrackTypeText, Visible: true, Muted: true,
+		Clips: []TimelineClip{{
+			ID: "c-text", StartMS: 0, DurationMS: 3000,
+			Text: &TimelineText{Text: "Hello"},
+		}},
+	}}
+	filterStr, _, _ := buildFilterComplex(doc, nil, 1920, 1080)
+	if !strings.Contains(filterStr, "drawtext=text='Hello'") {
+		t.Errorf("muted text track should still render text: %s", filterStr)
+	}
+
+	// transform.scale multiplies the font size (matching the preview).
+	scaled := drawTextFilter(TimelineClip{
+		StartMS: 0, DurationMS: 2000,
+		Transform: map[string]any{"scale": 2.0},
+	}, TimelineText{Text: "Big", FontSize: 50}, 1920, 1080)
+	if !strings.Contains(scaled, "fontsize=100") {
+		t.Errorf("expected fontsize=100 for scale 2.0, got: %s", scaled)
+	}
+
+	// Fades and opacity export as a drawtext alpha expression.
+	faded := drawTextFilter(TimelineClip{
+		StartMS: 1000, DurationMS: 4000, FadeInMS: 500, FadeOutMS: 1000,
+		Transform: map[string]any{"opacity": 0.8},
+	}, TimelineText{Text: "Fade"}, 1920, 1080)
+	if !strings.Contains(faded, "alpha='0.800*clip(min((t-1.000)/0.500\\,(5.000-t)/1.000)\\,0\\,1)'") {
+		t.Errorf("expected fade+opacity alpha expression, got: %s", faded)
+	}
+	plain := drawTextFilter(TimelineClip{StartMS: 0, DurationMS: 2000}, TimelineText{Text: "Plain"}, 1920, 1080)
+	if strings.Contains(plain, "alpha=") {
+		t.Errorf("fully opaque unfaded text should have no alpha option: %s", plain)
+	}
+}
+
 func TestFFmpegRendererCapabilitiesMatrix(t *testing.T) {
 	caps := FFmpegRendererCapabilities()
 	byFeature := map[string]RendererFeatureSupport{}

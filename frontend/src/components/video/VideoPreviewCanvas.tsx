@@ -86,6 +86,19 @@ export function VideoPreviewCanvas() {
   const [cropDraft, setCropDraft] = useState<CropBox | null>(null);
   const [moveSnap, setMoveSnap] = useState<{ x: boolean; y: boolean } | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  // Refs mirror the live drag state so pointer-up commits can read the final
+  // value without side effects inside setState updaters (StrictMode runs
+  // updaters twice in dev, which would double-commit).
+  const liveTransformRef = useRef<{ clipId: string; patch: Partial<DragState['base']> } | null>(null);
+  const cropDraftRef = useRef<CropBox | null>(null);
+  const applyLiveTransform = (value: { clipId: string; patch: Partial<DragState['base']> } | null) => {
+    liveTransformRef.current = value;
+    setLiveTransform(value);
+  };
+  const applyCropDraft = (value: CropBox | null) => {
+    cropDraftRef.current = value;
+    setCropDraft(value);
+  };
 
   const canvasWidth = timeline?.canvas.width || 1920;
   const canvasHeight = timeline?.canvas.height || 1080;
@@ -130,6 +143,7 @@ export function VideoPreviewCanvas() {
   useEffect(() => {
     setCropMode(false);
     setCropDraft(null);
+    cropDraftRef.current = null;
   }, [selectedClipId, isPlaying]);
 
   // Fit the stage to the available area while preserving the canvas aspect ratio,
@@ -267,10 +281,10 @@ export function VideoPreviewCanvas() {
           }
         }
         setMoveSnap(snappedX || snappedY ? { x: snappedX, y: snappedY } : null);
-        setLiveTransform({ clipId: drag.clipId, patch: { x, y } });
+        applyLiveTransform({ clipId: drag.clipId, patch: { x, y } });
       } else if (drag.mode === 'scale') {
         const dist = Math.hypot(moveEvent.clientX - drag.centerClientX, moveEvent.clientY - drag.centerClientY);
-        setLiveTransform({
+        applyLiveTransform({
           clipId: drag.clipId,
           patch: { scale: Math.min(4, Math.max(0.05, drag.base.scale * (dist / drag.startDist))) },
         });
@@ -279,7 +293,7 @@ export function VideoPreviewCanvas() {
         let rotation = drag.base.rotation + ((angle - drag.startAngle) * 180) / Math.PI;
         while (rotation > 180) rotation -= 360;
         while (rotation < -180) rotation += 360;
-        setLiveTransform({ clipId: drag.clipId, patch: { rotation: Math.round(rotation) } });
+        applyLiveTransform({ clipId: drag.clipId, patch: { rotation: Math.round(rotation) } });
       }
     };
     const onUp = (upEvent: PointerEvent) => {
@@ -290,12 +304,11 @@ export function VideoPreviewCanvas() {
       dragRef.current = null;
       setMoveSnap(null);
       // Commit once on release: a single undo entry and a single save.
-      setLiveTransform((live) => {
-        if (live && live.clipId === drag.clipId && Object.keys(live.patch).length > 0) {
-          void updateClipTransform(live.clipId, live.patch);
-        }
-        return null;
-      });
+      const live = liveTransformRef.current;
+      if (live && live.clipId === drag.clipId && Object.keys(live.patch).length > 0) {
+        void updateClipTransform(live.clipId, live.patch);
+      }
+      applyLiveTransform(null);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -323,25 +336,24 @@ export function VideoPreviewCanvas() {
       if (edge === 'bottom') next.bottom = clampCropSide(base.bottom + (startY - moveEvent.clientY) / rect.height, base.top);
       if (edge === 'left') next.left = clampCropSide(base.left + (moveEvent.clientX - startX) / rect.width, base.right);
       if (edge === 'right') next.right = clampCropSide(base.right + (startX - moveEvent.clientX) / rect.width, base.left);
-      setCropDraft(next);
+      applyCropDraft(next);
     };
     const onUp = (upEvent: PointerEvent) => {
       if (upEvent.pointerId !== pointerId) return;
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       // Commit once on release: a single undo entry and a single save.
-      setCropDraft((draft) => {
-        if (draft) {
-          const rounded: CropBox = {
-            top: Math.round(draft.top * 1000) / 1000,
-            right: Math.round(draft.right * 1000) / 1000,
-            bottom: Math.round(draft.bottom * 1000) / 1000,
-            left: Math.round(draft.left * 1000) / 1000,
-          };
-          void updateClipTransform(entry.clip.id, { crop: rounded });
-        }
-        return null;
-      });
+      const draft = cropDraftRef.current;
+      if (draft) {
+        const rounded: CropBox = {
+          top: Math.round(draft.top * 1000) / 1000,
+          right: Math.round(draft.right * 1000) / 1000,
+          bottom: Math.round(draft.bottom * 1000) / 1000,
+          left: Math.round(draft.left * 1000) / 1000,
+        };
+        void updateClipTransform(entry.clip.id, { crop: rounded });
+      }
+      applyCropDraft(null);
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -552,7 +564,7 @@ export function VideoPreviewCanvas() {
           {cropMode && canCrop && selectedEntry?.clip.transform?.crop && (
             <button
               onClick={() => {
-                setCropDraft(null);
+                applyCropDraft(null);
                 void updateClipTransform(selectedClipId as string, { crop: undefined });
               }}
               className="rounded border border-white/15 px-1.5 py-0.5 text-[10px] text-white/55 hover:text-white"

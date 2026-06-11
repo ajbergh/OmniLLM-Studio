@@ -421,9 +421,10 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 	}
 
 	// ── Text / caption / callout overlays ──────────────────────────────────
+	// Mute only silences audio; hidden tracks drop their text.
 	textIdx := 0
 	for _, track := range doc.Tracks {
-		if !track.Visible || track.Muted {
+		if !track.Visible {
 			continue
 		}
 		if track.Type != TrackTypeText && track.Type != TrackTypeCaption && track.Type != TrackTypeCallout {
@@ -487,7 +488,7 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 func ffmpegVideoFilters(doc TimelineDocument, width, height int) string {
 	var filters []string
 	for _, track := range doc.Tracks {
-		if !track.Visible || track.Muted || (track.Type != TrackTypeText && track.Type != TrackTypeCaption && track.Type != TrackTypeCallout) {
+		if !track.Visible || (track.Type != TrackTypeText && track.Type != TrackTypeCaption && track.Type != TrackTypeCallout) {
 			continue
 		}
 		for _, clip := range track.Clips {
@@ -507,6 +508,10 @@ func drawTextFilter(clip TimelineClip, text TimelineText, width, height int) str
 	fontSize := text.FontSize
 	if fontSize <= 0 {
 		fontSize = maxInt(24, height/18)
+	}
+	// The preview scales text layers by transform.scale; match it at export.
+	if scale, ok := numericTransform(clip.Transform, "scale"); ok && scale > 0 && scale != 1 {
+		fontSize = int(float64(fontSize)*clampFloat(scale, 0.05, 4) + 0.5)
 	}
 	if fontSize < 8 {
 		fontSize = 8
@@ -533,6 +538,9 @@ func drawTextFilter(clip TimelineClip, text TimelineText, width, height int) str
 		"y=" + y,
 		fmt.Sprintf("enable='between(t\\,%.3f\\,%.3f)'", start, end),
 	}
+	if alpha := drawTextAlphaExpr(clip, start, end); alpha != "" {
+		parts = append(parts, "alpha='"+alpha+"'")
+	}
 	if family := strings.TrimSpace(text.FontFamily); family != "" {
 		// Fontconfig resolves the closest installed match, so an unknown
 		// family degrades to a fallback font instead of failing the render.
@@ -558,6 +566,38 @@ func drawTextFilter(clip TimelineClip, text TimelineText, width, height int) str
 		parts = append(parts, fmt.Sprintf("borderw=%.0f", borderWidth), "bordercolor="+ffmpegColor(text.Stroke, "black"))
 	}
 	return strings.Join(parts, ":")
+}
+
+// drawTextAlphaExpr builds a drawtext alpha expression applying the clip's
+// static opacity and fade in/out (matching the preview), or "" when the text
+// is fully opaque with no fades. Commas are escaped for the filter graph.
+func drawTextAlphaExpr(clip TimelineClip, startS, endS float64) string {
+	opacity := 1.0
+	if v, ok := numericTransform(clip.Transform, "opacity"); ok {
+		opacity = clampFloat(v, 0, 1)
+	}
+	fadeInS, fadeOutS := clipFadeSeconds(clip)
+	if opacity >= 1 && fadeInS <= 0 && fadeOutS <= 0 {
+		return ""
+	}
+	var fade string
+	switch {
+	case fadeInS > 0 && fadeOutS > 0:
+		fade = fmt.Sprintf("clip(min((t-%.3f)/%.3f,(%.3f-t)/%.3f),0,1)", startS, fadeInS, endS, fadeOutS)
+	case fadeInS > 0:
+		fade = fmt.Sprintf("clip((t-%.3f)/%.3f,0,1)", startS, fadeInS)
+	case fadeOutS > 0:
+		fade = fmt.Sprintf("clip((%.3f-t)/%.3f,0,1)", endS, fadeOutS)
+	}
+	expr := fmt.Sprintf("%.3f", opacity)
+	if fade != "" {
+		if opacity < 1 {
+			expr = fmt.Sprintf("%.3f*%s", opacity, fade)
+		} else {
+			expr = fade
+		}
+	}
+	return strings.ReplaceAll(expr, ",", "\\,")
 }
 
 // clipRenderTransform is the subset of clip transform values the renderer honors.

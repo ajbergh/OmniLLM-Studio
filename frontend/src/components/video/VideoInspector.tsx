@@ -1,4 +1,5 @@
 import { ArrowDown, ArrowUp, Sparkles, Trash2, Type } from 'lucide-react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import { editorModeFeatures } from './editorModes';
@@ -428,26 +429,20 @@ export function VideoInspector() {
                         <Trash2 size={11} />
                       </button>
                     </div>
-                    {definition?.params.map((param) => {
-                      const value = numberParam(effect.params, param.key, param.defaultValue);
-                      return (
-                        <label key={param.key} className="mt-1 block">
-                          <span className="block text-[10px]">{param.label}: {Math.round(value * 100) / 100}</span>
-                          <input
-                            type="range"
-                            min={param.min}
-                            max={param.max}
-                            step={param.step}
-                            value={value}
-                            onChange={(event) => {
-                              void updateClipEffect(selectedClipId as string, effect.id, { params: { [param.key]: Number(event.target.value) } });
-                            }}
-                            className="w-full"
-                            aria-label={`${definition.label} ${param.label}`}
-                          />
-                        </label>
-                      );
-                    })}
+                    {definition?.params.map((param) => (
+                      <div key={param.key} className="mt-1">
+                        <Slider
+                          label={param.label}
+                          min={param.min}
+                          max={param.max}
+                          step={param.step}
+                          value={numberParam(effect.params, param.key, param.defaultValue)}
+                          onChange={(value) => {
+                            void updateClipEffect(selectedClipId as string, effect.id, { params: { [param.key]: value } });
+                          }}
+                        />
+                      </div>
+                    ))}
                   </div>
                 );
               })}
@@ -608,15 +603,27 @@ function Slider({
   value: number;
   onChange: (value: number) => void;
 }) {
+  // Track the value locally while dragging and commit once on release —
+  // committing per input event floods the undo history and fires a save
+  // request for every pixel of slider travel.
+  const [draft, setDraft] = useState<number | null>(null);
+  const display = draft ?? value;
+  const commit = () => {
+    if (draft !== null && draft !== value) onChange(draft);
+    setDraft(null);
+  };
   return (
-    <Field label={`${label}: ${Math.round(value * 100) / 100}`}>
+    <Field label={`${label}: ${Math.round(display * 100) / 100}`}>
       <input
         type="range"
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        value={display}
+        onChange={(event) => setDraft(Number(event.target.value))}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
         className="w-full"
       />
     </Field>
