@@ -52,6 +52,21 @@ const (
 	TransitionTypeZoom       = "zoom"
 )
 
+const (
+	// ShapeKindRectangle draws an outlined box; ShapeKindHighlight a filled
+	// translucent box. Both export via FFmpeg drawbox. ShapeKindBlur blurs
+	// the composited region beneath it (redaction) via crop+boxblur+overlay.
+	ShapeKindRectangle = "rectangle"
+	ShapeKindHighlight = "highlight"
+	ShapeKindBlur      = "blur"
+)
+
+var knownShapeKinds = map[string]bool{
+	ShapeKindRectangle: true,
+	ShapeKindHighlight: true,
+	ShapeKindBlur:      true,
+}
+
 var knownEffectTypes = map[string]bool{
 	EffectTypeBlur:           true,
 	EffectTypeBrightness:     true,
@@ -142,9 +157,23 @@ type TimelineClip struct {
 	FadeInMS    int64                `json:"fade_in_ms,omitempty"`
 	FadeOutMS   int64                `json:"fade_out_ms,omitempty"`
 	Text        *TimelineText        `json:"text,omitempty"`
+	Shape       *TimelineShape       `json:"shape,omitempty"`
 	Effects     []TimelineEffect     `json:"effects"`
 	Transitions []TimelineTransition `json:"transitions,omitempty"`
 	Keyframes   []TimelineKeyframe   `json:"keyframes"`
+}
+
+// TimelineShape is a parameterized callout/annotation box. Dimensions are in
+// canvas pixels; position comes from the clip transform like any visual clip.
+type TimelineShape struct {
+	Kind        string  `json:"kind"`
+	Width       int     `json:"width,omitempty"`
+	Height      int     `json:"height,omitempty"`
+	Fill        string  `json:"fill,omitempty"`
+	Stroke      string  `json:"stroke,omitempty"`
+	StrokeWidth float64 `json:"stroke_width,omitempty"`
+	// BlurRadius applies to blur-region shapes (clamped 1–50, default 12).
+	BlurRadius float64 `json:"blur_radius,omitempty"`
 }
 
 type TimelineMarker struct {
@@ -376,6 +405,31 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 			clip.GroupID = strings.TrimSpace(clip.GroupID)
 			if clip.Transform == nil && track.Type != TrackTypeAudio && track.Type != TrackTypeMusic {
 				clip.Transform = defaultTransform()
+			}
+			if clip.Shape != nil {
+				clip.Shape.Kind = strings.ToLower(strings.TrimSpace(clip.Shape.Kind))
+				if !knownShapeKinds[clip.Shape.Kind] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has unsupported shape kind %q", clip.ID, clip.Shape.Kind)
+				}
+				if clip.Shape.Width <= 0 {
+					clip.Shape.Width = 320
+				}
+				if clip.Shape.Height <= 0 {
+					clip.Shape.Height = 180
+				}
+				if clip.Shape.Width > 8192 {
+					clip.Shape.Width = 8192
+				}
+				if clip.Shape.Height > 8192 {
+					clip.Shape.Height = 8192
+				}
+				clip.Shape.StrokeWidth = clampFloat(clip.Shape.StrokeWidth, 0, 100)
+				if clip.Shape.Kind == ShapeKindBlur {
+					if clip.Shape.BlurRadius <= 0 {
+						clip.Shape.BlurRadius = 12
+					}
+					clip.Shape.BlurRadius = clampFloat(clip.Shape.BlurRadius, 1, 50)
+				}
 			}
 			if clip.Effects == nil {
 				clip.Effects = []TimelineEffect{}

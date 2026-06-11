@@ -76,6 +76,7 @@ export function VideoPreviewCanvas() {
   const bringClipForward = useVideoStudioStore((state) => state.bringClipForward);
   const sendClipBackward = useVideoStudioStore((state) => state.sendClipBackward);
   const addTextClip = useVideoStudioStore((state) => state.addTextClip);
+  const addShapeClip = useVideoStudioStore((state) => state.addShapeClip);
 
   const rafRef = useRef<number | null>(null);
   const timelineDurationRef = useRef<number>(0);
@@ -456,6 +457,35 @@ export function VideoPreviewCanvas() {
       content = (
         <img src={videoApi.downloadUrl(asset.id)} alt={asset.file_name} className="h-full w-full object-contain" style={{ clipPath }} />
       );
+    } else if (clip.shape) {
+      const shape = clip.shape;
+      const boxStyle: CSSProperties = {
+        width: Math.max(2, (shape.width || 320) * stageScale),
+        height: Math.max(2, (shape.height || 180) * stageScale),
+        background: shape.kind === 'highlight' ? shape.fill || '#facc15' : 'transparent',
+        border: shape.kind === 'rectangle'
+          ? `${Math.max(1, (shape.stroke_width || 6) * stageScale)}px solid ${shape.stroke || '#f59e0b'}`
+          : undefined,
+        // Blur regions blur whatever composites beneath them, like export.
+        backdropFilter: shape.kind === 'blur' ? `blur(${Math.max(1, (shape.blur_radius || 12) * stageScale)}px)` : undefined,
+      };
+      content = (
+        <div style={boxStyle} className="flex items-center justify-center">
+          {clip.text?.text && (
+            <span
+              className="whitespace-pre-wrap text-center"
+              style={{
+                fontSize: (clip.text.font_size || Math.round(canvasHeight / 24)) * stageScale,
+                fontWeight: (clip.text.font_weight as CSSProperties['fontWeight']) || 700,
+                color: clip.text.color || '#ffffff',
+                textShadow: clip.text.shadow ? '2px 2px 4px rgba(0,0,0,0.7)' : undefined,
+              }}
+            >
+              {clip.text.text}
+            </span>
+          )}
+        </div>
+      );
     } else if (clip.text) {
       const text = clip.text;
       const fontSize = (text.font_size || Math.round(canvasHeight / 18)) * stageScale;
@@ -741,6 +771,9 @@ export function VideoPreviewCanvas() {
         } else {
           items = [
             { label: 'Add title card', action: () => { void addTextClip(); } },
+            { label: 'Add highlight box', action: () => { void addShapeClip('highlight'); } },
+            { label: 'Add rectangle callout', action: () => { void addShapeClip('rectangle'); } },
+            { label: 'Add blur region', action: () => { void addShapeClip('blur'); } },
             'divider',
             { label: showGrid ? 'Hide grid' : 'Show grid', action: () => setShowGrid((value) => !value) },
             { label: showSafeAreas ? 'Hide safe areas' : 'Show safe areas', action: () => setShowSafeAreas((value) => !value) },

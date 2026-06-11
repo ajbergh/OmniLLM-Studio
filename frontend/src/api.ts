@@ -146,8 +146,9 @@ export async function initAPIBase(): Promise<void> {
   }
 }
 
-// Auth token management
-let authToken: string | null = localStorage.getItem('omnillm_auth_token');
+// Auth token management (guarded so the module loads outside a browser,
+// e.g. in node-based unit tests).
+let authToken: string | null = typeof localStorage === 'undefined' ? null : localStorage.getItem('omnillm_auth_token');
 
 export function setAuthToken(token: string | null): void {
   authToken = token;
@@ -1445,6 +1446,12 @@ export const videoApi = {
   deleteProject: (projectId: string) =>
     apiFetch<{ deleted: boolean }>(`/video/projects/${encodeURIComponent(projectId)}`, {
       method: 'DELETE',
+    }),
+
+  duplicateProject: (projectId: string) =>
+    apiFetch<VideoProject>(`/video/projects/${encodeURIComponent(projectId)}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify({}),
     }),
 
   listGenerations: (projectId: string) =>

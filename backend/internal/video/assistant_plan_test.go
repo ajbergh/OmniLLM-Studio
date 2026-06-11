@@ -106,6 +106,45 @@ func TestEditPlanVolumeAndMarkerOperations(t *testing.T) {
 	}
 }
 
+func TestEditPlanAssetClipAndTransformOperations(t *testing.T) {
+	doc := planTestDoc()
+	scale := 1.5
+	opacity := 0.7
+	valid, _, issues := ValidateEditPlanOperations(doc, EditPlan{Operations: []EditOperation{
+		{Type: "add_asset_clip", AssetID: "asset-a", StartMS: 5000, DurationMS: 3000},
+		{Type: "add_asset_clip", DurationMS: 3000},                                       // missing asset_id
+		{Type: "add_asset_clip", AssetID: "asset-a", DurationMS: 3000, TrackID: "nope"},  // unknown track
+		{Type: "set_transform", ClipID: "clip-a", Scale: &scale, Opacity: &opacity},
+		{Type: "set_transform", ClipID: "clip-a"},                                        // no fields
+	}})
+	if len(valid) != 2 || len(issues) != 3 {
+		t.Fatalf("validation = %d valid / %d issues, want 2/3 (%v)", len(valid), len(issues), issues)
+	}
+
+	updated, err := ApplyEditPlanToTimeline(doc, EditPlan{Operations: valid})
+	if err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
+	// New asset clip lands on the first unlocked track at the requested time.
+	found := false
+	for _, clip := range updated.Tracks[0].Clips {
+		if clip.AssetID == "asset-a" && clip.StartMS == 5000 && clip.DurationMS == 3000 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("asset clip not added: %+v", updated.Tracks[0].Clips)
+	}
+	ti, ci, ok := findTimelineClip(updated, "clip-a")
+	if !ok {
+		t.Fatal("clip-a lost")
+	}
+	transform := updated.Tracks[ti].Clips[ci].Transform
+	if transform["scale"] != 1.5 || transform["opacity"] != 0.7 {
+		t.Fatalf("transform not applied: %+v", transform)
+	}
+}
+
 func TestTimelineContextSummaryIncludesStructure(t *testing.T) {
 	doc := planTestDoc()
 	durationMS := int64(5000)

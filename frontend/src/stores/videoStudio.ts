@@ -35,6 +35,7 @@ import type {
   VideoTimelineEffect,
   VideoTimelineKeyframe,
   VideoTimelineRecord,
+  VideoTimelineShape,
   VideoTimelineTrack,
   VideoTimelineTrackType,
   VideoTimelineTransform,
@@ -368,6 +369,8 @@ interface VideoStudioState {
   updateClipVolume: (clipId: string, volume: number) => Promise<void>;
   updateClipFade: (clipId: string, fade: { fade_in_ms?: number; fade_out_ms?: number }) => Promise<void>;
   addTextClip: (text?: string, options?: { trackId?: string; startMs?: number }) => Promise<void>;
+  addShapeClip: (kind: VideoTimelineShape['kind'], options?: { trackId?: string; startMs?: number }) => Promise<void>;
+  updateClipShape: (clipId: string, patch: Partial<VideoTimelineShape>) => Promise<void>;
   updateClipText: (clipId: string, text: Partial<NonNullable<VideoTimelineClip['text']>>) => Promise<void>;
   addClipEffect: (clipId: string, effect: Omit<VideoTimelineEffect, 'id'>) => Promise<void>;
   toggleClipEffect: (clipId: string, effectId: string) => Promise<void>;
@@ -391,6 +394,7 @@ interface VideoStudioState {
   toggleTrackSolo: (trackId: string) => void;
   moveTrackToEdge: (trackId: string, edge: 'top' | 'bottom') => Promise<void>;
   selectClipsOnTrack: (trackId: string) => void;
+  setSelectedClips: (ids: string[]) => void;
   selectClipsRelativeToPlayhead: (which: 'before' | 'after') => void;
   selectAllClips: () => void;
   moveClipToAdjacentTrack: (clipId: string, direction: 'above' | 'below') => Promise<void>;
@@ -405,6 +409,8 @@ interface VideoStudioState {
   detachClipAudio: (clipId: string) => Promise<void>;
   addAssetAsMusicBed: (assetId: string) => Promise<void>;
   toggleFollowPlayhead: () => void;
+  duplicateProject: (projectId?: string) => Promise<void>;
+  createProjectFromVariant: (variant: VideoSocialVariant) => Promise<void>;
   addMarker: (timeMs?: number, label?: string) => Promise<void>;
   removeMarker: (markerId: string) => Promise<void>;
   updateClipZIndex: (clipId: string, zIndex: number) => Promise<void>;
@@ -435,7 +441,7 @@ interface VideoStudioState {
   requestStoryboard: () => Promise<void>;
   requestEditPlan: () => Promise<void>;
   requestTimelinePlan: () => Promise<void>;
-  applyAssistantPlan: () => Promise<void>;
+  applyAssistantPlan: (selectedIndices?: number[]) => Promise<void>;
   requestSocialVariants: () => Promise<void>;
 }
 
@@ -1680,6 +1686,62 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     await get().saveTimeline(next);
   },
 
+  addShapeClip: async (kind, options = {}) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    let track = (options.trackId ? next.tracks.find((item) => item.id === options.trackId && !item.locked) : undefined)
+      ?? [...next.tracks].reverse().find((item) => item.type === 'layer' && !item.locked);
+    if (!track) {
+      track = { id: newId('track'), type: 'layer', name: `Layer ${next.tracks.length + 1}`, locked: false, muted: false, visible: true, clips: [] };
+      next.tracks.push(track);
+    }
+    const canvas = next.canvas;
+    const size = { width: Math.round(canvas.width / 3), height: Math.round(canvas.height / 4) };
+    // Highlights default translucent via the transform; rectangles outline;
+    // blur regions redact whatever composites beneath them.
+    const shape: VideoTimelineShape = kind === 'highlight'
+      ? { kind, ...size, fill: '#facc15' }
+      : kind === 'blur'
+        ? { kind, ...size, blur_radius: 12 }
+        : { kind, ...size, stroke: '#f59e0b', stroke_width: 6 };
+    const clip: VideoTimelineClip = {
+      id: newId('clip'),
+      start_ms: Math.max(0, Math.round(options.startMs ?? get().playheadMs)),
+      duration_ms: 4000,
+      trim_in_ms: 0,
+      trim_out_ms: 4000,
+      transform: { ...defaultTransform(), opacity: kind === 'highlight' ? 0.4 : 1 },
+      shape,
+      effects: [],
+      keyframes: [],
+      transitions: [],
+    };
+    track.clips.push(clip);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: clip.id,
+      selectedClipIds: [clip.id],
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  updateClipShape: async (clipId, patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc || !loc.clip.shape) return;
+    loc.clip.shape = { ...loc.clip.shape, ...patch };
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
   addClipEffect: async (clipId, effect) => {
     const current = get().timeline;
     if (!current) return;
@@ -2008,6 +2070,11 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     await get().reorderTrack(trackId, edge === 'top' ? current.tracks.length - 1 : 0);
   },
 
+  setSelectedClips: (ids) => set({
+    selectedClipIds: ids,
+    selectedClipId: ids[ids.length - 1] || null,
+  }),
+
   selectClipsOnTrack: (trackId) => set((state) => {
     const track = state.timeline?.tracks.find((item) => item.id === trackId);
     if (!track || track.clips.length === 0) return {};
@@ -2261,6 +2328,35 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   },
 
   toggleFollowPlayhead: () => set((state) => ({ followPlayhead: !state.followPlayhead })),
+
+  duplicateProject: async (projectId) => {
+    const id = projectId ?? get().activeProjectId;
+    if (!id) return;
+    try {
+      const copy = await videoApi.duplicateProject(id);
+      await get().loadProjects();
+      await get().selectProject(copy.id);
+      toast.success('Project duplicated');
+    } catch (err) {
+      toast.error(`Failed to duplicate project: ${(err as Error).message}`);
+    }
+  },
+
+  createProjectFromVariant: async (variant) => {
+    const sourceId = get().activeProjectId;
+    if (!sourceId) return;
+    try {
+      const copy = await videoApi.duplicateProject(sourceId);
+      // Clip IDs survive duplication, so the variant's plan applies cleanly
+      // to the copied timeline.
+      await videoApi.assistant.applyEditPlan(copy.id, variant.plan);
+      await get().loadProjects();
+      await get().selectProject(copy.id);
+      toast.success(`Created "${variant.name}" variant project`);
+    } catch (err) {
+      toast.error(`Failed to create variant project: ${(err as Error).message}`);
+    }
+  },
 
   addMarker: async (timeMs, label) => {
     const current = get().timeline;
@@ -2524,13 +2620,19 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     }
   },
 
-  applyAssistantPlan: async () => {
+  applyAssistantPlan: async (selectedIndices) => {
     const projectId = get().activeProjectId;
     const plan = get().assistantPlan;
     if (!projectId || !plan) return;
+    // The backend annotates plans so operations[i] ↔ preview[i]; a selection
+    // applies just those operations.
+    const operations = selectedIndices
+      ? plan.operations.filter((_, index) => selectedIndices.includes(index))
+      : plan.operations;
+    if (operations.length === 0) return;
     const previous = get().timeline ? cloneTimeline(get().timeline as VideoTimelineDocument) : null;
     try {
-      const detail = await videoApi.assistant.applyEditPlan(projectId, plan);
+      const detail = await videoApi.assistant.applyEditPlan(projectId, { ...plan, operations });
       set((state) => ({
         timelineRecord: detail.timeline,
         timeline: detail.document,

@@ -420,21 +420,51 @@ func (h *VideoHandler) DownloadAsset(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, fullPath)
 }
 
+// DuplicateProject copies a project with all of its assets and its active
+// timeline (asset references remapped to the copies).
+func (h *VideoHandler) DuplicateProject(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadOwnedProject(w, r, chi.URLParam(r, "projectId"))
+	if !ok {
+		return
+	}
+	copyProject, err := h.service.DuplicateProject(r.Context(), auth.UserIDFromContext(r.Context()), project.ID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, copyProject)
+}
+
 // AssetArtifact serves a generated thumbnail or waveform image for an asset.
 func (h *VideoHandler) AssetArtifact(w http.ResponseWriter, r *http.Request) {
 	asset, ok := h.loadOwnedAsset(w, r, chi.URLParam(r, "assetId"))
 	if !ok {
 		return
 	}
+	artifact := chi.URLParam(r, "artifact")
+	if artifact != "thumbnail" && artifact != "waveform" {
+		respondError(w, http.StatusNotFound, "unknown artifact")
+		return
+	}
+	// Lazy backfill: assets ingested before artifact generation existed get
+	// their thumbnail/waveform rendered on first request.
+	if (asset.ThumbnailPath == nil || *asset.ThumbnailPath == "") && (asset.WaveformPath == nil || *asset.WaveformPath == "") {
+		if thumbRel, waveRel := video.GenerateAssetArtifacts(r.Context(), h.storageDir, asset.FilePath, asset.MimeType); thumbRel != "" || waveRel != "" {
+			if thumbRel != "" {
+				asset.ThumbnailPath = &thumbRel
+			}
+			if waveRel != "" {
+				asset.WaveformPath = &waveRel
+			}
+			_ = h.assetRepo.UpdateArtifacts(asset.ID, asset.ThumbnailPath, asset.WaveformPath)
+		}
+	}
 	var relPath *string
-	switch chi.URLParam(r, "artifact") {
+	switch artifact {
 	case "thumbnail":
 		relPath = asset.ThumbnailPath
 	case "waveform":
 		relPath = asset.WaveformPath
-	default:
-		respondError(w, http.StatusNotFound, "unknown artifact")
-		return
 	}
 	if relPath == nil || *relPath == "" {
 		respondError(w, http.StatusNotFound, "artifact not generated for this asset")

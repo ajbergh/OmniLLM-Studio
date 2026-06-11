@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DragHandle, useResizablePanels } from '../ResizablePanels';
-import { Check, Download, Film, LayoutGrid, LayoutTemplate, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, Upload, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Download, Film, LayoutGrid, LayoutTemplate, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, videoApi } from '../../api';
 import { useConversationStore, useSettingsStore } from '../../stores';
@@ -72,6 +72,8 @@ export function VideoEditStudio() {
     defaultRight: 340,
     storageKey: 'video-edit-studio-panels',
   });
+  const [collapsedLeft, setCollapsedLeft] = useState(false);
+  const [collapsedRight, setCollapsedRight] = useState(false);
   const isSavingTimeline = useVideoStudioStore((state) => state.isSavingTimeline);
 
   return (
@@ -160,28 +162,47 @@ export function VideoEditStudio() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
-        <aside className="min-h-0 overflow-y-auto border-b border-border bg-surface xl:border-b-0 xl:border-r" style={leftStyle}>
-          <div className="space-y-3 p-3">
-            <ProjectStrip
-              projects={projects}
-              activeProjectId={activeProjectId}
-              isLoading={isLoading}
-              onNew={() => { void createProject(); }}
-              onSelect={(id) => { void selectProject(id); }}
-            />
-            <AssetPanel
-              assets={assets}
-              activeAssetId={activeAsset?.id || null}
-              onSelect={selectAsset}
-              onAdd={(assetId) => { void addAssetToTimeline(assetId); }}
-              onRename={(assetId, name) => { void renameAsset(assetId, name); }}
-              onDelete={(assetId) => { void deleteAsset(assetId); }}
-              onUpload={uploadAsset}
-            />
-          </div>
-        </aside>
+        {collapsedLeft ? (
+          <button
+            onClick={() => setCollapsedLeft(false)}
+            className="hidden w-6 shrink-0 items-center justify-center border-r border-border bg-surface text-text-muted hover:text-text xl:flex"
+            title="Expand media panel"
+            aria-label="Expand media panel"
+          >
+            <ChevronRight size={14} />
+          </button>
+        ) : (
+          <aside className="relative min-h-0 overflow-y-auto border-b border-border bg-surface xl:border-b-0 xl:border-r" style={leftStyle}>
+            <button
+              onClick={() => setCollapsedLeft(true)}
+              className="absolute right-1 top-1 z-10 hidden rounded p-1 text-text-muted hover:text-text xl:block"
+              title="Collapse media panel"
+              aria-label="Collapse media panel"
+            >
+              <ChevronLeft size={13} />
+            </button>
+            <div className="space-y-3 p-3">
+              <ProjectStrip
+                projects={projects}
+                activeProjectId={activeProjectId}
+                isLoading={isLoading}
+                onNew={() => { void createProject(); }}
+                onSelect={(id) => { void selectProject(id); }}
+              />
+              <AssetPanel
+                assets={assets}
+                activeAssetId={activeAsset?.id || null}
+                onSelect={selectAsset}
+                onAdd={(assetId) => { void addAssetToTimeline(assetId); }}
+                onRename={(assetId, name) => { void renameAsset(assetId, name); }}
+                onDelete={(assetId) => { void deleteAsset(assetId); }}
+                onUpload={uploadAsset}
+              />
+            </div>
+          </aside>
+        )}
 
-        <DragHandle onMouseDown={startLeft} />
+        {!collapsedLeft && <DragHandle onMouseDown={startLeft} />}
 
         <main className="flex min-h-[620px] min-w-0 flex-1 flex-col bg-surface">
           <section className="min-h-0 flex-1 border-b border-border p-3">
@@ -192,19 +213,38 @@ export function VideoEditStudio() {
           </section>
         </main>
 
-        <DragHandle onMouseDown={startRight} />
+        {!collapsedRight && <DragHandle onMouseDown={startRight} />}
 
-        <aside className="min-h-0 overflow-y-auto border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
-          <VideoInspector />
-          {modeFeatures.captionsPanel && (
+        {collapsedRight ? (
+          <button
+            onClick={() => setCollapsedRight(false)}
+            className="hidden w-6 shrink-0 items-center justify-center border-l border-border bg-surface-raised text-text-muted hover:text-text xl:flex"
+            title="Expand inspector panel"
+            aria-label="Expand inspector panel"
+          >
+            <ChevronLeft size={14} />
+          </button>
+        ) : (
+          <aside className="relative min-h-0 overflow-y-auto border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
+            <button
+              onClick={() => setCollapsedRight(true)}
+              className="absolute left-1 top-1 z-10 hidden rounded p-1 text-text-muted hover:text-text xl:block"
+              title="Collapse inspector panel"
+              aria-label="Collapse inspector panel"
+            >
+              <ChevronRight size={13} />
+            </button>
+            <VideoInspector />
+            {modeFeatures.captionsPanel && (
+              <div className="px-3 pb-3">
+                <VideoCaptionPanel />
+              </div>
+            )}
             <div className="px-3 pb-3">
-              <VideoCaptionPanel />
+              <VideoRenderPanel />
             </div>
-          )}
-          <div className="px-3 pb-3">
-            <VideoRenderPanel />
-          </div>
-        </aside>
+          </aside>
+        )}
       </div>
     </div>
   );
@@ -223,6 +263,9 @@ function ProjectStrip({
   onNew: () => void;
   onSelect: (id: string) => void;
 }) {
+  const [menu, setMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
+  const duplicateProject = useVideoStudioStore((state) => state.duplicateProject);
+  const deleteProject = useVideoStudioStore((state) => state.deleteProject);
   return (
     <section className="rounded-lg border border-border bg-surface-alt p-3">
       <div className="mb-3 flex items-center justify-between">
@@ -253,6 +296,10 @@ function ProjectStrip({
             <button
               key={project.id}
               onClick={() => onSelect(project.id)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setMenu({ projectId: project.id, x: event.clientX, y: event.clientY });
+              }}
               className={`w-full rounded-lg px-3 py-2 text-left text-xs transition-colors ${
                 project.id === activeProjectId
                   ? 'border border-primary/30 bg-primary/10 text-primary'
@@ -265,6 +312,23 @@ function ProjectStrip({
           ))
         )}
       </div>
+      {menu && (() => {
+        const project = projects.find((item) => item.id === menu.projectId);
+        if (!project) return null;
+        const items: ContextMenuEntry[] = [
+          { label: 'Open project', action: () => onSelect(project.id) },
+          { label: 'Duplicate project (with assets)', action: () => { void duplicateProject(project.id); } },
+          'divider',
+          {
+            label: 'Delete project',
+            danger: true,
+            action: () => {
+              if (window.confirm(`Delete "${project.title}" and all of its assets?`)) void deleteProject(project.id);
+            },
+          },
+        ];
+        return <ContextMenu position={{ x: menu.x, y: menu.y }} items={items} onClose={() => setMenu(null)} />;
+      })()}
     </section>
   );
 }
@@ -278,6 +342,12 @@ const ASSET_FILTERS = [
 ] as const;
 
 type AssetFilterKey = (typeof ASSET_FILTERS)[number]['key'];
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1 << 30) return `${(bytes / (1 << 30)).toFixed(1)} GB`;
+  if (bytes >= 1 << 20) return `${(bytes / (1 << 20)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
 
 function assetMatchesFilter(asset: VideoAsset, filter: AssetFilterKey): boolean {
   if (filter === 'all') return true;
@@ -527,7 +597,12 @@ function AssetPanel({
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-text">Media Bin</h2>
         <div className="flex items-center gap-1">
-          <span className="text-[11px] text-text-muted">{filtered.length}</span>
+          <span
+            className="text-[11px] text-text-muted"
+            title={`${assets.length} asset${assets.length === 1 ? '' : 's'} using ${formatBytes(assets.reduce((sum, asset) => sum + asset.size_bytes, 0))} of storage`}
+          >
+            {filtered.length} · {formatBytes(assets.reduce((sum, asset) => sum + asset.size_bytes, 0))}
+          </span>
           <input
             ref={fileInputRef}
             type="file"

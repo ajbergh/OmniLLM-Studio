@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, Sparkles, Trash2, Type } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import { ContextMenu } from '../common/ContextMenu';
@@ -98,6 +98,7 @@ export function VideoInspector() {
   const toggleClipMute = useVideoStudioStore((state) => state.toggleClipMute);
   const updateClipFade = useVideoStudioStore((state) => state.updateClipFade);
   const updateClipText = useVideoStudioStore((state) => state.updateClipText);
+  const updateClipShape = useVideoStudioStore((state) => state.updateClipShape);
   const addClipEffect = useVideoStudioStore((state) => state.addClipEffect);
   const toggleClipEffect = useVideoStudioStore((state) => state.toggleClipEffect);
   const removeClipEffect = useVideoStudioStore((state) => state.removeClipEffect);
@@ -123,6 +124,21 @@ export function VideoInspector() {
   const clip = selectedClip();
   const [rowMenu, setRowMenu] = useState<{ kind: 'effect' | 'transition' | 'keyframe'; id: string; x: number; y: number } | null>(null);
   const [planMenu, setPlanMenu] = useState<{ x: number; y: number } | null>(null);
+  const [variantMenu, setVariantMenu] = useState<{ name: string; x: number; y: number } | null>(null);
+  const createProjectFromVariant = useVideoStudioStore((state) => state.createProjectFromVariant);
+  // Unchecked plan operations are skipped on apply; a fresh plan starts with
+  // everything included.
+  const [planExcluded, setPlanExcluded] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    setPlanExcluded(new Set());
+  }, [assistantPlan]);
+  const planTotal = assistantPlan?.preview?.length ?? assistantPlan?.operations.length ?? 0;
+  const planSelectedCount = planTotal - planExcluded.size;
+  const applySelectedPlan = () => {
+    if (!assistantPlan) return;
+    const selected = Array.from({ length: planTotal }, (_, index) => index).filter((index) => !planExcluded.has(index));
+    void applyAssistantPlan(selected.length === planTotal ? undefined : selected);
+  };
 
   return (
     <div className="min-h-0 overflow-y-auto p-3">
@@ -170,12 +186,28 @@ export function VideoInspector() {
           >
             <p className="text-xs font-medium text-text">{assistantPlan.summary}</p>
             <p className="mt-1 text-[11px] text-text-muted">
-              {(assistantPlan.preview?.length ?? assistantPlan.operations.length)} valid operation{(assistantPlan.preview?.length ?? assistantPlan.operations.length) === 1 ? '' : 's'}
+              {planSelectedCount} of {planTotal} operation{planTotal === 1 ? '' : 's'} selected
             </p>
             {assistantPlan.preview && assistantPlan.preview.length > 0 && (
               <ul className="mt-1.5 space-y-0.5">
                 {assistantPlan.preview.map((line, index) => (
-                  <li key={index} className="text-[10px] text-text-secondary">• {line}</li>
+                  <li key={index} className="flex items-start gap-1.5 text-[10px] text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={!planExcluded.has(index)}
+                      onChange={() => {
+                        setPlanExcluded((excluded) => {
+                          const next = new Set(excluded);
+                          if (next.has(index)) next.delete(index);
+                          else next.add(index);
+                          return next;
+                        });
+                      }}
+                      className="mt-0.5 shrink-0"
+                      aria-label={`Include operation: ${line}`}
+                    />
+                    <span className={planExcluded.has(index) ? 'opacity-50 line-through' : ''}>{line}</span>
+                  </li>
                 ))}
               </ul>
             )}
@@ -188,10 +220,10 @@ export function VideoInspector() {
             )}
             <button
               className="mt-2 min-h-8 rounded-md bg-primary px-2 text-xs font-medium text-white disabled:opacity-50"
-              disabled={(assistantPlan.preview?.length ?? assistantPlan.operations.length) === 0}
-              onClick={() => { void applyAssistantPlan(); }}
+              disabled={planSelectedCount === 0}
+              onClick={applySelectedPlan}
             >
-              Apply
+              {planSelectedCount < planTotal ? `Apply ${planSelectedCount} selected` : 'Apply'}
             </button>
           </div>
         )}
@@ -209,9 +241,21 @@ export function VideoInspector() {
         {socialVariants.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1">
             {socialVariants.map((variant) => (
-              <span key={variant.name} className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[10px] text-text-muted">
+              <button
+                key={variant.name}
+                onClick={(event) => {
+                  event.preventDefault();
+                  setVariantMenu({ name: variant.name, x: event.clientX, y: event.clientY });
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setVariantMenu({ name: variant.name, x: event.clientX, y: event.clientY });
+                }}
+                className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[10px] text-text-muted hover:text-text"
+                title="Click for variant actions"
+              >
                 {variant.name}
-              </span>
+              </button>
             ))}
           </div>
         )}
@@ -545,6 +589,90 @@ export function VideoInspector() {
                 </Field>
               </>
             )}
+            {clip.shape && (
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Shape width">
+                  <input
+                    type="number"
+                    min={2}
+                    key={`sw-${clip.id}-${clip.shape.width ?? ''}`}
+                    defaultValue={clip.shape.width || 320}
+                    onBlur={(event) => {
+                      const width = Math.max(2, Math.round(Number(event.target.value)));
+                      if (Number.isFinite(width) && width !== clip.shape?.width) void updateClipShape(clip.id, { width });
+                    }}
+                    onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                    className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                  />
+                </Field>
+                <Field label="Shape height">
+                  <input
+                    type="number"
+                    min={2}
+                    key={`sh-${clip.id}-${clip.shape.height ?? ''}`}
+                    defaultValue={clip.shape.height || 180}
+                    onBlur={(event) => {
+                      const height = Math.max(2, Math.round(Number(event.target.value)));
+                      if (Number.isFinite(height) && height !== clip.shape?.height) void updateClipShape(clip.id, { height });
+                    }}
+                    onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                    className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                  />
+                </Field>
+                {clip.shape.kind === 'highlight' ? (
+                  <Field label="Fill">
+                    <input
+                      type="color"
+                      value={/^#[0-9a-fA-F]{6}$/.test(clip.shape.fill || '') ? (clip.shape.fill as string) : '#facc15'}
+                      onChange={(event) => { void updateClipShape(clip.id, { fill: event.target.value }); }}
+                      className="h-8 w-full cursor-pointer rounded-md border border-border bg-surface-alt"
+                    />
+                  </Field>
+                ) : clip.shape.kind === 'blur' ? (
+                  <Field label="Blur radius">
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      key={`br-${clip.id}-${clip.shape.blur_radius ?? ''}`}
+                      defaultValue={clip.shape.blur_radius || 12}
+                      onBlur={(event) => {
+                        const blurRadius = Math.max(1, Math.min(50, Math.round(Number(event.target.value))));
+                        if (Number.isFinite(blurRadius) && blurRadius !== clip.shape?.blur_radius) void updateClipShape(clip.id, { blur_radius: blurRadius });
+                      }}
+                      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                      className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                    />
+                  </Field>
+                ) : (
+                  <>
+                    <Field label="Stroke">
+                      <input
+                        type="color"
+                        value={/^#[0-9a-fA-F]{6}$/.test(clip.shape.stroke || '') ? (clip.shape.stroke as string) : '#f59e0b'}
+                        onChange={(event) => { void updateClipShape(clip.id, { stroke: event.target.value }); }}
+                        className="h-8 w-full cursor-pointer rounded-md border border-border bg-surface-alt"
+                      />
+                    </Field>
+                    <Field label="Stroke width">
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        key={`stw-${clip.id}-${clip.shape.stroke_width ?? ''}`}
+                        defaultValue={clip.shape.stroke_width || 6}
+                        onBlur={(event) => {
+                          const strokeWidth = Math.max(1, Math.min(100, Math.round(Number(event.target.value))));
+                          if (Number.isFinite(strokeWidth) && strokeWidth !== clip.shape?.stroke_width) void updateClipShape(clip.id, { stroke_width: strokeWidth });
+                        }}
+                        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                        className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                      />
+                    </Field>
+                  </>
+                )}
+              </div>
+            )}
             {modeFeatures.effectControls && (
             <div className="grid grid-cols-1 gap-2">
               <select
@@ -839,9 +967,9 @@ export function VideoInspector() {
       {planMenu && assistantPlan && (() => {
         const items: ContextMenuEntry[] = [
           {
-            label: 'Apply plan',
-            disabled: (assistantPlan.preview?.length ?? assistantPlan.operations.length) === 0,
-            action: () => { void applyAssistantPlan(); },
+            label: planSelectedCount < planTotal ? `Apply ${planSelectedCount} selected` : 'Apply plan',
+            disabled: planSelectedCount === 0,
+            action: applySelectedPlan,
           },
           'divider',
           { label: 'Copy plan JSON', action: () => { void navigator.clipboard.writeText(JSON.stringify(assistantPlan, null, 2)); } },
@@ -850,6 +978,18 @@ export function VideoInspector() {
           { label: 'Dismiss plan', danger: true, action: () => useVideoStudioStore.setState({ assistantPlan: null }) },
         ];
         return <ContextMenu position={planMenu} items={items} onClose={() => setPlanMenu(null)} />;
+      })()}
+      {variantMenu && (() => {
+        const variant = socialVariants.find((item) => item.name === variantMenu.name);
+        if (!variant) return null;
+        const items: ContextMenuEntry[] = [
+          {
+            label: 'Create project with this variant',
+            action: () => { void createProjectFromVariant(variant); },
+          },
+          { label: 'Copy plan JSON', action: () => { void navigator.clipboard.writeText(JSON.stringify(variant.plan, null, 2)); } },
+        ];
+        return <ContextMenu position={{ x: variantMenu.x, y: variantMenu.y }} items={items} onClose={() => setVariantMenu(null)} />;
       })()}
       {rowMenu && clip && (() => {
         let items: ContextMenuEntry[] = [];

@@ -40,6 +40,7 @@ Current FFmpeg export coverage:
 - **Per-clip transform** — `x`/`y` position offset, `scale`, **`rotation`** (via `rotate` with transparent fill), and fractional `crop` (`{top, right, bottom, left}`, 0–0.95 each).
 - **Position keyframes** — keyframed `x`/`y` animate via piecewise-linear `overlay` time expressions (keyframe `time_ms` is clip-relative; easing curves are approximated linearly).
 - **Volume keyframes** — keyframed `volume` exports as a frame-evaluated `volume` filter expression and overrides the static clip volume.
+- **Rotation keyframes** — keyframed `rotation` exports via a per-frame `rotate` angle expression inside a fixed diagonal bounding box, overriding static rotation.
 - **Opacity** — applied via `colorchannelmixer`.
 - **Fades** — video fade in/out as alpha fades; audio fade in/out via `afade`.
 - **Transitions** — `fade`, `crossfade`, and `dip_to_black` render as alpha fades; `slide` renders as an animated overlay position (enters from the chosen edge, exits the opposite edge).
@@ -50,6 +51,7 @@ Current FFmpeg export coverage:
 - **Track semantics** — hidden tracks drop their video (their video clips' audio still mixes); muted tracks drop their audio.
 - **Layer-order compositing** — visual clips (media and text alike) composite bottom-to-top by track array order, then `z_index`, then start time, matching the preview. Start time controls only when a clip is enabled, never its stacking. Text clips on any visible track (including generic `layer` tracks) interleave into the same compositing chain, so a text clip on a lower layer renders beneath media on a higher layer.
 - Text/caption/callout clips with timing, font size, text color, optional background box, stroke, and shadow.
+- **Callout shapes** — `rectangle` (outlined) and `highlight` (filled) shape clips render via `drawbox` at the clip's transform position/scale, with the transform opacity folded into the box color; a callout's text label draws above its own box. `blur` regions render via a split→crop→boxblur→overlay subgraph, blurring whatever has composited beneath them (preview uses CSS backdrop-filter for the same semantics).
 - Render diagnostics — the FFmpeg command (and stderr on failure) is persisted in `video_render_jobs.metadata_json`.
 - Clear render failure if `ffmpeg` is unavailable or returns an encoding error.
 
@@ -57,7 +59,7 @@ Current FFmpeg export coverage:
 
 The following are stored in the timeline JSON and shown in the editor but are **not yet applied by the FFmpeg renderer**:
 
-- Keyframes for `scale`, `rotation`, and `opacity` (position and volume keyframes render; easing curves are linearized)
+- Keyframes for `scale` and `opacity` (position, volume, and rotation keyframes render; easing curves are linearized)
 - `wipe`/`zoom` transitions (true `xfade` directional transitions)
 - `shadow` and `background_blur` effects
 - Text letter spacing, border radius, and alignment (preview-only)

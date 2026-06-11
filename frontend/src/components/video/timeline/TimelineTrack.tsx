@@ -189,6 +189,7 @@ export function TimelineTrack({
       <div
         className="relative bg-surface"
         style={{ width }}
+        data-lane={track.id}
         onDragOver={(event) => {
           if (!track.locked && (event.dataTransfer.types.includes('application/x-video-clip-id') || event.dataTransfer.types.includes('application/x-video-asset-id'))) {
             event.preventDefault();

@@ -4,6 +4,7 @@ import type { VideoAsset, VideoTimelineClip as Clip } from '../../../types/video
 
 function clipLabel(clip: Clip, asset?: VideoAsset): string {
   if (clip.text?.text) return clip.text.text;
+  if (clip.shape) return clip.shape.kind === 'highlight' ? 'Highlight' : clip.shape.kind === 'blur' ? 'Blur region' : 'Callout box';
   return asset?.file_name || clip.asset_id || 'Clip';
 }
 
@@ -32,7 +33,7 @@ export function TimelineClip({
 }) {
   const left = clip.start_ms * pxPerMs;
   const width = Math.max(36, clip.duration_ms * pxPerMs);
-  const kind = asset?.kind || (clip.text ? 'text' : 'video');
+  const kind = asset?.kind || (clip.text ? 'text' : clip.shape ? 'caption' : 'video');
   const tone =
     kind === 'audio' || kind === 'music'
       ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-200'
@@ -79,6 +80,7 @@ export function TimelineClip({
       role="button"
       tabIndex={0}
       draggable
+      data-clip-id={clip.id}
       onDragStart={(event) => {
         event.dataTransfer.setData('application/x-video-clip-id', clip.id);
         // Remember where inside the clip the drag started so drops keep the

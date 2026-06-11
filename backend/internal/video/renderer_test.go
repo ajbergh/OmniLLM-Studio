@@ -62,10 +62,3 @@ func TestFFmpegRendererProducesVideoAsset(t *testing.T) {
 		t.Fatalf("expected MP4 ftyp box near start")
 	}
 }
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

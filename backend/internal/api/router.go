@@ -421,6 +421,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 					r.Get("/", videoHandler.GetProject)
 					r.Patch("/", videoHandler.UpdateProject)
 					r.Delete("/", videoHandler.DeleteProject)
+					r.Post("/duplicate", videoHandler.DuplicateProject)
 					r.Get("/generations", videoHandler.ListGenerations)
 					r.Get("/assets", videoHandler.ListAssets)
 					r.Post("/assets/upload", videoHandler.UploadAsset)

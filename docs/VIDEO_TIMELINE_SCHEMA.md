@@ -68,6 +68,13 @@ Important fields:
 - `muted`: silences the clip's audio contribution without touching `volume`.
 - `audio_only`: suppresses a clip's visual output so a video asset acts as
   detached audio (created by the editor's "Detach audio" command).
+- `shape`: parameterized callout/annotation box — `kind` (`rectangle` |
+  `highlight` | `blur`), `width`/`height` in canvas pixels (defaults 320×180),
+  `fill` (highlight), `stroke` + `stroke_width` (rectangle, clamped 0–100),
+  `blur_radius` (blur regions, clamped 1–50, default 12). Position/scale/
+  opacity come from the clip transform; a clip may carry both a shape and
+  `text` (the label draws above its box). Blur regions redact whatever
+  composites beneath them.
 - `transform`: x, y, scale, rotation, opacity, and optional fractional crop (`{top, right, bottom, left}`, each 0–0.95).
 - `text`: text payload and styling — `font_family`, `font_size`, `font_weight`, `color`, `background`, `stroke`, `stroke_width`, `shadow`, `text_align`, `line_height`, `letter_spacing`, `border_radius`. Some styling fields are preview-only; export support is reported by `GET /v1/video/render/capabilities`.
 - `effects`: ordered effect definitions. Allowed types: `blur`, `brightness`, `contrast`, `saturation`, `grayscale`, `shadow`, `background_blur`, `chroma_key`, `sharpen`, `vignette`.

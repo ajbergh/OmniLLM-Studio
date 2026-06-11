@@ -439,7 +439,8 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 			continue
 		}
 		for _, clip := range track.Clips {
-			if clip.Text == nil || strings.TrimSpace(clip.Text.Text) == "" {
+			hasText := clip.Text != nil && strings.TrimSpace(clip.Text.Text) != ""
+			if !hasText && clip.Shape == nil {
 				continue
 			}
 			items = append(items, visualItem{clip: clip, trackIndex: trackIndex})
@@ -462,14 +463,30 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 
 	for _, item := range items {
 		if item.media == nil {
-			filter := drawTextFilter(item.clip, *item.clip.Text, width, height)
-			if filter == "" {
-				continue
+			// A callout can carry both a shape and a label: the box composites
+			// beneath its own text.
+			if item.clip.Shape != nil && item.clip.Shape.Kind == ShapeKindBlur {
+				if blurParts, outLabel := blurRegionParts(prevV, item.clip, *item.clip.Shape, width, height, textIdx); len(blurParts) > 0 {
+					parts = append(parts, blurParts...)
+					prevV = outLabel
+					textIdx++
+				}
+			} else if item.clip.Shape != nil {
+				if filter := drawBoxFilter(item.clip, *item.clip.Shape, width, height); filter != "" {
+					outLabel := fmt.Sprintf("[t%d_v]", textIdx)
+					parts = append(parts, prevV+filter+outLabel)
+					prevV = outLabel
+					textIdx++
+				}
 			}
-			outLabel := fmt.Sprintf("[t%d_v]", textIdx)
-			parts = append(parts, prevV+filter+outLabel)
-			prevV = outLabel
-			textIdx++
+			if item.clip.Text != nil && strings.TrimSpace(item.clip.Text.Text) != "" {
+				if filter := drawTextFilter(item.clip, *item.clip.Text, width, height); filter != "" {
+					outLabel := fmt.Sprintf("[t%d_v]", textIdx)
+					parts = append(parts, prevV+filter+outLabel)
+					prevV = outLabel
+					textIdx++
+				}
+			}
 			continue
 		}
 		rc := *item.media
@@ -496,7 +513,12 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 		chain = append(chain, fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease", scaledW, scaledH))
 		chain = append(chain, effectFilters(rc.clip.Effects)...)
 		chain = append(chain, "format=rgba")
-		if tr.rotation != 0 {
+		if expr := positionKeyframeExpr(rc.clip.Keyframes, "rotation", 0); expr != "" {
+			// rotate evaluates the angle per frame; after setpts the stream's
+			// t is clip-relative, matching keyframe times. A fixed diagonal
+			// bounding box keeps the output size constant while rotating.
+			chain = append(chain, fmt.Sprintf("rotate=a='(%s)*PI/180':c=black@0:ow='hypot(iw\\,ih)':oh=ow", expr))
+		} else if tr.rotation != 0 {
 			// Rotate after format=rgba so the expanded corners stay transparent.
 			rad := tr.rotation * math.Pi / 180.0
 			chain = append(chain, fmt.Sprintf("rotate=%.6f:c=black@0:ow=rotw(%.6f):oh=roth(%.6f)", rad, rad, rad))
@@ -590,6 +612,11 @@ func ffmpegVideoFilters(doc TimelineDocument, width, height int) string {
 			continue
 		}
 		for _, clip := range track.Clips {
+			if clip.Shape != nil {
+				if filter := drawBoxFilter(clip, *clip.Shape, width, height); filter != "" {
+					filters = append(filters, filter)
+				}
+			}
 			if clip.Text == nil || strings.TrimSpace(clip.Text.Text) == "" {
 				continue
 			}
@@ -600,6 +627,89 @@ func ffmpegVideoFilters(doc TimelineDocument, width, height int) string {
 		}
 	}
 	return strings.Join(filters, ",")
+}
+
+// blurRegionParts blurs the composited frame beneath a blur-region shape:
+// the chain so far splits, the region crops out and blurs, and the blurred
+// patch overlays back at the same position during the clip's window. Returns
+// the graph parts and the chain's new output label.
+func blurRegionParts(prev string, clip TimelineClip, shape TimelineShape, width, height, idx int) ([]string, string) {
+	tr := parseClipTransform(clip.Transform)
+	boxW := shape.Width
+	boxH := shape.Height
+	if boxW <= 0 || boxH <= 0 {
+		return nil, ""
+	}
+	if tr.scale != 1 {
+		boxW = maxInt(2, int(float64(boxW)*tr.scale+0.5))
+		boxH = maxInt(2, int(float64(boxH)*tr.scale+0.5))
+	}
+	// crop requires the region fully inside the frame.
+	if boxW > width {
+		boxW = width
+	}
+	if boxH > height {
+		boxH = height
+	}
+	x := (width-boxW)/2 + int(tr.x)
+	y := (height-boxH)/2 + int(tr.y)
+	x = maxInt(0, minInt(x, width-boxW))
+	y = maxInt(0, minInt(y, height-boxH))
+	radius := int(shape.BlurRadius + 0.5)
+	if radius <= 0 {
+		radius = 12
+	}
+	startS := float64(clip.StartMS) / 1000.0
+	endS := float64(clip.StartMS+clip.DurationMS) / 1000.0
+	srcLabel := fmt.Sprintf("[bbs%d]", idx)
+	baseLabel := fmt.Sprintf("[bbb%d]", idx)
+	blurLabel := fmt.Sprintf("[bbl%d]", idx)
+	outLabel := fmt.Sprintf("[t%d_v]", idx)
+	return []string{
+		prev + "split" + srcLabel + baseLabel,
+		fmt.Sprintf("%scrop=%d:%d:%d:%d,boxblur=%d%s", srcLabel, boxW, boxH, x, y, radius, blurLabel),
+		fmt.Sprintf("%s%soverlay=%d:%d:enable='between(t\\,%.3f\\,%.3f)'%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),
+	}, outLabel
+}
+
+// drawBoxFilter renders a rectangle or highlight shape via FFmpeg drawbox.
+// Position derives from the clip transform (offsets from canvas center) and
+// scale multiplies the shape dimensions, matching the preview. The static
+// transform opacity folds into the box color's alpha.
+func drawBoxFilter(clip TimelineClip, shape TimelineShape, width, height int) string {
+	tr := parseClipTransform(clip.Transform)
+	boxW := shape.Width
+	boxH := shape.Height
+	if boxW <= 0 || boxH <= 0 {
+		return ""
+	}
+	if tr.scale != 1 {
+		boxW = maxInt(2, int(float64(boxW)*tr.scale+0.5))
+		boxH = maxInt(2, int(float64(boxH)*tr.scale+0.5))
+	}
+	x := (width-boxW)/2 + int(tr.x)
+	y := (height-boxH)/2 + int(tr.y)
+	startS := float64(clip.StartMS) / 1000.0
+	endS := float64(clip.StartMS+clip.DurationMS) / 1000.0
+	opacity := clampFloat(tr.opacity, 0, 1)
+	if opacity <= 0 {
+		return ""
+	}
+	enable := fmt.Sprintf("enable='between(t\\,%.3f\\,%.3f)'", startS, endS)
+	switch shape.Kind {
+	case ShapeKindHighlight:
+		color := ffmpegColor(shape.Fill, "0xFACC15")
+		return fmt.Sprintf("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@%.3f:t=fill:%s", x, y, boxW, boxH, color, opacity, enable)
+	case ShapeKindRectangle:
+		color := ffmpegColor(shape.Stroke, "0xF59E0B")
+		thickness := int(shape.StrokeWidth + 0.5)
+		if thickness <= 0 {
+			thickness = 4
+		}
+		return fmt.Sprintf("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@%.3f:t=%d:%s", x, y, boxW, boxH, color, opacity, thickness, enable)
+	default:
+		return ""
+	}
 }
 
 func drawTextFilter(clip TimelineClip, text TimelineText, width, height int) string {
@@ -1009,6 +1119,13 @@ func countTextClips(doc TimelineDocument) int {
 
 func maxInt(a, b int) int {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func minInt(a, b int) int {
+	if a < b {
 		return a
 	}
 	return b

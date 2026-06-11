@@ -211,6 +211,35 @@ func TestAddAssetToTimelineLegacyAutoRouting(t *testing.T) {
 	}
 }
 
+func TestValidateTimelineDocumentShapes(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks[0].Clips = []TimelineClip{{
+		ID:         "clip-shape",
+		StartMS:    0,
+		DurationMS: 3000,
+		Shape:      &TimelineShape{Kind: "RECTANGLE", StrokeWidth: 500},
+	}}
+	validated, err := ValidateTimelineDocument(doc)
+	if err != nil {
+		t.Fatalf("shape clip failed validation: %v", err)
+	}
+	shape := validated.Tracks[0].Clips[0].Shape
+	if shape.Kind != ShapeKindRectangle {
+		t.Errorf("shape kind not normalized: %q", shape.Kind)
+	}
+	if shape.Width != 320 || shape.Height != 180 {
+		t.Errorf("shape default dimensions not applied: %dx%d", shape.Width, shape.Height)
+	}
+	if shape.StrokeWidth != 100 {
+		t.Errorf("stroke width not clamped: %f", shape.StrokeWidth)
+	}
+
+	doc.Tracks[0].Clips[0].Shape = &TimelineShape{Kind: "starburst"}
+	if _, err := ValidateTimelineDocument(doc); err == nil {
+		t.Fatalf("expected unknown shape kind to be rejected")
+	}
+}
+
 func TestKindForAssetOrMimeFallback(t *testing.T) {
 	cases := []struct {
 		kind string

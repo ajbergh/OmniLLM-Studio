@@ -52,14 +52,19 @@ type EditOperation struct {
 	Type       string `json:"type"`
 	ClipID     string `json:"clip_id,omitempty"`
 	TrackID    string `json:"track_id,omitempty"`
+	AssetID    string `json:"asset_id,omitempty"`
 	StartMS    int64  `json:"start_ms,omitempty"`
 	DurationMS int64  `json:"duration_ms,omitempty"`
 	Text       string `json:"text,omitempty"`
 	Width      int    `json:"width,omitempty"`
 	Height     int    `json:"height,omitempty"`
 	FPS        int    `json:"fps,omitempty"`
-	// Volume is a pointer so set_volume can distinguish "mute" (0) from unset.
-	Volume *float64 `json:"volume,omitempty"`
+	// Pointer values distinguish "set to zero" from unset.
+	Volume  *float64 `json:"volume,omitempty"`
+	X       *float64 `json:"x,omitempty"`
+	Y       *float64 `json:"y,omitempty"`
+	Scale   *float64 `json:"scale,omitempty"`
+	Opacity *float64 `json:"opacity,omitempty"`
 }
 
 type SocialVariant struct {
@@ -314,11 +319,16 @@ Output ONLY a JSON object matching this schema (no markdown, no explanation):
       "width": <optional integer>,
       "height": <optional integer>,
       "fps": <optional integer>,
-      "volume": <optional number 0-2>
+      "volume": <optional number 0-2>,
+      "asset_id": "<optional asset id>",
+      "x": <optional number, px offset from canvas center>,
+      "y": <optional number, px offset from canvas center>,
+      "scale": <optional number 0.05-4>,
+      "opacity": <optional number 0-1>
     }
   ]
 }
-Valid operation types: set_canvas, set_duration, add_text_clip, move_clip, trim_clip, delete_clip, set_volume, add_marker.
+Valid operation types: set_canvas, set_duration, add_text_clip, move_clip, trim_clip, delete_clip, set_volume, add_marker, add_asset_clip, set_transform.
 - set_canvas: provide width, height, fps
 - set_duration: provide duration_ms
 - add_text_clip: provide track_id, start_ms, duration_ms, text
@@ -327,6 +337,8 @@ Valid operation types: set_canvas, set_duration, add_text_clip, move_clip, trim_
 - delete_clip: provide clip_id
 - set_volume: provide clip_id and volume (0 mutes, 1 is unity, up to 2)
 - add_marker: provide start_ms and optionally text as the marker label
+- add_asset_clip: provide asset_id, start_ms, duration_ms, and optionally track_id
+- set_transform: provide clip_id and any of x, y, scale, opacity
 Reference ONLY clip ids and track ids that appear in the timeline context. Never invent ids.
 Only include fields relevant to the operation type. Do not include null or zero values for optional fields.`
 
@@ -628,6 +640,50 @@ func ValidateEditPlanOperations(doc TimelineDocument, plan EditPlan) (valid []Ed
 			}
 			valid = append(valid, op)
 			preview = append(preview, fmt.Sprintf("Add marker %q at %.1fs", label, float64(op.StartMS)/1000))
+		case "add_asset_clip":
+			if strings.TrimSpace(op.AssetID) == "" || op.DurationMS <= 0 {
+				issues = append(issues, describeIdx+": requires asset_id and duration_ms")
+				continue
+			}
+			if op.TrackID != "" {
+				trackExists := false
+				for _, track := range doc.Tracks {
+					if track.ID == op.TrackID {
+						trackExists = true
+						break
+					}
+				}
+				if !trackExists {
+					issues = append(issues, describeIdx+": track "+op.TrackID+" does not exist")
+					continue
+				}
+			}
+			valid = append(valid, op)
+			preview = append(preview, fmt.Sprintf("Add asset %s at %.1fs for %.1fs", op.AssetID, float64(maxInt64(0, op.StartMS))/1000, float64(op.DurationMS)/1000))
+		case "set_transform":
+			if op.ClipID == "" || (op.X == nil && op.Y == nil && op.Scale == nil && op.Opacity == nil) {
+				issues = append(issues, describeIdx+": requires clip_id and at least one of x, y, scale, opacity")
+				continue
+			}
+			if _, _, ok := findTimelineClip(doc, op.ClipID); !ok {
+				issues = append(issues, describeIdx+": clip "+op.ClipID+" does not exist in the timeline")
+				continue
+			}
+			var changes []string
+			if op.X != nil {
+				changes = append(changes, fmt.Sprintf("x=%.0f", *op.X))
+			}
+			if op.Y != nil {
+				changes = append(changes, fmt.Sprintf("y=%.0f", *op.Y))
+			}
+			if op.Scale != nil {
+				changes = append(changes, fmt.Sprintf("scale=%.2f", *op.Scale))
+			}
+			if op.Opacity != nil {
+				changes = append(changes, fmt.Sprintf("opacity=%.2f", *op.Opacity))
+			}
+			valid = append(valid, op)
+			preview = append(preview, fmt.Sprintf("Set clip %s transform (%s)", clipLabel(op.ClipID), strings.Join(changes, ", ")))
 		default:
 			issues = append(issues, describeIdx+": unsupported operation type")
 		}
@@ -636,11 +692,14 @@ func ValidateEditPlanOperations(doc TimelineDocument, plan EditPlan) (valid []Ed
 }
 
 // annotatePlan validates a plan against the timeline and fills Preview/Issues.
+// Operations are replaced by the validated subset so each preview line maps
+// 1:1 to an operation — the editor can apply a user-selected subset by index.
 func annotatePlan(doc TimelineDocument, plan *EditPlan) {
 	if plan == nil {
 		return
 	}
-	_, preview, issues := ValidateEditPlanOperations(doc, *plan)
+	valid, preview, issues := ValidateEditPlanOperations(doc, *plan)
+	plan.Operations = valid
 	plan.Preview = preview
 	plan.Issues = issues
 }
@@ -790,6 +849,71 @@ func ApplyEditPlanToTimeline(doc TimelineDocument, plan EditPlan) (TimelineDocum
 				TimeMS: maxInt64(0, op.StartMS),
 				Label:  label,
 			})
+		case "add_asset_clip":
+			if strings.TrimSpace(op.AssetID) == "" || op.DurationMS <= 0 {
+				return TimelineDocument{}, fmt.Errorf("add_asset_clip requires asset_id and duration_ms")
+			}
+			trackIndex := -1
+			if op.TrackID != "" {
+				for i := range doc.Tracks {
+					if doc.Tracks[i].ID == op.TrackID {
+						trackIndex = i
+						break
+					}
+				}
+				if trackIndex == -1 {
+					return TimelineDocument{}, fmt.Errorf("track %q not found", op.TrackID)
+				}
+			} else {
+				for i := range doc.Tracks {
+					if !doc.Tracks[i].Locked {
+						trackIndex = i
+						break
+					}
+				}
+			}
+			if trackIndex == -1 {
+				return TimelineDocument{}, fmt.Errorf("no unlocked track available")
+			}
+			volume := 1.0
+			doc.Tracks[trackIndex].Clips = append(doc.Tracks[trackIndex].Clips, TimelineClip{
+				ID:         "clip-" + uuid.New().String(),
+				AssetID:    strings.TrimSpace(op.AssetID),
+				StartMS:    maxInt64(0, op.StartMS),
+				DurationMS: op.DurationMS,
+				TrimInMS:   0,
+				TrimOutMS:  op.DurationMS,
+				// The asset kind is unknown here; transform + volume defaults
+				// are harmless on whichever half doesn't apply.
+				Transform: defaultTransform(),
+				Volume:    &volume,
+				Effects:   []TimelineEffect{},
+				Keyframes: []TimelineKeyframe{},
+			})
+		case "set_transform":
+			if op.ClipID == "" {
+				return TimelineDocument{}, fmt.Errorf("set_transform requires clip_id")
+			}
+			ti, ci, ok := findTimelineClip(doc, op.ClipID)
+			if !ok {
+				return TimelineDocument{}, fmt.Errorf("clip %q not found", op.ClipID)
+			}
+			if doc.Tracks[ti].Clips[ci].Transform == nil {
+				doc.Tracks[ti].Clips[ci].Transform = defaultTransform()
+			}
+			transform := doc.Tracks[ti].Clips[ci].Transform
+			if op.X != nil {
+				transform["x"] = *op.X
+			}
+			if op.Y != nil {
+				transform["y"] = *op.Y
+			}
+			if op.Scale != nil {
+				transform["scale"] = clampFloat(*op.Scale, 0.05, 4)
+			}
+			if op.Opacity != nil {
+				transform["opacity"] = clampFloat(*op.Opacity, 0, 1)
+			}
 		default:
 			return TimelineDocument{}, fmt.Errorf("unsupported edit operation %q", op.Type)
 		}

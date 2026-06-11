@@ -188,6 +188,87 @@ func TestEffectFiltersChromaKey(t *testing.T) {
 	}
 }
 
+func TestBuildFilterComplexRotationKeyframes(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	clips := []resolvedClip{{
+		inputIdx: 1,
+		isVideo:  true,
+		clip: TimelineClip{
+			ID: "clip-video", AssetID: "asset-video", StartMS: 0, DurationMS: 4000,
+			Transform: map[string]any{"rotation": float64(45)}, // static loses to keyframes
+			Keyframes: []TimelineKeyframe{
+				{ID: "kf-1", Property: "rotation", TimeMS: 0, Value: 0},
+				{ID: "kf-2", Property: "rotation", TimeMS: 2000, Value: 90},
+			},
+		},
+	}}
+	filterStr, _, _ := buildFilterComplex(doc, clips, 1920, 1080)
+	if !strings.Contains(filterStr, "rotate=a='(") || !strings.Contains(filterStr, ")*PI/180':c=black@0:ow='hypot(iw\\,ih)':oh=ow") {
+		t.Errorf("expected keyframed rotate expression: %s", filterStr)
+	}
+	if strings.Contains(filterStr, "rotate=0.785398") {
+		t.Errorf("static rotation must not apply when rotation keyframes exist: %s", filterStr)
+	}
+}
+
+func TestBuildFilterComplexBlurRegion(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks = []TimelineTrack{{
+		ID: "l1", Type: TrackTypeLayer, Visible: true,
+		Clips: []TimelineClip{{
+			ID: "c-blur", StartMS: 1000, DurationMS: 2000,
+			Transform: map[string]any{"x": float64(200), "y": float64(0)},
+			Shape:     &TimelineShape{Kind: ShapeKindBlur, Width: 400, Height: 300, BlurRadius: 20},
+		}},
+	}}
+	filterStr, videoLabel, _ := buildFilterComplex(doc, nil, 1920, 1080)
+	for _, expect := range []string{
+		"split[bbs0][bbb0]",
+		"[bbs0]crop=400:300:960:390,boxblur=20[bbl0]",
+		"[bbb0][bbl0]overlay=960:390:enable='between(t\\,1.000\\,3.000)'[t0_v]",
+	} {
+		if !strings.Contains(filterStr, expect) {
+			t.Errorf("blur region graph missing %q: %s", expect, filterStr)
+		}
+	}
+	if videoLabel != "[t0_v]" {
+		t.Errorf("blur region should end the chain, got %s", videoLabel)
+	}
+}
+
+func TestBuildFilterComplexRendersShapes(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks = []TimelineTrack{{
+		ID: "l1", Type: TrackTypeLayer, Visible: true,
+		Clips: []TimelineClip{
+			{
+				ID: "c-highlight", StartMS: 1000, DurationMS: 2000,
+				Transform: map[string]any{"x": float64(100), "y": float64(-50), "opacity": 0.4},
+				Shape:     &TimelineShape{Kind: ShapeKindHighlight, Width: 400, Height: 200, Fill: "#facc15"},
+			},
+			{
+				ID: "c-rect", StartMS: 0, DurationMS: 1000,
+				Shape: &TimelineShape{Kind: ShapeKindRectangle, Width: 300, Height: 100, Stroke: "#ff0000", StrokeWidth: 6},
+				Text:  &TimelineText{Text: "Look here"},
+			},
+		},
+	}}
+	filterStr, _, _ := buildFilterComplex(doc, nil, 1920, 1080)
+	// Highlight: filled box at center offset (100,-50), 40% opacity.
+	if !strings.Contains(filterStr, "drawbox=x=860:y=390:w=400:h=200:color=0xfacc15@0.400:t=fill:enable='between(t\\,1.000\\,3.000)'") {
+		t.Errorf("highlight drawbox missing or wrong: %s", filterStr)
+	}
+	// Rectangle: outlined box with its label drawn after (on top of) the box.
+	rectAt := strings.Index(filterStr, "drawbox=x=810:y=490:w=300:h=100:color=0xff0000@1.000:t=6:enable='between(t\\,0.000\\,1.000)'")
+	textAt := strings.Index(filterStr, "drawtext=text='Look here'")
+	if rectAt == -1 || textAt == -1 {
+		t.Fatalf("rectangle drawbox or callout text missing: %s", filterStr)
+	}
+	if rectAt > textAt {
+		t.Errorf("callout text must draw above its box: %s", filterStr)
+	}
+}
+
 func TestResolveMediaClipsClipMuteAndAudioOnly(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"a.mp3", "b.mp4"} {

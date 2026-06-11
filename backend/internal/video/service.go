@@ -461,6 +461,88 @@ func (s *Service) EnhancePrompt(ctx context.Context, req EnhancePromptRequest) s
 	return EnhancePromptWithLLM(ctx, s.llm, req)
 }
 
+// DuplicateProject copies a project: same settings, every asset's file bytes
+// copied into the new project's storage (artifacts regenerated), and the
+// active timeline cloned with asset references remapped to the copies. Clip
+// IDs are preserved so saved assistant plans still target them.
+func (s *Service) DuplicateProject(ctx context.Context, userID, projectID string) (*models.VideoProject, error) {
+	source, err := s.ensureProjectOwned(userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	provider := ""
+	if source.DefaultProvider != nil {
+		provider = *source.DefaultProvider
+	}
+	model := ""
+	if source.DefaultModel != nil {
+		model = *source.DefaultModel
+	}
+	copyProject, err := s.projects.Create(userID, source.Title+" copy", provider, model, source.Width, source.Height, source.FPS, source.AspectRatio)
+	if err != nil {
+		return nil, err
+	}
+
+	// Copy assets; assets whose files are missing on disk are skipped and
+	// their clips keep a dangling reference (same as deleting the asset).
+	assets, err := s.assets.ListByProject(projectID)
+	if err != nil {
+		return nil, err
+	}
+	idMap := map[string]string{}
+	for i := range assets {
+		src := assets[i]
+		data, readErr := os.ReadFile(filepath.Join(s.attachmentsDir, filepath.FromSlash(src.FilePath)))
+		if readErr != nil {
+			continue
+		}
+		relPath, _, writeErr := s.storage.Write(copyProject.ID, "copy-"+src.ID, src.FileName, src.MimeType, data)
+		if writeErr != nil {
+			continue
+		}
+		projectRef := copyProject.ID
+		dup := &models.VideoAsset{
+			ProjectID:    &projectRef,
+			SourceType:   src.SourceType,
+			SourceStudio: src.SourceStudio,
+			SourceID:     src.SourceID,
+			Kind:         src.Kind,
+			FileName:     src.FileName,
+			FilePath:     relPath,
+			MimeType:     src.MimeType,
+			SizeBytes:    int64(len(data)),
+			DurationMS:   src.DurationMS,
+			Width:        src.Width,
+			Height:       src.Height,
+			FPS:          src.FPS,
+			Provider:     src.Provider,
+			Model:        src.Model,
+			MetadataJSON: src.MetadataJSON,
+		}
+		s.attachAssetArtifacts(ctx, dup)
+		if createErr := s.assets.Create(dup); createErr != nil {
+			continue
+		}
+		idMap[src.ID] = dup.ID
+	}
+
+	_, doc, err := s.GetOrCreateTimeline(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for ti := range doc.Tracks {
+		for ci := range doc.Tracks[ti].Clips {
+			if mapped, ok := idMap[doc.Tracks[ti].Clips[ci].AssetID]; ok {
+				doc.Tracks[ti].Clips[ci].AssetID = mapped
+			}
+		}
+	}
+	if _, _, err := s.SaveTimeline(ctx, userID, copyProject.ID, doc); err != nil {
+		return nil, err
+	}
+	return copyProject, nil
+}
+
 // attachAssetArtifacts generates a thumbnail/waveform next to the asset file
 // and fills the corresponding fields. Best-effort — silently skipped without
 // FFmpeg.

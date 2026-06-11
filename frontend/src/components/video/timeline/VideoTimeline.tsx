@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Plus } from 'lucide-react';
 import { useVideoStudioStore } from '../../../stores/videoStudio';
 import { editorModeFeatures } from '../editorModes';
@@ -96,16 +97,68 @@ export function VideoTimeline() {
   const hasClipboard = useVideoStudioStore((state) => Boolean(state.clipClipboard?.length));
   const hasAttributeClipboard = useVideoStudioStore((state) => Boolean(state.attributeClipboard));
   const addTextClip = useVideoStudioStore((state) => state.addTextClip);
+  const addShapeClip = useVideoStudioStore((state) => state.addShapeClip);
   const toggleClipMute = useVideoStudioStore((state) => state.toggleClipMute);
   const detachClipAudio = useVideoStudioStore((state) => state.detachClipAudio);
   const followPlayhead = useVideoStudioStore((state) => state.followPlayhead);
   const toggleFollowPlayhead = useVideoStudioStore((state) => state.toggleFollowPlayhead);
+  const setSelectedClips = useVideoStudioStore((state) => state.setSelectedClips);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const addTrackRef = useRef<HTMLDivElement | null>(null);
   const [addTrackOpen, setAddTrackOpen] = useState(false);
   const [menu, setMenu] = useState<TimelineMenuState | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const marqueeRef = useRef<{ startX: number; startY: number; moved: boolean } | null>(null);
+  const [marqueeRect, setMarqueeRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+
+  // Drag on empty lane space sweeps out a marquee; clips intersecting the
+  // rectangle become the selection on release.
+  const beginMarquee = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || toolMode !== 'select') return;
+    if ((event.target as HTMLElement).dataset?.lane === undefined) return;
+    marqueeRef.current = { startX: event.clientX, startY: event.clientY, moved: false };
+    const onMove = (move: PointerEvent) => {
+      const start = marqueeRef.current;
+      if (!start) return;
+      if (!start.moved && Math.abs(move.clientX - start.startX) < 4 && Math.abs(move.clientY - start.startY) < 4) return;
+      start.moved = true;
+      setMarqueeRect({
+        left: Math.min(start.startX, move.clientX),
+        top: Math.min(start.startY, move.clientY),
+        width: Math.abs(move.clientX - start.startX),
+        height: Math.abs(move.clientY - start.startY),
+      });
+    };
+    const onUp = (up: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      const start = marqueeRef.current;
+      marqueeRef.current = null;
+      setMarqueeRect(null);
+      if (!start?.moved) return;
+      const left = Math.min(start.startX, up.clientX);
+      const right = Math.max(start.startX, up.clientX);
+      const top = Math.min(start.startY, up.clientY);
+      const bottom = Math.max(start.startY, up.clientY);
+      const ids: string[] = [];
+      document.querySelectorAll<HTMLElement>('[data-clip-id]').forEach((node) => {
+        const rect = node.getBoundingClientRect();
+        if (rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top && node.dataset.clipId) {
+          ids.push(node.dataset.clipId);
+        }
+      });
+      setSelectedClips(ids);
+      // Swallow the click that follows pointerup so the lane's click-to-
+      // deselect doesn't clear the fresh selection.
+      window.addEventListener('click', (clickEvent) => {
+        clickEvent.stopPropagation();
+        clickEvent.preventDefault();
+      }, { capture: true, once: true });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
   const pxPerMs = useMemo(() => 0.02 * zoom, [zoom]);
   const width = Math.max(900, (timeline?.duration_ms || 30000) * pxPerMs);
 
@@ -272,7 +325,7 @@ export function VideoTimeline() {
         onHelp={() => setShowHelp(true)}
         timecode={`${formatTimecode(playheadMs, timeline.canvas.fps)} / ${formatTimecode(timeline.duration_ms, timeline.canvas.fps)}`}
       />
-      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
+      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto" onPointerDown={beginMarquee}>
         <div className="grid grid-cols-[116px_minmax(0,1fr)]">
           <div ref={addTrackRef} className="sticky left-0 z-20 flex h-8 items-center border-b border-r border-border bg-surface-alt px-1">
             <button
@@ -459,6 +512,9 @@ export function VideoTimeline() {
             { label: 'Paste at playhead', shortcut: 'Ctrl+V', disabled: !hasClipboard, action: () => { void pasteClips(); } },
             'divider',
             { label: 'Add text clip here', disabled: track.locked, action: () => { void addTextClip(undefined, { trackId: track.id, startMs: menu.timeMs }); } },
+            { label: 'Add highlight box here', disabled: track.locked, action: () => { void addShapeClip('highlight', { trackId: track.id, startMs: menu.timeMs }); } },
+            { label: 'Add rectangle callout here', disabled: track.locked, action: () => { void addShapeClip('rectangle', { trackId: track.id, startMs: menu.timeMs }); } },
+            { label: 'Add blur region here', disabled: track.locked, action: () => { void addShapeClip('blur', { trackId: track.id, startMs: menu.timeMs }); } },
             { label: 'Add marker here', action: () => { void addMarker(menu.timeMs); } },
             'divider',
             { label: 'Add layer above', action: () => { void insertTrackAdjacent(track.id, 'above'); } },
@@ -490,6 +546,9 @@ export function VideoTimeline() {
         }
         return <ContextMenu position={{ x: menu.x, y: menu.y }} items={items} onClose={() => setMenu(null)} />;
       })()}
+      {marqueeRect && (
+        <div className="pointer-events-none fixed z-[90] border border-primary/70 bg-primary/10" style={marqueeRect} />
+      )}
       {showHelp && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowHelp(false)}>
           <div className="max-h-[80vh] w-80 overflow-y-auto rounded-lg border border-border bg-surface p-4 shadow-xl" onClick={(event) => event.stopPropagation()}>
@@ -512,6 +571,7 @@ export function VideoTimeline() {
                 ['Shift+← / →', 'Nudge selection by 10 frames'],
                 ['Delete / Backspace', 'Delete selection'],
                 ['Ctrl/Cmd/Shift+Click', 'Multi-select clips'],
+                ['Drag on empty lane', 'Marquee-select clips'],
                 ['Escape', 'Deselect / close menus'],
                 ['Right-click clip / layer / lane / ruler', 'Context menus'],
                 ['Shift+F10', 'Open menu on focused clip'],

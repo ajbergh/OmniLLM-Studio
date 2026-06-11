@@ -241,6 +241,18 @@ export interface VideoTimelineText {
   params?: Record<string, unknown>;
 }
 
+/** Parameterized callout/annotation box; dimensions in canvas pixels, position via the clip transform. */
+export interface VideoTimelineShape {
+  kind: 'rectangle' | 'highlight' | 'blur';
+  width?: number;
+  height?: number;
+  fill?: string;
+  stroke?: string;
+  stroke_width?: number;
+  /** Blur-region radius (1–50, default 12). */
+  blur_radius?: number;
+}
+
 export interface VideoTimelineEffect {
   id: string;
   type:
@@ -291,6 +303,7 @@ export interface VideoTimelineClip {
   fade_in_ms?: number;
   fade_out_ms?: number;
   text?: VideoTimelineText;
+  shape?: VideoTimelineShape;
   effects: VideoTimelineEffect[];
   transitions?: VideoTimelineTransition[];
   keyframes: VideoTimelineKeyframe[];
