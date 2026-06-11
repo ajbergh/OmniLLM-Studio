@@ -5,9 +5,13 @@ import { useVideoStudioStore } from '../../stores/videoStudio';
 import { ContextMenu } from '../common/ContextMenu';
 import type { ContextMenuEntry } from '../common/ContextMenu';
 import { editorModeFeatures } from './editorModes';
-import { EFFECT_DEFINITIONS, defaultEffectParams, effectDefinition, numberParam } from './effects/effectRegistry';
+import { effectDefinition, numberParam } from './effects/effectRegistry';
 import { KEYFRAME_EASINGS, KEYFRAME_PROPERTIES } from './effects/keyframeUtils';
-import { TRANSITION_DEFINITIONS, transitionDefinition } from './effects/transitionRegistry';
+import { transitionDefinition } from './effects/transitionRegistry';
+import { ANNOTATION_PRESETS, annotationDefinition } from './effects/annotationRegistry';
+import { MOTION_PRESETS } from './effects/motionPresets';
+import { EffectBrowser, TransitionBrowser } from './EffectBrowser';
+import { describeOperationDiff } from './planDiff';
 import type { VideoTimelineClip, VideoTimelineKeyframe } from '../../types/video';
 
 function selectedClip(): VideoTimelineClip | null {
@@ -70,18 +74,43 @@ const TEXT_PRESETS: Array<{
   },
 ];
 
-const QUICK_WORKFLOWS = [
-  { label: '30s social cut', instruction: 'Create a 30-second social cut' },
-  { label: '15s teaser', instruction: 'Create a 15-second teaser' },
-  { label: 'Vertical 9:16', instruction: 'Convert the timeline to vertical 9:16' },
-  { label: 'Square 1:1', instruction: 'Convert the timeline to square 1:1' },
-  { label: 'Title card', instruction: 'Add a title card at the start' },
-  { label: 'Lower third', instruction: 'Add a lower third caption at the playhead' },
-  { label: 'Captions', instruction: 'Add captions from the prompt text' },
-  { label: 'Tighten pacing', instruction: 'Tighten pacing and remove trailing dead space' },
+// Assistant recipes. Instruction recipes request a validated plan from the
+// backend; local recipes run deterministic store actions directly.
+const QUICK_WORKFLOWS: Array<
+  | { kind: 'instruction'; label: string; instruction: string }
+  | { kind: 'local'; label: string; description: string; run: () => void }
+> = [
+  { kind: 'instruction', label: '30s social cut', instruction: 'Create a 30-second social cut' },
+  { kind: 'instruction', label: '15s teaser', instruction: 'Create a 15-second teaser' },
+  { kind: 'instruction', label: 'Vertical 9:16', instruction: 'Convert the timeline to vertical 9:16' },
+  { kind: 'instruction', label: 'Square 1:1', instruction: 'Convert the timeline to square 1:1' },
+  { kind: 'instruction', label: 'Title card', instruction: 'Add a title card at the start' },
+  { kind: 'instruction', label: 'Lower third', instruction: 'Add a lower third caption at the playhead' },
+  { kind: 'instruction', label: 'Captions', instruction: 'Add captions from the prompt text' },
+  { kind: 'instruction', label: 'Tighten pacing', instruction: 'Tighten pacing and remove trailing dead space' },
+  { kind: 'instruction', label: 'Remove dead space', instruction: 'Remove dead space between clips and close the gaps' },
+  { kind: 'instruction', label: 'Add callouts', instruction: 'Add callouts highlighting the selected clips' },
+  { kind: 'instruction', label: 'Normalize audio', instruction: 'Normalize all clip volumes to 100%' },
+  { kind: 'instruction', label: 'Prep for YouTube', instruction: 'Prepare the timeline for YouTube: 16:9 canvas, title card, end padding trimmed' },
+  { kind: 'instruction', label: 'Prep for Reels', instruction: 'Prepare the timeline for Reels/TikTok: vertical 9:16, max 60 seconds, bold captions' },
+  {
+    kind: 'local',
+    label: 'Duck music',
+    description: 'Generates deterministic volume keyframes so music ducks under narration',
+    run: () => { void useVideoStudioStore.getState().duckMusicUnderNarration(); },
+  },
+  {
+    kind: 'local',
+    label: 'Pan/zoom motion',
+    description: 'Applies a Ken Burns motion preset to the selected clip',
+    run: () => {
+      const { selectedClipId, applyMotionPreset } = useVideoStudioStore.getState();
+      if (selectedClipId) void applyMotionPreset(selectedClipId, 'ken_burns');
+    },
+  },
 ];
 
-export function VideoInspector() {
+export function VideoInspector({ section = 'all' }: { section?: 'all' | 'properties' | 'assistant' } = {}) {
   const timeline = useVideoStudioStore((state) => state.timeline);
   const playheadMs = useVideoStudioStore((state) => state.playheadMs);
   const selectedClipId = useVideoStudioStore((state) => state.selectedClipId);
@@ -99,6 +128,7 @@ export function VideoInspector() {
   const updateClipFade = useVideoStudioStore((state) => state.updateClipFade);
   const updateClipText = useVideoStudioStore((state) => state.updateClipText);
   const updateClipShape = useVideoStudioStore((state) => state.updateClipShape);
+  const applyAnnotationPreset = useVideoStudioStore((state) => state.applyAnnotationPreset);
   const addClipEffect = useVideoStudioStore((state) => state.addClipEffect);
   const toggleClipEffect = useVideoStudioStore((state) => state.toggleClipEffect);
   const removeClipEffect = useVideoStudioStore((state) => state.removeClipEffect);
@@ -108,6 +138,7 @@ export function VideoInspector() {
   const updateClipTransition = useVideoStudioStore((state) => state.updateClipTransition);
   const removeClipTransition = useVideoStudioStore((state) => state.removeClipTransition);
   const addKeyframe = useVideoStudioStore((state) => state.addKeyframe);
+  const applyMotionPreset = useVideoStudioStore((state) => state.applyMotionPreset);
   const updateKeyframe = useVideoStudioStore((state) => state.updateKeyframe);
   const removeKeyframe = useVideoStudioStore((state) => state.removeKeyframe);
   const bringClipForward = useVideoStudioStore((state) => state.bringClipForward);
@@ -140,9 +171,12 @@ export function VideoInspector() {
     void applyAssistantPlan(selected.length === planTotal ? undefined : selected);
   };
 
+  const showAssistant = section === 'all' || section === 'assistant';
+  const showProperties = section === 'all' || section === 'properties';
+
   return (
     <div className="min-h-0 overflow-y-auto p-3">
-      {modeFeatures.assistant && (
+      {showAssistant && modeFeatures.assistant && (
       <section className="rounded-lg border border-border bg-surface p-3">
         <div className="mb-3 flex items-center gap-2">
           <Sparkles size={14} className="text-primary" />
@@ -166,11 +200,15 @@ export function VideoInspector() {
             <button
               key={workflow.label}
               onClick={() => {
-                setAssistantInstruction(workflow.instruction);
-                void requestEditPlan();
+                if (workflow.kind === 'local') {
+                  workflow.run();
+                } else {
+                  setAssistantInstruction(workflow.instruction);
+                  void requestEditPlan();
+                }
               }}
-              className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[10px] text-text-muted hover:text-text"
-              title={workflow.instruction}
+              className={`rounded-md border px-2 py-1 text-[10px] hover:text-text ${workflow.kind === 'local' ? 'border-emerald-400/30 bg-emerald-400/5 text-emerald-300/80' : 'border-border bg-surface-alt text-text-muted'}`}
+              title={workflow.kind === 'local' ? `${workflow.description} (runs instantly, no AI)` : workflow.instruction}
             >
               {workflow.label}
             </button>
@@ -190,25 +228,39 @@ export function VideoInspector() {
             </p>
             {assistantPlan.preview && assistantPlan.preview.length > 0 && (
               <ul className="mt-1.5 space-y-0.5">
-                {assistantPlan.preview.map((line, index) => (
-                  <li key={index} className="flex items-start gap-1.5 text-[10px] text-text-secondary">
-                    <input
-                      type="checkbox"
-                      checked={!planExcluded.has(index)}
-                      onChange={() => {
-                        setPlanExcluded((excluded) => {
-                          const next = new Set(excluded);
-                          if (next.has(index)) next.delete(index);
-                          else next.add(index);
-                          return next;
-                        });
-                      }}
-                      className="mt-0.5 shrink-0"
-                      aria-label={`Include operation: ${line}`}
-                    />
-                    <span className={planExcluded.has(index) ? 'opacity-50 line-through' : ''}>{line}</span>
-                  </li>
-                ))}
+                {assistantPlan.preview.map((line, index) => {
+                  const operation = assistantPlan.operations[index];
+                  const diff = operation ? describeOperationDiff(operation, timeline, assets) : {};
+                  return (
+                    <li key={index} className="flex items-start gap-1.5 text-[10px] text-text-secondary">
+                      <input
+                        type="checkbox"
+                        checked={!planExcluded.has(index)}
+                        onChange={() => {
+                          setPlanExcluded((excluded) => {
+                            const next = new Set(excluded);
+                            if (next.has(index)) next.delete(index);
+                            else next.add(index);
+                            return next;
+                          });
+                        }}
+                        className="mt-0.5 shrink-0"
+                        aria-label={`Include operation: ${line}`}
+                      />
+                      <span className={`min-w-0 ${planExcluded.has(index) ? 'opacity-50 line-through' : ''}`}>
+                        {line}
+                        {(diff.target || diff.before || diff.after) && (
+                          <span className="block text-[9px] text-text-muted">
+                            {diff.target && <span>{diff.target}</span>}
+                            {(diff.before || diff.after) && (
+                              <span>{diff.target ? ' · ' : ''}{diff.before ?? '—'} → {diff.after ?? '—'}</span>
+                            )}
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {assistantPlan.issues && assistantPlan.issues.length > 0 && (
@@ -238,8 +290,14 @@ export function VideoInspector() {
             ))}
           </div>
         )}
+        {!assistantPlan && !storyboard && socialVariants.length === 0 && (
+          <p className="mt-2 rounded-md border border-dashed border-border bg-surface-alt px-2 py-2 text-[11px] text-text-muted">
+            Describe an edit above, or pick a recipe — the assistant proposes a reviewable plan; nothing changes until you apply it.
+          </p>
+        )}
         {socialVariants.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1">
+          <div className="mt-3 space-y-1.5">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">Variants — compare, then create a project (non-destructive)</p>
             {socialVariants.map((variant) => (
               <button
                 key={variant.name}
@@ -251,10 +309,16 @@ export function VideoInspector() {
                   event.preventDefault();
                   setVariantMenu({ name: variant.name, x: event.clientX, y: event.clientY });
                 }}
-                className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[10px] text-text-muted hover:text-text"
-                title="Click for variant actions"
+                className="block w-full rounded-md border border-border bg-surface-alt px-2 py-1.5 text-left hover:border-primary/40"
+                title="Click for variant actions — applying creates a new project; this timeline is untouched"
               >
-                {variant.name}
+                <span className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-medium text-text">{variant.name}</span>
+                  <span className="shrink-0 text-[9px] text-text-muted">{variant.aspect_ratio} · {variant.width}×{variant.height}</span>
+                </span>
+                <span className="mt-0.5 block truncate text-[10px] text-text-muted">
+                  {variant.plan.summary} · {variant.plan.operations.length} operation{variant.plan.operations.length === 1 ? '' : 's'}
+                </span>
               </button>
             ))}
           </div>
@@ -262,7 +326,8 @@ export function VideoInspector() {
       </section>
       )}
 
-      <section className="mt-3 rounded-lg border border-border bg-surface p-3">
+      {showProperties && (
+      <section className={`${showAssistant ? 'mt-3 ' : ''}rounded-lg border border-border bg-surface p-3`}>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-text">Inspector</h2>
           <button
@@ -470,6 +535,39 @@ export function VideoInspector() {
                     ));
                   })()}
                 </div>
+                {/* Numeric crop — percentages of the source frame per side. */}
+                {clip.asset_id && (
+                  <Field label="Crop % (top / right / bottom / left)">
+                    <div className="grid grid-cols-4 gap-1">
+                      {(['top', 'right', 'bottom', 'left'] as const).map((side) => {
+                        const crop = clip.transform?.crop;
+                        const current = Math.round(((crop?.[side] ?? 0) as number) * 100);
+                        return (
+                          <input
+                            key={side}
+                            type="number"
+                            min={0}
+                            max={95}
+                            aria-label={`Crop ${side} percent`}
+                            title={`Crop ${side} (%)`}
+                            defaultValue={current}
+                            // Re-key on external crop changes so canvas edits show up.
+                            data-side={side}
+                            onBlur={(event) => {
+                              const value = Math.max(0, Math.min(95, Math.round(Number(event.target.value))));
+                              if (!Number.isFinite(value) || value === current) return;
+                              const nextCrop = { top: 0, right: 0, bottom: 0, left: 0, ...(clip.transform?.crop || {}), [side]: value / 100 };
+                              const isEmpty = nextCrop.top === 0 && nextCrop.right === 0 && nextCrop.bottom === 0 && nextCrop.left === 0;
+                              void updateClipTransform(clip.id, { crop: isEmpty ? undefined : nextCrop });
+                            }}
+                            onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                            className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-1 text-center text-xs text-text"
+                          />
+                        );
+                      })}
+                    </div>
+                  </Field>
+                )}
               </>
             )}
             {clip.volume !== undefined && (
@@ -589,130 +687,166 @@ export function VideoInspector() {
                 </Field>
               </>
             )}
-            {clip.shape && (
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Shape width">
-                  <input
-                    type="number"
-                    min={2}
-                    key={`sw-${clip.id}-${clip.shape.width ?? ''}`}
-                    defaultValue={clip.shape.width || 320}
-                    onBlur={(event) => {
-                      const width = Math.max(2, Math.round(Number(event.target.value)));
-                      if (Number.isFinite(width) && width !== clip.shape?.width) void updateClipShape(clip.id, { width });
-                    }}
-                    onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
-                    className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
-                  />
-                </Field>
-                <Field label="Shape height">
-                  <input
-                    type="number"
-                    min={2}
-                    key={`sh-${clip.id}-${clip.shape.height ?? ''}`}
-                    defaultValue={clip.shape.height || 180}
-                    onBlur={(event) => {
-                      const height = Math.max(2, Math.round(Number(event.target.value)));
-                      if (Number.isFinite(height) && height !== clip.shape?.height) void updateClipShape(clip.id, { height });
-                    }}
-                    onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
-                    className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
-                  />
-                </Field>
-                {clip.shape.kind === 'highlight' ? (
-                  <Field label="Fill">
-                    <input
-                      type="color"
-                      value={/^#[0-9a-fA-F]{6}$/.test(clip.shape.fill || '') ? (clip.shape.fill as string) : '#facc15'}
-                      onChange={(event) => { void updateClipShape(clip.id, { fill: event.target.value }); }}
-                      className="h-8 w-full cursor-pointer rounded-md border border-border bg-surface-alt"
-                    />
-                  </Field>
-                ) : clip.shape.kind === 'blur' ? (
-                  <Field label="Blur radius">
-                    <input
-                      type="number"
-                      min={1}
-                      max={50}
-                      key={`br-${clip.id}-${clip.shape.blur_radius ?? ''}`}
-                      defaultValue={clip.shape.blur_radius || 12}
-                      onBlur={(event) => {
-                        const blurRadius = Math.max(1, Math.min(50, Math.round(Number(event.target.value))));
-                        if (Number.isFinite(blurRadius) && blurRadius !== clip.shape?.blur_radius) void updateClipShape(clip.id, { blur_radius: blurRadius });
-                      }}
-                      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
-                      className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
-                    />
-                  </Field>
-                ) : (
-                  <>
-                    <Field label="Stroke">
-                      <input
-                        type="color"
-                        value={/^#[0-9a-fA-F]{6}$/.test(clip.shape.stroke || '') ? (clip.shape.stroke as string) : '#f59e0b'}
-                        onChange={(event) => { void updateClipShape(clip.id, { stroke: event.target.value }); }}
-                        className="h-8 w-full cursor-pointer rounded-md border border-border bg-surface-alt"
-                      />
-                    </Field>
-                    <Field label="Stroke width">
+            {clip.shape && (() => {
+              const shape = clip.shape;
+              const definition = annotationDefinition(shape.kind);
+              const fillKinds = ['highlight', 'label', 'speech_bubble', 'step_marker', 'spotlight', 'rounded_rectangle', 'ellipse'];
+              const strokeKinds = ['rectangle', 'rounded_rectangle', 'ellipse', 'arrow', 'line', 'checkmark', 'x_mark', 'speech_bubble', 'label'];
+              const blurKinds = ['blur', 'pixelate'];
+              const cornerKinds = ['rounded_rectangle', 'speech_bubble', 'label'];
+              return (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-text-secondary">{definition?.label || shape.kind}</span>
+                    {definition && definition.exportSupport !== 'full' && (
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${definition.exportSupport === 'preview' ? 'bg-amber-400/15 text-amber-300' : 'bg-sky-400/15 text-sky-300'}`}
+                        title={definition.exportNote || (definition.exportSupport === 'preview' ? 'This annotation shows in the preview but is not drawn at export yet' : 'Exports with reduced fidelity')}
+                      >
+                        {definition.exportSupport === 'preview' ? 'preview only' : 'partial export'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="Shape width">
                       <input
                         type="number"
-                        min={1}
-                        max={100}
-                        key={`stw-${clip.id}-${clip.shape.stroke_width ?? ''}`}
-                        defaultValue={clip.shape.stroke_width || 6}
+                        min={2}
+                        key={`sw-${clip.id}-${shape.width ?? ''}`}
+                        defaultValue={shape.width || 320}
                         onBlur={(event) => {
-                          const strokeWidth = Math.max(1, Math.min(100, Math.round(Number(event.target.value))));
-                          if (Number.isFinite(strokeWidth) && strokeWidth !== clip.shape?.stroke_width) void updateClipShape(clip.id, { stroke_width: strokeWidth });
+                          const width = Math.max(2, Math.round(Number(event.target.value)));
+                          if (Number.isFinite(width) && width !== shape.width) void updateClipShape(clip.id, { width });
                         }}
                         onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
                         className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
                       />
                     </Field>
-                  </>
-                )}
-              </div>
-            )}
+                    <Field label="Shape height">
+                      <input
+                        type="number"
+                        min={2}
+                        key={`sh-${clip.id}-${shape.height ?? ''}`}
+                        defaultValue={shape.height || 180}
+                        onBlur={(event) => {
+                          const height = Math.max(2, Math.round(Number(event.target.value)));
+                          if (Number.isFinite(height) && height !== shape.height) void updateClipShape(clip.id, { height });
+                        }}
+                        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                        className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                      />
+                    </Field>
+                    {fillKinds.includes(shape.kind) && (
+                      <Field label="Fill">
+                        <input
+                          type="color"
+                          value={/^#[0-9a-fA-F]{6}$/.test(shape.fill || '') ? (shape.fill as string) : '#facc15'}
+                          onChange={(event) => { void updateClipShape(clip.id, { fill: event.target.value }); }}
+                          className="h-8 w-full cursor-pointer rounded-md border border-border bg-surface-alt"
+                        />
+                      </Field>
+                    )}
+                    {blurKinds.includes(shape.kind) && (
+                      <Field label={shape.kind === 'pixelate' ? 'Block size' : 'Blur radius'}>
+                        <input
+                          type="number"
+                          min={1}
+                          max={50}
+                          key={`br-${clip.id}-${shape.blur_radius ?? ''}`}
+                          defaultValue={shape.blur_radius || 12}
+                          onBlur={(event) => {
+                            const blurRadius = Math.max(1, Math.min(50, Math.round(Number(event.target.value))));
+                            if (Number.isFinite(blurRadius) && blurRadius !== shape.blur_radius) void updateClipShape(clip.id, { blur_radius: blurRadius });
+                          }}
+                          onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                          className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                        />
+                      </Field>
+                    )}
+                    {strokeKinds.includes(shape.kind) && (
+                      <>
+                        <Field label="Stroke">
+                          <input
+                            type="color"
+                            value={/^#[0-9a-fA-F]{6}$/.test(shape.stroke || '') ? (shape.stroke as string) : '#f59e0b'}
+                            onChange={(event) => { void updateClipShape(clip.id, { stroke: event.target.value }); }}
+                            className="h-8 w-full cursor-pointer rounded-md border border-border bg-surface-alt"
+                          />
+                        </Field>
+                        <Field label="Stroke width">
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            key={`stw-${clip.id}-${shape.stroke_width ?? ''}`}
+                            defaultValue={shape.stroke_width || 6}
+                            onBlur={(event) => {
+                              const strokeWidth = Math.max(1, Math.min(100, Math.round(Number(event.target.value))));
+                              if (Number.isFinite(strokeWidth) && strokeWidth !== shape.stroke_width) void updateClipShape(clip.id, { stroke_width: strokeWidth });
+                            }}
+                            onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                            className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                          />
+                        </Field>
+                      </>
+                    )}
+                    {cornerKinds.includes(shape.kind) && (
+                      <Field label="Corner radius">
+                        <input
+                          type="number"
+                          min={0}
+                          max={200}
+                          key={`cr-${clip.id}-${shape.corner_radius ?? ''}`}
+                          defaultValue={shape.corner_radius || 0}
+                          onBlur={(event) => {
+                            const cornerRadius = Math.max(0, Math.min(200, Math.round(Number(event.target.value))));
+                            if (Number.isFinite(cornerRadius) && cornerRadius !== shape.corner_radius) void updateClipShape(clip.id, { corner_radius: cornerRadius });
+                          }}
+                          onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                          className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                        />
+                      </Field>
+                    )}
+                  </div>
+                  <Field label="Annotation preset">
+                    <div className="flex flex-wrap gap-1">
+                      {ANNOTATION_PRESETS.map((preset) => (
+                        <button
+                          key={preset.key}
+                          onClick={() => { void applyAnnotationPreset(clip.id, preset.key); }}
+                          className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[10px] text-text-muted hover:text-text"
+                          title={`Apply the "${preset.label}" style to this annotation`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </Field>
+                </>
+              );
+            })()}
             {modeFeatures.effectControls && (
             <div className="grid grid-cols-1 gap-2">
-              <select
-                value=""
-                onChange={(event) => {
-                  const definition = effectDefinition(event.target.value);
-                  if (!definition) return;
-                  void addClipEffect(selectedClipId as string, { type: definition.type, enabled: true, params: defaultEffectParams(definition) });
-                }}
-                className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary"
-                aria-label="Add effect"
-              >
-                <option value="">+ Add effect…</option>
-                {EFFECT_DEFINITIONS.map((definition) => (
-                  <option key={definition.type} value={definition.type}>
-                    {definition.label}{definition.exportSupported ? '' : ' (preview only)'}
-                  </option>
-                ))}
-              </select>
-              <select
-                value=""
-                onChange={(event) => {
-                  const definition = transitionDefinition(event.target.value);
-                  if (!definition) return;
-                  void addClipTransition(selectedClipId as string, {
-                    type: definition.type,
-                    duration_ms: definition.defaultDurationMs,
-                    ...(definition.supportsDirection ? { direction: 'left' as const } : {}),
-                  });
-                }}
-                className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary"
-                aria-label="Add transition"
-              >
-                <option value="">+ Add transition…</option>
-                {TRANSITION_DEFINITIONS.map((definition) => (
-                  <option key={definition.type} value={definition.type}>
-                    {definition.label}{definition.exportSupported ? '' : ' (preview only)'}
-                  </option>
-                ))}
-              </select>
+              <Field label="Effects">
+                <EffectBrowser onApply={(effect) => { void addClipEffect(selectedClipId as string, effect); }} />
+              </Field>
+              <Field label="Transitions">
+                <TransitionBrowser onApply={(transition) => { void addClipTransition(selectedClipId as string, transition); }} />
+              </Field>
+              <Field label="Pan & zoom motion">
+                <div className="flex flex-wrap gap-1">
+                  {MOTION_PRESETS.map((preset) => (
+                    <button
+                      key={preset.key}
+                      onClick={() => { void applyMotionPreset(selectedClipId as string, preset.key); }}
+                      className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[10px] text-text-muted hover:text-text"
+                      title={`${preset.description} — generates editable keyframes (scale animation is preview-only at export)`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </Field>
               <select
                 value=""
                 onChange={(event) => {
@@ -964,6 +1098,7 @@ export function VideoInspector() {
           </div>
         )}
       </section>
+      )}
       {planMenu && assistantPlan && (() => {
         const items: ContextMenuEntry[] = [
           {

@@ -37,6 +37,8 @@ const (
 	RendererFeatureAudioFades   = "audio_fades"
 	RendererFeatureTrackMute    = "track_mute"
 	RendererFeatureTrackSolo    = "track_solo"
+	RendererFeatureAnnotations  = "annotations"
+	RendererFeatureCursor       = "cursor_effects"
 )
 
 // FFmpegRendererCapabilities returns the feature support matrix for the
@@ -63,6 +65,8 @@ func FFmpegRendererCapabilities() RendererCapabilities {
 			{Feature: RendererFeatureAudioFades, Label: "Audio fade in/out", Supported: true},
 			{Feature: RendererFeatureTrackMute, Label: "Track mute / hide", Supported: true},
 			{Feature: RendererFeatureTrackSolo, Label: "Track solo", Supported: false, Notes: "Solo is a preview-only monitoring control; exports mix all unmuted tracks."},
+			{Feature: RendererFeatureAnnotations, Label: "Annotations", Supported: true, Partial: true, Notes: "Rectangle, highlight, blur, and pixelate regions export; rounded rectangles and label callouts export with square corners; arrow, line, ellipse, speech bubble, spotlight, checkmark, X mark, and step markers are preview-only."},
+			{Feature: RendererFeatureCursor, Label: "Cursor effects", Supported: false, Notes: "Cursor metadata persists with the timeline and previews in the editor, but exports do not draw cursor overlays yet."},
 		},
 	}
 }

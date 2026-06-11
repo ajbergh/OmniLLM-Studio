@@ -69,12 +69,23 @@ Important fields:
 - `audio_only`: suppresses a clip's visual output so a video asset acts as
   detached audio (created by the editor's "Detach audio" command).
 - `shape`: parameterized callout/annotation box — `kind` (`rectangle` |
-  `highlight` | `blur`), `width`/`height` in canvas pixels (defaults 320×180),
-  `fill` (highlight), `stroke` + `stroke_width` (rectangle, clamped 0–100),
-  `blur_radius` (blur regions, clamped 1–50, default 12). Position/scale/
+  `highlight` | `blur` | `rounded_rectangle` | `ellipse` | `arrow` | `line` |
+  `speech_bubble` | `spotlight` | `pixelate` | `checkmark` | `x_mark` |
+  `step_marker` | `label`), `width`/`height` in canvas pixels (defaults
+  320×180), `fill`, `stroke` + `stroke_width` (clamped 0–100), `blur_radius`
+  (blur radius or pixelate block size, clamped 1–50, default 12),
+  `corner_radius` (clamped 0–200, preview-only at export). Position/scale/
   opacity come from the clip transform; a clip may carry both a shape and
   `text` (the label draws above its box). Blur regions redact whatever
-  composites beneath them.
+  composites beneath them; pixelate regions export as a true mosaic.
+  Export support per kind: rectangle/highlight/blur/pixelate export fully;
+  rounded_rectangle and label export with square corners; the remaining
+  annotation kinds are preview-only (see `GET /v1/video/render/capabilities`).
+- `cursor`: optional cursor metadata captured with screen recordings —
+  `visible`, `scale` (clamped 0.25–4, default 1), `highlight`, `click_rings`,
+  `smoothing`, and `events` (sorted samples `{time_ms, x, y, click?}` with
+  clip-relative times and canvas-pixel coordinates from the top-left).
+  Preview-only: the editor overlays a cursor, but exports do not draw it yet.
 - `transform`: x, y, scale, rotation, opacity, and optional fractional crop (`{top, right, bottom, left}`, each 0–0.95).
 - `text`: text payload and styling — `font_family`, `font_size`, `font_weight`, `color`, `background`, `stroke`, `stroke_width`, `shadow`, `text_align`, `line_height`, `letter_spacing`, `border_radius`. Some styling fields are preview-only; export support is reported by `GET /v1/video/render/capabilities`.
 - `effects`: ordered effect definitions. Allowed types: `blur`, `brightness`, `contrast`, `saturation`, `grayscale`, `shadow`, `background_blur`, `chroma_key`, `sharpen`, `vignette`.

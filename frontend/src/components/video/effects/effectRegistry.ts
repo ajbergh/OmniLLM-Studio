@@ -11,9 +11,19 @@ export interface EffectParamMeta {
   defaultValue: number;
 }
 
+export type EffectCategory = 'color' | 'blur' | 'stylize' | 'keying';
+
+export const EFFECT_CATEGORIES: Array<{ key: EffectCategory; label: string }> = [
+  { key: 'color', label: 'Color' },
+  { key: 'blur', label: 'Blur' },
+  { key: 'stylize', label: 'Stylize' },
+  { key: 'keying', label: 'Keying' },
+];
+
 export interface EffectDefinition {
   type: EffectTypeKey;
   label: string;
+  category: EffectCategory;
   /** Whether the FFmpeg renderer applies this effect at export today. */
   exportSupported: boolean;
   params: EffectParamMeta[];
@@ -37,6 +47,7 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
   {
     type: 'brightness',
     label: 'Brightness',
+    category: 'color',
     exportSupported: true,
     params: [amountParam('Amount', 0, 2, 0.05, 1.1)],
     previewFilter: (params) => `brightness(${numberParam(params, 'amount', 1)})`,
@@ -44,6 +55,7 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
   {
     type: 'contrast',
     label: 'Contrast',
+    category: 'color',
     exportSupported: true,
     params: [amountParam('Amount', 0, 3, 0.05, 1.2)],
     previewFilter: (params) => `contrast(${numberParam(params, 'amount', 1)})`,
@@ -51,6 +63,7 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
   {
     type: 'saturation',
     label: 'Saturation',
+    category: 'color',
     exportSupported: true,
     params: [amountParam('Amount', 0, 3, 0.05, 1.3)],
     previewFilter: (params) => `saturate(${numberParam(params, 'amount', 1)})`,
@@ -58,6 +71,7 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
   {
     type: 'blur',
     label: 'Blur',
+    category: 'blur',
     exportSupported: true,
     params: [amountParam('Radius', 0, 30, 1, 6)],
     previewFilter: (params) => `blur(${numberParam(params, 'amount', 0)}px)`,
@@ -65,6 +79,7 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
   {
     type: 'grayscale',
     label: 'Grayscale',
+    category: 'color',
     exportSupported: true,
     params: [],
     previewFilter: () => 'grayscale(1)',
@@ -72,6 +87,7 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
   {
     type: 'sharpen',
     label: 'Sharpen',
+    category: 'stylize',
     exportSupported: true,
     params: [amountParam('Amount', 0, 3, 0.1, 1)],
     previewFilter: () => null,
@@ -79,6 +95,7 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
   {
     type: 'vignette',
     label: 'Vignette',
+    category: 'stylize',
     exportSupported: true,
     params: [amountParam('Strength', 0, 1, 0.05, 0.4)],
     previewFilter: () => null,
@@ -86,6 +103,7 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
   {
     type: 'shadow',
     label: 'Drop shadow',
+    category: 'stylize',
     exportSupported: false,
     params: [],
     previewFilter: () => 'drop-shadow(2px 4px 6px rgba(0,0,0,0.6))',
@@ -93,6 +111,7 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
   {
     type: 'background_blur',
     label: 'Background blur',
+    category: 'blur',
     exportSupported: false,
     params: [amountParam('Radius', 0, 30, 1, 10)],
     previewFilter: () => null,
@@ -102,6 +121,7 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
     // cannot preview it, so the canvas shows the unkeyed frame.
     type: 'chroma_key',
     label: 'Chroma key (export only)',
+    category: 'keying',
     exportSupported: true,
     params: [
       { key: 'similarity', label: 'Similarity', min: 0.01, max: 1, step: 0.01, defaultValue: 0.3 },

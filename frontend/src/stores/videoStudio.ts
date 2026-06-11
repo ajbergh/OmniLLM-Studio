@@ -3,6 +3,8 @@ import { toast } from 'sonner';
 import { videoApi } from '../api';
 import { CAPTION_PRESETS, parseCaptions, serializeSrt, serializeVtt } from '../components/video/captions/captionUtils';
 import type { CaptionCue, CaptionPresetKey } from '../components/video/captions/captionUtils';
+import { annotationDefaults, ANNOTATION_PRESETS } from '../components/video/effects/annotationRegistry';
+import { motionPreset } from '../components/video/effects/motionPresets';
 import { TIMELINE_TEMPLATES } from '../components/video/templates/timelineTemplates';
 import type { EditorModeKey } from '../components/video/editorModes';
 
@@ -233,8 +235,8 @@ function ensureCaptionTrack(doc: VideoTimelineDocument): VideoTimelineTrack {
   return track;
 }
 
-function captionClipFromCue(cue: CaptionCue, canvas: VideoTimelineDocument['canvas']): VideoTimelineClip {
-  const preset = CAPTION_PRESETS[0];
+function captionClipFromCue(cue: CaptionCue, canvas: VideoTimelineDocument['canvas'], presetKey?: CaptionPresetKey): VideoTimelineClip {
+  const preset = (presetKey && CAPTION_PRESETS.find((item) => item.key === presetKey)) || CAPTION_PRESETS[0];
   const position = preset.position(canvas);
   const duration = Math.max(100, cue.end_ms - cue.start_ms);
   return {
@@ -249,6 +251,14 @@ function captionClipFromCue(cue: CaptionCue, canvas: VideoTimelineDocument['canv
     keyframes: [],
     transitions: [],
   };
+}
+
+/** Project-default caption style, recorded in the timeline metadata. */
+function defaultCaptionPreset(doc: VideoTimelineDocument | null): CaptionPresetKey | undefined {
+  const key = doc?.metadata?.default_caption_preset;
+  return typeof key === 'string' && CAPTION_PRESETS.some((preset) => preset.key === key)
+    ? (key as CaptionPresetKey)
+    : undefined;
 }
 
 function recomputeDuration(doc: VideoTimelineDocument): VideoTimelineDocument {
@@ -301,11 +311,18 @@ interface VideoStudioState {
   zoom: number;
   isPlaying: boolean;
   snappingEnabled: boolean;
+  // Ripple mode: deletes/trims/inserts shift later clips on the same layer to
+  // keep the timeline gap-free.
+  rippleEnabled: boolean;
   toolMode: 'select' | 'blade';
   editorMode: EditorModeKey;
   rendererCapabilities: VideoRendererCapabilities | null;
   renderJobs: VideoRenderJob[];
   activeRenderJobId: string | null;
+  // Dirty-render tracking: the save sequence captured when the last completed
+  // render started. 0 = nothing rendered yet this session.
+  _renderStartedSaveSeq: number;
+  renderedSaveSeq: number;
   exportSettings: VideoExportSettings;
   assistantInstruction: string;
   assistantPlan: VideoEditPlan | null;
@@ -362,15 +379,29 @@ interface VideoStudioState {
   zoomToFit: (containerWidth: number) => void;
   setPlaying: (playing: boolean) => void;
   toggleSnapping: () => void;
+  toggleRipple: () => void;
+  removeGap: (trackId: string, startMs: number, endMs: number) => Promise<void>;
+  removeAllGaps: (trackId?: string) => Promise<void>;
+  rippleDeleteClip: (clipId?: string) => Promise<void>;
+  rippleTrimClip: (clipId: string, edge: 'start' | 'end', newTimeMs: number) => Promise<void>;
+  insertClipAt: (assetId: string, trackId: string, timeMs: number, ripple?: boolean) => Promise<void>;
+  overwriteClipAt: (assetId: string, trackId: string, timeMs: number) => Promise<void>;
   toggleTrackMute: (trackId: string) => Promise<void>;
   toggleTrackLock: (trackId: string) => Promise<void>;
   toggleTrackVisibility: (trackId: string) => Promise<void>;
   updateClipTransform: (clipId: string, transform: Partial<VideoTimelineTransform>) => Promise<void>;
   updateClipVolume: (clipId: string, volume: number) => Promise<void>;
   updateClipFade: (clipId: string, fade: { fade_in_ms?: number; fade_out_ms?: number }) => Promise<void>;
+  /** Clears fades on the given clips (or the selection) as one undo step. */
+  removeClipFades: (clipIds?: string[]) => Promise<void>;
+  /** Generates volume keyframes on music clips so they duck under narration. */
+  duckMusicUnderNarration: (duckTo?: number, rampMs?: number) => Promise<void>;
   addTextClip: (text?: string, options?: { trackId?: string; startMs?: number }) => Promise<void>;
   addShapeClip: (kind: VideoTimelineShape['kind'], options?: { trackId?: string; startMs?: number }) => Promise<void>;
   updateClipShape: (clipId: string, patch: Partial<VideoTimelineShape>) => Promise<void>;
+  /** Shape resize commits dimensions and position together as one undo step. */
+  resizeShapeClip: (clipId: string, patch: { width?: number; height?: number; x?: number; y?: number }) => Promise<void>;
+  applyAnnotationPreset: (clipId: string, presetKey: string) => Promise<void>;
   updateClipText: (clipId: string, text: Partial<NonNullable<VideoTimelineClip['text']>>) => Promise<void>;
   addClipEffect: (clipId: string, effect: Omit<VideoTimelineEffect, 'id'>) => Promise<void>;
   toggleClipEffect: (clipId: string, effectId: string) => Promise<void>;
@@ -381,6 +412,8 @@ interface VideoStudioState {
   updateClipEffect: (clipId: string, effectId: string, patch: Partial<Omit<VideoTimelineEffect, 'id'>>) => Promise<void>;
   reorderClipEffect: (clipId: string, effectId: string, direction: -1 | 1) => Promise<void>;
   addKeyframe: (clipId: string, keyframe: Omit<VideoTimelineKeyframe, 'id'>) => Promise<void>;
+  /** Replaces pan/zoom (x/y/scale) keyframes with a generated motion preset. */
+  applyMotionPreset: (clipId: string, presetKey: string) => Promise<void>;
   updateKeyframe: (clipId: string, keyframeId: string, patch: Partial<Omit<VideoTimelineKeyframe, 'id'>>) => Promise<void>;
   removeKeyframe: (clipId: string, keyframeId: string) => Promise<void>;
   addTrack: (type?: VideoTimelineTrackType, name?: string) => Promise<void>;
@@ -430,6 +463,8 @@ interface VideoStudioState {
   exportCaptions: (format: 'srt' | 'vtt') => string | null;
   mergeCaptionClipWithNext: (clipId: string) => Promise<void>;
   applyCaptionPreset: (preset: CaptionPresetKey) => Promise<void>;
+  /** Shifts all caption clips (or one) in time as a single undo step. */
+  shiftCaptions: (deltaMs: number, clipId?: string) => Promise<void>;
   undoTimeline: () => Promise<void>;
   redoTimeline: () => Promise<void>;
   setExportSetting: <K extends keyof VideoExportSettings>(key: K, value: VideoExportSettings[K]) => void;
@@ -437,6 +472,8 @@ interface VideoStudioState {
   pollRenderJob: (jobId: string) => Promise<void>;
   cancelRenderJob: (jobId?: string) => Promise<void>;
   downloadRender: (jobId?: string) => void;
+  /** Re-renders using the settings stored on an earlier job. */
+  retryRenderJob: (jobId: string) => Promise<void>;
   setAssistantInstruction: (instruction: string) => void;
   requestStoryboard: () => Promise<void>;
   requestEditPlan: () => Promise<void>;
@@ -472,11 +509,14 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   zoom: 1,
   isPlaying: false,
   snappingEnabled: true,
+  rippleEnabled: false,
   toolMode: 'select',
   editorMode: initialEditorMode(),
   rendererCapabilities: null,
   renderJobs: [],
   activeRenderJobId: null,
+  _renderStartedSaveSeq: 0,
+  renderedSaveSeq: 0,
   exportSettings: { ...DEFAULT_EXPORT },
   assistantInstruction: '',
   assistantPlan: null,
@@ -1261,7 +1301,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const next = cloneTimeline(current);
     const track = ensureCaptionTrack(next);
     const start = Math.max(0, Math.round(get().playheadMs));
-    const clip = captionClipFromCue({ start_ms: start, end_ms: start + 2000, text }, next.canvas);
+    const clip = captionClipFromCue({ start_ms: start, end_ms: start + 2000, text }, next.canvas, defaultCaptionPreset(next));
     track.clips.push(clip);
     track.clips.sort((a, b) => a.start_ms - b.start_ms);
     set((state) => ({
@@ -1285,7 +1325,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const next = cloneTimeline(current);
     const track = ensureCaptionTrack(next);
     for (const cue of cues) {
-      track.clips.push(captionClipFromCue(cue, next.canvas));
+      track.clips.push(captionClipFromCue(cue, next.canvas, defaultCaptionPreset(next)));
     }
     track.clips.sort((a, b) => a.start_ms - b.start_ms);
     set((state) => ({
@@ -1366,8 +1406,35 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         clip.transform = { ...defaultTransform(), ...(clip.transform || {}), x: position.x, y: position.y };
       }
     }
+    // The applied style becomes the project default for new/imported captions.
+    next.metadata = { ...(next.metadata || {}), default_caption_preset: preset.key };
     set((state) => ({
       timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  shiftCaptions: async (deltaMs, clipId) => {
+    const current = get().timeline;
+    if (!current || !Number.isFinite(deltaMs) || deltaMs === 0) return;
+    const next = cloneTimeline(current);
+    let moved = false;
+    for (const track of next.tracks) {
+      if (track.type !== 'caption' || track.locked) continue;
+      for (const clip of track.clips) {
+        if (clipId && clip.id !== clipId) continue;
+        const start = Math.max(0, clip.start_ms + Math.round(deltaMs));
+        if (start !== clip.start_ms) {
+          clip.start_ms = start;
+          moved = true;
+        }
+      }
+      track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    }
+    if (!moved) return;
+    set((state) => ({
+      timeline: recomputeDuration(next),
       ...withTimelineHistory(state, current),
     }));
     await get().saveTimeline(next);
@@ -1551,6 +1618,284 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   },
   setPlaying: (playing) => set({ isPlaying: playing }),
   toggleSnapping: () => set((state) => ({ snappingEnabled: !state.snappingEnabled })),
+  toggleRipple: () => set((state) => ({ rippleEnabled: !state.rippleEnabled })),
+
+  removeGap: async (trackId, startMs, endMs) => {
+    const current = get().timeline;
+    if (!current) return;
+    const gap = Math.round(endMs - startMs);
+    if (gap <= 0) return;
+    const next = cloneTimeline(current);
+    const track = next.tracks.find((item) => item.id === trackId);
+    if (!track || track.locked) return;
+    const threshold = Math.round(endMs);
+    let moved = false;
+    for (const clip of track.clips) {
+      if (clip.start_ms >= threshold) {
+        clip.start_ms = Math.max(0, clip.start_ms - gap);
+        moved = true;
+      }
+    }
+    if (!moved) return;
+    track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  removeAllGaps: async (trackId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    let moved = false;
+    for (const track of next.tracks) {
+      if (track.locked) continue;
+      if (trackId && track.id !== trackId) continue;
+      const clips = [...track.clips].sort((a, b) => a.start_ms - b.start_ms);
+      // Compact clip-to-clip; the first clip keeps its position so an
+      // intentional delayed start (e.g. late music bed) survives.
+      let cursor: number | null = null;
+      for (const clip of clips) {
+        if (cursor !== null && clip.start_ms > cursor) {
+          clip.start_ms = cursor;
+          moved = true;
+        }
+        cursor = Math.max(cursor ?? clip.start_ms, clip.start_ms) + clip.duration_ms;
+      }
+      track.clips = clips;
+    }
+    if (!moved) return;
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  rippleDeleteClip: async (clipId) => {
+    const current = get().timeline;
+    const ids = clipId
+      ? [clipId]
+      : get().selectedClipIds.length > 0
+        ? get().selectedClipIds
+        : get().selectedClipId
+          ? [get().selectedClipId as string]
+          : [];
+    if (!current || ids.length === 0) return;
+    const idSet = new Set(ids);
+    const next = cloneTimeline(current);
+    let removedAny = false;
+    for (const track of next.tracks) {
+      if (track.locked) continue;
+      const removed = track.clips.filter((clip) => idSet.has(clip.id));
+      if (removed.length === 0) continue;
+      track.clips = track.clips.filter((clip) => !idSet.has(clip.id));
+      // Close each removed span right-to-left so earlier shifts don't move
+      // later spans' reference points.
+      for (const gone of [...removed].sort((a, b) => b.start_ms - a.start_ms)) {
+        for (const clip of track.clips) {
+          if (clip.start_ms > gone.start_ms) {
+            clip.start_ms = Math.max(0, clip.start_ms - gone.duration_ms);
+          }
+        }
+      }
+      track.clips.sort((a, b) => a.start_ms - b.start_ms);
+      removedAny = true;
+    }
+    if (!removedAny) return;
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: null,
+      selectedClipIds: [],
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  rippleTrimClip: async (clipId, edge, newTimeMs) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc || loc.track.locked) return;
+    const clip = loc.clip;
+    const oldEnd = clip.start_ms + clip.duration_ms;
+    if (edge === 'start') {
+      // Trim from the left, then pull the clip (and everything after it on
+      // the layer) back so the clip still begins where it used to.
+      const delta = Math.round(Math.min(Math.max(newTimeMs - clip.start_ms, 0), clip.duration_ms - 100));
+      if (delta <= 0) return;
+      clip.trim_in_ms = Math.max(0, clip.trim_in_ms + delta);
+      clip.duration_ms -= delta;
+      clip.trim_out_ms = Math.max(clip.trim_in_ms + 100, clip.trim_out_ms ?? clip.trim_in_ms + clip.duration_ms);
+      for (const other of loc.track.clips) {
+        if (other.id !== clip.id && other.start_ms >= oldEnd) {
+          other.start_ms = Math.max(0, other.start_ms - delta);
+        }
+      }
+    } else {
+      const newDuration = Math.round(Math.max(100, newTimeMs - clip.start_ms));
+      const delta = newDuration - clip.duration_ms;
+      if (delta === 0) return;
+      clip.duration_ms = newDuration;
+      clip.trim_out_ms = clip.trim_in_ms + newDuration;
+      for (const other of loc.track.clips) {
+        if (other.id !== clip.id && other.start_ms >= oldEnd) {
+          other.start_ms = Math.max(0, other.start_ms + delta);
+        }
+      }
+    }
+    loc.track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  insertClipAt: async (assetId, trackId, timeMs, ripple) => {
+    const current = get().timeline;
+    const asset = get().assets.find((item) => item.id === assetId);
+    if (!current) return;
+    if (!asset) {
+      toast.error('Asset not found in this project');
+      return;
+    }
+    const next = cloneTimeline(current);
+    const track = next.tracks.find((item) => item.id === trackId);
+    if (!track || track.locked) return;
+    const at = Math.max(0, Math.round(timeMs));
+    const duration = Math.max(100, Math.round(asset.duration_ms || 4000));
+    if (ripple ?? get().rippleEnabled) {
+      // Split any clip straddling the insert point; everything at/after the
+      // point shifts right to make room.
+      const result: VideoTimelineClip[] = [];
+      for (const clip of track.clips) {
+        const offset = at - clip.start_ms;
+        if (offset > 0 && offset < clip.duration_ms) {
+          const right = JSON.parse(JSON.stringify(clip)) as VideoTimelineClip;
+          right.id = newId('clip');
+          right.start_ms = at;
+          right.duration_ms = clip.duration_ms - offset;
+          right.trim_in_ms = clip.trim_in_ms + offset;
+          right.trim_out_ms = clip.trim_out_ms;
+          right.fade_in_ms = undefined;
+          right.keyframes = (clip.keyframes || [])
+            .filter((keyframe) => keyframe.time_ms >= offset)
+            .map((keyframe) => ({ ...keyframe, id: newId('keyframe'), time_ms: keyframe.time_ms - offset }));
+          clip.duration_ms = offset;
+          clip.trim_out_ms = clip.trim_in_ms + offset;
+          clip.fade_out_ms = undefined;
+          clip.keyframes = (clip.keyframes || []).filter((keyframe) => keyframe.time_ms <= offset);
+          result.push(clip, right);
+        } else {
+          result.push(clip);
+        }
+      }
+      for (const clip of result) {
+        if (clip.start_ms >= at) clip.start_ms += duration;
+      }
+      track.clips = result;
+    }
+    const inserted: VideoTimelineClip = {
+      id: newId('clip'),
+      asset_id: assetId,
+      start_ms: at,
+      duration_ms: duration,
+      trim_in_ms: 0,
+      trim_out_ms: duration,
+      transform: defaultTransform(),
+      effects: [],
+      keyframes: [],
+      transitions: [],
+    };
+    track.clips.push(inserted);
+    track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: inserted.id,
+      selectedClipIds: [inserted.id],
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  overwriteClipAt: async (assetId, trackId, timeMs) => {
+    const current = get().timeline;
+    const asset = get().assets.find((item) => item.id === assetId);
+    if (!current) return;
+    if (!asset) {
+      toast.error('Asset not found in this project');
+      return;
+    }
+    const next = cloneTimeline(current);
+    const track = next.tracks.find((item) => item.id === trackId);
+    if (!track || track.locked) return;
+    const at = Math.max(0, Math.round(timeMs));
+    const duration = Math.max(100, Math.round(asset.duration_ms || 4000));
+    const end = at + duration;
+    // Carve out [at, end): clips inside vanish, straddlers get trimmed, and a
+    // clip spanning the whole region splits around it.
+    const result: VideoTimelineClip[] = [];
+    for (const clip of track.clips) {
+      const clipEnd = clip.start_ms + clip.duration_ms;
+      if (clipEnd <= at || clip.start_ms >= end) {
+        result.push(clip);
+        continue;
+      }
+      const leftKeep = clip.start_ms < at;
+      const rightKeep = clipEnd > end;
+      if (leftKeep) {
+        const left = rightKeep ? (JSON.parse(JSON.stringify(clip)) as VideoTimelineClip) : clip;
+        const offset = at - clip.start_ms;
+        left.duration_ms = offset;
+        left.trim_out_ms = left.trim_in_ms + offset;
+        left.fade_out_ms = undefined;
+        left.keyframes = (left.keyframes || []).filter((keyframe) => keyframe.time_ms <= offset);
+        result.push(left);
+      }
+      if (rightKeep) {
+        const shift = end - clip.start_ms;
+        const right = clip;
+        const newRightId = leftKeep ? newId('clip') : right.id;
+        right.id = newRightId;
+        right.trim_in_ms = right.trim_in_ms + shift;
+        right.duration_ms = clipEnd - end;
+        right.start_ms = end;
+        right.fade_in_ms = undefined;
+        right.keyframes = (right.keyframes || [])
+          .filter((keyframe) => keyframe.time_ms >= shift)
+          .map((keyframe) => ({ ...keyframe, id: newId('keyframe'), time_ms: keyframe.time_ms - shift }));
+        result.push(right);
+      }
+    }
+    const inserted: VideoTimelineClip = {
+      id: newId('clip'),
+      asset_id: assetId,
+      start_ms: at,
+      duration_ms: duration,
+      trim_in_ms: 0,
+      trim_out_ms: duration,
+      transform: defaultTransform(),
+      effects: [],
+      keyframes: [],
+      transitions: [],
+    };
+    result.push(inserted);
+    result.sort((a, b) => a.start_ms - b.start_ms);
+    track.clips = result;
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: inserted.id,
+      selectedClipIds: [inserted.id],
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
 
   toggleTrackMute: async (trackId) => {
     const current = get().timeline;
@@ -1637,6 +1982,107 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     await get().saveTimeline(next);
   },
 
+  removeClipFades: async (clipIds) => {
+    const current = get().timeline;
+    const ids = clipIds && clipIds.length > 0
+      ? clipIds
+      : get().selectedClipIds.length > 0
+        ? get().selectedClipIds
+        : get().selectedClipId
+          ? [get().selectedClipId as string]
+          : [];
+    if (!current || ids.length === 0) return;
+    const next = cloneTimeline(current);
+    let changed = false;
+    for (const id of ids) {
+      const loc = findClip(next, id);
+      if (!loc || loc.track.locked) continue;
+      if (loc.clip.fade_in_ms || loc.clip.fade_out_ms) {
+        loc.clip.fade_in_ms = undefined;
+        loc.clip.fade_out_ms = undefined;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  duckMusicUnderNarration: async (duckTo = 0.3, rampMs = 250) => {
+    const current = get().timeline;
+    if (!current) return;
+    const assets = get().assets;
+    const assetKind = (clip: VideoTimelineClip) => assets.find((item) => item.id === clip.asset_id)?.kind;
+    // Narration = audio assets and detached-audio clips on audible tracks.
+    const narration: Array<{ start: number; end: number }> = [];
+    for (const track of current.tracks) {
+      if (track.muted) continue;
+      for (const clip of track.clips) {
+        if (clip.muted) continue;
+        if (assetKind(clip) === 'audio' || clip.audio_only) {
+          narration.push({ start: clip.start_ms, end: clip.start_ms + clip.duration_ms });
+        }
+      }
+    }
+    if (narration.length === 0) {
+      toast.info('No narration (audio clips) found to duck under');
+      return;
+    }
+    narration.sort((a, b) => a.start - b.start);
+    const merged: Array<{ start: number; end: number }> = [];
+    for (const interval of narration) {
+      const last = merged[merged.length - 1];
+      if (last && interval.start <= last.end) {
+        last.end = Math.max(last.end, interval.end);
+      } else {
+        merged.push({ ...interval });
+      }
+    }
+    const next = cloneTimeline(current);
+    let ducked = 0;
+    for (const track of next.tracks) {
+      if (track.locked) continue;
+      for (const clip of track.clips) {
+        if (assetKind(clip) !== 'music') continue;
+        const base = clip.volume ?? 1;
+        const duck = Math.round(base * Math.max(0, Math.min(1, duckTo)) * 100) / 100;
+        const clipEnd = clip.start_ms + clip.duration_ms;
+        const keyframes: VideoTimelineKeyframe[] = [];
+        const addPoint = (timeMs: number, value: number) => {
+          const clamped = Math.max(0, Math.min(clip.duration_ms, Math.round(timeMs)));
+          if (keyframes.some((keyframe) => keyframe.time_ms === clamped)) return;
+          keyframes.push({ id: newId('keyframe'), property: 'volume', time_ms: clamped, value, easing: 'linear' });
+        };
+        let overlapped = false;
+        for (const interval of merged) {
+          const start = Math.max(interval.start, clip.start_ms);
+          const end = Math.min(interval.end, clipEnd);
+          if (end <= start) continue;
+          overlapped = true;
+          addPoint(start - clip.start_ms - rampMs, base);
+          addPoint(start - clip.start_ms, duck);
+          addPoint(end - clip.start_ms, duck);
+          addPoint(end - clip.start_ms + rampMs, base);
+        }
+        if (!overlapped) continue;
+        // Deterministic: regenerate the volume envelope; other properties keep
+        // their keyframes.
+        clip.keyframes = [
+          ...(clip.keyframes || []).filter((keyframe) => keyframe.property !== 'volume'),
+          ...keyframes.sort((a, b) => a.time_ms - b.time_ms),
+        ];
+        ducked += 1;
+      }
+    }
+    if (ducked === 0) {
+      toast.info('No music clips overlap narration');
+      return;
+    }
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+    toast.success(`Ducked ${ducked} music clip${ducked === 1 ? '' : 's'} under narration`);
+  },
+
   addTextClip: async (text = 'Title card', options = {}) => {
     const current = get().timeline;
     if (!current) return;
@@ -1696,23 +2142,18 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       track = { id: newId('track'), type: 'layer', name: `Layer ${next.tracks.length + 1}`, locked: false, muted: false, visible: true, clips: [] };
       next.tracks.push(track);
     }
-    const canvas = next.canvas;
-    const size = { width: Math.round(canvas.width / 3), height: Math.round(canvas.height / 4) };
-    // Highlights default translucent via the transform; rectangles outline;
-    // blur regions redact whatever composites beneath them.
-    const shape: VideoTimelineShape = kind === 'highlight'
-      ? { kind, ...size, fill: '#facc15' }
-      : kind === 'blur'
-        ? { kind, ...size, blur_radius: 12 }
-        : { kind, ...size, stroke: '#f59e0b', stroke_width: 6 };
+    // Per-kind creation defaults (colors, sizes, label text) live in the
+    // annotation registry shared with the palette and inspector.
+    const defaults = annotationDefaults(kind, next.canvas);
     const clip: VideoTimelineClip = {
       id: newId('clip'),
       start_ms: Math.max(0, Math.round(options.startMs ?? get().playheadMs)),
       duration_ms: 4000,
       trim_in_ms: 0,
       trim_out_ms: 4000,
-      transform: { ...defaultTransform(), opacity: kind === 'highlight' ? 0.4 : 1 },
-      shape,
+      transform: { ...defaultTransform(), opacity: defaults.opacity },
+      shape: defaults.shape,
+      ...(defaults.text ? { text: { ...defaults.text } } : {}),
       effects: [],
       keyframes: [],
       transitions: [],
@@ -1735,6 +2176,51 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const loc = findClip(next, clipId);
     if (!loc || !loc.clip.shape) return;
     loc.clip.shape = { ...loc.clip.shape, ...patch };
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  applyAnnotationPreset: async (clipId, presetKey) => {
+    const current = get().timeline;
+    const preset = ANNOTATION_PRESETS.find((item) => item.key === presetKey);
+    if (!current || !preset) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc || !loc.clip.shape) return;
+    loc.clip.shape = { ...loc.clip.shape, ...preset.shape };
+    if (preset.text) {
+      // Presets restyle text but never replace what the user wrote.
+      loc.clip.text = { ...(loc.clip.text || { text: '' }), ...preset.text, text: loc.clip.text?.text || '' };
+    }
+    if (preset.opacity !== undefined) {
+      loc.clip.transform = { ...defaultTransform(), ...(loc.clip.transform || {}), opacity: preset.opacity };
+    }
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  resizeShapeClip: async (clipId, patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc || !loc.clip.shape) return;
+    if (patch.width !== undefined) loc.clip.shape.width = Math.max(8, Math.round(patch.width));
+    if (patch.height !== undefined) loc.clip.shape.height = Math.max(8, Math.round(patch.height));
+    if (patch.x !== undefined || patch.y !== undefined) {
+      loc.clip.transform = {
+        ...defaultTransform(),
+        ...(loc.clip.transform || {}),
+        ...(patch.x !== undefined ? { x: Math.round(patch.x) } : {}),
+        ...(patch.y !== undefined ? { y: Math.round(patch.y) } : {}),
+      };
+    }
     set((state) => ({
       timeline: next,
       ...withTimelineHistory(state, current),
@@ -1810,6 +2296,28 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       ...withTimelineHistory(state, current),
     }));
     await get().saveTimeline(next);
+  },
+
+  applyMotionPreset: async (clipId, presetKey) => {
+    const current = get().timeline;
+    const preset = motionPreset(presetKey);
+    if (!current || !preset) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc || loc.track.locked) return;
+    const generated = preset.build(loc.clip, next.canvas)
+      .map((spec) => ({ ...spec, id: newId('keyframe') }));
+    // Motion presets own the pan/zoom envelope; other properties keep theirs.
+    loc.clip.keyframes = [
+      ...(loc.clip.keyframes || []).filter((keyframe) => !['x', 'y', 'scale'].includes(keyframe.property)),
+      ...generated,
+    ];
+    set((state) => ({
+      timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+    toast.success(generated.length > 0 ? `Applied "${preset.label}" motion` : 'Removed pan/zoom motion');
   },
 
   updateClipTransition: async (clipId, transitionId, patch) => {
@@ -2504,6 +3012,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     set({ isRendering: true, error: null });
     try {
       await get().saveTimeline();
+      const startedSeq = get()._saveSeq;
       const job = await videoApi.renderTimeline(projectId, {
         ...get().exportSettings,
         estimated_duration_ms: get().timeline?.duration_ms,
@@ -2511,6 +3020,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       set((state) => ({
         renderJobs: upsertRenderJob(state.renderJobs, job),
         activeRenderJobId: job.id,
+        _renderStartedSaveSeq: startedSeq,
         isRendering: false,
       }));
       toast.success('Render started');
@@ -2521,6 +3031,20 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     }
   },
 
+  retryRenderJob: async (jobId) => {
+    const job = get().renderJobs.find((item) => item.id === jobId);
+    if (!job) return;
+    try {
+      const settings = JSON.parse(job.settings_json) as VideoExportSettings;
+      if (settings && typeof settings === 'object') {
+        set({ exportSettings: { ...DEFAULT_EXPORT, ...settings } });
+      }
+    } catch {
+      // Unparseable settings — render with the current panel settings instead.
+    }
+    await get().renderTimeline();
+  },
+
   pollRenderJob: async (jobId) => {
     try {
       const job = await videoApi.getRenderJob(jobId);
@@ -2529,6 +3053,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       if (get().activeProjectId !== job.project_id) return;
       set((state) => ({ renderJobs: upsertRenderJob(state.renderJobs, job), activeRenderJobId: job.id }));
       if (job.status === 'completed') {
+        // The render reflects the timeline as of when it started.
+        set((state) => ({ renderedSaveSeq: state._renderStartedSaveSeq }));
         if (get().activeProjectId === job.project_id) {
           const assets = await videoApi.listAssets(job.project_id);
           if (get().activeProjectId === job.project_id) {

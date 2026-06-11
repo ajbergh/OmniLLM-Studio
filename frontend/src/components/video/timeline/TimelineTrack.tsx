@@ -42,8 +42,12 @@ export function TimelineTrack({
   toolMode = 'select',
   onSplitAt,
   onClipContextMenu,
+  onEdgeContextMenu,
   onHeaderContextMenu,
   onLaneContextMenu,
+  onFadeClip,
+  onUpdateClipKeyframe,
+  onTransitionContextMenu,
 }: {
   track: Track;
   assets: VideoAsset[];
@@ -65,6 +69,10 @@ export function TimelineTrack({
   toolMode?: 'select' | 'blade';
   onSplitAt?: (clipId: string, timeMs: number) => void;
   onClipContextMenu?: (clipId: string, trackId: string, clientX: number, clientY: number) => void;
+  onEdgeContextMenu?: (clipId: string, trackId: string, edge: 'start' | 'end', clientX: number, clientY: number) => void;
+  onFadeClip?: (clipId: string, fade: { fade_in_ms?: number; fade_out_ms?: number }) => void;
+  onUpdateClipKeyframe?: (clipId: string, keyframeId: string, patch: Partial<Omit<VideoTimelineClip['keyframes'][number], 'id'>>) => void;
+  onTransitionContextMenu?: (clipId: string, trackId: string, clientX: number, clientY: number) => void;
   onHeaderContextMenu?: (trackId: string, clientX: number, clientY: number) => void;
   onLaneContextMenu?: (trackId: string, timeMs: number, clientX: number, clientY: number) => void;
 }) {
@@ -246,6 +254,10 @@ export function TimelineTrack({
             onTrim={onTrimClip}
             onSplitAt={onSplitAt}
             onContextMenu={onClipContextMenu}
+            onEdgeContextMenu={onEdgeContextMenu}
+            onFade={track.locked ? undefined : onFadeClip}
+            onUpdateKeyframe={track.locked ? undefined : onUpdateClipKeyframe}
+            onTransitionContextMenu={onTransitionContextMenu}
           />
         ))}
       </div>

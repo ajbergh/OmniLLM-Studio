@@ -59,12 +59,38 @@ const (
 	ShapeKindRectangle = "rectangle"
 	ShapeKindHighlight = "highlight"
 	ShapeKindBlur      = "blur"
+	// Annotation kinds. ShapeKindPixelate exports via crop+downscale+upscale
+	// (mosaic redaction); ShapeKindRoundedRectangle and ShapeKindLabel export
+	// as square-corner drawbox approximations. The remaining annotation kinds
+	// are preview-only until the renderer gains vector drawing.
+	ShapeKindRoundedRectangle = "rounded_rectangle"
+	ShapeKindEllipse          = "ellipse"
+	ShapeKindArrow            = "arrow"
+	ShapeKindLine             = "line"
+	ShapeKindSpeechBubble     = "speech_bubble"
+	ShapeKindSpotlight        = "spotlight"
+	ShapeKindPixelate         = "pixelate"
+	ShapeKindCheckmark        = "checkmark"
+	ShapeKindXMark            = "x_mark"
+	ShapeKindStepMarker       = "step_marker"
+	ShapeKindLabel            = "label"
 )
 
 var knownShapeKinds = map[string]bool{
-	ShapeKindRectangle: true,
-	ShapeKindHighlight: true,
-	ShapeKindBlur:      true,
+	ShapeKindRectangle:        true,
+	ShapeKindHighlight:        true,
+	ShapeKindBlur:             true,
+	ShapeKindRoundedRectangle: true,
+	ShapeKindEllipse:          true,
+	ShapeKindArrow:            true,
+	ShapeKindLine:             true,
+	ShapeKindSpeechBubble:     true,
+	ShapeKindSpotlight:        true,
+	ShapeKindPixelate:         true,
+	ShapeKindCheckmark:        true,
+	ShapeKindXMark:            true,
+	ShapeKindStepMarker:       true,
+	ShapeKindLabel:            true,
 }
 
 var knownEffectTypes = map[string]bool{
@@ -158,6 +184,7 @@ type TimelineClip struct {
 	FadeOutMS   int64                `json:"fade_out_ms,omitempty"`
 	Text        *TimelineText        `json:"text,omitempty"`
 	Shape       *TimelineShape       `json:"shape,omitempty"`
+	Cursor      *TimelineCursor      `json:"cursor,omitempty"`
 	Effects     []TimelineEffect     `json:"effects"`
 	Transitions []TimelineTransition `json:"transitions,omitempty"`
 	Keyframes   []TimelineKeyframe   `json:"keyframes"`
@@ -172,8 +199,33 @@ type TimelineShape struct {
 	Fill        string  `json:"fill,omitempty"`
 	Stroke      string  `json:"stroke,omitempty"`
 	StrokeWidth float64 `json:"stroke_width,omitempty"`
-	// BlurRadius applies to blur-region shapes (clamped 1–50, default 12).
+	// BlurRadius applies to blur/pixelate regions: blur radius or pixel block
+	// size respectively (clamped 1–50, default 12).
 	BlurRadius float64 `json:"blur_radius,omitempty"`
+	// CornerRadius applies to rounded rectangles, speech bubbles, and labels
+	// (clamped 0–200). Preview-only; exports draw square corners.
+	CornerRadius float64 `json:"corner_radius,omitempty"`
+}
+
+// TimelineCursor carries cursor metadata captured with screen recordings so
+// cursor effects can layer onto footage. Persisted but preview-only today —
+// the renderer reports it as unsupported until export support lands.
+type TimelineCursor struct {
+	Visible    bool                  `json:"visible,omitempty"`
+	Scale      float64               `json:"scale,omitempty"`
+	Highlight  bool                  `json:"highlight,omitempty"`
+	ClickRings bool                  `json:"click_rings,omitempty"`
+	Smoothing  bool                  `json:"smoothing,omitempty"`
+	Events     []TimelineCursorEvent `json:"events,omitempty"`
+}
+
+// TimelineCursorEvent is a sampled cursor position (canvas pixels from the
+// top-left), clip-relative in time. Click marks press events for click rings.
+type TimelineCursorEvent struct {
+	TimeMS int64   `json:"time_ms"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Click  bool    `json:"click,omitempty"`
 }
 
 type TimelineMarker struct {
@@ -219,6 +271,99 @@ type TimelineKeyframe struct {
 	TimeMS   int64   `json:"time_ms"`
 	Value    float64 `json:"value"`
 	Easing   string  `json:"easing,omitempty"`
+}
+
+// SliceTimelineRange returns a copy of the document trimmed to the window
+// [startMS, endMS): clips outside the window drop, straddling clips trim
+// (advancing their source trim window and rebasing clip-relative keyframes),
+// and everything shifts so the window starts at 0. Used for export ranges.
+func SliceTimelineRange(doc TimelineDocument, startMS, endMS int64) TimelineDocument {
+	if endMS <= startMS || startMS < 0 {
+		return doc
+	}
+	if endMS > doc.DurationMS && doc.DurationMS > 0 {
+		endMS = doc.DurationMS
+	}
+	if endMS <= startMS {
+		return doc
+	}
+	out := doc
+	out.Tracks = make([]TimelineTrack, len(doc.Tracks))
+	for ti, track := range doc.Tracks {
+		copied := track
+		copied.Clips = nil
+		for _, clip := range track.Clips {
+			clipEnd := clip.StartMS + clip.DurationMS
+			if clipEnd <= startMS || clip.StartMS >= endMS {
+				continue
+			}
+			next := clip
+			if lead := startMS - next.StartMS; lead > 0 {
+				next.TrimInMS += lead
+				next.DurationMS -= lead
+				next.StartMS = startMS
+				next.FadeInMS = 0
+				var keyframes []TimelineKeyframe
+				for _, keyframe := range next.Keyframes {
+					if keyframe.TimeMS < lead {
+						continue
+					}
+					rebased := keyframe
+					rebased.TimeMS -= lead
+					keyframes = append(keyframes, rebased)
+				}
+				next.Keyframes = keyframes
+			}
+			if over := (next.StartMS + next.DurationMS) - endMS; over > 0 {
+				next.DurationMS -= over
+				next.TrimOutMS = next.TrimInMS + next.DurationMS
+				next.FadeOutMS = 0
+				var keyframes []TimelineKeyframe
+				for _, keyframe := range next.Keyframes {
+					if keyframe.TimeMS > next.DurationMS {
+						continue
+					}
+					keyframes = append(keyframes, keyframe)
+				}
+				next.Keyframes = keyframes
+			}
+			next.StartMS -= startMS
+			copied.Clips = append(copied.Clips, next)
+		}
+		if copied.Clips == nil {
+			copied.Clips = []TimelineClip{}
+		}
+		out.Tracks[ti] = copied
+	}
+	out.Markers = nil
+	for _, marker := range doc.Markers {
+		if marker.TimeMS < startMS || marker.TimeMS >= endMS {
+			continue
+		}
+		shifted := marker
+		shifted.TimeMS -= startMS
+		out.Markers = append(out.Markers, shifted)
+	}
+	if out.Markers == nil {
+		out.Markers = []TimelineMarker{}
+	}
+	out.DurationMS = endMS - startMS
+	return out
+}
+
+// StripCaptionOverlays returns a copy with caption-track clips removed so the
+// renderer skips burning them into the frame (burn_in_captions=false).
+func StripCaptionOverlays(doc TimelineDocument) TimelineDocument {
+	out := doc
+	out.Tracks = make([]TimelineTrack, len(doc.Tracks))
+	for ti, track := range doc.Tracks {
+		copied := track
+		if track.Type == TrackTypeCaption {
+			copied.Clips = []TimelineClip{}
+		}
+		out.Tracks[ti] = copied
+	}
+	return out
 }
 
 type TimelineImportAssetRequest struct {
@@ -424,12 +569,30 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 					clip.Shape.Height = 8192
 				}
 				clip.Shape.StrokeWidth = clampFloat(clip.Shape.StrokeWidth, 0, 100)
-				if clip.Shape.Kind == ShapeKindBlur {
+				if clip.Shape.Kind == ShapeKindBlur || clip.Shape.Kind == ShapeKindPixelate {
 					if clip.Shape.BlurRadius <= 0 {
 						clip.Shape.BlurRadius = 12
 					}
 					clip.Shape.BlurRadius = clampFloat(clip.Shape.BlurRadius, 1, 50)
 				}
+				clip.Shape.CornerRadius = clampFloat(clip.Shape.CornerRadius, 0, 200)
+			}
+			if clip.Cursor != nil {
+				if clip.Cursor.Scale <= 0 {
+					clip.Cursor.Scale = 1
+				}
+				clip.Cursor.Scale = clampFloat(clip.Cursor.Scale, 0.25, 4)
+				events := clip.Cursor.Events[:0]
+				for _, event := range clip.Cursor.Events {
+					if event.TimeMS < 0 {
+						continue
+					}
+					events = append(events, event)
+				}
+				clip.Cursor.Events = events
+				sort.SliceStable(clip.Cursor.Events, func(i, j int) bool {
+					return clip.Cursor.Events[i].TimeMS < clip.Cursor.Events[j].TimeMS
+				})
 			}
 			if clip.Effects == nil {
 				clip.Effects = []TimelineEffect{}

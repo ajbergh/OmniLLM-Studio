@@ -1575,6 +1575,47 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
 		return
 	}
+	// Sidecar caption files ship as a sibling asset. Range exports slice the
+	// document the same way the renderer did so cue times match the output.
+	if format := settings.SidecarCaptions; format == "srt" || format == "vtt" {
+		sidecarDoc := doc
+		if settings.RangeEndMS > settings.RangeStartMS && settings.RangeStartMS >= 0 {
+			sidecarDoc = SliceTimelineRange(doc, settings.RangeStartMS, settings.RangeEndMS)
+		}
+		content := SerializeCaptions(CaptionCuesFromTimeline(sidecarDoc), format)
+		if content == "" {
+			jobMeta["captions_sidecar"] = "skipped — no caption clips"
+		} else {
+			mime := "application/x-subrip"
+			if format == "vtt" {
+				mime = "text/vtt"
+			}
+			sidecarPath, sidecarName, sidecarErr := s.storage.Write(project.ID, job.ID+"-captions", "captions."+format, mime, []byte(content))
+			if sidecarErr == nil {
+				sidecar := &models.VideoAsset{
+					ProjectID:    &projectID,
+					SourceType:   "render",
+					SourceID:     &job.ID,
+					Kind:         "caption",
+					FileName:     sidecarName,
+					FilePath:     sidecarPath,
+					MimeType:     mime,
+					SizeBytes:    int64(len(content)),
+					MetadataJSON: fmt.Sprintf(`{"render_job_id":%q,"sidecar_format":%q}`, job.ID, format),
+				}
+				if createErr := s.assets.Create(sidecar); createErr == nil {
+					jobMeta["captions_sidecar_asset_id"] = sidecar.ID
+				} else {
+					jobMeta["captions_sidecar"] = "failed: " + createErr.Error()
+				}
+			} else {
+				jobMeta["captions_sidecar"] = "failed: " + sidecarErr.Error()
+			}
+		}
+		if jobMetaJSON, marshalErr := json.Marshal(jobMeta); marshalErr == nil {
+			_ = s.renderJobs.SetMetadata(job.ID, string(jobMetaJSON))
+		}
+	}
 	_ = s.renderJobs.MarkCompleted(job.ID, asset.ID)
 }
 
@@ -1721,6 +1762,30 @@ func validateExportSettings(settings ExportSettings, project models.VideoProject
 	case "draft", "standard", "high":
 	default:
 		return ExportSettings{}, fmt.Errorf("unsupported export quality")
+	}
+	switch settings.Codec {
+	case "", "h264", "vp9":
+	case "h265":
+		if settings.Format != "mp4" {
+			return ExportSettings{}, fmt.Errorf("h265 requires the mp4 format")
+		}
+	default:
+		return ExportSettings{}, fmt.Errorf("unsupported export codec")
+	}
+	settings.SidecarCaptions = strings.ToLower(strings.TrimSpace(settings.SidecarCaptions))
+	switch settings.SidecarCaptions {
+	case "", "srt", "vtt":
+	default:
+		return ExportSettings{}, fmt.Errorf("unsupported sidecar caption format")
+	}
+	if settings.RangeStartMS < 0 || settings.RangeEndMS < 0 {
+		return ExportSettings{}, fmt.Errorf("export range must be non-negative")
+	}
+	if settings.RangeEndMS > 0 && settings.RangeEndMS <= settings.RangeStartMS {
+		return ExportSettings{}, fmt.Errorf("export range end must be after its start")
+	}
+	if settings.AudioBitrateKbps != 0 && (settings.AudioBitrateKbps < 32 || settings.AudioBitrateKbps > 512) {
+		return ExportSettings{}, fmt.Errorf("audio bitrate must be between 32 and 512 kbps")
 	}
 	return settings, nil
 }

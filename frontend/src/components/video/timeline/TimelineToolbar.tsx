@@ -1,9 +1,10 @@
-import { Copy, HelpCircle, Magnet, Maximize2, MousePointer2, Pause, Play, Redo2, Save, Scissors, Slice, Trash2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { ChevronsLeftRight, Copy, Flag, HelpCircle, Magnet, Maximize2, MousePointer2, Pause, Play, Redo2, Save, Scissors, Slice, Trash2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export function TimelineToolbar({
   isPlaying,
   snappingEnabled,
+  rippleEnabled,
   zoom,
   isSaving,
   canUndo,
@@ -19,12 +20,16 @@ export function TimelineToolbar({
   onZoom,
   onZoomToFit,
   onToggleSnap,
+  onToggleRipple,
   onSetToolMode,
+  onAddMarker,
   onHelp,
   timecode,
+  selectionSummary,
 }: {
   isPlaying: boolean;
   snappingEnabled: boolean;
+  rippleEnabled: boolean;
   zoom: number;
   isSaving: boolean;
   canUndo: boolean;
@@ -40,9 +45,12 @@ export function TimelineToolbar({
   onZoom: (zoom: number) => void;
   onZoomToFit: () => void;
   onToggleSnap: () => void;
+  onToggleRipple: () => void;
   onSetToolMode: (mode: 'select' | 'blade') => void;
+  onAddMarker: () => void;
   onHelp: () => void;
   timecode?: string;
+  selectionSummary?: string;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-border bg-surface-alt px-2 py-1.5">
@@ -68,6 +76,9 @@ export function TimelineToolbar({
         <Slice size={14} />
       </IconButton>
       <span className="mx-1 h-5 w-px bg-border" />
+      <IconButton label="Add marker at playhead (M)" onClick={onAddMarker}>
+        <Flag size={14} />
+      </IconButton>
       <IconButton label="Split selected clip" onClick={onSplit}>
         <Scissors size={14} />
       </IconButton>
@@ -91,6 +102,13 @@ export function TimelineToolbar({
       <IconButton label={snappingEnabled ? 'Disable snapping' : 'Enable snapping'} onClick={onToggleSnap} active={snappingEnabled}>
         <Magnet size={14} />
       </IconButton>
+      <IconButton
+        label={rippleEnabled ? 'Disable ripple mode (R) — edits stop shifting later clips' : 'Enable ripple mode (R) — deletes/trims shift later clips to close gaps'}
+        onClick={onToggleRipple}
+        active={rippleEnabled}
+      >
+        <ChevronsLeftRight size={14} />
+      </IconButton>
       <span className="mx-1 h-5 w-px bg-border" />
       <IconButton label="Save timeline" onClick={onSave} active={isSaving}>
         <Save size={14} className={isSaving ? 'animate-pulse' : ''} />
@@ -98,6 +116,15 @@ export function TimelineToolbar({
       <IconButton label="Keyboard shortcuts (?)" onClick={onHelp}>
         <HelpCircle size={14} />
       </IconButton>
+      <span className="ml-auto flex items-center gap-2 text-[10px] text-text-muted">
+        {rippleEnabled && (
+          <span className="rounded bg-primary/15 px-1.5 py-0.5 font-semibold uppercase tracking-wide text-primary" title="Ripple mode is on — deletes and trims shift later clips">
+            Ripple
+          </span>
+        )}
+        {selectionSummary && <span className="tabular-nums">{selectionSummary}</span>}
+        <span className={isSaving ? 'text-amber-300' : 'text-text-muted'}>{isSaving ? 'Saving…' : 'Saved'}</span>
+      </span>
     </div>
   );
 }

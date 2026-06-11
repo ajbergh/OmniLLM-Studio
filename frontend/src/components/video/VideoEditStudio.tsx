@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DragHandle, useResizablePanels } from '../ResizablePanels';
-import { Check, ChevronLeft, ChevronRight, Download, Film, LayoutGrid, LayoutTemplate, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, Upload, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Circle, Download, Film, LayoutGrid, LayoutTemplate, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, videoApi } from '../../api';
 import { useConversationStore, useSettingsStore } from '../../stores';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import { ContextMenu } from '../common/ContextMenu';
 import type { ContextMenuEntry } from '../common/ContextMenu';
+import { ConfirmDialog } from '../common/AppDialog';
 import type { VideoAsset } from '../../types/video';
+import { RecordingModal } from './RecordingModal';
 import { VideoCaptionPanel } from './VideoCaptionPanel';
 import { VideoInspector } from './VideoInspector';
 import { VideoPreviewCanvas } from './VideoPreviewCanvas';
@@ -41,7 +43,18 @@ export function VideoEditStudio() {
   const setAppMode = useSettingsStore((state) => state.setAppMode);
   const modeFeatures = editorModeFeatures(editorMode);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [railTab, setRailTab] = useState<'properties' | 'assistant' | 'captions' | 'export'>('properties');
   const templatesRef = useRef<HTMLDivElement | null>(null);
+
+  // The right rail tabs follow the editor mode's feature gates.
+  const railTabs = [
+    { key: 'properties' as const, label: 'Properties', enabled: true },
+    { key: 'assistant' as const, label: 'Assistant', enabled: modeFeatures.assistant },
+    { key: 'captions' as const, label: 'Captions', enabled: modeFeatures.captionsPanel },
+    { key: 'export' as const, label: 'Export', enabled: true },
+  ].filter((tab) => tab.enabled);
+  const activeRailTab = railTabs.some((tab) => tab.key === railTab) ? railTab : 'properties';
 
   useEffect(() => {
     if (!templatesOpen) return;
@@ -158,8 +171,18 @@ export function VideoEditStudio() {
             Text
           </button>
           )}
+          <button
+            onClick={() => setRecordOpen(true)}
+            disabled={!activeProjectId}
+            className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-45 transition-colors inline-flex items-center gap-1.5"
+            title={activeProjectId ? 'Record screen, camera, or voiceover into this project' : 'Select or create a project first'}
+          >
+            <Circle size={11} className="text-red-400" fill="currentColor" />
+            Record
+          </button>
         </div>
       </div>
+      {recordOpen && <RecordingModal onClose={() => setRecordOpen(false)} />}
 
       <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
         {collapsedLeft ? (
@@ -225,23 +248,45 @@ export function VideoEditStudio() {
             <ChevronLeft size={14} />
           </button>
         ) : (
-          <aside className="relative min-h-0 overflow-y-auto border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
-            <button
-              onClick={() => setCollapsedRight(true)}
-              className="absolute left-1 top-1 z-10 hidden rounded p-1 text-text-muted hover:text-text xl:block"
-              title="Collapse inspector panel"
-              aria-label="Collapse inspector panel"
-            >
-              <ChevronRight size={13} />
-            </button>
-            <VideoInspector />
-            {modeFeatures.captionsPanel && (
-              <div className="px-3 pb-3">
-                <VideoCaptionPanel />
-              </div>
-            )}
-            <div className="px-3 pb-3">
-              <VideoRenderPanel />
+          <aside className="relative flex min-h-0 flex-col border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
+            <div className="flex items-center gap-0.5 border-b border-border px-2 pt-1.5" role="tablist" aria-label="Inspector panels">
+              <button
+                onClick={() => setCollapsedRight(true)}
+                className="hidden rounded p-1 text-text-muted hover:text-text xl:block"
+                title="Collapse inspector panel"
+                aria-label="Collapse inspector panel"
+              >
+                <ChevronRight size={13} />
+              </button>
+              {railTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  role="tab"
+                  aria-selected={activeRailTab === tab.key}
+                  onClick={() => setRailTab(tab.key)}
+                  className={`rounded-t-md border-b-2 px-2.5 py-1.5 text-[11px] transition-colors ${
+                    activeRailTab === tab.key
+                      ? 'border-primary font-medium text-text'
+                      : 'border-transparent text-text-muted hover:text-text'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {activeRailTab === 'properties' && <VideoInspector section="properties" />}
+              {activeRailTab === 'assistant' && <VideoInspector section="assistant" />}
+              {activeRailTab === 'captions' && modeFeatures.captionsPanel && (
+                <div className="p-3">
+                  <VideoCaptionPanel />
+                </div>
+              )}
+              {activeRailTab === 'export' && (
+                <div className="p-3">
+                  <VideoRenderPanel />
+                </div>
+              )}
             </div>
           </aside>
         )}
@@ -264,6 +309,7 @@ function ProjectStrip({
   onSelect: (id: string) => void;
 }) {
   const [menu, setMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<{ id: string; title: string } | null>(null);
   const duplicateProject = useVideoStudioStore((state) => state.duplicateProject);
   const deleteProject = useVideoStudioStore((state) => state.deleteProject);
   return (
@@ -322,13 +368,24 @@ function ProjectStrip({
           {
             label: 'Delete project',
             danger: true,
-            action: () => {
-              if (window.confirm(`Delete "${project.title}" and all of its assets?`)) void deleteProject(project.id);
-            },
+            action: () => setDeleteCandidate({ id: project.id, title: project.title }),
           },
         ];
         return <ContextMenu position={{ x: menu.x, y: menu.y }} items={items} onClose={() => setMenu(null)} />;
       })()}
+      {deleteCandidate && (
+        <ConfirmDialog
+          title="Delete project"
+          message={`Delete "${deleteCandidate.title}" and all of its assets? This cannot be undone.`}
+          confirmLabel="Delete project"
+          danger
+          onConfirm={() => {
+            setDeleteCandidate(null);
+            void deleteProject(deleteCandidate.id);
+          }}
+          onCancel={() => setDeleteCandidate(null)}
+        />
+      )}
     </section>
   );
 }
@@ -404,6 +461,7 @@ function AssetPanel({
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [menu, setMenu] = useState<{ assetId: string; x: number; y: number } | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<{ id: string; name: string; used: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const timeline = useVideoStudioStore((state) => state.timeline);
   const addAssetToTimeline = useVideoStudioStore((state) => state.addAssetToTimeline);
@@ -521,9 +579,7 @@ function AssetPanel({
       <button
         onClick={(event) => {
           event.stopPropagation();
-          if (window.confirm(`Delete "${asset.file_name}"? Clips using it will stop rendering.`)) {
-            onDelete(asset.id);
-          }
+          setDeleteCandidate({ id: asset.id, name: asset.file_name, used: usedCounts.get(asset.id) || 0 });
         }}
         className="min-h-7 min-w-7 rounded-md border border-border bg-surface-alt text-text-muted hover:text-red-400 inline-flex items-center justify-center"
         aria-label={`Delete ${asset.file_name}`}
@@ -667,9 +723,25 @@ function AssetPanel({
         ))}
       </div>
       {filtered.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-8 text-center text-xs text-text-muted">
-          {assets.length === 0 ? 'No media yet.' : 'No media matches this filter.'}
-        </div>
+        assets.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-6 text-center">
+            <p className="text-xs font-medium text-text-secondary">Your media bin is empty</p>
+            <p className="mt-1 text-[11px] text-text-muted">
+              Drop video, image, or audio files here — or generate a clip and use “Send to Timeline”.
+            </p>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="mt-3 inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:text-text"
+            >
+              <Upload size={12} />
+              Upload media
+            </button>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-8 text-center text-xs text-text-muted">
+            No media matches this filter.
+          </div>
+        )
       ) : view === 'grid' ? (
         <div className="grid grid-cols-2 gap-2">
           {filtered.map((asset) => (
@@ -775,16 +847,26 @@ function AssetPanel({
           {
             label: used > 0 ? `Delete (used by ${used} clip${used === 1 ? '' : 's'})` : 'Delete',
             danger: true,
-            action: () => {
-              const warning = used > 0
-                ? `Delete "${asset.file_name}"? ${used} clip${used === 1 ? '' : 's'} in the timeline use${used === 1 ? 's' : ''} it and will stop rendering.`
-                : `Delete "${asset.file_name}"?`;
-              if (window.confirm(warning)) onDelete(asset.id);
-            },
+            action: () => setDeleteCandidate({ id: asset.id, name: asset.file_name, used }),
           },
         ];
         return <ContextMenu position={{ x: menu.x, y: menu.y }} items={items} onClose={() => setMenu(null)} />;
       })()}
+      {deleteCandidate && (
+        <ConfirmDialog
+          title="Delete asset"
+          message={deleteCandidate.used > 0
+            ? `Delete "${deleteCandidate.name}"? ${deleteCandidate.used} clip${deleteCandidate.used === 1 ? '' : 's'} in the timeline use${deleteCandidate.used === 1 ? 's' : ''} it and will stop rendering.`
+            : `Delete "${deleteCandidate.name}"?`}
+          confirmLabel="Delete asset"
+          danger
+          onConfirm={() => {
+            setDeleteCandidate(null);
+            onDelete(deleteCandidate.id);
+          }}
+          onCancel={() => setDeleteCandidate(null)}
+        />
+      )}
     </section>
   );
 }

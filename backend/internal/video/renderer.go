@@ -91,6 +91,16 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 	if err != nil {
 		return nil, err
 	}
+	// Export range: slice the validated document so the filtergraph only sees
+	// the requested window (clip trims, keyframes, and markers rebase).
+	if req.Settings.RangeEndMS > req.Settings.RangeStartMS && req.Settings.RangeStartMS >= 0 {
+		req.Timeline = SliceTimelineRange(req.Timeline, req.Settings.RangeStartMS, req.Settings.RangeEndMS)
+	}
+	// Burn-in toggle: dropping caption-track clips keeps them out of the frame;
+	// sidecar files are written by the render job from the original document.
+	if req.Settings.BurnInCaptions != nil && !*req.Settings.BurnInCaptions {
+		req.Timeline = StripCaptionOverlays(req.Timeline)
+	}
 	binary := r.binary
 	if binary == "" {
 		binary, err = exec.LookPath("ffmpeg")
@@ -281,6 +291,10 @@ func evenDimension(value int) int {
 }
 
 func appendFFmpegCodecArgs(args []string, format string, settings ExportSettings) []string {
+	audioBitrate := "128k"
+	if settings.AudioBitrateKbps >= 32 && settings.AudioBitrateKbps <= 512 {
+		audioBitrate = fmt.Sprintf("%dk", settings.AudioBitrateKbps)
+	}
 	switch format {
 	case "webm":
 		crf := "34"
@@ -291,18 +305,30 @@ func appendFFmpegCodecArgs(args []string, format string, settings ExportSettings
 		}
 		args = append(args, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", crf, "-pix_fmt", "yuv420p")
 		if settings.IncludeAudio {
-			args = append(args, "-c:a", "libopus")
+			args = append(args, "-c:a", "libopus", "-b:a", audioBitrate)
 		}
 	default:
-		crf := "23"
-		if settings.Quality == "high" {
-			crf = "18"
-		} else if settings.Quality == "draft" {
-			crf = "30"
+		if settings.Codec == "h265" {
+			// H.265 needs an ffmpeg built with libx265; failures surface in the
+			// job's FFmpeg diagnostics rather than being silently downgraded.
+			crf := "28"
+			if settings.Quality == "high" {
+				crf = "22"
+			} else if settings.Quality == "draft" {
+				crf = "34"
+			}
+			args = append(args, "-c:v", "libx265", "-preset", "fast", "-crf", crf, "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-movflags", "+faststart")
+		} else {
+			crf := "23"
+			if settings.Quality == "high" {
+				crf = "18"
+			} else if settings.Quality == "draft" {
+				crf = "30"
+			}
+			args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-crf", crf, "-pix_fmt", "yuv420p", "-movflags", "+faststart")
 		}
-		args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-crf", crf, "-pix_fmt", "yuv420p", "-movflags", "+faststart")
 		if settings.IncludeAudio {
-			args = append(args, "-c:a", "aac", "-b:a", "128k")
+			args = append(args, "-c:a", "aac", "-b:a", audioBitrate)
 		}
 	}
 	return args
@@ -465,7 +491,7 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 		if item.media == nil {
 			// A callout can carry both a shape and a label: the box composites
 			// beneath its own text.
-			if item.clip.Shape != nil && item.clip.Shape.Kind == ShapeKindBlur {
+			if item.clip.Shape != nil && (item.clip.Shape.Kind == ShapeKindBlur || item.clip.Shape.Kind == ShapeKindPixelate) {
 				if blurParts, outLabel := blurRegionParts(prevV, item.clip, *item.clip.Shape, width, height, textIdx); len(blurParts) > 0 {
 					parts = append(parts, blurParts...)
 					prevV = outLabel
@@ -665,6 +691,18 @@ func blurRegionParts(prev string, clip TimelineClip, shape TimelineShape, width,
 	baseLabel := fmt.Sprintf("[bbb%d]", idx)
 	blurLabel := fmt.Sprintf("[bbl%d]", idx)
 	outLabel := fmt.Sprintf("[t%d_v]", idx)
+	if shape.Kind == ShapeKindPixelate {
+		// Mosaic redaction: shrink the region by the block size and scale it
+		// back up with nearest-neighbor so each block becomes one flat cell.
+		block := maxInt(2, radius)
+		downW := maxInt(1, boxW/block)
+		downH := maxInt(1, boxH/block)
+		return []string{
+			prev + "split" + srcLabel + baseLabel,
+			fmt.Sprintf("%scrop=%d:%d:%d:%d,scale=%d:%d,scale=%d:%d:flags=neighbor%s", srcLabel, boxW, boxH, x, y, downW, downH, boxW, boxH, blurLabel),
+			fmt.Sprintf("%s%soverlay=%d:%d:enable='between(t\\,%.3f\\,%.3f)'%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),
+		}, outLabel
+	}
 	return []string{
 		prev + "split" + srcLabel + baseLabel,
 		fmt.Sprintf("%scrop=%d:%d:%d:%d,boxblur=%d%s", srcLabel, boxW, boxH, x, y, radius, blurLabel),
@@ -700,13 +738,20 @@ func drawBoxFilter(clip TimelineClip, shape TimelineShape, width, height int) st
 	case ShapeKindHighlight:
 		color := ffmpegColor(shape.Fill, "0xFACC15")
 		return fmt.Sprintf("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@%.3f:t=fill:%s", x, y, boxW, boxH, color, opacity, enable)
-	case ShapeKindRectangle:
+	case ShapeKindRectangle, ShapeKindRoundedRectangle:
+		// Rounded rectangles export with square corners — drawbox cannot
+		// round; the capability matrix reports this as partial.
 		color := ffmpegColor(shape.Stroke, "0xF59E0B")
 		thickness := int(shape.StrokeWidth + 0.5)
 		if thickness <= 0 {
 			thickness = 4
 		}
 		return fmt.Sprintf("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@%.3f:t=%d:%s", x, y, boxW, boxH, color, opacity, thickness, enable)
+	case ShapeKindLabel:
+		// Label callouts export as a filled box; their text renders through
+		// the regular drawtext pass that follows the shape in the chain.
+		color := ffmpegColor(shape.Fill, "0x1E293B")
+		return fmt.Sprintf("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@%.3f:t=fill:%s", x, y, boxW, boxH, color, opacity, enable)
 	default:
 		return ""
 	}

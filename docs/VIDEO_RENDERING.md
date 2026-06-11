@@ -35,6 +35,8 @@ The default renderer is FFmpeg-backed. It creates real MP4/WebM bytes from the n
 Current FFmpeg export coverage:
 
 - Canvas size, background color, duration, FPS, format, quality, and optional silent audio.
+- **Export settings extensions** — `codec` (`h264` default for MP4, `h265` via libx265 when the FFmpeg build has it, `vp9` for WebM), `audio_bitrate_kbps` (32–512, default 128), `range_start_ms`/`range_end_ms` (renders only that timeline window — clips slice, trims/keyframes/markers rebase via `SliceTimelineRange`), `burn_in_captions` (default true; false strips caption-track clips from the frame), and `sidecar_captions` (`srt`/`vtt`; writes the captions as a sibling `kind:"caption"` asset and records `captions_sidecar_asset_id` in the job metadata).
+- **Pixelate regions** — `pixelate` shape clips export as a true mosaic via crop → downscale → nearest-neighbor upscale → overlay; `rounded_rectangle` and `label` annotations export as square-corner drawbox approximations. Other annotation kinds (arrow, ellipse, spotlight, …) are preview-only and reported as such by the capability matrix.
 - **Video asset compositing** — video clips with `asset_id` pointing to a real video file are overlaid on the canvas at the correct start/duration using FFmpeg `-itsoffset` and `overlay` filter graph entries.
 - **Image asset compositing** — image clips are overlaid on the canvas at the correct start/duration using FFmpeg `overlay` filters.
 - **Per-clip transform** — `x`/`y` position offset, `scale`, **`rotation`** (via `rotate` with transparent fill), and fractional `crop` (`{top, right, bottom, left}`, 0–0.95 each).
