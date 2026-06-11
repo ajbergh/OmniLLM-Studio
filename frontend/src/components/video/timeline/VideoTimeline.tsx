@@ -21,6 +21,7 @@ import { TimelinePlayhead } from './TimelinePlayhead';
 import { TimelineRuler } from './TimelineRuler';
 import { TimelineToolbar } from './TimelineToolbar';
 import { TimelineTrack } from './TimelineTrack';
+import type { SnapPoint } from './TimelineTrack';
 
 type TimelineMenuState =
   | { kind: 'clip'; clipId: string; trackId: string; x: number; y: number }
@@ -213,20 +214,28 @@ export function VideoTimeline() {
   const pxPerMs = useMemo(() => 0.02 * zoom, [zoom]);
   const width = Math.max(900, (timeline?.duration_ms || 30000) * pxPerMs);
 
-  // Snap targets: every clip edge plus the playhead.
-  const snapPointsMs = useMemo(() => {
-    if (!timeline) return [] as number[];
-    const points = new Set<number>([0, playheadMs]);
+  // Snap targets, typed so the drop guide can say what it snapped to. When a
+  // position matches several targets, precedence is playhead > marker > clip
+  // edge > timeline start/end.
+  const snapPoints = useMemo(() => {
+    if (!timeline) return [] as SnapPoint[];
+    const points = new Map<number, SnapPoint['kind']>();
+    const add = (ms: number, kind: SnapPoint['kind']) => {
+      if (!points.has(ms)) points.set(ms, kind);
+    };
+    add(playheadMs, 'playhead');
+    for (const marker of timeline.markers || []) {
+      add(marker.time_ms, 'marker');
+    }
     for (const track of timeline.tracks) {
       for (const clip of track.clips) {
-        points.add(clip.start_ms);
-        points.add(clip.start_ms + clip.duration_ms);
+        add(clip.start_ms, 'clip');
+        add(clip.start_ms + clip.duration_ms, 'clip');
       }
     }
-    for (const marker of timeline.markers || []) {
-      points.add(marker.time_ms);
-    }
-    return Array.from(points);
+    add(0, 'edge');
+    add(timeline.duration_ms, 'edge');
+    return Array.from(points, ([ms, kind]) => ({ ms, kind }));
   }, [timeline, playheadMs]);
 
   useEffect(() => {
@@ -566,7 +575,7 @@ export function VideoTimeline() {
             pxPerMs={pxPerMs}
             width={width}
             snappingEnabled={snappingEnabled}
-            snapPointsMs={snapPointsMs}
+            snapPoints={snapPoints}
             soloActive={soloTrackId === track.id}
             onMoveClip={(clipId, trackId, startMs) => { void moveClip(clipId, trackId, startMs); }}
             onTrimClip={handleTrimClip}

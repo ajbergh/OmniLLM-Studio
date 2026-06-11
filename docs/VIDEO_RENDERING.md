@@ -22,9 +22,12 @@ Backend render jobs are persisted in `video_render_jobs` and exposed through:
 
 ```text
 POST /v1/video/projects/{projectId}/render
-GET  /v1/video/render-jobs/{jobId}
-POST /v1/video/render-jobs/{jobId}/cancel
+GET    /v1/video/render-jobs/{jobId}
+POST   /v1/video/render-jobs/{jobId}/cancel
+DELETE /v1/video/render-jobs/{jobId}
 ```
+
+Deleting a render job removes only the job record (terminal jobs only — cancel active jobs first); the output export asset, if any, is an independent record and survives.
 
 Render outputs become `VideoAsset` rows with `kind = "export"`.
 

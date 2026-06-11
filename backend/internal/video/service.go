@@ -1453,6 +1453,20 @@ func (s *Service) CancelRenderJob(userID, jobID string) (*models.VideoRenderJob,
 	return s.renderJobs.GetByID(job.ID)
 }
 
+// DeleteRenderJob removes a terminal render job record after an ownership
+// check. Active jobs must be cancelled first; the job's output asset (if any)
+// is an independent record and is not deleted.
+func (s *Service) DeleteRenderJob(userID, jobID string) error {
+	job, err := s.GetRenderJob(userID, jobID)
+	if err != nil {
+		return err
+	}
+	if job.Status == "queued" || job.Status == "running" {
+		return fmt.Errorf("cancel the render job before deleting it")
+	}
+	return s.renderJobs.Delete(job.ID)
+}
+
 // runRenderJob executes one render job end-to-end: load the project/timeline/
 // settings, invoke the renderer (progress updates stream into the job row),
 // persist the output as an export asset, optionally write an SRT/VTT caption

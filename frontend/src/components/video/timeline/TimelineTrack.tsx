@@ -13,11 +13,25 @@ import { TimelineClip } from './TimelineClip';
 const SNAP_RADIUS_PX = 8;
 const DEFAULT_TRACK_HEIGHT = 52;
 
-function snapToPoints(startMs: number, snapPointsMs: number[], pxPerMs: number): number {
-  let best = startMs;
+/** A snap target with what it represents, so drag guides can say why they snapped. */
+export interface SnapPoint {
+  ms: number;
+  kind: 'playhead' | 'marker' | 'clip' | 'edge';
+}
+
+const SNAP_GUIDE_STYLES: Record<SnapPoint['kind'], { line: string; label: string }> = {
+  playhead: { line: 'bg-primary/90', label: 'playhead' },
+  marker: { line: 'bg-amber-400/90', label: 'marker' },
+  clip: { line: 'bg-sky-400/90', label: 'clip edge' },
+  edge: { line: 'bg-white/70', label: 'timeline' },
+};
+
+/** Nearest snap point within the radius, or null when nothing is close enough. */
+function snapToPoints(startMs: number, snapPoints: SnapPoint[], pxPerMs: number): SnapPoint | null {
+  let best: SnapPoint | null = null;
   let bestDistPx = SNAP_RADIUS_PX + 1;
-  for (const point of snapPointsMs) {
-    const distPx = Math.abs(point - startMs) * pxPerMs;
+  for (const point of snapPoints) {
+    const distPx = Math.abs(point.ms - startMs) * pxPerMs;
     if (distPx < bestDistPx) {
       best = point;
       bestDistPx = distPx;
@@ -33,7 +47,7 @@ export function TimelineTrack({
   pxPerMs,
   width,
   snappingEnabled,
-  snapPointsMs,
+  snapPoints,
   soloActive = false,
   onMoveClip,
   onTrimClip,
@@ -60,7 +74,7 @@ export function TimelineTrack({
   pxPerMs: number;
   width: number;
   snappingEnabled: boolean;
-  snapPointsMs: number[];
+  snapPoints: SnapPoint[];
   soloActive?: boolean;
   onMoveClip: (clipId: string, trackId: string, startMs: number) => void;
   onTrimClip: (clipId: string, updates: Partial<Pick<VideoTimelineClip, 'start_ms' | 'duration_ms' | 'trim_in_ms' | 'trim_out_ms'>>) => void;
@@ -83,7 +97,7 @@ export function TimelineTrack({
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(track.name);
-  const [dropGuideX, setDropGuideX] = useState<number | null>(null);
+  const [dropGuide, setDropGuide] = useState<{ x: number; kind: SnapPoint['kind'] | null } | null>(null);
   const [liveHeight, setLiveHeight] = useState<number | null>(null);
   // Mirrors liveHeight so pointer-up can commit without a side effect inside
   // a setState updater (StrictMode runs updaters twice in dev).
@@ -210,16 +224,21 @@ export function TimelineTrack({
             // Without the grab offset (unavailable during dragover) the guide marks
             // the cursor position, snapped to the same targets the drop will use.
             let guideMs = Math.max(0, Math.round((event.clientX - rect.left) / pxPerMs));
+            let guideKind: SnapPoint['kind'] | null = null;
             if (snappingEnabled) {
-              guideMs = Math.max(0, snapToPoints(guideMs, snapPointsMs, pxPerMs));
+              const snapped = snapToPoints(guideMs, snapPoints, pxPerMs);
+              if (snapped) {
+                guideMs = Math.max(0, snapped.ms);
+                guideKind = snapped.kind;
+              }
             }
-            setDropGuideX(guideMs * pxPerMs);
+            setDropGuide({ x: guideMs * pxPerMs, kind: guideKind });
           }
         }}
-        onDragLeave={() => setDropGuideX(null)}
+        onDragLeave={() => setDropGuide(null)}
         onDrop={(event) => {
           event.preventDefault();
-          setDropGuideX(null);
+          setDropGuide(null);
           if (track.locked) return;
           const clipId = event.dataTransfer.getData('application/x-video-clip-id');
           const assetId = event.dataTransfer.getData('application/x-video-asset-id');
@@ -227,7 +246,8 @@ export function TimelineTrack({
           const rect = event.currentTarget.getBoundingClientRect();
           let startMs = Math.max(0, Math.round((event.clientX - rect.left - grabOffsetPx) / pxPerMs));
           if (snappingEnabled) {
-            startMs = Math.max(0, snapToPoints(startMs, snapPointsMs, pxPerMs));
+            const snapped = snapToPoints(startMs, snapPoints, pxPerMs);
+            if (snapped) startMs = Math.max(0, snapped.ms);
           }
           if (clipId) {
             onMoveClip(clipId, track.id, startMs);
@@ -243,8 +263,15 @@ export function TimelineTrack({
           onLaneContextMenu(track.id, Math.max(0, Math.round((event.clientX - rect.left) / pxPerMs)), event.clientX, event.clientY);
         }}
       >
-        {dropGuideX !== null && (
-          <div className="pointer-events-none absolute top-0 z-10 h-full w-px bg-primary/80" style={{ left: dropGuideX }} />
+        {dropGuide !== null && (
+          <div className="pointer-events-none absolute top-0 z-10 h-full" style={{ left: dropGuide.x }}>
+            <div className={`h-full w-px ${dropGuide.kind ? SNAP_GUIDE_STYLES[dropGuide.kind].line : 'bg-primary/50'}`} />
+            {dropGuide.kind && (
+              <span className={`absolute left-1 top-0.5 rounded px-1 text-[8px] font-semibold uppercase tracking-wide text-black/80 ${SNAP_GUIDE_STYLES[dropGuide.kind].line}`}>
+                {SNAP_GUIDE_STYLES[dropGuide.kind].label}
+              </span>
+            )}
+          </div>
         )}
         {track.clips.map((clip) => (
           <TimelineClip

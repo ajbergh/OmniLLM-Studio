@@ -19,7 +19,7 @@ import { KEYFRAME_EASINGS, KEYFRAME_PROPERTIES } from './effects/keyframeUtils';
 import { transitionDefinition } from './effects/transitionRegistry';
 import { ANNOTATION_PRESETS, annotationDefinition } from './effects/annotationRegistry';
 import { MOTION_PRESETS } from './effects/motionPresets';
-import { EffectBrowser, TransitionBrowser } from './EffectBrowser';
+import { AnnotationBrowser, EffectBrowser, TransitionBrowser } from './EffectBrowser';
 import { describeOperationDiff } from './planDiff';
 import type { VideoTimelineClip, VideoTimelineKeyframe } from '../../types/video';
 
@@ -137,6 +137,7 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
   const updateClipFade = useVideoStudioStore((state) => state.updateClipFade);
   const updateClipText = useVideoStudioStore((state) => state.updateClipText);
   const updateClipShape = useVideoStudioStore((state) => state.updateClipShape);
+  const addShapeClip = useVideoStudioStore((state) => state.addShapeClip);
   const applyAnnotationPreset = useVideoStudioStore((state) => state.applyAnnotationPreset);
   const addClipEffect = useVideoStudioStore((state) => state.addClipEffect);
   const toggleClipEffect = useVideoStudioStore((state) => state.toggleClipEffect);
@@ -348,6 +349,17 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
             <Type size={14} />
           </button>
         </div>
+        {/* Annotation palette — creation works with or without a selection. */}
+        {modeFeatures.addTextClip && timeline && (
+          <details className="mb-3 rounded-md border border-border bg-surface-alt/40">
+            <summary className="cursor-pointer select-none px-2 py-1.5 text-[11px] font-medium text-text-secondary hover:text-text">
+              Annotations — add at playhead
+            </summary>
+            <div className="p-1.5">
+              <AnnotationBrowser onAdd={(kind) => { void addShapeClip(kind); }} />
+            </div>
+          </details>
+        )}
         {!clip ? (
           !timeline ? (
             <div className="rounded-lg border border-dashed border-border bg-surface-alt p-4 text-center text-xs text-text-muted">

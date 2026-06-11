@@ -36,6 +36,7 @@ export function VideoRenderPanel() {
   const renderTimeline = useVideoStudioStore((state) => state.renderTimeline);
   const retryRenderJob = useVideoStudioStore((state) => state.retryRenderJob);
   const cancelRenderJob = useVideoStudioStore((state) => state.cancelRenderJob);
+  const deleteRenderJob = useVideoStudioStore((state) => state.deleteRenderJob);
   const downloadRender = useVideoStudioStore((state) => state.downloadRender);
   const saveSeq = useVideoStudioStore((state) => state._saveSeq);
   const renderedSaveSeq = useVideoStudioStore((state) => state.renderedSaveSeq);
@@ -336,6 +337,7 @@ export function VideoRenderPanel() {
             onCancel={(jobId) => { void cancelRenderJob(jobId); }}
             onDownload={downloadRender}
             onRetry={(jobId) => { void retryRenderJob(jobId); }}
+            onDelete={(jobId) => { void deleteRenderJob(jobId); }}
           />
         ))}
         {renderJobs.length === 0 && (

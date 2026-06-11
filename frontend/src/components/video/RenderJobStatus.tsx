@@ -17,11 +17,13 @@ export function RenderJobStatus({
   onCancel,
   onDownload,
   onRetry,
+  onDelete,
 }: {
   job: VideoRenderJob;
   onCancel: (jobId: string) => void;
   onDownload: (jobId: string) => void;
   onRetry?: (jobId: string) => void;
+  onDelete?: (jobId: string) => void;
 }) {
   const progress = Math.round((job.progress || 0) * 100);
   const terminal = ['completed', 'failed', 'cancelled'].includes(job.status);
@@ -151,6 +153,12 @@ export function RenderJobStatus({
           { label: 'Copy job ID', action: () => copyToClipboard(job.id, 'Job ID') },
           'divider',
           { label: 'Cancel job', disabled: terminal, danger: true, action: () => onCancel(job.id) },
+          {
+            label: 'Delete job record',
+            disabled: !terminal || !onDelete,
+            danger: true,
+            action: () => onDelete?.(job.id),
+          },
         ];
         return <ContextMenu position={menu} items={items} onClose={() => setMenu(null)} />;
       })()}

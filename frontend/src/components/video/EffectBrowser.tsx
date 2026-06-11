@@ -3,7 +3,8 @@ import { Search } from 'lucide-react';
 import { EFFECT_CATEGORIES, EFFECT_DEFINITIONS, defaultEffectParams } from './effects/effectRegistry';
 import type { EffectCategory, EffectDefinition } from './effects/effectRegistry';
 import { TRANSITION_DEFINITIONS } from './effects/transitionRegistry';
-import type { VideoTimelineEffect, VideoTimelineTransition } from '../../types/video';
+import { ANNOTATION_DEFINITIONS } from './effects/annotationRegistry';
+import type { VideoTimelineEffect, VideoTimelineShapeKind, VideoTimelineTransition } from '../../types/video';
 
 function SupportBadge({ supported, note }: { supported: boolean; note?: string }) {
   if (supported) {
@@ -74,6 +75,32 @@ export function EffectBrowser({ onApply, disabled }: {
           <p className="col-span-2 px-1 py-2 text-center text-[10px] text-text-muted">No effects match.</p>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Annotation palette: every shape/annotation kind as a card with its
+ * export-support badge. Click to create one on the timeline at the playhead.
+ */
+export function AnnotationBrowser({ onAdd, disabled }: {
+  onAdd: (kind: VideoTimelineShapeKind) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-surface-alt/50 p-2">
+      {ANNOTATION_DEFINITIONS.map((definition) => (
+        <button
+          key={definition.kind}
+          disabled={disabled}
+          onClick={() => onAdd(definition.kind)}
+          className="flex items-center justify-between gap-1 rounded border border-border bg-surface px-1.5 py-1.5 text-left text-[11px] text-text-secondary hover:border-primary/40 hover:text-text disabled:cursor-not-allowed disabled:opacity-45"
+          title={definition.exportNote || `Add a ${definition.label.toLowerCase()} at the playhead`}
+        >
+          <span className="min-w-0 truncate">{definition.label}</span>
+          <SupportBadge supported={definition.exportSupport !== 'preview'} note={definition.exportSupport === 'partial' ? definition.exportNote : undefined} />
+        </button>
+      ))}
     </div>
   );
 }

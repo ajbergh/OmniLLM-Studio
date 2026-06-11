@@ -486,6 +486,8 @@ interface VideoStudioState {
   downloadRender: (jobId?: string) => void;
   /** Re-renders using the settings stored on an earlier job. */
   retryRenderJob: (jobId: string) => Promise<void>;
+  /** Removes a terminal job record; its output asset (if any) is kept. */
+  deleteRenderJob: (jobId: string) => Promise<void>;
   setAssistantInstruction: (instruction: string) => void;
   requestStoryboard: () => Promise<void>;
   requestEditPlan: () => Promise<void>;
@@ -3094,6 +3096,19 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       const job = await videoApi.cancelRenderJob(id);
       set((state) => ({ renderJobs: upsertRenderJob(state.renderJobs, job) }));
       toast.success('Render cancelled');
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  },
+
+  deleteRenderJob: async (jobId) => {
+    try {
+      await videoApi.deleteRenderJob(jobId);
+      set((state) => ({
+        renderJobs: state.renderJobs.filter((job) => job.id !== jobId),
+        activeRenderJobId: state.activeRenderJobId === jobId ? null : state.activeRenderJobId,
+      }));
+      toast.success('Render job deleted');
     } catch (err) {
       toast.error((err as Error).message);
     }
