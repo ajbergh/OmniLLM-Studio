@@ -1,19 +1,40 @@
+import { useState } from 'react';
 import { Download, Loader2, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { ContextMenu } from '../common/ContextMenu';
+import type { ContextMenuEntry } from '../common/ContextMenu';
 import type { VideoRenderJob } from '../../types/video';
 
 export function RenderJobStatus({
   job,
   onCancel,
   onDownload,
+  onRetry,
 }: {
   job: VideoRenderJob;
   onCancel: (jobId: string) => void;
   onDownload: (jobId: string) => void;
+  onRetry?: () => void;
 }) {
   const progress = Math.round((job.progress || 0) * 100);
   const terminal = ['completed', 'failed', 'cancelled'].includes(job.status);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  const copyToClipboard = (text: string, what: string) => {
+    void navigator.clipboard.writeText(text).then(
+      () => toast.success(`${what} copied`),
+      () => toast.error(`Could not copy ${what.toLowerCase()}`),
+    );
+  };
+
   return (
-    <div className="rounded-lg border border-border bg-surface-alt p-2">
+    <div
+      className="rounded-lg border border-border bg-surface-alt p-2"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setMenu({ x: event.clientX, y: event.clientY });
+      }}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-xs font-medium text-text">{job.status}</p>
@@ -54,6 +75,23 @@ export function RenderJobStatus({
           </pre>
         </details>
       )}
+      {menu && (() => {
+        const items: ContextMenuEntry[] = [
+          { label: 'Download output', disabled: job.status !== 'completed' || !job.output_asset_id, action: () => onDownload(job.id) },
+          { label: 'Render again', disabled: !onRetry, action: () => onRetry?.() },
+          'divider',
+          { label: 'Copy error', disabled: !job.error, action: () => copyToClipboard(job.error || '', 'Error') },
+          {
+            label: 'Copy FFmpeg diagnostics',
+            disabled: !job.metadata_json || job.metadata_json === '{}',
+            action: () => copyToClipboard(formatDiagnostics(job.metadata_json || ''), 'Diagnostics'),
+          },
+          { label: 'Copy job ID', action: () => copyToClipboard(job.id, 'Job ID') },
+          'divider',
+          { label: 'Cancel job', disabled: terminal, danger: true, action: () => onCancel(job.id) },
+        ];
+        return <ContextMenu position={menu} items={items} onClose={() => setMenu(null)} />;
+      })()}
     </div>
   );
 }

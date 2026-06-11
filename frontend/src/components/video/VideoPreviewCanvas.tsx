@@ -1,8 +1,10 @@
-import { Crop, Crosshair, Grid3x3, Pause, Play } from 'lucide-react';
+import { Crop, Crosshair, Grid3x3, Maximize2, Minimize2, Pause, Play } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { videoApi } from '../../api';
 import { useVideoStudioStore } from '../../stores/videoStudio';
+import { ContextMenu } from '../common/ContextMenu';
+import type { ContextMenuEntry } from '../common/ContextMenu';
 import { composePreviewFilter } from './effects/effectRegistry';
 import { sampleKeyframes } from './effects/keyframeUtils';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineTrack } from '../../types/video';
@@ -14,7 +16,7 @@ function formatTime(ms: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-const VISUAL_TRACK_TYPES = ['video', 'image', 'text', 'caption', 'shape', 'callout'];
+const VISUAL_TRACK_TYPES = ['layer', 'video', 'image', 'text', 'caption', 'shape', 'callout'];
 
 // Mounted <video> elements are expensive; only the topmost few video layers get
 // real elements — deeper ones render a lightweight placeholder card.
@@ -66,10 +68,14 @@ export function VideoPreviewCanvas() {
   const isPlaying = useVideoStudioStore((state) => state.isPlaying);
   const snappingEnabled = useVideoStudioStore((state) => state.snappingEnabled);
   const selectedClipId = useVideoStudioStore((state) => state.selectedClipId);
+  const soloTrackId = useVideoStudioStore((state) => state.soloTrackId);
   const setPlaying = useVideoStudioStore((state) => state.setPlaying);
   const setPlayhead = useVideoStudioStore((state) => state.setPlayhead);
   const selectClip = useVideoStudioStore((state) => state.selectClip);
   const updateClipTransform = useVideoStudioStore((state) => state.updateClipTransform);
+  const bringClipForward = useVideoStudioStore((state) => state.bringClipForward);
+  const sendClipBackward = useVideoStudioStore((state) => state.sendClipBackward);
+  const addTextClip = useVideoStudioStore((state) => state.addTextClip);
 
   const rafRef = useRef<number | null>(null);
   const timelineDurationRef = useRef<number>(0);
@@ -81,6 +87,23 @@ export function VideoPreviewCanvas() {
   const [stageSize, setStageSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [showGrid, setShowGrid] = useState(false);
   const [showSafeAreas, setShowSafeAreas] = useState(false);
+  const [menu, setMenu] = useState<{ clipId: string | null; x: number; y: number } | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else if (rootRef.current) {
+      void rootRef.current.requestFullscreen();
+    }
+  };
   const [liveTransform, setLiveTransform] = useState<{ clipId: string; patch: Partial<DragState['base']> } | null>(null);
   const [cropMode, setCropMode] = useState(false);
   const [cropDraft, setCropDraft] = useState<CropBox | null>(null);
@@ -111,12 +134,15 @@ export function VideoPreviewCanvas() {
     .filter(({ track }) => track.visible && VISUAL_TRACK_TYPES.includes(track.type))
     .filter(({ clip }) => playheadMs >= clip.start_ms && playheadMs < clip.start_ms + clip.duration_ms)
     .map((entry) => ({ ...entry, asset: entry.clip.asset_id ? assets.find((item) => item.id === entry.clip.asset_id) : undefined }))
+    // Audio-only clips on generic layers contribute no visuals.
+    .filter(({ clip, asset }) => Boolean(clip.text) || !asset || !asset.mime_type.startsWith('audio/'))
     .sort((a, b) => (a.trackIndex - b.trackIndex) || ((a.clip.z_index ?? 0) - (b.clip.z_index ?? 0)));
 
-  // Audio/music clips active at the playhead mount hidden <audio> elements so
-  // the preview is audible. Muted tracks contribute no audio (matching export).
+  // Audio clips active at the playhead mount hidden <audio> elements so the
+  // preview is audible — on any unmuted track, matching export semantics where
+  // the asset (not the track type) decides audio contribution.
   const audioLayers = (timeline?.tracks || [])
-    .filter((track) => (track.type === 'audio' || track.type === 'music') && !track.muted)
+    .filter((track) => !track.muted && (!soloTrackId || track.id === soloTrackId))
     .flatMap((track) => track.clips)
     .filter((clip) => playheadMs >= clip.start_ms && playheadMs < clip.start_ms + clip.duration_ms)
     .map((clip) => ({ clip, asset: clip.asset_id ? assets.find((item) => item.id === clip.asset_id) : undefined }))
@@ -475,6 +501,12 @@ export function VideoPreviewCanvas() {
           }
           if (!track.locked) beginDrag('move', entry, event, event.currentTarget);
         }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (clip.id !== selectedClipId) selectClip(clip.id, track.id);
+          setMenu({ clipId: clip.id, x: event.clientX, y: event.clientY });
+        }}
       >
         {content}
         {selected && !isPlaying && !track.locked && !inCropEdit && (
@@ -534,7 +566,7 @@ export function VideoPreviewCanvas() {
   };
 
   return (
-    <div className="flex h-full min-h-[320px] flex-col rounded-lg border border-border bg-black">
+    <div ref={rootRef} className="flex h-full min-h-[320px] flex-col rounded-lg border border-border bg-black">
       <div className="hidden">
         {audioLayers.map(({ clip, asset }) => (
           <audio
@@ -589,6 +621,14 @@ export function VideoPreviewCanvas() {
           >
             <Crosshair size={12} />
           </button>
+          <button
+            onClick={toggleFullscreen}
+            className="inline-flex h-6 w-6 items-center justify-center rounded border border-white/15 text-white/55 hover:text-white"
+            title={isFullscreen ? 'Exit fullscreen preview' : 'Fullscreen preview'}
+            aria-label={isFullscreen ? 'Exit fullscreen preview' : 'Fullscreen preview'}
+          >
+            {isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          </button>
           <span className="ml-2">{timeline ? `${timeline.canvas.width}x${timeline.canvas.height} · ${timeline.canvas.fps}fps` : 'No timeline'}</span>
         </div>
       </div>
@@ -603,6 +643,11 @@ export function VideoPreviewCanvas() {
           onPointerDown={(event) => {
             // Clicking empty stage space deselects.
             if (event.target === event.currentTarget) selectClip(null);
+          }}
+          onContextMenu={(event) => {
+            if (event.target !== event.currentTarget) return;
+            event.preventDefault();
+            setMenu({ clipId: null, x: event.clientX, y: event.clientY });
           }}
         >
           {layers.map((entry) => renderLayer(entry))}
@@ -654,6 +699,52 @@ export function VideoPreviewCanvas() {
           />
         </div>
       </div>
+      {menu && (() => {
+        const entry = menu.clipId ? layers.find((layer) => layer.clip.id === menu.clipId) : undefined;
+        // Cover the canvas while preserving the asset's aspect ratio
+        // (object-contain renders at scale 1 = fit).
+        const fillScale = (asset?: VideoAsset): number => {
+          if (!asset?.width || !asset?.height) return 1;
+          const assetAR = asset.width / asset.height;
+          const canvasAR = canvasWidth / canvasHeight;
+          return assetAR >= canvasAR ? assetAR / canvasAR : canvasAR / assetAR;
+        };
+        let items: ContextMenuEntry[];
+        if (entry) {
+          const { clip, track, asset } = entry;
+          const isMedia = Boolean(asset && (asset.mime_type.startsWith('video/') || asset.mime_type.startsWith('image/')));
+          const stackIndex = layers.findIndex((layer) => layer.clip.id === clip.id);
+          items = [
+            {
+              label: 'Select next clip underneath',
+              disabled: layers.length < 2,
+              action: () => {
+                const next = layers[(stackIndex - 1 + layers.length) % layers.length];
+                selectClip(next.clip.id, next.track.id);
+              },
+            },
+            'divider',
+            { label: 'Fit to canvas', disabled: !isMedia || track.locked, action: () => { void updateClipTransform(clip.id, { x: 0, y: 0, scale: 1 }); } },
+            { label: 'Fill canvas', disabled: !isMedia || track.locked, action: () => { void updateClipTransform(clip.id, { x: 0, y: 0, scale: fillScale(asset) }); } },
+            { label: 'Center on canvas', disabled: track.locked, action: () => { void updateClipTransform(clip.id, { x: 0, y: 0 }); } },
+            { label: 'Reset transform', disabled: track.locked, action: () => { void updateClipTransform(clip.id, { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, crop: undefined }); } },
+            'divider',
+            { label: 'Bring forward', disabled: track.locked, action: () => { void bringClipForward(clip.id); } },
+            { label: 'Send backward', disabled: track.locked, action: () => { void sendClipBackward(clip.id); } },
+            'divider',
+            { label: showGrid ? 'Hide grid' : 'Show grid', action: () => setShowGrid((value) => !value) },
+            { label: showSafeAreas ? 'Hide safe areas' : 'Show safe areas', action: () => setShowSafeAreas((value) => !value) },
+          ];
+        } else {
+          items = [
+            { label: 'Add title card', action: () => { void addTextClip(); } },
+            'divider',
+            { label: showGrid ? 'Hide grid' : 'Show grid', action: () => setShowGrid((value) => !value) },
+            { label: showSafeAreas ? 'Hide safe areas' : 'Show safe areas', action: () => setShowSafeAreas((value) => !value) },
+          ];
+        }
+        return <ContextMenu position={{ x: menu.x, y: menu.y }} items={items} onClose={() => setMenu(null)} />;
+      })()}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import type { PointerEvent as ReactPointerEvent } from 'react';
+import { videoApi } from '../../../api';
 import type { VideoAsset, VideoTimelineClip as Clip } from '../../../types/video';
 
 function clipLabel(clip: Clip, asset?: VideoAsset): string {
@@ -105,12 +106,24 @@ export function TimelineClip({
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onSelect(clip.id, trackId, event.ctrlKey || event.metaKey || event.shiftKey);
+        } else if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+          event.preventDefault();
+          event.stopPropagation();
+          const rect = event.currentTarget.getBoundingClientRect();
+          onContextMenu?.(clip.id, trackId, rect.left + rect.width / 2, rect.bottom);
         }
       }}
       className={`absolute top-1 h-9 rounded-md border px-2 text-left text-[11px] transition-colors ${tone} ${
         selected ? 'ring-2 ring-primary ring-offset-1 ring-offset-surface' : ''
       } ${toolMode === 'blade' ? 'cursor-crosshair' : ''}`}
-      style={{ left, width }}
+      style={{
+        left,
+        width,
+        // Audio clips show their server-generated waveform as a backdrop.
+        ...(asset?.waveform_path
+          ? { backgroundImage: `url(${videoApi.artifactUrl(asset.id, 'waveform')})`, backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat' }
+          : {}),
+      }}
       title={clipLabel(clip, asset)}
     >
       <button

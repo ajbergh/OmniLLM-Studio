@@ -2,6 +2,8 @@ import { ArrowDown, ArrowUp, Sparkles, Trash2, Type } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useVideoStudioStore } from '../../stores/videoStudio';
+import { ContextMenu } from '../common/ContextMenu';
+import type { ContextMenuEntry } from '../common/ContextMenu';
 import { editorModeFeatures } from './editorModes';
 import { EFFECT_DEFINITIONS, defaultEffectParams, effectDefinition, numberParam } from './effects/effectRegistry';
 import { KEYFRAME_EASINGS, KEYFRAME_PROPERTIES } from './effects/keyframeUtils';
@@ -17,6 +19,56 @@ function selectedClip(): VideoTimelineClip | null {
   }
   return null;
 }
+
+/** HH:MM:SS.cc — hours omitted when zero. */
+function formatTimecode(ms: number): string {
+  const total = Math.max(0, Math.round(ms));
+  const hours = Math.floor(total / 3_600_000);
+  const minutes = Math.floor((total % 3_600_000) / 60_000);
+  const seconds = Math.floor((total % 60_000) / 1000);
+  const centis = Math.floor((total % 1000) / 10);
+  const base = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(centis).padStart(2, '0')}`;
+  return hours > 0 ? `${hours}:${base}` : base;
+}
+
+/** Accepts plain seconds ("12.5") or timecode ("1:02", "00:01:02.15"). */
+function parseTimecode(input: string): number | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split(':').map((part) => part.trim());
+  if (parts.length > 3 || parts.some((part) => part === '' || Number.isNaN(Number(part)))) return null;
+  let seconds = 0;
+  for (const part of parts) {
+    seconds = seconds * 60 + Number(part);
+  }
+  return Math.max(0, Math.round(seconds * 1000));
+}
+
+const TEXT_PRESETS: Array<{
+  key: string;
+  label: string;
+  text: Partial<NonNullable<VideoTimelineClip['text']>>;
+  position?: (canvas: { width: number; height: number }) => { x: number; y: number };
+}> = [
+  {
+    key: 'title_card',
+    label: 'Title card',
+    text: { font_size: 96, font_weight: '800', color: '#ffffff', background: undefined, shadow: true, text_align: 'center' },
+    position: () => ({ x: 0, y: 0 }),
+  },
+  {
+    key: 'lower_third',
+    label: 'Lower third',
+    text: { font_size: 40, font_weight: '700', color: '#ffffff', background: '#111111', shadow: false, text_align: 'left' },
+    position: (canvas) => ({ x: -Math.round(canvas.width * 0.22), y: Math.round(canvas.height * 0.35) }),
+  },
+  {
+    key: 'subtitle',
+    label: 'Subtitle',
+    text: { font_size: 48, font_weight: '600', color: '#ffffff', background: undefined, shadow: true, text_align: 'center' },
+    position: (canvas) => ({ x: 0, y: Math.round(canvas.height * 0.38) }),
+  },
+];
 
 const QUICK_WORKFLOWS = [
   { label: '30s social cut', instruction: 'Create a 30-second social cut' },
@@ -39,6 +91,8 @@ export function VideoInspector() {
   const storyboard = useVideoStudioStore((state) => state.storyboard);
   const socialVariants = useVideoStudioStore((state) => state.socialVariants);
   const setAssistantInstruction = useVideoStudioStore((state) => state.setAssistantInstruction);
+  const assets = useVideoStudioStore((state) => state.assets);
+  const trimClip = useVideoStudioStore((state) => state.trimClip);
   const updateClipTransform = useVideoStudioStore((state) => state.updateClipTransform);
   const updateClipVolume = useVideoStudioStore((state) => state.updateClipVolume);
   const updateClipFade = useVideoStudioStore((state) => state.updateClipFade);
@@ -66,6 +120,7 @@ export function VideoInspector() {
   const editorMode = useVideoStudioStore((state) => state.editorMode);
   const modeFeatures = editorModeFeatures(editorMode);
   const clip = selectedClip();
+  const [rowMenu, setRowMenu] = useState<{ kind: 'effect' | 'transition' | 'keyframe'; id: string; x: number; y: number } | null>(null);
 
   return (
     <div className="min-h-0 overflow-y-auto p-3">
@@ -261,9 +316,29 @@ export function VideoInspector() {
           )
         ) : (
           <div className="space-y-3">
-            <Field label="Start">
-              <span className="text-xs text-text-secondary">{Math.round(clip.start_ms / 100) / 10}s</span>
-            </Field>
+            {/* Timing accepts timecode (MM:SS.cc / H:MM:SS.cc) or plain seconds. */}
+            <div className="grid grid-cols-2 gap-2">
+              <TimecodeField
+                label="Start"
+                valueMs={clip.start_ms}
+                onCommit={(ms) => { void trimClip(clip.id, { start_ms: ms }); }}
+              />
+              <TimecodeField
+                label="End"
+                valueMs={clip.start_ms + clip.duration_ms}
+                onCommit={(ms) => { void trimClip(clip.id, { duration_ms: Math.max(100, ms - clip.start_ms) }); }}
+              />
+              <TimecodeField
+                label="Duration"
+                valueMs={clip.duration_ms}
+                onCommit={(ms) => { void trimClip(clip.id, { duration_ms: Math.max(100, ms) }); }}
+              />
+              <TimecodeField
+                label="Trim in"
+                valueMs={clip.trim_in_ms}
+                onCommit={(ms) => { void trimClip(clip.id, { trim_in_ms: ms }); }}
+              />
+            </div>
             {modeFeatures.transformControls && (
             <Field label={`Layer order: ${clip.z_index ?? 0}`}>
               <div className="flex gap-2">
@@ -286,9 +361,63 @@ export function VideoInspector() {
             )}
             {modeFeatures.transformControls && clip.transform && (
               <>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="X">
+                    <input
+                      type="number"
+                      step={1}
+                      key={`x-${clip.id}-${clip.transform.x}`}
+                      defaultValue={Math.round(clip.transform.x)}
+                      onBlur={(event) => {
+                        const x = Number(event.target.value);
+                        if (Number.isFinite(x) && x !== clip.transform?.x) void updateClipTransform(clip.id, { x });
+                      }}
+                      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                      className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                    />
+                  </Field>
+                  <Field label="Y">
+                    <input
+                      type="number"
+                      step={1}
+                      key={`y-${clip.id}-${clip.transform.y}`}
+                      defaultValue={Math.round(clip.transform.y)}
+                      onBlur={(event) => {
+                        const y = Number(event.target.value);
+                        if (Number.isFinite(y) && y !== clip.transform?.y) void updateClipTransform(clip.id, { y });
+                      }}
+                      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                      className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                    />
+                  </Field>
+                </div>
                 <Slider label="Scale" min={0.25} max={3} step={0.05} value={clip.transform.scale} onChange={(value) => { void updateClipTransform(selectedClipId as string, { scale: value }); }} />
                 <Slider label="Opacity" min={0} max={1} step={0.05} value={clip.transform.opacity} onChange={(value) => { void updateClipTransform(selectedClipId as string, { opacity: value }); }} />
                 <Slider label="Rotation" min={-180} max={180} step={1} value={clip.transform.rotation} onChange={(value) => { void updateClipTransform(selectedClipId as string, { rotation: value }); }} />
+                <div className="flex flex-wrap gap-1">
+                  {(() => {
+                    const asset = clip.asset_id ? assets.find((item) => item.id === clip.asset_id) : undefined;
+                    const fillScale = asset?.width && asset?.height && timeline
+                      ? (asset.width / asset.height >= timeline.canvas.width / timeline.canvas.height
+                        ? (asset.width / asset.height) / (timeline.canvas.width / timeline.canvas.height)
+                        : (timeline.canvas.width / timeline.canvas.height) / (asset.width / asset.height))
+                      : 1;
+                    return [
+                      { label: 'Fit', action: () => { void updateClipTransform(clip.id, { x: 0, y: 0, scale: 1 }); } },
+                      { label: 'Fill', action: () => { void updateClipTransform(clip.id, { x: 0, y: 0, scale: fillScale }); } },
+                      { label: 'Center', action: () => { void updateClipTransform(clip.id, { x: 0, y: 0 }); } },
+                      { label: 'Reset', action: () => { void updateClipTransform(clip.id, { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, crop: undefined }); } },
+                    ].map((button) => (
+                      <button
+                        key={button.label}
+                        onClick={button.action}
+                        className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[10px] text-text-muted hover:text-text"
+                      >
+                        {button.label}
+                      </button>
+                    ));
+                  })()}
+                </div>
               </>
             )}
             {clip.volume !== undefined && (
@@ -297,13 +426,107 @@ export function VideoInspector() {
             <Slider label="Fade in" min={0} max={5000} step={100} value={clip.fade_in_ms || 0} onChange={(value) => { void updateClipFade(selectedClipId as string, { fade_in_ms: value }); }} />
             <Slider label="Fade out" min={0} max={5000} step={100} value={clip.fade_out_ms || 0} onChange={(value) => { void updateClipFade(selectedClipId as string, { fade_out_ms: value }); }} />
             {clip.text && (
-              <Field label="Text">
-                <input
-                  value={clip.text.text}
-                  onChange={(event) => { void updateClipText(selectedClipId as string, { text: event.target.value }); }}
-                  className="min-h-9 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
-                />
-              </Field>
+              <>
+                <Field label="Text">
+                  <input
+                    value={clip.text.text}
+                    onChange={(event) => { void updateClipText(selectedClipId as string, { text: event.target.value }); }}
+                    className="min-h-9 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                  />
+                </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Font size">
+                    <input
+                      type="number"
+                      min={8}
+                      max={240}
+                      key={`fs-${clip.id}-${clip.text.font_size ?? ''}`}
+                      defaultValue={clip.text.font_size || 48}
+                      onBlur={(event) => {
+                        const fontSize = Math.max(8, Math.min(240, Math.round(Number(event.target.value))));
+                        if (Number.isFinite(fontSize) && fontSize !== clip.text?.font_size) void updateClipText(clip.id, { font_size: fontSize });
+                      }}
+                      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                      className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text"
+                    />
+                  </Field>
+                  <Field label="Weight">
+                    <select
+                      value={clip.text.font_weight || '700'}
+                      onChange={(event) => { void updateClipText(clip.id, { font_weight: event.target.value }); }}
+                      className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-1 text-xs text-text"
+                    >
+                      {['400', '500', '600', '700', '800'].map((weight) => (
+                        <option key={weight} value={weight}>{weight}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Color">
+                    <input
+                      type="color"
+                      value={/^#[0-9a-fA-F]{6}$/.test(clip.text.color || '') ? (clip.text.color as string) : '#ffffff'}
+                      onChange={(event) => { void updateClipText(clip.id, { color: event.target.value }); }}
+                      className="h-8 w-full cursor-pointer rounded-md border border-border bg-surface-alt"
+                    />
+                  </Field>
+                  <Field label="Background">
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="color"
+                        value={/^#[0-9a-fA-F]{6}$/.test(clip.text.background || '') ? (clip.text.background as string) : '#111111'}
+                        onChange={(event) => { void updateClipText(clip.id, { background: event.target.value }); }}
+                        className="h-8 min-w-0 flex-1 cursor-pointer rounded-md border border-border bg-surface-alt"
+                      />
+                      {clip.text.background && (
+                        <button
+                          onClick={() => { void updateClipText(clip.id, { background: undefined }); }}
+                          className="rounded border border-border px-1.5 py-1 text-[10px] text-text-muted hover:text-text"
+                          title="Remove background"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  </Field>
+                  <Field label="Align">
+                    <select
+                      value={clip.text.text_align || 'center'}
+                      onChange={(event) => { void updateClipText(clip.id, { text_align: event.target.value as 'left' | 'center' | 'right' }); }}
+                      className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-1 text-xs text-text"
+                    >
+                      {(['left', 'center', 'right'] as const).map((align) => (
+                        <option key={align} value={align}>{align}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Shadow">
+                    <button
+                      onClick={() => { void updateClipText(clip.id, { shadow: !clip.text?.shadow }); }}
+                      className={`min-h-8 w-full rounded-md border px-2 text-xs ${clip.text.shadow ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-surface-alt text-text-muted hover:text-text'}`}
+                    >
+                      {clip.text.shadow ? 'On' : 'Off'}
+                    </button>
+                  </Field>
+                </div>
+                <Field label="Text preset">
+                  <div className="flex flex-wrap gap-1">
+                    {TEXT_PRESETS.map((preset) => (
+                      <button
+                        key={preset.key}
+                        onClick={() => {
+                          void updateClipText(clip.id, preset.text);
+                          if (preset.position && timeline) {
+                            void updateClipTransform(clip.id, preset.position(timeline.canvas));
+                          }
+                        }}
+                        className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[10px] text-text-muted hover:text-text"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+              </>
             )}
             {modeFeatures.effectControls && (
             <div className="grid grid-cols-1 gap-2">
@@ -388,7 +611,14 @@ export function VideoInspector() {
               {clip.effects.map((effect, effectIndex) => {
                 const definition = effectDefinition(effect.type);
                 return (
-                  <div key={effect.id} className="rounded-md border border-border bg-surface-alt px-2 py-1.5 text-[11px] text-text-muted">
+                  <div
+                    key={effect.id}
+                    className="rounded-md border border-border bg-surface-alt px-2 py-1.5 text-[11px] text-text-muted"
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setRowMenu({ kind: 'effect', id: effect.id, x: event.clientX, y: event.clientY });
+                    }}
+                  >
                     <div className="flex items-center gap-1">
                       <button
                         className="min-w-0 flex-1 truncate text-left hover:text-text"
@@ -449,7 +679,14 @@ export function VideoInspector() {
               {(clip.transitions || []).map((transition) => {
                 const definition = transitionDefinition(transition.type);
                 return (
-                  <div key={transition.id} className="rounded-md border border-border bg-surface-alt px-2 py-1.5 text-[11px] text-text-muted">
+                  <div
+                    key={transition.id}
+                    className="rounded-md border border-border bg-surface-alt px-2 py-1.5 text-[11px] text-text-muted"
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setRowMenu({ kind: 'transition', id: transition.id, x: event.clientX, y: event.clientY });
+                    }}
+                  >
                     <div className="flex items-center gap-1">
                       <span className="min-w-0 flex-1 truncate">{definition?.label || transition.type}</span>
                       {definition && !definition.exportSupported && (
@@ -509,7 +746,14 @@ export function VideoInspector() {
                 );
               })}
               {clip.keyframes.map((keyframe) => (
-                <div key={keyframe.id} className="rounded-md border border-border bg-surface-alt px-2 py-1.5 text-[11px] text-text-muted">
+                <div
+                  key={keyframe.id}
+                  className="rounded-md border border-border bg-surface-alt px-2 py-1.5 text-[11px] text-text-muted"
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setRowMenu({ kind: 'keyframe', id: keyframe.id, x: event.clientX, y: event.clientY });
+                  }}
+                >
                   <div className="flex items-center gap-1">
                     <span className="min-w-0 flex-1 truncate">{keyframe.property} keyframe</span>
                     <button
@@ -575,7 +819,56 @@ export function VideoInspector() {
           </div>
         )}
       </section>
+      {rowMenu && clip && (() => {
+        let items: ContextMenuEntry[] = [];
+        if (rowMenu.kind === 'effect') {
+          const effect = clip.effects.find((item) => item.id === rowMenu.id);
+          if (!effect) return null;
+          const index = clip.effects.findIndex((item) => item.id === rowMenu.id);
+          items = [
+            { label: effect.enabled ? 'Disable' : 'Enable', action: () => { void toggleClipEffect(clip.id, effect.id); } },
+            { label: 'Duplicate effect', action: () => { void addClipEffect(clip.id, { type: effect.type, enabled: effect.enabled, params: { ...effect.params } }); } },
+            { label: 'Move up', disabled: index === 0, action: () => { void reorderClipEffect(clip.id, effect.id, -1); } },
+            { label: 'Move down', disabled: index >= clip.effects.length - 1, action: () => { void reorderClipEffect(clip.id, effect.id, 1); } },
+            'divider',
+            { label: 'Remove effect', danger: true, action: () => { void removeClipEffect(clip.id, effect.id); } },
+          ];
+        } else if (rowMenu.kind === 'transition') {
+          const transition = (clip.transitions || []).find((item) => item.id === rowMenu.id);
+          if (!transition) return null;
+          items = [
+            { label: 'Remove transition', danger: true, action: () => { void removeClipTransition(clip.id, transition.id); } },
+          ];
+        } else {
+          const keyframe = clip.keyframes.find((item) => item.id === rowMenu.id);
+          if (!keyframe) return null;
+          items = [
+            { label: 'Duplicate keyframe', action: () => { void addKeyframe(clip.id, { property: keyframe.property, time_ms: keyframe.time_ms + 250, value: keyframe.value, easing: keyframe.easing }); } },
+            'divider',
+            { label: 'Delete keyframe', danger: true, action: () => { void removeKeyframe(clip.id, keyframe.id); } },
+          ];
+        }
+        return <ContextMenu position={{ x: rowMenu.x, y: rowMenu.y }} items={items} onClose={() => setRowMenu(null)} />;
+      })()}
     </div>
+  );
+}
+
+function TimecodeField({ label, valueMs, onCommit }: { label: string; valueMs: number; onCommit: (ms: number) => void }) {
+  return (
+    <Field label={label}>
+      <input
+        key={`${label}-${valueMs}`}
+        defaultValue={formatTimecode(valueMs)}
+        onBlur={(event) => {
+          const ms = parseTimecode(event.target.value);
+          if (ms !== null && ms !== valueMs) onCommit(ms);
+        }}
+        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+        className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 font-mono text-xs text-text"
+        title="Timecode (MM:SS.cc) or seconds"
+      />
+    </Field>
   );
 }
 

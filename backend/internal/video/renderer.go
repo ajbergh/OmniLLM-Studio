@@ -31,12 +31,13 @@ type RenderRequest struct {
 
 // resolvedClip is a timeline clip with its asset file path resolved to an absolute path.
 type resolvedClip struct {
-	inputIdx int
-	clip     TimelineClip
-	filePath string
-	isVideo  bool
-	isImage  bool
-	isAudio  bool
+	inputIdx   int
+	trackIndex int
+	clip       TimelineClip
+	filePath   string
+	isVideo    bool
+	isImage    bool
+	isAudio    bool
 }
 
 // RenderError carries FFmpeg diagnostics for failed renders so they can be
@@ -305,13 +306,15 @@ func appendFFmpegCodecArgs(args []string, format string, settings ExportSettings
 }
 
 // resolveMediaClips iterates the timeline tracks and returns all clips that
-// reference a known asset with a valid file on disk, in ascending start-time order.
+// reference a known asset with a valid file on disk, in track stacking order
+// (later tracks composite on top, matching the preview), then z-index, then
+// start time.
 func resolveMediaClips(req RenderRequest) []resolvedClip {
 	if req.AttachmentsDir == "" || len(req.Assets) == 0 {
 		return nil
 	}
 	var result []resolvedClip
-	for _, track := range req.Timeline.Tracks {
+	for trackIndex, track := range req.Timeline.Tracks {
 		for _, clip := range track.Clips {
 			if clip.AssetID == "" || clip.DurationMS <= 0 {
 				continue
@@ -326,11 +329,12 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 			}
 			mime := strings.ToLower(strings.TrimSpace(strings.SplitN(asset.MimeType, ";", 2)[0]))
 			rc := resolvedClip{
-				clip:     clip,
-				filePath: fullPath,
-				isVideo:  strings.HasPrefix(mime, "video/"),
-				isImage:  strings.HasPrefix(mime, "image/"),
-				isAudio:  strings.HasPrefix(mime, "audio/"),
+				trackIndex: trackIndex,
+				clip:       clip,
+				filePath:   fullPath,
+				isVideo:    strings.HasPrefix(mime, "video/"),
+				isImage:    strings.HasPrefix(mime, "image/"),
+				isAudio:    strings.HasPrefix(mime, "audio/"),
 			}
 			// Hidden tracks contribute no video; muted tracks contribute no audio.
 			if (rc.isVideo || rc.isImage) && !track.Visible {
@@ -344,10 +348,27 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 			}
 		}
 	}
-	sort.Slice(result, func(i, j int) bool {
+	// Layer order controls visual stacking; start time only controls when a
+	// clip is enabled. Sorting by start time here would let an early clip on a
+	// top layer composite below a later clip on a bottom layer.
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].trackIndex != result[j].trackIndex {
+			return result[i].trackIndex < result[j].trackIndex
+		}
+		zi, zj := clipZIndex(result[i].clip), clipZIndex(result[j].clip)
+		if zi != zj {
+			return zi < zj
+		}
 		return result[i].clip.StartMS < result[j].clip.StartMS
 	})
 	return result
+}
+
+func clipZIndex(clip TimelineClip) int {
+	if clip.ZIndex != nil {
+		return *clip.ZIndex
+	}
+	return 0
 }
 
 // buildFilterComplex constructs an FFmpeg -filter_complex expression that composites
@@ -357,14 +378,60 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, height int) (filterStr, videoLabel, audioLabel string) {
 	var parts []string
 
-	// ── Video / image overlays ──────────────────────────────────────────────
-	prevV := "[base_v]"
-	parts = append(parts, "[0:v]setpts=PTS-STARTPTS[base_v]")
-
-	for _, rc := range clips {
-		if !rc.isVideo && !rc.isImage {
+	// ── Visual chain: media overlays and text interleaved in layer order ────
+	// One ordered list so a text clip on a lower layer composites beneath
+	// media on a higher layer, matching the preview compositor. Mute only
+	// silences audio; hidden tracks drop their text and visuals.
+	type visualItem struct {
+		media      *resolvedClip // nil for text items
+		clip       TimelineClip
+		trackIndex int
+	}
+	var items []visualItem
+	for i := range clips {
+		if clips[i].isVideo || clips[i].isImage {
+			items = append(items, visualItem{media: &clips[i], clip: clips[i].clip, trackIndex: clips[i].trackIndex})
+		}
+	}
+	for trackIndex, track := range doc.Tracks {
+		if !track.Visible {
 			continue
 		}
+		for _, clip := range track.Clips {
+			if clip.Text == nil || strings.TrimSpace(clip.Text.Text) == "" {
+				continue
+			}
+			items = append(items, visualItem{clip: clip, trackIndex: trackIndex})
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].trackIndex != items[j].trackIndex {
+			return items[i].trackIndex < items[j].trackIndex
+		}
+		zi, zj := clipZIndex(items[i].clip), clipZIndex(items[j].clip)
+		if zi != zj {
+			return zi < zj
+		}
+		return items[i].clip.StartMS < items[j].clip.StartMS
+	})
+
+	prevV := "[base_v]"
+	parts = append(parts, "[0:v]setpts=PTS-STARTPTS[base_v]")
+	textIdx := 0
+
+	for _, item := range items {
+		if item.media == nil {
+			filter := drawTextFilter(item.clip, *item.clip.Text, width, height)
+			if filter == "" {
+				continue
+			}
+			outLabel := fmt.Sprintf("[t%d_v]", textIdx)
+			parts = append(parts, prevV+filter+outLabel)
+			prevV = outLabel
+			textIdx++
+			continue
+		}
+		rc := *item.media
 		cLabel := fmt.Sprintf("[c%d_v]", rc.inputIdx)
 		ovLabel := fmt.Sprintf("[ov%d_v]", rc.inputIdx)
 		startS := float64(rc.clip.StartMS) / 1000.0
@@ -420,30 +487,6 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 		prevV = ovLabel
 	}
 
-	// ── Text / caption / callout overlays ──────────────────────────────────
-	// Mute only silences audio; hidden tracks drop their text.
-	textIdx := 0
-	for _, track := range doc.Tracks {
-		if !track.Visible {
-			continue
-		}
-		if track.Type != TrackTypeText && track.Type != TrackTypeCaption && track.Type != TrackTypeCallout {
-			continue
-		}
-		for _, clip := range track.Clips {
-			if clip.Text == nil || strings.TrimSpace(clip.Text.Text) == "" {
-				continue
-			}
-			filter := drawTextFilter(clip, *clip.Text, width, height)
-			if filter == "" {
-				continue
-			}
-			outLabel := fmt.Sprintf("[t%d_v]", textIdx)
-			parts = append(parts, prevV+filter+outLabel)
-			prevV = outLabel
-			textIdx++
-		}
-	}
 	videoLabel = prevV
 
 	// ── Audio clips ─────────────────────────────────────────────────────────
@@ -488,7 +531,7 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 func ffmpegVideoFilters(doc TimelineDocument, width, height int) string {
 	var filters []string
 	for _, track := range doc.Tracks {
-		if !track.Visible || (track.Type != TrackTypeText && track.Type != TrackTypeCaption && track.Type != TrackTypeCallout) {
+		if !track.Visible {
 			continue
 		}
 		for _, clip := range track.Clips {
@@ -853,9 +896,6 @@ func escapeDrawText(value string) string {
 func countTextClips(doc TimelineDocument) int {
 	count := 0
 	for _, track := range doc.Tracks {
-		if track.Type != TrackTypeText && track.Type != TrackTypeCaption && track.Type != TrackTypeCallout {
-			continue
-		}
 		for _, clip := range track.Clips {
 			if clip.Text != nil && strings.TrimSpace(clip.Text.Text) != "" {
 				count++

@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { DragHandle, useResizablePanels } from '../ResizablePanels';
 import { Check, Download, Film, LayoutGrid, LayoutTemplate, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { videoApi } from '../../api';
-import { useSettingsStore } from '../../stores';
+import { api, videoApi } from '../../api';
+import { useConversationStore, useSettingsStore } from '../../stores';
 import { useVideoStudioStore } from '../../stores/videoStudio';
+import { ContextMenu } from '../common/ContextMenu';
+import type { ContextMenuEntry } from '../common/ContextMenu';
 import type { VideoAsset } from '../../types/video';
 import { VideoCaptionPanel } from './VideoCaptionPanel';
 import { VideoInspector } from './VideoInspector';
@@ -65,7 +67,12 @@ export function VideoEditStudio() {
     [assets, selectedAssetId],
   );
 
-  const { leftStyle, rightStyle, startLeft, startRight } = useResizablePanels({ defaultLeft: 300, defaultRight: 340 });
+  const { leftStyle, rightStyle, startLeft, startRight } = useResizablePanels({
+    defaultLeft: 300,
+    defaultRight: 340,
+    storageKey: 'video-edit-studio-panels',
+  });
+  const isSavingTimeline = useVideoStudioStore((state) => state.isSavingTimeline);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface">
@@ -76,6 +83,14 @@ export function VideoEditStudio() {
           {activeProject && (
             <span className="min-w-0 truncate text-xs text-text-muted">- {activeProject.title}</span>
           )}
+          <span
+            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] transition-opacity ${
+              isSavingTimeline ? 'bg-primary/15 text-primary opacity-100' : 'text-text-muted opacity-60'
+            }`}
+            title={isSavingTimeline ? 'Saving timeline changes' : 'All timeline changes are saved'}
+          >
+            {isSavingTimeline ? 'Saving…' : 'Saved'}
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select
@@ -272,6 +287,14 @@ function assetMatchesFilter(asset: VideoAsset, filter: AssetFilterKey): boolean 
 
 function AssetThumbnail({ asset, className }: { asset: VideoAsset; className: string }) {
   const url = videoApi.downloadUrl(asset.id);
+  // Server-generated artifacts are cheap static images; fall back to loading
+  // the real media when they haven't been generated (e.g. FFmpeg missing).
+  if (asset.thumbnail_path) {
+    return <img src={videoApi.artifactUrl(asset.id, 'thumbnail')} alt={asset.file_name} loading="lazy" className={`${className} object-cover`} />;
+  }
+  if (asset.waveform_path) {
+    return <img src={videoApi.artifactUrl(asset.id, 'waveform')} alt={`${asset.file_name} waveform`} loading="lazy" className={`${className} object-cover`} />;
+  }
   if (asset.kind === 'image') {
     return <img src={url} alt={asset.file_name} loading="lazy" className={`${className} object-cover`} />;
   }
@@ -310,7 +333,48 @@ function AssetPanel({
   const [editingName, setEditingName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [menu, setMenu] = useState<{ assetId: string; x: number; y: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const timeline = useVideoStudioStore((state) => state.timeline);
+  const addAssetToTimeline = useVideoStudioStore((state) => state.addAssetToTimeline);
+  const addTrack = useVideoStudioStore((state) => state.addTrack);
+  const setAppMode = useSettingsStore((state) => state.setAppMode);
+  const createConversation = useConversationStore((state) => state.createConversation);
+
+  // Clip counts per asset id, for the in-use badge and delete warnings.
+  const usedCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const track of timeline?.tracks || []) {
+      for (const clip of track.clips) {
+        if (clip.asset_id) counts.set(clip.asset_id, (counts.get(clip.asset_id) || 0) + 1);
+      }
+    }
+    return counts;
+  }, [timeline]);
+
+  const sendAssetToChat = async (asset: VideoAsset) => {
+    try {
+      const convo = await createConversation(`Video asset: ${asset.file_name}`);
+      const attachment = await videoApi.attachAssetToConversation(asset.id, convo.id);
+      await api.sendMessage(convo.id, {
+        content: `Video Edit Studio asset: ${asset.file_name}\n/v1/attachments/${attachment.id}/download`,
+        no_reply: true,
+      });
+      setAppMode('chat');
+      toast.success('Asset sent to chat');
+    } catch (err) {
+      toast.error(`Failed to send to chat: ${(err as Error).message}`);
+    }
+  };
+
+  const registerInLibrary = async (asset: VideoAsset) => {
+    try {
+      const file = await videoApi.registerAssetInLibrary(asset.id);
+      toast.success(`Registered ${file.display_name || asset.file_name} in File Library`);
+    } catch (err) {
+      toast.error(`Failed to register in File Library: ${(err as Error).message}`);
+    }
+  };
 
   const handleFiles = async (list: FileList | null) => {
     if (!list || list.length === 0) return;
@@ -429,7 +493,16 @@ function AssetPanel({
     if (asset.source_studio) bits.push(`from ${asset.source_studio}`);
     if (asset.duration_ms) bits.push(`${Math.round(asset.duration_ms / 100) / 10}s`);
     bits.push(`${Math.max(1, Math.round(asset.size_bytes / 1024))} KB`);
+    const used = usedCounts.get(asset.id);
+    if (used) bits.push(`in use ×${used}`);
     return bits.filter(Boolean).join(' · ');
+  };
+
+  const openAssetMenu = (event: React.MouseEvent, asset: VideoAsset) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect(asset.id);
+    setMenu({ assetId: asset.id, x: event.clientX, y: event.clientY });
   };
 
   return (
@@ -534,10 +607,16 @@ function AssetPanel({
                 event.dataTransfer.effectAllowed = 'copy';
               }}
               onClick={() => onSelect(asset.id)}
+              onContextMenu={(event) => openAssetMenu(event, asset)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
                   onSelect(asset.id);
+                } else if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+                  event.preventDefault();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  onSelect(asset.id);
+                  setMenu({ assetId: asset.id, x: rect.left + rect.width / 2, y: rect.bottom });
                 }
               }}
               className={`cursor-grab overflow-hidden rounded-lg border active:cursor-grabbing ${
@@ -566,10 +645,16 @@ function AssetPanel({
                 event.dataTransfer.effectAllowed = 'copy';
               }}
               onClick={() => onSelect(asset.id)}
+              onContextMenu={(event) => openAssetMenu(event, asset)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
                   onSelect(asset.id);
+                } else if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+                  event.preventDefault();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  onSelect(asset.id);
+                  setMenu({ assetId: asset.id, x: rect.left + rect.width / 2, y: rect.bottom });
                 }
               }}
               className={`flex cursor-grab items-start gap-2 rounded-lg border p-2 active:cursor-grabbing ${
@@ -586,6 +671,41 @@ function AssetPanel({
           ))}
         </div>
       )}
+      {menu && (() => {
+        const asset = assets.find((item) => item.id === menu.assetId);
+        if (!asset) return null;
+        const used = usedCounts.get(asset.id) || 0;
+        const items: ContextMenuEntry[] = [
+          { label: 'Add to timeline at playhead', action: () => onAdd(asset.id) },
+          {
+            label: 'Add to new layer',
+            action: () => {
+              void (async () => {
+                await addTrack('layer');
+                const trackId = useVideoStudioStore.getState().selectedTrackId;
+                await addAssetToTimeline(asset.id, trackId ? { track_id: trackId } : undefined);
+              })();
+            },
+          },
+          'divider',
+          { label: 'Rename', action: () => { setEditingId(asset.id); setEditingName(asset.file_name); } },
+          { label: 'Download', action: () => { window.open(videoApi.downloadUrl(asset.id), '_blank', 'noopener,noreferrer'); } },
+          { label: 'Send to Chat', action: () => { void sendAssetToChat(asset); } },
+          { label: 'Register in File Library', action: () => { void registerInLibrary(asset); } },
+          'divider',
+          {
+            label: used > 0 ? `Delete (used by ${used} clip${used === 1 ? '' : 's'})` : 'Delete',
+            danger: true,
+            action: () => {
+              const warning = used > 0
+                ? `Delete "${asset.file_name}"? ${used} clip${used === 1 ? '' : 's'} in the timeline use${used === 1 ? 's' : ''} it and will stop rendering.`
+                : `Delete "${asset.file_name}"?`;
+              if (window.confirm(warning)) onDelete(asset.id);
+            },
+          },
+        ];
+        return <ContextMenu position={{ x: menu.x, y: menu.y }} items={items} onClose={() => setMenu(null)} />;
+      })()}
     </section>
   );
 }

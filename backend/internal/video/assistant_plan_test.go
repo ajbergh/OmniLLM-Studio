@@ -28,7 +28,7 @@ func TestValidateEditPlanOperations(t *testing.T) {
 	doc := planTestDoc()
 	plan := EditPlan{Operations: []EditOperation{
 		{Type: "trim_clip", ClipID: "clip-a", DurationMS: 2000},
-		{Type: "move_clip", ClipID: "clip-a", StartMS: 1000, TrackID: "track-video-1"},
+		{Type: "move_clip", ClipID: "clip-a", StartMS: 1000, TrackID: "track-layer-1"},
 		{Type: "move_clip", ClipID: "clip-a", StartMS: 1000, TrackID: "track-missing"},
 		{Type: "delete_clip", ClipID: "clip-missing"},
 		{Type: "add_text_clip", Text: "Hello", StartMS: 0, DurationMS: 2000},
@@ -55,7 +55,7 @@ func TestValidateEditPlanOperations(t *testing.T) {
 func TestApplyEditPlanToTimelineMoveAndDelete(t *testing.T) {
 	doc := planTestDoc()
 	moved, err := ApplyEditPlanToTimeline(doc, EditPlan{Operations: []EditOperation{
-		{Type: "move_clip", ClipID: "clip-a", StartMS: 4000, TrackID: "track-overlay-1"},
+		{Type: "move_clip", ClipID: "clip-a", StartMS: 4000, TrackID: "track-layer-2"},
 	}})
 	if err != nil {
 		t.Fatalf("move_clip failed: %v", err)
@@ -64,7 +64,7 @@ func TestApplyEditPlanToTimelineMoveAndDelete(t *testing.T) {
 	if !found {
 		t.Fatalf("clip lost after move")
 	}
-	if moved.Tracks[ti].ID != "track-overlay-1" || moved.Tracks[ti].Clips[ci].StartMS != 4000 {
+	if moved.Tracks[ti].ID != "track-layer-2" || moved.Tracks[ti].Clips[ci].StartMS != 4000 {
 		t.Fatalf("clip not moved correctly: track=%s start=%d", moved.Tracks[ti].ID, moved.Tracks[ti].Clips[ci].StartMS)
 	}
 

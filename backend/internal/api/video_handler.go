@@ -420,6 +420,34 @@ func (h *VideoHandler) DownloadAsset(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, fullPath)
 }
 
+// AssetArtifact serves a generated thumbnail or waveform image for an asset.
+func (h *VideoHandler) AssetArtifact(w http.ResponseWriter, r *http.Request) {
+	asset, ok := h.loadOwnedAsset(w, r, chi.URLParam(r, "assetId"))
+	if !ok {
+		return
+	}
+	var relPath *string
+	switch chi.URLParam(r, "artifact") {
+	case "thumbnail":
+		relPath = asset.ThumbnailPath
+	case "waveform":
+		relPath = asset.WaveformPath
+	default:
+		respondError(w, http.StatusNotFound, "unknown artifact")
+		return
+	}
+	if relPath == nil || *relPath == "" {
+		respondError(w, http.StatusNotFound, "artifact not generated for this asset")
+		return
+	}
+	fullPath, err := SafeJoin(h.storageDir, *relPath)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid artifact path")
+		return
+	}
+	http.ServeFile(w, r, fullPath)
+}
+
 // UpdateAsset updates editable asset fields (currently the display file name).
 func (h *VideoHandler) UpdateAsset(w http.ResponseWriter, r *http.Request) {
 	asset, ok := h.loadOwnedAsset(w, r, chi.URLParam(r, "assetId"))
@@ -462,6 +490,14 @@ func (h *VideoHandler) DeleteAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	if fullPath, err := SafeJoin(h.storageDir, asset.FilePath); err == nil {
 		_ = os.Remove(fullPath)
+	}
+	for _, artifact := range []*string{asset.ThumbnailPath, asset.WaveformPath} {
+		if artifact == nil || *artifact == "" {
+			continue
+		}
+		if fullPath, err := SafeJoin(h.storageDir, *artifact); err == nil {
+			_ = os.Remove(fullPath)
+		}
 	}
 	if err := h.assetRepo.Delete(asset.ID); err != nil {
 		respondInternalError(w, err)
@@ -633,6 +669,18 @@ func (h *VideoHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 					asset.FPS = &probe.FPS
 				}
 			}
+			if meta := video.ProbeMetadataJSON(probe); meta != "" {
+				asset.MetadataJSON = meta
+			}
+		}
+	}
+	// Poster thumbnail / waveform image, also best-effort.
+	if thumbRel, waveRel := video.GenerateAssetArtifacts(r.Context(), h.storageDir, storageFilename, mimeType); thumbRel != "" || waveRel != "" {
+		if thumbRel != "" {
+			asset.ThumbnailPath = &thumbRel
+		}
+		if waveRel != "" {
+			asset.WaveformPath = &waveRel
 		}
 	}
 	if err := h.assetRepo.Create(asset); err != nil {

@@ -47,7 +47,7 @@ func FFmpegRendererCapabilities() RendererCapabilities {
 		Formats:  []string{"mp4", "webm"},
 		Features: []RendererFeatureSupport{
 			{Feature: RendererFeatureClipTrim, Label: "Clip trim", Supported: true},
-			{Feature: RendererFeatureClipOrdering, Label: "Clip ordering & timing", Supported: true},
+			{Feature: RendererFeatureClipOrdering, Label: "Clip ordering & timing", Supported: true, Notes: "Layer order controls visual stacking (later layers on top, matching the preview); start time controls when clips appear."},
 			{Feature: RendererFeatureScaling, Label: "Scaling", Supported: true},
 			{Feature: RendererFeaturePositioning, Label: "Position (x/y offset)", Supported: true},
 			{Feature: RendererFeatureCropping, Label: "Cropping", Supported: true, Partial: true, Notes: "Crop values are fractions of the source frame (0–1)."},
@@ -62,7 +62,7 @@ func FFmpegRendererCapabilities() RendererCapabilities {
 			{Feature: RendererFeatureClipVolume, Label: "Per-clip volume", Supported: true},
 			{Feature: RendererFeatureAudioFades, Label: "Audio fade in/out", Supported: true},
 			{Feature: RendererFeatureTrackMute, Label: "Track mute / hide", Supported: true},
-			{Feature: RendererFeatureTrackSolo, Label: "Track solo", Supported: false, Notes: "Solo is not part of the timeline schema yet."},
+			{Feature: RendererFeatureTrackSolo, Label: "Track solo", Supported: false, Notes: "Solo is a preview-only monitoring control; exports mix all unmuted tracks."},
 		},
 	}
 }

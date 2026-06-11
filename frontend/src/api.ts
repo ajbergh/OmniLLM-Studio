@@ -175,6 +175,10 @@ export function videoAssetUrl(assetId: string): string {
   return `${BASE_URL}/video/assets/${encodeURIComponent(assetId)}/download`;
 }
 
+export function videoAssetArtifactUrl(assetId: string, artifact: 'thumbnail' | 'waveform'): string {
+  return `${BASE_URL}/video/assets/${encodeURIComponent(assetId)}/artifacts/${artifact}`;
+}
+
 // Upload a file as an attachment scoped to a conversation.
 export async function uploadAttachment(conversationId: string, file: File): Promise<{ id: string }> {
   const formData = new FormData();
@@ -1523,6 +1527,8 @@ export const videoApi = {
     ),
 
   downloadUrl: (assetId: string) => videoAssetUrl(assetId),
+
+  artifactUrl: (assetId: string, artifact: 'thumbnail' | 'waveform') => videoAssetArtifactUrl(assetId, artifact),
 
   enhancePrompt: (data: { prompt: string; aspect_ratio?: string; duration_seconds?: number; negative_prompt?: string }) =>
     apiFetch<{ prompt: string }>('/video/enhance-prompt', {

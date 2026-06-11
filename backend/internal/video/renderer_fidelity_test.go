@@ -297,3 +297,84 @@ func TestResolveMediaClipsHiddenAndMutedTracks(t *testing.T) {
 		t.Errorf("expected only the visible unmuted music clip to resolve, got %+v", clips)
 	}
 }
+
+func TestResolveMediaClipsOrdersByTrackThenZIndexThenStart(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"a.mp4", "b.mp4", "c.mp4"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("stub"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	zTop := 1
+	doc := NewEmptyTimeline(1280, 720, 30)
+	doc.Tracks = []TimelineTrack{
+		// Bottom layer clip starts last — start time must not promote it.
+		{ID: "l1", Type: TrackTypeLayer, Visible: true, Clips: []TimelineClip{{ID: "c-bottom", AssetID: "a1", StartMS: 5000, DurationMS: 1000}}},
+		{ID: "l2", Type: TrackTypeLayer, Visible: true, Clips: []TimelineClip{
+			{ID: "c-z1", AssetID: "a2", StartMS: 0, DurationMS: 1000, ZIndex: &zTop},
+			{ID: "c-z0", AssetID: "a3", StartMS: 0, DurationMS: 1000},
+		}},
+	}
+	req := RenderRequest{
+		Timeline:       doc,
+		AttachmentsDir: dir,
+		Assets: map[string]models.VideoAsset{
+			"a1": {ID: "a1", FilePath: "a.mp4", MimeType: "video/mp4"},
+			"a2": {ID: "a2", FilePath: "b.mp4", MimeType: "video/mp4"},
+			"a3": {ID: "a3", FilePath: "c.mp4", MimeType: "video/mp4"},
+		},
+	}
+	clips := resolveMediaClips(req)
+	if len(clips) != 3 {
+		t.Fatalf("expected 3 clips, got %d", len(clips))
+	}
+	got := []string{clips[0].clip.ID, clips[1].clip.ID, clips[2].clip.ID}
+	want := []string{"c-bottom", "c-z0", "c-z1"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("stacking order = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestBuildFilterComplexStacksByLayerOrderNotStartTime(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	// The top-layer clip starts earlier than the bottom-layer clip; layer
+	// order must still control compositing order.
+	clips := []resolvedClip{
+		{inputIdx: 1, trackIndex: 1, isImage: true, clip: TimelineClip{ID: "c-top", AssetID: "a-top", StartMS: 0, DurationMS: 2000}},
+		{inputIdx: 2, trackIndex: 0, isVideo: true, clip: TimelineClip{ID: "c-bottom", AssetID: "a-bottom", StartMS: 1000, DurationMS: 2000}},
+	}
+	filterStr, videoLabel, _ := buildFilterComplex(doc, clips, 1920, 1080)
+	bottomAt := strings.Index(filterStr, "[base_v][c2_v]overlay")
+	topAt := strings.Index(filterStr, "[c1_v]overlay")
+	if bottomAt == -1 || topAt == -1 {
+		t.Fatalf("expected both overlays in chain: %s", filterStr)
+	}
+	if bottomAt > topAt {
+		t.Errorf("bottom layer must composite before top layer: %s", filterStr)
+	}
+	if videoLabel != "[ov1_v]" {
+		t.Errorf("expected top layer to finish the chain, got %s", videoLabel)
+	}
+}
+
+func TestBuildFilterComplexInterleavesTextByLayerOrder(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks = []TimelineTrack{
+		{ID: "l1", Type: TrackTypeLayer, Visible: true, Clips: []TimelineClip{{ID: "c-text-bottom", StartMS: 0, DurationMS: 2000, Text: &TimelineText{Text: "Bottom"}}}},
+		{ID: "l2", Type: TrackTypeLayer, Visible: true, Clips: []TimelineClip{{ID: "c-media", AssetID: "a1", StartMS: 0, DurationMS: 2000}}},
+		{ID: "l3", Type: TrackTypeLayer, Visible: true, Clips: []TimelineClip{{ID: "c-text-top", StartMS: 0, DurationMS: 2000, Text: &TimelineText{Text: "Top"}}}},
+	}
+	clips := []resolvedClip{{inputIdx: 1, trackIndex: 1, isVideo: true, clip: doc.Tracks[1].Clips[0]}}
+	filterStr, _, _ := buildFilterComplex(doc, clips, 1920, 1080)
+	bottomAt := strings.Index(filterStr, "drawtext=text='Bottom'")
+	mediaAt := strings.Index(filterStr, "[c1_v]overlay")
+	topAt := strings.Index(filterStr, "drawtext=text='Top'")
+	if bottomAt == -1 || mediaAt == -1 || topAt == -1 {
+		t.Fatalf("expected text below, media, text above in chain: %s", filterStr)
+	}
+	if !(bottomAt < mediaAt && mediaAt < topAt) {
+		t.Errorf("text must interleave with media by layer order (got %d, %d, %d): %s", bottomAt, mediaAt, topAt, filterStr)
+	}
+}

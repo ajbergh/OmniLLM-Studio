@@ -424,6 +424,7 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 		Model:        &modelID,
 		MetadataJSON: metaJSON,
 	}
+	s.attachAssetArtifacts(ctx, asset)
 	if err := s.assets.Create(asset); err != nil {
 		_ = s.generations.MarkFailed(generation.ID, err.Error())
 		return project, generation, nil, err
@@ -458,6 +459,22 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 // EnhancePrompt enhances a prompt using LLM if available, falling back to deterministic.
 func (s *Service) EnhancePrompt(ctx context.Context, req EnhancePromptRequest) string {
 	return EnhancePromptWithLLM(ctx, s.llm, req)
+}
+
+// attachAssetArtifacts generates a thumbnail/waveform next to the asset file
+// and fills the corresponding fields. Best-effort — silently skipped without
+// FFmpeg.
+func (s *Service) attachAssetArtifacts(ctx context.Context, asset *models.VideoAsset) {
+	if asset == nil || asset.FilePath == "" {
+		return
+	}
+	thumbRel, waveRel := GenerateAssetArtifacts(ctx, s.attachmentsDir, asset.FilePath, asset.MimeType)
+	if thumbRel != "" {
+		asset.ThumbnailPath = &thumbRel
+	}
+	if waveRel != "" {
+		asset.WaveformPath = &waveRel
+	}
 }
 
 // resolveAssetPath looks up a video asset by ID and returns its absolute file
@@ -787,6 +804,7 @@ func (s *Service) finalizeGeneration(
 		Model:        &modelID,
 		MetadataJSON: string(metaJSONBytes),
 	}
+	s.attachAssetArtifacts(context.Background(), asset)
 	if err := s.assets.Create(asset); err != nil {
 		fail(err.Error())
 		return
@@ -1064,10 +1082,10 @@ func (s *Service) ImportExternalAsset(ctx context.Context, userID, projectID str
 	if asset.SizeBytes == 0 {
 		asset.SizeBytes = resolved.sizeBytes
 	}
+	s.attachAssetArtifacts(ctx, asset)
 	if err := s.assets.Create(asset); err != nil {
 		return nil, err
 	}
-	_ = ctx
 	return asset, nil
 }
 
@@ -1470,6 +1488,7 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 		FPS:          &result.FPS,
 		MetadataJSON: metaJSON,
 	}
+	s.attachAssetArtifacts(context.Background(), asset)
 	if err := s.assets.Create(asset); err != nil {
 		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
 		return

@@ -11,6 +11,10 @@ import (
 )
 
 const (
+	// TrackTypeLayer is a generic ordered layer that accepts any clip kind.
+	// Media behavior (visual/audio, defaults, render treatment) comes from the
+	// clip and its asset, not the track. Higher array indices stack on top.
+	TrackTypeLayer   = "layer"
 	TrackTypeVideo   = "video"
 	TrackTypeImage   = "image"
 	TrackTypeAudio   = "audio"
@@ -210,11 +214,13 @@ func NewEmptyTimeline(width, height, fps int) TimelineDocument {
 			Background: "#000000",
 		},
 		DurationMS: 30000,
+		// Generic layers: index 0 (Layer 1) is the background; later layers
+		// stack on top, matching the preview compositor and FFmpeg renderer.
 		Tracks: []TimelineTrack{
-			{ID: "track-video-1", Type: TrackTypeVideo, Name: "Video 1", Visible: true, Clips: []TimelineClip{}},
-			{ID: "track-overlay-1", Type: TrackTypeImage, Name: "Overlay 1", Visible: true, Clips: []TimelineClip{}},
-			{ID: "track-audio-1", Type: TrackTypeAudio, Name: "Audio 1", Visible: true, Clips: []TimelineClip{}},
-			{ID: "track-text-1", Type: TrackTypeText, Name: "Text 1", Visible: true, Clips: []TimelineClip{}},
+			{ID: "track-layer-1", Type: TrackTypeLayer, Name: "Layer 1", Visible: true, Clips: []TimelineClip{}},
+			{ID: "track-layer-2", Type: TrackTypeLayer, Name: "Layer 2", Visible: true, Clips: []TimelineClip{}},
+			{ID: "track-layer-3", Type: TrackTypeLayer, Name: "Layer 3", Visible: true, Clips: []TimelineClip{}},
+			{ID: "track-layer-4", Type: TrackTypeLayer, Name: "Layer 4", Visible: true, Clips: []TimelineClip{}},
 		},
 		Markers:  []TimelineMarker{},
 		Metadata: map[string]any{},
@@ -452,13 +458,7 @@ func AddAssetToTimeline(doc TimelineDocument, asset models.VideoAsset, req Timel
 	if err != nil {
 		return TimelineDocument{}, TimelineClip{}, err
 	}
-	trackType := normalizeTrackType(req.TrackType)
-	if trackType == "" {
-		trackType = trackTypeForAssetKind(asset.Kind)
-	}
-	if trackType == "" {
-		return TimelineDocument{}, TimelineClip{}, fmt.Errorf("unsupported asset kind %q", asset.Kind)
-	}
+	kind := kindForAssetOrMime(asset)
 
 	trackIndex := -1
 	if req.TrackID != "" {
@@ -471,22 +471,37 @@ func AddAssetToTimeline(doc TimelineDocument, asset models.VideoAsset, req Timel
 		if trackIndex == -1 {
 			return TimelineDocument{}, TimelineClip{}, fmt.Errorf("track not found")
 		}
-		if !trackAcceptsKind(doc.Tracks[trackIndex].Type, asset.Kind) {
-			return TimelineDocument{}, TimelineClip{}, fmt.Errorf("asset kind %q is not compatible with %s track", asset.Kind, doc.Tracks[trackIndex].Type)
+		// Any clip kind is accepted on an explicit target track; only a lock
+		// blocks placement.
+		if doc.Tracks[trackIndex].Locked {
+			return TimelineDocument{}, TimelineClip{}, fmt.Errorf("track %q is locked", doc.Tracks[trackIndex].Name)
 		}
 	} else {
-		for i := range doc.Tracks {
-			if !doc.Tracks[i].Locked && trackAcceptsKind(doc.Tracks[i].Type, asset.Kind) {
-				trackIndex = i
-				break
+		// Honor a legacy track_type hint first, then prefer tracks that
+		// naturally accept the kind (generic layers accept everything, so new
+		// timelines pick the first unlocked layer).
+		if requested := normalizeTrackType(req.TrackType); requested != "" {
+			for i := range doc.Tracks {
+				if !doc.Tracks[i].Locked && doc.Tracks[i].Type == requested {
+					trackIndex = i
+					break
+				}
+			}
+		}
+		if trackIndex == -1 {
+			for i := range doc.Tracks {
+				if !doc.Tracks[i].Locked && trackAcceptsKind(doc.Tracks[i].Type, kind) {
+					trackIndex = i
+					break
+				}
 			}
 		}
 	}
 	if trackIndex == -1 {
 		doc.Tracks = append(doc.Tracks, TimelineTrack{
-			ID:      fmt.Sprintf("track-%s-%d", trackType, len(doc.Tracks)+1),
-			Type:    trackType,
-			Name:    defaultTrackName(trackType, len(doc.Tracks)+1),
+			ID:      "track-" + uuid.New().String(),
+			Type:    TrackTypeLayer,
+			Name:    fmt.Sprintf("Layer %d", len(doc.Tracks)+1),
 			Visible: true,
 			Clips:   []TimelineClip{},
 		})
@@ -502,7 +517,7 @@ func AddAssetToTimeline(doc TimelineDocument, asset models.VideoAsset, req Timel
 		duration = *asset.DurationMS
 	}
 	if duration <= 0 {
-		duration = defaultDurationForTrack(trackType)
+		duration = defaultDurationForAssetKind(kind)
 	}
 	trimOut := duration
 	volume := 1.0
@@ -516,10 +531,11 @@ func AddAssetToTimeline(doc TimelineDocument, asset models.VideoAsset, req Timel
 		Effects:    []TimelineEffect{},
 		Keyframes:  []TimelineKeyframe{},
 	}
-	if trackType == TrackTypeAudio || trackType == TrackTypeMusic {
-		clip.Volume = &volume
-	} else {
+	if isVisualAssetKind(kind) {
 		clip.Transform = defaultTransform()
+	}
+	if isAudioAssetKind(kind) {
+		clip.Volume = &volume
 	}
 	doc.Tracks[trackIndex].Clips = append(doc.Tracks[trackIndex].Clips, clip)
 	if end := clip.StartMS + clip.DurationMS; end > doc.DurationMS {
@@ -592,6 +608,8 @@ func defaultTransform() map[string]any {
 
 func normalizeTrackType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case TrackTypeLayer:
+		return TrackTypeLayer
 	case TrackTypeVideo:
 		return TrackTypeVideo
 	case TrackTypeImage, "overlay":
@@ -632,8 +650,15 @@ func trackTypeForAssetKind(kind string) string {
 	}
 }
 
+// trackAcceptsKind reports whether a track naturally accepts an asset kind.
+// Generic layers accept everything; for legacy typed tracks this preserves
+// the old media routing. Used only for automatic placement preference — an
+// explicit track_id bypasses it entirely.
 func trackAcceptsKind(trackType, kind string) bool {
 	trackType = normalizeTrackType(trackType)
+	if trackType == TrackTypeLayer {
+		return true
+	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "video":
 		return trackType == TrackTypeVideo
@@ -654,6 +679,8 @@ func trackAcceptsKind(trackType, kind string) bool {
 
 func defaultTrackName(trackType string, index int) string {
 	switch trackType {
+	case TrackTypeLayer:
+		return fmt.Sprintf("Layer %d", index)
 	case TrackTypeVideo:
 		return fmt.Sprintf("Video %d", index)
 	case TrackTypeImage:
@@ -675,14 +702,56 @@ func defaultTrackName(trackType string, index int) string {
 	}
 }
 
-func defaultDurationForTrack(trackType string) int64 {
-	switch trackType {
-	case TrackTypeImage, TrackTypeText, TrackTypeCaption, TrackTypeShape, TrackTypeCallout:
+func defaultDurationForAssetKind(kind string) int64 {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "image", "text", "caption", "shape", "callout":
 		return 5000
-	case TrackTypeAudio, TrackTypeMusic:
+	case "audio", "music":
 		return 30000
 	default:
 		return 8000
+	}
+}
+
+// kindForAssetOrMime returns the effective asset kind, falling back to the
+// MIME type prefix when the kind column is empty.
+func kindForAssetOrMime(asset models.VideoAsset) string {
+	if kind := strings.ToLower(strings.TrimSpace(asset.Kind)); kind != "" {
+		return kind
+	}
+	mime := strings.ToLower(strings.TrimSpace(asset.MimeType))
+	switch {
+	case strings.HasPrefix(mime, "video/"):
+		return "video"
+	case strings.HasPrefix(mime, "image/"):
+		return "image"
+	case strings.HasPrefix(mime, "audio/"):
+		return "audio"
+	default:
+		return "other"
+	}
+}
+
+// isVisualAssetKind reports whether clips of this kind produce visual output.
+// Unknown kinds default to visual — a spurious transform on a non-visual clip
+// is harmless, while a missing one degrades editing.
+func isVisualAssetKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "audio", "music":
+		return false
+	default:
+		return true
+	}
+}
+
+// isAudioAssetKind reports whether clips of this kind can contribute audio to
+// the mix. Video and export assets carry audio streams.
+func isAudioAssetKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "audio", "music", "video", "export":
+		return true
+	default:
+		return false
 	}
 }
 

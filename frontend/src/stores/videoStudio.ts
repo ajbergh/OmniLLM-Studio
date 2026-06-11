@@ -116,11 +116,13 @@ function defaultTimeline(project?: VideoProject | null): VideoTimelineDocument {
       background: '#000000',
     },
     duration_ms: Math.max(project?.duration_ms || 0, 30000),
+    // Generic layers, matching the backend's NewEmptyTimeline: index 0 is the
+    // background; later layers stack on top.
     tracks: [
-      { id: 'track-video-1', type: 'video', name: 'Video 1', locked: false, muted: false, visible: true, clips: [] },
-      { id: 'track-overlay-1', type: 'image', name: 'Overlay 1', locked: false, muted: false, visible: true, clips: [] },
-      { id: 'track-audio-1', type: 'audio', name: 'Audio 1', locked: false, muted: false, visible: true, clips: [] },
-      { id: 'track-text-1', type: 'text', name: 'Text 1', locked: false, muted: false, visible: true, clips: [] },
+      { id: 'track-layer-1', type: 'layer', name: 'Layer 1', locked: false, muted: false, visible: true, clips: [] },
+      { id: 'track-layer-2', type: 'layer', name: 'Layer 2', locked: false, muted: false, visible: true, clips: [] },
+      { id: 'track-layer-3', type: 'layer', name: 'Layer 3', locked: false, muted: false, visible: true, clips: [] },
+      { id: 'track-layer-4', type: 'layer', name: 'Layer 4', locked: false, muted: false, visible: true, clips: [] },
     ],
     markers: [],
     metadata: {},
@@ -287,6 +289,11 @@ interface VideoStudioState {
   selectedClipId: string | null;
   selectedClipIds: string[];
   selectedTrackId: string | null;
+  // Ephemeral playback solo — only this track contributes preview audio.
+  // Not persisted to the timeline document and ignored by export.
+  soloTrackId: string | null;
+  clipClipboard: Array<{ clip: VideoTimelineClip; trackId: string }> | null;
+  attributeClipboard: Partial<Pick<VideoTimelineClip, 'transform' | 'volume' | 'fade_in_ms' | 'fade_out_ms' | 'effects' | 'transitions' | 'text'>> | null;
   playheadMs: number;
   zoom: number;
   isPlaying: boolean;
@@ -358,7 +365,7 @@ interface VideoStudioState {
   updateClipTransform: (clipId: string, transform: Partial<VideoTimelineTransform>) => Promise<void>;
   updateClipVolume: (clipId: string, volume: number) => Promise<void>;
   updateClipFade: (clipId: string, fade: { fade_in_ms?: number; fade_out_ms?: number }) => Promise<void>;
-  addTextClip: (text?: string) => Promise<void>;
+  addTextClip: (text?: string, options?: { trackId?: string; startMs?: number }) => Promise<void>;
   updateClipText: (clipId: string, text: Partial<NonNullable<VideoTimelineClip['text']>>) => Promise<void>;
   addClipEffect: (clipId: string, effect: Omit<VideoTimelineEffect, 'id'>) => Promise<void>;
   toggleClipEffect: (clipId: string, effectId: string) => Promise<void>;
@@ -371,11 +378,27 @@ interface VideoStudioState {
   addKeyframe: (clipId: string, keyframe: Omit<VideoTimelineKeyframe, 'id'>) => Promise<void>;
   updateKeyframe: (clipId: string, keyframeId: string, patch: Partial<Omit<VideoTimelineKeyframe, 'id'>>) => Promise<void>;
   removeKeyframe: (clipId: string, keyframeId: string) => Promise<void>;
-  addTrack: (type: VideoTimelineTrackType, name?: string) => Promise<void>;
+  addTrack: (type?: VideoTimelineTrackType, name?: string) => Promise<void>;
   removeTrack: (trackId: string) => Promise<void>;
   renameTrack: (trackId: string, name: string) => Promise<void>;
   reorderTrack: (trackId: string, targetIndex: number) => Promise<void>;
   setTrackHeight: (trackId: string, height: number) => Promise<void>;
+  duplicateTrack: (trackId: string) => Promise<void>;
+  insertTrackAdjacent: (trackId: string, where: 'above' | 'below') => Promise<void>;
+  clearTrack: (trackId: string) => Promise<void>;
+  toggleTrackSolo: (trackId: string) => void;
+  moveTrackToEdge: (trackId: string, edge: 'top' | 'bottom') => Promise<void>;
+  selectClipsOnTrack: (trackId: string) => void;
+  selectClipsRelativeToPlayhead: (which: 'before' | 'after') => void;
+  selectAllClips: () => void;
+  moveClipToAdjacentTrack: (clipId: string, direction: 'above' | 'below') => Promise<void>;
+  copySelection: (clipId?: string) => void;
+  cutSelection: (clipId?: string) => Promise<void>;
+  pasteClips: (atMs?: number, trackId?: string) => Promise<void>;
+  copyClipAttributes: (clipId?: string) => void;
+  pasteClipAttributes: (clipId?: string) => Promise<void>;
+  setTimelineDuration: (durationMs: number) => Promise<void>;
+  splitAllAtPlayhead: () => Promise<void>;
   addMarker: (timeMs?: number, label?: string) => Promise<void>;
   removeMarker: (markerId: string) => Promise<void>;
   updateClipZIndex: (clipId: string, zIndex: number) => Promise<void>;
@@ -429,6 +452,9 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   selectedClipId: null,
   selectedClipIds: [],
   selectedTrackId: null,
+  soloTrackId: null,
+  clipClipboard: null,
+  attributeClipboard: null,
   playheadMs: 0,
   zoom: 1,
   isPlaying: false,
@@ -967,10 +993,15 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     if (!projectId) return;
     const asset = get().assets.find((item) => item.id === assetId);
     const previous = get().timeline ? cloneTimeline(get().timeline as VideoTimelineDocument) : null;
+    // Without an explicit target, prefer the selected layer; the backend
+    // otherwise picks the first unlocked track that accepts the asset.
+    const selectedTrack = !options.track_id && get().selectedTrackId
+      ? get().timeline?.tracks.find((track) => track.id === get().selectedTrackId && !track.locked)
+      : undefined;
     try {
       const detail = await videoApi.importAssetToTimeline(projectId, {
         asset_id: assetId,
-        track_id: options.track_id,
+        track_id: options.track_id ?? selectedTrack?.id,
         track_type: options.track_type || assetTrackType(asset),
         start_ms: options.start_ms ?? get().playheadMs,
         duration_ms: options.duration_ms,
@@ -1593,18 +1624,22 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     await get().saveTimeline(next);
   },
 
-  addTextClip: async (text = 'Title card') => {
+  addTextClip: async (text = 'Title card', options = {}) => {
     const current = get().timeline;
     if (!current) return;
     const next = cloneTimeline(current);
-    let track = next.tracks.find((item) => item.type === 'text');
+    // Explicit target first, then the topmost (foreground) unlocked generic
+    // layer, then a legacy text track, then a new layer on top.
+    let track = (options.trackId ? next.tracks.find((item) => item.id === options.trackId && !item.locked) : undefined)
+      ?? [...next.tracks].reverse().find((item) => item.type === 'layer' && !item.locked)
+      ?? next.tracks.find((item) => item.type === 'text' && !item.locked);
     if (!track) {
-      track = { id: 'track-text-1', type: 'text', name: 'Text 1', locked: false, muted: false, visible: true, clips: [] };
+      track = { id: newId('track'), type: 'layer', name: `Layer ${next.tracks.length + 1}`, locked: false, muted: false, visible: true, clips: [] };
       next.tracks.push(track);
     }
     const clip: VideoTimelineClip = {
       id: newId('clip'),
-      start_ms: get().playheadMs,
+      start_ms: Math.max(0, Math.round(options.startMs ?? get().playheadMs)),
       duration_ms: 3000,
       trim_in_ms: 0,
       trim_out_ms: 3000,
@@ -1802,15 +1837,16 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     await get().saveTimeline(next);
   },
 
-  addTrack: async (type, name) => {
+  addTrack: async (type = 'layer', name) => {
     const current = get().timeline;
     if (!current) return;
     const next = cloneTimeline(current);
     const count = next.tracks.filter((track) => track.type === type).length;
+    const defaultName = type === 'layer' ? `Layer ${next.tracks.length + 1}` : `${type.charAt(0).toUpperCase()}${type.slice(1)} ${count + 1}`;
     const track: VideoTimelineTrack = {
       id: newId('track'),
       type,
-      name: name?.trim() || `${type.charAt(0).toUpperCase()}${type.slice(1)} ${count + 1}`,
+      name: name?.trim() || defaultName,
       locked: false,
       muted: false,
       visible: true,
@@ -1886,6 +1922,269 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       timeline: next,
       ...withTimelineHistory(state, current),
     }));
+    await get().saveTimeline(next);
+  },
+
+  duplicateTrack: async (trackId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const index = next.tracks.findIndex((item) => item.id === trackId);
+    if (index === -1) return;
+    const copy = JSON.parse(JSON.stringify(next.tracks[index])) as VideoTimelineTrack;
+    copy.id = newId('track');
+    copy.name = `${copy.name} copy`;
+    for (const clip of copy.clips) {
+      clip.id = newId('clip');
+      delete clip.group_id;
+      clip.effects = (clip.effects || []).map((effect) => ({ ...effect, id: newId('effect') }));
+      clip.keyframes = (clip.keyframes || []).map((keyframe) => ({ ...keyframe, id: newId('keyframe') }));
+      clip.transitions = (clip.transitions || []).map((transition) => ({ ...transition, id: newId('transition') }));
+    }
+    // Insert directly above the source — toward the foreground.
+    next.tracks.splice(index + 1, 0, copy);
+    set((state) => ({
+      timeline: next,
+      selectedTrackId: copy.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  insertTrackAdjacent: async (trackId, where) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const index = next.tracks.findIndex((item) => item.id === trackId);
+    if (index === -1) return;
+    const track: VideoTimelineTrack = {
+      id: newId('track'),
+      type: 'layer',
+      name: `Layer ${next.tracks.length + 1}`,
+      locked: false,
+      muted: false,
+      visible: true,
+      clips: [],
+    };
+    // "above" = toward the foreground = higher array index.
+    next.tracks.splice(where === 'above' ? index + 1 : index, 0, track);
+    set((state) => ({
+      timeline: next,
+      selectedTrackId: track.id,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  clearTrack: async (trackId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const target = next.tracks.find((item) => item.id === trackId);
+    if (!target || target.clips.length === 0) return;
+    const removed = new Set(target.clips.map((clip) => clip.id));
+    target.clips = [];
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipId: state.selectedClipId && removed.has(state.selectedClipId) ? null : state.selectedClipId,
+      selectedClipIds: state.selectedClipIds.filter((id) => !removed.has(id)),
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  toggleTrackSolo: (trackId) => set((state) => ({ soloTrackId: state.soloTrackId === trackId ? null : trackId })),
+
+  moveTrackToEdge: async (trackId, edge) => {
+    const current = get().timeline;
+    if (!current) return;
+    await get().reorderTrack(trackId, edge === 'top' ? current.tracks.length - 1 : 0);
+  },
+
+  selectClipsOnTrack: (trackId) => set((state) => {
+    const track = state.timeline?.tracks.find((item) => item.id === trackId);
+    if (!track || track.clips.length === 0) return {};
+    const ids = track.clips.map((clip) => clip.id);
+    return { selectedClipIds: ids, selectedClipId: ids[ids.length - 1], selectedTrackId: trackId };
+  }),
+
+  selectClipsRelativeToPlayhead: (which) => set((state) => {
+    if (!state.timeline) return {};
+    const playhead = state.playheadMs;
+    const ids: string[] = [];
+    for (const track of state.timeline.tracks) {
+      for (const clip of track.clips) {
+        const matches = which === 'before'
+          ? clip.start_ms < playhead
+          : clip.start_ms + clip.duration_ms > playhead;
+        if (matches) ids.push(clip.id);
+      }
+    }
+    return { selectedClipIds: ids, selectedClipId: ids[ids.length - 1] || null };
+  }),
+
+  selectAllClips: () => set((state) => {
+    if (!state.timeline) return {};
+    const ids = state.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id));
+    return { selectedClipIds: ids, selectedClipId: ids[ids.length - 1] || null };
+  }),
+
+  moveClipToAdjacentTrack: async (clipId, direction) => {
+    const current = get().timeline;
+    if (!current) return;
+    const loc = findClip(current, clipId);
+    if (!loc) return;
+    // "above" = toward the foreground (higher array index; the UI shows the
+    // track list reversed).
+    const target = current.tracks[loc.trackIndex + (direction === 'above' ? 1 : -1)];
+    if (!target || target.locked) return;
+    await get().moveClip(clipId, target.id, loc.clip.start_ms);
+  },
+
+  copySelection: (clipId) => set((state) => {
+    const ids = clipId
+      ? [clipId]
+      : state.selectedClipIds.length > 0
+        ? state.selectedClipIds
+        : state.selectedClipId
+          ? [state.selectedClipId]
+          : [];
+    if (!state.timeline || ids.length === 0) return {};
+    const entries: Array<{ clip: VideoTimelineClip; trackId: string }> = [];
+    for (const id of ids) {
+      const loc = findClip(state.timeline, id);
+      if (loc) entries.push({ clip: JSON.parse(JSON.stringify(loc.clip)) as VideoTimelineClip, trackId: loc.track.id });
+    }
+    return entries.length > 0 ? { clipClipboard: entries } : {};
+  }),
+
+  cutSelection: async (clipId) => {
+    get().copySelection(clipId);
+    if (!get().clipClipboard?.length) return;
+    await get().deleteClip(clipId);
+  },
+
+  pasteClips: async (atMs, trackId) => {
+    const current = get().timeline;
+    const clipboard = get().clipClipboard;
+    if (!current || !clipboard || clipboard.length === 0) return;
+    const next = cloneTimeline(current);
+    const pasteAt = Math.max(0, Math.round(atMs ?? get().playheadMs));
+    const earliest = Math.min(...clipboard.map((entry) => entry.clip.start_ms));
+    const newIds: string[] = [];
+    let lastTrackId: string | null = null;
+    for (const entry of clipboard) {
+      const clip = JSON.parse(JSON.stringify(entry.clip)) as VideoTimelineClip;
+      clip.id = newId('clip');
+      delete clip.group_id;
+      clip.effects = (clip.effects || []).map((effect) => ({ ...effect, id: newId('effect') }));
+      clip.keyframes = (clip.keyframes || []).map((keyframe) => ({ ...keyframe, id: newId('keyframe') }));
+      clip.transitions = (clip.transitions || []).map((transition) => ({ ...transition, id: newId('transition') }));
+      clip.start_ms = pasteAt + (entry.clip.start_ms - earliest);
+      const target = (trackId ? next.tracks.find((track) => track.id === trackId && !track.locked) : undefined)
+        ?? next.tracks.find((track) => track.id === entry.trackId && !track.locked)
+        ?? next.tracks.find((track) => !track.locked);
+      if (!target) continue;
+      target.clips.push(clip);
+      target.clips.sort((a, b) => a.start_ms - b.start_ms);
+      newIds.push(clip.id);
+      lastTrackId = target.id;
+    }
+    if (newIds.length === 0) return;
+    set((state) => ({
+      timeline: recomputeDuration(next),
+      selectedClipIds: newIds,
+      selectedClipId: newIds[newIds.length - 1],
+      selectedTrackId: lastTrackId,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  copyClipAttributes: (clipId) => set((state) => {
+    const id = clipId ?? state.selectedClipId;
+    if (!state.timeline || !id) return {};
+    const loc = findClip(state.timeline, id);
+    if (!loc) return {};
+    const { transform, volume, fade_in_ms, fade_out_ms, effects, transitions, text } =
+      JSON.parse(JSON.stringify(loc.clip)) as VideoTimelineClip;
+    return { attributeClipboard: { transform, volume, fade_in_ms, fade_out_ms, effects, transitions, text } };
+  }),
+
+  pasteClipAttributes: async (clipId) => {
+    const attrs = get().attributeClipboard;
+    const current = get().timeline;
+    if (!attrs || !current) return;
+    const ids = clipId
+      ? [clipId]
+      : get().selectedClipIds.length > 0
+        ? get().selectedClipIds
+        : get().selectedClipId
+          ? [get().selectedClipId as string]
+          : [];
+    if (ids.length === 0) return;
+    const next = cloneTimeline(current);
+    let applied = false;
+    for (const id of ids) {
+      const loc = findClip(next, id);
+      if (!loc) continue;
+      if (attrs.transform) loc.clip.transform = JSON.parse(JSON.stringify(attrs.transform));
+      if (attrs.volume !== undefined) loc.clip.volume = attrs.volume;
+      if (attrs.fade_in_ms !== undefined) loc.clip.fade_in_ms = attrs.fade_in_ms;
+      if (attrs.fade_out_ms !== undefined) loc.clip.fade_out_ms = attrs.fade_out_ms;
+      if (attrs.effects) loc.clip.effects = attrs.effects.map((effect) => ({ ...(JSON.parse(JSON.stringify(effect)) as VideoTimelineEffect), id: newId('effect') }));
+      if (attrs.transitions) loc.clip.transitions = attrs.transitions.map((transition) => ({ ...(JSON.parse(JSON.stringify(transition)) as VideoTimelineTransition), id: newId('transition') }));
+      // Styling pastes onto clips that already have text; their content is kept.
+      if (attrs.text && loc.clip.text) loc.clip.text = { ...(JSON.parse(JSON.stringify(attrs.text)) as NonNullable<VideoTimelineClip['text']>), text: loc.clip.text.text };
+      applied = true;
+    }
+    if (!applied) return;
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  setTimelineDuration: async (durationMs) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    next.duration_ms = Math.max(1000, Math.round(durationMs));
+    // Never shrink below the last clip end.
+    recomputeDuration(next);
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  splitAllAtPlayhead: async () => {
+    const current = get().timeline;
+    if (!current) return;
+    const playhead = get().playheadMs;
+    const next = cloneTimeline(current);
+    let split = false;
+    for (const track of next.tracks) {
+      if (track.locked) continue;
+      const result: VideoTimelineClip[] = [];
+      for (const clip of track.clips) {
+        const offset = playhead - clip.start_ms;
+        if (offset <= 0 || offset >= clip.duration_ms) {
+          result.push(clip);
+          continue;
+        }
+        const left = clip;
+        const right = JSON.parse(JSON.stringify(clip)) as VideoTimelineClip;
+        right.id = newId('clip');
+        right.start_ms = playhead;
+        right.duration_ms = clip.duration_ms - offset;
+        right.trim_in_ms = left.trim_in_ms + offset;
+        right.trim_out_ms = clip.trim_out_ms;
+        left.duration_ms = offset;
+        left.trim_out_ms = left.trim_in_ms + offset;
+        result.push(left, right);
+        split = true;
+      }
+      track.clips = result;
+    }
+    if (!split) return;
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
     await get().saveTimeline(next);
   },
 

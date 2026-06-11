@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Eye, EyeOff, Lock, Unlock, Volume2, VolumeX } from 'lucide-react';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineTrack as Track, VideoTimelineTrackType } from '../../../types/video';
@@ -7,7 +7,6 @@ import { TimelineClip } from './TimelineClip';
 // Snap a drop position to nearby clip edges / playhead within this pixel radius.
 const SNAP_RADIUS_PX = 8;
 const DEFAULT_TRACK_HEIGHT = 52;
-const TRACK_HEIGHT_STEP = 16;
 
 function snapToPoints(startMs: number, snapPointsMs: number[], pxPerMs: number): number {
   let best = startMs;
@@ -24,14 +23,13 @@ function snapToPoints(startMs: number, snapPointsMs: number[], pxPerMs: number):
 
 export function TimelineTrack({
   track,
-  trackIndex,
-  trackCount,
   assets,
   selectedClipIds,
   pxPerMs,
   width,
   snappingEnabled,
   snapPointsMs,
+  soloActive = false,
   onMoveClip,
   onTrimClip,
   onAddAsset,
@@ -40,22 +38,21 @@ export function TimelineTrack({
   onToggleLock,
   onToggleVisibility,
   onRenameTrack,
-  onReorderTrack,
-  onRemoveTrack,
   onSetTrackHeight,
   toolMode = 'select',
   onSplitAt,
   onClipContextMenu,
+  onHeaderContextMenu,
+  onLaneContextMenu,
 }: {
   track: Track;
-  trackIndex: number;
-  trackCount: number;
   assets: VideoAsset[];
   selectedClipIds: string[];
   pxPerMs: number;
   width: number;
   snappingEnabled: boolean;
   snapPointsMs: number[];
+  soloActive?: boolean;
   onMoveClip: (clipId: string, trackId: string, startMs: number) => void;
   onTrimClip: (clipId: string, updates: Partial<Pick<VideoTimelineClip, 'start_ms' | 'duration_ms' | 'trim_in_ms' | 'trim_out_ms'>>) => void;
   onAddAsset: (assetId: string, trackId: string, trackType: VideoTimelineTrackType, startMs: number) => void;
@@ -64,16 +61,15 @@ export function TimelineTrack({
   onToggleLock: (trackId: string) => void;
   onToggleVisibility: (trackId: string) => void;
   onRenameTrack: (trackId: string, name: string) => void;
-  onReorderTrack: (trackId: string, targetIndex: number) => void;
-  onRemoveTrack: (trackId: string) => void;
   onSetTrackHeight: (trackId: string, height: number) => void;
   toolMode?: 'select' | 'blade';
   onSplitAt?: (clipId: string, timeMs: number) => void;
   onClipContextMenu?: (clipId: string, trackId: string, clientX: number, clientY: number) => void;
+  onHeaderContextMenu?: (trackId: string, clientX: number, clientY: number) => void;
+  onLaneContextMenu?: (trackId: string, timeMs: number, clientX: number, clientY: number) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(track.name);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [dropGuideX, setDropGuideX] = useState<number | null>(null);
   const [liveHeight, setLiveHeight] = useState<number | null>(null);
   // Mirrors liveHeight so pointer-up can commit without a side effect inside
@@ -110,15 +106,6 @@ export function TimelineTrack({
     window.addEventListener('pointerup', onUp);
   };
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!headerRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [menuOpen]);
-
   const commitRename = () => {
     setRenaming(false);
     if (draftName.trim() && draftName.trim() !== track.name) {
@@ -133,7 +120,7 @@ export function TimelineTrack({
         className="sticky left-0 z-20 flex min-w-0 items-center gap-1 border-r border-border bg-surface-alt px-2"
         onContextMenu={(event) => {
           event.preventDefault();
-          setMenuOpen(true);
+          onHeaderContextMenu?.(track.id, event.clientX, event.clientY);
         }}
       >
         {renaming ? (
@@ -188,35 +175,16 @@ export function TimelineTrack({
         >
           {track.visible ? <Eye size={12} /> : <EyeOff size={12} />}
         </button>
+        {soloActive && (
+          <span className="rounded bg-amber-400/20 px-1 text-[9px] font-semibold text-amber-300" title="Solo — only this layer plays audio">
+            S
+          </span>
+        )}
         <div
           className="absolute inset-x-0 bottom-0 h-1.5 cursor-ns-resize hover:bg-primary/30"
           onPointerDown={beginHeightDrag}
           title="Drag to resize track height"
         />
-        {menuOpen && (
-          <div className="absolute left-1 top-full z-30 w-36 rounded-md border border-border bg-surface p-1 shadow-lg">
-            {[
-              { label: 'Rename', disabled: false, action: () => { setDraftName(track.name); setRenaming(true); } },
-              { label: 'Move up', disabled: trackIndex === 0, action: () => onReorderTrack(track.id, trackIndex - 1) },
-              { label: 'Move down', disabled: trackIndex >= trackCount - 1, action: () => onReorderTrack(track.id, trackIndex + 1) },
-              { label: 'Increase height', disabled: false, action: () => onSetTrackHeight(track.id, trackHeight + TRACK_HEIGHT_STEP) },
-              { label: 'Decrease height', disabled: false, action: () => onSetTrackHeight(track.id, trackHeight - TRACK_HEIGHT_STEP) },
-              { label: 'Remove track', disabled: false, action: () => onRemoveTrack(track.id) },
-            ].map((item) => (
-              <button
-                key={item.label}
-                disabled={item.disabled}
-                className="block w-full rounded px-2 py-1 text-left text-[11px] text-text-secondary hover:bg-surface-alt hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
-                onClick={() => {
-                  setMenuOpen(false);
-                  item.action();
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
       <div
         className="relative bg-surface"
@@ -254,6 +222,12 @@ export function TimelineTrack({
           }
         }}
         onClick={() => onSelectClip('', track.id)}
+        onContextMenu={(event) => {
+          if (!onLaneContextMenu) return;
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          onLaneContextMenu(track.id, Math.max(0, Math.round((event.clientX - rect.left) / pxPerMs)), event.clientX, event.clientY);
+        }}
       >
         {dropGuideX !== null && (
           <div className="pointer-events-none absolute top-0 z-10 h-full w-px bg-primary/80" style={{ left: dropGuideX }} />

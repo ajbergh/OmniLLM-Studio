@@ -13,12 +13,15 @@ export function TimelineRuler({
   markers = [],
   onSeek,
   onRemoveMarker,
+  onContextMenu,
 }: {
   durationMs: number;
   pxPerMs: number;
   markers?: VideoTimelineMarker[];
   onSeek: (timeMs: number) => void;
   onRemoveMarker?: (markerId: string) => void;
+  /** Right-click on the ruler surface; timeMs is the time under the cursor. */
+  onContextMenu?: (timeMs: number, clientX: number, clientY: number) => void;
 }) {
   const width = Math.max(900, durationMs * pxPerMs);
   // At high zoom show 250ms sub-second ticks (labels stay on whole seconds).
@@ -35,6 +38,12 @@ export function TimelineRuler({
       onClick={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();
         onSeek(Math.max(0, Math.round((event.clientX - rect.left) / pxPerMs)));
+      }}
+      onContextMenu={(event) => {
+        if (!onContextMenu) return;
+        event.preventDefault();
+        const rect = event.currentTarget.getBoundingClientRect();
+        onContextMenu(Math.max(0, Math.round((event.clientX - rect.left) / pxPerMs)), event.clientX, event.clientY);
       }}
     >
       {ticks.map((time) => (

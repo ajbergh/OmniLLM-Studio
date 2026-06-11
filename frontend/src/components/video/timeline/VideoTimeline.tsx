@@ -3,13 +3,21 @@ import { Plus } from 'lucide-react';
 import { useVideoStudioStore } from '../../../stores/videoStudio';
 import { editorModeFeatures } from '../editorModes';
 import type { VideoTimelineTrackType } from '../../../types/video';
+import { ContextMenu } from '../../common/ContextMenu';
+import type { ContextMenuEntry } from '../../common/ContextMenu';
 import { TimelinePlayhead } from './TimelinePlayhead';
 import { TimelineRuler } from './TimelineRuler';
 import { TimelineToolbar } from './TimelineToolbar';
 import { TimelineTrack } from './TimelineTrack';
 
+type TimelineMenuState =
+  | { kind: 'clip'; clipId: string; trackId: string; x: number; y: number }
+  | { kind: 'track'; trackId: string; x: number; y: number }
+  | { kind: 'lane'; trackId: string; timeMs: number; x: number; y: number }
+  | { kind: 'ruler'; timeMs: number; x: number; y: number };
+
 const TRACK_HEADER_WIDTH = 116;
-const ADDABLE_TRACK_TYPES: VideoTimelineTrackType[] = ['video', 'image', 'audio', 'music', 'text', 'caption'];
+const ADDABLE_TRACK_TYPES: VideoTimelineTrackType[] = ['layer', 'video', 'image', 'audio', 'music', 'text', 'caption'];
 
 function formatTimecode(ms: number, fps: number): string {
   const clamped = Math.max(0, ms);
@@ -68,11 +76,31 @@ export function VideoTimeline() {
   const addClipTransition = useVideoStudioStore((state) => state.addClipTransition);
   const bringClipForward = useVideoStudioStore((state) => state.bringClipForward);
   const sendClipBackward = useVideoStudioStore((state) => state.sendClipBackward);
+  const copySelection = useVideoStudioStore((state) => state.copySelection);
+  const cutSelection = useVideoStudioStore((state) => state.cutSelection);
+  const pasteClips = useVideoStudioStore((state) => state.pasteClips);
+  const copyClipAttributes = useVideoStudioStore((state) => state.copyClipAttributes);
+  const pasteClipAttributes = useVideoStudioStore((state) => state.pasteClipAttributes);
+  const selectAllClips = useVideoStudioStore((state) => state.selectAllClips);
+  const selectClipsRelativeToPlayhead = useVideoStudioStore((state) => state.selectClipsRelativeToPlayhead);
+  const selectClipsOnTrack = useVideoStudioStore((state) => state.selectClipsOnTrack);
+  const moveClipToAdjacentTrack = useVideoStudioStore((state) => state.moveClipToAdjacentTrack);
+  const duplicateTrack = useVideoStudioStore((state) => state.duplicateTrack);
+  const clearTrack = useVideoStudioStore((state) => state.clearTrack);
+  const toggleTrackSolo = useVideoStudioStore((state) => state.toggleTrackSolo);
+  const soloTrackId = useVideoStudioStore((state) => state.soloTrackId);
+  const insertTrackAdjacent = useVideoStudioStore((state) => state.insertTrackAdjacent);
+  const moveTrackToEdge = useVideoStudioStore((state) => state.moveTrackToEdge);
+  const setTimelineDuration = useVideoStudioStore((state) => state.setTimelineDuration);
+  const splitAllAtPlayhead = useVideoStudioStore((state) => state.splitAllAtPlayhead);
+  const hasClipboard = useVideoStudioStore((state) => Boolean(state.clipClipboard?.length));
+  const hasAttributeClipboard = useVideoStudioStore((state) => Boolean(state.attributeClipboard));
+  const addTextClip = useVideoStudioStore((state) => state.addTextClip);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const addTrackRef = useRef<HTMLDivElement | null>(null);
   const [addTrackOpen, setAddTrackOpen] = useState(false);
-  const [clipMenu, setClipMenu] = useState<{ clipId: string; trackId: string; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<TimelineMenuState | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const pxPerMs = useMemo(() => 0.02 * zoom, [zoom]);
   const width = Math.max(900, (timeline?.duration_ms || 30000) * pxPerMs);
@@ -101,13 +129,6 @@ export function VideoTimeline() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [addTrackOpen]);
-
-  useEffect(() => {
-    if (!clipMenu) return;
-    const onPointerDown = () => setClipMenu(null);
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [clipMenu]);
 
   // Ctrl/Cmd + wheel zooms the timeline (native listener — React's synthetic
   // wheel handler can't preventDefault on passive listeners).
@@ -157,6 +178,18 @@ export function VideoTimeline() {
       } else if (event.key.toLowerCase() === 's' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         void saveTimeline();
+      } else if (event.key.toLowerCase() === 'c' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        copySelection();
+      } else if (event.key.toLowerCase() === 'x' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        void cutSelection();
+      } else if (event.key.toLowerCase() === 'v' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        void pasteClips();
+      } else if (event.key.toLowerCase() === 'a' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        selectAllClips();
       } else if (event.key.toLowerCase() === 's') {
         void splitClipAtPlayhead();
       } else if (event.key.toLowerCase() === 'm') {
@@ -175,6 +208,9 @@ export function VideoTimeline() {
         setZoom(useVideoStudioStore.getState().zoom * 1.25);
       } else if (event.key === '-' || event.key === '_') {
         setZoom(useVideoStudioStore.getState().zoom / 1.25);
+      } else if (event.key.toLowerCase() === 'f') {
+        const container = scrollRef.current;
+        if (container) zoomToFit(Math.max(200, container.clientWidth - TRACK_HEADER_WIDTH - 24));
       } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         const state = useVideoStudioStore.getState();
         if (state.selectedClipIds.length === 0 && !state.selectedClipId) return;
@@ -184,13 +220,13 @@ export function VideoTimeline() {
         void nudgeSelection(step);
       } else if (event.key === 'Escape') {
         setShowHelp(false);
-        setClipMenu(null);
+        setMenu(null);
         selectClip(null);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [addMarker, deleteClip, nudgeSelection, redoTimeline, saveTimeline, selectClip, setPlaying, setToolMode, setZoom, splitClipAtPlayhead, trimClipEdgeToPlayhead, undoTimeline]);
+  }, [addMarker, copySelection, cutSelection, deleteClip, nudgeSelection, pasteClips, redoTimeline, saveTimeline, selectAllClips, selectClip, setPlaying, setToolMode, setZoom, splitClipAtPlayhead, trimClipEdgeToPlayhead, undoTimeline, zoomToFit]);
 
   if (!timeline) {
     return (
@@ -268,6 +304,7 @@ export function VideoTimeline() {
               markers={timeline.markers}
               onSeek={setPlayhead}
               onRemoveMarker={(markerId) => { void removeMarker(markerId); }}
+              onContextMenu={(timeMs, x, y) => setMenu({ kind: 'ruler', timeMs, x, y })}
             />
             <TimelinePlayhead x={playheadMs * pxPerMs} />
           </div>
@@ -278,18 +315,20 @@ export function VideoTimeline() {
             <TimelinePlayhead x={playheadMs * pxPerMs} />
           </div>
         </div>
-        {timeline.tracks.map((track, trackIndex) => (
+        {/* Tracks render top-down from the end of the array: the last track is
+            the foreground layer, so it appears at the top of the list
+            (Camtasia/Premiere convention). trackIndex stays the array index. */}
+        {[...timeline.tracks].reverse().map((track) => (
           <TimelineTrack
             key={track.id}
             track={track}
-            trackIndex={trackIndex}
-            trackCount={timeline.tracks.length}
             assets={assets}
             selectedClipIds={selectedClipIds}
             pxPerMs={pxPerMs}
             width={width}
             snappingEnabled={snappingEnabled}
             snapPointsMs={snapPointsMs}
+            soloActive={soloTrackId === track.id}
             onMoveClip={(clipId, trackId, startMs) => { void moveClip(clipId, trackId, startMs); }}
             onTrimClip={(clipId, updates) => { void trimClip(clipId, updates); }}
             onAddAsset={(assetId, trackId, trackType, startMs) => {
@@ -300,14 +339,6 @@ export function VideoTimeline() {
             onToggleLock={(trackId) => { void toggleTrackLock(trackId); }}
             onToggleVisibility={(trackId) => { void toggleTrackVisibility(trackId); }}
             onRenameTrack={(trackId, name) => { void renameTrack(trackId, name); }}
-            onReorderTrack={(trackId, targetIndex) => { void reorderTrack(trackId, targetIndex); }}
-            onRemoveTrack={(trackId) => {
-              const target = timeline.tracks.find((item) => item.id === trackId);
-              if (target && target.clips.length > 0 && !window.confirm(`Remove "${target.name}" and its ${target.clips.length} clip(s)?`)) {
-                return;
-              }
-              void removeTrack(trackId);
-            }}
             onSetTrackHeight={(trackId, height) => { void setTrackHeight(trackId, height); }}
             toolMode={toolMode}
             onSplitAt={(clipId, timeMs) => { void splitClipAt(clipId, timeMs); }}
@@ -315,67 +346,139 @@ export function VideoTimeline() {
               if (!useVideoStudioStore.getState().selectedClipIds.includes(clipId)) {
                 selectClip(clipId, trackId);
               }
-              setClipMenu({ clipId, trackId, x, y });
+              setMenu({ kind: 'clip', clipId, trackId, x, y });
             }}
+            onHeaderContextMenu={(trackId, x, y) => setMenu({ kind: 'track', trackId, x, y })}
+            onLaneContextMenu={(trackId, timeMs, x, y) => setMenu({ kind: 'lane', trackId, timeMs, x, y })}
           />
         ))}
         {!hasClips && (
           <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
             <span className="rounded-md border border-dashed border-border bg-surface-alt/90 px-3 py-1.5 text-[11px] text-text-muted">
-              Drag media from the bin onto a track, or generate a video and use “Send to Timeline”.
+              Drag media from the bin onto a layer, or generate a video and use “Send to Timeline”.
             </span>
           </div>
         )}
       </div>
-      {clipMenu && (() => {
-        const menuClip = timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === clipMenu.clipId);
-        if (!menuClip) return null;
-        const multi = selectedClipIds.length >= 2;
-        const items: Array<{ label: string; action: () => void } | 'divider'> = [
-          { label: 'Split at playhead (S)', action: () => { void splitClipAt(clipMenu.clipId, playheadMs); } },
-          { label: 'Trim start to playhead [', action: () => { void trimClipEdgeToPlayhead('start'); } },
-          { label: 'Trim end to playhead ]', action: () => { void trimClipEdgeToPlayhead('end'); } },
-          'divider',
-          { label: multi ? `Duplicate ${selectedClipIds.length} clips` : 'Duplicate', action: () => { void duplicateClip(multi ? undefined : clipMenu.clipId); } },
-          { label: 'Bring forward', action: () => { void bringClipForward(clipMenu.clipId); } },
-          { label: 'Send backward', action: () => { void sendClipBackward(clipMenu.clipId); } },
-          { label: 'Add fade in/out', action: () => { void updateClipFade(clipMenu.clipId, { fade_in_ms: 500, fade_out_ms: 500 }); } },
-          { label: 'Add fade transition', action: () => { void addClipTransition(clipMenu.clipId, { type: 'fade', duration_ms: 500 }); } },
-        ];
-        if (multi && !menuClip.group_id) items.push({ label: `Group ${selectedClipIds.length} clips`, action: () => { void groupClips(); } });
-        if (menuClip.group_id) items.push({ label: 'Ungroup', action: () => { void ungroupClips(menuClip.group_id); } });
-        if (multi) {
+      {menu && (() => {
+        let items: ContextMenuEntry[] = [];
+        if (menu.kind === 'clip') {
+          const menuClip = timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === menu.clipId);
+          if (!menuClip) return null;
+          const multi = selectedClipIds.length >= 2;
+          items = [
+            { label: 'Split at playhead', shortcut: 'S', action: () => { void splitClipAt(menu.clipId, playheadMs); } },
+            { label: 'Trim start to playhead', shortcut: '[', action: () => { void trimClipEdgeToPlayhead('start'); } },
+            { label: 'Trim end to playhead', shortcut: ']', action: () => { void trimClipEdgeToPlayhead('end'); } },
+            'divider',
+            { label: multi ? `Copy ${selectedClipIds.length} clips` : 'Copy', shortcut: 'Ctrl+C', action: () => copySelection(multi ? undefined : menu.clipId) },
+            { label: multi ? `Cut ${selectedClipIds.length} clips` : 'Cut', shortcut: 'Ctrl+X', action: () => { void cutSelection(multi ? undefined : menu.clipId); } },
+            { label: 'Paste at playhead', shortcut: 'Ctrl+V', disabled: !hasClipboard, action: () => { void pasteClips(); } },
+            { label: multi ? `Duplicate ${selectedClipIds.length} clips` : 'Duplicate', action: () => { void duplicateClip(multi ? undefined : menu.clipId); } },
+            'divider',
+            { label: 'Copy attributes', action: () => copyClipAttributes(menu.clipId) },
+            { label: 'Paste attributes', disabled: !hasAttributeClipboard, action: () => { void pasteClipAttributes(multi ? undefined : menu.clipId); } },
+            'divider',
+            { label: 'Move to layer above', action: () => { void moveClipToAdjacentTrack(menu.clipId, 'above'); } },
+            { label: 'Move to layer below', action: () => { void moveClipToAdjacentTrack(menu.clipId, 'below'); } },
+            { label: 'Bring forward', action: () => { void bringClipForward(menu.clipId); } },
+            { label: 'Send backward', action: () => { void sendClipBackward(menu.clipId); } },
+            'divider',
+            { label: 'Add fade in/out', action: () => { void updateClipFade(menu.clipId, { fade_in_ms: 500, fade_out_ms: 500 }); } },
+            { label: 'Add fade transition', action: () => { void addClipTransition(menu.clipId, { type: 'fade', duration_ms: 500 }); } },
+          ];
+          if (multi && !menuClip.group_id) items.push({ label: `Group ${selectedClipIds.length} clips`, action: () => { void groupClips(); } });
+          if (menuClip.group_id) items.push({ label: 'Ungroup', action: () => { void ungroupClips(menuClip.group_id); } });
+          if (multi) {
+            items.push('divider');
+            items.push({ label: 'Align starts', action: () => { void alignSelection('start'); } });
+            items.push({ label: 'Align ends', action: () => { void alignSelection('end'); } });
+            if (selectedClipIds.length >= 3) items.push({ label: 'Distribute evenly', action: () => { void alignSelection('distribute'); } });
+          }
           items.push('divider');
-          items.push({ label: 'Align starts', action: () => { void alignSelection('start'); } });
-          items.push({ label: 'Align ends', action: () => { void alignSelection('end'); } });
-          if (selectedClipIds.length >= 3) items.push({ label: 'Distribute evenly', action: () => { void alignSelection('distribute'); } });
+          items.push({ label: multi ? `Delete ${selectedClipIds.length} clips` : 'Delete', danger: true, shortcut: 'Del', action: () => { void deleteClip(multi ? undefined : menu.clipId); } });
+        } else if (menu.kind === 'track') {
+          const trackIndex = timeline.tracks.findIndex((item) => item.id === menu.trackId);
+          const track = timeline.tracks[trackIndex];
+          if (!track) return null;
+          const atTop = trackIndex >= timeline.tracks.length - 1;
+          const atBottom = trackIndex === 0;
+          items = [
+            {
+              label: 'Rename layer…',
+              action: () => {
+                const name = window.prompt('Layer name', track.name);
+                if (name?.trim()) void renameTrack(track.id, name);
+              },
+            },
+            { label: 'Add layer above', action: () => { void insertTrackAdjacent(track.id, 'above'); } },
+            { label: 'Add layer below', action: () => { void insertTrackAdjacent(track.id, 'below'); } },
+            { label: 'Duplicate layer', action: () => { void duplicateTrack(track.id); } },
+            'divider',
+            { label: 'Move up', disabled: atTop, action: () => { void reorderTrack(track.id, trackIndex + 1); } },
+            { label: 'Move down', disabled: atBottom, action: () => { void reorderTrack(track.id, trackIndex - 1); } },
+            { label: 'Move to top', disabled: atTop, action: () => { void moveTrackToEdge(track.id, 'top'); } },
+            { label: 'Move to bottom', disabled: atBottom, action: () => { void moveTrackToEdge(track.id, 'bottom'); } },
+            'divider',
+            { label: track.locked ? 'Unlock layer' : 'Lock layer', action: () => { void toggleTrackLock(track.id); } },
+            { label: track.visible ? 'Hide visuals' : 'Show visuals', action: () => { void toggleTrackVisibility(track.id); } },
+            { label: track.muted ? 'Unmute audio' : 'Mute audio', action: () => { void toggleTrackMute(track.id); } },
+            { label: soloTrackId === track.id ? 'Unsolo' : 'Solo (preview audio)', action: () => toggleTrackSolo(track.id) },
+            'divider',
+            { label: 'Select all clips on layer', disabled: track.clips.length === 0, action: () => selectClipsOnTrack(track.id) },
+            {
+              label: 'Clear layer',
+              disabled: track.clips.length === 0,
+              danger: true,
+              action: () => {
+                if (window.confirm(`Remove all ${track.clips.length} clip(s) from "${track.name}"?`)) void clearTrack(track.id);
+              },
+            },
+            {
+              label: 'Delete layer',
+              danger: true,
+              action: () => {
+                if (track.clips.length === 0 || window.confirm(`Remove "${track.name}" and its ${track.clips.length} clip(s)?`)) void removeTrack(track.id);
+              },
+            },
+          ];
+        } else if (menu.kind === 'lane') {
+          const track = timeline.tracks.find((item) => item.id === menu.trackId);
+          if (!track) return null;
+          items = [
+            { label: 'Paste here', disabled: !hasClipboard || track.locked, action: () => { void pasteClips(menu.timeMs, track.id); } },
+            { label: 'Paste at playhead', shortcut: 'Ctrl+V', disabled: !hasClipboard, action: () => { void pasteClips(); } },
+            'divider',
+            { label: 'Add text clip here', disabled: track.locked, action: () => { void addTextClip(undefined, { trackId: track.id, startMs: menu.timeMs }); } },
+            { label: 'Add marker here', action: () => { void addMarker(menu.timeMs); } },
+            'divider',
+            { label: 'Add layer above', action: () => { void insertTrackAdjacent(track.id, 'above'); } },
+            { label: 'Add layer below', action: () => { void insertTrackAdjacent(track.id, 'below'); } },
+            'divider',
+            {
+              label: 'Select clips after this point',
+              action: () => {
+                setPlayhead(menu.timeMs);
+                selectClipsRelativeToPlayhead('after');
+              },
+            },
+          ];
+        } else {
+          items = [
+            { label: 'Add marker here', shortcut: 'M', action: () => { void addMarker(menu.timeMs); } },
+            { label: 'Go to start', action: () => setPlayhead(0) },
+            { label: 'Go to end', action: () => setPlayhead(timeline.duration_ms) },
+            'divider',
+            { label: 'Split selected clip at playhead', shortcut: 'S', disabled: selectedClipIds.length === 0, action: () => { void splitClipAtPlayhead(); } },
+            { label: 'Split all clips at playhead', action: () => { void splitAllAtPlayhead(); } },
+            { label: 'Select clips before playhead', action: () => selectClipsRelativeToPlayhead('before') },
+            { label: 'Select clips after playhead', action: () => selectClipsRelativeToPlayhead('after') },
+            'divider',
+            { label: 'Set project duration to here', action: () => { void setTimelineDuration(menu.timeMs); } },
+            { label: 'Zoom to fit', shortcut: 'F', action: handleZoomToFit },
+          ];
         }
-        items.push('divider');
-        items.push({ label: multi ? `Delete ${selectedClipIds.length} clips` : 'Delete', action: () => { void deleteClip(multi ? undefined : clipMenu.clipId); } });
-        return (
-          <div
-            className="fixed z-50 w-44 rounded-md border border-border bg-surface p-1 shadow-xl"
-            style={{ left: Math.min(clipMenu.x, window.innerWidth - 190), top: Math.min(clipMenu.y, window.innerHeight - items.length * 26 - 16) }}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            {items.map((item, index) =>
-              item === 'divider' ? (
-                <div key={`divider-${index}`} className="my-1 h-px bg-border" />
-              ) : (
-                <button
-                  key={item.label}
-                  className="block w-full rounded px-2 py-1 text-left text-[11px] text-text-secondary hover:bg-surface-alt hover:text-text"
-                  onClick={() => {
-                    setClipMenu(null);
-                    item.action();
-                  }}
-                >
-                  {item.label}
-                </button>
-              ),
-            )}
-          </div>
-        );
+        return <ContextMenu position={{ x: menu.x, y: menu.y }} items={items} onClose={() => setMenu(null)} />;
       })()}
       {showHelp && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowHelp(false)}>
@@ -387,20 +490,23 @@ export function VideoTimeline() {
                 ['Ctrl/Cmd+Z', 'Undo'],
                 ['Ctrl/Cmd+Shift+Z · Ctrl/Cmd+Y', 'Redo'],
                 ['Ctrl/Cmd+S', 'Save timeline'],
+                ['Ctrl/Cmd+C / X / V', 'Copy / cut / paste clips'],
+                ['Ctrl/Cmd+A', 'Select all clips'],
                 ['S', 'Split selected clip at playhead'],
                 ['C / V', 'Blade tool / Select tool'],
                 ['[ / ]', 'Trim clip start / end to playhead'],
                 ['M', 'Add marker at playhead'],
                 ['+ / -', 'Zoom in / out'],
+                ['F', 'Zoom to fit'],
                 ['← / →', 'Nudge selection by 1 frame'],
                 ['Shift+← / →', 'Nudge selection by 10 frames'],
                 ['Delete / Backspace', 'Delete selection'],
                 ['Ctrl/Cmd/Shift+Click', 'Multi-select clips'],
                 ['Escape', 'Deselect / close menus'],
-                ['Right-click clip', 'Clip actions menu'],
-                ['Right-click track name', 'Track actions menu'],
+                ['Right-click clip / layer / lane / ruler', 'Context menus'],
+                ['Shift+F10', 'Open menu on focused clip'],
                 ['Right-click marker', 'Remove marker'],
-                ['Double-click track name', 'Rename track'],
+                ['Double-click layer name', 'Rename layer'],
               ].map(([keys, description]) => (
                 <div key={keys} className="flex items-baseline justify-between gap-3">
                   <dt className="shrink-0 rounded bg-surface-alt px-1.5 py-0.5 font-mono text-[10px] text-text-secondary">{keys}</dt>

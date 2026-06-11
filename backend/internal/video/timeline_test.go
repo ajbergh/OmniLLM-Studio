@@ -76,7 +76,7 @@ func TestApplyEditPlanToTimelineValidatesOperations(t *testing.T) {
 		Operations: []EditOperation{
 			{Type: "set_canvas", Width: 1080, Height: 1920, FPS: 30},
 			{Type: "set_duration", DurationMS: 30000},
-			{Type: "add_text_clip", TrackID: "track-text-1", StartMS: 0, DurationMS: 3000, Text: "Launch"},
+			{Type: "add_text_clip", StartMS: 0, DurationMS: 3000, Text: "Launch"},
 		},
 	}
 	updated, err := ApplyEditPlanToTimeline(doc, plan)
@@ -89,13 +89,145 @@ func TestApplyEditPlanToTimelineValidatesOperations(t *testing.T) {
 	if updated.DurationMS != 30000 {
 		t.Fatalf("duration not updated: %d", updated.DurationMS)
 	}
-	textTrack := updated.Tracks[3]
+	// With no track_id the text clip lands on the topmost (foreground) layer.
+	textTrack := updated.Tracks[len(updated.Tracks)-1]
 	if len(textTrack.Clips) != 1 || textTrack.Clips[0].Text == nil || textTrack.Clips[0].Text.Text != "Launch" {
 		t.Fatalf("text clip not added: %+v", textTrack.Clips)
 	}
 
 	if _, err := ApplyEditPlanToTimeline(doc, EditPlan{Operations: []EditOperation{{Type: "write_raw_json"}}}); err == nil {
 		t.Fatalf("expected unsupported operation to fail")
+	}
+}
+
+func TestNewEmptyTimelineCreatesGenericLayers(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	if len(doc.Tracks) != 4 {
+		t.Fatalf("expected 4 layers, got %d", len(doc.Tracks))
+	}
+	for i, track := range doc.Tracks {
+		if track.Type != TrackTypeLayer {
+			t.Fatalf("track %d is %q, want %q", i, track.Type, TrackTypeLayer)
+		}
+		if track.Locked || track.Muted || !track.Visible {
+			t.Fatalf("layer %d has wrong default flags: %+v", i, track)
+		}
+	}
+	if _, err := ValidateTimelineDocument(doc); err != nil {
+		t.Fatalf("layer timeline failed validation: %v", err)
+	}
+}
+
+func TestAddAssetToTimelineAnyKindOnAnyTrack(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	audio := models.VideoAsset{ID: "asset-audio", Kind: "music", MimeType: "audio/mpeg"}
+	image := models.VideoAsset{ID: "asset-image", Kind: "image", MimeType: "image/png"}
+
+	// Explicit target layer accepts audio.
+	withAudio, audioClip, err := AddAssetToTimeline(doc, audio, TimelineImportAssetRequest{TrackID: "track-layer-2"})
+	if err != nil {
+		t.Fatalf("audio on layer rejected: %v", err)
+	}
+	if len(withAudio.Tracks[1].Clips) != 1 {
+		t.Fatalf("audio clip not on layer 2: %+v", withAudio.Tracks)
+	}
+	if audioClip.Volume == nil || audioClip.Transform != nil {
+		t.Fatalf("audio clip defaults wrong: %+v", audioClip)
+	}
+	if audioClip.DurationMS != 30000 {
+		t.Fatalf("audio default duration wrong: %d", audioClip.DurationMS)
+	}
+
+	// Legacy typed track accepts a mismatched kind when explicitly targeted.
+	legacy := TimelineDocument{
+		Version: 1,
+		Tracks: []TimelineTrack{
+			{ID: "t-video", Type: TrackTypeVideo, Name: "Video 1", Visible: true, Clips: []TimelineClip{}},
+		},
+	}
+	withImage, imageClip, err := AddAssetToTimeline(legacy, image, TimelineImportAssetRequest{TrackID: "t-video"})
+	if err != nil {
+		t.Fatalf("image on explicit video track rejected: %v", err)
+	}
+	if len(withImage.Tracks[0].Clips) != 1 {
+		t.Fatalf("image clip not placed: %+v", withImage.Tracks)
+	}
+	if imageClip.Transform == nil || imageClip.Volume != nil {
+		t.Fatalf("image clip defaults wrong: %+v", imageClip)
+	}
+	if imageClip.DurationMS != 5000 {
+		t.Fatalf("image default duration wrong: %d", imageClip.DurationMS)
+	}
+}
+
+func TestAddAssetToTimelineLockedTrack(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks[0].Locked = true
+	asset := models.VideoAsset{ID: "asset-1", Kind: "video", MimeType: "video/mp4"}
+
+	if _, _, err := AddAssetToTimeline(doc, asset, TimelineImportAssetRequest{TrackID: "track-layer-1"}); err == nil {
+		t.Fatalf("expected locked track to reject explicit placement")
+	}
+
+	// Auto-placement skips the locked layer.
+	updated, _, err := AddAssetToTimeline(doc, asset, TimelineImportAssetRequest{})
+	if err != nil {
+		t.Fatalf("auto placement failed: %v", err)
+	}
+	if len(updated.Tracks[0].Clips) != 0 || len(updated.Tracks[1].Clips) != 1 {
+		t.Fatalf("clip not routed around locked layer: %+v", updated.Tracks)
+	}
+}
+
+func TestAddAssetToTimelineLegacyAutoRouting(t *testing.T) {
+	legacy := TimelineDocument{
+		Version: 1,
+		Tracks: []TimelineTrack{
+			{ID: "t-video", Type: TrackTypeVideo, Name: "Video 1", Visible: true, Clips: []TimelineClip{}},
+			{ID: "t-audio", Type: TrackTypeAudio, Name: "Audio 1", Visible: true, Clips: []TimelineClip{}},
+		},
+	}
+	audio := models.VideoAsset{ID: "asset-audio", Kind: "audio", MimeType: "audio/mpeg"}
+	updated, _, err := AddAssetToTimeline(legacy, audio, TimelineImportAssetRequest{})
+	if err != nil {
+		t.Fatalf("legacy auto routing failed: %v", err)
+	}
+	if len(updated.Tracks[1].Clips) != 1 {
+		t.Fatalf("audio not routed to legacy audio track: %+v", updated.Tracks)
+	}
+
+	// A kind no legacy track accepts creates a new generic layer.
+	export := models.VideoAsset{ID: "asset-export", Kind: "export", MimeType: "video/mp4"}
+	updated, clip, err := AddAssetToTimeline(updated, export, TimelineImportAssetRequest{})
+	if err != nil {
+		t.Fatalf("export asset placement failed: %v", err)
+	}
+	last := updated.Tracks[len(updated.Tracks)-1]
+	if last.Type != TrackTypeLayer || len(last.Clips) != 1 {
+		t.Fatalf("export asset did not create a generic layer: %+v", last)
+	}
+	if clip.Transform == nil || clip.Volume == nil {
+		t.Fatalf("export clip should get transform and volume: %+v", clip)
+	}
+}
+
+func TestKindForAssetOrMimeFallback(t *testing.T) {
+	cases := []struct {
+		kind string
+		mime string
+		want string
+	}{
+		{"video", "text/plain", "video"},
+		{"", "video/mp4", "video"},
+		{"", "image/png", "image"},
+		{"", "audio/mpeg", "audio"},
+		{"", "application/json", "other"},
+	}
+	for _, tc := range cases {
+		got := kindForAssetOrMime(models.VideoAsset{Kind: tc.kind, MimeType: tc.mime})
+		if got != tc.want {
+			t.Fatalf("kindForAssetOrMime(%q, %q) = %q, want %q", tc.kind, tc.mime, got, tc.want)
+		}
 	}
 }
 

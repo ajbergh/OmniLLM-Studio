@@ -448,6 +448,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Get("/video/assets/{assetId}", videoHandler.GetAsset)
 			r.Patch("/video/assets/{assetId}", videoHandler.UpdateAsset)
 			r.Get("/video/assets/{assetId}/download", videoHandler.DownloadAsset)
+			r.Get("/video/assets/{assetId}/artifacts/{artifact}", videoHandler.AssetArtifact)
 			r.Delete("/video/assets/{assetId}", videoHandler.DeleteAsset)
 			r.Post("/video/assets/{assetId}/attach-to-conversation", videoHandler.AttachToConversation)
 			r.Post("/video/assets/{assetId}/register-in-library", videoHandler.RegisterInLibrary)

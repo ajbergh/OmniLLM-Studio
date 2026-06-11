@@ -160,6 +160,7 @@ export function VideoRenderPanel() {
             job={job}
             onCancel={(jobId) => { void cancelRenderJob(jobId); }}
             onDownload={downloadRender}
+            onRetry={() => { void renderTimeline(); }}
           />
         ))}
       </div>

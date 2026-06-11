@@ -694,14 +694,24 @@ func ApplyEditPlanToTimeline(doc TimelineDocument, plan EditPlan) (TimelineDocum
 				return TimelineDocument{}, fmt.Errorf("add_text_clip requires text")
 			}
 			trackID := op.TrackID
+			trackIndex := -1
 			if trackID == "" {
+				// Topmost (foreground) unlocked generic layer first, then the
+				// legacy default text track.
+				for i := len(doc.Tracks) - 1; i >= 0; i-- {
+					if doc.Tracks[i].Type == TrackTypeLayer && !doc.Tracks[i].Locked {
+						trackIndex = i
+						break
+					}
+				}
 				trackID = "track-text-1"
 			}
-			trackIndex := -1
-			for i := range doc.Tracks {
-				if doc.Tracks[i].ID == trackID {
-					trackIndex = i
-					break
+			if trackIndex == -1 {
+				for i := range doc.Tracks {
+					if doc.Tracks[i].ID == trackID {
+						trackIndex = i
+						break
+					}
 				}
 			}
 			if trackIndex == -1 {

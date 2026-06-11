@@ -69,13 +69,13 @@ export const TIMELINE_TEMPLATES: TimelineTemplate[] = [
   {
     key: 'blank_16_9',
     label: 'Blank 16:9',
-    description: 'Standard widescreen project with video, overlay, audio, and text tracks.',
+    description: 'Standard widescreen project with four generic layers.',
     build: () =>
       baseDocument(1920, 1080, 30000, [
-        track('video', 'Video 1'),
-        track('image', 'Overlay 1'),
-        track('audio', 'Audio 1'),
-        track('text', 'Text 1'),
+        track('layer', 'Layer 1'),
+        track('layer', 'Layer 2'),
+        track('layer', 'Layer 3'),
+        track('layer', 'Layer 4'),
       ]),
   },
   {

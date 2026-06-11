@@ -196,6 +196,9 @@ export interface VideoGenerationError {
 }
 
 export type VideoTimelineTrackType =
+  // Generic ordered layer — accepts any clip kind; media behavior comes from
+  // the clip and asset. Later tracks in the array stack on top.
+  | 'layer'
   | 'video'
   | 'image'
   | 'audio'

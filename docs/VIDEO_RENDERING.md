@@ -4,7 +4,7 @@ Video Edit Studio separates interactive timeline preview from final export. Vide
 
 ## Preview
 
-The frontend preview uses timeline state, browser rendering, and project assets to show the active visual clip at the current playhead. It is intended for responsive editing, not frame-perfect export.
+The frontend preview composites **all** active visual clips at the current playhead, stacked by track order (later tracks on top) and per-clip `z_index`, with transforms, fades, effects, and text styling applied. It is intended for responsive editing, not frame-perfect export. Track solo is a preview-only monitoring control (only the soloed track contributes preview audio); exports ignore it.
 
 Asset display in the preview canvas:
 
@@ -46,6 +46,7 @@ Current FFmpeg export coverage:
 - **Text styling** — font family (fontconfig best match), stroke color + width, line spacing, plus the existing size/color/background box/shadow.
 - **Audio/music mixing** — per-clip `volume`, timeline placement via `adelay`, and multi-track `amix` mixdown.
 - **Track semantics** — hidden tracks drop their video; muted tracks drop their audio.
+- **Layer-order compositing** — visual clips (media and text alike) composite bottom-to-top by track array order, then `z_index`, then start time, matching the preview. Start time controls only when a clip is enabled, never its stacking. Text clips on any visible track (including generic `layer` tracks) interleave into the same compositing chain, so a text clip on a lower layer renders beneath media on a higher layer.
 - Text/caption/callout clips with timing, font size, text color, optional background box, stroke, and shadow.
 - Render diagnostics — the FFmpeg command (and stderr on failure) is persisted in `video_render_jobs.metadata_json`.
 - Clear render failure if `ffmpeg` is unavailable or returns an encoding error.
@@ -58,7 +59,7 @@ The following are stored in the timeline JSON and shown in the editor but are **
 - `slide`/`wipe`/`zoom` transitions (true `xfade` directional transitions)
 - `chroma_key`, `shadow`, and `background_blur` effects
 - Text letter spacing, border radius, and alignment (preview-only)
-- Track solo (not yet in the timeline schema)
+- Track solo (preview-only monitoring control; exports mix all unmuted tracks)
 
 Renderer support is reported by `GET /v1/video/render/capabilities` (see `backend/internal/video/renderer_capabilities.go`). The inspector and render panel derive their export-fidelity warnings from that endpoint, so warnings stay accurate as renderer support evolves.
 
