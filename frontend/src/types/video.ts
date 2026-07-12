@@ -330,6 +330,11 @@ export interface VideoTimelineClip {
   duration_ms: number;
   trim_in_ms: number;
   trim_out_ms: number;
+  /**
+   * Constant source playback rate. Timeline duration stays in output time;
+   * the consumed source window is duration_ms * playback_rate.
+   */
+  playback_rate?: number;
   z_index?: number;
   group_id?: string;
   /** Silences this clip's audio without touching volume. */

@@ -159,6 +159,17 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 
 	// Attempt to resolve media clips from the asset map.
 	resolved := resolveMediaClips(req)
+	if !req.Settings.IncludeAudio {
+		visualOnly := make([]resolvedClip, 0, len(resolved))
+		for _, rc := range resolved {
+			rc.hasAudio = false
+			rc.isAudio = false
+			if rc.isVideo || rc.isImage {
+				visualOnly = append(visualOnly, rc)
+			}
+		}
+		resolved = visualOnly
+	}
 
 	if len(resolved) > 0 {
 		// ── Media compositing path ─────────────────────────────────────────
@@ -171,7 +182,7 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		}
 		hasAudioClips := func() bool {
 			for _, rc := range resolved {
-				if rc.isAudio {
+				if rc.hasAudio {
 					return true
 				}
 			}
@@ -185,7 +196,7 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 			args = append(args, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000")
 		}
 
-		filterStr, videoLabel, audioLabel := buildFilterComplex(req.Timeline, resolved, width, height)
+		filterStr, videoLabel, audioLabel := buildFilterComplexWithAudio(req.Timeline, resolved, width, height, req.Settings.IncludeAudio)
 		args = append(args, "-filter_complex", filterStr)
 		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps))
 		args = append(args, "-map", videoLabel)
@@ -455,6 +466,13 @@ func videoAssetHasAudio(asset models.VideoAsset, fullPath string) bool {
 // It returns the filter_complex string, the final video stream label, and the final
 // audio stream label (empty if no audio clips).
 func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, height int) (filterStr, videoLabel, audioLabel string) {
+	return buildFilterComplexWithAudio(doc, clips, width, height, true)
+}
+
+// buildFilterComplexWithAudio lets audio-disabled exports omit audio filter
+// outputs entirely. FFmpeg rejects a labeled filter output that is not mapped,
+// so building the audio branch and then mapping video alone is not valid.
+func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, width, height int, includeAudio bool) (filterStr, videoLabel, audioLabel string) {
 	var parts []string
 
 	// ── Visual chain: media overlays and text interleaved in layer order ────
@@ -534,13 +552,20 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 		endS := float64(rc.clip.StartMS+rc.clip.DurationMS) / 1000.0
 		trimInS := float64(rc.clip.TrimInMS) / 1000.0
 		durS := float64(rc.clip.DurationMS) / 1000.0
+		sourceDurS := float64(sourceDurationFor(rc.clip, rc.clip.DurationMS)) / 1000.0
+		playbackRate := clipPlaybackRate(rc.clip)
 		tr := parseClipTransform(rc.clip.Transform)
 
 		var chain []string
 		if rc.isImage {
 			chain = append(chain, "loop=loop=-1:size=1:start=0", fmt.Sprintf("trim=duration=%.3f", durS), "setpts=PTS-STARTPTS")
 		} else {
-			chain = append(chain, fmt.Sprintf("trim=start=%.3f:duration=%.3f", trimInS, durS), "setpts=PTS-STARTPTS")
+			chain = append(chain, fmt.Sprintf("trim=start=%.3f:duration=%.3f", trimInS, sourceDurS))
+			if playbackRate == 1 {
+				chain = append(chain, "setpts=PTS-STARTPTS")
+			} else {
+				chain = append(chain, fmt.Sprintf("setpts=(PTS-STARTPTS)/%.6f", playbackRate))
+			}
 		}
 		if tr.hasCrop {
 			chain = append(chain, fmt.Sprintf("crop=iw*%.4f:ih*%.4f:iw*%.4f:ih*%.4f",
@@ -601,43 +626,47 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 	// ── Audio clips ─────────────────────────────────────────────────────────
 	// hasAudio covers audio assets and video assets with an audio stream;
 	// muted tracks/clips were already dropped in resolveMediaClips.
-	var aLabels []string
-	for _, rc := range clips {
-		if !rc.hasAudio {
-			continue
+	if includeAudio {
+		var aLabels []string
+		for _, rc := range clips {
+			if !rc.hasAudio {
+				continue
+			}
+			aLabel := fmt.Sprintf("[a%d]", rc.inputIdx)
+			trimInS := float64(rc.clip.TrimInMS) / 1000.0
+			durS := float64(rc.clip.DurationMS) / 1000.0
+			sourceDurS := float64(sourceDurationFor(rc.clip, rc.clip.DurationMS)) / 1000.0
+			startMS := rc.clip.StartMS
+			chain := []string{
+				fmt.Sprintf("atrim=start=%.3f:duration=%.3f", trimInS, sourceDurS),
+				"asetpts=PTS-STARTPTS",
+			}
+			chain = append(chain, atempoFilters(clipPlaybackRate(rc.clip))...)
+			// Volume keyframes override the static volume (matching the preview).
+			// The retimed stream starts at 0, so keyframe time is `t` directly.
+			if expr := positionKeyframeExpr(rc.clip.Keyframes, "volume", 0); expr != "" {
+				chain = append(chain, fmt.Sprintf("volume=volume='%s':eval=frame", expr))
+			} else if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
+				chain = append(chain, fmt.Sprintf("volume=%.3f", clampFloat(*rc.clip.Volume, 0, 2)))
+			}
+			fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
+			if fadeInS > 0 {
+				chain = append(chain, fmt.Sprintf("afade=t=in:st=0:d=%.3f", fadeInS))
+			}
+			if fadeOutS > 0 {
+				chain = append(chain, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f", durS-fadeOutS, fadeOutS))
+			}
+			chain = append(chain, fmt.Sprintf("adelay=%d|%d", startMS, startMS))
+			parts = append(parts, fmt.Sprintf("[%d:a]%s%s", rc.inputIdx, strings.Join(chain, ","), aLabel))
+			aLabels = append(aLabels, aLabel)
 		}
-		aLabel := fmt.Sprintf("[a%d]", rc.inputIdx)
-		trimInS := float64(rc.clip.TrimInMS) / 1000.0
-		durS := float64(rc.clip.DurationMS) / 1000.0
-		startMS := rc.clip.StartMS
-		chain := []string{
-			fmt.Sprintf("atrim=start=%.3f:duration=%.3f", trimInS, durS),
-			"asetpts=PTS-STARTPTS",
+		if len(aLabels) > 1 {
+			audioLabel = "[final_audio]"
+			parts = append(parts, strings.Join(aLabels, "")+
+				fmt.Sprintf("amix=inputs=%d:normalize=0:dropout_transition=0[final_audio]", len(aLabels)))
+		} else if len(aLabels) == 1 {
+			audioLabel = aLabels[0]
 		}
-		// Volume keyframes override the static volume (matching the preview).
-		// asetpts rebased the stream to 0, so keyframe time is `t` directly.
-		if expr := positionKeyframeExpr(rc.clip.Keyframes, "volume", 0); expr != "" {
-			chain = append(chain, fmt.Sprintf("volume=volume='%s':eval=frame", expr))
-		} else if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
-			chain = append(chain, fmt.Sprintf("volume=%.3f", clampFloat(*rc.clip.Volume, 0, 2)))
-		}
-		fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
-		if fadeInS > 0 {
-			chain = append(chain, fmt.Sprintf("afade=t=in:st=0:d=%.3f", fadeInS))
-		}
-		if fadeOutS > 0 {
-			chain = append(chain, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f", durS-fadeOutS, fadeOutS))
-		}
-		chain = append(chain, fmt.Sprintf("adelay=%d|%d", startMS, startMS))
-		parts = append(parts, fmt.Sprintf("[%d:a]%s%s", rc.inputIdx, strings.Join(chain, ","), aLabel))
-		aLabels = append(aLabels, aLabel)
-	}
-	if len(aLabels) > 1 {
-		audioLabel = "[final_audio]"
-		parts = append(parts, strings.Join(aLabels, "")+
-			fmt.Sprintf("amix=inputs=%d:normalize=0:dropout_transition=0[final_audio]", len(aLabels)))
-	} else if len(aLabels) == 1 {
-		audioLabel = aLabels[0]
 	}
 
 	return strings.Join(parts, ";"), videoLabel, audioLabel
@@ -955,6 +984,28 @@ func slideTransitionExpr(clip TimelineClip, startS, endS float64) (xOff, yOff st
 		return xOff, yOff
 	}
 	return "", ""
+}
+
+// atempoFilters returns a product of FFmpeg atempo stages for the requested
+// rate. Factoring through 0.5–2.0 works across older FFmpeg builds and keeps
+// audio pitch-preserving while matching the video setpts retime.
+func atempoFilters(rate float64) []string {
+	if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return nil
+	}
+	var filters []string
+	for rate < 0.5-1e-9 {
+		filters = append(filters, "atempo=0.500000")
+		rate /= 0.5
+	}
+	for rate > 2+1e-9 {
+		filters = append(filters, "atempo=2.000000")
+		rate /= 2
+	}
+	if math.Abs(rate-1) > 1e-9 {
+		filters = append(filters, fmt.Sprintf("atempo=%.6f", rate))
+	}
+	return filters
 }
 
 // clipFadeSeconds combines explicit fade_in/fade_out with fade-style

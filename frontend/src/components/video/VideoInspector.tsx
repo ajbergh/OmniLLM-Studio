@@ -23,6 +23,8 @@ import { AnnotationBrowser, EffectBrowser, TransitionBrowser } from './EffectBro
 import { describeOperationDiff } from './planDiff';
 import type { VideoTimelineClip, VideoTimelineKeyframe } from '../../types/video';
 
+type InspectorFocus = 'properties' | 'effects' | 'transitions' | 'audio';
+
 function selectedClip(): VideoTimelineClip | null {
   const { timeline, selectedClipId } = useVideoStudioStore.getState();
   if (!timeline || !selectedClipId) return null;
@@ -119,9 +121,16 @@ const QUICK_WORKFLOWS: Array<
   },
 ];
 
-export function VideoInspector({ section = 'all' }: { section?: 'all' | 'properties' | 'assistant' } = {}) {
+export function VideoInspector({
+  section = 'all',
+  focus = 'properties',
+}: {
+  section?: 'all' | 'properties' | 'assistant';
+  focus?: InspectorFocus;
+} = {}) {
   const timeline = useVideoStudioStore((state) => state.timeline);
   const playheadMs = useVideoStudioStore((state) => state.playheadMs);
+  const rippleEnabled = useVideoStudioStore((state) => state.rippleEnabled);
   const selectedClipId = useVideoStudioStore((state) => state.selectedClipId);
   const rendererCapabilities = useVideoStudioStore((state) => state.rendererCapabilities);
   const assistantInstruction = useVideoStudioStore((state) => state.assistantInstruction);
@@ -131,6 +140,7 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
   const setAssistantInstruction = useVideoStudioStore((state) => state.setAssistantInstruction);
   const assets = useVideoStudioStore((state) => state.assets);
   const trimClip = useVideoStudioStore((state) => state.trimClip);
+  const retimeClip = useVideoStudioStore((state) => state.retimeClip);
   const updateClipTransform = useVideoStudioStore((state) => state.updateClipTransform);
   const updateClipVolume = useVideoStudioStore((state) => state.updateClipVolume);
   const toggleClipMute = useVideoStudioStore((state) => state.toggleClipMute);
@@ -163,6 +173,10 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
   const editorMode = useVideoStudioStore((state) => state.editorMode);
   const modeFeatures = editorModeFeatures(editorMode);
   const clip = selectedClip();
+  const clipAsset = clip?.asset_id ? assets.find((asset) => asset.id === clip.asset_id) : undefined;
+  const canRetimeClip = Boolean(clipAsset && (
+    clipAsset.mime_type.startsWith('video/') || clipAsset.mime_type.startsWith('audio/')
+  ));
   const [rowMenu, setRowMenu] = useState<{ kind: 'effect' | 'transition' | 'keyframe'; id: string; x: number; y: number } | null>(null);
   const [planMenu, setPlanMenu] = useState<{ x: number; y: number } | null>(null);
   const [variantMenu, setVariantMenu] = useState<{ name: string; x: number; y: number } | null>(null);
@@ -183,6 +197,18 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
 
   const showAssistant = section === 'all' || section === 'assistant';
   const showProperties = section === 'all' || section === 'properties';
+  const showGeneralProperties = focus === 'properties';
+  const showAudioControls = focus === 'properties' || focus === 'audio';
+  const showEffectControls = focus === 'properties' || focus === 'effects';
+  const showTransitionControls = focus === 'properties' || focus === 'transitions';
+  const focusTitle =
+    focus === 'effects'
+      ? 'Effects'
+      : focus === 'transitions'
+        ? 'Transitions'
+        : focus === 'audio'
+          ? 'Audio'
+          : 'Inspector';
 
   return (
     <div className="min-h-0 overflow-y-auto p-3">
@@ -339,7 +365,7 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
       {showProperties && (
       <section className={`${showAssistant ? 'mt-3 ' : ''}rounded-lg border border-border bg-surface p-3`}>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-text">Inspector</h2>
+          <h2 className="text-sm font-semibold text-text">{focusTitle}</h2>
           <button
             onClick={() => { void addTextClip(); }}
             className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface-alt text-text-muted hover:text-text"
@@ -350,7 +376,7 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
           </button>
         </div>
         {/* Annotation palette — creation works with or without a selection. */}
-        {modeFeatures.addTextClip && timeline && (
+        {showGeneralProperties && modeFeatures.addTextClip && timeline && (
           <details className="mb-3 rounded-md border border-border bg-surface-alt/40">
             <summary className="cursor-pointer select-none px-2 py-1.5 text-[11px] font-medium text-text-secondary hover:text-text">
               Annotations — add at playhead
@@ -364,6 +390,10 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
           !timeline ? (
             <div className="rounded-lg border border-dashed border-border bg-surface-alt p-4 text-center text-xs text-text-muted">
               No timeline loaded.
+            </div>
+          ) : !showGeneralProperties ? (
+            <div className="rounded-lg border border-dashed border-border bg-surface-alt p-4 text-center text-xs text-text-muted">
+              Select a clip to edit {focusTitle.toLowerCase()} controls.
             </div>
           ) : !modeFeatures.canvasControls ? (
             <div className="rounded-lg border border-dashed border-border bg-surface-alt p-4 text-center text-xs text-text-muted">
@@ -455,29 +485,87 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
         ) : (
           <div className="space-y-3">
             {/* Timing accepts timecode (MM:SS.cc / H:MM:SS.cc) or plain seconds. */}
-            <div className="grid grid-cols-2 gap-2">
-              <TimecodeField
-                label="Start"
-                valueMs={clip.start_ms}
-                onCommit={(ms) => { void trimClip(clip.id, { start_ms: ms }); }}
-              />
-              <TimecodeField
-                label="End"
-                valueMs={clip.start_ms + clip.duration_ms}
-                onCommit={(ms) => { void trimClip(clip.id, { duration_ms: Math.max(100, ms - clip.start_ms) }); }}
-              />
-              <TimecodeField
-                label="Duration"
-                valueMs={clip.duration_ms}
-                onCommit={(ms) => { void trimClip(clip.id, { duration_ms: Math.max(100, ms) }); }}
-              />
-              <TimecodeField
-                label="Trim in"
-                valueMs={clip.trim_in_ms}
-                onCommit={(ms) => { void trimClip(clip.id, { trim_in_ms: ms }); }}
-              />
-            </div>
-            {modeFeatures.transformControls && (
+            {showGeneralProperties && (
+              <div className="grid grid-cols-2 gap-2">
+                <TimecodeField
+                  label="Start"
+                  valueMs={clip.start_ms}
+                  onCommit={(ms) => { void trimClip(clip.id, { start_ms: ms }); }}
+                />
+                <TimecodeField
+                  label="End"
+                  valueMs={clip.start_ms + clip.duration_ms}
+                  onCommit={(ms) => { void trimClip(clip.id, { duration_ms: Math.max(100, ms - clip.start_ms) }); }}
+                />
+                <TimecodeField
+                  label="Duration"
+                  valueMs={clip.duration_ms}
+                  onCommit={(ms) => { void trimClip(clip.id, { duration_ms: Math.max(100, ms) }); }}
+                />
+                <TimecodeField
+                  label="Trim in"
+                  valueMs={clip.trim_in_ms}
+                  onCommit={(ms) => { void trimClip(clip.id, { trim_in_ms: ms }); }}
+                />
+              </div>
+            )}
+            {showGeneralProperties && canRetimeClip && (
+              <div className="rounded-lg border border-border bg-surface-alt/60 p-2.5">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[11px] font-semibold text-text">Clip speed</p>
+                    <p className="text-[10px] text-text-muted">Preserves the selected source range and retimes audio with pitch correction.</p>
+                  </div>
+                  <span className="rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] text-primary">
+                    {(clip.playback_rate ?? 1).toFixed(2)}×
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Speed %">
+                    <input
+                      type="number"
+                      min={25}
+                      max={400}
+                      step={5}
+                      key={`speed-${clip.id}-${clip.playback_rate ?? 1}`}
+                      defaultValue={Math.round((clip.playback_rate ?? 1) * 1000) / 10}
+                      onBlur={(event) => {
+                        const percent = Number(event.target.value);
+                        if (Number.isFinite(percent)) void retimeClip(clip.id, { playbackRate: percent / 100 });
+                      }}
+                      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                      className="min-h-8 w-full rounded-md border border-border bg-surface px-2 text-xs tabular-nums text-text"
+                      aria-label="Clip speed percent"
+                    />
+                  </Field>
+                  <TimecodeField
+                    label="Target duration"
+                    valueMs={clip.duration_ms}
+                    onCommit={(ms) => { void retimeClip(clip.id, { durationMs: ms }); }}
+                  />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {[0.25, 0.5, 1, 1.5, 2, 4].map((rate) => (
+                    <button
+                      key={rate}
+                      type="button"
+                      onClick={() => { void retimeClip(clip.id, { playbackRate: rate }); }}
+                      className={`rounded-md border px-2 py-1 text-[10px] tabular-nums transition-colors ${
+                        Math.abs((clip.playback_rate ?? 1) - rate) < 0.001
+                          ? 'border-primary/45 bg-primary/12 text-primary'
+                          : 'border-border bg-surface text-text-muted hover:text-text'
+                      }`}
+                    >
+                      {rate}×
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-[10px] text-text-muted">
+                  Source: {formatTimecode(clip.trim_in_ms)}–{formatTimecode(clip.trim_out_ms)} · Ripple {rippleEnabled ? 'on' : 'off'}
+                </p>
+              </div>
+            )}
+            {showGeneralProperties && modeFeatures.transformControls && (
             <Field label={`Layer order: ${clip.z_index ?? 0}`}>
               <div className="flex gap-2">
                 <button
@@ -497,7 +585,7 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
               </div>
             </Field>
             )}
-            {modeFeatures.transformControls && clip.transform && (
+            {showGeneralProperties && modeFeatures.transformControls && clip.transform && (
               <>
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="X">
@@ -591,7 +679,7 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
                 )}
               </>
             )}
-            {clip.volume !== undefined && (
+            {showAudioControls && clip.volume !== undefined && (
               <>
                 <Slider label="Volume" min={0} max={2} step={0.05} value={clip.volume} onChange={(value) => { void updateClipVolume(selectedClipId as string, value); }} />
                 <button
@@ -603,9 +691,13 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
                 </button>
               </>
             )}
-            <Slider label="Fade in" min={0} max={5000} step={100} value={clip.fade_in_ms || 0} onChange={(value) => { void updateClipFade(selectedClipId as string, { fade_in_ms: value }); }} />
-            <Slider label="Fade out" min={0} max={5000} step={100} value={clip.fade_out_ms || 0} onChange={(value) => { void updateClipFade(selectedClipId as string, { fade_out_ms: value }); }} />
-            {clip.text && (
+            {showAudioControls && (
+              <>
+                <Slider label="Fade in" min={0} max={5000} step={100} value={clip.fade_in_ms || 0} onChange={(value) => { void updateClipFade(selectedClipId as string, { fade_in_ms: value }); }} />
+                <Slider label="Fade out" min={0} max={5000} step={100} value={clip.fade_out_ms || 0} onChange={(value) => { void updateClipFade(selectedClipId as string, { fade_out_ms: value }); }} />
+              </>
+            )}
+            {showGeneralProperties && clip.text && (
               <>
                 <Field label="Text">
                   <input
@@ -708,7 +800,7 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
                 </Field>
               </>
             )}
-            {clip.shape && (() => {
+            {showGeneralProperties && clip.shape && (() => {
               const shape = clip.shape;
               const definition = annotationDefinition(shape.kind);
               const fillKinds = ['highlight', 'label', 'speech_bubble', 'step_marker', 'spotlight', 'rounded_rectangle', 'ellipse'];
@@ -846,14 +938,20 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
                 </>
               );
             })()}
-            {modeFeatures.effectControls && (
+            {modeFeatures.effectControls && (showEffectControls || showTransitionControls) && (
             <div className="grid grid-cols-1 gap-2">
+              {showEffectControls && (
               <Field label="Effects">
                 <EffectBrowser onApply={(effect) => { void addClipEffect(selectedClipId as string, effect); }} />
               </Field>
+              )}
+              {showTransitionControls && (
               <Field label="Transitions">
                 <TransitionBrowser onApply={(transition) => { void addClipTransition(selectedClipId as string, transition); }} />
               </Field>
+              )}
+              {showGeneralProperties && (
+              <>
               <Field label="Pan & zoom motion">
                 <div className="flex flex-wrap gap-1">
                   {MOTION_PRESETS.map((preset) => (
@@ -889,9 +987,12 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
                   <option key={property} value={property}>{property}</option>
                 ))}
               </select>
+              </>
+              )}
             </div>
             )}
             {(() => {
+              if (!modeFeatures.effectControls || (!showEffectControls && !showTransitionControls)) return null;
               const limited = (rendererCapabilities?.features || []).filter((f) => !f.supported || f.partial);
               if (rendererCapabilities && limited.length === 0) return null;
               const text = limited.length > 0
@@ -906,9 +1007,9 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
                 </p>
               );
             })()}
-            {modeFeatures.effectControls && (
+            {modeFeatures.effectControls && (showEffectControls || showTransitionControls) && (
             <div className="space-y-1">
-              {clip.effects.map((effect, effectIndex) => {
+              {showEffectControls && clip.effects.map((effect, effectIndex) => {
                 const definition = effectDefinition(effect.type);
                 return (
                   <div
@@ -976,7 +1077,7 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
                   </div>
                 );
               })}
-              {(clip.transitions || []).map((transition) => {
+              {showTransitionControls && (clip.transitions || []).map((transition) => {
                 const definition = transitionDefinition(transition.type);
                 return (
                   <div
@@ -1045,7 +1146,7 @@ export function VideoInspector({ section = 'all' }: { section?: 'all' | 'propert
                   </div>
                 );
               })}
-              {clip.keyframes.map((keyframe) => (
+              {showGeneralProperties && clip.keyframes.map((keyframe) => (
                 <div
                   key={keyframe.id}
                   className="rounded-md border border-border bg-surface-alt px-2 py-1.5 text-[11px] text-text-muted"

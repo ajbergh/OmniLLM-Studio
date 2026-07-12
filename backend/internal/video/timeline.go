@@ -14,6 +14,7 @@ package video
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -40,6 +41,13 @@ const (
 // can read and write. Documents from future builds fail with an actionable
 // error instead of being silently mangled.
 const CurrentTimelineVersion = 1
+
+const (
+	// Playback-rate bounds keep browser preview and FFmpeg atempo behavior in
+	// a predictable range. A missing/zero value is the v1-compatible 1x rate.
+	MinPlaybackRate = 0.25
+	MaxPlaybackRate = 4.0
+)
 
 const (
 	EffectTypeBlur           = "blur"
@@ -176,14 +184,15 @@ type TimelineTrack struct {
 }
 
 type TimelineClip struct {
-	ID         string `json:"id"`
-	AssetID    string `json:"asset_id,omitempty"`
-	StartMS    int64  `json:"start_ms"`
-	DurationMS int64  `json:"duration_ms"`
-	TrimInMS   int64  `json:"trim_in_ms"`
-	TrimOutMS  int64  `json:"trim_out_ms"`
-	ZIndex     *int   `json:"z_index,omitempty"`
-	GroupID    string `json:"group_id,omitempty"`
+	ID           string  `json:"id"`
+	AssetID      string  `json:"asset_id,omitempty"`
+	StartMS      int64   `json:"start_ms"`
+	DurationMS   int64   `json:"duration_ms"`
+	TrimInMS     int64   `json:"trim_in_ms"`
+	TrimOutMS    int64   `json:"trim_out_ms"`
+	PlaybackRate float64 `json:"playback_rate,omitempty"`
+	ZIndex       *int    `json:"z_index,omitempty"`
+	GroupID      string  `json:"group_id,omitempty"`
 	// Muted silences this clip's audio contribution without touching Volume.
 	Muted bool `json:"muted,omitempty"`
 	// AudioOnly suppresses a clip's visual output so a video asset can act as
@@ -284,6 +293,28 @@ type TimelineKeyframe struct {
 	Easing   string  `json:"easing,omitempty"`
 }
 
+// clipPlaybackRate returns the normalized constant source playback rate. A
+// zero value represents legacy timeline documents and therefore means 1x.
+func clipPlaybackRate(clip TimelineClip) float64 {
+	if clip.PlaybackRate == 0 {
+		return 1
+	}
+	return clip.PlaybackRate
+}
+
+// sourceDurationFor converts an output-timeline duration into the amount of
+// source media consumed by a clip at its constant playback rate.
+func sourceDurationFor(clip TimelineClip, timelineDurationMS int64) int64 {
+	if timelineDurationMS <= 0 {
+		return 0
+	}
+	duration := int64(math.Round(float64(timelineDurationMS) * clipPlaybackRate(clip)))
+	if duration < 1 {
+		return 1
+	}
+	return duration
+}
+
 // SliceTimelineRange returns a copy of the document trimmed to the window
 // [startMS, endMS): clips outside the window drop, straddling clips trim
 // (advancing their source trim window and rebasing clip-relative keyframes),
@@ -310,7 +341,7 @@ func SliceTimelineRange(doc TimelineDocument, startMS, endMS int64) TimelineDocu
 			}
 			next := clip
 			if lead := startMS - next.StartMS; lead > 0 {
-				next.TrimInMS += lead
+				next.TrimInMS += sourceDurationFor(next, lead)
 				next.DurationMS -= lead
 				next.StartMS = startMS
 				next.FadeInMS = 0
@@ -324,10 +355,23 @@ func SliceTimelineRange(doc TimelineDocument, startMS, endMS int64) TimelineDocu
 					keyframes = append(keyframes, rebased)
 				}
 				next.Keyframes = keyframes
+				if next.Cursor != nil {
+					events := make([]TimelineCursorEvent, 0, len(next.Cursor.Events))
+					for _, event := range next.Cursor.Events {
+						if event.TimeMS < lead {
+							continue
+						}
+						rebased := event
+						rebased.TimeMS -= lead
+						events = append(events, rebased)
+					}
+					cursor := *next.Cursor
+					cursor.Events = events
+					next.Cursor = &cursor
+				}
 			}
 			if over := (next.StartMS + next.DurationMS) - endMS; over > 0 {
 				next.DurationMS -= over
-				next.TrimOutMS = next.TrimInMS + next.DurationMS
 				next.FadeOutMS = 0
 				var keyframes []TimelineKeyframe
 				for _, keyframe := range next.Keyframes {
@@ -337,7 +381,19 @@ func SliceTimelineRange(doc TimelineDocument, startMS, endMS int64) TimelineDocu
 					keyframes = append(keyframes, keyframe)
 				}
 				next.Keyframes = keyframes
+				if next.Cursor != nil {
+					events := make([]TimelineCursorEvent, 0, len(next.Cursor.Events))
+					for _, event := range next.Cursor.Events {
+						if event.TimeMS <= next.DurationMS {
+							events = append(events, event)
+						}
+					}
+					cursor := *next.Cursor
+					cursor.Events = events
+					next.Cursor = &cursor
+				}
 			}
+			next.TrimOutMS = next.TrimInMS + sourceDurationFor(next, next.DurationMS)
 			next.StartMS -= startMS
 			copied.Clips = append(copied.Clips, next)
 		}
@@ -552,12 +608,22 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 			if clip.DurationMS <= 0 {
 				return TimelineDocument{}, fmt.Errorf("clip %q duration_ms must be greater than zero", clip.ID)
 			}
+			if clip.PlaybackRate == 0 {
+				clip.PlaybackRate = 1
+			}
+			if math.IsNaN(clip.PlaybackRate) || math.IsInf(clip.PlaybackRate, 0) {
+				return TimelineDocument{}, fmt.Errorf("clip %q playback_rate must be finite", clip.ID)
+			}
+			if clip.PlaybackRate < MinPlaybackRate || clip.PlaybackRate > MaxPlaybackRate {
+				return TimelineDocument{}, fmt.Errorf("clip %q playback_rate must be between %.2g and %.2g", clip.ID, MinPlaybackRate, MaxPlaybackRate)
+			}
 			if clip.TrimInMS < 0 || clip.TrimOutMS < 0 {
 				return TimelineDocument{}, fmt.Errorf("clip %q trim values cannot be negative", clip.ID)
 			}
-			if clip.TrimOutMS == 0 {
-				clip.TrimOutMS = clip.TrimInMS + clip.DurationMS
-			}
+			// duration_ms is output-timeline time while trims are source-media
+			// time. Keep the redundant out-point canonical so every editing and
+			// rendering path consumes the same source window.
+			clip.TrimOutMS = clip.TrimInMS + sourceDurationFor(*clip, clip.DurationMS)
 			clip.GroupID = strings.TrimSpace(clip.GroupID)
 			if clip.Transform == nil && track.Type != TrackTypeAudio && track.Type != TrackTypeMusic {
 				clip.Transform = defaultTransform()
@@ -755,14 +821,15 @@ func AddAssetToTimeline(doc TimelineDocument, asset models.VideoAsset, req Timel
 	trimOut := duration
 	volume := 1.0
 	clip := TimelineClip{
-		ID:         "clip-" + uuid.New().String(),
-		AssetID:    asset.ID,
-		StartMS:    start,
-		DurationMS: duration,
-		TrimInMS:   0,
-		TrimOutMS:  trimOut,
-		Effects:    []TimelineEffect{},
-		Keyframes:  []TimelineKeyframe{},
+		ID:           "clip-" + uuid.New().String(),
+		AssetID:      asset.ID,
+		StartMS:      start,
+		DurationMS:   duration,
+		TrimInMS:     0,
+		TrimOutMS:    trimOut,
+		PlaybackRate: 1,
+		Effects:      []TimelineEffect{},
+		Keyframes:    []TimelineKeyframe{},
 	}
 	if isVisualAssetKind(kind) {
 		clip.Transform = defaultTransform()
@@ -792,15 +859,58 @@ func SplitClipAt(doc TimelineDocument, clipID string, timeMS int64) (TimelineDoc
 			if offset <= 0 || offset >= clip.DurationMS {
 				return TimelineDocument{}, fmt.Errorf("split point must be inside the clip")
 			}
+			sourceOffset := sourceDurationFor(clip, offset)
 			left := clip
 			right := clip
 			left.DurationMS = offset
-			left.TrimOutMS = left.TrimInMS + offset
+			left.TrimOutMS = left.TrimInMS + sourceOffset
+			left.FadeOutMS = 0
+			left.Keyframes = nil
+			for _, keyframe := range clip.Keyframes {
+				if keyframe.TimeMS <= offset {
+					left.Keyframes = append(left.Keyframes, keyframe)
+				}
+			}
+			if left.Keyframes == nil {
+				left.Keyframes = []TimelineKeyframe{}
+			}
 			right.ID = "clip-" + uuid.New().String()
 			right.StartMS = timeMS
 			right.DurationMS = clip.DurationMS - offset
 			right.TrimInMS = left.TrimOutMS
 			right.TrimOutMS = clip.TrimOutMS
+			right.FadeInMS = 0
+			right.Keyframes = nil
+			for _, keyframe := range clip.Keyframes {
+				if keyframe.TimeMS < offset {
+					continue
+				}
+				rebased := keyframe
+				rebased.ID = "keyframe-" + uuid.New().String()
+				rebased.TimeMS -= offset
+				right.Keyframes = append(right.Keyframes, rebased)
+			}
+			if right.Keyframes == nil {
+				right.Keyframes = []TimelineKeyframe{}
+			}
+			if clip.Cursor != nil {
+				leftCursor := *clip.Cursor
+				leftCursor.Events = nil
+				rightCursor := *clip.Cursor
+				rightCursor.Events = nil
+				for _, event := range clip.Cursor.Events {
+					if event.TimeMS <= offset {
+						leftCursor.Events = append(leftCursor.Events, event)
+					}
+					if event.TimeMS >= offset {
+						rebased := event
+						rebased.TimeMS -= offset
+						rightCursor.Events = append(rightCursor.Events, rebased)
+					}
+				}
+				left.Cursor = &leftCursor
+				right.Cursor = &rightCursor
+			}
 			clips := append([]TimelineClip{}, doc.Tracks[ti].Clips[:ci+1]...)
 			clips[ci] = left
 			clips = append(clips, right)

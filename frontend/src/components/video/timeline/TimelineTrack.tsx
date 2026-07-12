@@ -141,7 +141,7 @@ export function TimelineTrack({
   };
 
   return (
-    <div className="grid grid-cols-[116px_minmax(0,1fr)] border-b border-border last:border-b-0" style={{ minHeight: trackHeight }}>
+    <div className="grid grid-cols-[148px_minmax(0,1fr)] border-b border-border last:border-b-0" style={{ minHeight: trackHeight }}>
       <div
         ref={headerRef}
         className="sticky left-0 z-20 flex min-w-0 items-center gap-1 border-r border-border bg-surface-alt px-2"

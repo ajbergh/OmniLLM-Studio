@@ -38,7 +38,7 @@ type TimelineDialogState =
   | { kind: 'trimPrecise'; clipId: string; edge: 'start' | 'end'; initialSeconds: number }
   | { kind: 'transitionDuration'; clipId: string; transitionId: string; initialSeconds: number };
 
-const TRACK_HEADER_WIDTH = 116;
+const TRACK_HEADER_WIDTH = 148;
 const LEGACY_TRACK_TYPES: VideoTimelineTrackType[] = ['video', 'image', 'audio', 'music', 'text', 'caption'];
 
 function formatTimecode(ms: number, fps: number): string {
@@ -75,6 +75,8 @@ export function VideoTimeline() {
   const snappingEnabled = useVideoStudioStore((state) => state.snappingEnabled);
   const rippleEnabled = useVideoStudioStore((state) => state.rippleEnabled);
   const isSavingTimeline = useVideoStudioStore((state) => state.isSavingTimeline);
+  const saveStatus = useVideoStudioStore((state) => state.saveStatus);
+  const saveError = useVideoStudioStore((state) => state.saveError);
   const canUndo = useVideoStudioStore((state) => state.timelineUndoStack.length > 0);
   const canRedo = useVideoStudioStore((state) => state.timelineRedoStack.length > 0);
   const setPlayhead = useVideoStudioStore((state) => state.setPlayhead);
@@ -511,6 +513,8 @@ export function VideoTimeline() {
         rippleEnabled={rippleEnabled}
         zoom={zoom}
         isSaving={isSavingTimeline}
+        saveStatus={saveStatus}
+        saveError={saveError}
         canUndo={canUndo}
         canRedo={canRedo}
         toolMode={toolMode}
@@ -532,7 +536,7 @@ export function VideoTimeline() {
         selectionSummary={selectionSummary}
       />
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto" onPointerDown={beginMarquee}>
-        <div className="grid grid-cols-[116px_minmax(0,1fr)]">
+        <div className="grid grid-cols-[148px_minmax(0,1fr)]">
           <div ref={addTrackRef} className="sticky left-0 z-20 flex h-8 items-center border-b border-r border-border bg-surface-alt px-1">
             <button
               className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text ${editorModeFeatures(editorMode).addTrack ? '' : 'invisible'}`}
@@ -557,7 +561,7 @@ export function VideoTimeline() {
             <TimelinePlayhead x={playheadMs * pxPerMs} />
           </div>
         </div>
-        <div className="grid grid-cols-[116px_minmax(0,1fr)]">
+        <div className="grid grid-cols-[148px_minmax(0,1fr)]">
           <div className="sticky left-0 z-20 border-r border-border bg-surface-alt" />
           <div className="relative">
             <TimelinePlayhead x={playheadMs * pxPerMs} />
@@ -884,19 +888,17 @@ export function VideoTimeline() {
             if (dialog.edge === 'start') {
               const offset = timeMs - clip.start_ms;
               if (offset <= 0 || offset >= clip.duration_ms) return;
+              const rate = Math.min(4, Math.max(0.25, clip.playback_rate ?? 1));
               void trimClip(dialog.clipId, {
                 start_ms: timeMs,
                 duration_ms: clip.duration_ms - offset,
-                trim_in_ms: clip.trim_in_ms + offset,
+                trim_in_ms: clip.trim_in_ms + Math.round(offset * rate),
                 trim_out_ms: clip.trim_out_ms,
               });
             } else {
               const duration = timeMs - clip.start_ms;
               if (duration < 100) return;
-              void trimClip(dialog.clipId, {
-                duration_ms: duration,
-                trim_out_ms: clip.trim_in_ms + duration,
-              });
+              void trimClip(dialog.clipId, { duration_ms: duration });
             }
           }}
           onCancel={() => setDialog(null)}

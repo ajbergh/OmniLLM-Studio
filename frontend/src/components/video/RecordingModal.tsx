@@ -279,10 +279,9 @@ export function RecordingModal({ initialSource = 'voiceover', onClose }: { initi
       const extension = result.blob.type.includes('mp4') ? 'mp4' : 'webm';
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const name = `${source === 'voiceover' ? 'voiceover' : source === 'camera' ? 'camera-recording' : 'screen-recording'}-${stamp}.${extension}`;
-      await uploadAsset(new File([result.blob], name, { type: result.blob.type }));
-      const assetId = useVideoStudioStore.getState().selectedAssetId;
-      if (addToTimeline && assetId) {
-        await addAssetToTimeline(assetId);
+      const asset = await uploadAsset(new File([result.blob], name, { type: result.blob.type }));
+      if (addToTimeline) {
+        await addAssetToTimeline(asset.id);
       }
       URL.revokeObjectURL(result.url);
       onClose();

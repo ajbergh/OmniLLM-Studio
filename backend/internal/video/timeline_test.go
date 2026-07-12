@@ -24,8 +24,38 @@ func TestValidateTimelineDocumentNormalizesDefaults(t *testing.T) {
 	if doc.Tracks[0].ID == "" || doc.Tracks[0].Clips[0].ID == "" {
 		t.Fatalf("expected generated track and clip IDs: %+v", doc.Tracks[0])
 	}
+	if clip := doc.Tracks[0].Clips[0]; clip.PlaybackRate != 1 || clip.TrimOutMS != 2000 {
+		t.Fatalf("legacy clip timing defaults not normalized: %+v", clip)
+	}
 	if doc.DurationMS < 3000 {
 		t.Fatalf("duration did not include clip end: %d", doc.DurationMS)
+	}
+}
+
+func TestValidateTimelineDocumentPlaybackRate(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks[0].Clips = []TimelineClip{{
+		ID:           "retimed",
+		DurationMS:   2000,
+		TrimInMS:     500,
+		TrimOutMS:    123, // canonicalized from duration and playback rate
+		PlaybackRate: 2,
+	}}
+	validated, err := ValidateTimelineDocument(doc)
+	if err != nil {
+		t.Fatalf("valid playback rate rejected: %v", err)
+	}
+	clip := validated.Tracks[0].Clips[0]
+	if clip.PlaybackRate != 2 || clip.TrimOutMS != 4500 {
+		t.Fatalf("retimed source window not normalized: %+v", clip)
+	}
+
+	for _, rate := range []float64{0.1, 4.1} {
+		invalid := NewEmptyTimeline(1920, 1080, 30)
+		invalid.Tracks[0].Clips = []TimelineClip{{ID: "bad-rate", DurationMS: 1000, PlaybackRate: rate}}
+		if _, err := ValidateTimelineDocument(invalid); err == nil {
+			t.Fatalf("expected playback rate %v to be rejected", rate)
+		}
 	}
 }
 
@@ -354,6 +384,83 @@ func TestSliceTimelineRange(t *testing.T) {
 	same := SliceTimelineRange(doc, 5000, 5000)
 	if same.DurationMS != doc.DurationMS || len(same.Tracks[0].Clips) != 5 {
 		t.Errorf("invalid range should be a no-op")
+	}
+}
+
+func TestSliceTimelineRangePreservesRetimedSourceWindow(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.DurationMS = 6000
+	doc.Tracks[0].Clips = []TimelineClip{{
+		ID:           "fast",
+		StartMS:      1000,
+		DurationMS:   4000,
+		TrimInMS:     500,
+		TrimOutMS:    8500,
+		PlaybackRate: 2,
+		Keyframes: []TimelineKeyframe{
+			{ID: "before", Property: "x", TimeMS: 500},
+			{ID: "inside", Property: "x", TimeMS: 1500},
+			{ID: "after", Property: "x", TimeMS: 3500},
+		},
+		Cursor: &TimelineCursor{Events: []TimelineCursorEvent{
+			{TimeMS: 500, X: 1}, {TimeMS: 1500, X: 2}, {TimeMS: 3500, X: 3},
+		}},
+	}}
+
+	out := SliceTimelineRange(doc, 2000, 4000)
+	if len(out.Tracks[0].Clips) != 1 {
+		t.Fatalf("expected one sliced clip: %+v", out.Tracks[0].Clips)
+	}
+	clip := out.Tracks[0].Clips[0]
+	if clip.StartMS != 0 || clip.DurationMS != 2000 || clip.TrimInMS != 2500 || clip.TrimOutMS != 6500 || clip.PlaybackRate != 2 {
+		t.Fatalf("retimed slice timing wrong: %+v", clip)
+	}
+	if len(clip.Keyframes) != 1 || clip.Keyframes[0].ID != "inside" || clip.Keyframes[0].TimeMS != 500 {
+		t.Fatalf("retimed keyframes not sliced/rebased: %+v", clip.Keyframes)
+	}
+	if clip.Cursor == nil || len(clip.Cursor.Events) != 1 || clip.Cursor.Events[0].TimeMS != 500 || clip.Cursor.Events[0].X != 2 {
+		t.Fatalf("retimed cursor events not sliced/rebased: %+v", clip.Cursor)
+	}
+}
+
+func TestSplitClipAtPreservesRetimedSourceWindow(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks[0].Clips = []TimelineClip{{
+		ID:           "fast",
+		DurationMS:   4000,
+		TrimInMS:     500,
+		TrimOutMS:    8500,
+		PlaybackRate: 2,
+		FadeInMS:     200,
+		FadeOutMS:    300,
+		Keyframes: []TimelineKeyframe{
+			{ID: "left", Property: "x", TimeMS: 500},
+			{ID: "right", Property: "x", TimeMS: 2000},
+		},
+		Cursor: &TimelineCursor{Events: []TimelineCursorEvent{
+			{TimeMS: 500, X: 1}, {TimeMS: 2000, X: 2},
+		}},
+	}}
+
+	out, err := SplitClipAt(doc, "fast", 1500)
+	if err != nil {
+		t.Fatalf("SplitClipAt returned error: %v", err)
+	}
+	if len(out.Tracks[0].Clips) != 2 {
+		t.Fatalf("expected two clips: %+v", out.Tracks[0].Clips)
+	}
+	left, right := out.Tracks[0].Clips[0], out.Tracks[0].Clips[1]
+	if left.DurationMS != 1500 || left.TrimInMS != 500 || left.TrimOutMS != 3500 || left.FadeOutMS != 0 {
+		t.Fatalf("left retimed split wrong: %+v", left)
+	}
+	if right.DurationMS != 2500 || right.TrimInMS != 3500 || right.TrimOutMS != 8500 || right.PlaybackRate != 2 || right.FadeInMS != 0 {
+		t.Fatalf("right retimed split wrong: %+v", right)
+	}
+	if len(right.Keyframes) != 1 || right.Keyframes[0].TimeMS != 500 || right.Keyframes[0].ID == "right" {
+		t.Fatalf("right keyframes not rebased/reidentified: %+v", right.Keyframes)
+	}
+	if right.Cursor == nil || len(right.Cursor.Events) != 1 || right.Cursor.Events[0].TimeMS != 500 {
+		t.Fatalf("right cursor events not rebased: %+v", right.Cursor)
 	}
 }
 

@@ -115,6 +115,7 @@ export function TimelineClip({
     const startX = event.clientX;
     const trimIn = clip.trim_in_ms ?? 0;
     const trimOut = clip.trim_out_ms ?? clip.duration_ms;
+    const playbackRate = Math.min(4, Math.max(0.25, clip.playback_rate ?? 1));
 
     const onPointerUp = (upEvent: PointerEvent) => {
       document.removeEventListener('pointerup', onPointerUp);
@@ -122,18 +123,20 @@ export function TimelineClip({
       if (deltaMs === 0) return;
       if (edge === 'start') {
         const clamped = Math.max(-clip.start_ms, Math.min(deltaMs, clip.duration_ms - 100));
+        const sourceDelta = Math.round(clamped * playbackRate);
         onTrim(clip.id, {
           start_ms: clip.start_ms + clamped,
           duration_ms: clip.duration_ms - clamped,
-          trim_in_ms: Math.max(0, trimIn + clamped),
+          trim_in_ms: Math.max(0, trimIn + sourceDelta),
           trim_out_ms: trimOut,
         });
       } else {
         const clamped = Math.max(100 - clip.duration_ms, deltaMs);
+        const sourceDelta = Math.round(clamped * playbackRate);
         onTrim(clip.id, {
           duration_ms: clip.duration_ms + clamped,
           trim_in_ms: trimIn,
-          trim_out_ms: Math.max(trimIn + 100, trimOut + clamped),
+          trim_out_ms: Math.max(trimIn + Math.round(100 * playbackRate), trimOut + sourceDelta),
         });
       }
     };
@@ -287,7 +290,7 @@ export function TimelineClip({
         selected ? 'ring-2 ring-primary ring-offset-1 ring-offset-surface' : ''
       } ${toolMode === 'blade' ? 'cursor-crosshair' : ''}`}
       style={{ left, width, ...backgroundStyle }}
-      title={`${clipLabel(clip, asset)} — ${formatSeconds(clip.start_ms)} → ${formatSeconds(endMs)} (${formatSeconds(clip.duration_ms)})`}
+      title={`${clipLabel(clip, asset)} — ${formatSeconds(clip.start_ms)} → ${formatSeconds(endMs)} (${formatSeconds(clip.duration_ms)})${Math.abs((clip.playback_rate ?? 1) - 1) > 0.001 ? ` · ${(clip.playback_rate ?? 1).toFixed(2)}× speed` : ''}`}
     >
       {thumbnailUrl && <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/55 via-black/25 to-transparent" aria-hidden="true" />}
       {/* Fade ramps */}
@@ -375,6 +378,9 @@ export function TimelineClip({
       </span>
       <span className="relative flex items-center gap-1 truncate text-[10px] opacity-75">
         {formatSeconds(clip.duration_ms)}
+        {Math.abs((clip.playback_rate ?? 1) - 1) > 0.001 && (
+          <span className="rounded bg-white/15 px-0.5 text-[8px] font-semibold tabular-nums">{(clip.playback_rate ?? 1).toFixed(2)}×</span>
+        )}
         {isMuted && <VolumeX size={9} aria-label="Muted" />}
         {clip.audio_only && <span className="rounded bg-emerald-400/20 px-0.5 text-[8px] font-semibold uppercase tracking-wide">audio</span>}
         {clip.group_id && <Link2 size={9} aria-label="Grouped" />}

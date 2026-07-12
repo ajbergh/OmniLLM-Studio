@@ -28,12 +28,6 @@ function formatTime(ms: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-const VISUAL_TRACK_TYPES = ['layer', 'video', 'image', 'text', 'caption', 'shape', 'callout'];
-
-// Mounted <video> elements are expensive; only the topmost few video layers get
-// real elements — deeper ones render a lightweight placeholder card.
-const MAX_VIDEO_ELEMENTS = 4;
-
 const SNAP_THRESHOLD_PX = 8;
 
 type CropBox = { top: number; right: number; bottom: number; left: number };
@@ -131,6 +125,7 @@ export function VideoPreviewCanvas() {
   const snappingEnabled = useVideoStudioStore((state) => state.snappingEnabled);
   const selectedClipId = useVideoStudioStore((state) => state.selectedClipId);
   const soloTrackId = useVideoStudioStore((state) => state.soloTrackId);
+  const previewVolume = useVideoStudioStore((state) => state.previewVolume);
   const setPlaying = useVideoStudioStore((state) => state.setPlaying);
   const setPlayhead = useVideoStudioStore((state) => state.setPlayhead);
   const selectClip = useVideoStudioStore((state) => state.selectClip);
@@ -201,7 +196,7 @@ export function VideoPreviewCanvas() {
   // matching export semantics); hidden tracks contribute nothing.
   const layers: LayerEntry[] = (timeline?.tracks || [])
     .flatMap((track, trackIndex) => track.clips.map((clip) => ({ track, trackIndex, clip })))
-    .filter(({ track }) => track.visible && VISUAL_TRACK_TYPES.includes(track.type))
+    .filter(({ track }) => track.visible)
     .filter(({ clip }) => playheadMs >= clip.start_ms && playheadMs < clip.start_ms + clip.duration_ms)
     .map((entry) => ({ ...entry, asset: entry.clip.asset_id ? assets.find((item) => item.id === entry.clip.asset_id) : undefined }))
     // Audio-only and detached-audio clips contribute no visuals.
@@ -216,21 +211,16 @@ export function VideoPreviewCanvas() {
     .flatMap((track) => track.clips)
     .filter((clip) => playheadMs >= clip.start_ms && playheadMs < clip.start_ms + clip.duration_ms)
     .map((clip) => ({ clip, asset: clip.asset_id ? assets.find((item) => item.id === clip.asset_id) : undefined }))
-    // Audio assets play directly; detached-audio (audio_only) video clips
-    // play their soundtrack through a hidden <audio> element too.
+    // Route every time-based asset through managed hidden audio. Visual video
+    // elements stay muted, which gives ordinary video soundtracks the same
+    // fades, keyframes, solo, master gain, and retiming as detached audio.
     .filter((entry): entry is { clip: VideoTimelineClip; asset: VideoAsset } =>
       Boolean(entry.asset && !entry.clip.muted &&
-        (entry.asset.mime_type.startsWith('audio/') || (entry.clip.audio_only && entry.asset.mime_type.startsWith('video/')))));
+        (entry.asset.mime_type.startsWith('audio/') || entry.asset.mime_type.startsWith('video/'))));
 
   layersRef.current = layers;
   audioLayersRef.current = audioLayers;
   timelineDurationRef.current = timeline?.duration_ms ?? 0;
-
-  // Topmost video layers get real <video> elements, up to the cap.
-  const allowedVideoIds = new Set<string>();
-  for (let i = layers.length - 1; i >= 0 && allowedVideoIds.size < MAX_VIDEO_ELEMENTS; i--) {
-    if (layers[i].asset?.mime_type.startsWith('video/')) allowedVideoIds.add(layers[i].clip.id);
-  }
 
   const selectedEntry = layers.find((layer) => layer.clip.id === selectedClipId);
   const selectedIsMedia = Boolean(
@@ -306,7 +296,10 @@ export function VideoPreviewCanvas() {
   // While paused it doubles as the scrub-seek path.
   useEffect(() => {
     const syncElement = (element: HTMLMediaElement, clip: VideoTimelineClip) => {
-      const target = ((clip.trim_in_ms ?? 0) + Math.max(0, playheadMs - clip.start_ms)) / 1000;
+      const playbackRate = Math.min(4, Math.max(0.25, clip.playback_rate ?? 1));
+      const target = ((clip.trim_in_ms ?? 0) + Math.max(0, playheadMs - clip.start_ms) * playbackRate) / 1000;
+      element.playbackRate = playbackRate;
+      element.preservesPitch = true;
       if (isPlaying) {
         if (element.paused && !element.ended) {
           element.currentTime = target;
@@ -329,11 +322,14 @@ export function VideoPreviewCanvas() {
     for (const [clipId, audio] of audioRefs.current) {
       const entry = audioLayersRef.current.find((layer) => layer.clip.id === clipId);
       if (!entry) continue;
-      // Element volume caps at 1; clip volumes above 1 only boost at export.
-      audio.volume = Math.min(1, Math.max(0, (entry.clip.volume ?? 1) * fadeFactor(entry.clip, playheadMs)));
+      const clipTimeMs = Math.max(0, playheadMs - entry.clip.start_ms);
+      const keyedVolume = sampleKeyframes(entry.clip.keyframes, 'volume', clipTimeMs);
+      const clipVolume = keyedVolume ?? entry.clip.volume ?? 1;
+      // Element volume caps at 1; gains above unity remain export-only.
+      audio.volume = Math.min(1, Math.max(0, clipVolume * fadeFactor(entry.clip, playheadMs) * previewVolume));
       syncElement(audio, entry.clip);
     }
-  }, [playheadMs, isPlaying]);
+  }, [playheadMs, isPlaying, previewVolume]);
 
   /** Alignment candidates in client coordinates, captured once per drag. */
   const collectSnapCandidates = (excludeClipId: string) => {
@@ -649,16 +645,7 @@ export function VideoPreviewCanvas() {
     const isEditingText = editingTextClipId === clip.id;
 
     let content = null;
-    if (asset && asset.mime_type.startsWith('video/') && !allowedVideoIds.has(clip.id)) {
-      content = (
-        <div className="flex h-full w-full items-center justify-center bg-neutral-900/80" style={{ clipPath }}>
-          <div className="max-w-md px-6 text-center">
-            <p className="truncate text-sm font-medium text-white/80">{asset.file_name}</p>
-            <p className="mt-1 text-[10px] text-white/40">preview capped — layer renders in export</p>
-          </div>
-        </div>
-      );
-    } else if (asset && asset.mime_type.startsWith('video/')) {
+    if (asset && asset.mime_type.startsWith('video/')) {
       content = (
         <video
           ref={(node) => {
@@ -672,7 +659,7 @@ export function VideoPreviewCanvas() {
           controls={false}
           playsInline
           autoPlay={false}
-          muted={track.muted || Boolean(clip.muted)}
+          muted
           aria-label={asset.file_name}
         />
       );

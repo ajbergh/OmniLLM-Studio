@@ -111,6 +111,11 @@ function cloneTimeline(doc: VideoTimelineDocument): VideoTimelineDocument {
 
 const TIMELINE_HISTORY_LIMIT = 50;
 
+// Serialize timeline writes in invocation order. The previous implementation
+// fired concurrent PUTs and only ignored stale responses locally, so a slower
+// old request could still overwrite newer timeline JSON on the server.
+let timelineSaveQueue: Promise<void> = Promise.resolve();
+
 function withTimelineHistory(
   state: { timelineUndoStack: VideoTimelineDocument[] },
   previous: VideoTimelineDocument,
@@ -293,6 +298,76 @@ function findClip(doc: VideoTimelineDocument, clipId: string): { track: VideoTim
   return null;
 }
 
+const MIN_PLAYBACK_RATE = 0.25;
+const MAX_PLAYBACK_RATE = 4;
+
+function clipPlaybackRate(clip: VideoTimelineClip): number {
+  const rate = clip.playback_rate ?? 1;
+  return Number.isFinite(rate) ? Math.min(MAX_PLAYBACK_RATE, Math.max(MIN_PLAYBACK_RATE, rate)) : 1;
+}
+
+/** Convert an output-timeline duration into the source-media duration it consumes. */
+function sourceDurationFor(clip: VideoTimelineClip, timelineDurationMs: number): number {
+  return Math.max(1, Math.round(timelineDurationMs * clipPlaybackRate(clip)));
+}
+
+/**
+ * Keep clip-relative animation timing valid when a retime changes the output
+ * duration. Cursor events share the same clip-relative output timeline, so
+ * recorded paths stay aligned with sped-up or slowed-down screen footage.
+ */
+function scaleClipOutputTiming(clip: VideoTimelineClip, oldDurationMs: number, newDurationMs: number): void {
+  const ratio = newDurationMs / Math.max(1, oldDurationMs);
+  clip.keyframes = (clip.keyframes || []).map((keyframe) => ({
+    ...keyframe,
+    time_ms: Math.max(0, Math.min(newDurationMs, Math.round(keyframe.time_ms * ratio))),
+  }));
+  if (clip.fade_in_ms !== undefined) clip.fade_in_ms = Math.min(newDurationMs, Math.round(clip.fade_in_ms * ratio));
+  if (clip.fade_out_ms !== undefined) clip.fade_out_ms = Math.min(newDurationMs, Math.round(clip.fade_out_ms * ratio));
+  clip.transitions = (clip.transitions || []).map((transition) => ({
+    ...transition,
+    duration_ms: Math.max(1, Math.min(newDurationMs, Math.round(transition.duration_ms * ratio))),
+  }));
+  if (clip.cursor) {
+    clip.cursor.events = (clip.cursor.events || []).map((event) => ({
+      ...event,
+      time_ms: Math.max(0, Math.min(newDurationMs, Math.round(event.time_ms * ratio))),
+    }));
+  }
+}
+
+/** Split a clip in output time while keeping source trims and timed metadata aligned. */
+function splitClipAtOutputOffset(clip: VideoTimelineClip, offsetMs: number): { left: VideoTimelineClip; right: VideoTimelineClip } | null {
+  const offset = Math.round(offsetMs);
+  if (offset <= 0 || offset >= clip.duration_ms) return null;
+  const sourceOffset = sourceDurationFor(clip, offset);
+  const left = JSON.parse(JSON.stringify(clip)) as VideoTimelineClip;
+  const right = JSON.parse(JSON.stringify(clip)) as VideoTimelineClip;
+  left.duration_ms = offset;
+  left.trim_out_ms = clip.trim_in_ms + sourceOffset;
+  left.fade_out_ms = undefined;
+  left.keyframes = (clip.keyframes || []).filter((keyframe) => keyframe.time_ms <= offset);
+  if (left.cursor) {
+    left.cursor.events = (clip.cursor?.events || []).filter((event) => event.time_ms <= offset);
+  }
+
+  right.id = newId('clip');
+  right.start_ms = clip.start_ms + offset;
+  right.duration_ms = clip.duration_ms - offset;
+  right.trim_in_ms = clip.trim_in_ms + sourceOffset;
+  right.trim_out_ms = clip.trim_out_ms;
+  right.fade_in_ms = undefined;
+  right.keyframes = (clip.keyframes || [])
+    .filter((keyframe) => keyframe.time_ms >= offset)
+    .map((keyframe) => ({ ...keyframe, id: newId('keyframe'), time_ms: keyframe.time_ms - offset }));
+  if (right.cursor) {
+    right.cursor.events = (clip.cursor?.events || [])
+      .filter((event) => event.time_ms >= offset)
+      .map((event) => ({ ...event, time_ms: event.time_ms - offset }));
+  }
+  return { left, right };
+}
+
 interface VideoStudioState {
   projects: VideoProject[];
   activeProjectId: string | null;
@@ -320,6 +395,8 @@ interface VideoStudioState {
   clipClipboard: Array<{ clip: VideoTimelineClip; trackId: string }> | null;
   attributeClipboard: Partial<Pick<VideoTimelineClip, 'transform' | 'volume' | 'fade_in_ms' | 'fade_out_ms' | 'effects' | 'transitions' | 'text'>> | null;
   playheadMs: number;
+  /** Ephemeral master gain for editor preview only (export is unaffected). */
+  previewVolume: number;
   zoom: number;
   isPlaying: boolean;
   snappingEnabled: boolean;
@@ -344,6 +421,8 @@ interface VideoStudioState {
   isGenerating: boolean;
   isEnhancing: boolean;
   isSavingTimeline: boolean;
+  saveStatus: 'idle' | 'saving' | 'saved' | 'error';
+  saveError: string | null;
   isRendering: boolean;
   generationProgress: VideoGenerationProgress | null;
   generationValidation: VideoGenerationValidationResult | null;
@@ -377,16 +456,19 @@ interface VideoStudioState {
   addAssetToTimeline: (assetId: string, options?: { track_id?: string; track_type?: VideoTimelineTrackType; start_ms?: number; duration_ms?: number }) => Promise<void>;
   moveClip: (clipId: string, trackId: string, startMs: number) => Promise<void>;
   trimClip: (clipId: string, updates: Partial<Pick<VideoTimelineClip, 'start_ms' | 'duration_ms' | 'trim_in_ms' | 'trim_out_ms'>>) => Promise<void>;
+  /** Retime a media clip while preserving its selected source range. */
+  retimeClip: (clipId: string, options: { playbackRate?: number; durationMs?: number }) => Promise<void>;
   splitClipAtPlayhead: () => Promise<void>;
   deleteClip: (clipId?: string) => Promise<void>;
   duplicateClip: (clipId?: string) => Promise<void>;
   selectClip: (clipId: string | null, trackId?: string | null, additive?: boolean) => void;
   renameAsset: (assetId: string, fileName: string) => Promise<void>;
   deleteAsset: (assetId: string) => Promise<void>;
-  uploadAsset: (file: File) => Promise<void>;
+  uploadAsset: (file: File) => Promise<VideoAsset>;
   importMusicAsset: (musicAssetId: string, title?: string) => Promise<VideoAsset | null>;
   loadRendererCapabilities: () => Promise<void>;
   setPlayhead: (timeMs: number) => void;
+  setPreviewVolume: (volume: number) => void;
   setZoom: (zoom: number) => void;
   zoomToFit: (containerWidth: number) => void;
   setPlaying: (playing: boolean) => void;
@@ -520,6 +602,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   clipClipboard: null,
   attributeClipboard: null,
   playheadMs: 0,
+  previewVolume: 1,
   zoom: 1,
   isPlaying: false,
   snappingEnabled: true,
@@ -540,6 +623,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   isGenerating: false,
   isEnhancing: false,
   isSavingTimeline: false,
+  saveStatus: 'idle',
+  saveError: null,
   isRendering: false,
   generationProgress: null,
   generationValidation: null,
@@ -623,6 +708,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         timelineRecord: null,
         timelineUndoStack: [],
         timelineRedoStack: [],
+        saveStatus: 'idle',
+        saveError: null,
         generationValidation: null,
       }));
       await get().loadTimeline(project.id);
@@ -683,6 +770,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         playheadMs: 0,
         timelineUndoStack: [],
         timelineRedoStack: [],
+        saveStatus: 'idle',
+        saveError: null,
         generationValidation: null,
         isLoading: false,
       }));
@@ -1019,14 +1108,22 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         selectedClipId: null,
         selectedClipIds: [],
         selectedTrackId: null,
+        saveStatus: 'saved',
+        saveError: null,
       });
     } catch (err) {
       set({
-        timeline: defaultTimeline(get().projects.find((project) => project.id === id)),
+        // Do not substitute a blank document after a network/server failure;
+        // a later edit could otherwise overwrite a real project timeline.
+        timeline: null,
+        timelineRecord: null,
         timelineUndoStack: [],
         timelineRedoStack: [],
         error: (err as Error).message,
+        saveStatus: 'error',
+        saveError: `Could not load timeline: ${(err as Error).message}`,
       });
+      toast.error('Could not load timeline');
     }
   },
 
@@ -1035,24 +1132,39 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     const doc = document || get().timeline;
     if (!projectId || !doc) return;
     const seq = get()._saveSeq + 1;
-    set({ isSavingTimeline: true, _saveSeq: seq });
-    try {
-      const detail = await videoApi.saveTimeline(projectId, doc);
-      // Only the latest save's response may update local state — applying an
-      // older response (rapid consecutive edits, out-of-order replies) would
-      // clobber newer local edits.
-      if (get()._saveSeq !== seq) return;
-      if (get().activeProjectId === projectId) {
-        set({ timelineRecord: detail.timeline, timeline: detail.document, isSavingTimeline: false });
-      } else {
-        set({ isSavingTimeline: false });
+    const snapshot = cloneTimeline(doc);
+    set({ isSavingTimeline: true, saveStatus: 'saving', saveError: null, _saveSeq: seq });
+    const save = async () => {
+      try {
+        const detail = await videoApi.saveTimeline(projectId, snapshot);
+        // Only the newest queued response may normalize local state. Server
+        // writes are serialized above, so the newest request also lands last.
+        if (get()._saveSeq !== seq) return;
+        if (get().activeProjectId === projectId) {
+          set({
+            timelineRecord: detail.timeline,
+            timeline: detail.document,
+            isSavingTimeline: false,
+            saveStatus: 'saved',
+            saveError: null,
+          });
+        } else {
+          set({ isSavingTimeline: false, saveStatus: 'saved', saveError: null });
+        }
+      } catch (err) {
+        if (get()._saveSeq === seq) {
+          set({
+            isSavingTimeline: false,
+            saveStatus: 'error',
+            saveError: (err as Error).message,
+            error: (err as Error).message,
+          });
+          toast.error('Could not save timeline — changes remain in this session');
+        }
       }
-    } catch (err) {
-      if (get()._saveSeq === seq) {
-        set({ isSavingTimeline: false, error: (err as Error).message });
-      }
-      toast.error('Could not save timeline');
-    }
+    };
+    timelineSaveQueue = timelineSaveQueue.then(save, save);
+    await timelineSaveQueue;
   },
 
   addAssetToTimeline: async (assetId, options = {}) => {
@@ -1130,10 +1242,72 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     loc.clip.start_ms = Math.max(0, Math.round(updates.start_ms ?? loc.clip.start_ms));
     loc.clip.duration_ms = Math.max(100, Math.round(updates.duration_ms ?? loc.clip.duration_ms));
     loc.clip.trim_in_ms = Math.max(0, Math.round(updates.trim_in_ms ?? loc.clip.trim_in_ms));
-    loc.clip.trim_out_ms = Math.max(loc.clip.trim_in_ms + 100, Math.round(updates.trim_out_ms ?? loc.clip.trim_out_ms ?? loc.clip.duration_ms));
+    const minimumSourceOut = loc.clip.trim_in_ms + sourceDurationFor(loc.clip, 100);
+    const derivedSourceOut = loc.clip.trim_in_ms + sourceDurationFor(loc.clip, loc.clip.duration_ms);
+    const shouldDeriveSourceOut = updates.trim_out_ms === undefined
+      && (updates.duration_ms !== undefined || updates.trim_in_ms !== undefined);
+    loc.clip.trim_out_ms = Math.max(
+      minimumSourceOut,
+      Math.round(updates.trim_out_ms ?? (shouldDeriveSourceOut ? derivedSourceOut : loc.clip.trim_out_ms || derivedSourceOut)),
+    );
     recomputeDuration(next);
     set((state) => ({
       timeline: next,
+      ...withTimelineHistory(state, current),
+    }));
+    await get().saveTimeline(next);
+  },
+
+  retimeClip: async (clipId, options) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    const asset = loc?.clip.asset_id ? get().assets.find((item) => item.id === loc.clip.asset_id) : undefined;
+    const isTimeBasedMedia = Boolean(asset && (
+      asset.kind === 'video' || asset.kind === 'audio' || asset.kind === 'music'
+      || asset.mime_type.startsWith('video/') || asset.mime_type.startsWith('audio/')
+    ));
+    if (!loc || loc.track.locked || !isTimeBasedMedia) return;
+    const clip = loc.clip;
+    const oldDuration = clip.duration_ms;
+    const oldEnd = clip.start_ms + oldDuration;
+    const oldRate = clipPlaybackRate(clip);
+    const sourceSpan = Math.max(
+      1,
+      (clip.trim_out_ms || 0) - clip.trim_in_ms || sourceDurationFor(clip, oldDuration),
+    );
+    let nextRate: number;
+    if (options.durationMs !== undefined) {
+      const requestedDuration = Math.max(100, Math.round(options.durationMs));
+      nextRate = sourceSpan / requestedDuration;
+    } else {
+      nextRate = options.playbackRate ?? oldRate;
+    }
+    nextRate = Math.min(MAX_PLAYBACK_RATE, Math.max(MIN_PLAYBACK_RATE, nextRate));
+    nextRate = Math.round(nextRate * 1000) / 1000;
+    const nextDuration = Math.max(100, Math.round(sourceSpan / nextRate));
+    if (nextDuration === oldDuration && Math.abs(nextRate - oldRate) < 0.0005) return;
+
+    clip.playback_rate = nextRate;
+    clip.duration_ms = nextDuration;
+    clip.trim_out_ms = clip.trim_in_ms + sourceSpan;
+    scaleClipOutputTiming(clip, oldDuration, nextDuration);
+
+    // Global ripple mode makes retiming deterministic in an assembled edit:
+    // clips at/after the old out-point follow the changed duration.
+    if (get().rippleEnabled) {
+      const delta = nextDuration - oldDuration;
+      for (const other of loc.track.clips) {
+        if (other.id !== clip.id && other.start_ms >= oldEnd) {
+          other.start_ms = Math.max(0, other.start_ms + delta);
+        }
+      }
+      loc.track.clips.sort((a, b) => a.start_ms - b.start_ms);
+    }
+
+    set((state) => ({
+      timeline: recomputeDuration(next),
       ...withTimelineHistory(state, current),
     }));
     await get().saveTimeline(next);
@@ -1156,29 +1330,9 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       toast.error('Split point must be inside the clip');
       return;
     }
-    // Keyframes are clip-relative: the left half keeps keyframes up to the
-    // split point; the right half keeps the rest rebased to its new start.
-    // Fades split with their edge — fade-in stays left, fade-out stays right.
-    const keyframes = loc.clip.keyframes || [];
-    const left = {
-      ...loc.clip,
-      duration_ms: offset,
-      trim_out_ms: loc.clip.trim_in_ms + offset,
-      fade_out_ms: undefined,
-      keyframes: keyframes.filter((keyframe) => keyframe.time_ms <= offset),
-    };
-    const right = {
-      ...loc.clip,
-      id: newId('clip'),
-      start_ms: timeMs,
-      duration_ms: loc.clip.duration_ms - offset,
-      trim_in_ms: loc.clip.trim_in_ms + offset,
-      trim_out_ms: loc.clip.trim_out_ms,
-      fade_in_ms: undefined,
-      keyframes: keyframes
-        .filter((keyframe) => keyframe.time_ms >= offset)
-        .map((keyframe) => ({ ...keyframe, id: newId('keyframe'), time_ms: keyframe.time_ms - offset })),
-    };
+    const split = splitClipAtOutputOffset(loc.clip, offset);
+    if (!split) return;
+    const { left, right } = split;
     loc.track.clips.splice(loc.clipIndex, 1, left, right);
     set((state) => ({
       timeline: recomputeDuration(next),
@@ -1203,16 +1357,17 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       return;
     }
     if (edge === 'start') {
+      const sourceOffset = sourceDurationFor(loc.clip, offset);
       await get().trimClip(clipId, {
         start_ms: playhead,
         duration_ms: loc.clip.duration_ms - offset,
-        trim_in_ms: loc.clip.trim_in_ms + offset,
+        trim_in_ms: loc.clip.trim_in_ms + sourceOffset,
         trim_out_ms: loc.clip.trim_out_ms,
       });
     } else {
       await get().trimClip(clipId, {
         duration_ms: offset,
-        trim_out_ms: loc.clip.trim_in_ms + offset,
+        trim_out_ms: loc.clip.trim_in_ms + sourceDurationFor(loc.clip, offset),
       });
     }
   },
@@ -1570,8 +1725,9 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   uploadAsset: async (file) => {
     const projectId = get().activeProjectId;
     if (!projectId) {
-      toast.error('Select or create a project first');
-      return;
+      const error = new Error('Select or create a project first');
+      toast.error(error.message);
+      throw error;
     }
     try {
       const asset = await videoApi.uploadAsset(projectId, file);
@@ -1580,8 +1736,10 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         selectedAssetId: asset.id,
       }));
       toast.success(`Uploaded ${asset.file_name}`);
+      return asset;
     } catch (err) {
       toast.error((err as Error).message);
+      throw err;
     }
   },
 
@@ -1623,6 +1781,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   },
 
   setPlayhead: (timeMs) => set((state) => ({ playheadMs: Math.max(0, Math.min(timeMs, state.timeline?.duration_ms || timeMs)) })),
+  setPreviewVolume: (volume) => set({ previewVolume: Math.max(0, Math.min(1, volume)) }),
   setZoom: (zoom) => set({ zoom: Math.min(4, Math.max(0.35, zoom)) }),
   zoomToFit: (containerWidth) => {
     const duration = get().timeline?.duration_ms || 30000;
@@ -1741,9 +1900,9 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       // the layer) back so the clip still begins where it used to.
       const delta = Math.round(Math.min(Math.max(newTimeMs - clip.start_ms, 0), clip.duration_ms - 100));
       if (delta <= 0) return;
-      clip.trim_in_ms = Math.max(0, clip.trim_in_ms + delta);
+      clip.trim_in_ms = Math.max(0, clip.trim_in_ms + sourceDurationFor(clip, delta));
       clip.duration_ms -= delta;
-      clip.trim_out_ms = Math.max(clip.trim_in_ms + 100, clip.trim_out_ms ?? clip.trim_in_ms + clip.duration_ms);
+      clip.trim_out_ms = Math.max(clip.trim_in_ms + sourceDurationFor(clip, 100), clip.trim_out_ms ?? clip.trim_in_ms + sourceDurationFor(clip, clip.duration_ms));
       for (const other of loc.track.clips) {
         if (other.id !== clip.id && other.start_ms >= oldEnd) {
           other.start_ms = Math.max(0, other.start_ms - delta);
@@ -1754,7 +1913,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       const delta = newDuration - clip.duration_ms;
       if (delta === 0) return;
       clip.duration_ms = newDuration;
-      clip.trim_out_ms = clip.trim_in_ms + newDuration;
+      clip.trim_out_ms = clip.trim_in_ms + sourceDurationFor(clip, newDuration);
       for (const other of loc.track.clips) {
         if (other.id !== clip.id && other.start_ms >= oldEnd) {
           other.start_ms = Math.max(0, other.start_ms + delta);
@@ -1789,21 +1948,9 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       for (const clip of track.clips) {
         const offset = at - clip.start_ms;
         if (offset > 0 && offset < clip.duration_ms) {
-          const right = JSON.parse(JSON.stringify(clip)) as VideoTimelineClip;
-          right.id = newId('clip');
-          right.start_ms = at;
-          right.duration_ms = clip.duration_ms - offset;
-          right.trim_in_ms = clip.trim_in_ms + offset;
-          right.trim_out_ms = clip.trim_out_ms;
-          right.fade_in_ms = undefined;
-          right.keyframes = (clip.keyframes || [])
-            .filter((keyframe) => keyframe.time_ms >= offset)
-            .map((keyframe) => ({ ...keyframe, id: newId('keyframe'), time_ms: keyframe.time_ms - offset }));
-          clip.duration_ms = offset;
-          clip.trim_out_ms = clip.trim_in_ms + offset;
-          clip.fade_out_ms = undefined;
-          clip.keyframes = (clip.keyframes || []).filter((keyframe) => keyframe.time_ms <= offset);
-          result.push(clip, right);
+          const split = splitClipAtOutputOffset(clip, offset);
+          if (split) result.push(split.left, split.right);
+          else result.push(clip);
         } else {
           result.push(clip);
         }
@@ -1862,28 +2009,16 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       }
       const leftKeep = clip.start_ms < at;
       const rightKeep = clipEnd > end;
-      if (leftKeep) {
-        const left = rightKeep ? (JSON.parse(JSON.stringify(clip)) as VideoTimelineClip) : clip;
-        const offset = at - clip.start_ms;
-        left.duration_ms = offset;
-        left.trim_out_ms = left.trim_in_ms + offset;
-        left.fade_out_ms = undefined;
-        left.keyframes = (left.keyframes || []).filter((keyframe) => keyframe.time_ms <= offset);
-        result.push(left);
-      }
-      if (rightKeep) {
-        const shift = end - clip.start_ms;
-        const right = clip;
-        const newRightId = leftKeep ? newId('clip') : right.id;
-        right.id = newRightId;
-        right.trim_in_ms = right.trim_in_ms + shift;
-        right.duration_ms = clipEnd - end;
-        right.start_ms = end;
-        right.fade_in_ms = undefined;
-        right.keyframes = (right.keyframes || [])
-          .filter((keyframe) => keyframe.time_ms >= shift)
-          .map((keyframe) => ({ ...keyframe, id: newId('keyframe'), time_ms: keyframe.time_ms - shift }));
-        result.push(right);
+      if (leftKeep && rightKeep) {
+        const first = splitClipAtOutputOffset(clip, at - clip.start_ms);
+        const second = first ? splitClipAtOutputOffset(first.right, end - at) : null;
+        if (first && second) result.push(first.left, second.right);
+      } else if (leftKeep) {
+        const split = splitClipAtOutputOffset(clip, at - clip.start_ms);
+        if (split) result.push(split.left);
+      } else if (rightKeep) {
+        const split = splitClipAtOutputOffset(clip, end - clip.start_ms);
+        if (split) result.push(split.right);
       }
     }
     const inserted: VideoTimelineClip = {
@@ -2765,17 +2900,13 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
           result.push(clip);
           continue;
         }
-        const left = clip;
-        const right = JSON.parse(JSON.stringify(clip)) as VideoTimelineClip;
-        right.id = newId('clip');
-        right.start_ms = playhead;
-        right.duration_ms = clip.duration_ms - offset;
-        right.trim_in_ms = left.trim_in_ms + offset;
-        right.trim_out_ms = clip.trim_out_ms;
-        left.duration_ms = offset;
-        left.trim_out_ms = left.trim_in_ms + offset;
-        result.push(left, right);
-        split = true;
+        const parts = splitClipAtOutputOffset(clip, offset);
+        if (parts) {
+          result.push(parts.left, parts.right);
+          split = true;
+        } else {
+          result.push(clip);
+        }
       }
       track.clips = result;
     }

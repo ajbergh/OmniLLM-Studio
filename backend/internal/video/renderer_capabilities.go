@@ -21,6 +21,7 @@ type RendererCapabilities struct {
 
 const (
 	RendererFeatureClipTrim     = "clip_trim"
+	RendererFeaturePlaybackRate = "playback_rate"
 	RendererFeatureClipOrdering = "clip_ordering"
 	RendererFeatureScaling      = "scaling"
 	RendererFeaturePositioning  = "positioning"
@@ -49,6 +50,7 @@ func FFmpegRendererCapabilities() RendererCapabilities {
 		Formats:  []string{"mp4", "webm"},
 		Features: []RendererFeatureSupport{
 			{Feature: RendererFeatureClipTrim, Label: "Clip trim", Supported: true},
+			{Feature: RendererFeaturePlaybackRate, Label: "Constant clip speed", Supported: true, Notes: "Video and audio retime together from 0.25x to 4x; audio uses pitch-preserving atempo filters."},
 			{Feature: RendererFeatureClipOrdering, Label: "Clip ordering & timing", Supported: true, Notes: "Layer order controls visual stacking (later layers on top, matching the preview); start time controls when clips appear."},
 			{Feature: RendererFeatureScaling, Label: "Scaling", Supported: true},
 			{Feature: RendererFeaturePositioning, Label: "Position (x/y offset)", Supported: true},

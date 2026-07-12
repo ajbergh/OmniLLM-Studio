@@ -4,9 +4,39 @@
  * the center, and a tabbed right rail (Properties / Assistant / Captions /
  * Export) whose tabs follow the editor mode's feature gates.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { DragHandle, useResizablePanels } from '../ResizablePanels';
-import { Check, ChevronLeft, ChevronRight, Circle, Download, Film, LayoutGrid, LayoutTemplate, List, Loader2, Music2, Pencil, Plus, Scissors, Trash2, Upload, X } from 'lucide-react';
+import {
+  AudioLines,
+  Bot,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeftRight,
+  Circle,
+  Download,
+  Film,
+  Files,
+  Filter,
+  LayoutGrid,
+  LayoutTemplate,
+  List,
+  Loader2,
+  Music2,
+  Pencil,
+  Plus,
+  Scissors,
+  Settings,
+  Sparkles,
+  Square,
+  Star,
+  Subtitles,
+  Trash2,
+  Type,
+  Upload,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { api, videoApi } from '../../api';
 import { useConversationStore, useSettingsStore } from '../../stores';
@@ -14,7 +44,7 @@ import { useVideoStudioStore } from '../../stores/videoStudio';
 import { ContextMenu } from '../common/ContextMenu';
 import type { ContextMenuEntry } from '../common/ContextMenu';
 import { ConfirmDialog } from '../common/AppDialog';
-import type { VideoAsset } from '../../types/video';
+import type { VideoAsset, VideoTimelineDocument } from '../../types/video';
 import { RecordingModal } from './RecordingModal';
 import { VideoCaptionPanel } from './VideoCaptionPanel';
 import { VideoInspector } from './VideoInspector';
@@ -24,6 +54,18 @@ import { VideoTimeline } from './timeline/VideoTimeline';
 import { TIMELINE_TEMPLATES } from './templates/timelineTemplates';
 import { EDITOR_MODES, editorModeFeatures } from './editorModes';
 import type { EditorModeKey } from './editorModes';
+import type { LucideIcon } from 'lucide-react';
+
+type InspectorRailTab = 'properties' | 'effects' | 'transitions' | 'captions' | 'audio' | 'assistant' | 'export';
+
+function formatStatusTime(ms: number, fps = 30): string {
+  const total = Math.max(0, Math.round(ms));
+  const hours = Math.floor(total / 3_600_000);
+  const minutes = Math.floor((total % 3_600_000) / 60_000);
+  const seconds = Math.floor((total % 60_000) / 1000);
+  const frames = Math.floor(((total % 1000) / 1000) * Math.max(1, fps));
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(frames).padStart(2, '0')}`;
+}
 
 export function VideoEditStudio() {
   const projects = useVideoStudioStore((state) => state.projects);
@@ -39,28 +81,42 @@ export function VideoEditStudio() {
   const selectAsset = useVideoStudioStore((state) => state.selectAsset);
   const addAssetToTimeline = useVideoStudioStore((state) => state.addAssetToTimeline);
   const addTextClip = useVideoStudioStore((state) => state.addTextClip);
+  const addShapeClip = useVideoStudioStore((state) => state.addShapeClip);
   const renameAsset = useVideoStudioStore((state) => state.renameAsset);
   const deleteAsset = useVideoStudioStore((state) => state.deleteAsset);
   const uploadAsset = useVideoStudioStore((state) => state.uploadAsset);
   const createProjectFromTemplate = useVideoStudioStore((state) => state.createProjectFromTemplate);
   const loadRendererCapabilities = useVideoStudioStore((state) => state.loadRendererCapabilities);
+  const undoTimeline = useVideoStudioStore((state) => state.undoTimeline);
+  const redoTimeline = useVideoStudioStore((state) => state.redoTimeline);
+  const canUndo = useVideoStudioStore((state) => state.timelineUndoStack.length > 0);
+  const canRedo = useVideoStudioStore((state) => state.timelineRedoStack.length > 0);
+  const snappingEnabled = useVideoStudioStore((state) => state.snappingEnabled);
   const editorMode = useVideoStudioStore((state) => state.editorMode);
   const setEditorMode = useVideoStudioStore((state) => state.setEditorMode);
   const setAppMode = useSettingsStore((state) => state.setAppMode);
+  const toggleSettings = useSettingsStore((state) => state.toggleSettings);
   const modeFeatures = editorModeFeatures(editorMode);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
-  const [railTab, setRailTab] = useState<'properties' | 'assistant' | 'captions' | 'export'>('properties');
+  const [railTab, setRailTab] = useState<InspectorRailTab>('properties');
   const templatesRef = useRef<HTMLDivElement | null>(null);
 
   // The right rail tabs follow the editor mode's feature gates.
   const railTabs = [
     { key: 'properties' as const, label: 'Properties', enabled: true },
-    { key: 'assistant' as const, label: 'Assistant', enabled: modeFeatures.assistant },
+    { key: 'effects' as const, label: 'Effects', enabled: modeFeatures.effectControls },
+    { key: 'transitions' as const, label: 'Transitions', enabled: modeFeatures.effectControls },
     { key: 'captions' as const, label: 'Captions', enabled: modeFeatures.captionsPanel },
+    { key: 'audio' as const, label: 'Audio', enabled: true },
+    { key: 'assistant' as const, label: 'AI Assistant', enabled: modeFeatures.assistant },
     { key: 'export' as const, label: 'Export', enabled: true },
   ].filter((tab) => tab.enabled);
   const activeRailTab = railTabs.some((tab) => tab.key === railTab) ? railTab : 'properties';
+
+  const openFileLibrary = () => {
+    window.dispatchEvent(new CustomEvent('omnillm:open-file-library', { detail: { preferredScope: 'all' } }));
+  };
 
   useEffect(() => {
     if (!templatesOpen) return;
@@ -87,105 +143,125 @@ export function VideoEditStudio() {
   );
 
   const { leftStyle, rightStyle, startLeft, startRight } = useResizablePanels({
-    defaultLeft: 300,
+    defaultLeft: 320,
     defaultRight: 340,
-    storageKey: 'video-edit-studio-panels',
+    minWidth: 260,
+    storageKey: 'video-edit-studio-panels-v3',
   });
   const [collapsedLeft, setCollapsedLeft] = useState(false);
   const [collapsedRight, setCollapsedRight] = useState(false);
   const isSavingTimeline = useVideoStudioStore((state) => state.isSavingTimeline);
+  const saveStatus = useVideoStudioStore((state) => state.saveStatus);
+  const saveError = useVideoStudioStore((state) => state.saveError);
+  const saveTimeline = useVideoStudioStore((state) => state.saveTimeline);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-surface">
-      <div className="flex flex-col gap-2 border-b border-border bg-surface-raised px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <Scissors size={18} className="text-primary" />
-          <span className="shrink-0 text-sm font-medium text-text">Video Edit Studio</span>
-          {activeProject && (
-            <span className="min-w-0 truncate text-xs text-text-muted">- {activeProject.title}</span>
-          )}
-          <span
-            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] transition-opacity ${
-              isSavingTimeline ? 'bg-primary/15 text-primary opacity-100' : 'text-text-muted opacity-60'
-            }`}
-            title={isSavingTimeline ? 'Saving timeline changes' : 'All timeline changes are saved'}
-          >
-            {isSavingTimeline ? 'Saving…' : 'Saved'}
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={editorMode}
-            onChange={(event) => setEditorMode(event.target.value as EditorModeKey)}
-            className="min-h-9 rounded-lg border border-border bg-surface-alt px-2 text-xs text-text-secondary hover:text-text"
-            aria-label="Editor mode"
-            title={EDITOR_MODES.find((mode) => mode.key === editorMode)?.description}
-          >
-            {EDITOR_MODES.map((mode) => (
-              <option key={mode.key} value={mode.key}>{mode.label}</option>
-            ))}
-          </select>
-          <button
-            onClick={() => setAppMode('video')}
-            className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text transition-colors inline-flex items-center gap-1.5"
-          >
-            <Film size={13} />
-            Create
-          </button>
-          <button
-            onClick={() => { void createProject(); }}
-            className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text transition-colors inline-flex items-center gap-1.5"
-          >
-            <Plus size={13} />
-            Project
-          </button>
-          {modeFeatures.templates && (
-          <div ref={templatesRef} className="relative">
-            <button
-              onClick={() => setTemplatesOpen((open) => !open)}
-              className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text transition-colors inline-flex items-center gap-1.5"
-              title="Create a new project from a starter template"
-            >
-              <LayoutTemplate size={13} />
-              Templates
-            </button>
-            {templatesOpen && (
-              <div className="absolute right-0 top-full z-40 mt-1 w-64 rounded-md border border-border bg-surface p-1 shadow-xl">
-                {TIMELINE_TEMPLATES.map((template) => (
-                  <button
-                    key={template.key}
-                    className="block w-full rounded px-2 py-1.5 text-left hover:bg-surface-alt"
-                    onClick={() => {
-                      setTemplatesOpen(false);
-                      void createProjectFromTemplate(template.key);
-                    }}
-                  >
-                    <span className="block text-xs font-medium text-text">{template.label}</span>
-                    <span className="block text-[10px] text-text-muted">{template.description}</span>
-                  </button>
-                ))}
-              </div>
+    <div className="video-edit-shell flex min-h-0 flex-1 flex-col bg-surface text-text">
+      <div className="border-b border-border bg-surface-raised/95 px-3 py-2 shadow-[0_1px_0_rgba(255,255,255,0.03)]">
+        <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex min-w-0 items-center gap-2">
+            <Scissors size={17} className="text-primary" />
+            <span className="shrink-0 text-sm font-semibold text-text">Video Edit Studio</span>
+            {activeProject && (
+              <>
+                <span className="text-xs text-text-muted">·</span>
+                <span className="min-w-0 truncate text-xs text-text-muted">{activeProject.title}</span>
+                <span className="hidden text-xs text-text-muted sm:inline">· {new Date(activeProject.updated_at).toLocaleString()}</span>
+              </>
             )}
+            <span className="text-xs text-text-muted">·</span>
+            <button
+              type="button"
+              onClick={saveStatus === 'error' ? () => { void saveTimeline(); } : undefined}
+              disabled={saveStatus !== 'error'}
+              className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] transition-opacity ${
+                isSavingTimeline
+                  ? 'bg-primary/15 text-primary opacity-100'
+                  : saveStatus === 'error'
+                    ? 'cursor-pointer bg-red-400/10 text-red-300 hover:bg-red-400/15'
+                    : 'text-text-muted opacity-80'
+              }`}
+              title={isSavingTimeline
+                ? 'Saving timeline changes'
+                : saveStatus === 'error'
+                  ? `${saveError || 'Timeline save failed'} — click to retry`
+                  : saveStatus === 'idle'
+                    ? 'Timeline has not been saved yet'
+                    : 'All timeline changes are saved'}
+            >
+              {isSavingTimeline ? 'Saving…' : saveStatus === 'error' ? 'Save failed · Retry' : saveStatus === 'idle' ? 'Not saved' : 'Saved'}
+            </button>
           </div>
-          )}
-          {modeFeatures.addTextClip && (
-          <button
-            onClick={() => { void addTextClip(); }}
-            disabled={!timeline}
-            className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-45 transition-colors"
-          >
-            Text
-          </button>
-          )}
-          <button
-            onClick={() => setRecordOpen(true)}
-            disabled={!activeProjectId}
-            className="min-h-9 rounded-lg border border-border bg-surface-alt px-3 text-xs text-text-secondary hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-45 transition-colors inline-flex items-center gap-1.5"
-            title={activeProjectId ? 'Record screen, camera, or voiceover into this project' : 'Select or create a project first'}
-          >
-            <Circle size={11} className="text-red-400" fill="currentColor" />
-            Record
-          </button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => setRailTab('export')}
+              disabled={!timeline}
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-black shadow-sm hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-45"
+              title="Open export settings"
+            >
+              <Download size={13} />
+              Export
+              <ChevronDown size={12} />
+            </button>
+            <HeaderIconButton label="Undo" disabled={!canUndo} onClick={() => { void undoTimeline(); }}>
+              <ChevronLeft size={13} />
+            </HeaderIconButton>
+            <HeaderIconButton label="Redo" disabled={!canRedo} onClick={() => { void redoTimeline(); }}>
+              <ChevronRight size={13} />
+            </HeaderIconButton>
+            <select
+              value={editorMode}
+              onChange={(event) => setEditorMode(event.target.value as EditorModeKey)}
+              className="min-h-8 rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary hover:text-text"
+              aria-label="Editor mode"
+              title={EDITOR_MODES.find((mode) => mode.key === editorMode)?.description}
+            >
+              {EDITOR_MODES.map((mode) => (
+                <option key={mode.key} value={mode.key}>{mode.label}</option>
+              ))}
+            </select>
+            <HeaderActionButton onClick={() => setAppMode('video')} icon={Film} label="Create" />
+            <HeaderActionButton onClick={() => { void createProject(); }} icon={Plus} label="Project" />
+            {modeFeatures.templates && (
+            <div ref={templatesRef} className="relative">
+              <HeaderActionButton
+                onClick={() => setTemplatesOpen((open) => !open)}
+                icon={LayoutTemplate}
+                label="Templates"
+                title="Create a new project from a starter template"
+              />
+              {templatesOpen && (
+                <div className="absolute right-0 top-full z-40 mt-1 w-64 rounded-md border border-border bg-surface p-1 shadow-xl">
+                  {TIMELINE_TEMPLATES.map((template) => (
+                    <button
+                      key={template.key}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-surface-alt"
+                      onClick={() => {
+                        setTemplatesOpen(false);
+                        void createProjectFromTemplate(template.key);
+                      }}
+                    >
+                      <span className="block text-xs font-medium text-text">{template.label}</span>
+                      <span className="block text-[10px] text-text-muted">{template.description}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            )}
+            {modeFeatures.addTextClip && (
+              <HeaderActionButton onClick={() => { void addTextClip(); }} icon={Type} label="Text" disabled={!timeline} />
+            )}
+            <button
+              onClick={() => setRecordOpen(true)}
+              disabled={!activeProjectId}
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border bg-surface-alt px-2.5 text-xs text-text-secondary transition-colors hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-45"
+              title={activeProjectId ? 'Record screen, camera, or voiceover into this project' : 'Select or create a project first'}
+            >
+              <Circle size={10} className="text-red-400" fill="currentColor" />
+              Record
+            </button>
+          </div>
         </div>
       </div>
       {recordOpen && <RecordingModal onClose={() => setRecordOpen(false)} />}
@@ -201,7 +277,7 @@ export function VideoEditStudio() {
             <ChevronRight size={14} />
           </button>
         ) : (
-          <aside className="relative min-h-0 overflow-y-auto border-b border-border bg-surface xl:border-b-0 xl:border-r" style={leftStyle}>
+          <aside className="video-edit-panel relative flex min-h-0 border-b border-border bg-surface xl:border-b-0 xl:border-r" style={leftStyle}>
             <button
               onClick={() => setCollapsedLeft(true)}
               className="absolute right-1 top-1 z-10 hidden rounded p-1 text-text-muted hover:text-text xl:block"
@@ -210,14 +286,27 @@ export function VideoEditStudio() {
             >
               <ChevronLeft size={13} />
             </button>
-            <div className="space-y-3 p-3">
-              <ProjectStrip
-                projects={projects}
-                activeProjectId={activeProjectId}
-                isLoading={isLoading}
-                onNew={() => { void createProject(); }}
-                onSelect={(id) => { void selectProject(id); }}
-              />
+            <StudioToolRail
+              activeTab={activeRailTab}
+              templatesEnabled={modeFeatures.templates}
+              textEnabled={modeFeatures.addTextClip && Boolean(timeline)}
+              effectsEnabled={modeFeatures.effectControls}
+              captionsEnabled={modeFeatures.captionsPanel}
+              assistantEnabled={modeFeatures.assistant}
+              onMedia={() => setCollapsedLeft(false)}
+              onLibrary={openFileLibrary}
+              onTemplates={() => setTemplatesOpen((open) => !open)}
+              onText={() => { void addTextClip(); }}
+              onShapes={() => { void addShapeClip('rectangle'); setRailTab('properties'); }}
+              onEffects={() => setRailTab('effects')}
+              onTransitions={() => setRailTab('transitions')}
+              onCaptions={() => setRailTab('captions')}
+              onAudio={() => setRailTab('audio')}
+              onAssistant={() => setRailTab('assistant')}
+              onSettings={toggleSettings}
+            />
+            <div className="min-w-0 flex-1 overflow-y-auto">
+              <div className="space-y-3 p-3">
               <AssetPanel
                 assets={assets}
                 activeAssetId={activeAsset?.id || null}
@@ -226,7 +315,16 @@ export function VideoEditStudio() {
                 onRename={(assetId, name) => { void renameAsset(assetId, name); }}
                 onDelete={(assetId) => { void deleteAsset(assetId); }}
                 onUpload={uploadAsset}
+                onOpenLibrary={openFileLibrary}
               />
+              <ProjectStrip
+                projects={projects}
+                activeProjectId={activeProjectId}
+                isLoading={isLoading}
+                onNew={() => { void createProject(); }}
+                onSelect={(id) => { void selectProject(id); }}
+              />
+              </div>
             </div>
           </aside>
         )}
@@ -237,7 +335,7 @@ export function VideoEditStudio() {
           <section className="min-h-0 flex-1 border-b border-border p-3">
             <VideoPreviewCanvas />
           </section>
-          <section className="h-72 shrink-0 border-b border-border bg-surface-raised p-3">
+          <section className="h-[22rem] shrink-0 border-b border-border bg-surface-raised p-2">
             <VideoTimeline />
           </section>
         </main>
@@ -254,15 +352,15 @@ export function VideoEditStudio() {
             <ChevronLeft size={14} />
           </button>
         ) : (
-          <aside className="relative flex min-h-0 flex-col border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
-            <div className="flex items-center gap-0.5 border-b border-border px-2 pt-1.5" role="tablist" aria-label="Inspector panels">
+          <aside className="video-edit-panel relative flex min-h-0 flex-col border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
+            <div className="flex items-center gap-0.5 overflow-x-auto border-b border-border px-1 pt-1.5" role="tablist" aria-label="Inspector panels">
               <button
                 onClick={() => setCollapsedRight(true)}
-                className="hidden rounded p-1 text-text-muted hover:text-text xl:block"
+                className="hidden shrink-0 rounded p-0.5 text-text-muted hover:text-text xl:block"
                 title="Collapse inspector panel"
                 aria-label="Collapse inspector panel"
               >
-                <ChevronRight size={13} />
+                <ChevronRight size={12} />
               </button>
               {railTabs.map((tab) => (
                 <button
@@ -270,7 +368,7 @@ export function VideoEditStudio() {
                   role="tab"
                   aria-selected={activeRailTab === tab.key}
                   onClick={() => setRailTab(tab.key)}
-                  className={`rounded-t-md border-b-2 px-2.5 py-1.5 text-[11px] transition-colors ${
+                  className={`shrink-0 rounded-t-md border-b-2 px-1.5 py-1.5 text-[10px] transition-colors ${
                     activeRailTab === tab.key
                       ? 'border-primary font-medium text-text'
                       : 'border-transparent text-text-muted hover:text-text'
@@ -281,7 +379,10 @@ export function VideoEditStudio() {
               ))}
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {activeRailTab === 'properties' && <VideoInspector section="properties" />}
+              {activeRailTab === 'properties' && <VideoInspector section="properties" focus="properties" />}
+              {activeRailTab === 'effects' && modeFeatures.effectControls && <VideoInspector section="properties" focus="effects" />}
+              {activeRailTab === 'transitions' && modeFeatures.effectControls && <VideoInspector section="properties" focus="transitions" />}
+              {activeRailTab === 'audio' && <VideoInspector section="properties" focus="audio" />}
               {activeRailTab === 'assistant' && <VideoInspector section="assistant" />}
               {activeRailTab === 'captions' && modeFeatures.captionsPanel && (
                 <div className="p-3">
@@ -296,6 +397,192 @@ export function VideoEditStudio() {
             </div>
           </aside>
         )}
+      </div>
+      <StudioStatusBar timeline={timeline} snappingEnabled={snappingEnabled} />
+    </div>
+  );
+}
+
+function HeaderActionButton({
+  icon: Icon,
+  label,
+  title,
+  disabled = false,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  title?: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border bg-surface-alt px-2.5 text-xs text-text-secondary transition-colors hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-45"
+      title={title || label}
+    >
+      <Icon size={13} />
+      {label}
+    </button>
+  );
+}
+
+function HeaderIconButton({
+  label,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface-alt text-text-muted transition-colors hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-35"
+      title={label}
+      aria-label={label}
+    >
+      {children}
+    </button>
+  );
+}
+
+function StudioToolRail({
+  activeTab,
+  templatesEnabled,
+  textEnabled,
+  effectsEnabled,
+  captionsEnabled,
+  assistantEnabled,
+  onMedia,
+  onLibrary,
+  onTemplates,
+  onText,
+  onShapes,
+  onEffects,
+  onTransitions,
+  onCaptions,
+  onAudio,
+  onAssistant,
+  onSettings,
+}: {
+  activeTab: InspectorRailTab;
+  templatesEnabled: boolean;
+  textEnabled: boolean;
+  effectsEnabled: boolean;
+  captionsEnabled: boolean;
+  assistantEnabled: boolean;
+  onMedia: () => void;
+  onLibrary: () => void;
+  onTemplates: () => void;
+  onText: () => void;
+  onShapes: () => void;
+  onEffects: () => void;
+  onTransitions: () => void;
+  onCaptions: () => void;
+  onAudio: () => void;
+  onAssistant: () => void;
+  onSettings: () => void;
+}) {
+  const topItems: Array<{
+    key: string;
+    label: string;
+    Icon: LucideIcon;
+    active?: boolean;
+    disabled?: boolean;
+    onClick: () => void;
+  }> = [
+    { key: 'media', label: 'Media', Icon: Film, active: activeTab === 'properties', onClick: onMedia },
+    { key: 'library', label: 'Library', Icon: Files, onClick: onLibrary },
+    { key: 'templates', label: 'Templates', Icon: LayoutTemplate, disabled: !templatesEnabled, onClick: onTemplates },
+    { key: 'text', label: 'Text', Icon: Type, disabled: !textEnabled, onClick: onText },
+    { key: 'shapes', label: 'Shapes', Icon: Square, disabled: !textEnabled, onClick: onShapes },
+    { key: 'effects', label: 'Effects', Icon: Sparkles, active: activeTab === 'effects', disabled: !effectsEnabled, onClick: onEffects },
+    { key: 'transitions', label: 'Transitions', Icon: ChevronsLeftRight, active: activeTab === 'transitions', disabled: !effectsEnabled, onClick: onTransitions },
+    { key: 'captions', label: 'Captions', Icon: Subtitles, active: activeTab === 'captions', disabled: !captionsEnabled, onClick: onCaptions },
+    { key: 'audio', label: 'Audio', Icon: AudioLines, active: activeTab === 'audio', onClick: onAudio },
+    { key: 'assistant', label: 'AI Assistant', Icon: Bot, active: activeTab === 'assistant', disabled: !assistantEnabled, onClick: onAssistant },
+  ];
+
+  return (
+    <nav className="flex w-16 shrink-0 flex-col border-r border-border bg-surface/80 py-2" aria-label="Video Edit Studio tools">
+      <div className="flex flex-1 flex-col items-stretch gap-1 px-1.5">
+        {topItems.map(({ key, label, Icon, active = false, disabled = false, onClick }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            className={`flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-md border text-[9px] leading-tight transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+              active
+                ? 'border-primary/45 bg-primary/12 text-primary'
+                : 'border-transparent text-text-muted hover:border-border hover:bg-surface-alt hover:text-text'
+            }`}
+            title={label}
+            aria-label={key === 'text' ? 'Add text from tool rail' : label}
+          >
+            <Icon size={15} />
+            <span className="max-w-full truncate">{label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 border-t border-border px-1.5 pt-2">
+        <button
+          type="button"
+          onClick={onSettings}
+          className="flex min-h-11 w-full flex-col items-center justify-center gap-0.5 rounded-md border border-transparent text-[9px] leading-tight text-text-muted transition-colors hover:border-border hover:bg-surface-alt hover:text-text"
+          title="Settings"
+          aria-label="Settings"
+        >
+          <Settings size={15} />
+          <span>Settings</span>
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+function StudioStatusBar({
+  timeline,
+  snappingEnabled,
+}: {
+  timeline: VideoTimelineDocument | null;
+  snappingEnabled: boolean;
+}) {
+  const fps = timeline?.canvas.fps || 30;
+  const markers = timeline?.markers?.length || 0;
+  const previewVolume = useVideoStudioStore((state) => state.previewVolume);
+  const setPreviewVolume = useVideoStudioStore((state) => state.setPreviewVolume);
+  return (
+    <div className="flex min-h-9 shrink-0 items-center gap-4 overflow-x-auto border-t border-border bg-surface-raised px-3 text-[11px] text-text-muted">
+      <span>Project length: <span className="font-mono text-text-secondary">{formatStatusTime(timeline?.duration_ms || 0, fps)}</span></span>
+      <span className="h-4 w-px bg-border" />
+      <span>Frame rate: <span className="text-text-secondary">{fps}fps</span></span>
+      <span className="h-4 w-px bg-border" />
+      <span>Resolution: <span className="text-text-secondary">{timeline ? `${timeline.canvas.width}x${timeline.canvas.height}` : '—'}</span></span>
+      <span className="h-4 w-px bg-border" />
+      <span>Snap: <span className="text-text-secondary">{snappingEnabled ? 'On' : 'Off'}</span></span>
+      <span className="h-4 w-px bg-border" />
+      <span>Markers: <span className="text-text-secondary">{markers}</span></span>
+      <div className="ml-auto hidden items-center gap-2 md:flex">
+        <AudioLines size={13} />
+        <span className="text-text-secondary">Preview</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(previewVolume * 100)}
+          onChange={(event) => setPreviewVolume(Number(event.target.value) / 100)}
+          className="w-28"
+          aria-label="Preview volume"
+        />
+        <span className="w-8 text-right font-mono tabular-nums text-text-secondary">{Math.round(previewVolume * 100)}%</span>
       </div>
     </div>
   );
@@ -321,7 +608,7 @@ function ProjectStrip({
   return (
     <section className="rounded-lg border border-border bg-surface-alt p-3">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-text">Projects</h2>
+        <h2 className="text-sm font-semibold text-text">Project</h2>
         <button
           onClick={onNew}
           className="min-h-8 rounded-lg border border-border bg-surface px-2 text-xs text-text-muted hover:text-text inline-flex items-center gap-1"
@@ -449,6 +736,7 @@ function AssetPanel({
   onRename,
   onDelete,
   onUpload,
+  onOpenLibrary,
 }: {
   assets: VideoAsset[];
   activeAssetId: string | null;
@@ -456,10 +744,21 @@ function AssetPanel({
   onAdd: (assetId: string) => void;
   onRename: (assetId: string, fileName: string) => void;
   onDelete: (assetId: string) => void;
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (file: File) => Promise<VideoAsset>;
+  onOpenLibrary: () => void;
 }) {
   const [view, setView] = useState<'list' | 'grid'>('list');
   const [filter, setFilter] = useState<AssetFilterKey>('all');
+  const [sourceTab, setSourceTab] = useState<'project' | 'favorites'>('project');
+  const [favoriteAssetIds, setFavoriteAssetIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const value = JSON.parse(window.localStorage.getItem('omnillm-video-favorite-assets') || '[]');
+      return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<'newest' | 'name' | 'duration' | 'size'>('newest');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -475,6 +774,16 @@ function AssetPanel({
   const addTrack = useVideoStudioStore((state) => state.addTrack);
   const setAppMode = useSettingsStore((state) => state.setAppMode);
   const createConversation = useConversationStore((state) => state.createConversation);
+
+  useEffect(() => {
+    window.localStorage.setItem('omnillm-video-favorite-assets', JSON.stringify(favoriteAssetIds));
+  }, [favoriteAssetIds]);
+
+  const toggleFavorite = (assetId: string) => {
+    setFavoriteAssetIds((current) => current.includes(assetId)
+      ? current.filter((id) => id !== assetId)
+      : [...current, assetId]);
+  };
 
   // Clip counts per asset id, for the in-use badge and delete warnings.
   const usedCounts = useMemo(() => {
@@ -516,7 +825,11 @@ function AssetPanel({
     setUploading(true);
     try {
       for (const file of Array.from(list)) {
-        await onUpload(file);
+        try {
+          await onUpload(file);
+        } catch {
+          // The store already surfaced the per-file error; continue the batch.
+        }
       }
     } finally {
       setUploading(false);
@@ -525,6 +838,7 @@ function AssetPanel({
   };
 
   const filtered = assets
+    .filter((asset) => sourceTab !== 'favorites' || favoriteAssetIds.includes(asset.id))
     .filter((asset) => assetMatchesFilter(asset, filter))
     .filter((asset) => !query.trim() || asset.file_name.toLowerCase().includes(query.trim().toLowerCase()))
     .sort((a, b) => {
@@ -547,6 +861,19 @@ function AssetPanel({
 
   const actionButtons = (asset: VideoAsset) => (
     <>
+      <button
+        onClick={(event) => {
+          event.stopPropagation();
+          toggleFavorite(asset.id);
+        }}
+        className={`min-h-7 min-w-7 rounded-md border bg-surface-alt inline-flex items-center justify-center ${
+          favoriteAssetIds.includes(asset.id) ? 'border-amber-400/40 text-amber-300' : 'border-border text-text-muted hover:text-text'
+        }`}
+        aria-label={`${favoriteAssetIds.includes(asset.id) ? 'Remove' : 'Add'} ${asset.file_name} ${favoriteAssetIds.includes(asset.id) ? 'from' : 'to'} favorites`}
+        title={favoriteAssetIds.includes(asset.id) ? 'Remove from favorites' : 'Add to favorites'}
+      >
+        <Star size={12} fill={favoriteAssetIds.includes(asset.id) ? 'currentColor' : 'none'} />
+      </button>
       <button
         onClick={(event) => {
           event.stopPropagation();
@@ -656,7 +983,7 @@ function AssetPanel({
         }
       }}
     >
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-text">Media Bin</h2>
         <div className="flex items-center gap-1">
           <span
@@ -692,14 +1019,44 @@ function AssetPanel({
           </button>
         </div>
       </div>
+      <div className="mb-2 flex border-b border-border text-[11px]" role="tablist" aria-label="Media sources">
+        {[
+          { key: 'project' as const, label: 'Project Media' },
+          { key: 'favorites' as const, label: 'Favorites' },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={sourceTab === tab.key}
+            onClick={() => setSourceTab(tab.key)}
+            className={`border-b-2 px-2 py-1.5 transition-colors ${
+              sourceTab === tab.key ? 'border-primary text-text' : 'border-transparent text-text-muted hover:text-text'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={onOpenLibrary}
+          className="ml-auto border-b-2 border-transparent px-2 py-1.5 text-text-muted transition-colors hover:text-text"
+          title="Open the global File Library"
+        >
+          Library ↗
+        </button>
+      </div>
       <div className="mb-2 flex items-center gap-1.5">
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search media..."
-          className="min-h-8 min-w-0 flex-1 rounded-md border border-border bg-surface px-2 text-xs text-text focus:border-primary/50 focus:outline-none"
-          aria-label="Search media bin"
-        />
+        <div className="relative min-w-0 flex-1">
+          <Filter size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-text-muted" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search media..."
+            className="min-h-8 w-full min-w-0 rounded-md border border-border bg-surface px-2 pl-7 text-xs text-text focus:border-primary/50 focus:outline-none"
+            aria-label="Search media bin"
+          />
+        </div>
         <select
           value={sortKey}
           onChange={(event) => setSortKey(event.target.value as typeof sortKey)}
@@ -745,7 +1102,7 @@ function AssetPanel({
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-8 text-center text-xs text-text-muted">
-            No media matches this filter.
+            {sourceTab === 'favorites' ? 'No favorite media yet. Use the star on any asset to keep it here.' : 'No media matches this filter.'}
           </div>
         )
       ) : view === 'grid' ? (
@@ -844,6 +1201,10 @@ function AssetPanel({
           ...(asset.kind === 'audio' || asset.kind === 'music'
             ? [{ label: 'Add as music bed (full length)', action: () => { void addAssetAsMusicBed(asset.id); } }]
             : []),
+          {
+            label: favoriteAssetIds.includes(asset.id) ? 'Remove from favorites' : 'Add to favorites',
+            action: () => toggleFavorite(asset.id),
+          },
           'divider',
           { label: 'Rename', action: () => { setEditingId(asset.id); setEditingName(asset.file_name); } },
           { label: 'Download', action: () => { window.open(videoApi.downloadUrl(asset.id), '_blank', 'noopener,noreferrer'); } },
