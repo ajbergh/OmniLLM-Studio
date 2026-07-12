@@ -2,13 +2,13 @@
  * Zustand store for Video Studio (AI generation) and Video Edit Studio
  * (timeline editing). All timeline mutations follow the same shape: clone the
  * document, mutate the clone, push one undo snapshot via withTimelineHistory,
- * set state, then autosave. Drag interactions keep live values in component
- * state and call a store action once on pointer-up so each user gesture is a
- * single undo entry and a single save.
+ * set state, then enqueue a serialized save. Drag interactions keep live
+ * values in component state and call a store action once on pointer-up so
+ * each user gesture is a single undo entry and a single save.
  *
- * Sequence counters guard async races: _saveSeq ignores out-of-order save
- * responses, and renderedSaveSeq (vs. _saveSeq) drives the "timeline changed
- * since last render" indicator.
+ * The save queue preserves server write order; _saveSeq prevents an older
+ * response from replacing newer local state. renderedSaveSeq (vs. _saveSeq)
+ * drives the "timeline changed since last render" indicator.
  */
 import { create } from 'zustand';
 import { toast } from 'sonner';

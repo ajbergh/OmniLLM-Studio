@@ -214,7 +214,7 @@ func TestBuildFilterComplexOmitsAudioBranchWhenDisabled(t *testing.T) {
 		inputIdx: 1,
 		isVideo:  true,
 		hasAudio: true,
-		clip: TimelineClip{ID: "clip-video", AssetID: "asset-video", DurationMS: 1000, TrimOutMS: 1000},
+		clip:     TimelineClip{ID: "clip-video", AssetID: "asset-video", DurationMS: 1000, TrimOutMS: 1000},
 	}}
 	filterStr, videoLabel, audioLabel := buildFilterComplexWithAudio(doc, clips, 1280, 720, false)
 	if videoLabel == "" || !strings.Contains(filterStr, "[1:v]") {

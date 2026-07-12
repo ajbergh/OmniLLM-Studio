@@ -61,8 +61,12 @@ Clips include timing, asset references, transforms, fades, effects, transitions,
 Important fields:
 
 - `asset_id`: optional for generated text/callout clips.
-- `start_ms`, `duration_ms`: timeline placement.
-- `trim_in_ms`, `trim_out_ms`: source trim window.
+- `start_ms`, `duration_ms`: output-timeline placement and duration.
+- `trim_in_ms`, `trim_out_ms`: source-media trim window.
+- `playback_rate`: optional constant playback rate for time-based media,
+  from **0.25× through 4×** (defaults to `1`). The selected source span is
+  `duration_ms × playback_rate`; validation canonicalizes `trim_out_ms` from
+  that relationship. Images, text, and shapes ignore the field.
 - `z_index`: optional compositing order among overlapping clips (default 0).
 - `group_id`: optional grouping handle for multi-select operations.
 - `muted`: silences the clip's audio contribution without touching `volume`.
@@ -84,8 +88,11 @@ Important fields:
 - `cursor`: optional cursor metadata captured with screen recordings —
   `visible`, `scale` (clamped 0.25–4, default 1), `highlight`, `click_rings`,
   `smoothing`, and `events` (sorted samples `{time_ms, x, y, click?}` with
-  clip-relative times and canvas-pixel coordinates from the top-left).
-  Preview-only: the editor overlays a cursor, but exports do not draw it yet.
+  clip-relative **output-timeline** times and canvas-pixel coordinates from
+  the top-left). Retime and split operations scale or rebase the samples so
+  the path stays synchronized with its clip. Preview-only: the editor overlays
+  a cursor, but exports do not draw it yet. The built-in recorder does not
+  currently collect browser cursor coordinates.
 - `transform`: x, y, scale, rotation, opacity, and optional fractional crop (`{top, right, bottom, left}`, each 0–0.95).
 - `text`: text payload and styling — `font_family`, `font_size`, `font_weight`, `color`, `background`, `stroke`, `stroke_width`, `shadow`, `text_align`, `line_height`, `letter_spacing`, `border_radius`. Some styling fields are preview-only; export support is reported by `GET /v1/video/render/capabilities`.
 - `effects`: ordered effect definitions. Allowed types: `blur`, `brightness`, `contrast`, `saturation`, `grayscale`, `shadow`, `background_blur`, `chroma_key`, `sharpen`, `vignette`.
@@ -93,4 +100,8 @@ Important fields:
 - `keyframes`: animated scalar values over time. Allowed properties: `x`, `y`, `scale`, `rotation`, `opacity`, `volume`. Easing: `linear`, `ease-in`, `ease-out`, `ease-in-out`, `step` (unknown easings normalize to `linear`). **`time_ms` is clip-relative** (measured from the clip start). The preview canvas animates keyframed `x`/`y`/`scale`/`rotation`/`opacity` (interpolation in `frontend/src/components/video/effects/keyframeUtils.ts`); FFmpeg export applies `x`/`y`, `rotation`, and `volume` keyframes with linear interpolation; `scale`/`opacity` keyframes — and easing curves — are preview-only (see `GET /v1/video/render/capabilities`). The editor's motion presets (zoom, pan, Ken Burns) generate ordinary `x`/`y`/`scale` keyframes.
 - `metadata`: free-form document metadata. The editor records `default_caption_preset` here (set when a caption style preset is applied) so new and imported captions inherit the project's caption style.
 
-The backend validates version, canvas defaults, unique track/clip/marker IDs, clip durations, trim values, effect/transition/keyframe types, per-clip effect/transition/keyframe ID uniqueness, and operation types before saving or applying AI edit plans. Unknown effect/transition types and unknown keyframe properties are rejected.
+The backend validates version, canvas defaults, unique track/clip/marker IDs,
+clip durations, trim values, finite 0.25×–4× playback rates, effect/
+transition/keyframe types, per-clip effect/transition/keyframe ID uniqueness,
+and operation types before saving or applying AI edit plans. Unknown effect/
+transition types and unknown keyframe properties are rejected.

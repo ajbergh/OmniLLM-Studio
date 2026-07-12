@@ -1,7 +1,8 @@
 /**
  * Timeline toolbar: transport, undo/redo, tool modes (select/blade), marker,
  * split/duplicate/delete, zoom, snap and ripple toggles, save, and a trailing
- * status readout (ripple badge, selection count + duration, saved state).
+ * status readout (ripple badge, selection count + duration, and an honest
+ * save state that exposes a retry action after a failed write).
  */
 import { ChevronsLeftRight, Copy, Flag, HelpCircle, Magnet, Maximize2, MousePointer2, Pause, Play, Redo2, Save, Scissors, Slice, Trash2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import type { ReactNode } from 'react';

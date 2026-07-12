@@ -4,17 +4,24 @@ Video Edit Studio separates interactive timeline preview from final export. Vide
 
 ## Preview
 
-The frontend preview composites **all** active visual clips at the current playhead, stacked by track order (later tracks on top) and per-clip `z_index`, with transforms, fades, effects, and text styling applied. It is intended for responsive editing, not frame-perfect export. Track solo is a preview-only monitoring control (only the soloed track contributes preview audio); exports ignore it.
+The frontend preview composites **all** active visual clips at the current
+playhead, stacked by track order (later tracks on top) and per-clip `z_index`,
+with transforms, fades, effects, and text styling applied. It uses muted visual
+`<video>` elements plus managed audio elements, so video soundtracks and audio
+assets both audition clip volume, volume keyframes, fades, track solo, constant
+0.25×–4× speed, and the preview-only master volume. It is intended for
+responsive editing, not frame-perfect export. Track solo and master volume are
+preview-only monitoring controls; exports ignore both.
 
 Asset display in the preview canvas:
 
 | Asset type | Rendered as |
 |------------|-------------|
-| `video/*` MIME | Native `<video>` element with `src` pointing to the download URL |
+| `video/*` MIME | Native muted `<video>` element with `src` pointing to the download URL; its soundtrack is played by the managed audio element |
 | `image/*` MIME | `<img>` element |
 | Text/caption clip | Inline styled text div |
-| `text/plain` asset | Compact text asset card |
-| Any other asset | Generic grey placeholder |
+| `audio/*` MIME or `audio_only` video clip | No visual element; managed hidden `<audio>` element |
+| Other asset without text/shape clip data | No visual output |
 
 ## Export Jobs
 
@@ -41,6 +48,10 @@ Current FFmpeg export coverage:
 - **Export settings extensions** — `codec` (`h264` default for MP4, `h265` via libx265 when the FFmpeg build has it, `vp9` for WebM), `audio_bitrate_kbps` (32–512, default 128), `range_start_ms`/`range_end_ms` (renders only that timeline window — clips slice, trims/keyframes/markers rebase via `SliceTimelineRange`), `burn_in_captions` (default true; false strips caption-track clips from the frame), and `sidecar_captions` (`srt`/`vtt`; writes the captions as a sibling `kind:"caption"` asset and records `captions_sidecar_asset_id` in the job metadata).
 - **Pixelate regions** — `pixelate` shape clips export as a true mosaic via crop → downscale → nearest-neighbor upscale → overlay; `rounded_rectangle` and `label` annotations export as square-corner drawbox approximations. Other annotation kinds (arrow, ellipse, spotlight, …) are preview-only and reported as such by the capability matrix.
 - **Video asset compositing** — video clips with `asset_id` pointing to a real video file are overlaid on the canvas at the correct start/duration using FFmpeg `-itsoffset` and `overlay` filter graph entries.
+- **Constant clip speed** — video and audio clips support `playback_rate` from
+  0.25× to 4×. The renderer consumes `duration_ms × playback_rate` source
+  time, retimes video with `setpts`, and applies one or more pitch-preserving
+  `atempo` stages to the corresponding audio so A/V duration remains aligned.
 - **Image asset compositing** — image clips are overlaid on the canvas at the correct start/duration using FFmpeg `overlay` filters.
 - **Per-clip transform** — `x`/`y` position offset, `scale`, **`rotation`** (via `rotate` with transparent fill), and fractional `crop` (`{top, right, bottom, left}`, 0–0.95 each).
 - **Position keyframes** — keyframed `x`/`y` animate via piecewise-linear `overlay` time expressions (keyframe `time_ms` is clip-relative; easing curves are approximated linearly).
@@ -51,7 +62,10 @@ Current FFmpeg export coverage:
 - **Transitions** — `fade`, `crossfade`, and `dip_to_black` render as alpha fades; `slide` renders as an animated overlay position (enters from the chosen edge, exits the opposite edge).
 - **Effects** — `brightness`, `contrast`, `saturation`, `blur`, `grayscale`, `sharpen` (`unsharp`), `vignette`, and `chroma_key` (`chromakey`, default green with `color`/`similarity`/`blend` params) map to FFmpeg filters.
 - **Text styling** — font family (fontconfig best match), stroke color + width, line spacing, plus the existing size/color/background box/shadow.
-- **Audio/music mixing** — per-clip `volume`, timeline placement via `adelay`, and multi-track `amix` mixdown. Audio from video clips joins the mix when the asset carries an audio stream (`has_audio` recorded at ingest, ffprobe fallback at render).
+- **Audio/music mixing** — per-clip `volume`, volume keyframes, fades,
+  constant playback speed, timeline placement via `adelay`, and multi-track
+  `amix` mixdown. Audio from video clips joins the mix when the asset carries
+  an audio stream (`has_audio` recorded at ingest, ffprobe fallback at render).
 - **Clip mute & detached audio** — `clip.muted` silences a clip without changing volume; `clip.audio_only` suppresses a video clip's visuals so it acts as detached audio (the editor's "Detach audio" command pairs a muted original with an audio-only twin).
 - **Track semantics** — hidden tracks drop their video (their video clips' audio still mixes); muted tracks drop their audio.
 - **Layer-order compositing** — visual clips (media and text alike) composite bottom-to-top by track array order, then `z_index`, then start time, matching the preview. Start time controls only when a clip is enabled, never its stacking. Text clips on any visible track (including generic `layer` tracks) interleave into the same compositing chain, so a text clip on a lower layer renders beneath media on a higher layer.

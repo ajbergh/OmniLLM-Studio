@@ -1,8 +1,9 @@
 /**
  * Video Edit Studio shell: header (editor modes, templates, text, record),
- * project strip + media bin on the left, preview canvas over the timeline in
- * the center, and a tabbed right rail (Properties / Assistant / Captions /
- * Export) whose tabs follow the editor mode's feature gates.
+ * project strip + project media/favorites bin on the left, preview canvas over
+ * the timeline in the center, and a mode-gated right rail for properties,
+ * effects, transitions, captions, audio, assistant, and export. The footer
+ * owns the preview-only master volume; project export is unaffected by it.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { DragHandle, useResizablePanels } from '../ResizablePanels';

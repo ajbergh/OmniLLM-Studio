@@ -315,10 +315,11 @@ func sourceDurationFor(clip TimelineClip, timelineDurationMS int64) int64 {
 	return duration
 }
 
-// SliceTimelineRange returns a copy of the document trimmed to the window
-// [startMS, endMS): clips outside the window drop, straddling clips trim
-// (advancing their source trim window and rebasing clip-relative keyframes),
-// and everything shifts so the window starts at 0. Used for export ranges.
+// SliceTimelineRange returns a copy of the document trimmed to the output-time
+// window [startMS, endMS). Clips outside the window drop; straddling clips
+// advance their source trim by playback_rate × lead and rebase clip-relative
+// keyframes and cursor events. Everything then shifts so the window starts at
+// 0. Used for export ranges without mutating the saved source document.
 func SliceTimelineRange(doc TimelineDocument, startMS, endMS int64) TimelineDocument {
 	if endMS <= startMS || startMS < 0 {
 		return doc
@@ -514,6 +515,10 @@ func UpgradeTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 	return doc, nil
 }
 
+// ValidateTimelineDocument upgrades, defaults, and canonicalizes a timeline
+// before persistence or rendering. In particular, duration_ms is output time
+// while trim points are source time, so it normalizes each trim_out_ms from
+// duration_ms × playback_rate.
 func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 	doc, err := UpgradeTimelineDocument(doc)
 	if err != nil {

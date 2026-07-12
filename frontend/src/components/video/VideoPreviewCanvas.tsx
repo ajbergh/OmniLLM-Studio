@@ -1,13 +1,17 @@
 /**
  * Preview canvas: composites every visible track at the playhead (track order
- * + z-index) with transforms, fades, crop, effects, keyframes, and text, and
- * doubles as the direct-manipulation surface — 8-handle resize (uniform scale
+ * + z-index) with transforms, fades, crop, effects, keyframes, text, and all
+ * active visual media. It manages audio/video media elements from the same
+ * timeline so constant speed, clip volume/fades/keyframes, solo, and the
+ * preview-only master gain are auditioned together. It also doubles as the
+ * direct-manipulation surface — 8-handle resize (uniform scale
  * for media/text, true width/height for shapes) with Shift/Alt/Ctrl
  * modifiers, rotation, smart-guide snapping against the stage and other
  * layers, double-click inline text editing, an 8-handle crop mode with
  * explicit apply/cancel, and a cursor-metadata overlay. Drags preview via
  * liveTransform and commit once on pointer-up; playback advances the store
- * playhead via rAF and keeps mounted <video>/<audio> elements in sync.
+ * playhead via rAF and keeps muted visual <video> plus managed <audio>
+ * elements synchronized to the timeline.
  */
 import { Check, Crop, Crosshair, Grid3x3, Maximize2, Minimize2, Pause, Play, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -289,11 +293,11 @@ export function VideoPreviewCanvas() {
     };
   }, [isPlaying, setPlayhead, setPlaying]);
 
-  // Keep every mounted media element in sync with the playhead on every tick.
-  // This is what starts clips that mount mid-playback: a clip whose element
-  // appears after play began is paused, so the next tick seeks it to its trim
-  // offset and plays it (previously only clips mounted at play-start played).
-  // While paused it doubles as the scrub-seek path.
+  // Keep every mounted media element in sync with output-timeline time on every
+  // tick. The source seek point multiplies elapsed output time by the clip's
+  // constant playback rate. Visual videos are muted; managed <audio> elements
+  // apply volume keyframes, fades, solo, and preview master gain. While paused
+  // this same path is the scrub-seek path.
   useEffect(() => {
     const syncElement = (element: HTMLMediaElement, clip: VideoTimelineClip) => {
       const playbackRate = Math.min(4, Math.max(0.25, clip.playback_rate ?? 1));

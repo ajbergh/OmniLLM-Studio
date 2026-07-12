@@ -461,10 +461,11 @@ func videoAssetHasAudio(asset models.VideoAsset, fullPath string) bool {
 	return probe.HasAudio
 }
 
-// buildFilterComplex constructs an FFmpeg -filter_complex expression that composites
-// all resolved media clips onto a lavfi color background (input 0).
-// It returns the filter_complex string, the final video stream label, and the final
-// audio stream label (empty if no audio clips).
+// buildFilterComplex constructs an audio-enabled FFmpeg -filter_complex
+// expression that composites all resolved media clips onto a lavfi color
+// background (input 0). It returns the graph plus final video/audio labels.
+// Audio-disabled exports must instead call buildFilterComplexWithAudio with
+// includeAudio=false so no unmapped labeled audio output is produced.
 func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, height int) (filterStr, videoLabel, audioLabel string) {
 	return buildFilterComplexWithAudio(doc, clips, width, height, true)
 }
