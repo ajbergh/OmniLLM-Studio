@@ -1,3 +1,9 @@
+/**
+ * Caption utilities shared by the caption panel and the store: SRT/WebVTT
+ * parsing and serialization, plus the style presets (the backend mirrors the
+ * serialization in backend/internal/video/captions.go for render-time
+ * sidecar files — keep formats in sync).
+ */
 import type { VideoTimelineCanvas, VideoTimelineText } from '../../../types/video';
 
 export interface CaptionCue {
@@ -70,7 +76,7 @@ export function serializeVtt(cues: CaptionCue[]): string {
   );
 }
 
-export type CaptionPresetKey = 'subtitle' | 'bold_social' | 'lower_third';
+export type CaptionPresetKey = 'subtitle' | 'bold_social' | 'lower_third' | 'training' | 'accessibility';
 
 export interface CaptionPreset {
   key: CaptionPresetKey;
@@ -99,5 +105,17 @@ export const CAPTION_PRESETS: CaptionPreset[] = [
     label: 'Lower third',
     text: { font_size: 40, font_weight: '700', color: '#ffffff', background: '#111111', border_radius: 8, stroke: '', shadow: false, text_align: 'left' },
     position: (canvas) => ({ x: -Math.round(canvas.width * 0.22), y: Math.round(canvas.height * 0.36) }),
+  },
+  {
+    key: 'training',
+    label: 'Training burn-in',
+    text: { font_size: 44, font_weight: '600', color: '#ffffff', background: '#000000cc', border_radius: 4, stroke: '', shadow: false, text_align: 'center' },
+    position: (canvas) => ({ x: 0, y: Math.round(canvas.height * 0.4) }),
+  },
+  {
+    key: 'accessibility',
+    label: 'Accessibility',
+    text: { font_size: 52, font_weight: '700', color: '#ffff00', background: '#000000', border_radius: 0, stroke: '', shadow: false, text_align: 'center' },
+    position: (canvas) => ({ x: 0, y: Math.round(canvas.height * 0.38) }),
   },
 ];

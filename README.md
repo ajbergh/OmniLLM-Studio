@@ -110,7 +110,7 @@ The creation panel is organized into individually collapsible sections — **Pro
 | **Reference Image (Gemini)** | Supply an image asset as a reference to guide Gemini Veo image-to-video generation |
 | **Start / Last Frame** | Set the first and/or last frame for image-to-video or interpolation (model capability gated) |
 | **Cinematic Controls** | Music-Studio-style dropdowns for style, camera motion, shot type, composition, lens/focus, lighting/ambiance, audio cues (dialogue, sound effects, ambient noise), and continuity notes — assembled into the final prompt at generation time |
-| **Local File Upload** | `+` button next to every image/video picker — upload directly from disk via `POST /v1/video/projects/{projectId}/assets/upload` (50 MB limit, auto MIME detection) |
+| **Local File Upload** | `+` button next to every image/video picker — upload directly from disk via `POST /v1/video/projects/{projectId}/assets/upload` (25 MB images, 100 MB audio, 500 MB video; content-based MIME detection) |
 | **Asset Thumbnails** | Selected images and video assets render an inline thumbnail preview below the picker |
 | **Output Preview** | Real `<video>`, `<img>`, and `<audio>` elements for selected outputs |
 | **Cross-Studio Shortcuts** | "Make Video" buttons in Image Studio and Music Studio route assets into Video Studio via domain translation |
@@ -122,9 +122,9 @@ Video Edit Studio owns timeline composition and export for video projects. It us
 | Capability | Description |
 |------------|-------------|
 | **Media Bin** | Generated outputs plus imported File Library, Music Studio, and Image Studio assets |
-| **Timeline** | Multi-track video, image, audio, music, text, caption, shape, and callout timeline with move, trim, split, duplicate, delete, track mute/lock/visibility, fades, volume, effects, transitions, and keyframes |
-| **Preview** | Timeline preview canvas with real media playback and scrub controls |
-| **Export** | Persistent render jobs — FFmpeg composites real video/image media plus text overlays into durable MP4/WebM |
+| **Timeline** | Multi-track video, image, audio, music, text, caption, shape, and callout timeline with move, trim, split, 0.25×–4× clip speed/target-duration retiming, duplicate, delete, track mute/lock/visibility, fades, volume, effects, transitions, and keyframes |
+| **Preview** | Asset-driven timeline preview with managed video/audio playback, fades, volume keyframes, solo, speed, and preview-only master gain |
+| **Export** | Persistent render jobs — FFmpeg composites real video/image media plus text overlays into durable MP4/WebM, including constant-speed video/audio retiming with pitch-preserving audio |
 | **AI Assistance** | LLM-backed storyboard and edit-plan generation (with deterministic fallbacks); rule-based social-format variants, apply-plan, and validate-plan |
 | **Cross-Studio Imports** | One-click import from File Library, Music Studio, and Image Studio into the project media bin |
 | **Send to Chat** | Copy any video asset into a conversation attachment and navigate directly to that chat |

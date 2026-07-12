@@ -24,8 +24,38 @@ func TestValidateTimelineDocumentNormalizesDefaults(t *testing.T) {
 	if doc.Tracks[0].ID == "" || doc.Tracks[0].Clips[0].ID == "" {
 		t.Fatalf("expected generated track and clip IDs: %+v", doc.Tracks[0])
 	}
+	if clip := doc.Tracks[0].Clips[0]; clip.PlaybackRate != 1 || clip.TrimOutMS != 2000 {
+		t.Fatalf("legacy clip timing defaults not normalized: %+v", clip)
+	}
 	if doc.DurationMS < 3000 {
 		t.Fatalf("duration did not include clip end: %d", doc.DurationMS)
+	}
+}
+
+func TestValidateTimelineDocumentPlaybackRate(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks[0].Clips = []TimelineClip{{
+		ID:           "retimed",
+		DurationMS:   2000,
+		TrimInMS:     500,
+		TrimOutMS:    123, // canonicalized from duration and playback rate
+		PlaybackRate: 2,
+	}}
+	validated, err := ValidateTimelineDocument(doc)
+	if err != nil {
+		t.Fatalf("valid playback rate rejected: %v", err)
+	}
+	clip := validated.Tracks[0].Clips[0]
+	if clip.PlaybackRate != 2 || clip.TrimOutMS != 4500 {
+		t.Fatalf("retimed source window not normalized: %+v", clip)
+	}
+
+	for _, rate := range []float64{0.1, 4.1} {
+		invalid := NewEmptyTimeline(1920, 1080, 30)
+		invalid.Tracks[0].Clips = []TimelineClip{{ID: "bad-rate", DurationMS: 1000, PlaybackRate: rate}}
+		if _, err := ValidateTimelineDocument(invalid); err == nil {
+			t.Fatalf("expected playback rate %v to be rejected", rate)
+		}
 	}
 }
 
@@ -237,6 +267,246 @@ func TestValidateTimelineDocumentShapes(t *testing.T) {
 	doc.Tracks[0].Clips[0].Shape = &TimelineShape{Kind: "starburst"}
 	if _, err := ValidateTimelineDocument(doc); err == nil {
 		t.Fatalf("expected unknown shape kind to be rejected")
+	}
+}
+
+func TestValidateTimelineDocumentAnnotationKinds(t *testing.T) {
+	kinds := []string{
+		ShapeKindRoundedRectangle, ShapeKindEllipse, ShapeKindArrow, ShapeKindLine,
+		ShapeKindSpeechBubble, ShapeKindSpotlight, ShapeKindPixelate,
+		ShapeKindCheckmark, ShapeKindXMark, ShapeKindStepMarker, ShapeKindLabel,
+	}
+	for _, kind := range kinds {
+		doc := NewEmptyTimeline(1920, 1080, 30)
+		doc.Tracks[0].Clips = []TimelineClip{{
+			ID:         "clip-" + kind,
+			StartMS:    0,
+			DurationMS: 2000,
+			Shape:      &TimelineShape{Kind: kind, CornerRadius: 999},
+		}}
+		validated, err := ValidateTimelineDocument(doc)
+		if err != nil {
+			t.Fatalf("annotation kind %q failed validation: %v", kind, err)
+		}
+		shape := validated.Tracks[0].Clips[0].Shape
+		if shape.CornerRadius != 200 {
+			t.Errorf("kind %q: corner radius not clamped: %f", kind, shape.CornerRadius)
+		}
+		if kind == ShapeKindPixelate && shape.BlurRadius != 12 {
+			t.Errorf("pixelate did not default blur radius: %f", shape.BlurRadius)
+		}
+	}
+}
+
+func TestValidateTimelineDocumentCursorMetadata(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks[0].Clips = []TimelineClip{{
+		ID:         "clip-cursor",
+		StartMS:    0,
+		DurationMS: 5000,
+		Cursor: &TimelineCursor{
+			Scale: 99,
+			Events: []TimelineCursorEvent{
+				{TimeMS: 2000, X: 100, Y: 100},
+				{TimeMS: -5, X: 0, Y: 0},
+				{TimeMS: 1000, X: 50, Y: 50, Click: true},
+			},
+		},
+	}}
+	validated, err := ValidateTimelineDocument(doc)
+	if err != nil {
+		t.Fatalf("cursor metadata failed validation: %v", err)
+	}
+	cursor := validated.Tracks[0].Clips[0].Cursor
+	if cursor.Scale != 4 {
+		t.Errorf("cursor scale not clamped: %f", cursor.Scale)
+	}
+	if len(cursor.Events) != 2 {
+		t.Fatalf("negative-time cursor event not dropped: %+v", cursor.Events)
+	}
+	if cursor.Events[0].TimeMS != 1000 || !cursor.Events[0].Click {
+		t.Errorf("cursor events not sorted by time: %+v", cursor.Events)
+	}
+
+	// Older documents without cursor metadata stay valid untouched.
+	plain := NewEmptyTimeline(1920, 1080, 30)
+	if _, err := ValidateTimelineDocument(plain); err != nil {
+		t.Fatalf("document without cursor metadata failed validation: %v", err)
+	}
+}
+
+func TestSliceTimelineRange(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.DurationMS = 10000
+	doc.Tracks[0].Clips = []TimelineClip{
+		{ID: "before", StartMS: 0, DurationMS: 1000, TrimOutMS: 1000},
+		{ID: "straddle-start", StartMS: 1500, DurationMS: 2000, TrimOutMS: 2000, FadeInMS: 300,
+			Keyframes: []TimelineKeyframe{
+				{ID: "k1", Property: "x", TimeMS: 100, Value: 5},
+				{ID: "k2", Property: "x", TimeMS: 1500, Value: 50},
+			}},
+		{ID: "inside", StartMS: 4000, DurationMS: 1000, TrimOutMS: 1000},
+		{ID: "straddle-end", StartMS: 5500, DurationMS: 2000, TrimOutMS: 2000, FadeOutMS: 300},
+		{ID: "after", StartMS: 8000, DurationMS: 1000, TrimOutMS: 1000},
+	}
+	doc.Markers = []TimelineMarker{
+		{ID: "m1", TimeMS: 500}, {ID: "m2", TimeMS: 4500}, {ID: "m3", TimeMS: 9000},
+	}
+	out := SliceTimelineRange(doc, 2000, 6000)
+	if out.DurationMS != 4000 {
+		t.Fatalf("sliced duration: %d", out.DurationMS)
+	}
+	clips := out.Tracks[0].Clips
+	if len(clips) != 3 {
+		t.Fatalf("expected 3 clips, got %d: %+v", len(clips), clips)
+	}
+	left := clips[0]
+	if left.ID != "straddle-start" || left.StartMS != 0 || left.DurationMS != 1500 || left.TrimInMS != 500 {
+		t.Errorf("straddle-start wrong: %+v", left)
+	}
+	if left.FadeInMS != 0 {
+		t.Errorf("fade-in should drop when the head is cut: %+v", left)
+	}
+	if len(left.Keyframes) != 1 || left.Keyframes[0].TimeMS != 1000 {
+		t.Errorf("keyframes not rebased: %+v", left.Keyframes)
+	}
+	if clips[1].ID != "inside" || clips[1].StartMS != 2000 {
+		t.Errorf("inside clip wrong: %+v", clips[1])
+	}
+	tail := clips[2]
+	if tail.ID != "straddle-end" || tail.StartMS != 3500 || tail.DurationMS != 500 || tail.FadeOutMS != 0 {
+		t.Errorf("straddle-end wrong: %+v", tail)
+	}
+	if len(out.Markers) != 1 || out.Markers[0].TimeMS != 2500 {
+		t.Errorf("markers not sliced/shifted: %+v", out.Markers)
+	}
+	// Invalid range returns the document unchanged.
+	same := SliceTimelineRange(doc, 5000, 5000)
+	if same.DurationMS != doc.DurationMS || len(same.Tracks[0].Clips) != 5 {
+		t.Errorf("invalid range should be a no-op")
+	}
+}
+
+func TestSliceTimelineRangePreservesRetimedSourceWindow(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.DurationMS = 6000
+	doc.Tracks[0].Clips = []TimelineClip{{
+		ID:           "fast",
+		StartMS:      1000,
+		DurationMS:   4000,
+		TrimInMS:     500,
+		TrimOutMS:    8500,
+		PlaybackRate: 2,
+		Keyframes: []TimelineKeyframe{
+			{ID: "before", Property: "x", TimeMS: 500},
+			{ID: "inside", Property: "x", TimeMS: 1500},
+			{ID: "after", Property: "x", TimeMS: 3500},
+		},
+		Cursor: &TimelineCursor{Events: []TimelineCursorEvent{
+			{TimeMS: 500, X: 1}, {TimeMS: 1500, X: 2}, {TimeMS: 3500, X: 3},
+		}},
+	}}
+
+	out := SliceTimelineRange(doc, 2000, 4000)
+	if len(out.Tracks[0].Clips) != 1 {
+		t.Fatalf("expected one sliced clip: %+v", out.Tracks[0].Clips)
+	}
+	clip := out.Tracks[0].Clips[0]
+	if clip.StartMS != 0 || clip.DurationMS != 2000 || clip.TrimInMS != 2500 || clip.TrimOutMS != 6500 || clip.PlaybackRate != 2 {
+		t.Fatalf("retimed slice timing wrong: %+v", clip)
+	}
+	if len(clip.Keyframes) != 1 || clip.Keyframes[0].ID != "inside" || clip.Keyframes[0].TimeMS != 500 {
+		t.Fatalf("retimed keyframes not sliced/rebased: %+v", clip.Keyframes)
+	}
+	if clip.Cursor == nil || len(clip.Cursor.Events) != 1 || clip.Cursor.Events[0].TimeMS != 500 || clip.Cursor.Events[0].X != 2 {
+		t.Fatalf("retimed cursor events not sliced/rebased: %+v", clip.Cursor)
+	}
+}
+
+func TestSplitClipAtPreservesRetimedSourceWindow(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks[0].Clips = []TimelineClip{{
+		ID:           "fast",
+		DurationMS:   4000,
+		TrimInMS:     500,
+		TrimOutMS:    8500,
+		PlaybackRate: 2,
+		FadeInMS:     200,
+		FadeOutMS:    300,
+		Keyframes: []TimelineKeyframe{
+			{ID: "left", Property: "x", TimeMS: 500},
+			{ID: "right", Property: "x", TimeMS: 2000},
+		},
+		Cursor: &TimelineCursor{Events: []TimelineCursorEvent{
+			{TimeMS: 500, X: 1}, {TimeMS: 2000, X: 2},
+		}},
+	}}
+
+	out, err := SplitClipAt(doc, "fast", 1500)
+	if err != nil {
+		t.Fatalf("SplitClipAt returned error: %v", err)
+	}
+	if len(out.Tracks[0].Clips) != 2 {
+		t.Fatalf("expected two clips: %+v", out.Tracks[0].Clips)
+	}
+	left, right := out.Tracks[0].Clips[0], out.Tracks[0].Clips[1]
+	if left.DurationMS != 1500 || left.TrimInMS != 500 || left.TrimOutMS != 3500 || left.FadeOutMS != 0 {
+		t.Fatalf("left retimed split wrong: %+v", left)
+	}
+	if right.DurationMS != 2500 || right.TrimInMS != 3500 || right.TrimOutMS != 8500 || right.PlaybackRate != 2 || right.FadeInMS != 0 {
+		t.Fatalf("right retimed split wrong: %+v", right)
+	}
+	if len(right.Keyframes) != 1 || right.Keyframes[0].TimeMS != 500 || right.Keyframes[0].ID == "right" {
+		t.Fatalf("right keyframes not rebased/reidentified: %+v", right.Keyframes)
+	}
+	if right.Cursor == nil || len(right.Cursor.Events) != 1 || right.Cursor.Events[0].TimeMS != 500 {
+		t.Fatalf("right cursor events not rebased: %+v", right.Cursor)
+	}
+}
+
+func TestStripCaptionOverlays(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks = append(doc.Tracks, TimelineTrack{
+		ID: "captions", Type: TrackTypeCaption, Name: "Captions", Visible: true,
+		Clips: []TimelineClip{{ID: "cap1", StartMS: 0, DurationMS: 2000, Text: &TimelineText{Text: "hello"}}},
+	})
+	doc.Tracks[0].Clips = []TimelineClip{{ID: "title", StartMS: 0, DurationMS: 2000, Text: &TimelineText{Text: "Title"}}}
+	out := StripCaptionOverlays(doc)
+	if len(out.Tracks[len(out.Tracks)-1].Clips) != 0 {
+		t.Errorf("caption clips not stripped")
+	}
+	if len(out.Tracks[0].Clips) != 1 {
+		t.Errorf("non-caption text clips must survive")
+	}
+	if len(doc.Tracks[len(doc.Tracks)-1].Clips) != 1 {
+		t.Errorf("original document mutated")
+	}
+}
+
+func TestSerializeCaptionsSidecar(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	doc.Tracks = append(doc.Tracks, TimelineTrack{
+		ID: "captions", Type: TrackTypeCaption, Name: "Captions", Visible: true,
+		Clips: []TimelineClip{
+			{ID: "c2", StartMS: 3000, DurationMS: 1000, Text: &TimelineText{Text: "second"}},
+			{ID: "c1", StartMS: 500, DurationMS: 1500, Text: &TimelineText{Text: "first"}},
+			{ID: "empty", StartMS: 6000, DurationMS: 1000, Text: &TimelineText{Text: "  "}},
+		},
+	})
+	cues := CaptionCuesFromTimeline(doc)
+	if len(cues) != 2 || cues[0].Text != "first" {
+		t.Fatalf("cue extraction wrong: %+v", cues)
+	}
+	srt := SerializeCaptions(cues, "srt")
+	if !strings.Contains(srt, "00:00:00,500 --> 00:00:02,000") || !strings.HasPrefix(srt, "1\n") {
+		t.Errorf("srt output wrong:\n%s", srt)
+	}
+	vtt := SerializeCaptions(cues, "vtt")
+	if !strings.HasPrefix(vtt, "WEBVTT") || !strings.Contains(vtt, "00:00:03.000 --> 00:00:04.000") {
+		t.Errorf("vtt output wrong:\n%s", vtt)
+	}
+	if SerializeCaptions(nil, "srt") != "" || SerializeCaptions(cues, "ass") != "" {
+		t.Errorf("empty/unknown formats must serialize to empty string")
 	}
 }
 

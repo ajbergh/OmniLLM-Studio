@@ -1,3 +1,15 @@
+// FFmpeg-backed timeline renderer. Builds a single filter_complex graph that
+// composites media, text, and annotation clips in layer order (matching the
+// preview), mixes audio with per-clip volume/fade/keyframe envelopes, and
+// encodes via libx264/libx265/libvpx-vp9. Export settings can slice a
+// timeline range and strip caption burn-in before the graph is built.
+//
+// Every supported/partial/skipped feature here must be reflected in
+// renderer_capabilities.go — that matrix drives the editor's export-fidelity
+// warnings, so an unreported gap is a silent lie to the user. FFmpeg
+// arguments are constructed as discrete argv entries; never interpolate
+// untrusted strings into a shell command.
+
 package video
 
 import (
@@ -91,6 +103,16 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 	if err != nil {
 		return nil, err
 	}
+	// Export range: slice the validated document so the filtergraph only sees
+	// the requested window (clip trims, keyframes, and markers rebase).
+	if req.Settings.RangeEndMS > req.Settings.RangeStartMS && req.Settings.RangeStartMS >= 0 {
+		req.Timeline = SliceTimelineRange(req.Timeline, req.Settings.RangeStartMS, req.Settings.RangeEndMS)
+	}
+	// Burn-in toggle: dropping caption-track clips keeps them out of the frame;
+	// sidecar files are written by the render job from the original document.
+	if req.Settings.BurnInCaptions != nil && !*req.Settings.BurnInCaptions {
+		req.Timeline = StripCaptionOverlays(req.Timeline)
+	}
 	binary := r.binary
 	if binary == "" {
 		binary, err = exec.LookPath("ffmpeg")
@@ -137,6 +159,17 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 
 	// Attempt to resolve media clips from the asset map.
 	resolved := resolveMediaClips(req)
+	if !req.Settings.IncludeAudio {
+		visualOnly := make([]resolvedClip, 0, len(resolved))
+		for _, rc := range resolved {
+			rc.hasAudio = false
+			rc.isAudio = false
+			if rc.isVideo || rc.isImage {
+				visualOnly = append(visualOnly, rc)
+			}
+		}
+		resolved = visualOnly
+	}
 
 	if len(resolved) > 0 {
 		// ── Media compositing path ─────────────────────────────────────────
@@ -149,7 +182,7 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		}
 		hasAudioClips := func() bool {
 			for _, rc := range resolved {
-				if rc.isAudio {
+				if rc.hasAudio {
 					return true
 				}
 			}
@@ -163,7 +196,7 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 			args = append(args, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000")
 		}
 
-		filterStr, videoLabel, audioLabel := buildFilterComplex(req.Timeline, resolved, width, height)
+		filterStr, videoLabel, audioLabel := buildFilterComplexWithAudio(req.Timeline, resolved, width, height, req.Settings.IncludeAudio)
 		args = append(args, "-filter_complex", filterStr)
 		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps))
 		args = append(args, "-map", videoLabel)
@@ -281,6 +314,10 @@ func evenDimension(value int) int {
 }
 
 func appendFFmpegCodecArgs(args []string, format string, settings ExportSettings) []string {
+	audioBitrate := "128k"
+	if settings.AudioBitrateKbps >= 32 && settings.AudioBitrateKbps <= 512 {
+		audioBitrate = fmt.Sprintf("%dk", settings.AudioBitrateKbps)
+	}
 	switch format {
 	case "webm":
 		crf := "34"
@@ -291,18 +328,30 @@ func appendFFmpegCodecArgs(args []string, format string, settings ExportSettings
 		}
 		args = append(args, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", crf, "-pix_fmt", "yuv420p")
 		if settings.IncludeAudio {
-			args = append(args, "-c:a", "libopus")
+			args = append(args, "-c:a", "libopus", "-b:a", audioBitrate)
 		}
 	default:
-		crf := "23"
-		if settings.Quality == "high" {
-			crf = "18"
-		} else if settings.Quality == "draft" {
-			crf = "30"
+		if settings.Codec == "h265" {
+			// H.265 needs an ffmpeg built with libx265; failures surface in the
+			// job's FFmpeg diagnostics rather than being silently downgraded.
+			crf := "28"
+			if settings.Quality == "high" {
+				crf = "22"
+			} else if settings.Quality == "draft" {
+				crf = "34"
+			}
+			args = append(args, "-c:v", "libx265", "-preset", "fast", "-crf", crf, "-pix_fmt", "yuv420p", "-tag:v", "hvc1", "-movflags", "+faststart")
+		} else {
+			crf := "23"
+			if settings.Quality == "high" {
+				crf = "18"
+			} else if settings.Quality == "draft" {
+				crf = "30"
+			}
+			args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-crf", crf, "-pix_fmt", "yuv420p", "-movflags", "+faststart")
 		}
-		args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-crf", crf, "-pix_fmt", "yuv420p", "-movflags", "+faststart")
 		if settings.IncludeAudio {
-			args = append(args, "-c:a", "aac", "-b:a", "128k")
+			args = append(args, "-c:a", "aac", "-b:a", audioBitrate)
 		}
 	}
 	return args
@@ -412,11 +461,19 @@ func videoAssetHasAudio(asset models.VideoAsset, fullPath string) bool {
 	return probe.HasAudio
 }
 
-// buildFilterComplex constructs an FFmpeg -filter_complex expression that composites
-// all resolved media clips onto a lavfi color background (input 0).
-// It returns the filter_complex string, the final video stream label, and the final
-// audio stream label (empty if no audio clips).
+// buildFilterComplex constructs an audio-enabled FFmpeg -filter_complex
+// expression that composites all resolved media clips onto a lavfi color
+// background (input 0). It returns the graph plus final video/audio labels.
+// Audio-disabled exports must instead call buildFilterComplexWithAudio with
+// includeAudio=false so no unmapped labeled audio output is produced.
 func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, height int) (filterStr, videoLabel, audioLabel string) {
+	return buildFilterComplexWithAudio(doc, clips, width, height, true)
+}
+
+// buildFilterComplexWithAudio lets audio-disabled exports omit audio filter
+// outputs entirely. FFmpeg rejects a labeled filter output that is not mapped,
+// so building the audio branch and then mapping video alone is not valid.
+func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, width, height int, includeAudio bool) (filterStr, videoLabel, audioLabel string) {
 	var parts []string
 
 	// ── Visual chain: media overlays and text interleaved in layer order ────
@@ -465,7 +522,7 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 		if item.media == nil {
 			// A callout can carry both a shape and a label: the box composites
 			// beneath its own text.
-			if item.clip.Shape != nil && item.clip.Shape.Kind == ShapeKindBlur {
+			if item.clip.Shape != nil && (item.clip.Shape.Kind == ShapeKindBlur || item.clip.Shape.Kind == ShapeKindPixelate) {
 				if blurParts, outLabel := blurRegionParts(prevV, item.clip, *item.clip.Shape, width, height, textIdx); len(blurParts) > 0 {
 					parts = append(parts, blurParts...)
 					prevV = outLabel
@@ -496,13 +553,20 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 		endS := float64(rc.clip.StartMS+rc.clip.DurationMS) / 1000.0
 		trimInS := float64(rc.clip.TrimInMS) / 1000.0
 		durS := float64(rc.clip.DurationMS) / 1000.0
+		sourceDurS := float64(sourceDurationFor(rc.clip, rc.clip.DurationMS)) / 1000.0
+		playbackRate := clipPlaybackRate(rc.clip)
 		tr := parseClipTransform(rc.clip.Transform)
 
 		var chain []string
 		if rc.isImage {
 			chain = append(chain, "loop=loop=-1:size=1:start=0", fmt.Sprintf("trim=duration=%.3f", durS), "setpts=PTS-STARTPTS")
 		} else {
-			chain = append(chain, fmt.Sprintf("trim=start=%.3f:duration=%.3f", trimInS, durS), "setpts=PTS-STARTPTS")
+			chain = append(chain, fmt.Sprintf("trim=start=%.3f:duration=%.3f", trimInS, sourceDurS))
+			if playbackRate == 1 {
+				chain = append(chain, "setpts=PTS-STARTPTS")
+			} else {
+				chain = append(chain, fmt.Sprintf("setpts=(PTS-STARTPTS)/%.6f", playbackRate))
+			}
 		}
 		if tr.hasCrop {
 			chain = append(chain, fmt.Sprintf("crop=iw*%.4f:ih*%.4f:iw*%.4f:ih*%.4f",
@@ -563,43 +627,47 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 	// ── Audio clips ─────────────────────────────────────────────────────────
 	// hasAudio covers audio assets and video assets with an audio stream;
 	// muted tracks/clips were already dropped in resolveMediaClips.
-	var aLabels []string
-	for _, rc := range clips {
-		if !rc.hasAudio {
-			continue
+	if includeAudio {
+		var aLabels []string
+		for _, rc := range clips {
+			if !rc.hasAudio {
+				continue
+			}
+			aLabel := fmt.Sprintf("[a%d]", rc.inputIdx)
+			trimInS := float64(rc.clip.TrimInMS) / 1000.0
+			durS := float64(rc.clip.DurationMS) / 1000.0
+			sourceDurS := float64(sourceDurationFor(rc.clip, rc.clip.DurationMS)) / 1000.0
+			startMS := rc.clip.StartMS
+			chain := []string{
+				fmt.Sprintf("atrim=start=%.3f:duration=%.3f", trimInS, sourceDurS),
+				"asetpts=PTS-STARTPTS",
+			}
+			chain = append(chain, atempoFilters(clipPlaybackRate(rc.clip))...)
+			// Volume keyframes override the static volume (matching the preview).
+			// The retimed stream starts at 0, so keyframe time is `t` directly.
+			if expr := positionKeyframeExpr(rc.clip.Keyframes, "volume", 0); expr != "" {
+				chain = append(chain, fmt.Sprintf("volume=volume='%s':eval=frame", expr))
+			} else if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
+				chain = append(chain, fmt.Sprintf("volume=%.3f", clampFloat(*rc.clip.Volume, 0, 2)))
+			}
+			fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
+			if fadeInS > 0 {
+				chain = append(chain, fmt.Sprintf("afade=t=in:st=0:d=%.3f", fadeInS))
+			}
+			if fadeOutS > 0 {
+				chain = append(chain, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f", durS-fadeOutS, fadeOutS))
+			}
+			chain = append(chain, fmt.Sprintf("adelay=%d|%d", startMS, startMS))
+			parts = append(parts, fmt.Sprintf("[%d:a]%s%s", rc.inputIdx, strings.Join(chain, ","), aLabel))
+			aLabels = append(aLabels, aLabel)
 		}
-		aLabel := fmt.Sprintf("[a%d]", rc.inputIdx)
-		trimInS := float64(rc.clip.TrimInMS) / 1000.0
-		durS := float64(rc.clip.DurationMS) / 1000.0
-		startMS := rc.clip.StartMS
-		chain := []string{
-			fmt.Sprintf("atrim=start=%.3f:duration=%.3f", trimInS, durS),
-			"asetpts=PTS-STARTPTS",
+		if len(aLabels) > 1 {
+			audioLabel = "[final_audio]"
+			parts = append(parts, strings.Join(aLabels, "")+
+				fmt.Sprintf("amix=inputs=%d:normalize=0:dropout_transition=0[final_audio]", len(aLabels)))
+		} else if len(aLabels) == 1 {
+			audioLabel = aLabels[0]
 		}
-		// Volume keyframes override the static volume (matching the preview).
-		// asetpts rebased the stream to 0, so keyframe time is `t` directly.
-		if expr := positionKeyframeExpr(rc.clip.Keyframes, "volume", 0); expr != "" {
-			chain = append(chain, fmt.Sprintf("volume=volume='%s':eval=frame", expr))
-		} else if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
-			chain = append(chain, fmt.Sprintf("volume=%.3f", clampFloat(*rc.clip.Volume, 0, 2)))
-		}
-		fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
-		if fadeInS > 0 {
-			chain = append(chain, fmt.Sprintf("afade=t=in:st=0:d=%.3f", fadeInS))
-		}
-		if fadeOutS > 0 {
-			chain = append(chain, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f", durS-fadeOutS, fadeOutS))
-		}
-		chain = append(chain, fmt.Sprintf("adelay=%d|%d", startMS, startMS))
-		parts = append(parts, fmt.Sprintf("[%d:a]%s%s", rc.inputIdx, strings.Join(chain, ","), aLabel))
-		aLabels = append(aLabels, aLabel)
-	}
-	if len(aLabels) > 1 {
-		audioLabel = "[final_audio]"
-		parts = append(parts, strings.Join(aLabels, "")+
-			fmt.Sprintf("amix=inputs=%d:normalize=0:dropout_transition=0[final_audio]", len(aLabels)))
-	} else if len(aLabels) == 1 {
-		audioLabel = aLabels[0]
 	}
 
 	return strings.Join(parts, ";"), videoLabel, audioLabel
@@ -665,6 +733,18 @@ func blurRegionParts(prev string, clip TimelineClip, shape TimelineShape, width,
 	baseLabel := fmt.Sprintf("[bbb%d]", idx)
 	blurLabel := fmt.Sprintf("[bbl%d]", idx)
 	outLabel := fmt.Sprintf("[t%d_v]", idx)
+	if shape.Kind == ShapeKindPixelate {
+		// Mosaic redaction: shrink the region by the block size and scale it
+		// back up with nearest-neighbor so each block becomes one flat cell.
+		block := maxInt(2, radius)
+		downW := maxInt(1, boxW/block)
+		downH := maxInt(1, boxH/block)
+		return []string{
+			prev + "split" + srcLabel + baseLabel,
+			fmt.Sprintf("%scrop=%d:%d:%d:%d,scale=%d:%d,scale=%d:%d:flags=neighbor%s", srcLabel, boxW, boxH, x, y, downW, downH, boxW, boxH, blurLabel),
+			fmt.Sprintf("%s%soverlay=%d:%d:enable='between(t\\,%.3f\\,%.3f)'%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),
+		}, outLabel
+	}
 	return []string{
 		prev + "split" + srcLabel + baseLabel,
 		fmt.Sprintf("%scrop=%d:%d:%d:%d,boxblur=%d%s", srcLabel, boxW, boxH, x, y, radius, blurLabel),
@@ -700,13 +780,20 @@ func drawBoxFilter(clip TimelineClip, shape TimelineShape, width, height int) st
 	case ShapeKindHighlight:
 		color := ffmpegColor(shape.Fill, "0xFACC15")
 		return fmt.Sprintf("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@%.3f:t=fill:%s", x, y, boxW, boxH, color, opacity, enable)
-	case ShapeKindRectangle:
+	case ShapeKindRectangle, ShapeKindRoundedRectangle:
+		// Rounded rectangles export with square corners — drawbox cannot
+		// round; the capability matrix reports this as partial.
 		color := ffmpegColor(shape.Stroke, "0xF59E0B")
 		thickness := int(shape.StrokeWidth + 0.5)
 		if thickness <= 0 {
 			thickness = 4
 		}
 		return fmt.Sprintf("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@%.3f:t=%d:%s", x, y, boxW, boxH, color, opacity, thickness, enable)
+	case ShapeKindLabel:
+		// Label callouts export as a filled box; their text renders through
+		// the regular drawtext pass that follows the shape in the chain.
+		color := ffmpegColor(shape.Fill, "0x1E293B")
+		return fmt.Sprintf("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@%.3f:t=fill:%s", x, y, boxW, boxH, color, opacity, enable)
 	default:
 		return ""
 	}
@@ -898,6 +985,28 @@ func slideTransitionExpr(clip TimelineClip, startS, endS float64) (xOff, yOff st
 		return xOff, yOff
 	}
 	return "", ""
+}
+
+// atempoFilters returns a product of FFmpeg atempo stages for the requested
+// rate. Factoring through 0.5–2.0 works across older FFmpeg builds and keeps
+// audio pitch-preserving while matching the video setpts retime.
+func atempoFilters(rate float64) []string {
+	if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return nil
+	}
+	var filters []string
+	for rate < 0.5-1e-9 {
+		filters = append(filters, "atempo=0.500000")
+		rate /= 0.5
+	}
+	for rate > 2+1e-9 {
+		filters = append(filters, "atempo=2.000000")
+		rate /= 2
+	}
+	if math.Abs(rate-1) > 1e-9 {
+		filters = append(filters, fmt.Sprintf("atempo=%.6f", rate))
+	}
+	return filters
 }
 
 // clipFadeSeconds combines explicit fade_in/fade_out with fade-style

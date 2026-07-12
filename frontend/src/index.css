@@ -165,6 +165,44 @@ html, body, #root {
   border: 1px solid rgba(var(--primary-rgb), 0.1);
 }
 
+/* ---- Video Edit Studio ---- */
+
+.video-edit-shell {
+  --color-primary: #d98b1f;
+  --color-primary-hover: #f0a437;
+  --color-primary-glow: rgba(217, 139, 31, 0.18);
+  --color-accent: #8b5cf6;
+  --color-accent-glow: rgba(139, 92, 246, 0.12);
+  --primary-rgb: 217, 139, 31;
+  --accent-rgb: 139, 92, 246;
+
+  --color-surface: #100d09;
+  --color-surface-raised: #17120c;
+  --color-surface-alt: #1d170f;
+  --color-surface-hover: #2a2116;
+  --color-surface-glass: rgba(23, 18, 12, 0.86);
+  --color-border: #332719;
+  --color-border-subtle: #251d13;
+  --color-border-focus: #d98b1f;
+  --color-text: #f5ecdf;
+  --color-text-secondary: #d7c7ae;
+  --color-text-muted: #9f8b70;
+
+  background:
+    radial-gradient(circle at 20% 0%, rgba(217, 139, 31, 0.07), transparent 32%),
+    linear-gradient(180deg, #120e09 0%, #0d0b08 100%);
+}
+
+.video-edit-shell input[type="range"] {
+  accent-color: var(--color-primary);
+}
+
+.video-edit-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 36%),
+    var(--color-surface-raised);
+}
+
 /* ---- Gradient Text ---- */
 
 .gradient-text {

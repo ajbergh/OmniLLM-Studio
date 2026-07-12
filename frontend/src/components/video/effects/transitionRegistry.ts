@@ -1,3 +1,8 @@
+/**
+ * Transition registry — drives the transition browser, inspector rows, and
+ * export-support badges. Export support must track
+ * backend/internal/video/renderer.go.
+ */
 import type { VideoTimelineTransition } from '../../../types/video';
 
 export type TransitionTypeKey = VideoTimelineTransition['type'];

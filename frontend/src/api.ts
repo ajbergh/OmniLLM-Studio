@@ -1572,6 +1572,11 @@ export const videoApi = {
       method: 'POST',
     }),
 
+  deleteRenderJob: (jobId: string) =>
+    apiFetch<{ status: string }>(`/video/render-jobs/${encodeURIComponent(jobId)}`, {
+      method: 'DELETE',
+    }),
+
   rendererCapabilities: () =>
     apiFetch<VideoRendererCapabilities>('/video/render/capabilities'),
 

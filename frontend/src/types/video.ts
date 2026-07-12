@@ -241,16 +241,54 @@ export interface VideoTimelineText {
   params?: Record<string, unknown>;
 }
 
+export type VideoTimelineShapeKind =
+  | 'rectangle'
+  | 'highlight'
+  | 'blur'
+  // Annotation kinds. blur/pixelate/rectangle/highlight/rounded_rectangle/label
+  // export (rounded corners flatten to square); the rest are preview-only.
+  | 'rounded_rectangle'
+  | 'ellipse'
+  | 'arrow'
+  | 'line'
+  | 'speech_bubble'
+  | 'spotlight'
+  | 'pixelate'
+  | 'checkmark'
+  | 'x_mark'
+  | 'step_marker'
+  | 'label';
+
 /** Parameterized callout/annotation box; dimensions in canvas pixels, position via the clip transform. */
 export interface VideoTimelineShape {
-  kind: 'rectangle' | 'highlight' | 'blur';
+  kind: VideoTimelineShapeKind;
   width?: number;
   height?: number;
   fill?: string;
   stroke?: string;
   stroke_width?: number;
-  /** Blur-region radius (1–50, default 12). */
+  /** Blur radius or pixelate block size (1–50, default 12). */
   blur_radius?: number;
+  /** Corner rounding for rounded rectangles / speech bubbles / labels (0–200, preview-only at export). */
+  corner_radius?: number;
+}
+
+/** Sampled cursor position (canvas px from top-left), clip-relative in time. */
+export interface VideoTimelineCursorEvent {
+  time_ms: number;
+  x: number;
+  y: number;
+  click?: boolean;
+}
+
+/** Cursor metadata captured with screen recordings; persisted, preview-only at export. */
+export interface VideoTimelineCursor {
+  visible?: boolean;
+  scale?: number;
+  highlight?: boolean;
+  click_rings?: boolean;
+  smoothing?: boolean;
+  events?: VideoTimelineCursorEvent[];
 }
 
 export interface VideoTimelineEffect {
@@ -292,6 +330,11 @@ export interface VideoTimelineClip {
   duration_ms: number;
   trim_in_ms: number;
   trim_out_ms: number;
+  /**
+   * Constant source playback rate. Timeline duration stays in output time;
+   * the consumed source window is duration_ms * playback_rate.
+   */
+  playback_rate?: number;
   z_index?: number;
   group_id?: string;
   /** Silences this clip's audio without touching volume. */
@@ -304,6 +347,7 @@ export interface VideoTimelineClip {
   fade_out_ms?: number;
   text?: VideoTimelineText;
   shape?: VideoTimelineShape;
+  cursor?: VideoTimelineCursor;
   effects: VideoTimelineEffect[];
   transitions?: VideoTimelineTransition[];
   keyframes: VideoTimelineKeyframe[];
@@ -363,6 +407,15 @@ export interface VideoExportSettings {
   include_audio: boolean;
   register_in_file_library?: boolean;
   estimated_duration_ms?: number;
+  /** Draw caption-track text into the frame (default true when omitted). */
+  burn_in_captions?: boolean;
+  /** Also write captions as a sibling asset: '', 'srt', or 'vtt'. */
+  sidecar_captions?: '' | 'srt' | 'vtt';
+  /** Export only this timeline window when end > start. */
+  range_start_ms?: number;
+  range_end_ms?: number;
+  /** Audio bitrate override in kbps (32–512). */
+  audio_bitrate_kbps?: number;
 }
 
 export interface VideoRenderJob {
@@ -419,15 +472,21 @@ export interface VideoStoryboardResponse {
 }
 
 export interface VideoEditOperation {
-  type: 'set_canvas' | 'set_duration' | 'trim_clip' | 'add_text_clip' | string;
+  type: 'set_canvas' | 'set_duration' | 'trim_clip' | 'add_text_clip' | 'move_clip' | 'delete_clip' | 'set_volume' | 'add_marker' | 'add_asset_clip' | 'set_transform' | string;
   clip_id?: string;
   track_id?: string;
+  asset_id?: string;
   start_ms?: number;
   duration_ms?: number;
   text?: string;
   width?: number;
   height?: number;
   fps?: number;
+  volume?: number;
+  x?: number;
+  y?: number;
+  scale?: number;
+  opacity?: number;
 }
 
 export interface VideoEditPlan {

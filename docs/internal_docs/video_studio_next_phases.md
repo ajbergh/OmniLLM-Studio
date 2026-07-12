@@ -1,6 +1,13 @@
 # Video Studio Next Phases
 
-_Last updated: 2026-06-10_
+_Last updated: 2026-06-11_
+
+> **Superseded (2026-06-11):** the Camtasia-quality enhancement pass on the `feat_video_studio_enhance_v2` branch is tracked in
+> [video-edit-studio-camtasia-quality-copilot-prompt-v2.md](video-edit-studio-camtasia-quality-copilot-prompt-v2.md), which carries a
+> verified current-state audit and an implementation-status header covering all ten of its phases (ripple/gap editing, 8-handle canvas
+> manipulation, annotation library, audio envelopes/ducking, transcript captions + render-time sidecars, effect/transition browsers and
+> keyframe lane, export validation/range/codecs, screen/camera/voiceover recording, assistant plan diffs/recipes, and right-rail tabs).
+> Treat this file as historical context for the earlier generation-workflow phases.
 
 ## Purpose
 

@@ -362,7 +362,7 @@ function App() {
             <div className="flex min-h-11 items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-text-muted">
-                  {appMode === 'image' ? 'Image Studio' : appMode === 'music' ? 'Music Studio' : appMode === 'video' ? 'Video Studio' : appMode === 'video-edit' ? 'Video Edit Studio' : 'Chat Studio'}
+                  {appMode === 'image' ? 'Image Studio' : appMode === 'music' ? 'Music Studio' : appMode === 'video' ? 'Video Studio' : appMode === 'video-edit' ? 'Edit Studio' : 'Chat Studio'}
                 </p>
               </div>
 

@@ -1,8 +1,20 @@
+// Package video implements Video Studio (AI generation across provider
+// adapters) and Video Edit Studio (neutral timeline documents, FFmpeg
+// rendering, assistant edit planning).
+//
+// This file defines the timeline document schema and its invariants:
+// ValidateTimelineDocument normalizes and rejects documents before they are
+// saved or rendered, UpgradeTimelineDocument steps older schema versions
+// forward, and pure transforms (SliceTimelineRange, StripCaptionOverlays)
+// derive render-time variants without mutating the source document. The
+// frontend mirror of these structs lives in frontend/src/types/video.ts and
+// must stay field-for-field in sync (snake_case JSON).
 package video
 
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -29,6 +41,13 @@ const (
 // can read and write. Documents from future builds fail with an actionable
 // error instead of being silently mangled.
 const CurrentTimelineVersion = 1
+
+const (
+	// Playback-rate bounds keep browser preview and FFmpeg atempo behavior in
+	// a predictable range. A missing/zero value is the v1-compatible 1x rate.
+	MinPlaybackRate = 0.25
+	MaxPlaybackRate = 4.0
+)
 
 const (
 	EffectTypeBlur           = "blur"
@@ -59,12 +78,38 @@ const (
 	ShapeKindRectangle = "rectangle"
 	ShapeKindHighlight = "highlight"
 	ShapeKindBlur      = "blur"
+	// Annotation kinds. ShapeKindPixelate exports via crop+downscale+upscale
+	// (mosaic redaction); ShapeKindRoundedRectangle and ShapeKindLabel export
+	// as square-corner drawbox approximations. The remaining annotation kinds
+	// are preview-only until the renderer gains vector drawing.
+	ShapeKindRoundedRectangle = "rounded_rectangle"
+	ShapeKindEllipse          = "ellipse"
+	ShapeKindArrow            = "arrow"
+	ShapeKindLine             = "line"
+	ShapeKindSpeechBubble     = "speech_bubble"
+	ShapeKindSpotlight        = "spotlight"
+	ShapeKindPixelate         = "pixelate"
+	ShapeKindCheckmark        = "checkmark"
+	ShapeKindXMark            = "x_mark"
+	ShapeKindStepMarker       = "step_marker"
+	ShapeKindLabel            = "label"
 )
 
 var knownShapeKinds = map[string]bool{
-	ShapeKindRectangle: true,
-	ShapeKindHighlight: true,
-	ShapeKindBlur:      true,
+	ShapeKindRectangle:        true,
+	ShapeKindHighlight:        true,
+	ShapeKindBlur:             true,
+	ShapeKindRoundedRectangle: true,
+	ShapeKindEllipse:          true,
+	ShapeKindArrow:            true,
+	ShapeKindLine:             true,
+	ShapeKindSpeechBubble:     true,
+	ShapeKindSpotlight:        true,
+	ShapeKindPixelate:         true,
+	ShapeKindCheckmark:        true,
+	ShapeKindXMark:            true,
+	ShapeKindStepMarker:       true,
+	ShapeKindLabel:            true,
 }
 
 var knownEffectTypes = map[string]bool{
@@ -139,14 +184,15 @@ type TimelineTrack struct {
 }
 
 type TimelineClip struct {
-	ID         string `json:"id"`
-	AssetID    string `json:"asset_id,omitempty"`
-	StartMS    int64  `json:"start_ms"`
-	DurationMS int64  `json:"duration_ms"`
-	TrimInMS   int64  `json:"trim_in_ms"`
-	TrimOutMS  int64  `json:"trim_out_ms"`
-	ZIndex     *int   `json:"z_index,omitempty"`
-	GroupID    string `json:"group_id,omitempty"`
+	ID           string  `json:"id"`
+	AssetID      string  `json:"asset_id,omitempty"`
+	StartMS      int64   `json:"start_ms"`
+	DurationMS   int64   `json:"duration_ms"`
+	TrimInMS     int64   `json:"trim_in_ms"`
+	TrimOutMS    int64   `json:"trim_out_ms"`
+	PlaybackRate float64 `json:"playback_rate,omitempty"`
+	ZIndex       *int    `json:"z_index,omitempty"`
+	GroupID      string  `json:"group_id,omitempty"`
 	// Muted silences this clip's audio contribution without touching Volume.
 	Muted bool `json:"muted,omitempty"`
 	// AudioOnly suppresses a clip's visual output so a video asset can act as
@@ -158,6 +204,7 @@ type TimelineClip struct {
 	FadeOutMS   int64                `json:"fade_out_ms,omitempty"`
 	Text        *TimelineText        `json:"text,omitempty"`
 	Shape       *TimelineShape       `json:"shape,omitempty"`
+	Cursor      *TimelineCursor      `json:"cursor,omitempty"`
 	Effects     []TimelineEffect     `json:"effects"`
 	Transitions []TimelineTransition `json:"transitions,omitempty"`
 	Keyframes   []TimelineKeyframe   `json:"keyframes"`
@@ -172,8 +219,33 @@ type TimelineShape struct {
 	Fill        string  `json:"fill,omitempty"`
 	Stroke      string  `json:"stroke,omitempty"`
 	StrokeWidth float64 `json:"stroke_width,omitempty"`
-	// BlurRadius applies to blur-region shapes (clamped 1–50, default 12).
+	// BlurRadius applies to blur/pixelate regions: blur radius or pixel block
+	// size respectively (clamped 1–50, default 12).
 	BlurRadius float64 `json:"blur_radius,omitempty"`
+	// CornerRadius applies to rounded rectangles, speech bubbles, and labels
+	// (clamped 0–200). Preview-only; exports draw square corners.
+	CornerRadius float64 `json:"corner_radius,omitempty"`
+}
+
+// TimelineCursor carries cursor metadata captured with screen recordings so
+// cursor effects can layer onto footage. Persisted but preview-only today —
+// the renderer reports it as unsupported until export support lands.
+type TimelineCursor struct {
+	Visible    bool                  `json:"visible,omitempty"`
+	Scale      float64               `json:"scale,omitempty"`
+	Highlight  bool                  `json:"highlight,omitempty"`
+	ClickRings bool                  `json:"click_rings,omitempty"`
+	Smoothing  bool                  `json:"smoothing,omitempty"`
+	Events     []TimelineCursorEvent `json:"events,omitempty"`
+}
+
+// TimelineCursorEvent is a sampled cursor position (canvas pixels from the
+// top-left), clip-relative in time. Click marks press events for click rings.
+type TimelineCursorEvent struct {
+	TimeMS int64   `json:"time_ms"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Click  bool    `json:"click,omitempty"`
 }
 
 type TimelineMarker struct {
@@ -219,6 +291,147 @@ type TimelineKeyframe struct {
 	TimeMS   int64   `json:"time_ms"`
 	Value    float64 `json:"value"`
 	Easing   string  `json:"easing,omitempty"`
+}
+
+// clipPlaybackRate returns the normalized constant source playback rate. A
+// zero value represents legacy timeline documents and therefore means 1x.
+func clipPlaybackRate(clip TimelineClip) float64 {
+	if clip.PlaybackRate == 0 {
+		return 1
+	}
+	return clip.PlaybackRate
+}
+
+// sourceDurationFor converts an output-timeline duration into the amount of
+// source media consumed by a clip at its constant playback rate.
+func sourceDurationFor(clip TimelineClip, timelineDurationMS int64) int64 {
+	if timelineDurationMS <= 0 {
+		return 0
+	}
+	duration := int64(math.Round(float64(timelineDurationMS) * clipPlaybackRate(clip)))
+	if duration < 1 {
+		return 1
+	}
+	return duration
+}
+
+// SliceTimelineRange returns a copy of the document trimmed to the output-time
+// window [startMS, endMS). Clips outside the window drop; straddling clips
+// advance their source trim by playback_rate × lead and rebase clip-relative
+// keyframes and cursor events. Everything then shifts so the window starts at
+// 0. Used for export ranges without mutating the saved source document.
+func SliceTimelineRange(doc TimelineDocument, startMS, endMS int64) TimelineDocument {
+	if endMS <= startMS || startMS < 0 {
+		return doc
+	}
+	if endMS > doc.DurationMS && doc.DurationMS > 0 {
+		endMS = doc.DurationMS
+	}
+	if endMS <= startMS {
+		return doc
+	}
+	out := doc
+	out.Tracks = make([]TimelineTrack, len(doc.Tracks))
+	for ti, track := range doc.Tracks {
+		copied := track
+		copied.Clips = nil
+		for _, clip := range track.Clips {
+			clipEnd := clip.StartMS + clip.DurationMS
+			if clipEnd <= startMS || clip.StartMS >= endMS {
+				continue
+			}
+			next := clip
+			if lead := startMS - next.StartMS; lead > 0 {
+				next.TrimInMS += sourceDurationFor(next, lead)
+				next.DurationMS -= lead
+				next.StartMS = startMS
+				next.FadeInMS = 0
+				var keyframes []TimelineKeyframe
+				for _, keyframe := range next.Keyframes {
+					if keyframe.TimeMS < lead {
+						continue
+					}
+					rebased := keyframe
+					rebased.TimeMS -= lead
+					keyframes = append(keyframes, rebased)
+				}
+				next.Keyframes = keyframes
+				if next.Cursor != nil {
+					events := make([]TimelineCursorEvent, 0, len(next.Cursor.Events))
+					for _, event := range next.Cursor.Events {
+						if event.TimeMS < lead {
+							continue
+						}
+						rebased := event
+						rebased.TimeMS -= lead
+						events = append(events, rebased)
+					}
+					cursor := *next.Cursor
+					cursor.Events = events
+					next.Cursor = &cursor
+				}
+			}
+			if over := (next.StartMS + next.DurationMS) - endMS; over > 0 {
+				next.DurationMS -= over
+				next.FadeOutMS = 0
+				var keyframes []TimelineKeyframe
+				for _, keyframe := range next.Keyframes {
+					if keyframe.TimeMS > next.DurationMS {
+						continue
+					}
+					keyframes = append(keyframes, keyframe)
+				}
+				next.Keyframes = keyframes
+				if next.Cursor != nil {
+					events := make([]TimelineCursorEvent, 0, len(next.Cursor.Events))
+					for _, event := range next.Cursor.Events {
+						if event.TimeMS <= next.DurationMS {
+							events = append(events, event)
+						}
+					}
+					cursor := *next.Cursor
+					cursor.Events = events
+					next.Cursor = &cursor
+				}
+			}
+			next.TrimOutMS = next.TrimInMS + sourceDurationFor(next, next.DurationMS)
+			next.StartMS -= startMS
+			copied.Clips = append(copied.Clips, next)
+		}
+		if copied.Clips == nil {
+			copied.Clips = []TimelineClip{}
+		}
+		out.Tracks[ti] = copied
+	}
+	out.Markers = nil
+	for _, marker := range doc.Markers {
+		if marker.TimeMS < startMS || marker.TimeMS >= endMS {
+			continue
+		}
+		shifted := marker
+		shifted.TimeMS -= startMS
+		out.Markers = append(out.Markers, shifted)
+	}
+	if out.Markers == nil {
+		out.Markers = []TimelineMarker{}
+	}
+	out.DurationMS = endMS - startMS
+	return out
+}
+
+// StripCaptionOverlays returns a copy with caption-track clips removed so the
+// renderer skips burning them into the frame (burn_in_captions=false).
+func StripCaptionOverlays(doc TimelineDocument) TimelineDocument {
+	out := doc
+	out.Tracks = make([]TimelineTrack, len(doc.Tracks))
+	for ti, track := range doc.Tracks {
+		copied := track
+		if track.Type == TrackTypeCaption {
+			copied.Clips = []TimelineClip{}
+		}
+		out.Tracks[ti] = copied
+	}
+	return out
 }
 
 type TimelineImportAssetRequest struct {
@@ -302,6 +515,10 @@ func UpgradeTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 	return doc, nil
 }
 
+// ValidateTimelineDocument upgrades, defaults, and canonicalizes a timeline
+// before persistence or rendering. In particular, duration_ms is output time
+// while trim points are source time, so it normalizes each trim_out_ms from
+// duration_ms × playback_rate.
 func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 	doc, err := UpgradeTimelineDocument(doc)
 	if err != nil {
@@ -396,12 +613,22 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 			if clip.DurationMS <= 0 {
 				return TimelineDocument{}, fmt.Errorf("clip %q duration_ms must be greater than zero", clip.ID)
 			}
+			if clip.PlaybackRate == 0 {
+				clip.PlaybackRate = 1
+			}
+			if math.IsNaN(clip.PlaybackRate) || math.IsInf(clip.PlaybackRate, 0) {
+				return TimelineDocument{}, fmt.Errorf("clip %q playback_rate must be finite", clip.ID)
+			}
+			if clip.PlaybackRate < MinPlaybackRate || clip.PlaybackRate > MaxPlaybackRate {
+				return TimelineDocument{}, fmt.Errorf("clip %q playback_rate must be between %.2g and %.2g", clip.ID, MinPlaybackRate, MaxPlaybackRate)
+			}
 			if clip.TrimInMS < 0 || clip.TrimOutMS < 0 {
 				return TimelineDocument{}, fmt.Errorf("clip %q trim values cannot be negative", clip.ID)
 			}
-			if clip.TrimOutMS == 0 {
-				clip.TrimOutMS = clip.TrimInMS + clip.DurationMS
-			}
+			// duration_ms is output-timeline time while trims are source-media
+			// time. Keep the redundant out-point canonical so every editing and
+			// rendering path consumes the same source window.
+			clip.TrimOutMS = clip.TrimInMS + sourceDurationFor(*clip, clip.DurationMS)
 			clip.GroupID = strings.TrimSpace(clip.GroupID)
 			if clip.Transform == nil && track.Type != TrackTypeAudio && track.Type != TrackTypeMusic {
 				clip.Transform = defaultTransform()
@@ -424,12 +651,30 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 					clip.Shape.Height = 8192
 				}
 				clip.Shape.StrokeWidth = clampFloat(clip.Shape.StrokeWidth, 0, 100)
-				if clip.Shape.Kind == ShapeKindBlur {
+				if clip.Shape.Kind == ShapeKindBlur || clip.Shape.Kind == ShapeKindPixelate {
 					if clip.Shape.BlurRadius <= 0 {
 						clip.Shape.BlurRadius = 12
 					}
 					clip.Shape.BlurRadius = clampFloat(clip.Shape.BlurRadius, 1, 50)
 				}
+				clip.Shape.CornerRadius = clampFloat(clip.Shape.CornerRadius, 0, 200)
+			}
+			if clip.Cursor != nil {
+				if clip.Cursor.Scale <= 0 {
+					clip.Cursor.Scale = 1
+				}
+				clip.Cursor.Scale = clampFloat(clip.Cursor.Scale, 0.25, 4)
+				events := clip.Cursor.Events[:0]
+				for _, event := range clip.Cursor.Events {
+					if event.TimeMS < 0 {
+						continue
+					}
+					events = append(events, event)
+				}
+				clip.Cursor.Events = events
+				sort.SliceStable(clip.Cursor.Events, func(i, j int) bool {
+					return clip.Cursor.Events[i].TimeMS < clip.Cursor.Events[j].TimeMS
+				})
 			}
 			if clip.Effects == nil {
 				clip.Effects = []TimelineEffect{}
@@ -581,14 +826,15 @@ func AddAssetToTimeline(doc TimelineDocument, asset models.VideoAsset, req Timel
 	trimOut := duration
 	volume := 1.0
 	clip := TimelineClip{
-		ID:         "clip-" + uuid.New().String(),
-		AssetID:    asset.ID,
-		StartMS:    start,
-		DurationMS: duration,
-		TrimInMS:   0,
-		TrimOutMS:  trimOut,
-		Effects:    []TimelineEffect{},
-		Keyframes:  []TimelineKeyframe{},
+		ID:           "clip-" + uuid.New().String(),
+		AssetID:      asset.ID,
+		StartMS:      start,
+		DurationMS:   duration,
+		TrimInMS:     0,
+		TrimOutMS:    trimOut,
+		PlaybackRate: 1,
+		Effects:      []TimelineEffect{},
+		Keyframes:    []TimelineKeyframe{},
 	}
 	if isVisualAssetKind(kind) {
 		clip.Transform = defaultTransform()
@@ -618,15 +864,58 @@ func SplitClipAt(doc TimelineDocument, clipID string, timeMS int64) (TimelineDoc
 			if offset <= 0 || offset >= clip.DurationMS {
 				return TimelineDocument{}, fmt.Errorf("split point must be inside the clip")
 			}
+			sourceOffset := sourceDurationFor(clip, offset)
 			left := clip
 			right := clip
 			left.DurationMS = offset
-			left.TrimOutMS = left.TrimInMS + offset
+			left.TrimOutMS = left.TrimInMS + sourceOffset
+			left.FadeOutMS = 0
+			left.Keyframes = nil
+			for _, keyframe := range clip.Keyframes {
+				if keyframe.TimeMS <= offset {
+					left.Keyframes = append(left.Keyframes, keyframe)
+				}
+			}
+			if left.Keyframes == nil {
+				left.Keyframes = []TimelineKeyframe{}
+			}
 			right.ID = "clip-" + uuid.New().String()
 			right.StartMS = timeMS
 			right.DurationMS = clip.DurationMS - offset
 			right.TrimInMS = left.TrimOutMS
 			right.TrimOutMS = clip.TrimOutMS
+			right.FadeInMS = 0
+			right.Keyframes = nil
+			for _, keyframe := range clip.Keyframes {
+				if keyframe.TimeMS < offset {
+					continue
+				}
+				rebased := keyframe
+				rebased.ID = "keyframe-" + uuid.New().String()
+				rebased.TimeMS -= offset
+				right.Keyframes = append(right.Keyframes, rebased)
+			}
+			if right.Keyframes == nil {
+				right.Keyframes = []TimelineKeyframe{}
+			}
+			if clip.Cursor != nil {
+				leftCursor := *clip.Cursor
+				leftCursor.Events = nil
+				rightCursor := *clip.Cursor
+				rightCursor.Events = nil
+				for _, event := range clip.Cursor.Events {
+					if event.TimeMS <= offset {
+						leftCursor.Events = append(leftCursor.Events, event)
+					}
+					if event.TimeMS >= offset {
+						rebased := event
+						rebased.TimeMS -= offset
+						rightCursor.Events = append(rightCursor.Events, rebased)
+					}
+				}
+				left.Cursor = &leftCursor
+				right.Cursor = &rightCursor
+			}
 			clips := append([]TimelineClip{}, doc.Tracks[ti].Clips[:ci+1]...)
 			clips[ci] = left
 			clips = append(clips, right)

@@ -53,6 +53,15 @@ func (r *VideoRenderJobRepo) GetByID(id string) (*models.VideoRenderJob, error) 
 	return scanVideoRenderJob(row)
 }
 
+// Delete removes a render job record. Output assets are independent rows and
+// survive the job's deletion.
+func (r *VideoRenderJobRepo) Delete(id string) error {
+	if _, err := r.db.Exec(`DELETE FROM video_render_jobs WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete video render job: %w", err)
+	}
+	return nil
+}
+
 func (r *VideoRenderJobRepo) ListByProject(projectID string) ([]models.VideoRenderJob, error) {
 	rows, err := r.db.Query(videoRenderJobSelectSQL+` WHERE project_id = ? ORDER BY created_at DESC`, projectID)
 	if err != nil {

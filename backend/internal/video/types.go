@@ -212,4 +212,15 @@ type ExportSettings struct {
 	IncludeAudio          bool   `json:"include_audio"`
 	RegisterInFileLibrary bool   `json:"register_in_file_library,omitempty"`
 	EstimatedDurationMS   int64  `json:"estimated_duration_ms,omitempty"`
+	// BurnInCaptions controls whether caption-track text draws into the frame.
+	// Nil preserves the historical always-on behavior.
+	BurnInCaptions *bool `json:"burn_in_captions,omitempty"`
+	// SidecarCaptions additionally writes the captions as a sibling asset:
+	// "" (none), "srt", or "vtt".
+	SidecarCaptions string `json:"sidecar_captions,omitempty"`
+	// RangeStartMS/RangeEndMS export only that timeline window when end > start.
+	RangeStartMS int64 `json:"range_start_ms,omitempty"`
+	RangeEndMS   int64 `json:"range_end_ms,omitempty"`
+	// AudioBitrateKbps overrides the encoder's default audio bitrate (32–512).
+	AudioBitrateKbps int `json:"audio_bitrate_kbps,omitempty"`
 }

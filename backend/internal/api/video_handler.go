@@ -757,6 +757,14 @@ func (h *VideoHandler) CancelRenderJob(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, job)
 }
 
+func (h *VideoHandler) DeleteRenderJob(w http.ResponseWriter, r *http.Request) {
+	if err := h.service.DeleteRenderJob(auth.UserIDFromContext(r.Context()), chi.URLParam(r, "jobId")); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 func (h *VideoHandler) EnhancePrompt(w http.ResponseWriter, r *http.Request) {
 	var req video.EnhancePromptRequest
 	if err := decodeJSON(r, &req); err != nil {

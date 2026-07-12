@@ -19,7 +19,7 @@ test('video edit studio core editing flow', async ({ page }) => {
 
   // Media bin and timeline shell appear once the project/timeline load.
   await expect(page.getByRole('heading', { name: 'Media Bin' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Add track' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Add layer' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save timeline' })).toBeVisible();
 
   // Add a text clip (button enables once the timeline is loaded) and check
@@ -28,16 +28,19 @@ test('video edit studio core editing flow', async ({ page }) => {
   await expect(page.getByText(/Scale:/).first()).toBeVisible();
   await expect(page.getByText(/Layer order/).first()).toBeVisible();
 
-  // Caption editor and export/render panel are present in the right sidebar.
+  // Caption editor and export/render panel live behind right-rail tabs.
+  await page.getByRole('tab', { name: 'Captions' }).click();
   await expect(page.getByRole('heading', { name: 'Captions' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Export' })).toBeVisible();
-
-  // Save the timeline explicitly.
-  await page.getByRole('button', { name: 'Save timeline' }).click();
 
   // Add a caption segment at the playhead and confirm it lists in the panel.
   await page.getByRole('button', { name: 'Add at playhead' }).click();
   await expect(page.getByLabel('Caption 1 text')).toHaveValue('New caption');
+
+  await page.getByRole('tab', { name: 'Export' }).click();
+  await expect(page.getByRole('heading', { name: 'Export' })).toBeVisible();
+
+  // Save the timeline explicitly.
+  await page.getByRole('button', { name: 'Save timeline' }).click();
 });
 
 // Right-click context menus: clip menu duplicates and deletes through the
@@ -54,26 +57,38 @@ test('video edit studio clip context menu and clipboard', async ({ page }) => {
 
   // Seed one text clip; it lands on the topmost layer. Timeline clips are the
   // draggable elements — the preview canvas renders the same text separately.
+  // Clip tooltips now append timing ("Title card — 0.0s → 3.0s …").
   await page.getByRole('button', { name: 'Text', exact: true }).click();
-  const clips = page.locator('[draggable="true"][title="Title card"]');
+  const clips = page.locator('[draggable="true"][title^="Title card"]');
   await expect(clips).toHaveCount(1);
 
+  // Autosave responses can fire scroll events that dismiss an open context
+  // menu, so wait for saves to settle and the menu to be visible each time.
+  const savesSettled = () => expect(page.getByText('Saving…')).toHaveCount(0);
+
   // Duplicate via the clip context menu.
+  await savesSettled();
   await clips.first().click({ button: 'right' });
+  await expect(page.getByRole('menu')).toBeVisible();
   await page.getByRole('menuitem', { name: 'Duplicate', exact: true }).click();
   await expect(clips).toHaveCount(2);
 
   // Copy, then paste at the playhead — a third clip appears. The pasted clip
   // lands at the playhead (0ms) covering the original, so later steps target
   // the non-overlapped duplicate at the end of the lane.
+  await savesSettled();
   await clips.last().click({ button: 'right' });
+  await expect(page.getByRole('menu')).toBeVisible();
   await page.getByRole('menuitem', { name: 'Copy', exact: true }).click();
   await clips.last().click({ button: 'right' });
+  await expect(page.getByRole('menu')).toBeVisible();
   await page.getByRole('menuitem', { name: 'Paste at playhead' }).click();
   await expect(clips).toHaveCount(3);
 
   // Delete one through the menu (danger item).
+  await savesSettled();
   await clips.last().click({ button: 'right' });
+  await expect(page.getByRole('menu')).toBeVisible();
   await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
   await expect(clips).toHaveCount(2);
 

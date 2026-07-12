@@ -171,6 +171,60 @@ func TestBuildFilterComplexVolumeKeyframesAndVideoAudio(t *testing.T) {
 	}
 }
 
+func TestBuildFilterComplexConstantPlaybackRate(t *testing.T) {
+	doc := NewEmptyTimeline(1920, 1080, 30)
+	clips := []resolvedClip{{
+		inputIdx: 1,
+		isVideo:  true,
+		hasAudio: true,
+		clip: TimelineClip{
+			ID:           "clip-fast",
+			AssetID:      "asset-video",
+			StartMS:      1000,
+			DurationMS:   4000,
+			TrimInMS:     500,
+			TrimOutMS:    8500,
+			PlaybackRate: 2,
+		},
+	}}
+	filterStr, _, audioLabel := buildFilterComplex(doc, clips, 1920, 1080)
+	for _, expected := range []string{
+		"trim=start=0.500:duration=8.000,setpts=(PTS-STARTPTS)/2.000000",
+		"atrim=start=0.500:duration=8.000,asetpts=PTS-STARTPTS,atempo=2.000000",
+	} {
+		if !strings.Contains(filterStr, expected) {
+			t.Errorf("retimed filter graph missing %q: %s", expected, filterStr)
+		}
+	}
+	if audioLabel == "" {
+		t.Fatalf("retimed video audio should remain connected: %s", filterStr)
+	}
+
+	if got := atempoFilters(0.25); len(got) != 2 || got[0] != "atempo=0.500000" || got[1] != "atempo=0.500000" {
+		t.Fatalf("0.25x atempo factoring wrong: %v", got)
+	}
+	if got := atempoFilters(4); len(got) != 2 || got[0] != "atempo=2.000000" || got[1] != "atempo=2.000000" {
+		t.Fatalf("4x atempo factoring wrong: %v", got)
+	}
+}
+
+func TestBuildFilterComplexOmitsAudioBranchWhenDisabled(t *testing.T) {
+	doc := NewEmptyTimeline(1280, 720, 30)
+	clips := []resolvedClip{{
+		inputIdx: 1,
+		isVideo:  true,
+		hasAudio: true,
+		clip:     TimelineClip{ID: "clip-video", AssetID: "asset-video", DurationMS: 1000, TrimOutMS: 1000},
+	}}
+	filterStr, videoLabel, audioLabel := buildFilterComplexWithAudio(doc, clips, 1280, 720, false)
+	if videoLabel == "" || !strings.Contains(filterStr, "[1:v]") {
+		t.Fatalf("video branch missing from audio-disabled graph: %s", filterStr)
+	}
+	if audioLabel != "" || strings.Contains(filterStr, "[1:a]") || strings.Contains(filterStr, "atrim=") || strings.Contains(filterStr, "amix=") {
+		t.Fatalf("audio-disabled graph contains an audio output (%q): %s", audioLabel, filterStr)
+	}
+}
+
 func TestEffectFiltersChromaKey(t *testing.T) {
 	filters := effectFilters([]TimelineEffect{{
 		ID: "fx", Type: "chroma_key", Enabled: true,
@@ -449,6 +503,9 @@ func TestFFmpegRendererCapabilitiesMatrix(t *testing.T) {
 	}
 	if !byFeature[RendererFeaturePositioning].Supported {
 		t.Errorf("positioning should be reported as supported")
+	}
+	if !byFeature[RendererFeaturePlaybackRate].Supported {
+		t.Errorf("constant playback rate should be reported as supported")
 	}
 	if !byFeature[RendererFeatureKeyframes].Supported || !byFeature[RendererFeatureKeyframes].Partial {
 		t.Errorf("keyframes should be reported as partially supported (position only)")
