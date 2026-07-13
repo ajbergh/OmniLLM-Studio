@@ -158,7 +158,7 @@ Docs: `docs/VIDEO_STUDIO.md`, `docs/VIDEO_STUDIO_ARCHITECTURE.md`, `docs/VIDEO_P
 |----------|--------|
 | **OpenAI** | `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.4-pro`, `gpt-5.2`, `gpt-5.2-pro`, `gpt-5.1`, `gpt-5`, `gpt-5-pro`, `gpt-5-mini`, `gpt-5-nano`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `gpt-4o`, `gpt-4o-mini`, `o3-pro`, `o4-mini`, `o3`, `o3-mini`, `o1`, `o1-mini` |
 | **Anthropic** | `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `claude-sonnet-4-20250514`, `claude-3-7-sonnet-20250219`, `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`, `claude-3-opus-20240229` |
-| **Google Gemini** | `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite`, `gemini-3.1-flash-lite-preview`, `gemini-3-flash-preview`, `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-1.5-pro`, `gemini-1.5-flash` |
+| **Google Gemini** | `gemini-3.5-flash`, `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite`, `gemini-3.1-flash-lite-preview`, `gemini-3-flash-preview`, `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-1.5-pro`, `gemini-1.5-flash` |
 | **Ollama** | Dynamic — any model available in your local Ollama instance (`ollama pull <model>`) |
 | **OpenRouter** | `openai/gpt-5.5`, `openai/gpt-5.4-mini`, `openai/gpt-4.1`, `openai/gpt-4o`, `anthropic/claude-opus-4-7`, `anthropic/claude-sonnet-4-6`, `google/gemini-3.1-pro-preview`, `google/gemini-2.5-pro`, `google/gemini-2.5-flash`, `meta-llama/llama-4-maverick`, `meta-llama/llama-3.3-70b-instruct`, `deepseek/deepseek-r1`, `qwen/qwen3-235b-a22b`, `mistralai/mistral-medium-3-5`, `mistralai/mistral-large-2512`, and 2,000+ additional models via OpenRouter's marketplace |
 | **Groq** | `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `meta-llama/llama-4-scout-17b-16e-instruct`, `moonshotai/kimi-k2-instruct`, `deepseek-r1-distill-llama-70b`, `qwen/qwen3-32b`, `qwen-qwq-32b`, `mistral-saba-24b`, `gemma2-9b-it`, `groq/compound`, `groq/compound-mini` |
@@ -193,7 +193,7 @@ When **Anthropic** is selected, effort levels map to extended thinking `budget_t
 | Provider | Chat Image Models |
 |----------|-------------------|
 | **OpenAI** | `gpt-image-2`, `gpt-image-1.5`, `chatgpt-image-latest`, `gpt-image-1`, `gpt-image-1-mini`, `dall-e-3`, `dall-e-2` |
-| **Google Gemini** | `imagen-4.0-generate-001`, `imagen-4.0-ultra-generate-001`, `imagen-4.0-fast-generate-001`, `imagen-3.0-generate-002`, `imagen-3.0-fast-generate-001`, `gemini-3.1-flash-image-preview`, `gemini-2.5-flash-image` |
+| **Google Gemini** | `gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image`, `gemini-3-pro-image`, `gemini-2.5-flash-image`, `imagen-4.0-generate-001`, `imagen-4.0-ultra-generate-001`, `imagen-4.0-fast-generate-001`, `imagen-3.0-generate-002`, `imagen-3.0-fast-generate-001` |
 | **Together AI** | `google/imagen-4.0-preview`, `google/imagen-4.0-fast`, `google/imagen-4.0-ultra`, `google/flash-image-2.5`, `black-forest-labs/FLUX.1-schnell-Free`, `black-forest-labs/FLUX.1.1-pro`, `black-forest-labs/FLUX.1-kontext-pro`, `black-forest-labs/FLUX.2-pro`, `ByteDance-Seed/Seedream-3.0`, `ByteDance-Seed/Seedream-4.0`, `HiDream-ai/HiDream-I1-Full`, `ideogram/ideogram-3.0`, `stabilityai/stable-diffusion-xl-base-1.0`, and 20+ more |
 | **OpenRouter** | `openai/gpt-image-2`, `openai/dall-e-3`, `openai/gpt-image-1` |
 

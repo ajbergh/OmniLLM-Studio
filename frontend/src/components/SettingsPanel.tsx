@@ -1870,7 +1870,8 @@ function RAGTab() {
                         <option value="WhereIsAI/UAE-Large-V1">UAE-Large-V1</option>
                       </optgroup>
                       <optgroup label="Gemini">
-                        <option value="text-embedding-004">text-embedding-004</option>
+                        <option value="gemini-embedding-2">gemini-embedding-2</option>
+                        <option value="gemini-embedding-001">gemini-embedding-001</option>
                       </optgroup>
                       <optgroup label="Ollama (Local)">
                         <option value="nomic-embed-text">nomic-embed-text</option>

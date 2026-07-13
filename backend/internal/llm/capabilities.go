@@ -137,8 +137,9 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 				"1344x576",  // 21:9
 			},
 			ImageModels: []string{
-				"gemini-3.1-flash-image-preview",
-				"gemini-3-pro-image-preview",
+				"gemini-3.1-flash-image",
+				"gemini-3.1-flash-lite-image",
+				"gemini-3-pro-image",
 				"gemini-2.5-flash-image",
 				"imagen-4.0-generate-001",
 				"imagen-4.0-ultra-generate-001",
@@ -146,9 +147,9 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 				"imagen-3.0-generate-002",
 				"imagen-3.0-fast-generate-001",
 			},
-			DefaultImageModel: "gemini-2.5-flash-image",
+			DefaultImageModel: "gemini-3.1-flash-image",
 			ModelOverrides: map[string]ModelImageCapabilities{
-				"gemini-3.1-flash-image-preview": {
+				"gemini-3.1-flash-image": {
 					// Gemini 3.1 Flash adds 1:4, 4:1, 1:8, 8:1 aspect ratios.
 					SupportedSizes: []string{
 						"1024x1024", // 1:1

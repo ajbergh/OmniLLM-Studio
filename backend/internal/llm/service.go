@@ -1059,7 +1059,7 @@ func getDefaultImageModel(providerType string) string {
 	case "openrouter":
 		return "google/gemini-2.5-flash-image"
 	case "gemini":
-		return "gemini-2.0-flash-preview-image-generation"
+		return "gemini-3.1-flash-image"
 	default:
 		return ""
 	}

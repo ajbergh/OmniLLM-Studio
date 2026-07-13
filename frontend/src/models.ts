@@ -47,6 +47,7 @@ const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
   },
   gemini: {
     chat: [
+      'gemini-3.5-flash',
       'gemini-3.1-pro-preview',
       'gemini-3.1-flash-lite',
       'gemini-3.1-flash-lite-preview',
@@ -62,8 +63,9 @@ const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
       'gemini-1.5-flash',
     ],
     image: [
-      'gemini-3.1-flash-image-preview',
-      'gemini-3-pro-image-preview',
+      'gemini-3.1-flash-image',
+      'gemini-3.1-flash-lite-image',
+      'gemini-3-pro-image',
       'gemini-2.5-flash-image',
       'imagen-4.0-generate-001',
       'imagen-4.0-ultra-generate-001',
