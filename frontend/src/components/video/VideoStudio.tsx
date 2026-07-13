@@ -7,6 +7,9 @@ import {
   Download,
   Film,
   GitBranch,
+  Image as ImageIcon,
+  Images,
+  Info,
   Library,
   ListPlus,
   Loader2,
@@ -16,7 +19,10 @@ import {
   Scissors,
   Sparkles,
   Square,
+  Video,
+  Volume2,
   WandSparkles,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, videoApi, videoAssetUrl } from '../../api';
@@ -167,6 +173,20 @@ const PROMPT_VARIANTS: Array<{ kind: PromptVariantKind; label: string; aspectRat
   { kind: 'documentary', label: 'Documentary' },
 ];
 
+type OmniMode = NonNullable<VideoPromptForm['generation_mode']>;
+
+const OMNI_MODES: Array<{
+  id: OmniMode;
+  label: string;
+  description: string;
+  icon: typeof Film;
+}> = [
+  { id: 'text_to_video', label: 'Create', description: 'Start from a written scene', icon: Sparkles },
+  { id: 'image_to_video', label: 'Animate', description: 'Bring one image to life', icon: ImageIcon },
+  { id: 'reference_to_video', label: 'References', description: 'Keep subjects and style consistent', icon: Images },
+  { id: 'edit', label: 'Edit', description: 'Change a video conversationally', icon: Video },
+];
+
 function buildClientGenerationValidation(
   provider: VideoProviderKey,
   model: VideoModel | undefined,
@@ -198,6 +218,26 @@ function buildClientGenerationValidation(
   const hasLastFrame = Boolean(form.last_frame_asset_id);
   const hasSourceVideo = Boolean(form.source_video_asset_id);
   const hasReferenceImages = referenceIds.length > 0;
+  const isOmni = provider === 'gemini' && model.id === 'gemini-omni-flash-preview';
+  const omniMode = form.generation_mode || 'text_to_video';
+
+  if (isOmni) {
+    if (omniMode === 'text_to_video' && (hasStartImage || hasReferenceImages || hasSourceVideo)) {
+      addError('generation_mode', 'omni_text_inputs_invalid', 'Text to video does not use source media. Choose another mode.');
+    }
+    if (omniMode === 'image_to_video' && !hasStartImage && form.prompt.trim()) {
+      addError('start_image_asset_id', 'omni_start_image_required', 'Choose a start image to animate.');
+    }
+    if (omniMode === 'reference_to_video' && !hasReferenceImages && form.prompt.trim()) {
+      addError('reference_asset_ids', 'omni_references_required', 'Add at least one reference image.');
+    }
+    if (omniMode === 'edit' && !hasSourceVideo && !form.parent_generation_id && form.prompt.trim()) {
+      addError('source_video_asset_id', 'omni_edit_source_required', 'Choose a video or continue from a previous Omni result.');
+    }
+    if (omniMode === 'edit' && hasSourceVideo && form.parent_generation_id) {
+      addError('source_video_asset_id', 'omni_edit_source_exclusive', 'Choose either a video or a previous Omni result, not both.');
+    }
+  }
 
   if (hasLastFrame && !hasStartImage) {
     addError('last_frame_asset_id', 'last_frame_requires_start_frame', 'Choose a start frame before choosing a last frame.');
@@ -211,14 +251,15 @@ function buildClientGenerationValidation(
   if (hasLastFrame && !hasCap('first_last_frame')) {
     addError('last_frame_asset_id', 'first_last_frame_unsupported', `${model.name} does not support first/last-frame interpolation.`);
   }
-  if (hasSourceVideo && !hasCap('extend_video')) {
+  if (hasSourceVideo && !hasCap(isOmni ? 'video_to_video' : 'extend_video')) {
     addError('source_video_asset_id', 'source_video_unsupported', `${model.name} does not support source-video extension.`);
   }
   if (hasReferenceImages && !hasCap('reference_images')) {
     addError('reference_asset_ids', 'reference_images_unsupported', `${model.name} does not support reference images.`);
   }
-  if (referenceIds.length > 3) {
-    addError('reference_asset_ids', 'too_many_reference_images', 'Use no more than 3 reference images for this provider.');
+  const maxReferenceImages = model.max_reference_images || 3;
+  if (referenceIds.length > maxReferenceImages) {
+    addError('reference_asset_ids', 'too_many_reference_images', `Use no more than ${maxReferenceImages} reference images for this model.`);
   }
   if (form.negative_prompt?.trim() && !hasCap('negative_prompt')) {
     addError('negative_prompt', 'negative_prompt_unsupported', `${model.name} does not support negative prompts.`);
@@ -260,7 +301,7 @@ function buildClientGenerationValidation(
     addNormalization('duration_seconds', 'duration_max_normalized', `Duration will be capped at ${model.duration_max_seconds} seconds.`, duration, model.duration_max_seconds);
     duration = model.duration_max_seconds;
   }
-  if (provider === 'gemini') {
+  if (provider === 'gemini' && !isOmni) {
     const needsEightSeconds = hasSourceVideo || hasLastFrame || hasReferenceImages || resolution.toLowerCase() === '1080p' || resolution.toLowerCase() === '4k';
     if (needsEightSeconds && duration !== 8) {
       addNormalization('duration_seconds', 'gemini_duration_normalized', 'Gemini Veo will use 8 seconds for this mode and resolution.', duration, 8);
@@ -306,6 +347,16 @@ function getGenerationInputMode(inputAssets: InputAsset[]): string {
   if (roles.has('start_frame')) return 'Image-to-video';
   if (roles.has('reference_image')) return 'References';
   return 'Text-to-video';
+}
+
+function formatGenerationMode(mode?: VideoPromptForm['generation_mode']): string | null {
+  if (!mode) return null;
+  return {
+    text_to_video: 'Create',
+    image_to_video: 'Animate',
+    reference_to_video: 'References',
+    edit: 'Omni edit',
+  }[mode] || null;
 }
 
 function formatSettingSummary(settings: Partial<VideoPromptForm>): string {
@@ -461,6 +512,11 @@ export function VideoStudio() {
   const selectedProviderInfo = providers.find((provider) => provider.key === selectedProvider);
   const selectedProviderConfigured = selectedProviderInfo?.configured ?? false;
   const selectedModelCapabilities = selectedModelInfo?.capabilities || [];
+  const isOmniModel = selectedProvider === 'gemini' && selectedModel === 'gemini-omni-flash-preview';
+  const omniMode = (promptForm.generation_mode || 'text_to_video') as OmniMode;
+  const omniParentGeneration = promptForm.parent_generation_id
+    ? generations.find((generation) => generation.id === promptForm.parent_generation_id) || null
+    : null;
   const progressPercent = Math.round((generationProgress?.progress || 0) * 100);
   const clientValidation = useMemo(
     () => buildClientGenerationValidation(selectedProvider, selectedModelInfo, promptForm),
@@ -475,7 +531,44 @@ export function VideoStudio() {
 
   const startGeneration = () => {
     setPromptField('place_on_timeline', false);
+    if (isOmniModel && omniMode === 'edit') setPromptField('enhance', false);
     generate();
+  };
+
+  const setOmniMode = (mode: OmniMode) => {
+    setPromptField('generation_mode', mode);
+    setPromptField('last_frame_asset_id', undefined);
+    if (mode === 'text_to_video') {
+      setPromptField('start_image_asset_id', undefined);
+      setPromptField('reference_asset_ids', undefined);
+      setPromptField('source_video_asset_id', undefined);
+      setPromptField('parent_generation_id', undefined);
+    } else if (mode === 'image_to_video') {
+      setPromptField('reference_asset_ids', undefined);
+      setPromptField('source_video_asset_id', undefined);
+      setPromptField('parent_generation_id', undefined);
+    } else if (mode === 'reference_to_video') {
+      setPromptField('source_video_asset_id', undefined);
+      setPromptField('parent_generation_id', undefined);
+    } else {
+      setPromptField('start_image_asset_id', undefined);
+      setPromptField('reference_asset_ids', undefined);
+      setPromptField('enhance', false);
+    }
+  };
+
+  const handleContinueWithOmni = async (generation: VideoGenerationDetail) => {
+    if (selectedProvider !== 'gemini') await setProvider('gemini');
+    setModel('gemini-omni-flash-preview');
+    setPromptField('generation_mode', 'edit');
+    setPromptField('parent_generation_id', generation.id);
+    setPromptField('source_video_asset_id', undefined);
+    setPromptField('start_image_asset_id', undefined);
+    setPromptField('reference_asset_ids', undefined);
+    setPromptField('prompt', '');
+    setPromptField('enhance', false);
+    useVideoStudioStore.setState({ activeGenerationId: generation.id, selectedAssetId: generation.output_asset_id || selectedAssetId });
+    toast.success('Omni edit context loaded — describe one change');
   };
 
   const handleSendGenerationToTimeline = async (generation: VideoGenerationDetail) => {
@@ -669,6 +762,37 @@ export function VideoStudio() {
                   </div>
                 </ControlLabel>
 
+                {isOmniModel && (
+                  <div className="space-y-2" data-testid="omni-mode-picker">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-text-muted">Omni workflow</span>
+                      <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] text-primary">Preview</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Gemini Omni video workflow">
+                      {OMNI_MODES.map((mode) => {
+                        const Icon = mode.icon;
+                        const selected = omniMode === mode.id;
+                        return (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            onClick={() => setOmniMode(mode.id)}
+                            className={`min-h-[70px] rounded-lg border p-2 text-left transition-colors ${selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-surface hover:bg-surface-hover'}`}
+                          >
+                            <span className="flex items-center gap-1.5 text-xs font-medium text-text">
+                              <Icon size={13} className={selected ? 'text-primary' : 'text-text-muted'} />
+                              {mode.label}
+                            </span>
+                            <span className="mt-1 block text-[10px] leading-snug text-text-muted">{mode.description}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* ── Prompt ── */}
                 <CollapsibleSection label="Prompt" defaultOpen>
                   <ControlLabel label="Prompt">
@@ -677,10 +801,19 @@ export function VideoStudio() {
                       onChange={(event) => setPromptField('prompt', event.target.value)}
                       rows={8}
                       maxLength={selectedModelInfo?.max_prompt_chars || undefined}
-                      placeholder="Describe a single video: subject, scene, action, camera, lighting, and style."
+                      placeholder={isOmniModel && omniMode === 'edit'
+                        ? 'Describe one change, e.g. “Make the lighting more dramatic.”'
+                        : 'Describe a single video: subject, scene, action, camera, lighting, and style.'}
                       className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-muted/50 focus:border-primary/50 focus:outline-none"
                     />
                   </ControlLabel>
+                  {isOmniModel && (
+                    <div className="rounded-lg border border-sky-400/15 bg-sky-400/5 px-2.5 py-2 text-[10px] leading-relaxed text-text-muted">
+                      {omniMode === 'edit'
+                        ? 'Short, focused edits preserve continuity best. “Keep everything else the same” is added automatically.'
+                        : 'Omni creates a synchronized audio track by default. Describe music, dialogue, ambience, timing, camera motion, and any on-screen text directly in the prompt.'}
+                    </div>
+                  )}
                   {selectedModelCapabilities.includes('negative_prompt') && (
                     <ControlLabel label="Negative prompt">
                       <input
@@ -693,8 +826,101 @@ export function VideoStudio() {
                   )}
                 </CollapsibleSection>
 
+                {isOmniModel && omniMode === 'image_to_video' && (
+                  <CollapsibleSection label="Image to animate" defaultOpen>
+                    <AssetPicker
+                      value={promptForm.start_image_asset_id}
+                      onChange={(id) => setPromptField('start_image_asset_id', id)}
+                      assets={assets}
+                      projectId={activeProjectId}
+                      onAssetsChange={(updated) => useVideoStudioStore.setState({ assets: updated })}
+                      accept="image"
+                      placeholder="Choose or import a high-resolution image"
+                    />
+                    <p className="mt-1.5 text-[10px] leading-relaxed text-text-muted">Describe subject motion, camera movement, and environmental effects—not just “make it move.”</p>
+                  </CollapsibleSection>
+                )}
+
+                {isOmniModel && omniMode === 'reference_to_video' && (
+                  <CollapsibleSection label={`Visual references (${(promptForm.reference_asset_ids ?? []).filter(Boolean).length}/${selectedModelInfo?.max_reference_images || 6})`} defaultOpen>
+                    <div className="space-y-2">
+                      <ControlLabel label="Optional starting frame">
+                        <AssetPicker
+                          value={promptForm.start_image_asset_id}
+                          onChange={(id) => setPromptField('start_image_asset_id', id)}
+                          assets={assets}
+                          projectId={activeProjectId}
+                          onAssetsChange={(updated) => useVideoStudioStore.setState({ assets: updated })}
+                          accept="image"
+                          placeholder="None — use references only"
+                        />
+                      </ControlLabel>
+                      <div className="space-y-1.5">
+                        {Array.from({ length: selectedModelInfo?.max_reference_images || 6 }, (_, idx) => (
+                          <AssetPicker
+                            key={idx}
+                            value={(promptForm.reference_asset_ids ?? [])[idx]}
+                            onChange={(id) => {
+                              const current = [...(promptForm.reference_asset_ids ?? [])];
+                              if (id) current[idx] = id;
+                              else current.splice(idx, 1);
+                              const filtered = current.filter(Boolean);
+                              setPromptField('reference_asset_ids', filtered.length ? filtered : undefined);
+                            }}
+                            assets={assets}
+                            projectId={activeProjectId}
+                            onAssetsChange={(updated) => useVideoStudioStore.setState({ assets: updated })}
+                            accept="image"
+                            placeholder={`Reference ${idx + 1} — subject, product, or style`}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-[10px] leading-relaxed text-text-muted">References are tagged in upload order so Omni can preserve identity, products, and visual style across the scene.</p>
+                    </div>
+                  </CollapsibleSection>
+                )}
+
+                {isOmniModel && omniMode === 'edit' && (
+                  <CollapsibleSection label="Video to edit" defaultOpen>
+                    {omniParentGeneration ? (
+                      <div className="rounded-lg border border-primary/25 bg-primary/10 p-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-text">Continuing Omni conversation</p>
+                            <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-text-muted">{omniParentGeneration.prompt}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setPromptField('parent_generation_id', undefined)}
+                            className="rounded-md p-1 text-text-muted hover:bg-surface-hover hover:text-text"
+                            aria-label="Remove previous Omni context"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <AssetPicker
+                          value={promptForm.source_video_asset_id}
+                          onChange={(id) => {
+                            setPromptField('source_video_asset_id', id);
+                            if (id) setPromptField('parent_generation_id', undefined);
+                          }}
+                          assets={assets}
+                          projectId={activeProjectId}
+                          onAssetsChange={(updated) => useVideoStudioStore.setState({ assets: updated })}
+                          accept="video"
+                          placeholder="Choose or import one video"
+                        />
+                        <p className="mt-1.5 text-[10px] leading-relaxed text-text-muted">Uploaded video editing is region-limited. Generated Omni videos can be edited from History without re-uploading.</p>
+                      </>
+                    )}
+                  </CollapsibleSection>
+                )}
+
                 {/* ── Start / Last Frame ── */}
-                {(selectedModelCapabilities.includes('image_to_video') || selectedModelCapabilities.includes('first_last_frame') || selectedModelCapabilities.includes('extend_video')) && (
+                {!isOmniModel && (selectedModelCapabilities.includes('image_to_video') || selectedModelCapabilities.includes('first_last_frame') || selectedModelCapabilities.includes('extend_video')) && (
                   <CollapsibleSection label="Start / Last Frame" defaultOpen>
                     {(selectedModelCapabilities.includes('image_to_video') || selectedModelCapabilities.includes('first_last_frame')) && (
                       <ControlLabel label="Start frame image">
@@ -742,7 +968,7 @@ export function VideoStudio() {
                 )}
 
                 {/* ── Reference Images ── */}
-                {selectedModelCapabilities.includes('reference_images') && (
+                {!isOmniModel && selectedModelCapabilities.includes('reference_images') && (
                   <CollapsibleSection label={`Reference Images (${(promptForm.reference_asset_ids ?? []).filter(Boolean).length}/3)`}>
                     <ControlLabel label="">
                       <div className="space-y-1.5">
@@ -775,7 +1001,7 @@ export function VideoStudio() {
 
                 {/* ── Output Format ── */}
                 <CollapsibleSection label="Output Format" defaultOpen>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className={`grid gap-2 ${isOmniModel ? 'grid-cols-1' : 'grid-cols-2'}`}>
                     <ControlLabel label="Aspect">
                       <select
                         value={promptForm.aspect_ratio}
@@ -787,7 +1013,7 @@ export function VideoStudio() {
                         ))}
                       </select>
                     </ControlLabel>
-                    <ControlLabel label="Duration">
+                    {!isOmniModel && <ControlLabel label="Duration">
                       <input
                         type="number"
                         min={selectedModelInfo?.duration_min_seconds || 1}
@@ -796,8 +1022,8 @@ export function VideoStudio() {
                         onChange={(event) => setPromptField('duration_seconds', Math.max(1, Number(event.target.value) || 1))}
                         className="min-h-10 w-full rounded-lg border border-border bg-surface px-2 text-sm text-text"
                       />
-                    </ControlLabel>
-                    <ControlLabel label="Resolution">
+                    </ControlLabel>}
+                    {!isOmniModel && <ControlLabel label="Resolution">
                       <select
                         value={promptForm.resolution}
                         onChange={(event) => setPromptField('resolution', event.target.value)}
@@ -807,8 +1033,8 @@ export function VideoStudio() {
                           <option key={value} value={value}>{value}</option>
                         ))}
                       </select>
-                    </ControlLabel>
-                    <ControlLabel label="FPS">
+                    </ControlLabel>}
+                    {!isOmniModel && <ControlLabel label="FPS">
                       <select
                         value={promptForm.fps}
                         onChange={(event) => setPromptField('fps', Number(event.target.value))}
@@ -818,8 +1044,14 @@ export function VideoStudio() {
                           <option key={value} value={value}>{value}</option>
                         ))}
                       </select>
-                    </ControlLabel>
+                    </ControlLabel>}
                   </div>
+                  {isOmniModel && (
+                    <div className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-400/15 bg-emerald-400/5 px-2.5 py-2">
+                      <Volume2 size={13} className="mt-0.5 shrink-0 text-emerald-400" />
+                      <p className="text-[10px] leading-relaxed text-text-muted">Native synchronized audio is included. Delivery uses a Google-hosted URI to avoid large response limits, then saves the MP4 into this project.</p>
+                    </div>
+                  )}
                 </CollapsibleSection>
 
                 {/* ── Advanced ── */}
@@ -856,7 +1088,7 @@ export function VideoStudio() {
                   </CollapsibleSection>
                 )}
 
-                <CollapsibleSection label="Cinematic Controls">
+                {(!isOmniModel || omniMode !== 'edit') && <CollapsibleSection label="Cinematic Controls">
                   <div className="space-y-1">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                       <SelectWithCustom
@@ -959,7 +1191,14 @@ export function VideoStudio() {
                       </ControlLabel>
                     </div>
                   </div>
-                </CollapsibleSection>
+                </CollapsibleSection>}
+
+                {isOmniModel && (
+                  <div className="flex items-start gap-2 rounded-lg border border-border bg-surface px-2.5 py-2 text-[10px] leading-relaxed text-text-muted">
+                    <Info size={13} className="mt-0.5 shrink-0 text-primary" />
+                    <span>Outputs include invisible SynthID provenance. Safety filters apply to prompts, reference media, and generated video.</span>
+                  </div>
+                )}
 
                 {generationProgress && (
                   <div className="rounded-lg border border-primary/20 bg-primary/5 p-2" role="status" aria-live="polite">
@@ -984,11 +1223,11 @@ export function VideoStudio() {
                 <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap gap-2 border-t border-border bg-surface-alt/95 px-1 py-2 backdrop-blur xl:static xl:mx-0 xl:border-0 xl:bg-transparent xl:p-0">
                   <button
                     onClick={() => { void enhancePrompt(); }}
-                    disabled={isEnhancing || isGenerating || !promptForm.prompt.trim()}
+                    disabled={isEnhancing || isGenerating || !promptForm.prompt.trim() || (isOmniModel && omniMode === 'edit')}
                     className="min-h-10 flex-1 rounded-lg border border-border bg-surface px-3 text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-45 inline-flex items-center justify-center gap-1.5"
                   >
                     {isEnhancing ? <Loader2 size={14} className="animate-spin" /> : <WandSparkles size={14} />}
-                    Enhance
+                    {isOmniModel && omniMode === 'edit' ? 'Keep edit focused' : 'Enhance'}
                   </button>
                   <button
                     onClick={startGeneration}
@@ -996,7 +1235,7 @@ export function VideoStudio() {
                     className="btn-primary min-h-10 flex-[2] rounded-lg px-3 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
                   >
                     {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Clapperboard size={14} />}
-                    Generate
+                    {isOmniModel && omniMode === 'edit' ? 'Apply edit' : 'Generate'}
                   </button>
                   <button
                     onClick={isGenerating ? () => { void cancelGeneration(); } : clearPrompt}
@@ -1033,6 +1272,7 @@ export function VideoStudio() {
             onSelect={(generation) => useVideoStudioStore.setState({ activeGenerationId: generation.id, selectedAssetId: generation.output_asset_id || selectedAssetId })}
             onBranch={(generationId) => { void branchFromGeneration(generationId); }}
             onRegenerate={(generationId) => { void regenerateFromGeneration(generationId); }}
+            onOmniEdit={(generation) => { void handleContinueWithOmni(generation); }}
             onUseEnhancedPrompt={handleUseEnhancedPrompt}
             onExtend={(assetId) => {
               setPromptField('source_video_asset_id', assetId);
@@ -1166,6 +1406,7 @@ function HistoryPanel({
   onSelect,
   onBranch,
   onRegenerate,
+  onOmniEdit,
   onUseEnhancedPrompt,
   onExtend,
   onSendToTimeline,
@@ -1178,6 +1419,7 @@ function HistoryPanel({
   onSelect: (generation: VideoGenerationDetail) => void;
   onBranch: (generationId: string) => void;
   onRegenerate: (generationId: string) => void;
+  onOmniEdit: (generation: VideoGenerationDetail) => void;
   onUseEnhancedPrompt: (generation: VideoGenerationDetail) => void;
   onExtend: (assetId: string) => void;
   onSendToTimeline: (generation: VideoGenerationDetail) => void;
@@ -1199,7 +1441,7 @@ function HistoryPanel({
           {generations.slice().reverse().map((generation) => {
             const settings = getGenerationSettings(generation);
             const inputAssets = getGenerationInputAssets(generation);
-            const inputMode = getGenerationInputMode(inputAssets);
+            const inputMode = formatGenerationMode(settings.generation_mode) || getGenerationInputMode(inputAssets);
             const inputAssetSummary = formatInputAssetSummary(inputAssets);
             const cost = formatCost(generation.cost_usd);
             const upstream = compactID(generation.upstream_job_id || generation.upstream_request_id);
@@ -1256,6 +1498,19 @@ function HistoryPanel({
                   <div className="flex flex-wrap items-center justify-end gap-1">
                     {generation.status === 'completed' && generation.output_asset_id && (
                       <>
+                        {generation.provider === 'gemini' && generation.model === 'gemini-omni-flash-preview' && generation.upstream_job_id && (
+                          <button
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOmniEdit(generation);
+                            }}
+                            className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-primary hover:bg-primary/10"
+                            title="Continue editing this video with Gemini Omni"
+                          >
+                            <Sparkles size={11} />
+                            Edit
+                          </button>
+                        )}
                         <button
                           onClick={(event) => {
                             event.stopPropagation();

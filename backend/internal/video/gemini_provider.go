@@ -40,7 +40,7 @@ func (p *GeminiProvider) Key() string {
 }
 
 func (p *GeminiProvider) DisplayName() string {
-	return "Gemini Veo"
+	return "Google Video (Omni + Veo)"
 }
 
 func (p *GeminiProvider) Configured() bool {
@@ -49,14 +49,16 @@ func (p *GeminiProvider) Configured() bool {
 
 func (p *GeminiProvider) ListModels(ctx context.Context) ([]Model, error) {
 	if !p.Configured() {
-		return KnownGeminiVeoModels(), nil
+		return KnownGeminiVideoModels(), nil
 	}
 	live, err := p.fetchLiveModels(ctx)
-	if err != nil || len(live) == 0 {
+	if err != nil {
 		// Fall back to static list on any error.
-		return KnownGeminiVeoModels(), nil
+		return KnownGeminiVideoModels(), nil
 	}
-	return live, nil
+	// The Interactions API preview model is not consistently returned by
+	// models.list. Keep the documented Omni entry and merge live Veo models.
+	return mergeGeminiVideoModels(KnownGeminiVideoModels(), live), nil
 }
 
 // fetchLiveModels calls the Gemini models.list API and returns Veo model entries.
@@ -124,6 +126,9 @@ func (p *GeminiProvider) fetchLiveModels(ctx context.Context) ([]Model, error) {
 }
 
 func (p *GeminiProvider) Capabilities(model string) []Capability {
+	if isGeminiOmniModel(model) {
+		return geminiOmniCapabilities()
+	}
 	return geminiVeoCapabilitiesForID(model)
 }
 
@@ -347,6 +352,9 @@ func (p *GeminiProvider) buildPayload(req GenerateRequest) (map[string]any, erro
 // Generate is the synchronous (blocking) implementation retained for backward compat.
 // Prefer the async Submit → PollOnce → DownloadVideo flow for new callers.
 func (p *GeminiProvider) Generate(ctx context.Context, req GenerateRequest, progress func(GenerationProgress)) (*GenerationResult, error) {
+	if isGeminiOmniModel(req.Model) {
+		return p.GenerateOmni(ctx, req, progress)
+	}
 	if !p.Configured() {
 		return nil, fmt.Errorf("%w: no enabled Gemini provider profile with an API key", ErrProviderUnavailable)
 	}
@@ -604,6 +612,52 @@ func KnownGeminiVeoModels() []Model {
 		geminiVeoKnownModel("veo-3.1-fast-generate-preview", "Veo 3.1 Fast", []string{"720p", "1080p"}, "Veo 3.1 Fast: image-to-video, first/last-frame, reference images, extension (720p), no 4K."),
 		geminiVeoKnownModel("veo-3.1-lite-generate-preview", "Veo 3.1 Lite", []string{"720p", "1080p"}, "Veo 3.1 Lite: image-to-video, first/last-frame, reference images. No 4K, no extension."),
 	}
+}
+
+func KnownGeminiVideoModels() []Model {
+	return append([]Model{geminiOmniKnownModel()}, KnownGeminiVeoModels()...)
+}
+
+func geminiOmniKnownModel() Model {
+	return Model{
+		ID:                 "gemini-omni-flash-preview",
+		Provider:           ProviderGemini,
+		Name:               "Gemini Omni Flash (Preview)",
+		Capabilities:       geminiOmniCapabilities(),
+		AspectRatios:       []string{"16:9", "9:16"},
+		MaxPromptChars:     8000,
+		MaxReferenceImages: 6,
+		Notes:              "Interactions API: text, image, multi-reference, and conversational video editing with native audio.",
+	}
+}
+
+func geminiOmniCapabilities() []Capability {
+	return []Capability{
+		CapabilityTextToVideo,
+		CapabilityImageToVideo,
+		CapabilityReferenceImages,
+		CapabilityVideoToVideo,
+		CapabilityCameraMotion,
+		CapabilityAudioGeneration,
+	}
+}
+
+func isGeminiOmniModel(model string) bool {
+	return strings.EqualFold(strings.TrimSpace(model), "gemini-omni-flash-preview")
+}
+
+func mergeGeminiVideoModels(static, live []Model) []Model {
+	out := append([]Model(nil), static...)
+	seen := make(map[string]bool, len(out))
+	for _, model := range out {
+		seen[strings.ToLower(model.ID)] = true
+	}
+	for _, model := range live {
+		if !seen[strings.ToLower(model.ID)] {
+			out = append(out, model)
+		}
+	}
+	return out
 }
 
 func geminiVeoKnownModel(id, name string, resolutions []string, notes string) Model {

@@ -56,6 +56,7 @@ type Model struct {
 	DurationMaxSeconds int          `json:"duration_max_seconds,omitempty"`
 	FPSOptions         []int        `json:"fps_options,omitempty"`
 	MaxPromptChars     int          `json:"max_prompt_chars,omitempty"`
+	MaxReferenceImages int          `json:"max_reference_images,omitempty"`
 	Notes              string       `json:"notes,omitempty"`
 }
 
@@ -67,12 +68,15 @@ type ProviderInfo struct {
 }
 
 type GenerateRequest struct {
-	ProjectID       string `json:"project_id,omitempty"`
-	ParentID        string `json:"parent_id,omitempty"`
-	Title           string `json:"title,omitempty"`
-	Provider        string `json:"provider"`
-	Model           string `json:"model"`
-	Prompt          string `json:"prompt"`
+	ProjectID string `json:"project_id,omitempty"`
+	ParentID  string `json:"parent_id,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	Prompt    string `json:"prompt"`
+	// GenerationMode maps directly to provider task semantics when available.
+	// Gemini Omni accepts text_to_video, image_to_video, reference_to_video, and edit.
+	GenerationMode  string `json:"generation_mode,omitempty"`
 	Enhance         bool   `json:"enhance,omitempty"`
 	EnhancedPrompt  string `json:"enhanced_prompt,omitempty"`
 	NegativePrompt  string `json:"negative_prompt,omitempty"`
@@ -93,22 +97,25 @@ type GenerateRequest struct {
 	ReferenceAssetIDs   []string `json:"reference_asset_ids,omitempty"`
 	ReferenceAssetPaths []string `json:"-"` // resolved by service, not from JSON
 	// StartImagePath / LastFramePath / SourceVideoPath are resolved by service.
-	StartImagePath  string          `json:"-"`
-	LastFramePath   string          `json:"-"`
-	SourceVideoPath string          `json:"-"`
-	CameraMotion    string          `json:"camera_motion,omitempty"`
-	ShotType        string          `json:"shot_type,omitempty"`
-	StylePreset     string          `json:"style_preset,omitempty"`
-	Composition     string          `json:"composition,omitempty"`
-	LensEffect      string          `json:"lens_effect,omitempty"`
-	Lighting        string          `json:"lighting,omitempty"`
-	Dialogue        string          `json:"dialogue,omitempty"`
-	SoundEffects    string          `json:"sound_effects,omitempty"`
-	AmbientNoise    string          `json:"ambient_noise,omitempty"`
-	ContinuityNotes string          `json:"continuity_notes,omitempty"`
-	ProductionNotes string          `json:"production_notes,omitempty"`
-	Settings        json.RawMessage `json:"settings,omitempty"`
-	PlaceOnTimeline bool            `json:"place_on_timeline,omitempty"`
+	StartImagePath  string `json:"-"`
+	LastFramePath   string `json:"-"`
+	SourceVideoPath string `json:"-"`
+	// PreviousInteractionID is resolved from ParentID by the service for stateful
+	// Gemini Omni edits. It is never accepted directly from an HTTP request.
+	PreviousInteractionID string          `json:"-"`
+	CameraMotion          string          `json:"camera_motion,omitempty"`
+	ShotType              string          `json:"shot_type,omitempty"`
+	StylePreset           string          `json:"style_preset,omitempty"`
+	Composition           string          `json:"composition,omitempty"`
+	LensEffect            string          `json:"lens_effect,omitempty"`
+	Lighting              string          `json:"lighting,omitempty"`
+	Dialogue              string          `json:"dialogue,omitempty"`
+	SoundEffects          string          `json:"sound_effects,omitempty"`
+	AmbientNoise          string          `json:"ambient_noise,omitempty"`
+	ContinuityNotes       string          `json:"continuity_notes,omitempty"`
+	ProductionNotes       string          `json:"production_notes,omitempty"`
+	Settings              json.RawMessage `json:"settings,omitempty"`
+	PlaceOnTimeline       bool            `json:"place_on_timeline,omitempty"`
 }
 
 // GenerateAsyncResponse is returned by the non-blocking POST /v1/video/generations endpoint.

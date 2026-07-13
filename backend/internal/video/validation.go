@@ -90,6 +90,7 @@ func validateGenerateRequestForModel(providerKey string, model Model, result Gen
 	req.PersonGeneration = strings.TrimSpace(req.PersonGeneration)
 	req.AspectRatio = strings.TrimSpace(req.AspectRatio)
 	req.Resolution = strings.TrimSpace(req.Resolution)
+	req.GenerationMode = strings.ToLower(strings.TrimSpace(req.GenerationMode))
 	req.ReferenceAssetIDs = compactStrings(req.ReferenceAssetIDs)
 
 	if req.Prompt == "" {
@@ -100,6 +101,54 @@ func validateGenerateRequestForModel(providerKey string, model Model, result Gen
 	hasLastFrame := strings.TrimSpace(req.LastFrameAssetID) != ""
 	hasSourceVideo := strings.TrimSpace(req.SourceVideoAssetID) != ""
 	hasReferenceImages := len(req.ReferenceAssetIDs) > 0
+	isOmni := providerKey == ProviderGemini && isGeminiOmniModel(model.ID)
+
+	if isOmni {
+		if req.GenerationMode == "" {
+			switch {
+			case hasSourceVideo || strings.TrimSpace(req.ParentID) != "":
+				req.GenerationMode = "edit"
+			case hasReferenceImages:
+				req.GenerationMode = "reference_to_video"
+			case hasStartImage:
+				req.GenerationMode = "image_to_video"
+			default:
+				req.GenerationMode = "text_to_video"
+			}
+		}
+		switch req.GenerationMode {
+		case "text_to_video":
+			if hasStartImage || hasReferenceImages || hasSourceVideo {
+				result.addError("generation_mode", "omni_text_inputs_invalid", "Text to video does not accept source media. Choose Animate, References, or Edit instead.")
+			}
+		case "image_to_video":
+			if !hasStartImage {
+				result.addError("start_image_asset_id", "omni_start_image_required", "Choose a start image for image-to-video generation.")
+			}
+			if hasReferenceImages || hasSourceVideo {
+				result.addError("generation_mode", "omni_image_inputs_invalid", "Image to video accepts one start image. Choose References to combine images.")
+			}
+		case "reference_to_video":
+			if !hasReferenceImages {
+				result.addError("reference_asset_ids", "omni_references_required", "Add at least one reference image.")
+			}
+			if hasSourceVideo {
+				result.addError("source_video_asset_id", "omni_reference_video_invalid", "Reference generation cannot include a source video.")
+			}
+		case "edit":
+			if !hasSourceVideo && strings.TrimSpace(req.ParentID) == "" {
+				result.addError("source_video_asset_id", "omni_edit_source_required", "Choose a video or continue from a completed Omni generation to edit.")
+			}
+			if hasSourceVideo && strings.TrimSpace(req.ParentID) != "" {
+				result.addError("source_video_asset_id", "omni_edit_source_exclusive", "Choose either an uploaded video or a previous Omni result, not both.")
+			}
+			if hasStartImage || hasReferenceImages {
+				result.addError("generation_mode", "omni_edit_inputs_invalid", "Video editing accepts one video context and an edit instruction.")
+			}
+		default:
+			result.addError("generation_mode", "omni_task_invalid", "Choose a supported Gemini Omni video mode.")
+		}
+	}
 
 	caps := result.Capabilities
 	if !hasStartImage && !hasLastFrame && !hasSourceVideo && !hasReferenceImages && !hasCapability(caps, CapabilityTextToVideo) {
@@ -117,10 +166,12 @@ func validateGenerateRequestForModel(providerKey string, model Model, result Gen
 		}
 	}
 	if hasSourceVideo {
-		if !hasCapability(caps, CapabilityExtendVideo) {
+		if isOmni && !hasCapability(caps, CapabilityVideoToVideo) {
+			result.addError("source_video_asset_id", "source_video_unsupported", fmt.Sprintf("%s does not support video editing.", model.Name))
+		} else if !isOmni && !hasCapability(caps, CapabilityExtendVideo) {
 			result.addError("source_video_asset_id", "source_video_unsupported", fmt.Sprintf("%s does not support source-video extension.", model.Name))
 		}
-		if hasStartImage || hasLastFrame || hasReferenceImages {
+		if !isOmni && (hasStartImage || hasLastFrame || hasReferenceImages) {
 			result.addError("source_video_asset_id", "source_video_exclusive", "Source-video extension cannot be combined with start frame, last frame, or reference images.")
 		}
 	}
@@ -128,8 +179,8 @@ func validateGenerateRequestForModel(providerKey string, model Model, result Gen
 		if !hasCapability(caps, CapabilityReferenceImages) {
 			result.addError("reference_asset_ids", "reference_images_unsupported", fmt.Sprintf("%s does not support reference images.", model.Name))
 		}
-		if len(req.ReferenceAssetIDs) > maxReferenceImages(providerKey, model.ID) {
-			result.addError("reference_asset_ids", "too_many_reference_images", "Use no more than 3 reference images for this provider.")
+		if len(req.ReferenceAssetIDs) > maxReferenceImages(providerKey, model) {
+			result.addError("reference_asset_ids", "too_many_reference_images", fmt.Sprintf("Use no more than %d reference images for this model.", maxReferenceImages(providerKey, model)))
 		}
 	}
 	if req.NegativePrompt != "" && !hasCapability(caps, CapabilityNegativePrompt) {
@@ -200,7 +251,7 @@ func validateGenerateRequestForModel(providerKey string, model Model, result Gen
 		result.addNormalization("duration_seconds", "duration_max_normalized", fmt.Sprintf("Duration was capped at %d seconds for %s.", duration, model.Name), originalDuration, duration)
 		originalDuration = duration
 	}
-	if providerKey == ProviderGemini {
+	if providerKey == ProviderGemini && !isOmni {
 		forceEightReason := ""
 		switch {
 		case hasSourceVideo:
@@ -289,9 +340,11 @@ func compactStrings(in []string) []string {
 	return out
 }
 
-func maxReferenceImages(provider, model string) int {
+func maxReferenceImages(provider string, model Model) int {
 	_ = provider
-	_ = model
+	if model.MaxReferenceImages > 0 {
+		return model.MaxReferenceImages
+	}
 	return 3
 }
 

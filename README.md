@@ -34,7 +34,7 @@
 | **Conversation Management** | Create, rename, pin, archive, delete, full-text search, per-conversation model override |
 | **Image Studio** | Full canvas editor with generation, editing, inpainting, variant comparison, and branching history |
 | **Music Studio** | Generate, play, download, and manage Gemini Lyria music tracks through OpenRouter or Gemini direct |
-| **Video Studio** | Project-based AI video creation with OpenRouter Video, Gemini Veo, cinematic controls, local asset upload, collapsible creation panel, and output preview |
+| **Video Studio** | Project-based AI video creation and conversational editing with Gemini Omni Flash, Gemini Veo, OpenRouter Video, and Luma; guided multimodal inputs, cinematic/audio prompting, local asset upload, history, and output preview |
 | **Video Edit Studio** | Timeline editing, multi-asset media bin, preview canvas, inspector, AI edit planning, and FFmpeg render/export |
 | **Markdown Rendering** | Syntax highlighting, KaTeX math, Mermaid diagrams, inline image rendering |
 | **Auto-Titling** | Conversations are automatically titled based on the first exchange |
@@ -98,7 +98,7 @@ Screenshot placeholder: `docs/assets/screenshots/music-studio.png`
 
 ### Video Studio
 
-A dedicated project workspace for AI video creation. Video Studio includes real OpenRouter Video and direct Gemini Veo 3.1 adapters, live provider/model discovery (Gemini queries `/v1beta/models` at runtime with a static snapshot fallback), prompt enhancement, generation history, branching, durable generated outputs, single-output preview/download controls, and cross-studio prompt translation from Image Studio and Music Studio.
+A dedicated project workspace for AI video creation. Video Studio includes Gemini Omni Flash through the Interactions API, direct Gemini Veo 3.1, OpenRouter Video, and Luma adapters; live provider/model discovery with static snapshots; prompt enhancement; generation history and conversational Omni edits; durable generated outputs; preview/download controls; and cross-studio prompt translation from Image Studio and Music Studio.
 
 OpenRouter and Gemini use encrypted provider profiles from Settings. At least one real video provider profile must be configured before generation can run; there is no local mock video provider fallback. Gemini Veo supports reference image input for image-to-video generation.
 
@@ -108,6 +108,7 @@ The creation panel is organized into individually collapsible sections — **Pro
 |------------|-------------|
 | **Generation** | Text-to-video generation with capability-driven controls, prompt enhancement, SSE progress, history, and branching |
 | **Reference Image (Gemini)** | Supply an image asset as a reference to guide Gemini Veo image-to-video generation |
+| **Gemini Omni workflows** | Create from text, animate a first frame, combine up to six ordered references, or conversationally edit an imported/generated video with native audio |
 | **Start / Last Frame** | Set the first and/or last frame for image-to-video or interpolation (model capability gated) |
 | **Cinematic Controls** | Music-Studio-style dropdowns for style, camera motion, shot type, composition, lens/focus, lighting/ambiance, audio cues (dialogue, sound effects, ambient noise), and continuity notes — assembled into the final prompt at generation time |
 | **Local File Upload** | `+` button next to every image/video picker — upload directly from disk via `POST /v1/video/projects/{projectId}/assets/upload` (25 MB images, 100 MB audio, 500 MB video; content-based MIME detection) |
@@ -214,6 +215,7 @@ Video Studio registers real video generation adapters:
 |----------|--------|-------|
 | **OpenRouter Video** | Current `/videos/models` discovery, with built-in snapshot including `google/veo-3.1`, `google/veo-3.1-fast`, `google/veo-3.1-lite`, `x-ai/grok-imagine-video`, `kwaivgi/kling-v3.0-pro`, `kwaivgi/kling-v3.0-std`, `kwaivgi/kling-video-o1`, `minimax/hailuo-2.3`, `bytedance/seedance-2.0-fast`, `bytedance/seedance-2.0`, `alibaba/wan-2.7` | Uses an encrypted OpenRouter provider profile, submits `/videos` jobs, polls the returned URL, and downloads completed video outputs |
 | **Gemini direct** | `veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview` | Uses an encrypted Gemini provider profile and direct Gemini `predictLongRunning` Veo operations |
+| **Gemini direct** | `gemini-omni-flash-preview` | Uses Gemini Interactions + Files APIs for text/image/reference video generation and stateful conversational editing |
 
 Setup: open **Settings → Providers** and configure either an OpenRouter API key or a Gemini API key. Then use **Settings → Video** or Video Studio's Generate panel to select the provider/model. If neither provider is configured, generation is disabled until credentials are added.
 

@@ -5,7 +5,7 @@ Video Studio is a first-class project workspace for AI video creation. Timeline 
 ## Video Studio Capabilities
 
 - Project-based video workspace gated by the `video_studio` feature flag.
-- Real provider adapters for OpenRouter Video and direct Gemini Veo 3.1.
+- Real provider adapters for OpenRouter Video, Gemini Omni Flash, direct Gemini Veo 3.1, and Luma Dream Machine.
 - Provider/model discovery — Gemini performs live discovery against `/v1beta/models` and falls back to a built-in snapshot when the API is unavailable or unconfigured.
 - Prompt enhancement, generation history, branching metadata, and durable assets.
 - Gemini Veo supports **reference image input** (image-to-video): supply an image asset ID via `ReferenceAssetIDs` and the Gemini adapter base64-encodes the first image and embeds it into the `predictLongRunning` request.
@@ -24,6 +24,8 @@ The creation panel is organized into individually collapsible sections so you ca
 | **Output Format** | Open | Aspect ratio, duration, resolution, FPS |
 | **Cinematic Controls** | Closed | Full cinematic detail dropdowns (see below) |
 | **Advanced** | Closed | Person generation and future tunables |
+
+When **Gemini Omni Flash (Preview)** is selected, the generic input controls are replaced with four guided workflows: **Create**, **Animate**, **References**, and **Edit**. References accepts up to six ordered subject/product/style images and an optional first frame. Edit accepts one imported video or continues a completed Omni result from Generation History. Omni-specific output controls expose only the API's supported aspect ratios; native audio, URI delivery, SynthID, preview status, and regional editing caveats are explained inline.
 
 ## Cinematic Controls
 
@@ -89,7 +91,7 @@ Video generation requires a configured OpenRouter or Gemini provider profile wit
 OpenRouter and Gemini use encrypted provider profiles from Settings:
 
 - **OpenRouter**: defaults to `https://openrouter.ai/api/v1`, discovers current video models through `/videos/models`, submits jobs through `/videos`, polls the returned URL, and downloads completed `unsigned_urls`.
-- **Gemini**: defaults to `https://generativelanguage.googleapis.com/v1beta`, uses direct Veo `predictLongRunning`, polls long-running operations, and downloads generated sample video URIs. When a reference image is supplied, it is embedded as `instance["image"]` with base64-encoded bytes and detected MIME type.
+- **Gemini**: defaults to `https://generativelanguage.googleapis.com/v1beta`. Omni Flash uses the Interactions API, resumable Files API uploads for source-video editing, URI output delivery, and stored interaction IDs for conversational edits. Veo uses direct `predictLongRunning`, polls long-running operations, and downloads generated sample video URIs.
 
 Both providers include a built-in model snapshot so the UI shows expected capabilities before credentials are configured or when model discovery is temporarily unavailable.
 

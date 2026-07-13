@@ -58,6 +58,7 @@ import type {
 
 const DEFAULT_FORM: VideoPromptForm = {
   prompt: '',
+  generation_mode: 'text_to_video',
   negative_prompt: '',
   aspect_ratio: '16:9',
   duration_seconds: 6,
@@ -844,7 +845,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         model: selectedModel,
         prompt: promptForm.prompt.trim(),
         project_id: activeProjectId || undefined,
-        parent_id: parentId,
+        parent_id: parentId || promptForm.parent_generation_id,
       };
       let generationRequest = baseRequest;
       try {
@@ -860,7 +861,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
           ...baseRequest,
           ...validation.normalized_request,
           project_id: activeProjectId || undefined,
-          parent_id: parentId,
+          parent_id: parentId || promptForm.parent_generation_id,
         };
         if (validation.normalizations.length > 0) {
           set((state) => ({
@@ -900,13 +901,17 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
             set((state) => ({ generations: upsertGeneration(state.generations, gen) }));
             if (gen.status === 'completed') {
               clearInterval(interval);
-              set({
+              set((state) => ({
                 isGenerating: false,
                 _pollInterval: null,
                 generationProgress: { stage: 'done', message: 'Video generation complete', progress: 1 },
                 activeGenerationId: gen.id,
                 selectedAssetId: gen.output_asset_id || get().selectedAssetId,
-              });
+                // Keep iterative Omni edits chained to the newest result.
+                promptForm: state.promptForm.generation_mode === 'edit'
+                  ? { ...state.promptForm, parent_generation_id: gen.id, source_video_asset_id: undefined }
+                  : state.promptForm,
+              }));
               if (gen.output_asset_id) {
                 // Reload project assets
                 const proj = get().activeProjectId;

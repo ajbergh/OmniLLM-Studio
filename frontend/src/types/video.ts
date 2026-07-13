@@ -25,6 +25,7 @@ export interface VideoModel {
   duration_max_seconds?: number;
   fps_options?: number[];
   max_prompt_chars?: number;
+  max_reference_images?: number;
   notes?: string;
 }
 
@@ -128,6 +129,9 @@ export interface VideoProjectDetail {
 
 export interface VideoPromptForm {
   prompt: string;
+  generation_mode?: 'text_to_video' | 'image_to_video' | 'reference_to_video' | 'edit';
+  /** Local generation ID whose stored Gemini interaction should be continued. */
+  parent_generation_id?: string;
   negative_prompt: string;
   aspect_ratio: string;
   duration_seconds: number;

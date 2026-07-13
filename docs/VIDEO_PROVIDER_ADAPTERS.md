@@ -35,9 +35,26 @@ There is no local mock provider fallback; generation requires a configured OpenR
 
 The adapter includes a built-in model snapshot for the current OpenRouter video collection so the UI can show useful model choices before credentials are configured or when model discovery is temporarily unavailable.
 
+## Gemini Omni Flash
+
+`gemini-omni-flash-preview` uses the Gemini Interactions API and is always merged into the direct Gemini video catalog because preview Interactions models are not consistently returned by `models.list`.
+
+Video Studio exposes each supported Omni task as a distinct workflow:
+
+- `text_to_video`: prompt-only generation with native synchronized audio.
+- `image_to_video`: a single high-resolution starting image plus a motion-focused prompt.
+- `reference_to_video`: up to six reference images, with an optional first frame. The adapter adds Google's `<FIRST_FRAME>` and `<IMAGE_REF_N>` role declarations in upload order.
+- `edit`: either one imported video or a stored previous Omni interaction. Follow-up turns use `previous_interaction_id`, so the previous result does not need to be uploaded again.
+
+Interactions are submitted to `POST /v1beta/interactions` with `store: true`, `background: false`, and `stream: false`. Output uses `response_format: {"type":"video","delivery":"uri"}` plus the selected `16:9` or `9:16` aspect ratio. Google-hosted output files are polled until active and downloaded into the project's durable asset storage. Inline base64 output remains supported as a compatibility fallback.
+
+Imported source videos use the resumable Gemini Files API, are polled until active, and are deleted after the interaction completes. Conversational edit interaction IDs are stored in `video_generations.upstream_job_id`; the history panel's **Edit** action loads that context and subsequent turns automatically advance to the newest result.
+
+Omni generates audio from prompt instructions and does not expose duration, resolution, FPS, seed, negative-prompt, sampling, system-instruction, extension, interpolation, multi-video, uploaded-audio-reference, or voice-edit controls. The UI intentionally omits those controls for this model. Generated outputs carry SynthID provenance.
+
 ## Gemini Veo
 
-`NewGeminiProvider()` uses the direct Gemini API for Veo 3.1:
+The same `NewGeminiProvider()` adapter uses the direct Gemini prediction API for Veo 3.1:
 
 - **Model discovery**: calls `GET /v1beta/models?pageSize=100` and filters to `veo`-named models that support `predictLongRunning`. Falls back to the built-in `KnownGeminiVeoModels()` snapshot when the API is unavailable or returns an empty list.
 - Generation submit: `POST /models/{model}:predictLongRunning`

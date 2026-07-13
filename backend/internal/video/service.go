@@ -757,6 +757,34 @@ func (s *Service) runGenerationBackground(
 		}
 	}
 
+	if isGeminiOmniModel(modelID) {
+		if providerReq.ParentID != "" {
+			parent, err := s.generations.GetByID(providerReq.ParentID)
+			if err != nil || parent == nil {
+				fail("previous Omni generation was not found")
+				return
+			}
+			if parent.ProjectID != projectID || parent.Provider != ProviderGemini || !isGeminiOmniModel(parent.Model) {
+				fail("previous interaction must be a Gemini Omni generation in this project")
+				return
+			}
+			if parent.Status != StatusCompleted || parent.UpstreamJobID == nil || strings.TrimSpace(*parent.UpstreamJobID) == "" {
+				fail("previous Gemini Omni interaction is not available for editing")
+				return
+			}
+			providerReq.PreviousInteractionID = strings.TrimSpace(*parent.UpstreamJobID)
+		}
+		result, err := gemProv.GenerateOmni(ctx, providerReq, nil)
+		if err != nil {
+			fail(err.Error())
+			return
+		}
+		if err := s.finalizeProviderGeneration(ctx, userID, projectID, generationID, modelID, providerKey, result, req); err != nil {
+			fail(err.Error())
+		}
+		return
+	}
+
 	opName, err := gemProv.Submit(ctx, providerReq)
 	if err != nil {
 		fail(err.Error())
@@ -765,6 +793,90 @@ func (s *Service) runGenerationBackground(
 	_ = s.generations.SetUpstreamJobID(generationID, opName)
 
 	s.pollAndFinalize(ctx, projectID, generationID, modelID, providerKey, gemProv, opName, req)
+}
+
+// finalizeProviderGeneration persists a provider result for adapters (such as
+// Gemini Omni) that return completed bytes rather than a pollable operation.
+func (s *Service) finalizeProviderGeneration(
+	ctx context.Context,
+	userID, projectID, generationID, modelID, providerKey string,
+	result *GenerationResult,
+	req GenerateRequest,
+) error {
+	if result == nil || len(result.Data) == 0 {
+		return errors.New("provider returned no video asset")
+	}
+	if result.MimeType == "" {
+		result.MimeType = "video/mp4"
+	}
+	if result.FileName == "" {
+		result.FileName = "generated-video" + extensionForMimeType(result.MimeType)
+	}
+	relativePath, fileName, err := s.storage.Write(projectID, generationID, result.FileName, result.MimeType, result.Data)
+	if err != nil {
+		return err
+	}
+	if result.DurationMS == nil || result.Width == nil || result.Height == nil || result.FPS == nil {
+		if probe, probeErr := ProbeMedia(ctx, filepath.Join(s.attachmentsDir, filepath.FromSlash(relativePath))); probeErr == nil && probe != nil {
+			if result.DurationMS == nil && probe.DurationMS > 0 {
+				result.DurationMS = &probe.DurationMS
+			}
+			if result.Width == nil && probe.Width > 0 {
+				result.Width = &probe.Width
+			}
+			if result.Height == nil && probe.Height > 0 {
+				result.Height = &probe.Height
+			}
+			if result.FPS == nil && probe.FPS > 0 {
+				result.FPS = &probe.FPS
+			}
+		}
+	}
+	metadata := result.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["output_directory"] = s.storage.Root()
+	metaJSON, _ := json.Marshal(metadata)
+	projectRef := projectID
+	asset := &models.VideoAsset{
+		ProjectID:    &projectRef,
+		SourceType:   "generation",
+		Kind:         "video",
+		FileName:     fileName,
+		FilePath:     relativePath,
+		MimeType:     result.MimeType,
+		SizeBytes:    int64(len(result.Data)),
+		DurationMS:   result.DurationMS,
+		Width:        result.Width,
+		Height:       result.Height,
+		FPS:          result.FPS,
+		Provider:     &providerKey,
+		Model:        &modelID,
+		MetadataJSON: string(metaJSON),
+	}
+	s.attachAssetArtifacts(ctx, asset)
+	if err := s.assets.Create(asset); err != nil {
+		return err
+	}
+	var usage *string
+	if len(result.UsageJSON) > 0 && string(result.UsageJSON) != "null" {
+		value := string(result.UsageJSON)
+		usage = &value
+	}
+	if err := s.generations.MarkCompleted(generationID, repository.VideoGenerationCompletion{
+		OutputAssetID: asset.ID,
+		UpstreamJobID: result.UpstreamJobID,
+		UpstreamReqID: result.UpstreamReqID,
+		UsageJSON:     usage,
+		CostUSD:       result.CostUSD,
+	}); err != nil {
+		return err
+	}
+	if req.PlaceOnTimeline {
+		_, _, _ = s.ImportAssetToTimeline(ctx, userID, projectID, TimelineImportAssetRequest{AssetID: asset.ID})
+	}
+	return nil
 }
 
 // pollAndFinalize polls a Gemini operation until done then stores the result.
@@ -1822,6 +1934,7 @@ func buildSettingsJSON(req GenerateRequest) string {
 		return string(req.Settings)
 	}
 	settings := map[string]any{
+		"generation_mode":   req.GenerationMode,
 		"aspect_ratio":      req.AspectRatio,
 		"duration_seconds":  req.DurationSeconds,
 		"resolution":        req.Resolution,
