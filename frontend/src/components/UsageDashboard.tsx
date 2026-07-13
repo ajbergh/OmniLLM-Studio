@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import { toast } from 'sonner';
-import { BarChart3, DollarSign, Zap, TrendingUp } from 'lucide-react';
+import { BarChart3, DollarSign, Zap, TrendingUp, Download } from 'lucide-react';
 import { DialogShell } from './DialogShell';
 import type { UsageSummary, PricingRule } from '../types';
 
@@ -17,6 +17,7 @@ export function UsageDashboard({ open, onClose }: UsageDashboardProps) {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState<'usage' | 'pricing'>('usage');
+  const [budget, setBudget] = useState(() => Number(window.localStorage.getItem('omnillm_monthly_budget') || 0));
 
   // Map display labels to backend period values
   const periodOptions = [
@@ -109,6 +110,27 @@ export function UsageDashboard({ open, onClose }: UsageDashboardProps) {
                   {opt.label}
                 </button>
               ))}
+              <button
+                type="button"
+                disabled={!usage}
+                onClick={() => {
+                  if (!usage) return;
+                  const rows = [
+                    ['Provider', 'Requests', 'Input tokens', 'Output tokens', 'Estimated cost'],
+                    ...(usage.by_provider || []).map((item) => [item.provider, item.message_count, item.input_tokens, item.output_tokens, item.estimated_cost]),
+                  ];
+                  const blob = new Blob([rows.map((row) => row.join(',')).join('\n')], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = `omnillm-usage-${period}.csv`;
+                  link.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="ml-auto min-h-10 rounded-lg border border-border px-3 text-xs text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-40 inline-flex items-center gap-1.5"
+              >
+                <Download size={13} /> Export CSV
+              </button>
             </div>
 
             {usage && (
@@ -119,6 +141,41 @@ export function UsageDashboard({ open, onClose }: UsageDashboardProps) {
                   <StatCard icon={TrendingUp} label="Input Tokens" value={formatTokens(usage.total_input_tokens)} />
                   <StatCard icon={TrendingUp} label="Output Tokens" value={formatTokens(usage.total_output_tokens)} />
                   <StatCard icon={DollarSign} label="Est. Cost" value={`$${(usage.estimated_cost || 0).toFixed(4)}`} />
+                </div>
+
+                <div className="rounded-xl border border-border bg-surface-alt p-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-medium text-text">Cost budget</h3>
+                      <p className="text-xs text-text-muted">Stored locally for this installation.</p>
+                    </div>
+                    <label className="flex min-h-10 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs text-text-muted">
+                      Monthly USD
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={budget || ''}
+                        onChange={(event) => {
+                          const next = Math.max(0, Number(event.target.value) || 0);
+                          setBudget(next);
+                          window.localStorage.setItem('omnillm_monthly_budget', String(next));
+                        }}
+                        className="w-24 bg-transparent text-right text-text outline-none"
+                      />
+                    </label>
+                  </div>
+                  {budget > 0 && (
+                    <div className="mt-3" role="status" aria-live="polite">
+                      <div className="mb-1 flex justify-between text-[11px] text-text-muted">
+                        <span>${(usage.estimated_cost || 0).toFixed(2)} used</span><span>${budget.toFixed(2)} budget</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-surface">
+                        <div className={`h-full ${usage.estimated_cost >= budget ? 'bg-danger' : 'bg-primary'}`} style={{ width: `${Math.min(100, ((usage.estimated_cost || 0) / budget) * 100)}%` }} />
+                      </div>
+                      {usage.estimated_cost >= budget && <p className="mt-2 text-xs text-danger" role="alert">Budget threshold reached.</p>}
+                    </div>
+                  )}
                 </div>
 
                 {/* Per-provider breakdown */}

@@ -3,6 +3,12 @@ import { toast } from 'sonner';
 import { api } from '../api';
 import type { Conversation, Message, ProviderProfile, SendMessageRequest, WebSearchResult, FeatureFlag } from '../types';
 
+function getInitialConversationId(): string | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.pathname.match(/^\/chat\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : window.localStorage.getItem('omnillm_active_conversation');
+}
+
 // ---- Conversation Store ----
 
 interface ConversationState {
@@ -25,7 +31,7 @@ interface ConversationState {
 
 export const useConversationStore = create<ConversationState>((set, get) => ({
   conversations: [],
-  activeId: null,
+  activeId: getInitialConversationId(),
   loading: false,
   error: null,
   searchQuery: '',
@@ -59,10 +65,12 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       conversations: [convo, ...s.conversations],
       activeId: convo.id,
     }));
+    window.localStorage.setItem('omnillm_active_conversation', convo.id);
     return convo;
   },
 
   selectConversation: (id: string) => {
+    window.localStorage.setItem('omnillm_active_conversation', id);
     set({ activeId: id });
   },
 
@@ -75,6 +83,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
   deleteConversation: async (id: string) => {
     await api.deleteConversation(id);
+    if (get().activeId === id) window.localStorage.removeItem('omnillm_active_conversation');
     set((s) => ({
       conversations: s.conversations.filter((c) => c.id !== id),
       activeId: s.activeId === id ? null : s.activeId,
@@ -117,6 +126,7 @@ function dedupeMessages(messages: Message[]): Message[] {
 
 interface MessageState {
   messages: Message[];
+  loadedConversationId: string | null;
   streaming: boolean;
   streamingContent: string;
   streamingThinking: string;
@@ -137,17 +147,19 @@ interface MessageState {
   imageGenerating: boolean;
 
   fetchMessages: (conversationId: string) => Promise<void>;
+  replaceMessages: (conversationId: string, messages: Message[]) => void;
   sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }) => void;
   generateImage: (conversationId: string, prompt: string, override?: { provider?: string; model?: string }, options?: { size?: string; quality?: string; referenceImageId?: string }) => Promise<void>;
   regenerateLastMessage: (conversationId: string) => Promise<void>;
   editAndResend: (conversationId: string, messageId: string, newContent: string) => Promise<void>;
   deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
-  clearMessages: () => void;
+  clearMessages: (conversationId?: string) => void;
   stopStreaming: () => void;
 }
 
 export const useMessageStore = create<MessageState>((set, get) => ({
   messages: [],
+  loadedConversationId: null,
   streaming: false,
   streamingContent: '',
   streamingThinking: '',
@@ -170,12 +182,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   fetchMessages: async (conversationId: string) => {
     // Increment counter to detect stale responses from rapid switching
     const fetchToken = ++fetchMessageCounter;
-    set({ loading: true, error: null });
+    set({ messages: [], loadedConversationId: null, loading: true, error: null });
     try {
       const messages = await api.listMessages(conversationId);
       // Only commit if this is still the latest fetch request
       if (fetchToken === fetchMessageCounter) {
-        set({ messages: dedupeMessages(messages), loading: false });
+        set({ messages: dedupeMessages(messages), loadedConversationId: conversationId, loading: false });
       }
     } catch (err) {
       if (fetchToken === fetchMessageCounter) {
@@ -184,8 +196,18 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     }
   },
 
+  replaceMessages: (conversationId: string, messages: Message[]) => {
+    ++fetchMessageCounter;
+    set({
+      messages: dedupeMessages(messages),
+      loadedConversationId: conversationId,
+      loading: false,
+      error: null,
+    });
+  },
+
   sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }) => {
-    set({ streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, ragIndexingStatus: null, ragIndexingDetail: null, imageGenerating: false });
+    set({ loadedConversationId: conversationId, streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, ragIndexingStatus: null, ragIndexingDetail: null, imageGenerating: false });
 
     const reqBody: SendMessageRequest = { content };
     if (override) reqBody.override = override;
@@ -346,7 +368,10 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     set({ abortStream: abort });
   },
 
-  clearMessages: () => set({ messages: [], streamingContent: '', streamingThinking: '', streaming: false, streamingConversationId: null, webSearching: false, webSearchResults: null, webSearchQuery: null, browserStatus: null, browserStatusDetail: null, browserProgress: null }),
+  clearMessages: (conversationId?: string) => {
+    ++fetchMessageCounter;
+    set({ messages: [], loadedConversationId: conversationId ?? null, loading: false, error: null, streamingContent: '', streamingThinking: '', streaming: false, streamingConversationId: null, webSearching: false, webSearchResults: null, webSearchQuery: null, browserStatus: null, browserStatusDetail: null, browserProgress: null });
+  },
 
   stopStreaming: () => {
     const { abortStream, streamingContent, streamingConversationId } = get();
@@ -568,6 +593,11 @@ function getInitialSidebarOpen(): boolean {
 
 function getInitialAppMode(): 'chat' | 'image' | 'music' | 'video' | 'video-edit' {
   if (typeof window === 'undefined') return 'chat';
+  if (window.location.pathname.startsWith('/image/')) return 'image';
+  if (window.location.pathname.startsWith('/music/')) return 'music';
+  if (/^\/video\/[^/]+\/edit$/.test(window.location.pathname)) return 'video-edit';
+  if (window.location.pathname.startsWith('/video/')) return 'video';
+  if (window.location.pathname.startsWith('/chat/')) return 'chat';
   const saved = window.localStorage.getItem('omnillm_app_mode');
   if (saved === 'image') return 'image';
   if (saved === 'music') return 'music';

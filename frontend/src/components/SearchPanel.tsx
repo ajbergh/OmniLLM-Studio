@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { Search, X, MessageSquare, SlidersHorizontal, Clock, Filter, RefreshCw } from 'lucide-react';
-import { searchApi } from '../api';
+import { api, searchApi, workspaceApi } from '../api';
 import type { SearchResult, SearchMode } from '../types';
 
 interface SearchPanelProps {
@@ -48,7 +48,21 @@ export function SearchPanel({ open, onClose, onSelectResult }: SearchPanelProps)
     try {
       const data = await searchApi.search(query, mode, 50);
       const nextResults = data.results || [];
-      setResults(nextResults);
+      const conversationIds = [...new Set(nextResults.map((result) => result.conversation_id).filter(Boolean))];
+      const [conversations, workspaces] = await Promise.all([
+        Promise.all(conversationIds.map((id) => api.getConversation(id).catch(() => null))),
+        workspaceApi.list().catch(() => []),
+      ]);
+      const conversationMap = new Map(conversations.filter(Boolean).map((conversation) => [conversation!.id, conversation!]));
+      const workspaceMap = new Map(workspaces.map((workspace) => [workspace.id, workspace.name]));
+      setResults(nextResults.map((result) => {
+        const conversation = conversationMap.get(result.conversation_id);
+        return {
+          ...result,
+          conversation_title: conversation?.title || 'Conversation',
+          project_name: conversation?.workspace_id ? workspaceMap.get(conversation.workspace_id) : undefined,
+        };
+      }));
       setActiveResultIndex(nextResults.length > 0 ? 0 : -1);
     } catch (err) {
       const message = (err as Error).message;
@@ -280,24 +294,20 @@ export function SearchPanel({ open, onClose, onSelectResult }: SearchPanelProps)
                     <div className="flex items-center gap-2 mb-1">
                       <MessageSquare size={12} className="text-primary shrink-0" />
                       <span className="text-xs font-medium text-text truncate">
-                        {r.type === 'chunk' ? 'RAG Chunk' : (r.role || 'message')}
+                        {r.conversation_title || (r.type === 'chunk' ? 'RAG Chunk' : 'Conversation')}
                       </span>
                       {r.role && (
                         <span className="text-xs text-text-muted capitalize ml-auto shrink-0">{r.role}</span>
                       )}
                     </div>
-                    <div className="text-xs text-text-muted/80 line-clamp-2 pl-5">
-                      {r.content}
+                    {r.project_name && <div className="mb-1 pl-5 text-[10px] font-medium text-primary/80">Project · {r.project_name}</div>}
+                    <div className="text-xs text-text-muted/80 line-clamp-3 pl-5">
+                      <HighlightedExcerpt content={r.content} query={query} />
                     </div>
                     <div className="flex items-center gap-3 pl-5 mt-1.5">
                       {r.timestamp && (
                         <span className="flex items-center gap-1 text-[10px] text-text-muted/50">
                           <Clock size={10} /> {new Date(r.timestamp).toLocaleDateString()}
-                        </span>
-                      )}
-                      {r.score > 0 && (
-                        <span className="text-[10px] text-text-muted/50">
-                          Score: {(r.score * 100).toFixed(0)}
                         </span>
                       )}
                     </div>
@@ -319,5 +329,21 @@ export function SearchPanel({ open, onClose, onSelectResult }: SearchPanelProps)
         </motion.div>
       </motion.div>
     </AnimatePresence>
+  );
+}
+
+function HighlightedExcerpt({ content, query }: { content: string; query: string }) {
+  const needle = query.trim();
+  if (!needle) return content;
+  const index = content.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase());
+  if (index < 0) return content;
+  const start = Math.max(0, index - 90);
+  const end = Math.min(content.length, index + needle.length + 140);
+  return (
+    <>
+      {start > 0 ? '…' : ''}{content.slice(start, index)}
+      <mark className="rounded bg-primary/25 px-0.5 text-text">{content.slice(index, index + needle.length)}</mark>
+      {content.slice(index + needle.length, end)}{end < content.length ? '…' : ''}
+    </>
   );
 }

@@ -24,6 +24,9 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
   const [running, setRunning] = useState(false);
+  const [suiteMode, setSuiteMode] = useState<'builder' | 'json'>('builder');
+  const [suiteName, setSuiteName] = useState('Quality check');
+  const [cases, setCases] = useState([{ id: 'case-1', input: '', keywords: '' }]);
 
   const fetchRuns = useCallback(async () => {
     setLoading(true);
@@ -45,10 +48,20 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
   }, [open, fetchRuns]);
 
   const handleRunEval = async () => {
-    if (!suiteJson.trim() || !provider.trim()) return;
+    if (!provider.trim()) return;
     setRunning(true);
     try {
-      const suite: EvalSuite = JSON.parse(suiteJson);
+      const suite: EvalSuite = suiteMode === 'json'
+        ? JSON.parse(suiteJson)
+        : {
+            name: suiteName.trim() || 'Evaluation',
+            cases: cases.filter((item) => item.input.trim()).map((item) => ({
+              id: item.id,
+              input: item.input.trim(),
+              expected_keywords: item.keywords.split(',').map((keyword) => keyword.trim()).filter(Boolean),
+            })),
+          };
+      if (suite.cases.length === 0) throw new Error('Add at least one evaluation case');
       const run = await evalApi.run({ provider, model, suite });
       toast.success(`Eval complete: score ${((run.total_score ?? 0) * 100).toFixed(1)}%`);
       setSuiteJson('');
@@ -178,6 +191,30 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
                 </div>
 
                 <div>
+                  <div className="mb-3 flex w-fit rounded-xl border border-border bg-surface-alt p-1" role="tablist" aria-label="Evaluation suite editor">
+                    <button type="button" role="tab" aria-selected={suiteMode === 'builder'} onClick={() => setSuiteMode('builder')} className={`min-h-10 rounded-lg px-3 text-xs ${suiteMode === 'builder' ? 'bg-primary/20 text-primary' : 'text-text-muted'}`}>Case builder</button>
+                    <button type="button" role="tab" aria-selected={suiteMode === 'json'} onClick={() => setSuiteMode('json')} className={`min-h-10 rounded-lg px-3 text-xs ${suiteMode === 'json' ? 'bg-primary/20 text-primary' : 'text-text-muted'}`}>Advanced JSON</button>
+                  </div>
+                  {suiteMode === 'builder' ? (
+                    <div className="space-y-3">
+                      <label className="block text-xs font-medium text-text-muted">
+                        Suite name
+                        <input value={suiteName} onChange={(event) => setSuiteName(event.target.value)} className="mt-1 min-h-10 w-full rounded-lg border border-border bg-surface-light px-3 text-sm text-text outline-none focus:border-primary/50" />
+                      </label>
+                      {cases.map((evalCase, index) => (
+                        <div key={evalCase.id} className="rounded-xl border border-border bg-surface-alt p-3">
+                          <div className="mb-2 flex items-center justify-between">
+                            <span className="text-xs font-medium text-text">Case {index + 1}</span>
+                            {cases.length > 1 && <button type="button" onClick={() => setCases((current) => current.filter((item) => item.id !== evalCase.id))} className="min-h-10 rounded-lg px-2 text-xs text-danger hover:bg-danger-soft">Remove</button>}
+                          </div>
+                          <label className="block text-xs text-text-muted">Prompt<input value={evalCase.input} onChange={(event) => setCases((current) => current.map((item) => item.id === evalCase.id ? { ...item, input: event.target.value } : item))} placeholder="Question or instruction to evaluate" className="mt-1 min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text outline-none" /></label>
+                          <label className="mt-2 block text-xs text-text-muted">Expected keywords<input value={evalCase.keywords} onChange={(event) => setCases((current) => current.map((item) => item.id === evalCase.id ? { ...item, keywords: event.target.value } : item))} placeholder="comma, separated, criteria" className="mt-1 min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text outline-none" /></label>
+                        </div>
+                      ))}
+                      <button type="button" onClick={() => setCases((current) => [...current, { id: `case-${crypto.randomUUID()}`, input: '', keywords: '' }])} className="min-h-10 w-full rounded-lg border border-dashed border-border text-xs text-text-muted hover:border-primary/40 hover:text-primary">Add evaluation case</button>
+                    </div>
+                  ) : (
+                  <>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-medium text-text-muted">Eval Suite JSON</label>
                     <label className="flex items-center gap-1 text-xs text-primary cursor-pointer hover:text-primary/80">
@@ -193,13 +230,15 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
                                focus:outline-none focus:border-primary/50 resize-y font-mono"
                     placeholder='{"name": "my-eval", "cases": [{"id": "1", "input": "...", "expected_keywords": ["..."]}]}'
                   />
+                  </>
+                  )}
                 </div>
 
                 <motion.button
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.99 }}
                   onClick={handleRunEval}
-                  disabled={running || !suiteJson.trim() || !provider.trim()}
+                  disabled={running || !provider.trim() || (suiteMode === 'json' ? !suiteJson.trim() : !cases.some((item) => item.input.trim()))}
                     className="w-full py-2.5 rounded-xl btn-primary text-sm font-medium flex items-center justify-center gap-2
                              disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -319,6 +358,7 @@ export function EvalDashboard({ open, onClose }: EvalDashboardProps) {
                     <FlaskConical size={32} className="mx-auto mb-3 opacity-30" />
                     <p>No eval runs yet</p>
                     <p className="text-xs mt-1">Run an evaluation to test prompt quality across providers</p>
+                    <button type="button" onClick={() => setTab('new')} className="btn-primary mt-4 min-h-11 rounded-xl px-4 text-xs font-medium">Build your first evaluation</button>
                   </div>
                 ) : (
                   runs.map((run) => (

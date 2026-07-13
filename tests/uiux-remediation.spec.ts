@@ -188,14 +188,86 @@ test('mobile image studio exposes prompt canvas and history without fixed-column
 
   await openSidebarIfNeeded(page);
   await page.getByRole('button', { name: 'Image Studio' }).click();
+  await expect(page.getByRole('button', { name: 'Close sidebar' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await expect(page.getByRole('button', { name: 'Close sidebar' })).toBeVisible();
   await expect(page.getByText(fixture.title, { exact: true }).first()).toBeVisible();
   await page.getByText(fixture.title, { exact: true }).first().click();
 
   await expect(page.getByText('Image Edit Studio')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Prompt' })).toBeVisible();
-  await page.getByRole('button', { name: 'Canvas' }).click();
+  await expect(page.getByRole('button', { name: 'Prompt', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Canvas', exact: true }).click();
   await expect(page.getByTestId('image-canvas-toolbar')).toBeVisible();
-  await page.getByRole('button', { name: 'History' }).click();
+  await page.getByRole('button', { name: 'History', exact: true }).click();
   await expect(page.getByText(fixture.title).first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
+});
+
+test('mobile media studios expose full-height workspace tabs', async ({ page }) => {
+  await resetClientState(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+
+  const switchMode = async (name: string) => {
+    await openSidebarIfNeeded(page);
+    await page.getByRole('button', { name }).click();
+    await expect(page.getByRole('button', { name: 'Close sidebar' })).toBeHidden();
+  };
+
+  await switchMode('Music Studio');
+  for (const name of ['Create', 'Result', 'History']) {
+    await expect(page.getByRole('tab', { name, exact: true })).toBeVisible();
+    await page.getByRole('tab', { name, exact: true }).click();
+  }
+  await expectNoHorizontalOverflow(page);
+
+  await switchMode('Video Studio');
+  for (const name of ['Create', 'Preview', 'History', 'Outputs']) {
+    await expect(page.getByRole('tab', { name, exact: true })).toBeVisible();
+    await page.getByRole('tab', { name, exact: true }).click();
+  }
+  await expectNoHorizontalOverflow(page);
+
+  await switchMode('Video Edit Studio');
+  for (const name of ['Preview', 'Timeline', 'Media', 'Inspector']) {
+    await expect(page.getByRole('tab', { name, exact: true })).toBeVisible();
+    await page.getByRole('tab', { name, exact: true }).click();
+  }
+  await expectNoHorizontalOverflow(page);
+});
+
+test('opening a global dialog dismisses the model selector', async ({ page }) => {
+  const fixture = seedChatFixture(`UIUX Overlay Fixture ${Date.now()}`);
+  await resetClientState(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByText(fixture.title, { exact: true }).first().click();
+
+  await page.getByRole('button', { name: /^Model:/ }).click();
+  await expect(page.getByRole('listbox', { name: 'Available models' })).toBeVisible();
+  await page.getByRole('button', { name: 'Usage Dashboard' }).click();
+  await expect(page.getByRole('dialog', { name: 'Usage & Cost Dashboard' })).toBeVisible();
+  await expect(page.getByRole('listbox', { name: 'Available models' })).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('listbox', { name: 'Available models' })).toBeHidden();
+});
+
+test('slow conversation switching never renders the previous transcript under the new title', async ({ page }) => {
+  const first = seedChatFixture(`UIUX Slow First ${Date.now()}`);
+  const second = seedChatFixture(`UIUX Slow Second ${Date.now()}`);
+  await resetClientState(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByText(first.title, { exact: true }).first().click();
+  await expect(page.getByText('Show me a provider comparison table.', { exact: true })).toBeVisible();
+
+  await page.route(`**/conversations/${second.conversation_id}/messages`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    await route.continue();
+  });
+  await page.getByText(second.title, { exact: true }).first().click();
+  await expect(page.getByRole('status').filter({ hasText: 'Loading conversation' })).toBeVisible();
+  await expect(page.getByText('Show me a provider comparison table.', { exact: true })).toBeHidden();
+  await expect(page.getByText('Show me a provider comparison table.', { exact: true })).toBeVisible();
 });

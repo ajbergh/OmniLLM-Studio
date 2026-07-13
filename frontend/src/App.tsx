@@ -77,18 +77,64 @@ function getNewImageSessionTitle() {
 
 function App() {
   const { toggleSettings, settingsOpen, sidebarOpen, toggleSidebar, appMode, setAppMode } = useSettingsStore();
-  const { createConversation, selectConversation } = useConversationStore();
+  const { activeId, createConversation, selectConversation } = useConversationStore();
   const { clearMessages, fetchMessages } = useMessageStore();
   const providers = useProviderStore((s) => s.providers);
+  const imageSessionId = useImageEditorStore((state) => state.activeSessionId);
   const { createSession: createImageSession, loadAllSessions, loadSession: loadImageSession } = useImageEditorStore();
-  const { createSession: createMusicSession, loadSessions: loadMusicSessions } = useMusicStudioStore();
-  const { createProject: createVideoProject, loadProjects: loadVideoProjects } = useVideoStudioStore();
+  const musicSessionId = useMusicStudioStore((state) => state.activeSessionId);
+  const { createSession: createMusicSession, loadSessions: loadMusicSessions, selectSession: selectMusicSession } = useMusicStudioStore();
+  const videoProjectId = useVideoStudioStore((state) => state.activeProjectId);
+  const { createProject: createVideoProject, loadProjects: loadVideoProjects, selectProject: selectVideoProject } = useVideoStudioStore();
   const [activePanel, setActivePanel] = useState<OverlayPanel | null>(null);
   const [fileLibraryPreferredScope, setFileLibraryPreferredScope] = useState<'workspace' | 'conversation' | 'global' | 'all'>('all');
   const [fileLibraryPreferredWorkspaceId, setFileLibraryPreferredWorkspaceId] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(true); // Default true (solo mode)
   const [authChecked, setAuthChecked] = useState(false);
   const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const restoreRoute = async () => {
+      const parts = window.location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+      if (parts[0] === 'chat' && parts[1]) {
+        selectConversation(parts[1]);
+        await fetchMessages(parts[1]);
+      } else if (parts[0] === 'image' && parts[1]) {
+        await loadAllSessions();
+        const session = useImageEditorStore.getState().allSessions.find((item) => item.id === parts[1]);
+        if (session) await loadImageSession(session.conversation_id, session.id);
+      } else if (parts[0] === 'music' && parts[1]) {
+        await loadMusicSessions();
+        await selectMusicSession(parts[1]);
+      } else if (parts[0] === 'video' && parts[1]) {
+        await loadVideoProjects();
+        await selectVideoProject(parts[1]);
+      } else if (activeId && appMode === 'chat') {
+        await fetchMessages(activeId);
+      }
+    };
+    void restoreRoute();
+  // The route is intentionally restored only once; store actions are stable Zustand references.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let path = '/';
+    if (appMode === 'chat' && activeId) path = `/chat/${encodeURIComponent(activeId)}`;
+    if (appMode === 'image' && imageSessionId) path = `/image/${encodeURIComponent(imageSessionId)}`;
+    if (appMode === 'music' && musicSessionId) path = `/music/${encodeURIComponent(musicSessionId)}`;
+    if (appMode === 'video' && videoProjectId) path = `/video/${encodeURIComponent(videoProjectId)}`;
+    if (appMode === 'video-edit' && videoProjectId) path = `/video/${encodeURIComponent(videoProjectId)}/edit`;
+    if (window.location.pathname !== path) window.history.replaceState({}, '', path);
+  }, [activeId, appMode, imageSessionId, musicSessionId, videoProjectId]);
+
+  // Studio data must load independently of the sidebar: the mobile drawer unmounts
+  // immediately after a mode change.
+  useEffect(() => {
+    if (appMode === 'image') void loadAllSessions();
+    if (appMode === 'music') void loadMusicSessions();
+    if (appMode === 'video' || appMode === 'video-edit') void loadVideoProjects();
+  }, [appMode, loadAllSessions, loadMusicSessions, loadVideoProjects]);
 
   const shortcutsOpen = activePanel === 'shortcuts';
   const usageOpen = activePanel === 'usage';
@@ -100,9 +146,14 @@ function App() {
   const importExportOpen = activePanel === 'importExport';
   const toolsOpen = activePanel === 'tools';
 
-  const openPanel = useCallback((panel: OverlayPanel) => {
-    setActivePanel(panel);
+  const dismissPopovers = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('omnillm:dismiss-popovers'));
   }, []);
+
+  const openPanel = useCallback((panel: OverlayPanel) => {
+    dismissPopovers();
+    setActivePanel(panel);
+  }, [dismissPopovers]);
 
   useEffect(() => {
     const handler = (evt: Event) => {
@@ -121,17 +172,19 @@ function App() {
   }, []);
 
   const togglePanel = useCallback((panel: OverlayPanel) => {
+    dismissPopovers();
     setActivePanel((prev) => (prev === panel ? null : panel));
-  }, []);
+  }, [dismissPopovers]);
 
   const closePanels = useCallback(() => {
     setActivePanel(null);
   }, []);
 
   const openSettingsPanel = useCallback(() => {
+    dismissPopovers();
     closePanels();
     toggleSettings();
-  }, [closePanels, toggleSettings]);
+  }, [closePanels, dismissPopovers, toggleSettings]);
 
   // Check auth status on mount — solo mode (no users) stays authenticated
   useEffect(() => {
@@ -186,12 +239,17 @@ function App() {
           return;
         }
         const enabledProviders = providers.filter((p) => p.enabled);
+        if (enabledProviders.length === 0) {
+          toast.error('Configure and enable a provider before starting a conversation');
+          openSettingsPanel();
+          return;
+        }
         const defaultProvider = enabledProviders[0];
         createConversation(undefined, {
           provider: defaultProvider?.id,
           model: defaultProvider?.default_model || undefined,
         }).then((convo) => {
-          clearMessages();
+          clearMessages(convo.id);
           selectConversation(convo.id);
           toast.success('New conversation created');
         });
@@ -323,7 +381,7 @@ function App() {
                   transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
                   className="fixed left-0 top-0 bottom-0 z-40 w-72"
                 >
-                  <Sidebar />
+                  <Sidebar forceOpen />
                 </motion.div>
               </>
             )}

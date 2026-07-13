@@ -2,16 +2,26 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 
 interface DragHandleProps {
   onMouseDown: (e: React.MouseEvent) => void;
+  onKeyboardResize?: (delta: number) => void;
   /** Tailwind visibility + display classes. Defaults to 'hidden xl:flex'. */
   visibilityClass?: string;
 }
 
 /** Thin vertical bar rendered between two resizable panels. */
-export function DragHandle({ onMouseDown, visibilityClass = 'hidden xl:flex' }: DragHandleProps) {
+export function DragHandle({ onMouseDown, onKeyboardResize, visibilityClass = 'hidden xl:flex' }: DragHandleProps) {
   return (
     <div
       className={`${visibilityClass} w-1.5 shrink-0 cursor-col-resize select-none items-center justify-center hover:bg-primary/20 active:bg-primary/30 transition-colors group`}
       onMouseDown={onMouseDown}
+      role="separator"
+      aria-label="Resize panels"
+      aria-orientation="vertical"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.preventDefault();
+        onKeyboardResize?.(event.key === 'ArrowLeft' ? -16 : 16);
+      }}
       title="Drag to resize"
     >
       <div className="h-8 w-px rounded-full bg-border/60 group-hover:bg-primary/60 transition-colors" />
@@ -41,6 +51,8 @@ export interface UseResizablePanelsResult {
   isWide: boolean;
   startLeft: (e: React.MouseEvent) => void;
   startRight: (e: React.MouseEvent) => void;
+  resizeLeft: (delta: number) => void;
+  resizeRight: (delta: number) => void;
 }
 
 /**
@@ -128,11 +140,29 @@ export function useResizablePanels({
     dragRef.current = { side: 'right', startX: e.clientX, startW: rightW };
   }, [rightW]);
 
+  const resizeLeft = useCallback((delta: number) => {
+    setLeftW((value) => {
+      const next = Math.max(minWidth, value + delta);
+      if (storageKey) window.localStorage.setItem(`${storageKey}:left`, String(next));
+      return next;
+    });
+  }, [minWidth, storageKey]);
+
+  const resizeRight = useCallback((delta: number) => {
+    setRightW((value) => {
+      const next = Math.max(minWidth, value - delta);
+      if (storageKey) window.localStorage.setItem(`${storageKey}:right`, String(next));
+      return next;
+    });
+  }, [minWidth, storageKey]);
+
   return {
     leftStyle: isWide ? { width: leftW, flexShrink: 0 } : undefined,
     rightStyle: isWide ? { width: rightW, flexShrink: 0 } : undefined,
     isWide,
     startLeft,
     startRight,
+    resizeLeft,
+    resizeRight,
   };
 }

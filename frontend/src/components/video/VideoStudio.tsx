@@ -368,6 +368,7 @@ function buildPromptVariant(prompt: string, kind: PromptVariantKind): string {
 }
 
 export function VideoStudio() {
+  const [mobilePanel, setMobilePanel] = useState<'create' | 'preview' | 'history' | 'outputs'>('create');
   const projects = useVideoStudioStore((state) => state.projects);
   const activeProjectId = useVideoStudioStore((state) => state.activeProjectId);
   const activeGenerationId = useVideoStudioStore((state) => state.activeGenerationId);
@@ -379,7 +380,6 @@ export function VideoStudio() {
   const selectedModel = useVideoStudioStore((state) => state.selectedModel);
   const modelsByProvider = useVideoStudioStore((state) => state.modelsByProvider);
   const promptForm = useVideoStudioStore((state) => state.promptForm);
-  const isLoading = useVideoStudioStore((state) => state.isLoading);
   const isGenerating = useVideoStudioStore((state) => state.isGenerating);
   const isEnhancing = useVideoStudioStore((state) => state.isEnhancing);
   const generationProgress = useVideoStudioStore((state) => state.generationProgress);
@@ -388,7 +388,6 @@ export function VideoStudio() {
   const loadProviders = useVideoStudioStore((state) => state.loadProviders);
   const loadProjects = useVideoStudioStore((state) => state.loadProjects);
   const createProject = useVideoStudioStore((state) => state.createProject);
-  const selectProject = useVideoStudioStore((state) => state.selectProject);
   const setProvider = useVideoStudioStore((state) => state.setProvider);
   const setModel = useVideoStudioStore((state) => state.setModel);
   const setPromptField = useVideoStudioStore((state) => state.setPromptField);
@@ -563,7 +562,7 @@ export function VideoStudio() {
     toast.success(`${variant?.label || 'Prompt'} variant loaded`);
   };
 
-  const { leftStyle, rightStyle, startLeft, startRight } = useResizablePanels({ defaultLeft: 360, defaultRight: 320 });
+  const { leftStyle, rightStyle, isWide, startLeft, startRight, resizeLeft, resizeRight } = useResizablePanels({ defaultLeft: 360, defaultRight: 320 });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface">
@@ -593,17 +592,24 @@ export function VideoStudio() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
-        <aside className="min-h-0 overflow-y-auto border-b border-border bg-surface xl:border-b-0 xl:border-r" style={leftStyle}>
-          <div className="space-y-3 p-3">
-            <ProjectStrip
-              projects={projects}
-              activeProjectId={activeProjectId}
-              isLoading={isLoading}
-              onNew={() => { void createProject(); }}
-              onSelect={(id) => { void selectProject(id); }}
-            />
+      <div className="grid grid-cols-4 border-b border-border bg-surface-raised p-1 xl:hidden" role="tablist" aria-label="Video Studio workspace">
+        {(['create', 'preview', 'history', 'outputs'] as const).map((panel) => (
+          <button
+            key={panel}
+            type="button"
+            role="tab"
+            aria-selected={mobilePanel === panel}
+            onClick={() => setMobilePanel(panel)}
+            className={`min-h-11 rounded-lg px-1 text-[11px] font-medium capitalize transition-colors ${mobilePanel === panel ? 'bg-primary/15 text-primary' : 'text-text-muted hover:bg-surface-hover hover:text-text'}`}
+          >
+            {panel.charAt(0).toUpperCase() + panel.slice(1)}
+          </button>
+        ))}
+      </div>
 
+      <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
+        <aside className={`${mobilePanel === 'create' ? 'block' : 'hidden'} min-h-0 w-full flex-1 overflow-y-auto border-b border-border bg-surface xl:block xl:w-auto xl:flex-none xl:border-b-0 xl:border-r`} style={leftStyle}>
+          <div className="space-y-3 p-3">
             <section className="rounded-lg border border-border bg-surface-alt p-3">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -956,7 +962,7 @@ export function VideoStudio() {
                 </CollapsibleSection>
 
                 {generationProgress && (
-                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-2">
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-2" role="status" aria-live="polite">
                     <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-text-muted">
                       <span className="truncate">{generationProgress.message}</span>
                       <span>{progressPercent > 0 ? `${progressPercent}%` : generationProgress.stage}</span>
@@ -973,9 +979,9 @@ export function VideoStudio() {
                   normalizations={validationNormalizations}
                 />
 
-                {error && <p className="rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-xs text-danger">{error}</p>}
+                {error && <p className="rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-xs text-danger" role="alert">{error}</p>}
 
-                <div className="flex flex-wrap gap-2">
+                <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap gap-2 border-t border-border bg-surface-alt/95 px-1 py-2 backdrop-blur xl:static xl:mx-0 xl:border-0 xl:bg-transparent xl:p-0">
                   <button
                     onClick={() => { void enhancePrompt(); }}
                     disabled={isEnhancing || isGenerating || !promptForm.prompt.trim()}
@@ -1005,9 +1011,9 @@ export function VideoStudio() {
           </div>
         </aside>
 
-        <DragHandle onMouseDown={startLeft} />
+        <DragHandle onMouseDown={startLeft} onKeyboardResize={resizeLeft} />
 
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-surface p-3">
+        <main className={`${mobilePanel === 'preview' ? 'block' : 'hidden'} min-h-0 min-w-0 flex-1 overflow-y-auto bg-surface p-3 xl:block`}>
           <ResultPreview
             asset={activeAsset}
             generation={activeGeneration}
@@ -1017,10 +1023,10 @@ export function VideoStudio() {
           />
         </main>
 
-        <DragHandle onMouseDown={startRight} />
+        <DragHandle onMouseDown={startRight} onKeyboardResize={resizeRight} />
 
-        <aside className="min-h-0 overflow-y-auto border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
-          <HistoryPanel
+        <aside className={`${mobilePanel === 'history' || mobilePanel === 'outputs' ? 'block' : 'hidden'} min-h-0 w-full flex-1 overflow-y-auto border-t border-border bg-surface-raised xl:block xl:w-auto xl:flex-none xl:border-l xl:border-t-0`} style={rightStyle}>
+          {(isWide || mobilePanel === 'history') && <HistoryPanel
             generations={generations}
             activeGenerationId={activeGeneration?.id || null}
             isGenerating={isGenerating}
@@ -1035,8 +1041,8 @@ export function VideoStudio() {
             onSendToTimeline={(generation) => { void handleSendGenerationToTimeline(generation); }}
             onSendToChat={(generation) => { void handleSendGenerationToChat(generation); }}
             onRegisterInLibrary={(generation) => { void handleRegisterAssetInLibrary(generation); }}
-          />
-          <OutputPanel assets={assets} activeAssetId={activeAsset?.id || null} onSelect={selectAsset} />
+          />}
+          {(isWide || mobilePanel === 'outputs') && <OutputPanel assets={assets} activeAssetId={activeAsset?.id || null} onSelect={selectAsset} />}
         </aside>
       </div>
     </div>
@@ -1149,65 +1155,6 @@ function ResultPreview({
           </div>
         </div>
       )}
-    </section>
-  );
-}
-
-function ProjectStrip({
-  projects,
-  activeProjectId,
-  isLoading,
-  onNew,
-  onSelect,
-}: {
-  projects: Array<{ id: string; title: string; updated_at: string }>;
-  activeProjectId: string | null;
-  isLoading: boolean;
-  onNew: () => void;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <section className="rounded-lg border border-border bg-surface-alt p-3">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-text">Projects</h2>
-        <button
-          onClick={onNew}
-          className="min-h-8 rounded-lg border border-border bg-surface px-2 text-xs text-text-muted hover:text-text inline-flex items-center gap-1"
-        >
-          <Plus size={12} />
-          New
-        </button>
-      </div>
-      <div className="max-h-40 space-y-1 overflow-y-auto">
-        {isLoading && projects.length === 0 ? (
-          <div className="flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-xs text-text-muted">
-            <Loader2 size={13} className="animate-spin" />
-            Loading projects
-          </div>
-        ) : projects.length === 0 ? (
-          <button
-            onClick={onNew}
-            className="w-full rounded-lg border border-dashed border-border bg-surface px-3 py-4 text-center text-xs text-text-muted hover:text-text"
-          >
-            Create your first video project
-          </button>
-        ) : (
-          projects.map((project) => (
-            <button
-              key={project.id}
-              onClick={() => onSelect(project.id)}
-              className={`w-full rounded-lg px-3 py-2 text-left text-xs transition-colors ${
-                project.id === activeProjectId
-                  ? 'border border-primary/30 bg-primary/10 text-primary'
-                  : 'border border-transparent bg-surface text-text-secondary hover:bg-surface-hover hover:text-text'
-              }`}
-            >
-              <span className="block truncate font-medium">{project.title}</span>
-              <span className="mt-0.5 block text-[10px] text-text-muted">{new Date(project.updated_at).toLocaleDateString()}</span>
-            </button>
-          ))
-        )}
-      </div>
     </section>
   );
 }

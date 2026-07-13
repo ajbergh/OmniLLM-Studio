@@ -163,6 +163,7 @@ export function PluginManager({ open, onClose }: PluginManagerProps) {
                 <Puzzle size={32} className="mx-auto mb-3 opacity-30" />
                 <p>No plugins installed</p>
                 <p className="text-xs mt-1">Install plugins from a local directory to extend OmniLLM-Studio</p>
+                <button type="button" onClick={() => setInstalling(true)} className="btn-primary mt-4 min-h-11 rounded-xl px-4 text-xs font-medium">Install local plugin</button>
               </div>
             ) : (
               <div className="space-y-3">
@@ -203,6 +204,18 @@ export function PluginManager({ open, onClose }: PluginManagerProps) {
                             Tools: {plugin.manifest.tools.map((t) => t.name).join(', ')}
                           </div>
                         )}
+                        <div className="mt-3 rounded-lg border border-border bg-surface-alt p-2 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium text-text-secondary">Trust & permissions</span>
+                            <span className="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-400">Local · unsigned</span>
+                          </div>
+                          <p className="mt-1 text-text-muted">
+                            {plugin.manifest.permissions?.length
+                              ? plugin.manifest.permissions.join(', ')
+                              : 'No elevated permissions declared'}
+                          </p>
+                          <p className="mt-1 text-[10px] text-text-muted/70">Runtime: {plugin.manifest.runtime} · Installed {new Date(plugin.installed_at).toLocaleDateString()}</p>
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-1 sm:ml-3">

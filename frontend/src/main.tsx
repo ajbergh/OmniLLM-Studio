@@ -4,6 +4,7 @@ import './index.css'
 import App from './App.tsx'
 import { initAPIBase } from './api'
 import { ThemeProvider } from './theme'
+import { MotionConfig } from 'framer-motion'
 
 // In the Wails desktop build, discover the local API server URL before
 // rendering so that all fetch() / SSE calls use the real HTTP server.
@@ -11,7 +12,9 @@ initAPIBase().then(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <ThemeProvider>
-        <App />
+        <MotionConfig reducedMotion="user">
+          <App />
+        </MotionConfig>
       </ThemeProvider>
     </StrictMode>,
   )

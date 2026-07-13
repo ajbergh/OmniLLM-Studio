@@ -98,10 +98,12 @@ function groupSessionsByDate<T extends { created_at: string; updated_at: string 
   return groups.filter((g) => g.sessions.length > 0);
 }
 
-export function Sidebar() {
+export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
   const {
     conversations,
     activeId,
+    loading: conversationLoading,
+    error: conversationError,
     searchQuery,
     showArchived,
     fetchConversations,
@@ -113,7 +115,7 @@ export function Sidebar() {
     searchConversations,
     setShowArchived,
   } = useConversationStore();
-  const { sidebarOpen, toggleSidebar, appMode, setAppMode } = useSettingsStore();
+  const { sidebarOpen, toggleSidebar, appMode, setAppMode, toggleSettings } = useSettingsStore();
   const { fetchMessages, clearMessages } = useMessageStore();
   const providers = useProviderStore((s) => s.providers);
   const { features, fetchFeatures, isEnabled } = useFeatureFlagStore();
@@ -232,14 +234,26 @@ export function Sidebar() {
 
   const handleNew = async () => {
     const enabledProviders = providers.filter((p) => p.enabled);
+    if (enabledProviders.length === 0) {
+      toast.error('Configure and enable a provider before starting a conversation');
+      toggleSettings();
+      return;
+    }
     const defaultProvider = enabledProviders[0];
     const convo = await createConversation(undefined, {
       provider: defaultProvider?.id,
       model: defaultProvider?.default_model || undefined,
     }, activeWorkspaceId);
-    clearMessages();
+    clearMessages(convo.id);
     selectConversation(convo.id);
     toast.success('New conversation created');
+  };
+
+  const handleModeChange = (mode: Parameters<typeof setAppMode>[0]) => {
+    setAppMode(mode);
+    if (window.innerWidth < 768 && sidebarOpen) {
+      toggleSidebar();
+    }
   };
 
   const handleRename = (id: string, currentTitle: string) => {
@@ -460,7 +474,7 @@ export function Sidebar() {
     setEditTitle('');
   };
 
-  if (!sidebarOpen) {
+  if (!sidebarOpen && !forceOpen) {
     return (
       <motion.button
         initial={{ opacity: 0, x: -10 }}
@@ -508,7 +522,8 @@ export function Sidebar() {
       <div className="px-3 pb-2">
         <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface border border-border p-1">
           <button
-            onClick={() => setAppMode('chat')}
+            onClick={() => handleModeChange('chat')}
+            aria-label="Chat Studio"
             className={clsx(
               'min-h-10 px-2 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
               appMode === 'chat'
@@ -520,7 +535,8 @@ export function Sidebar() {
             Chat
           </button>
           <button
-            onClick={() => setAppMode('image')}
+            onClick={() => handleModeChange('image')}
+            aria-label="Image Studio"
             className={clsx(
               'min-h-10 px-2 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
               appMode === 'image'
@@ -533,7 +549,8 @@ export function Sidebar() {
           </button>
           {musicStudioEnabled && (
             <button
-              onClick={() => setAppMode('music')}
+              onClick={() => handleModeChange('music')}
+              aria-label="Music Studio"
               className={clsx(
                 'min-h-10 px-2 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
                 appMode === 'music'
@@ -547,7 +564,8 @@ export function Sidebar() {
           )}
           {videoStudioEnabled && (
             <button
-              onClick={() => setAppMode('video')}
+              onClick={() => handleModeChange('video')}
+              aria-label="Video Studio"
               className={clsx(
                 'min-h-10 px-2 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
                 appMode === 'video'
@@ -561,7 +579,8 @@ export function Sidebar() {
           )}
           {videoStudioEnabled && (
             <button
-              onClick={() => setAppMode('video-edit')}
+              onClick={() => handleModeChange('video-edit')}
+              aria-label="Video Edit Studio"
               className={clsx(
                 'min-h-10 px-2 py-2 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-2',
                 appMode === 'video-edit'
@@ -778,7 +797,18 @@ export function Sidebar() {
           )
         ) : (
           // ── Conversation List ──
-          visibleConversations.length === 0 ? (
+          conversationLoading && visibleConversations.length === 0 ? (
+            <div className="space-y-2 px-3 py-4" role="status" aria-live="polite">
+              <span className="sr-only">Loading conversations</span>
+              {[0, 1, 2, 3].map((item) => <div key={item} className="h-10 animate-pulse rounded-xl bg-surface-alt" />)}
+            </div>
+          ) : conversationError ? (
+            <div className="mx-3 my-4 rounded-xl border border-danger/25 bg-danger-soft p-3 text-xs text-danger" role="alert">
+              <p>Could not load conversations.</p>
+              <p className="mt-1 text-danger/75">{conversationError}</p>
+              <button type="button" onClick={() => fetchConversations()} className="mt-3 min-h-10 w-full rounded-lg border border-danger/30 px-3 font-medium hover:bg-danger/10">Retry</button>
+            </div>
+          ) : visibleConversations.length === 0 ? (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -950,8 +980,17 @@ function ConversationItem({
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.03, duration: 0.3 }}
       onClick={() => onSelect(convo.id)}
+      role="button"
+      tabIndex={0}
+      aria-current={isActive ? 'page' : undefined}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect(convo.id);
+        }
+      }}
       className={clsx(
-        'group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer text-sm mb-0.5',
+        'virtual-list-item group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer text-sm mb-0.5',
         'transition-all duration-200 relative',
         isActive
           ? 'bg-primary/10 text-text border border-primary/20'
@@ -1006,6 +1045,7 @@ function ConversationItem({
           'p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all',
           contextMenuId === convo.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
         )}
+        aria-label={`Conversation actions for ${convo.title}`}
       >
         <MoreHorizontal size={14} />
       </button>
@@ -1092,8 +1132,17 @@ function SessionItem({
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.03, duration: 0.3 }}
       onClick={() => onSelect(session)}
+      role="button"
+      tabIndex={0}
+      aria-current={isActive ? 'page' : undefined}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect(session);
+        }
+      }}
       className={clsx(
-        'group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer text-sm mb-0.5',
+        'virtual-list-item group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer text-sm mb-0.5',
         'transition-all duration-200 relative',
         isActive
           ? 'bg-primary/10 text-text border border-primary/20'
@@ -1139,6 +1188,7 @@ function SessionItem({
           'p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all',
           contextMenuId === session.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
         )}
+        aria-label={`Image session actions for ${session.title}`}
       >
         <MoreHorizontal size={14} />
       </button>
@@ -1196,8 +1246,17 @@ function MusicSessionItem({
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.03, duration: 0.3 }}
       onClick={() => onSelect(session)}
+      role="button"
+      tabIndex={0}
+      aria-current={isActive ? 'page' : undefined}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect(session);
+        }
+      }}
       className={clsx(
-        'group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer text-sm mb-0.5',
+        'virtual-list-item group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer text-sm mb-0.5',
         'transition-all duration-200 relative',
         isActive
           ? 'bg-primary/10 text-text border border-primary/20'
@@ -1228,6 +1287,7 @@ function MusicSessionItem({
           'p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all',
           contextMenuId === session.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
         )}
+        aria-label={`Music session actions for ${session.title}`}
       >
         <MoreHorizontal size={14} />
       </button>
@@ -1279,8 +1339,17 @@ function VideoProjectItem({
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.03, duration: 0.3 }}
       onClick={() => onSelect(project)}
+      role="button"
+      tabIndex={0}
+      aria-current={isActive ? 'page' : undefined}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect(project);
+        }
+      }}
       className={clsx(
-        'group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer text-sm mb-0.5',
+        'virtual-list-item group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer text-sm mb-0.5',
         'transition-all duration-200 relative',
         isActive
           ? 'bg-primary/10 text-text border border-primary/20'
@@ -1311,6 +1380,7 @@ function VideoProjectItem({
           'p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all',
           contextMenuId === project.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
         )}
+        aria-label={`Video project actions for ${project.title}`}
       >
         <MoreHorizontal size={14} />
       </button>

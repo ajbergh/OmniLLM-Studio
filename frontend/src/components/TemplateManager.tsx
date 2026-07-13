@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { templateApi } from '../api';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { FileText, Plus, Trash2, Edit3, Copy, Save, ChevronRight } from 'lucide-react';
+import { FileText, Plus, Trash2, Edit3, Copy, Save, ChevronRight, Search } from 'lucide-react';
 import { DialogShell } from './DialogShell';
 import type { PromptTemplate } from '../types';
 
@@ -21,6 +21,7 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
   const [formContent, setFormContent] = useState('');
   const [formCategory, setFormCategory] = useState('');
   const [formDescription, setFormDescription] = useState('');
+  const [query, setQuery] = useState('');
 
   const fetchTemplates = useCallback(async () => {
     setLoading(true);
@@ -100,6 +101,13 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
   if (!open) return null;
 
   const showForm = creating || editing;
+  const filteredTemplates = templates.filter((template) => {
+    const value = query.trim().toLocaleLowerCase();
+    if (!value) return true;
+    return [template.name, template.category, template.description, template.template_body]
+      .filter(Boolean)
+      .some((field) => field!.toLocaleLowerCase().includes(value));
+  });
 
   return (
     <DialogShell
@@ -121,6 +129,13 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
         </motion.button>
       )}
     >
+            {!showForm && (
+              <label className="mb-4 flex min-h-11 items-center gap-2 rounded-xl border border-border bg-surface-alt px-3">
+                <Search size={14} className="text-text-muted" />
+                <span className="sr-only">Search templates</span>
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, category, description, or content" className="min-w-0 flex-1 bg-transparent text-sm text-text outline-none placeholder:text-text-muted" />
+              </label>
+            )}
             {showForm ? (
               <div className="space-y-3">
                 <div>
@@ -200,13 +215,13 @@ export function TemplateManager({ open, onClose }: TemplateManagerProps) {
                   Retry
                 </button>
               </div>
-            ) : templates.length === 0 ? (
+            ) : filteredTemplates.length === 0 ? (
               <div className="py-12 text-center text-text-muted text-sm">
                 No templates yet. Create one to get started.
               </div>
             ) : (
               <div className="space-y-2">
-                {templates.map((t) => (
+                {filteredTemplates.map((t) => (
                   <div key={t.id} className="glass rounded-xl p-3 group">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">

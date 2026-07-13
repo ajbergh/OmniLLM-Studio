@@ -25,7 +25,7 @@ import { useMusicStudioStore } from '../stores/musicStudio';
 import { matchesShortcut } from '../shortcuts';
 import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult, Attachment, RouterTelemetry } from '../types';
 import { AgentEventType } from '../types';
-import { getModelReasoningLevels, getModelToolCallingSupport, isFreeModel, type ReasoningEffortLevel } from '../models';
+import { getKnownImageModels, getModelReasoningLevels, getModelToolCallingSupport, isFreeModel, type ReasoningEffortLevel } from '../models';
 
 type PendingUploadStatus = 'pending' | 'uploading' | 'failed';
 
@@ -37,6 +37,7 @@ interface PendingUploadFile {
 }
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+const MAX_ATTACHMENT_LABEL = `${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB`;
 
 // MIME types whose text content the backend can extract for LLM context / RAG.
 // Kept in sync with isTextMIME + canExtractAttachmentText in attachment_text.go.
@@ -145,8 +146,8 @@ export function ChatView() {
   const { toggleSettings, setAppMode } = useSettingsStore();
   const providers = useProviderStore((s) => s.providers);
   const {
-    messages, streaming, streamingContent, streamingThinking, error,
-    sendMessage, clearMessages, stopStreaming,
+    messages, loadedConversationId, loading: messagesLoading, streaming, streamingContent, streamingThinking, error,
+    sendMessage, clearMessages, replaceMessages, stopStreaming,
     webSearching, webSearchQuery, urlContextStatus, urlContextKind,
     browserStatus, browserStatusDetail, browserProgress,
     ragIndexingStatus, ragIndexingDetail, imageGenerating,
@@ -200,6 +201,7 @@ export function ChatView() {
     return false;
   })();
   const isOpenRouterProvider = activeProvider?.type?.toLowerCase() === 'openrouter';
+  const messagesReady = loadedConversationId === activeId && !messagesLoading;
 
   const openRouterOptions = (() => {
     if (!isOpenRouterProvider) return undefined;
@@ -217,7 +219,11 @@ export function ChatView() {
   })();
 
   // Check if the active provider supports image generation (from backend capability field)
-  const isImageCapable = activeProvider?.image_capable === true;
+  const isImageCapable = Boolean(activeProvider && (
+    activeProvider.image_capable === true ||
+    activeProvider.default_image_model ||
+    getKnownImageModels(activeProvider.type).length > 0
+  ));
 
   // Reasoning effort levels supported by the current model (null = not supported)
   const reasoningLevels = getModelReasoningLevels(
@@ -361,7 +367,7 @@ export function ChatView() {
   const queueFiles = useCallback((files: File[]) => {
     const withinLimit = files.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
     if (withinLimit.length < files.length) {
-      toast.error('Some files exceed the 10 MB limit and were skipped');
+      toast.error(`Some files exceed the ${MAX_ATTACHMENT_LABEL} limit and were skipped`);
     }
 
     if (withinLimit.length === 0) return;
@@ -393,7 +399,7 @@ export function ChatView() {
   }, []);
 
   const handleSend = useCallback(async () => {
-    if ((!input.trim() && pendingFiles.length === 0) || streaming) return;
+    if ((!input.trim() && pendingFiles.length === 0) || streaming || (activeId && !messagesReady)) return;
 
     let currentId = activeId;
 
@@ -401,12 +407,17 @@ export function ChatView() {
     if (!currentId) {
       try {
         const enabledProviders = providers.filter((p) => p.enabled);
+        if (enabledProviders.length === 0) {
+          toast.error('Configure and enable a provider before starting a conversation');
+          toggleSettings();
+          return;
+        }
         const defaultProvider = enabledProviders[0];
         const convo = await createConversation(undefined, {
           provider: defaultProvider?.id,
           model: defaultProvider?.default_model || undefined,
         });
-        clearMessages();
+        clearMessages(convo.id);
         selectConversation(convo.id);
         currentId = convo.id;
       } catch {
@@ -511,7 +522,7 @@ export function ChatView() {
         inputRef.current.style.height = 'auto';
       }
     }
-  }, [input, activeId, streaming, pendingFiles, imageMode, editPreviousImage, lastImageAttachmentId, agentMode, activeConvo, webSearchEnabled, thinkEnabled, isOllamaProvider, openRouterOptions, reasoningEffort, reasoningLevels, sendMessage, generateImage, createConversation, clearMessages, selectConversation]);
+  }, [input, activeId, messagesReady, streaming, pendingFiles, imageMode, editPreviousImage, lastImageAttachmentId, agentMode, activeConvo, providers, webSearchEnabled, thinkEnabled, isOllamaProvider, openRouterOptions, reasoningEffort, reasoningLevels, sendMessage, generateImage, createConversation, clearMessages, selectConversation, toggleSettings]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (matchesShortcut(e as unknown as KeyboardEvent, 'sendMessage')) {
@@ -526,12 +537,17 @@ export function ChatView() {
 
   const handleNewChat = async () => {
     const enabledProviders = providers.filter((p) => p.enabled);
+    if (enabledProviders.length === 0) {
+      toast.error('Configure and enable a provider before starting a conversation');
+      toggleSettings();
+      return;
+    }
     const defaultProvider = enabledProviders[0];
     const convo = await createConversation(undefined, {
       provider: defaultProvider?.id,
       model: defaultProvider?.default_model || undefined,
     });
-    clearMessages();
+    clearMessages(convo.id);
     selectConversation(convo.id);
     toast.success('New conversation created');
   };
@@ -630,16 +646,20 @@ export function ChatView() {
               conversationId={activeId}
               activeBranchId={activeBranchId}
               lastMessageId={messages.length > 0 ? messages[messages.length - 1].id : undefined}
-              onSwitchBranch={(branchId) => {
+              onSwitchBranch={async (branchId) => {
                 setActiveBranchId(branchId ?? undefined);
+                clearMessages();
                 if (branchId) {
-                  // Fetch branch messages and update the message store
-                  branchApi.listMessages(activeId, branchId).then((msgs) => {
-                    if (msgs) useMessageStore.getState().fetchMessages(activeId);
-                  }).catch(() => {});
+                  try {
+                    const branchMessages = await branchApi.listMessages(activeId, branchId);
+                    replaceMessages(activeId, branchMessages);
+                  } catch {
+                    toast.error('Failed to load branch messages');
+                    await useMessageStore.getState().fetchMessages(activeId);
+                  }
                 } else {
                   // Switching back to main — reload original messages
-                  useMessageStore.getState().fetchMessages(activeId);
+                  await useMessageStore.getState().fetchMessages(activeId);
                 }
               }}
             />
@@ -726,7 +746,14 @@ export function ChatView() {
             </div>
           </div>
 
-          {messages.length === 0 && !streaming && (
+          {!messagesReady && (
+            <div className="py-16 text-center" role="status" aria-live="polite">
+              <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-primary/25 border-t-primary" />
+              <p className="text-sm text-text-muted">Loading conversation…</p>
+            </div>
+          )}
+
+          {messagesReady && messages.length === 0 && !streaming && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -948,6 +975,8 @@ export function ChatView() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               className="flex items-start gap-3 max-w-3xl xl:max-w-4xl 2xl:max-w-5xl min-w-0"
+              role="status"
+              aria-live="polite"
             >
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center shrink-0 mt-0.5">
                 <Bot size={15} className="text-primary" />
@@ -971,6 +1000,7 @@ export function ChatView() {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
                 className="p-4 rounded-2xl bg-danger-soft border border-danger/20 text-danger text-sm flex items-start gap-3"
+                role="alert"
               >
                 <div className="w-6 h-6 rounded-full bg-danger/20 flex items-center justify-center shrink-0 mt-0.5">
                   <span className="text-xs font-bold">!</span>
@@ -1073,7 +1103,7 @@ export function ChatView() {
             </div>
 
             {(uploading || pendingFiles.length > 0) && (
-              <span className="text-[10px] text-text-muted/70">
+              <span className="text-[10px] text-text-muted/70" role="status" aria-live="polite">
                 {uploading ? 'Uploading attachments...' : `${pendingFiles.length} file(s) queued`}
               </span>
             )}
@@ -1339,10 +1369,11 @@ export function ChatView() {
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                disabled={!messagesReady}
                 onKeyDown={handleKeyDown}
                 onFocus={() => setInputFocused(true)}
                 onBlur={() => setInputFocused(false)}
-                placeholder={imageMode ? (editPreviousImage && lastImageAttachmentId ? 'Describe edits to apply to the previous image...' : 'Describe the image you want to generate...') : agentMode ? 'Describe a goal for the agent...' : activeId ? 'Message OmniLLM-Studio...' : 'Start a new conversation...'}
+                placeholder={!messagesReady ? 'Loading conversation…' : imageMode ? (editPreviousImage && lastImageAttachmentId ? 'Describe edits to apply to the previous image...' : 'Describe the image you want to generate...') : agentMode ? 'Describe a goal for the agent...' : activeId ? 'Message OmniLLM-Studio...' : 'Start a new conversation...'}
                 rows={1}
                 className="w-full resize-none px-3 py-2.5 bg-transparent
                            text-sm text-text placeholder-text-muted focus:outline-none
@@ -1386,7 +1417,7 @@ export function ChatView() {
                   whileHover={input.trim() || pendingFiles.length > 0 ? { scale: 1.05 } : {}}
                   whileTap={input.trim() || pendingFiles.length > 0 ? { scale: 0.95 } : {}}
                   onClick={handleSend}
-                  disabled={(!input.trim() && pendingFiles.length === 0) || uploading}
+                  disabled={!messagesReady || (!input.trim() && pendingFiles.length === 0) || uploading}
                   className={clsx(
                     'order-2 min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl transition-all duration-200 shrink-0',
                     input.trim() || pendingFiles.length > 0

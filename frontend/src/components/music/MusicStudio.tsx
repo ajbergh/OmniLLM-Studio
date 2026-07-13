@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DragHandle, useResizablePanels } from '../ResizablePanels';
 import { Music, PanelRight, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
@@ -11,10 +11,10 @@ import { MusicPromptBuilder } from './MusicPromptBuilder';
 import { MusicResultCard } from './MusicResultCard';
 import { MusicHistoryPanel } from './MusicHistoryPanel';
 import { MusicAssetDetails } from './MusicAssetDetails';
-import { MusicSidebar } from './MusicSidebar';
 import type { MusicGenerationDetail, MusicProviderKey } from '../../types/music';
 
 export function MusicStudio() {
+  const [mobilePanel, setMobilePanel] = useState<'create' | 'result' | 'history'>('create');
   const sessions = useMusicStudioStore((state) => state.sessions);
   const activeSessionId = useMusicStudioStore((state) => state.activeSessionId);
   const activeGenerationId = useMusicStudioStore((state) => state.activeGenerationId);
@@ -29,9 +29,6 @@ export function MusicStudio() {
   const error = useMusicStudioStore((state) => state.error);
   const loadProviders = useMusicStudioStore((state) => state.loadProviders);
   const loadSessions = useMusicStudioStore((state) => state.loadSessions);
-  const createSession = useMusicStudioStore((state) => state.createSession);
-  const selectSession = useMusicStudioStore((state) => state.selectSession);
-  const deleteSession = useMusicStudioStore((state) => state.deleteSession);
   const setProvider = useMusicStudioStore((state) => state.setProvider);
   const setModel = useMusicStudioStore((state) => state.setModel);
   const setActiveGeneration = useMusicStudioStore((state) => state.setActiveGeneration);
@@ -81,17 +78,6 @@ export function MusicStudio() {
 
   const models = selectedProvider ? modelsByProvider[selectedProvider] : [];
   const progressMessage = generationProgress?.message;
-
-  const handleDeleteSession = (sessionId: string) => {
-    toast('Delete this music session?', {
-      action: {
-        label: 'Delete',
-        onClick: () => deleteSession(sessionId),
-      },
-      cancel: { label: 'Cancel', onClick: () => {} },
-      duration: 5000,
-    });
-  };
 
   const handleSendToChat = async (generation: MusicGenerationDetail) => {
     if (!generation.asset_id) {
@@ -168,7 +154,7 @@ export function MusicStudio() {
     }
   };
 
-  const { leftStyle, rightStyle, startLeft, startRight } = useResizablePanels({ defaultLeft: 320, defaultRight: 320 });
+  const { leftStyle, rightStyle, startLeft, startRight, resizeLeft, resizeRight } = useResizablePanels({ defaultLeft: 320, defaultRight: 320 });
 
   return (
     <div className="flex flex-1 min-h-0 flex-col bg-surface">
@@ -192,16 +178,24 @@ export function MusicStudio() {
         </div>
       </div>
 
+      <div className="grid grid-cols-3 border-b border-border bg-surface-raised p-1 xl:hidden" role="tablist" aria-label="Music Studio workspace">
+        {(['create', 'result', 'history'] as const).map((panel) => (
+          <button
+            key={panel}
+            type="button"
+            role="tab"
+            aria-selected={mobilePanel === panel}
+            onClick={() => setMobilePanel(panel)}
+            className={`min-h-11 rounded-lg px-2 text-xs font-medium capitalize transition-colors ${mobilePanel === panel ? 'bg-primary/15 text-primary' : 'text-text-muted hover:bg-surface-hover hover:text-text'}`}
+          >
+            {panel.charAt(0).toUpperCase() + panel.slice(1)}
+          </button>
+        ))}
+      </div>
+
       <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
-        <aside className="min-h-0 overflow-y-auto border-b border-border bg-surface xl:border-b-0 xl:border-r" style={leftStyle}>
+        <aside className={`${mobilePanel === 'create' ? 'block' : 'hidden'} min-h-0 w-full flex-1 overflow-y-auto border-b border-border bg-surface xl:block xl:w-auto xl:flex-none xl:border-b-0 xl:border-r`} style={leftStyle}>
           <div className="space-y-3 p-3">
-            <MusicSidebar
-              sessions={sessions}
-              activeSessionId={activeSessionId}
-              onNew={() => { void createSession(); }}
-              onSelect={(sessionId) => { void selectSession(sessionId); }}
-              onDelete={handleDeleteSession}
-            />
             <MusicPromptBuilder
               providers={providers}
               selectedProvider={selectedProvider}
@@ -223,9 +217,9 @@ export function MusicStudio() {
           </div>
         </aside>
 
-        <DragHandle onMouseDown={startLeft} />
+        <DragHandle onMouseDown={startLeft} onKeyboardResize={resizeLeft} />
 
-        <main className="min-h-[520px] min-w-0 flex-1 overflow-hidden bg-surface">
+        <main className={`${mobilePanel === 'result' ? 'block' : 'hidden'} min-h-0 min-w-0 flex-1 overflow-y-auto bg-surface xl:block xl:min-h-[520px] xl:overflow-hidden`}>
           <MusicResultCard
             generation={activeGeneration}
             isGenerating={isGenerating}
@@ -239,10 +233,10 @@ export function MusicStudio() {
           />
         </main>
 
-        <DragHandle onMouseDown={startRight} />
+        <DragHandle onMouseDown={startRight} onKeyboardResize={resizeRight} />
 
-        <aside className="min-h-0 border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
-          <div className="flex h-full min-h-[420px] flex-col">
+        <aside className={`${mobilePanel === 'history' ? 'block' : 'hidden'} min-h-0 w-full flex-1 overflow-y-auto border-t border-border bg-surface-raised xl:block xl:w-auto xl:flex-none xl:overflow-hidden xl:border-l xl:border-t-0`} style={rightStyle}>
+          <div className="flex h-full min-h-0 flex-col xl:min-h-[420px]">
             <MusicHistoryPanel
               generations={generations}
               activeGenerationId={activeGeneration?.id || null}

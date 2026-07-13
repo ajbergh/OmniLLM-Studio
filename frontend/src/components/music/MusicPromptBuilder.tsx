@@ -337,10 +337,10 @@ export function MusicPromptBuilder({
 
       <div className="sticky bottom-0 z-10 -mx-1 rounded-xl border border-border bg-surface-raised/95 p-2 backdrop-blur">
         {progressMessage && (
-          <p className="mb-2 rounded-lg bg-primary/10 px-2 py-1 text-[11px] text-primary">{progressMessage}</p>
+          <p className="mb-2 rounded-lg bg-primary/10 px-2 py-1 text-[11px] text-primary" role="status" aria-live="polite">{progressMessage}</p>
         )}
         {error && (
-          <p className="mb-2 rounded-lg bg-danger-soft px-2 py-1 text-[11px] text-danger">{error}</p>
+          <p className="mb-2 rounded-lg bg-danger-soft px-2 py-1 text-[11px] text-danger" role="alert">{error}</p>
         )}
         <div className="flex gap-2">
           <button

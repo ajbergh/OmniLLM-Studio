@@ -7,8 +7,10 @@ import type { ThemeTokens, ThemeId } from './tokens';
 const TOKEN_TO_VAR: Record<keyof ThemeTokens, string> = {
   // Surfaces
   surface: '--color-surface',
+  background: '--color-background',
   surfaceRaised: '--color-surface-raised',
   surfaceAlt: '--color-surface-alt',
+  surfaceLight: '--color-surface-light',
   surfaceHover: '--color-surface-hover',
   surfaceGlass: '--color-surface-glass',
 
@@ -51,7 +53,7 @@ const TOKEN_TO_VAR: Record<keyof ThemeTokens, string> = {
 };
 
 /** Default body font — used when a theme doesn't specify fontFamily. */
-const DEFAULT_FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+const DEFAULT_FONT = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 /**
  * Apply all theme tokens as CSS custom properties on :root.

@@ -773,6 +773,8 @@ export interface SearchResult {
   score: number;
   role?: string;
   timestamp?: string;
+  conversation_title?: string;
+  project_name?: string;
 }
 
 export interface SearchResponse {

@@ -12,6 +12,14 @@ export function MusicPlayer({ src, fileName = 'track.mp3' }: MusicPlayerProps) {
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(false);
   const [volume, setVolume] = useState(0.85);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  const formatTime = (seconds: number) => {
+    if (!Number.isFinite(seconds)) return '0:00';
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+  };
 
   const togglePlay = async () => {
     const audio = audioRef.current;
@@ -32,11 +40,13 @@ export function MusicPlayer({ src, fileName = 'track.mp3' }: MusicPlayerProps) {
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
-        controls
-        className="w-full"
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        preload="metadata"
+        className="sr-only"
       />
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={togglePlay}
           disabled={!src}
@@ -49,6 +59,26 @@ export function MusicPlayer({ src, fileName = 'track.mp3' }: MusicPlayerProps) {
         >
           {playing ? <Pause size={16} /> : <Play size={16} />}
         </button>
+
+        <label className="flex min-h-10 min-w-48 flex-[2] items-center gap-2 rounded-lg border border-border bg-surface px-3 text-xs text-text-muted">
+          <span className="w-8 font-mono">{formatTime(currentTime)}</span>
+          <input
+            type="range"
+            min={0}
+            max={duration || 0}
+            step={0.1}
+            value={Math.min(currentTime, duration || 0)}
+            disabled={!src || !duration}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              setCurrentTime(next);
+              if (audioRef.current) audioRef.current.currentTime = next;
+            }}
+            className="min-w-24 flex-1 accent-primary"
+            aria-label="Track position"
+          />
+          <span className="w-8 text-right font-mono">{formatTime(duration)}</span>
+        </label>
 
         <button
           onClick={() => setLoop((value) => !value)}

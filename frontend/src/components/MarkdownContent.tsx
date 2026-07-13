@@ -29,8 +29,8 @@ function CodeBlock({ className, children }: { className?: string; children: Reac
       )}
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 p-1.5 rounded-lg bg-surface-hover/80 text-text-muted
-                   hover:text-text hover:bg-surface-hover transition-all opacity-0 group-hover:opacity-100"
+        className="absolute top-2 right-2 min-h-10 min-w-10 rounded-lg bg-surface-hover/90 text-text-muted
+                   hover:text-text hover:bg-surface-hover transition-all opacity-100 sm:min-h-8 sm:min-w-8 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
         aria-label="Copy code"
       >
         {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}

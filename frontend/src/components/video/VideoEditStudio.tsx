@@ -143,7 +143,7 @@ export function VideoEditStudio() {
     [assets, selectedAssetId],
   );
 
-  const { leftStyle, rightStyle, startLeft, startRight } = useResizablePanels({
+  const { leftStyle, rightStyle, startLeft, startRight, resizeLeft, resizeRight } = useResizablePanels({
     defaultLeft: 320,
     defaultRight: 340,
     minWidth: 260,
@@ -151,6 +151,7 @@ export function VideoEditStudio() {
   });
   const [collapsedLeft, setCollapsedLeft] = useState(false);
   const [collapsedRight, setCollapsedRight] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<'preview' | 'timeline' | 'media' | 'inspector'>('preview');
   const isSavingTimeline = useVideoStudioStore((state) => state.isSavingTimeline);
   const saveStatus = useVideoStudioStore((state) => state.saveStatus);
   const saveError = useVideoStudioStore((state) => state.saveError);
@@ -193,7 +194,7 @@ export function VideoEditStudio() {
               {isSavingTimeline ? 'Saving…' : saveStatus === 'error' ? 'Save failed · Retry' : saveStatus === 'idle' ? 'Not saved' : 'Saved'}
             </button>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="hidden flex-wrap items-center gap-1.5 xl:flex">
             <button
               onClick={() => setRailTab('export')}
               disabled={!timeline}
@@ -264,8 +265,33 @@ export function VideoEditStudio() {
             </button>
           </div>
         </div>
+        <div className="mt-2 grid grid-cols-4 gap-1 xl:hidden" aria-label="Video editor quick actions">
+          <button type="button" onClick={() => setAppMode('video')} className="min-h-11 rounded-lg border border-border bg-surface-alt text-xs text-text-secondary">Create</button>
+          <button type="button" onClick={() => { void undoTimeline(); }} disabled={!canUndo} className="min-h-11 rounded-lg border border-border bg-surface-alt text-xs text-text-secondary disabled:opacity-40">Undo</button>
+          <button type="button" onClick={() => { void redoTimeline(); }} disabled={!canRedo} className="min-h-11 rounded-lg border border-border bg-surface-alt text-xs text-text-secondary disabled:opacity-40">Redo</button>
+          <button type="button" onClick={() => { setRailTab('export'); setCollapsedRight(false); setMobilePanel('inspector'); }} disabled={!timeline} className="min-h-11 rounded-lg bg-primary text-xs font-semibold text-black disabled:opacity-40">Export</button>
+        </div>
       </div>
       {recordOpen && <RecordingModal onClose={() => setRecordOpen(false)} />}
+
+      <div className="grid grid-cols-4 border-b border-border bg-surface-raised p-1 xl:hidden" role="tablist" aria-label="Video Edit Studio workspace">
+        {(['preview', 'timeline', 'media', 'inspector'] as const).map((panel) => (
+          <button
+            key={panel}
+            type="button"
+            role="tab"
+            aria-selected={mobilePanel === panel}
+            onClick={() => {
+              if (panel === 'media') setCollapsedLeft(false);
+              if (panel === 'inspector') setCollapsedRight(false);
+              setMobilePanel(panel);
+            }}
+            className={`min-h-11 rounded-lg px-1 text-[11px] font-medium capitalize transition-colors ${mobilePanel === panel ? 'bg-primary/15 text-primary' : 'text-text-muted hover:bg-surface-hover hover:text-text'}`}
+          >
+            {panel.charAt(0).toUpperCase() + panel.slice(1)}
+          </button>
+        ))}
+      </div>
 
       <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
         {collapsedLeft ? (
@@ -278,7 +304,7 @@ export function VideoEditStudio() {
             <ChevronRight size={14} />
           </button>
         ) : (
-          <aside className="video-edit-panel relative flex min-h-0 border-b border-border bg-surface xl:border-b-0 xl:border-r" style={leftStyle}>
+          <aside className={`video-edit-panel relative min-h-0 w-full flex-1 border-b border-border bg-surface xl:w-auto xl:flex-none xl:border-b-0 xl:border-r ${mobilePanel === 'media' ? 'flex' : 'hidden xl:flex'}`} style={leftStyle}>
             <button
               onClick={() => setCollapsedLeft(true)}
               className="absolute right-1 top-1 z-10 hidden rounded p-1 text-text-muted hover:text-text xl:block"
@@ -287,6 +313,7 @@ export function VideoEditStudio() {
             >
               <ChevronLeft size={13} />
             </button>
+            <div className="hidden xl:block">
             <StudioToolRail
               activeTab={activeRailTab}
               templatesEnabled={modeFeatures.templates}
@@ -306,6 +333,7 @@ export function VideoEditStudio() {
               onAssistant={() => setRailTab('assistant')}
               onSettings={toggleSettings}
             />
+            </div>
             <div className="min-w-0 flex-1 overflow-y-auto">
               <div className="space-y-3 p-3">
               <AssetPanel
@@ -330,18 +358,18 @@ export function VideoEditStudio() {
           </aside>
         )}
 
-        {!collapsedLeft && <DragHandle onMouseDown={startLeft} />}
+        {!collapsedLeft && <DragHandle onMouseDown={startLeft} onKeyboardResize={resizeLeft} />}
 
-        <main className="flex min-h-[620px] min-w-0 flex-1 flex-col bg-surface">
-          <section className="min-h-0 flex-1 border-b border-border p-3">
+        <main className={`${mobilePanel === 'preview' || mobilePanel === 'timeline' ? 'flex' : 'hidden xl:flex'} min-h-0 min-w-0 flex-1 flex-col bg-surface xl:min-h-[620px]`}>
+          <section className={`${mobilePanel === 'preview' ? 'block' : 'hidden'} min-h-0 flex-1 border-b border-border p-3 xl:block`}>
             <VideoPreviewCanvas />
           </section>
-          <section className="h-[22rem] shrink-0 border-b border-border bg-surface-raised p-2">
+          <section className={`${mobilePanel === 'timeline' ? 'block' : 'hidden'} min-h-0 flex-1 border-b border-border bg-surface-raised p-2 xl:block xl:h-[22rem] xl:flex-none`}>
             <VideoTimeline />
           </section>
         </main>
 
-        {!collapsedRight && <DragHandle onMouseDown={startRight} />}
+        {!collapsedRight && <DragHandle onMouseDown={startRight} onKeyboardResize={resizeRight} />}
 
         {collapsedRight ? (
           <button
@@ -353,7 +381,7 @@ export function VideoEditStudio() {
             <ChevronLeft size={14} />
           </button>
         ) : (
-          <aside className="video-edit-panel relative flex min-h-0 flex-col border-t border-border bg-surface-raised xl:border-l xl:border-t-0" style={rightStyle}>
+          <aside className={`video-edit-panel relative min-h-0 w-full flex-1 flex-col border-t border-border bg-surface-raised xl:w-auto xl:flex-none xl:border-l xl:border-t-0 ${mobilePanel === 'inspector' ? 'flex' : 'hidden xl:flex'}`} style={rightStyle}>
             <div className="flex items-center gap-0.5 overflow-x-auto border-b border-border px-1 pt-1.5" role="tablist" aria-label="Inspector panels">
               <button
                 onClick={() => setCollapsedRight(true)}
@@ -399,7 +427,9 @@ export function VideoEditStudio() {
           </aside>
         )}
       </div>
-      <StudioStatusBar timeline={timeline} snappingEnabled={snappingEnabled} />
+      <div className="hidden xl:block">
+        <StudioStatusBar timeline={timeline} snappingEnabled={snappingEnabled} />
+      </div>
     </div>
   );
 }

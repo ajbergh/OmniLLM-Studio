@@ -18,6 +18,7 @@ import { clsx } from 'clsx';
 import { toast } from 'sonner';
 import { imageSessionApi, api, attachmentUrl, uploadAttachment, crossoverApi } from '../../api';
 import type { Conversation, ImageCapabilities } from '../../types';
+import { getKnownImageModels } from '../../models';
 
 interface ImageEditStudioProps {
   conversationId?: string;
@@ -41,7 +42,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const providers = useProviderStore((s) => s.providers);
   const { createConversation, selectConversation } = useConversationStore();
   const clearMessages = useMessageStore((s) => s.clearMessages);
-  const { setAppMode } = useSettingsStore();
+  const { setAppMode, toggleSettings } = useSettingsStore();
   const { crossoverContext, clearCrossoverContext, setCrossoverContext } = useCrossoverStore();
   const createMusicSession = useMusicStudioStore((s) => s.createSession);
   const activeConversationId = useImageEditorStore((s) => s.activeConversationId);
@@ -65,6 +66,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     loadingAssets,
     error,
     editMode,
+    createSession,
     loadSessions,
     generate,
     edit,
@@ -118,7 +120,14 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
   const autoGenerateNonceRef = useRef<string | null>(null);
   const [capabilities, setCapabilities] = useState<ImageCapabilities | null>(null);
-  const imageCapableProviders = useMemo(() => providers.filter((p) => p.image_capable && p.enabled), [providers]);
+  const imageCapableProviders = useMemo(
+    () => providers.filter((provider) => provider.enabled && (
+      provider.image_capable === true ||
+      Boolean(provider.default_image_model) ||
+      getKnownImageModels(provider.type).length > 0
+    )),
+    [providers],
+  );
   const prevProviderRef = useRef<string | null>(null);
   const baseImageInputRef = useRef<HTMLInputElement>(null);
 
@@ -421,6 +430,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
       await api.sendMessage(convo.id, { content });
       selectConversation(convo.id);
       clearMessages();
+      await useMessageStore.getState().fetchMessages(convo.id);
       setAppMode('chat');
       toast.success('Image sent to chat');
     } catch (err) {
@@ -467,7 +477,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     }
   };
 
-  const { leftStyle, rightStyle, startLeft, startRight, isWide } = useResizablePanels({ defaultLeft: 320, defaultRight: 288, breakpoint: 1024 });
+  const { leftStyle, rightStyle, startLeft, startRight, resizeLeft, resizeRight, isWide } = useResizablePanels({ defaultLeft: 320, defaultRight: 288, breakpoint: 1024 });
 
   if (!conversationId) {
     return (
@@ -689,9 +699,18 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                 )}
 
                 {imageCapableProviders.length === 0 && (
-                  <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[11px]">
-                    <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                    <span>Add an image-capable provider in Settings before generating or editing images.</span>
+                  <div className="space-y-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-amber-400">
+                    <div className="flex items-start gap-2 text-[11px]">
+                      <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                      <span>Add an image-capable provider in Settings before generating or editing images.</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={toggleSettings}
+                      className="min-h-10 w-full rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 text-xs font-medium hover:bg-amber-400/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                    >
+                      Open provider settings
+                    </button>
                   </div>
                 )}
 
@@ -1112,7 +1131,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
         </div>
         )}
 
-        {leftPanelOpen && isWide && <DragHandle visibilityClass="hidden lg:flex" onMouseDown={startLeft} />}
+        {leftPanelOpen && isWide && <DragHandle visibilityClass="hidden lg:flex" onMouseDown={startLeft} onKeyboardResize={resizeLeft} />}
 
         {/* Center — canvas */}
         <div className={clsx(
@@ -1143,6 +1162,18 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                     : 'Generate an image to get started'
                   : 'Create or select a session'}
               </p>
+              {!activeSessionId && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const session = await createSession(`Image session · ${new Date().toLocaleString()}`);
+                    if (session) setMobilePanel('prompt');
+                  }}
+                  className="btn-primary min-h-11 rounded-xl px-4 text-sm font-medium text-white"
+                >
+                  Create image session
+                </button>
+              )}
             </div>
           )}
 
@@ -1184,7 +1215,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
           {/* Zoom controls removed — now provided by CanvasToolbar in ImageCanvas */}
         </div>
 
-        {rightPanelOpen && isWide && <DragHandle visibilityClass="hidden lg:flex" onMouseDown={startRight} />}
+        {rightPanelOpen && isWide && <DragHandle visibilityClass="hidden lg:flex" onMouseDown={startRight} onKeyboardResize={resizeRight} />}
 
         {/* Right panel — history */}
         {(rightPanelOpen || mobilePanel === 'history') && (

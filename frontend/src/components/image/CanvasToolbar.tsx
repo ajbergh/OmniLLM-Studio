@@ -28,8 +28,11 @@ export function CanvasToolbar({ zoom, onZoomChange, onDownload, onFitToViewport 
     <div
       data-testid="image-canvas-toolbar"
       data-canvas-interactive="true"
-      className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-0.5
-                 bg-surface-glass backdrop-blur-sm rounded-xl border border-border p-1 shadow-lg z-10"
+      role="toolbar"
+      aria-label="Image canvas tools"
+      className="absolute top-2 left-2 right-2 flex items-center gap-0.5 overflow-x-auto
+                 bg-surface-glass backdrop-blur-sm rounded-xl border border-border p-1 shadow-lg z-10
+                 sm:top-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:overflow-visible"
     >
       {/* Drawing tools (edit mode only) */}
       {showMaskTools && (
@@ -38,10 +41,11 @@ export function CanvasToolbar({ zoom, onZoomChange, onDownload, onFitToViewport 
             data-testid="canvas-tool-brush"
             onClick={() => setTool('brush')}
             className={clsx(
-              'p-1.5 rounded-lg transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center',
+              'p-1.5 rounded-lg transition-colors min-w-11 min-h-11 sm:min-w-8 sm:min-h-8 flex items-center justify-center',
               tool === 'brush' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text hover:bg-surface-hover'
             )}
             title="Brush (B)"
+            aria-label="Brush tool"
           >
             <Paintbrush size={14} />
           </button>
@@ -49,10 +53,11 @@ export function CanvasToolbar({ zoom, onZoomChange, onDownload, onFitToViewport 
             data-testid="canvas-tool-eraser"
             onClick={() => setTool('eraser')}
             className={clsx(
-              'p-1.5 rounded-lg transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center',
+              'p-1.5 rounded-lg transition-colors min-w-11 min-h-11 sm:min-w-8 sm:min-h-8 flex items-center justify-center',
               tool === 'eraser' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text hover:bg-surface-hover'
             )}
             title="Eraser (E)"
+            aria-label="Eraser tool"
           >
             <Eraser size={14} />
           </button>
@@ -60,10 +65,11 @@ export function CanvasToolbar({ zoom, onZoomChange, onDownload, onFitToViewport 
             data-testid="canvas-tool-pan"
             onClick={() => setTool('pan')}
             className={clsx(
-              'p-1.5 rounded-lg transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center',
+              'p-1.5 rounded-lg transition-colors min-w-11 min-h-11 sm:min-w-8 sm:min-h-8 flex items-center justify-center',
               tool === 'pan' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text hover:bg-surface-hover'
             )}
             title="Pan (Space)"
+            aria-label="Pan tool"
           >
             <Move size={14} />
           </button>
@@ -81,24 +87,26 @@ export function CanvasToolbar({ zoom, onZoomChange, onDownload, onFitToViewport 
               onChange={(e) => setBrushSize(Number(e.target.value))}
               className="w-16 accent-primary"
               title={`Brush size: ${brushSize}`}
+              aria-label="Brush size"
             />
             <span data-testid="canvas-brush-size-value" className="text-[9px] text-text-muted font-mono w-5 text-center">{brushSize}</span>
           </div>
 
           <div className="w-px h-5 bg-border mx-0.5" />
 
-          <button data-testid="canvas-undo-stroke" onClick={undoMaskStroke} className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center" title="Undo stroke (Ctrl+Z)">
+          <button data-testid="canvas-undo-stroke" onClick={undoMaskStroke} className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-11 min-h-11 sm:min-w-8 sm:min-h-8 flex items-center justify-center" title="Undo stroke (Ctrl+Z)" aria-label="Undo mask stroke">
             <Undo2 size={13} />
           </button>
-          <button data-testid="canvas-redo-stroke" onClick={redoMaskStroke} className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center" title="Redo stroke (Ctrl+Shift+Z)">
+          <button data-testid="canvas-redo-stroke" onClick={redoMaskStroke} className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-11 min-h-11 sm:min-w-8 sm:min-h-8 flex items-center justify-center" title="Redo stroke (Ctrl+Shift+Z)" aria-label="Redo mask stroke">
             <Redo2 size={13} />
           </button>
 
           <button
             data-testid="canvas-toggle-mask"
             onClick={toggleMask}
-            className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center"
+            className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-11 min-h-11 sm:min-w-8 sm:min-h-8 flex items-center justify-center"
             title="Toggle mask (M)"
+            aria-label={maskVisible ? 'Hide mask' : 'Show mask'}
           >
             {maskVisible ? <Eye size={13} /> : <EyeOff size={13} />}
           </button>
@@ -111,8 +119,9 @@ export function CanvasToolbar({ zoom, onZoomChange, onDownload, onFitToViewport 
       <button
         data-testid="canvas-zoom-in"
         onClick={() => onZoomChange(Math.min(zoom * 1.25, 10))}
-        className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center"
+        className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-11 min-h-11 sm:min-w-8 sm:min-h-8 flex items-center justify-center"
         title="Zoom in (+)"
+        aria-label="Zoom in"
       >
         <ZoomIn size={14} />
       </button>
@@ -122,16 +131,18 @@ export function CanvasToolbar({ zoom, onZoomChange, onDownload, onFitToViewport 
       <button
         data-testid="canvas-zoom-out"
         onClick={() => onZoomChange(Math.max(zoom / 1.25, 0.1))}
-        className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center"
+        className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-11 min-h-11 sm:min-w-8 sm:min-h-8 flex items-center justify-center"
         title="Zoom out (-)"
+        aria-label="Zoom out"
       >
         <ZoomOut size={14} />
       </button>
       <button
         data-testid="canvas-fit"
         onClick={() => onFitToViewport ? onFitToViewport() : onZoomChange(1)}
-        className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center"
+        className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-11 min-h-11 sm:min-w-8 sm:min-h-8 flex items-center justify-center"
         title="Fit (F)"
+        aria-label="Fit image to viewport"
       >
         <Maximize size={14} />
       </button>
@@ -141,8 +152,9 @@ export function CanvasToolbar({ zoom, onZoomChange, onDownload, onFitToViewport 
       <button
         data-testid="canvas-download"
         onClick={onDownload}
-        className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-[32px] min-h-[32px] flex items-center justify-center"
+        className="p-1.5 rounded-lg text-text-muted hover:text-text hover:bg-surface-hover transition-colors min-w-11 min-h-11 sm:min-w-8 sm:min-h-8 flex items-center justify-center"
         title="Download (Ctrl+S)"
+        aria-label="Download image"
       >
         <Download size={14} />
       </button>

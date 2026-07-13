@@ -13,8 +13,10 @@
   --accent-rgb: 168, 85, 247;
 
   --color-surface: #0c0c16;
+  --color-background: #0c0c16;
   --color-surface-raised: #111122;
   --color-surface-alt: #161628;
+  --color-surface-light: #1e1e38;
   --color-surface-hover: #1e1e38;
   --color-surface-glass: rgba(22, 22, 40, 0.8);
 
@@ -46,7 +48,7 @@ html, body, #root {
   margin: 0;
   background-color: var(--color-surface);
   color: var(--color-text);
-  font-family: var(--font-family, 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -148,6 +150,35 @@ html, body, #root {
 .animation-delay-300 { animation-delay: 300ms; }
 .animation-delay-400 { animation-delay: 400ms; }
 .animation-delay-500 { animation-delay: 500ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (pointer: coarse) {
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="option"],
+  select {
+    min-height: 44px;
+  }
+
+  button[aria-label]:not([class*="px-"]) {
+    min-width: 44px;
+  }
+}
+
+.virtual-list-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 44px;
+}
 
 /* ---- Glass Morphism ---- */
 

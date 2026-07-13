@@ -39,8 +39,12 @@ export function ModelSelector({ conversationId }: Props) {
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
   const [loadingOllama, setLoadingOllama] = useState(false);
+  const [recentModels, setRecentModels] = useState<string[]>(() => {
+    try { return JSON.parse(window.localStorage.getItem('omnillm_recent_models') || '[]'); } catch { return []; }
+  });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     fetchProviders();
@@ -75,6 +79,24 @@ export function ModelSelector({ conversationId }: Props) {
     }
   }, [open]);
 
+  useEffect(() => {
+    const dismiss = () => setOpen(false);
+    window.addEventListener('omnillm:dismiss-popovers', dismiss);
+    return () => window.removeEventListener('omnillm:dismiss-popovers', dismiss);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setOpen(false);
+      requestAnimationFrame(() => triggerRef.current?.focus());
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open]);
+
   const convo = conversations.find((c) => c.id === conversationId);
   const currentProvider = convo?.default_provider;
   const currentModel = convo?.default_model;
@@ -95,6 +117,10 @@ export function ModelSelector({ conversationId }: Props) {
       default_provider: providerId,
       default_model: model,
     });
+    const recentKey = `${providerId}:${model}`;
+    const nextRecents = [recentKey, ...recentModels.filter((item) => item !== recentKey)].slice(0, 8);
+    setRecentModels(nextRecents);
+    window.localStorage.setItem('omnillm_recent_models', JSON.stringify(nextRecents));
     setOpen(false);
     toast.success(`Switched to ${model}`);
   };
@@ -116,7 +142,15 @@ export function ModelSelector({ conversationId }: Props) {
         ? ollamaModels
         : KNOWN_MODELS.ollama;
     }
-    return getKnownChatModels(type);
+    return getKnownChatModels(type).sort((left, right) => {
+      const provider = enabledProviders.find((item) => item.type.toLowerCase() === type);
+      const leftRank = recentModels.indexOf(`${provider?.id}:${left}`);
+      const rightRank = recentModels.indexOf(`${provider?.id}:${right}`);
+      if (leftRank < 0 && rightRank < 0) return 0;
+      if (leftRank < 0) return 1;
+      if (rightRank < 0) return -1;
+      return leftRank - rightRank;
+    });
   };
 
   // Filter models by search query
@@ -129,9 +163,13 @@ export function ModelSelector({ conversationId }: Props) {
   return (
     <div className="relative">
       <motion.button
+        ref={triggerRef}
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
         onClick={() => setOpen(!open)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Model: ${displayLabel}`}
         className={clsx(
           'flex items-center gap-2 px-3.5 py-2 text-xs rounded-xl',
           'border transition-all duration-200',
@@ -166,6 +204,8 @@ export function ModelSelector({ conversationId }: Props) {
                           min-w-[280px] max-w-[340px] bg-surface-raised border border-border
                           flex flex-col"
               style={{ maxHeight: 'min(420px, calc(100vh - 120px))' }}
+              role="listbox"
+              aria-label="Available models"
             >
               {/* Search bar */}
               <div className="p-2 border-b border-border shrink-0">
@@ -224,6 +264,8 @@ export function ModelSelector({ conversationId }: Props) {
                             <button
                               key={model}
                               onClick={() => handleSelect(provider.id, model)}
+                              role="option"
+                              aria-selected={isActive}
                               className={clsx(
                                 'w-full text-left px-3 py-1.5 text-[13px] transition-all flex items-center justify-between gap-2 rounded-lg mx-1',
                                 isActive
@@ -234,6 +276,9 @@ export function ModelSelector({ conversationId }: Props) {
                             >
                               <span className="min-w-0 flex flex-1 items-center gap-1.5">
                                 <span className="truncate">{model}</span>
+                                {recentModels.includes(`${provider.id}:${model}`) && (
+                                  <span className="shrink-0 rounded border border-primary/20 bg-primary/10 px-1 py-0.5 text-[8px] font-medium uppercase tracking-wide text-primary">Recent</span>
+                                )}
                                 {modelIsFree && <FreeModelBadge />}
                                 {getProviderToolCallingSupport(provider.type) && !getModelToolCallingSupport(provider.type, model) && (
                                   <NoToolsBadge />
@@ -250,6 +295,8 @@ export function ModelSelector({ conversationId }: Props) {
                           (!search || provider.default_model.toLowerCase().includes(search.toLowerCase())) && (
                             <button
                               onClick={() => handleSelect(provider.id, provider.default_model!)}
+                              role="option"
+                              aria-selected={effectiveModel === provider.default_model && effectiveProvider === provider.id}
                               className={clsx(
                                 'w-full text-left px-3 py-1.5 text-[13px] hover:bg-surface-hover text-text-secondary',
                                 'hover:text-text transition-all mx-1 rounded-lg flex items-center justify-between gap-2',

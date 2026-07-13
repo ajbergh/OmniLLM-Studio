@@ -14,8 +14,10 @@ export type ThemeId = 'aurora' | 'ember' | 'light' | 'terminal';
 export interface ThemeTokens {
   // ── Surfaces ──
   surface: string;        // --color-surface (app background)
+  background: string;     // --color-background (legacy semantic alias)
   surfaceRaised: string;  // --color-surface-raised
   surfaceAlt: string;     // --color-surface-alt
+  surfaceLight: string;   // --color-surface-light (interactive inset surface)
   surfaceHover: string;   // --color-surface-hover
   surfaceGlass: string;   // --color-surface-glass (rgba)
 

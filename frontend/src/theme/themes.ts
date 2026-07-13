@@ -11,8 +11,10 @@ const aurora: ThemeDefinition = {
   tokens: {
     // Surfaces
     surface: '#0c0c16',
+    background: '#0c0c16',
     surfaceRaised: '#111122',
     surfaceAlt: '#161628',
+    surfaceLight: '#1e1e38',
     surfaceHover: '#1e1e38',
     surfaceGlass: 'rgba(22, 22, 40, 0.8)',
 
@@ -62,8 +64,10 @@ const ember: ThemeDefinition = {
   tokens: {
     // Surfaces — warm dark tones
     surface: '#120e0a',
+    background: '#120e0a',
     surfaceRaised: '#1a1510',
     surfaceAlt: '#1e1812',
+    surfaceLight: '#2a221a',
     surfaceHover: '#2a221a',
     surfaceGlass: 'rgba(30, 24, 18, 0.8)',
 
@@ -113,8 +117,10 @@ const light: ThemeDefinition = {
   tokens: {
     // Surfaces
     surface: '#f8f9fc',
+    background: '#f8f9fc',
     surfaceRaised: '#ffffff',
     surfaceAlt: '#eef0f5',
+    surfaceLight: '#e2e5ed',
     surfaceHover: '#e2e5ed',
     surfaceGlass: 'rgba(255, 255, 255, 0.8)',
 
@@ -126,7 +132,7 @@ const light: ThemeDefinition = {
     // Text
     text: '#1a1a2e',
     textSecondary: '#4a4a6a',
-    textMuted: '#8888a8',
+    textMuted: '#62627c',
 
     // Brand
     primary: '#4f46e5',
@@ -164,8 +170,10 @@ const terminal: ThemeDefinition = {
   tokens: {
     // Surfaces — pure blacks
     surface: '#0a0a0a',
+    background: '#0a0a0a',
     surfaceRaised: '#111111',
     surfaceAlt: '#141414',
+    surfaceLight: '#1c1c1c',
     surfaceHover: '#1c1c1c',
     surfaceGlass: 'rgba(10, 10, 10, 0.9)',
 

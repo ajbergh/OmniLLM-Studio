@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useId, useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
 import { api, authApi, browserApi, mcpApi, musicApi, videoApi, setAuthToken } from '../api';
@@ -72,6 +72,7 @@ export function SettingsPanel() {
     useProviderStore();
   const { fetchFeatures } = useFeatureFlagStore();
   const [tab, setTab] = useState<SettingsTab>('providers');
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (settingsOpen) {
@@ -80,6 +81,43 @@ export function SettingsPanel() {
       fetchFeatures();
     }
   }, [settingsOpen, fetchProviders, fetchSettings, fetchFeatures]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const timer = window.setTimeout(() => panelRef.current?.focus(), 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        toggleSettings();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('keydown', onKeyDown, true);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [settingsOpen, toggleSettings]);
+
+  const trapFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab' || !panelRef.current) return;
+    const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'))
+      .filter((element) => element.offsetParent !== null);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -97,9 +135,12 @@ export function SettingsPanel() {
 
           {/* Panel */}
           <motion.div
+            ref={panelRef}
             role="dialog"
             aria-modal="true"
             aria-label="Settings"
+            tabIndex={-1}
+            onKeyDown={trapFocus}
             variants={panelVariants}
             initial="hidden"
             animate="visible"
@@ -953,6 +994,9 @@ function OpenRouterSettings({
             <button
               type="button"
               onClick={() => setShowCost((v) => !v)}
+              role="switch"
+              aria-checked={showCost}
+              aria-label="Show credit cost"
               className={`relative w-10 h-5 rounded-full transition-colors ${
                 showCost ? 'bg-primary' : 'bg-border'
               }`}
@@ -982,6 +1026,9 @@ function OpenRouterSettings({
             <button
               type="button"
               onClick={() => setAllowFallbacks((v) => !v)}
+              role="switch"
+              aria-checked={allowFallbacks}
+              aria-label="Allow provider fallbacks"
               className={`relative w-10 h-5 rounded-full transition-colors ${allowFallbacks ? 'bg-primary' : 'bg-border'}`}
             >
               <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${allowFallbacks ? 'translate-x-5' : ''}`} />
@@ -1072,12 +1119,14 @@ function InputField({
   secret?: boolean;
 }) {
   const [show, setShow] = useState(false);
+  const inputId = useId();
 
   return (
     <div>
-      <label className="block text-xs text-text-muted mb-1.5 font-medium">{label}</label>
+      <label htmlFor={inputId} className="block text-xs text-text-muted mb-1.5 font-medium">{label}</label>
       <div className="relative">
         <input
+          id={inputId}
           type={secret && !show ? 'password' : 'text'}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -1646,7 +1695,7 @@ function RoutingToggleRow({ label, description, enabled, onToggle }: { label: st
         <p className="text-xs font-medium text-text-secondary">{label}</p>
         <p className="text-[10px] text-text-muted mt-0.5">{description}</p>
       </div>
-      <button type="button" onClick={onToggle} className={`relative w-10 h-5 rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-border'}`}>
+      <button type="button" onClick={onToggle} role="switch" aria-checked={enabled} aria-label={label} className={`relative w-10 h-5 rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-border'}`}>
         <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : ''}`} />
       </button>
     </div>
@@ -2425,6 +2474,9 @@ function ToggleRow({ label, checked, onChange }: { label: string; checked: boole
       <button
         type="button"
         onClick={() => onChange(!checked)}
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
         className={`relative h-5 w-10 rounded-full transition-colors ${checked ? 'bg-primary' : 'bg-border'}`}
       >
         <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />

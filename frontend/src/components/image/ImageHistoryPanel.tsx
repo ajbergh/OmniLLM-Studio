@@ -154,17 +154,20 @@ export function ImageHistoryPanel({ nodes, activeNodeId, onNodeSelect, onBranchF
                       )} />
                     </div>
                   )}
-                  <button
-                    onClick={() => onNodeSelect(node.id)}
-                    className={clsx(
-                      'w-full text-left px-3 py-2 rounded-xl transition-all group relative',
+                  <div className="group relative">
+                    <button
+                      type="button"
+                      onClick={() => onNodeSelect(node.id)}
+                      className={clsx(
+                      'w-full text-left px-3 py-2 rounded-xl transition-all relative',
+                      onBranchFrom && !isActive && 'pr-12',
                       isActive
                         ? 'bg-primary/10 border border-primary/20'
                         : isOnPath
                           ? 'bg-primary/5 border border-primary/10 hover:bg-primary/10'
                           : 'hover:bg-surface-hover border border-transparent'
                     )}
-                  >
+                    >
                     <div className="flex items-start gap-2">
                       <div className={clsx(
                         'mt-0.5 p-1.5 rounded-lg shrink-0',
@@ -201,21 +204,20 @@ export function ImageHistoryPanel({ nodes, activeNodeId, onNodeSelect, onBranchF
                           </span>
                         </div>
                       </div>
-
-                      {/* Branch from here button */}
-                      {onBranchFrom && !isActive && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onBranchFrom(node.id); }}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded-md
-                                     text-text-muted hover:text-primary hover:bg-primary/10
-                                     transition-all shrink-0 mt-0.5"
-                          title="Branch from here"
-                        >
-                          <GitBranch size={12} />
-                        </button>
-                      )}
                     </div>
-                  </button>
+                    </button>
+                    {onBranchFrom && !isActive && (
+                      <button
+                        type="button"
+                        onClick={() => onBranchFrom(node.id)}
+                        className="absolute right-2 top-2 min-h-10 min-w-10 rounded-lg text-text-muted opacity-100 transition-all hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:min-h-8 sm:min-w-8 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+                        aria-label={`Branch from ${node.instruction || 'this image'}`}
+                        title="Branch from here"
+                      >
+                        <GitBranch size={12} className="mx-auto" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}

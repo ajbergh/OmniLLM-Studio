@@ -52,3 +52,5 @@ backend/chromem/*
 backend/omnillm-studio.db-wal
 backend/omnillm-studio.db-shm
 .playwright-mcp/*
+.playwright-cli/*
+

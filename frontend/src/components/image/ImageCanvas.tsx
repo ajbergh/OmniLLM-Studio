@@ -1,5 +1,4 @@
 import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { Download } from 'lucide-react';
 import { useImageEditorStore, type MaskStroke } from '../../stores/imageEditor';
 import { CanvasToolbar } from './CanvasToolbar';
 import { attachmentUrl } from '../../api';
@@ -25,6 +24,7 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
   const [imageLoaded, setImageLoaded] = useState(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
+  const autoFitPendingRef = useRef(true);
   // Use a ref for current stroke points so renderMask always sees the latest data
   const currentStrokeRef = useRef<{ x: number; y: number }[]>([]);
 
@@ -67,6 +67,7 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
   useEffect(() => {
     setPan({ x: 0, y: 0 });
     setImageLoaded(false);
+    autoFitPendingRef.current = true;
   }, [attachmentId]);
 
   // Resize mask canvas to match image dimensions
@@ -412,10 +413,27 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
     }
     const cW = container.clientWidth;
     const cH = container.clientHeight;
+    if (cW <= 0 || cH <= 0) return;
     const fitZoom = Math.min(cW / img.naturalWidth, cH / img.naturalHeight, 1);
     onZoomChange(fitZoom);
     setPan({ x: 0, y: 0 });
+    autoFitPendingRef.current = false;
   }, [onZoomChange]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !imageLoaded) return;
+
+    const fitWhenVisible = () => {
+      if (autoFitPendingRef.current && container.clientWidth > 0 && container.clientHeight > 0) {
+        fitToViewport();
+      }
+    };
+    fitWhenVisible();
+    const observer = new ResizeObserver(fitWhenVisible);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [imageLoaded, fitToViewport]);
 
   // Expose exportMaskBlob and fitToViewport to parent via ref
   useImperativeHandle(ref, () => ({
@@ -470,7 +488,10 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
             alt="Generated image"
             className="max-w-none block"
             style={{ imageRendering: zoom > 2 ? 'pixelated' : 'auto' }}
-            onLoad={() => setImageLoaded(true)}
+            onLoad={() => {
+              setImageLoaded(true);
+              autoFitPendingRef.current = true;
+            }}
             draggable={false}
           />
           {/* Mask overlay canvas */}
@@ -489,17 +510,6 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
           )}
         </div>
       </div>
-
-      {/* Download button */}
-      <button
-        onClick={handleDownload}
-        data-canvas-interactive="true"
-        className="absolute bottom-3 right-3 p-2 rounded-lg bg-surface-glass backdrop-blur-sm border border-border
-                   text-text-muted hover:text-text transition-colors"
-        title="Download image"
-      >
-        <Download size={14} />
-      </button>
     </div>
   );
 });
