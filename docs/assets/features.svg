@@ -1,190 +1,165 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 530" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">OmniLLM-Studio feature overview</title>
+  <desc id="desc">Four connected creative studios supported by local-first knowledge, automation, evaluation, cost controls, exports, plugins, and user-selected AI providers.</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="800" y2="530" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#0f0f23"/>
-      <stop offset="100%" stop-color="#1a1a3e"/>
+    <linearGradient id="bg" x1="26" y1="0" x2="1167" y2="780" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#090A18"/>
+      <stop offset="0.55" stop-color="#10112A"/>
+      <stop offset="1" stop-color="#091720"/>
     </linearGradient>
+    <linearGradient id="headline" x1="60" y1="54" x2="554" y2="115" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7F5FF"/>
+      <stop offset="0.55" stop-color="#C8C1FF"/>
+      <stop offset="1" stop-color="#79E3E1"/>
+    </linearGradient>
+    <linearGradient id="flow" x1="83" y1="323" x2="1116" y2="323" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7669F6"/>
+      <stop offset="0.52" stop-color="#BC60EB"/>
+      <stop offset="1" stop-color="#43D5D2"/>
+    </linearGradient>
+    <linearGradient id="pillarA" x1="60" y1="394" x2="404" y2="684" gradientUnits="userSpaceOnUse"><stop stop-color="#171830"/><stop offset="1" stop-color="#111426"/></linearGradient>
+    <linearGradient id="pillarB" x1="428" y1="394" x2="772" y2="684" gradientUnits="userSpaceOnUse"><stop stop-color="#1B1530"/><stop offset="1" stop-color="#121326"/></linearGradient>
+    <linearGradient id="pillarC" x1="796" y1="394" x2="1140" y2="684" gradientUnits="userSpaceOnUse"><stop stop-color="#11232D"/><stop offset="1" stop-color="#101626"/></linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" stroke="#A7ACCA" stroke-opacity="0.045"/></pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#00020A" flood-opacity="0.42"/></filter>
+    <filter id="nodeGlow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="6"/></filter>
+    <clipPath id="frameClip"><rect width="1200" height="780" rx="24"/></clipPath>
   </defs>
-  <rect width="800" height="530" rx="16" fill="url(#bg)"/>
 
-    <!-- Row 1 -->
-  <!-- Chat Studio -->
-  <rect x="24" y="20" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#6366f1" stroke-width="0.5"/>
-  <circle cx="50" cy="46" r="12" fill="#6366f1" fill-opacity="0.15"/>
-  <text x="50" y="50" font-family="system-ui,sans-serif" font-size="14" fill="#6366f1" text-anchor="middle">💬</text>
-  <text x="68" y="50" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Chat Studio</text>
-  <text x="36" y="70" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Multi-provider streaming</text>
-  <text x="36" y="82" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">responses with real-time</text>
-  <text x="36" y="94" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">markdown rendering</text>
-  <rect x="36" y="106" width="40" height="14" rx="7" fill="#6366f1" fill-opacity="0.12"/>
-  <text x="56" y="116" font-family="monospace" font-size="8" fill="#818cf8" text-anchor="middle">chat</text>
+  <g clip-path="url(#frameClip)">
+    <rect width="1200" height="780" fill="url(#bg)"/>
+    <rect width="1200" height="780" fill="url(#grid)"/>
+    <ellipse cx="1095" cy="75" rx="280" ry="210" fill="#6B4DF0" fill-opacity="0.075"/>
+    <ellipse cx="95" cy="750" rx="300" ry="210" fill="#31C9D0" fill-opacity="0.055"/>
+  </g>
+  <rect x="0.75" y="0.75" width="1198.5" height="778.5" rx="23.25" stroke="#7770B2" stroke-opacity="0.25" stroke-width="1.5"/>
 
-  <!-- Image Studio -->
-  <rect x="214" y="20" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#f472b6" stroke-width="0.5"/>
-  <circle cx="240" cy="46" r="12" fill="#f472b6" fill-opacity="0.15"/>
-  <text x="240" y="50" font-family="system-ui,sans-serif" font-size="14" fill="#f472b6" text-anchor="middle">🎨</text>
-  <text x="258" y="50" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Image Studio</text>
-  <text x="226" y="70" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Canvas editor, inpainting,</text>
-  <text x="226" y="82" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">variant compare, branching</text>
-  <text x="226" y="94" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">history, and multi-provider</text>
-  <rect x="226" y="106" width="54" height="14" rx="7" fill="#f472b6" fill-opacity="0.12"/>
-  <text x="253" y="116" font-family="monospace" font-size="8" fill="#f9a8d4" text-anchor="middle">canvas</text>
+  <!-- Header -->
+  <text x="60" y="56" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="2.4" fill="#7E81A5">THE OMNILLM-STUDIO WORKSPACE</text>
+  <text x="60" y="105" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="35" font-weight="780" letter-spacing="-1.2" fill="url(#headline)">From first prompt to finished work.</text>
+  <text x="1140" y="83" text-anchor="end" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" fill="#9799B5">One interface across models, media, knowledge, and tools.</text>
+  <text x="1140" y="104" text-anchor="end" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" fill="#6F7392">Local data. Portable workflows. Provider freedom.</text>
 
-  <!-- Music Studio -->
-  <rect x="404" y="20" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#f43f5e" stroke-width="0.5"/>
-  <circle cx="430" cy="46" r="12" fill="#f43f5e" fill-opacity="0.15"/>
-  <text x="430" y="50" font-family="system-ui,sans-serif" font-size="14" fill="#f43f5e" text-anchor="middle">🎵</text>
-  <text x="448" y="50" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Music Studio</text>
-  <text x="416" y="70" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Generate, play, and</text>
-  <text x="416" y="82" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">download Gemini Lyria</text>
-  <text x="416" y="94" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">music tracks</text>
-  <rect x="416" y="106" width="42" height="14" rx="7" fill="#f43f5e" fill-opacity="0.12"/>
-  <text x="437" y="116" font-family="monospace" font-size="8" fill="#fb7185" text-anchor="middle">audio</text>
+  <!-- Studio cards -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="140" width="252" height="116" rx="16" fill="#171730" stroke="#514D93"/>
+    <rect x="328" y="140" width="252" height="116" rx="16" fill="#1D152F" stroke="#71418C"/>
+    <rect x="596" y="140" width="252" height="116" rx="16" fill="#1A152D" stroke="#654080"/>
+    <rect x="864" y="140" width="276" height="116" rx="16" fill="#10232D" stroke="#2F6875"/>
+  </g>
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
+    <g transform="translate(60 140)">
+      <rect x="18" y="18" width="36" height="36" rx="10" fill="#7165EE" fill-opacity="0.16" stroke="#625BC0"/>
+      <path d="M28 28H44V39H36L31 44V39H28V28Z" stroke="#9A8DFF" stroke-width="1.6" stroke-linejoin="round"/>
+      <text x="67" y="34" font-size="13" font-weight="750" letter-spacing="0.8" fill="#E8E5FF">CHAT + AGENTS</text>
+      <text x="67" y="51" font-size="10" fill="#8D8EAD">STREAM • REASON • ACT</text>
+      <text x="18" y="78" font-size="11" fill="#B9B8D0">Multi-provider chat, branching, agent plans,</text>
+      <text x="18" y="95" font-size="11" fill="#B9B8D0">tool calls, approvals, and rich responses.</text>
+    </g>
+    <g transform="translate(328 140)">
+      <rect x="18" y="18" width="36" height="36" rx="10" fill="#BE59E7" fill-opacity="0.14" stroke="#7B4596"/>
+      <path d="M28 42L35 32L43 40M40 28H44V32" stroke="#DC79F3" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="67" y="34" font-size="13" font-weight="750" letter-spacing="0.8" fill="#F2DFF8">IMAGE STUDIO</text>
+      <text x="67" y="51" font-size="10" fill="#9C7AA7">GENERATE • MASK • COMPARE</text>
+      <text x="18" y="78" font-size="11" fill="#C9B7D0">Canvas editing, inpainting, references,</text>
+      <text x="18" y="95" font-size="11" fill="#C9B7D0">variants, and branching visual history.</text>
+    </g>
+    <g transform="translate(596 140)">
+      <rect x="18" y="18" width="36" height="36" rx="10" fill="#A55BD7" fill-opacity="0.13" stroke="#6F4788"/>
+      <path d="M43 27V39M43 30L33 32V43" stroke="#C97BEA" stroke-width="1.6" stroke-linecap="round"/>
+      <circle cx="31" cy="43" r="3" fill="#C97BEA"/><circle cx="41" cy="40" r="3" fill="#C97BEA"/>
+      <text x="67" y="34" font-size="13" font-weight="750" letter-spacing="0.8" fill="#ECDFF5">MUSIC STUDIO</text>
+      <text x="67" y="51" font-size="10" fill="#967AA2">PROMPT • GENERATE • PLAY</text>
+      <text x="18" y="78" font-size="11" fill="#C4B8CC">Structured Lyria prompting, generation,</text>
+      <text x="18" y="95" font-size="11" fill="#C4B8CC">playback, downloads, and track history.</text>
+    </g>
+    <g transform="translate(864 140)">
+      <rect x="18" y="18" width="36" height="36" rx="10" fill="#3CC8D0" fill-opacity="0.12" stroke="#34717A"/>
+      <rect x="27" y="29" width="14" height="12" rx="2" stroke="#5CDDE2" stroke-width="1.6"/>
+      <path d="M41 33L46 30V40L41 37" stroke="#5CDDE2" stroke-width="1.6" stroke-linejoin="round"/>
+      <text x="67" y="34" font-size="13" font-weight="750" letter-spacing="0.8" fill="#D9F2F3">VIDEO + EDIT</text>
+      <text x="67" y="51" font-size="10" fill="#7299A1">GENERATE • COMPOSE • RENDER</text>
+      <text x="18" y="78" font-size="11" fill="#B5CED2">Multimodal generation, conversational edits,</text>
+      <text x="18" y="95" font-size="11" fill="#B5CED2">timeline composition, and FFmpeg export.</text>
+    </g>
+  </g>
 
-  <!-- Multi-Provider -->
-  <rect x="594" y="20" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#a855f7" stroke-width="0.5"/>
-  <circle cx="620" cy="46" r="12" fill="#a855f7" fill-opacity="0.15"/>
-  <text x="620" y="50" font-family="system-ui,sans-serif" font-size="14" fill="#a855f7" text-anchor="middle">🔌</text>
-  <text x="638" y="50" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Multi-Provider</text>
-  <text x="606" y="70" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">OpenAI, Anthropic, Ollama,</text>
-  <text x="606" y="82" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Groq, Together, Mistral,</text>
-  <text x="606" y="94" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">and any OpenAI-compatible</text>
-  <rect x="606" y="106" width="52" height="14" rx="7" fill="#a855f7" fill-opacity="0.12"/>
-  <text x="632" y="116" font-family="monospace" font-size="8" fill="#c4b5fd" text-anchor="middle">8+ APIs</text>
+  <!-- Connected workflow -->
+  <text x="600" y="292" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="2" fill="#8587A8">A CONNECTED, CROSS-STUDIO WORKFLOW</text>
+  <path d="M106 329H1094" stroke="#31334F" stroke-width="6" stroke-linecap="round"/>
+  <path d="M106 329H1094" stroke="url(#flow)" stroke-width="2" stroke-linecap="round"/>
+  <g fill="url(#flow)" filter="url(#nodeGlow)" opacity="0.32"><circle cx="106" cy="329" r="12"/><circle cx="353" cy="329" r="12"/><circle cx="600" cy="329" r="12"/><circle cx="847" cy="329" r="12"/><circle cx="1094" cy="329" r="12"/></g>
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="10" font-weight="750" text-anchor="middle">
+    <g><circle cx="106" cy="329" r="7" fill="#0F1024" stroke="#7A6DF4" stroke-width="2"/><text x="106" y="357" fill="#AAA6D5">BRIEF</text></g>
+    <g><circle cx="353" cy="329" r="7" fill="#0F1024" stroke="#9368F0" stroke-width="2"/><text x="353" y="357" fill="#B3A5D4">GROUND</text></g>
+    <g><circle cx="600" cy="329" r="9" fill="#E9E5FF" stroke="#B964ED" stroke-width="3"/><text x="600" y="357" fill="#C9A9D8">CREATE</text></g>
+    <g><circle cx="847" cy="329" r="7" fill="#0F1024" stroke="#8A8FE4" stroke-width="2"/><text x="847" y="357" fill="#A8AFD0">REFINE</text></g>
+    <g><circle cx="1094" cy="329" r="7" fill="#0F1024" stroke="#49D3D1" stroke-width="2"/><text x="1094" y="357" fill="#8ECAC9">SHIP</text></g>
+  </g>
 
-  <!-- Row 2 -->
-  <!-- Agent Mode -->
-  <rect x="24" y="145" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#10b981" stroke-width="0.5"/>
-  <circle cx="50" cy="171" r="12" fill="#10b981" fill-opacity="0.15"/>
-  <text x="50" y="175" font-family="system-ui,sans-serif" font-size="14" fill="#10b981" text-anchor="middle">🤖</text>
-  <text x="68" y="175" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Agent Mode</text>
-  <text x="36" y="195" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Autonomous multi-step</text>
-  <text x="36" y="207" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">task execution with tool</text>
-  <text x="36" y="219" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">calling and planning</text>
-  <rect x="36" y="231" width="44" height="14" rx="7" fill="#10b981" fill-opacity="0.12"/>
-  <text x="58" y="241" font-family="monospace" font-size="8" fill="#34d399" text-anchor="middle">tools</text>
+  <!-- Capability pillars -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="394" width="344" height="286" rx="18" fill="url(#pillarA)" stroke="#42436D"/>
+    <rect x="428" y="394" width="344" height="286" rx="18" fill="url(#pillarB)" stroke="#5A3D70"/>
+    <rect x="796" y="394" width="344" height="286" rx="18" fill="url(#pillarC)" stroke="#315E6B"/>
+  </g>
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
+    <!-- Pillar A -->
+    <g transform="translate(60 394)">
+      <rect x="22" y="22" width="38" height="38" rx="11" fill="#6863D6" fill-opacity="0.14" stroke="#535191"/>
+      <path d="M31 32H40L44 36V49H31V32ZM40 32V36H44" stroke="#9189F2" stroke-width="1.5" stroke-linejoin="round"/>
+      <circle cx="50" cy="46" r="5" stroke="#9189F2" stroke-width="1.5"/><path d="M54 50L58 54" stroke="#9189F2" stroke-width="1.5" stroke-linecap="round"/>
+      <text x="75" y="39" font-size="15" font-weight="760" fill="#E6E4F7">Ground &amp; automate</text>
+      <text x="75" y="56" font-size="10" letter-spacing="0.9" fill="#8586A8">CONTEXT THAT CAN TAKE ACTION</text>
+      <line x1="22" y1="80" x2="322" y2="80" stroke="#353653"/>
+      <g font-size="12">
+        <circle cx="28" cy="108" r="3" fill="#8A80EF"/><text x="42" y="112" font-weight="650" fill="#D2D0E3">File Library + hybrid RAG</text><text x="42" y="130" font-size="10" fill="#82849F">Scoped files, citations, vector + keyword search</text>
+        <circle cx="28" cy="158" r="3" fill="#8A80EF"/><text x="42" y="162" font-weight="650" fill="#D2D0E3">Web search + headless browser</text><text x="42" y="180" font-size="10" fill="#82849F">Grounded research and JS-heavy page interaction</text>
+        <circle cx="28" cy="208" r="3" fill="#8A80EF"/><text x="42" y="212" font-weight="650" fill="#D2D0E3">MCP + built-in tools</text><text x="42" y="230" font-size="10" fill="#82849F">External servers, sports, calculator, URL context</text>
+        <circle cx="28" cy="258" r="3" fill="#8A80EF"/><text x="42" y="262" font-weight="650" fill="#D2D0E3">Agent plans + approvals</text>
+      </g>
+    </g>
+    <!-- Pillar B -->
+    <g transform="translate(428 394)">
+      <rect x="22" y="22" width="38" height="38" rx="11" fill="#BA5BE1" fill-opacity="0.13" stroke="#75448D"/>
+      <path d="M31 35H40V44H31V35ZM44 31H52V39H44V31ZM44 46H52V54H44V46Z" stroke="#D176EC" stroke-width="1.5"/>
+      <path d="M40 39H44M40 42L44 49" stroke="#D176EC" stroke-width="1.5"/>
+      <text x="75" y="39" font-size="15" font-weight="760" fill="#F0E3F4">Shape every medium</text>
+      <text x="75" y="56" font-size="10" letter-spacing="0.9" fill="#9B7FA4">ONE IDEA, MANY OUTPUTS</text>
+      <line x1="22" y1="80" x2="322" y2="80" stroke="#403047"/>
+      <g font-size="12">
+        <circle cx="28" cy="108" r="3" fill="#CF70E9"/><text x="42" y="112" font-weight="650" fill="#DED1E2">Cross-studio handoffs</text><text x="42" y="130" font-size="10" fill="#958398">Move image and music assets directly into video</text>
+        <circle cx="28" cy="158" r="3" fill="#CF70E9"/><text x="42" y="162" font-weight="650" fill="#DED1E2">Branch, compare, iterate</text><text x="42" y="180" font-size="10" fill="#958398">Explore alternates without losing the active path</text>
+        <circle cx="28" cy="208" r="3" fill="#CF70E9"/><text x="42" y="212" font-weight="650" fill="#DED1E2">Canvas + timeline editing</text><text x="42" y="230" font-size="10" fill="#958398">Masks, references, clips, tracks, effects, keyframes</text>
+        <circle cx="28" cy="258" r="3" fill="#CF70E9"/><text x="42" y="262" font-weight="650" fill="#DED1E2">Multimodal inputs + previews</text>
+      </g>
+    </g>
+    <!-- Pillar C -->
+    <g transform="translate(796 394)">
+      <rect x="22" y="22" width="38" height="38" rx="11" fill="#3FC7CD" fill-opacity="0.12" stroke="#34737B"/>
+      <path d="M31 49V41M38 49V35M45 49V30M52 49H29" stroke="#5AD5D5" stroke-width="1.7" stroke-linecap="round"/>
+      <text x="75" y="39" font-size="15" font-weight="760" fill="#DAF0F1">Operate with confidence</text>
+      <text x="75" y="56" font-size="10" letter-spacing="0.9" fill="#769BA1">MEASURE, GOVERN, DELIVER</text>
+      <line x1="22" y1="80" x2="322" y2="80" stroke="#294149"/>
+      <g font-size="12">
+        <circle cx="28" cy="108" r="3" fill="#4ED0D0"/><text x="42" y="112" font-weight="650" fill="#CFE2E4">Evaluation harness</text><text x="42" y="130" font-size="10" fill="#789297">Compare models and score repeatable test suites</text>
+        <circle cx="28" cy="158" r="3" fill="#4ED0D0"/><text x="42" y="162" font-weight="650" fill="#CFE2E4">Usage + cost controls</text><text x="42" y="180" font-size="10" fill="#789297">Provider breakdowns, budgets, pricing, CSV export</text>
+        <circle cx="28" cy="208" r="3" fill="#4ED0D0"/><text x="42" y="212" font-weight="650" fill="#CFE2E4">Workspaces + plugin governance</text><text x="42" y="230" font-size="10" fill="#789297">Roles, permissions, health, trust, install lifecycle</text>
+        <circle cx="28" cy="258" r="3" fill="#4ED0D0"/><text x="42" y="262" font-weight="650" fill="#CFE2E4">Artifact export + portable backup</text>
+      </g>
+    </g>
+  </g>
 
-  <!-- Branching -->
-  <rect x="214" y="145" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#ec4899" stroke-width="0.5"/>
-  <circle cx="240" cy="171" r="12" fill="#ec4899" fill-opacity="0.15"/>
-  <text x="240" y="175" font-family="system-ui,sans-serif" font-size="14" fill="#ec4899" text-anchor="middle">🌿</text>
-  <text x="258" y="175" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Branching</text>
-  <text x="226" y="195" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Fork conversations into</text>
-  <text x="226" y="207" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">parallel branches to</text>
-  <text x="226" y="219" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">explore different paths</text>
-  <rect x="226" y="231" width="38" height="14" rx="7" fill="#ec4899" fill-opacity="0.12"/>
-  <text x="245" y="241" font-family="monospace" font-size="8" fill="#f472b6" text-anchor="middle">git</text>
-
-  <!-- Web Search -->
-  <rect x="404" y="145" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#3b82f6" stroke-width="0.5"/>
-  <circle cx="430" cy="171" r="12" fill="#3b82f6" fill-opacity="0.15"/>
-  <text x="430" y="175" font-family="system-ui,sans-serif" font-size="14" fill="#3b82f6" text-anchor="middle">🔍</text>
-  <text x="448" y="175" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Web Search</text>
-  <text x="416" y="195" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Brave Search or DuckDuckGo</text>
-  <text x="416" y="207" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">with Jina Reader for</text>
-  <text x="416" y="219" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">article content extraction</text>
-  <rect x="416" y="231" width="64" height="14" rx="7" fill="#3b82f6" fill-opacity="0.12"/>
-  <text x="448" y="241" font-family="monospace" font-size="8" fill="#60a5fa" text-anchor="middle">grounded</text>
-
-  <!-- Security -->
-  <rect x="594" y="145" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#ef4444" stroke-width="0.5"/>
-  <circle cx="620" cy="171" r="12" fill="#ef4444" fill-opacity="0.15"/>
-  <text x="620" y="175" font-family="system-ui,sans-serif" font-size="14" fill="#ef4444" text-anchor="middle">🔒</text>
-  <text x="638" y="175" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Security</text>
-  <text x="606" y="195" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">AES-256-GCM key encryption,</text>
-  <text x="606" y="207" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">optional multi-user auth,</text>
-  <text x="606" y="219" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">data never leaves your machine</text>
-  <rect x="606" y="231" width="52" height="14" rx="7" fill="#ef4444" fill-opacity="0.12"/>
-  <text x="632" y="241" font-family="monospace" font-size="8" fill="#f87171" text-anchor="middle">local</text>
-
-  <!-- Row 3 -->
-  <!-- Analytics -->
-  <rect x="24" y="270" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#14b8a6" stroke-width="0.5"/>
-  <circle cx="50" cy="296" r="12" fill="#14b8a6" fill-opacity="0.15"/>
-  <text x="50" y="300" font-family="system-ui,sans-serif" font-size="14" fill="#14b8a6" text-anchor="middle">📊</text>
-  <text x="68" y="300" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Analytics</text>
-  <text x="36" y="320" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Token usage, cost tracking,</text>
-  <text x="36" y="332" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">per-model breakdowns, and</text>
-  <text x="36" y="344" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">custom pricing rules</text>
-  <rect x="36" y="356" width="42" height="14" rx="7" fill="#14b8a6" fill-opacity="0.12"/>
-  <text x="57" y="366" font-family="monospace" font-size="8" fill="#2dd4bf" text-anchor="middle">cost</text>
-
-  <!-- Workspaces -->
-  <rect x="214" y="270" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#8b5cf6" stroke-width="0.5"/>
-  <circle cx="240" cy="296" r="12" fill="#8b5cf6" fill-opacity="0.15"/>
-  <text x="240" y="300" font-family="system-ui,sans-serif" font-size="14" fill="#8b5cf6" text-anchor="middle">📁</text>
-  <text x="258" y="300" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Workspaces</text>
-  <text x="226" y="320" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Organize conversations,</text>
-  <text x="226" y="332" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">member management, and</text>
-  <text x="226" y="344" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">role-based access control</text>
-  <rect x="226" y="356" width="46" height="14" rx="7" fill="#8b5cf6" fill-opacity="0.12"/>
-  <text x="249" y="366" font-family="monospace" font-size="8" fill="#a78bfa" text-anchor="middle">teams</text>
-
-  <!-- Plugins -->
-  <rect x="404" y="270" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#06b6d4" stroke-width="0.5"/>
-  <circle cx="430" cy="296" r="12" fill="#06b6d4" fill-opacity="0.15"/>
-  <text x="430" y="300" font-family="system-ui,sans-serif" font-size="14" fill="#06b6d4" text-anchor="middle">🧩</text>
-  <text x="448" y="300" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Plugin SDK</text>
-  <text x="416" y="320" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">JSON-RPC subprocess</text>
-  <text x="416" y="332" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">model for extending with</text>
-  <text x="416" y="344" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">custom tools and actions</text>
-  <rect x="416" y="356" width="62" height="14" rx="7" fill="#06b6d4" fill-opacity="0.12"/>
-  <text x="447" y="366" font-family="monospace" font-size="8" fill="#22d3ee" text-anchor="middle">extensible</text>
-
-  <!-- Import/Export -->
-  <rect x="594" y="270" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#84cc16" stroke-width="0.5"/>
-  <circle cx="620" cy="296" r="12" fill="#84cc16" fill-opacity="0.15"/>
-  <text x="620" y="300" font-family="system-ui,sans-serif" font-size="14" fill="#84cc16" text-anchor="middle">💾</text>
-  <text x="638" y="300" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Import / Export</text>
-  <text x="606" y="320" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Full backup and restore</text>
-  <text x="606" y="332" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">of conversations, settings,</text>
-  <text x="606" y="344" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">and attachments</text>
-  <rect x="606" y="356" width="52" height="14" rx="7" fill="#84cc16" fill-opacity="0.12"/>
-  <text x="632" y="366" font-family="monospace" font-size="8" fill="#a3e635" text-anchor="middle">bundle</text>
-    <!-- Row 4 -->
-  <!-- RAG -->
-  <rect x="24" y="395" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#f59e0b" stroke-width="0.5"/>
-  <circle cx="50" cy="421" r="12" fill="#f59e0b" fill-opacity="0.15"/>
-  <text x="50" y="425" font-family="system-ui,sans-serif" font-size="14" fill="#f59e0b" text-anchor="middle">📚</text>
-  <text x="68" y="425" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">RAG Pipeline</text>
-  <text x="36" y="445" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Document chunking,</text>
-  <text x="36" y="457" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">embedding, and semantic</text>
-  <text x="36" y="469" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">search over your files</text>
-  <rect x="36" y="481" width="60" height="14" rx="7" fill="#f59e0b" fill-opacity="0.12"/>
-  <text x="66" y="491" font-family="monospace" font-size="8" fill="#fbbf24" text-anchor="middle">vectors</text>
-
-  <!-- Artifact Export -->
-  <rect x="214" y="395" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#10b981" stroke-width="0.5"/>
-  <circle cx="240" cy="421" r="12" fill="#10b981" fill-opacity="0.15"/>
-  <text x="240" y="425" font-family="system-ui,sans-serif" font-size="14" fill="#10b981" text-anchor="middle">📄</text>
-  <text x="258" y="425" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Artifact Export</text>
-  <text x="226" y="445" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Generate Word, Excel,</text>
-  <text x="226" y="457" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">PDF, CSV, HTML, JSON,</text>
-  <text x="226" y="469" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">and YAML files natively</text>
-  <rect x="226" y="481" width="52" height="14" rx="7" fill="#10b981" fill-opacity="0.12"/>
-  <text x="252" y="491" font-family="monospace" font-size="8" fill="#34d399" text-anchor="middle">export</text>
-
-  <!-- Headless Browser -->
-  <rect x="404" y="395" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#eab308" stroke-width="0.5"/>
-  <circle cx="430" cy="421" r="12" fill="#eab308" fill-opacity="0.15"/>
-  <text x="430" y="425" font-family="system-ui,sans-serif" font-size="14" fill="#eab308" text-anchor="middle">🌐</text>
-  <text x="448" y="425" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">Headless Browser</text>
-  <text x="416" y="445" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Chromium-powered browsing</text>
-  <text x="416" y="457" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">for JS-heavy sites,</text>
-  <text x="416" y="469" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">screenshots, and interaction</text>
-  <rect x="416" y="481" width="56" height="14" rx="7" fill="#eab308" fill-opacity="0.12"/>
-  <text x="444" y="491" font-family="monospace" font-size="8" fill="#fde047" text-anchor="middle">go-rod</text>
-
-  <!-- MCP Servers -->
-  <rect x="594" y="395" width="180" height="110" rx="12" fill="#1e1e3f" stroke="#0ea5e9" stroke-width="0.5"/>
-  <circle cx="620" cy="421" r="12" fill="#0ea5e9" fill-opacity="0.15"/>
-  <text x="620" y="425" font-family="system-ui,sans-serif" font-size="14" fill="#0ea5e9" text-anchor="middle">🔌</text>
-  <text x="638" y="425" font-family="system-ui,sans-serif" font-size="12" fill="#e0e0ff" font-weight="600">MCP Servers</text>
-  <text x="606" y="445" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">Connect to external MCP</text>
-  <text x="606" y="457" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">servers to securely use</text>
-  <text x="606" y="469" font-family="system-ui,sans-serif" font-size="9" fill="#6b7280">their tools dynamically</text>
-  <rect x="606" y="481" width="56" height="14" rx="7" fill="#0ea5e9" fill-opacity="0.12"/>
-  <text x="634" y="491" font-family="monospace" font-size="8" fill="#38bdf8" text-anchor="middle">protocol</text>
+  <!-- Local-first foundation -->
+  <rect x="60" y="708" width="1080" height="42" rx="14" fill="#0E1221" stroke="#30364E"/>
+  <g font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="0.8">
+    <g transform="translate(82 720)"><circle cx="8" cy="9" r="4" fill="#48D6BE"/><text x="21" y="12" fill="#A8DCD3">LOCAL SQLITE DATA</text></g>
+    <path d="M280 720V738" stroke="#30364E"/>
+    <g transform="translate(314 720)"><path d="M4 8V5C4 1 12 1 12 5V8M3 8H13V16H3V8Z" stroke="#8D82EF"/><text x="24" y="12" fill="#B8B2E8">ENCRYPTED SECRETS</text></g>
+    <path d="M552 720V738" stroke="#30364E"/>
+    <g transform="translate(586 720)"><circle cx="8" cy="9" r="6" stroke="#C66EE7"/><path d="M8 3V15M2 9H14" stroke="#C66EE7"/><text x="24" y="12" fill="#D5AFE2">PROVIDERS YOU CHOOSE</text></g>
+    <path d="M841 720V738" stroke="#30364E"/>
+    <g transform="translate(875 720)"><path d="M3 6H8V1H12V6H17V10H12V15H8V10H3V6Z" stroke="#51CDD1"/><text x="29" y="12" fill="#A6D9DB">EXTENSIBLE PLUGIN SDK</text></g>
+  </g>
+  <text x="600" y="768" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="9" letter-spacing="1.2" fill="#5F637E">YOUR DATA • YOUR PROVIDERS • YOUR WORKFLOW</text>
 </svg>
-
-
