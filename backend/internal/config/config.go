@@ -19,8 +19,7 @@ type Config struct {
 	ChromemDir      string // Directory for chromem-go persistent vector files.
 	ChromemCompress bool   // Enable gzip compression for chromem data files.
 
-	DesktopAPIToken string
-	MaxUploadBytes  int64
+	MaxUploadBytes int64
 
 	BrowserEnabled     bool
 	BrowserExecPath    string
@@ -115,7 +114,6 @@ func Load() *Config {
 		AllowPublicReg:     strings.EqualFold(os.Getenv("OMNILLM_ALLOW_PUBLIC_REGISTRATION"), "true"),
 		ChromemDir:         chromemDir,
 		ChromemCompress:    strings.EqualFold(os.Getenv("OMNILLM_CHROMEM_COMPRESS"), "true"),
-		DesktopAPIToken:    strings.TrimSpace(os.Getenv("OMNILLM_DESKTOP_API_TOKEN")),
 		MaxUploadBytes:     maxUploadBytes,
 		BrowserEnabled:     strings.EqualFold(os.Getenv("OMNILLM_BROWSER_ENABLED"), "true"),
 		BrowserExecPath:    strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_EXEC_PATH")),

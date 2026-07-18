@@ -4,11 +4,15 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -91,14 +95,14 @@ func NewPluginProcess(manifest *models.PluginManifest, pluginDir string) *Plugin
 		log.Printf("WARN: plugin directory %q: cannot resolve absolute path", pluginDir)
 		return nil
 	}
-	entryEval, err := filepath.EvalSymlinks(absEntry)
+	entryEval, err := resolvePluginPath(absPlugin, absEntry)
 	if err != nil {
-		log.Printf("WARN: plugin entrypoint %q: cannot resolve symlinks: %v", entrypoint, err)
+		log.Printf("WARN: plugin entrypoint %q: cannot resolve safely: %v", entrypoint, err)
 		return nil
 	}
-	pluginEval, err := filepath.EvalSymlinks(absPlugin)
+	pluginEval, err := resolvePluginPath(absPlugin, absPlugin)
 	if err != nil {
-		log.Printf("WARN: plugin directory %q: cannot resolve symlinks: %v", pluginDir, err)
+		log.Printf("WARN: plugin directory %q: cannot resolve safely: %v", pluginDir, err)
 		return nil
 	}
 	rel, err := filepath.Rel(pluginEval, entryEval)
@@ -113,6 +117,51 @@ func NewPluginProcess(manifest *models.PluginManifest, pluginDir string) *Plugin
 		nextID:     1,
 		pending:    make(map[int]chan pluginResponse),
 	}
+}
+
+// resolvePluginPath canonicalizes a plugin path. On Windows, EvalSymlinks can
+// return access denied for a usable path in a restricted temporary directory.
+// In that narrow case we retain containment by accepting only a lexical child
+// of pluginDir with no symlink component; all other resolution errors reject
+// the plugin.
+func resolvePluginPath(pluginDir, candidate string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err == nil {
+		return resolved, nil
+	}
+	if runtime.GOOS != "windows" || !errors.Is(err, fs.ErrPermission) {
+		return "", err
+	}
+
+	rel, relErr := filepath.Rel(pluginDir, candidate)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("candidate escapes plugin directory")
+	}
+	if err := rejectSymlinkPath(pluginDir, rel); err != nil {
+		return "", err
+	}
+	return filepath.Clean(candidate), nil
+}
+
+func rejectSymlinkPath(root, relativePath string) error {
+	current := root
+	parts := []string{"."}
+	if relativePath != "." {
+		parts = strings.Split(relativePath, string(filepath.Separator))
+	}
+	for _, part := range parts {
+		if part != "." {
+			current = filepath.Join(current, part)
+		}
+		info, err := os.Lstat(current)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink component %q is not permitted", current)
+		}
+	}
+	return nil
 }
 
 // Start launches the plugin subprocess and performs bounded initialization.

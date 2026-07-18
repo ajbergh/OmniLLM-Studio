@@ -63,12 +63,11 @@ func main() {
 		defer logFile.Close()
 	}
 
-	desktopToken, err := generateDesktopToken()
+	desktopSecret, err := generateDesktopToken()
 	if err != nil {
-		log.Fatalf("desktop API token: %v", err)
+		log.Fatalf("desktop API secret: %v", err)
 	}
 	cfg := config.Load()
-	cfg.DesktopAPIToken = desktopToken
 
 	database, err := db.Open(cfg.DatabasePath)
 	if err != nil {
@@ -89,14 +88,14 @@ func main() {
 		log.Fatalf("listen: %v", err)
 	}
 	apiPort := ln.Addr().(*net.TCPAddr).Port
-	desktopPrefix := "/__desktop/" + desktopToken
+	desktopPrefix := "/__desktop/" + desktopSecret
 	apiBase := fmt.Sprintf("http://127.0.0.1:%d%s/v1", apiPort, desktopPrefix)
 	log.Printf("[desktop] protected API server listening on 127.0.0.1:%d", apiPort)
 
 	// StripPrefix returns 404 for every request that does not contain the random
 	// per-launch path. The underlying router and request logger never see or log
 	// the secret prefix.
-	loopbackHandler := http.StripPrefix(desktopPrefix, router)
+	loopbackHandler := desktopLoopbackHandler(desktopPrefix, router)
 	srv := &http.Server{
 		Handler:           loopbackHandler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -162,6 +161,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("wails.Run: %v", err)
 	}
+}
+
+func desktopLoopbackHandler(prefix string, next http.Handler) http.Handler {
+	return http.StripPrefix(prefix, next)
 }
 
 func generateDesktopToken() (string, error) {
