@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/full-remediation-20260718
+  workflow_dispatch:
 
 permissions:
   contents: write
