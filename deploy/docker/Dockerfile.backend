@@ -1,25 +1,17 @@
 # OmniLLM-Studio backend container image.
 #
-# Multi-stage build. CGO is required by mattn/go-sqlite3, so the runtime
-# stage is distroless/cc (glibc) rather than distroless/static.
-#
+# The runtime intentionally includes FFmpeg/FFprobe because Video Edit Studio
+# advertises timeline rendering and media probing in container deployments.
 # Build context: repository root.
-#   docker build -f deploy/docker/Dockerfile.backend \
-#     --build-arg VERSION=$(git describe --tags --always) \
-#     --build-arg COMMIT=$(git rev-parse --short HEAD) \
-#     -t omnillm-studio-backend:dev .
 
 # --- build ---
-FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS build
 
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
 ARG COMMIT=unknown
 
-# CGO cross-compilation requires the right toolchain when TARGETARCH != BUILDPLATFORM.
-# Install both x86_64 and aarch64 cross GCC so this Dockerfile works under
-# `docker buildx --platform=linux/amd64,linux/arm64` from either host arch.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         gcc-x86-64-linux-gnu \
@@ -30,10 +22,8 @@ RUN apt-get update \
 WORKDIR /src
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
-
 COPY backend/ ./
 
-# Pick the right cross-compiler for the target arch.
 RUN set -eux; \
     case "${TARGETARCH}" in \
       amd64) CC=x86_64-linux-gnu-gcc ;; \
@@ -47,23 +37,31 @@ RUN set -eux; \
         ./cmd/server
 
 # --- runtime ---
-FROM gcr.io/distroless/cc-debian12:nonroot
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg \
+    && groupadd --system --gid 65532 omnillm \
+    && useradd --system --uid 65532 --gid 65532 --home-dir /app --shell /usr/sbin/nologin omnillm \
+    && mkdir -p /app /data \
+    && chown -R omnillm:omnillm /app /data \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=build /out/omnillm-studio /app/omnillm-studio
+COPY --from=build --chown=omnillm:omnillm /out/omnillm-studio /app/omnillm-studio
 
-# /data is the canonical state directory: SQLite DB, attachments, chromem.
-# The Helm chart mounts a PVC here. The image declares the volume so plain
-# `docker run` users get an anonymous volume by default.
 VOLUME ["/data"]
-
 EXPOSE 8080
 
 ENV OMNILLM_BIND_ADDRESS=0.0.0.0 \
     OMNILLM_PORT=8080 \
     OMNILLM_DB_PATH=/data/omnillm-studio.db \
     OMNILLM_ATTACHMENTS_DIR=/data/attachments \
-    OMNILLM_CHROMEM_DIR=/data/chromem
+    OMNILLM_CHROMEM_DIR=/data/chromem \
+    OMNILLM_MAX_UPLOAD_BYTES=524288000
 
-USER nonroot:nonroot
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl --fail --silent --show-error http://127.0.0.1:8080/v1/health >/dev/null || exit 1
+
+USER omnillm:omnillm
 ENTRYPOINT ["/app/omnillm-studio"]
