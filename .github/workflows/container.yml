@@ -1,9 +1,5 @@
 name: Build and Publish Container Images
 
-# This workflow is ADDITIVE — it does not replace or modify the legacy Wails
-# / web binary builds in release.yml. Container images are published to GHCR
-# alongside the existing GitHub Releases.
-
 on:
   push:
     branches: [main]
@@ -19,13 +15,12 @@ on:
       - 'backend/**'
       - 'frontend/**'
       - 'deploy/docker/**'
+      - 'deploy/helm/**'
       - '.github/workflows/container.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write   # required for cosign keyless signing
 
 env:
   REGISTRY: ghcr.io
@@ -35,7 +30,10 @@ jobs:
   build:
     name: Build ${{ matrix.image }}
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -50,11 +48,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
@@ -106,7 +101,6 @@ jobs:
       - name: Sign image (keyless)
         if: github.event_name != 'pull_request'
         env:
-          COSIGN_EXPERIMENTAL: '1'
           DIGEST: ${{ steps.build.outputs.digest }}
           TAGS: ${{ steps.docker_meta.outputs.tags }}
         run: |
@@ -116,21 +110,22 @@ jobs:
           done
 
   helm-lint:
-    name: Helm chart lint + template
+    name: Helm chart lint and template
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v4
         with:
           version: v3.16.2
 
       - name: Helm lint
-        run: helm lint deploy/helm/omnillm-studio
+        run: helm lint deploy/helm/omnillm-studio --set secrets.encryptionKey=$(printf '0%.0s' {1..64})
 
-      - name: Helm template (defaults)
-        run: helm template test deploy/helm/omnillm-studio > /tmp/rendered-default.yaml
+      - name: Helm template (combined topology)
+        run: |
+          helm template test deploy/helm/omnillm-studio \
+            --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
+            > /tmp/rendered-default.yaml
 
       - name: Helm template (split topology)
         run: |
@@ -139,10 +134,18 @@ jobs:
             --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
             > /tmp/rendered-split.yaml
 
+      - name: Verify upload limit reaches proxy and backend
+        run: |
+          grep -q 'client_max_body_size 500m' /tmp/rendered-default.yaml
+          grep -q 'name: OMNILLM_MAX_UPLOAD_BYTES' /tmp/rendered-default.yaml
+          grep -q 'value: "524288000"' /tmp/rendered-default.yaml
+
       - name: Helm template (replicaCount=2 must fail)
         run: |
-          if helm template test deploy/helm/omnillm-studio --set replicaCount=2 > /dev/null 2>&1; then
-            echo "Expected helm template to fail with replicaCount=2 (chart is single-writer)" >&2
+          if helm template test deploy/helm/omnillm-studio \
+            --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
+            --set replicaCount=2 >/dev/null 2>&1; then
+            echo "Expected helm template to fail with replicaCount=2" >&2
             exit 1
           fi
 
