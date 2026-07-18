@@ -1,16 +1,15 @@
-name: Repair Playwright contracts
+name: Finalize Playwright contracts
 
 on:
   push:
     branches:
       - agent/full-remediation-20260718
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  repair:
+  finalize:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     steps:
@@ -18,73 +17,27 @@ jobs:
         with:
           ref: agent/full-remediation-20260718
           fetch-depth: 0
-      - name: Update isolated ports fixtures and accessible names
+      - name: Use the supported Playwright request context type
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
-          def replace(path, old, new):
-              p = Path(path)
-              text = p.read_text()
-              if old not in text:
-                  raise SystemExit(f"expected text not found in {path}: {old!r}")
-              p.write_text(text.replace(old, new))
-
-          replace(
-              'tests/browser-tools-validation.spec.ts',
-              "const DEV_URL = 'http://localhost:5173';\nconst BACKEND_URL = 'http://localhost:8080';",
-              "const BACKEND_URL = process.env.OMNILLM_PLAYWRIGHT_BACKEND_URL ?? 'http://127.0.0.1:8090';",
+          path = Path('tests/browser-tools-validation.spec.ts')
+          text = path.read_text()
+          text = text.replace(
+              "import { expect, test, type Page } from '@playwright/test';",
+              "import { expect, test, type APIRequestContext, type Page } from '@playwright/test';",
           )
-          replace(
-              'tests/browser-tools-validation.spec.ts',
-              "  test.use({ baseURL: DEV_URL });\n",
-              "",
+          text = text.replace(
+              "async function expectBrowserRoutesAvailable(request: Parameters<Parameters<typeof test>[1]>[0]['request']) {",
+              "async function expectBrowserRoutesAvailable(request: APIRequestContext) {",
           )
-          replace(
-              'tests/browser-tools-validation.spec.ts',
-              ' * Targets the running dev server at http://localhost:5173/.',
-              ' * Uses the isolated backend and frontend started by playwright.config.ts.',
-          )
-
-          for path in ['tests/image-editor-toolbar.smoke.spec.ts', 'tests/uiux-remediation.spec.ts']:
-              replace(
-                  path,
-                  "path.join(backendDir, 'cmd', 'desktop', 'build', 'appicon.png')",
-                  "path.join(repoRoot, 'docs', 'assets', 'screenshots', 'chat-studio.png')",
-              )
-
-          replace(
-              'tests/image-editor-toolbar.smoke.spec.ts',
-              "page.getByRole('button', { name: 'Image', exact: true })",
-              "page.getByRole('button', { name: 'Image Studio', exact: true })",
-          )
-          replace(
-              'tests/image-editor-toolbar.smoke.spec.ts',
-              '// The sidebar also has an exact "Edit" button (Video Edit Studio); the studio\'s\n  // Edit mode tab renders later in the DOM.\n  await page.getByRole(\'button\', { name: \'Edit\', exact: true }).last().click();',
-              '// Enter the image editor\'s Edit mode. The sidebar uses the distinct accessible\n  // name "Video Edit Studio", so the exact Edit selector is unambiguous.\n  await page.getByRole(\'button\', { name: \'Edit\', exact: true }).click();',
-          )
-
-          replace(
-              'tests/music-studio.smoke.spec.ts',
-              "page.getByRole('button', { name: 'Music', exact: true })",
-              "page.getByRole('button', { name: 'Music Studio', exact: true })",
-          )
-          replace(
-              'tests/video-editor.smoke.spec.ts',
-              "page.getByRole('button', { name: 'Edit', exact: true })",
-              "page.getByRole('button', { name: 'Video Edit Studio', exact: true })",
-          )
-          replace(
-              'tests/video-editor.smoke.spec.ts',
-              '// Sidebar mode button (the image studio\'s "Edit" tab is not mounted here).',
-              '// Open the dedicated Video Edit Studio from the sidebar.',
-          )
+          path.write_text(text)
           PY
-
-      - name: Commit repaired tests
+          git rm .github/workflows/repair-playwright-contracts.yml
+      - name: Commit final test contracts and remove this helper
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests
-          git commit -m "test playwright: align ports fixtures and accessible names"
+          git add tests/browser-tools-validation.spec.ts .github/workflows/repair-playwright-contracts.yml
+          git commit -m "test playwright: finalize isolated browser contracts"
           git push origin HEAD:agent/full-remediation-20260718
