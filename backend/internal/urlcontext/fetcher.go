@@ -119,7 +119,6 @@ func newHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 	return &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
 			DialContext:           ssrfSafeDialContext(allowPrivate),
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          20,
