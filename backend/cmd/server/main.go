@@ -61,14 +61,17 @@ func main() {
 	}()
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port),
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
+		Addr:              fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port),
+		Handler:           router,
+		ReadHeaderTimeout: 15 * time.Second,
+		// Upload handlers enforce byte limits and request contexts. A global body
+		// read timeout made the documented 500 MB media upload impossible on normal
+		// connections, so body reads are not capped by a wall-clock server timeout.
+		ReadTimeout:  0,
 		WriteTimeout: 5 * time.Minute,
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Graceful shutdown
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
