@@ -32,16 +32,50 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             frontend/package-lock.json
+
       - name: Go vulnerability scan
+        id: govulncheck
+        continue-on-error: true
         working-directory: backend
         run: |
+          set -o pipefail
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          govulncheck ./... 2>&1 | tee ../govulncheck.log
+
       - name: Root npm audit
-        run: npm audit --audit-level=high
+        id: root_audit
+        continue-on-error: true
+        run: npm audit --audit-level=high 2>&1 | tee root-npm-audit.log
+
       - name: Frontend npm audit
+        id: frontend_audit
+        continue-on-error: true
         working-directory: frontend
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=high 2>&1 | tee ../frontend-npm-audit.log
+
+      - name: Upload dependency audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit-reports
+          path: |
+            govulncheck.log
+            root-npm-audit.log
+            frontend-npm-audit.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Enforce dependency audit results
+        if: always()
+        env:
+          GO_RESULT: ${{ steps.govulncheck.outcome }}
+          ROOT_NPM_RESULT: ${{ steps.root_audit.outcome }}
+          FRONTEND_NPM_RESULT: ${{ steps.frontend_audit.outcome }}
+        run: |
+          if [ "$GO_RESULT" != "success" ] || [ "$ROOT_NPM_RESULT" != "success" ] || [ "$FRONTEND_NPM_RESULT" != "success" ]; then
+            echo "One or more dependency audits failed; see the uploaded reports." >&2
+            exit 1
+          fi
 
   codeql:
     name: CodeQL (${{ matrix.language }})
@@ -82,18 +116,54 @@ jobs:
           languages: ${{ matrix.language }}
 
       - name: Build Go source for CodeQL
+        id: go_build
         if: matrix.language == 'go'
+        continue-on-error: true
         working-directory: backend
         env:
           GOFLAGS: -tags=webkit2_41
           OMNILLM_MASTER_KEY: 0000000000000000000000000000000000000000000000000000000000000000
-        run: go build ./...
+        run: |
+          set -o pipefail
+          go build ./... 2>&1 | tee ../codeql-go-build.log
 
       - name: Build TypeScript source for CodeQL
+        id: typescript_build
         if: matrix.language == 'javascript-typescript'
+        continue-on-error: true
         run: |
-          npm ci
-          npm ci --prefix frontend
-          npm run build --prefix frontend
+          set -o pipefail
+          npm ci 2>&1 | tee codeql-root-npm.log
+          npm ci --prefix frontend 2>&1 | tee codeql-frontend-npm.log
+          npm run build --prefix frontend 2>&1 | tee codeql-typescript-build.log
+
+      - name: Upload CodeQL build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-build-${{ matrix.language }}
+          path: |
+            codeql-go-build.log
+            codeql-root-npm.log
+            codeql-frontend-npm.log
+            codeql-typescript-build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Enforce CodeQL build result
+        if: always()
+        env:
+          LANGUAGE: ${{ matrix.language }}
+          GO_RESULT: ${{ steps.go_build.outcome }}
+          TYPESCRIPT_RESULT: ${{ steps.typescript_build.outcome }}
+        run: |
+          if [ "$LANGUAGE" = "go" ] && [ "$GO_RESULT" != "success" ]; then
+            echo "Go CodeQL build failed; see uploaded diagnostics." >&2
+            exit 1
+          fi
+          if [ "$LANGUAGE" = "javascript-typescript" ] && [ "$TYPESCRIPT_RESULT" != "success" ]; then
+            echo "TypeScript CodeQL build failed; see uploaded diagnostics." >&2
+            exit 1
+          fi
 
       - uses: github/codeql-action/analyze@v3
