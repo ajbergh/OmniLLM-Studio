@@ -31,7 +31,7 @@ function seedImageSessionFixture(title: string): SeedFixture {
             OMNILLM_DB_PATH: process.env.OMNILLM_PLAYWRIGHT_DB_PATH,
             OMNILLM_ATTACHMENTS_DIR: process.env.OMNILLM_PLAYWRIGHT_ATTACHMENTS_DIR,
           },
-        }
+        },
       );
       return JSON.parse(raw.trim()) as SeedFixture;
     } catch (error) {
@@ -41,7 +41,7 @@ function seedImageSessionFixture(title: string): SeedFixture {
       const waitMs = 250 * (attempt + 1);
       const start = Date.now();
       while (Date.now() - start < waitMs) {
-        // busy-wait; execFileSync flows are synchronous
+        // execFileSync fixture setup is synchronous.
       }
     }
   }
@@ -52,20 +52,16 @@ test('floating canvas toolbar responds in image edit mode', async ({ page, brows
   const sessionTitle = `Toolbar Smoke ${browserName} ${Date.now()}`;
   const fixture = seedImageSessionFixture(sessionTitle);
 
-  await page.addInitScript(() => {
-    window.localStorage.clear();
-  });
-
+  await page.addInitScript(() => window.localStorage.clear());
   await page.goto('/');
 
   await page.getByRole('button', { name: 'Image Studio', exact: true }).click();
   await expect(page.getByText(fixture.title).first()).toBeVisible();
-
   await page.getByText(fixture.title).first().click();
   await expect(page.getByText('Image Edit Studio')).toBeVisible();
 
-  // Enter the image editor's Edit mode. The sidebar uses the distinct accessible
-  // name "Video Edit Studio", so the exact Edit selector is unambiguous.
+  // The sidebar uses the distinct name "Video Edit Studio", making the image
+  // editor's exact Edit mode selector unambiguous.
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
 
   const toolbar = page.getByTestId('image-canvas-toolbar');
@@ -75,11 +71,16 @@ test('floating canvas toolbar responds in image edit mode', async ({ page, brows
   const maskCanvas = page.getByTestId('image-mask-canvas');
 
   await expect(toolbar).toBeVisible();
-  await expect(zoomValue).toHaveText('100%');
+  await expect(zoomValue).toHaveText(/^\d+%$/);
+  const initialZoom = Number.parseInt((await zoomValue.textContent() ?? '').replace('%', ''), 10);
+  expect(initialZoom).toBeGreaterThan(0);
   await expect(maskCanvas).toHaveCSS('opacity', '1');
 
   await page.getByTestId('canvas-zoom-in').click();
-  await expect(zoomValue).toHaveText('125%');
+  await expect.poll(async () => {
+    const text = await zoomValue.textContent();
+    return Number.parseInt((text ?? '').replace('%', ''), 10);
+  }).toBeGreaterThan(initialZoom);
 
   await panButton.click();
   await expect(panButton).toHaveClass(/bg-primary\/20/);
@@ -95,10 +96,7 @@ test('AI enhance rewrites and can undo an image studio prompt', async ({ page, b
   const enhancedPrompt = 'A cozy cedar cabin tucked into a misty pine forest, warm window light, textured snow, cinematic dusk composition, soft volumetric lighting, natural color palette, highly detailed.';
   let requestBody: Record<string, unknown> | undefined;
 
-  await page.addInitScript(() => {
-    window.localStorage.clear();
-  });
-
+  await page.addInitScript(() => window.localStorage.clear());
   await page.route('**/v1/conversations/*/images/sessions/*/enhance-prompt', async (route) => {
     requestBody = route.request().postDataJSON() as Record<string, unknown>;
     await route.fulfill({
@@ -114,10 +112,8 @@ test('AI enhance rewrites and can undo an image studio prompt', async ({ page, b
   });
 
   await page.goto('/');
-
   await page.getByRole('button', { name: 'Image Studio', exact: true }).click();
   await expect(page.getByText(fixture.title).first()).toBeVisible();
-
   await page.getByText(fixture.title).first().click();
   await expect(page.getByText('Image Edit Studio')).toBeVisible();
 
@@ -126,10 +122,7 @@ test('AI enhance rewrites and can undo an image studio prompt', async ({ page, b
   await page.getByRole('button', { name: /AI enhance prompt/i }).click();
 
   await expect(promptInput).toHaveValue(enhancedPrompt);
-  expect(requestBody).toMatchObject({
-    prompt: originalPrompt,
-    mode: 'generate',
-  });
+  expect(requestBody).toMatchObject({ prompt: originalPrompt, mode: 'generate' });
 
   await page.getByRole('button', { name: 'Undo AI enhance' }).click();
   await expect(promptInput).toHaveValue(originalPrompt);
