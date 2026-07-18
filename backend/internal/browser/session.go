@@ -7,15 +7,17 @@ import (
 	"github.com/go-rod/rod"
 )
 
-// Session is the in-memory state for a live browser page. opMu prevents two
-// concurrent tool calls from driving the same page at once.
+// Session is the in-memory state for a live browser page. Every session owns an
+// incognito browser context, preventing cookies, local storage, and cached
+// credentials from crossing user/session boundaries.
 type Session struct {
 	opMu sync.Mutex
 
-	ID         string
-	UserID     string
-	Page       *rod.Page
-	CreatedAt  time.Time
-	LastUsedAt time.Time
-	CurrentURL string
+	ID             string
+	UserID         string
+	BrowserContext *rod.Browser
+	Page           *rod.Page
+	CreatedAt      time.Time
+	LastUsedAt     time.Time
+	CurrentURL     string
 }
