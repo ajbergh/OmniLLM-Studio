@@ -21,8 +21,6 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       annotations:
-        # Roll the StatefulSet when the nginx ConfigMap changes (combined
-        # topology only — but the checksum is cheap to compute).
         checksum/nginx-config: {{ include (print $.Template.BasePath "/configmap-nginx.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
         {{- with .Values.podAnnotations }}
@@ -79,6 +77,8 @@ spec:
               value: /data/attachments
             - name: OMNILLM_CHROMEM_DIR
               value: /data/chromem
+            - name: OMNILLM_MAX_UPLOAD_BYTES
+              value: {{ .Values.config.maxUploadBytes | quote }}
             - name: OMNILLM_ALLOW_PUBLIC_REGISTRATION
               value: {{ .Values.config.allowPublicRegistration | quote }}
             - name: OMNILLM_CHROMEM_COMPRESS
