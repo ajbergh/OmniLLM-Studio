@@ -532,10 +532,9 @@ export const api = {
 
   /** Fetch installed models from an Ollama instance (proxied through backend
    *  so the Wails desktop build doesn't need cross-origin access to Ollama). */
-  fetchOllamaModels: async (baseUrl?: string): Promise<string[]> => {
-    const url = (baseUrl || 'http://localhost:11434').replace(/\/+$/, '');
+  fetchOllamaModels: async (providerId: string): Promise<string[]> => {
     try {
-      return await apiFetch<string[]>(`/providers/ollama/models?base_url=${encodeURIComponent(url)}`);
+      return await apiFetch<string[]>(`/providers/ollama/models?provider_id=${encodeURIComponent(providerId)}`);
     } catch {
       return [];
     }

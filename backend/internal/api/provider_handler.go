@@ -117,20 +117,24 @@ func (h *ProviderHandler) FetchOllamaModels(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(r.URL.Query().Get("base_url")), "/")
-	if providerID := strings.TrimSpace(r.URL.Query().Get("provider_id")); providerID != "" {
-		provider, err := h.repo.GetByID(providerID)
-		if err != nil {
-			respondInternalError(w, err)
-			return
-		}
-		if provider == nil || !strings.EqualFold(provider.Type, "ollama") {
-			respondError(w, http.StatusNotFound, "Ollama provider not found")
-			return
-		}
-		if provider.BaseURL != nil && strings.TrimSpace(*provider.BaseURL) != "" {
-			baseURL = strings.TrimRight(strings.TrimSpace(*provider.BaseURL), "/")
-		}
+	providerID := strings.TrimSpace(r.URL.Query().Get("provider_id"))
+	if providerID == "" {
+		respondError(w, http.StatusBadRequest, "provider_id is required")
+		return
+	}
+	provider, err := h.repo.GetByID(providerID)
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	if provider == nil || !strings.EqualFold(provider.Type, "ollama") {
+		respondError(w, http.StatusNotFound, "Ollama provider not found")
+		return
+	}
+
+	baseURL := ""
+	if provider.BaseURL != nil && strings.TrimSpace(*provider.BaseURL) != "" {
+		baseURL = strings.TrimRight(strings.TrimSpace(*provider.BaseURL), "/")
 	}
 	if baseURL == "" {
 		baseURL = "http://127.0.0.1:11434"
@@ -339,7 +343,7 @@ func providerDiscoveryClient(ctx context.Context, target *url.URL) (*http.Client
 	local := true
 	for _, addr := range ips {
 		ip := addr.IP
-		if !(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
+		if !(ip.IsLoopback() || ip.IsPrivate()) {
 			local = false
 			break
 		}
@@ -350,8 +354,35 @@ func providerDiscoveryClient(ctx context.Context, target *url.URL) (*http.Client
 
 	host := strings.ToLower(target.Hostname())
 	scheme := target.Scheme
+	port := target.Port()
+	if port == "" {
+		if scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	return &http.Client{
 		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(dialCtx context.Context, network, address string) (net.Conn, error) {
+				dialHost, dialPort, splitErr := net.SplitHostPort(address)
+				if splitErr != nil || !strings.EqualFold(dialHost, host) || dialPort != port {
+					return nil, fmt.Errorf("provider connection changed origin")
+				}
+				resolved, resolveErr := net.DefaultResolver.LookupIPAddr(dialCtx, host)
+				if resolveErr != nil || len(resolved) == 0 {
+					return nil, fmt.Errorf("resolve provider host")
+				}
+				for _, addr := range resolved {
+					if !(addr.IP.IsLoopback() || addr.IP.IsPrivate()) {
+						return nil, fmt.Errorf("provider host no longer resolves to a private address")
+					}
+				}
+				return dialer.DialContext(dialCtx, network, net.JoinHostPort(resolved[0].IP.String(), port))
+			},
+		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 3 {
 				return fmt.Errorf("too many redirects")

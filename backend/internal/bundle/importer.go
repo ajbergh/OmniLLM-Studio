@@ -16,6 +16,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/db"
 	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
+	"github.com/google/uuid"
 )
 
 // importableSettingsKeys is the allowlist of settings keys that may be imported
@@ -328,10 +329,15 @@ func (imp *Importer) importConversation(tx *sql.Tx, bundle *ConversationBundle, 
 }
 
 func (imp *Importer) importAttachment(tx *sql.Tx, zr *zip.Reader, attachment *models.Attachment, strategy ImportStrategy) (bool, error) {
-	attachment.StoragePath = filepath.Base(attachment.StoragePath)
-	if attachment.StoragePath == "." || attachment.StoragePath == string(filepath.Separator) || attachment.StoragePath == "" {
+	archiveStoragePath := filepath.Base(attachment.StoragePath)
+	if archiveStoragePath == "." || archiveStoragePath == string(filepath.Separator) || archiveStoragePath == "" {
 		return false, fmt.Errorf("invalid storage path")
 	}
+	// Never reuse an archive-controlled name as a filesystem path. Imported
+	// attachments receive the same opaque, server-generated storage names as
+	// newly uploaded attachments.
+	storagePath := uuid.NewString()
+	attachment.StoragePath = storagePath
 
 	var exists int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM attachments WHERE id = ?`, attachment.ID).Scan(&exists); err != nil {
@@ -351,22 +357,18 @@ func (imp *Importer) importAttachment(tx *sql.Tx, zr *zip.Reader, attachment *mo
 			storage_path, bytes, width, height, created_at, metadata_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		attachment.ID, attachment.ConversationID, attachment.MessageID, attachment.Type, attachment.MimeType,
-		attachment.StoragePath, attachment.Bytes, attachment.Width, attachment.Height,
+		storagePath, attachment.Bytes, attachment.Width, attachment.Height,
 		attachment.CreatedAt.Format(time.RFC3339), attachment.MetadataJSON,
 	); err != nil {
 		return false, fmt.Errorf("insert attachment: %w", err)
 	}
 
-	fileEntry := "attachments/files/" + attachment.StoragePath
+	fileEntry := "attachments/files/" + archiveStoragePath
 	if data, err := readZipEntry(zr, fileEntry); err == nil {
-		destination, pathErr := safeJoinPath(imp.attachmentsDir, attachment.StoragePath)
-		if pathErr != nil {
-			log.Printf("[import] skipping file write for attachment %s: unsafe path", attachment.ID)
+		if err := os.MkdirAll(imp.attachmentsDir, 0700); err != nil {
 			return true, nil
 		}
-		if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
-			return true, nil
-		}
+		destination := filepath.Join(imp.attachmentsDir, storagePath)
 		if err := os.WriteFile(destination, data, 0600); err != nil {
 			return true, nil
 		}
