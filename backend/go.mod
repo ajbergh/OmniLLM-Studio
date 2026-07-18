@@ -6,7 +6,7 @@ require (
 	codeberg.org/readeck/go-readability/v2 v2.1.1
 	github.com/chinmaykhachane/espn-go v0.1.1
 	github.com/drumkitai/go-word v1.0.1
-	github.com/go-chi/chi/v5 v5.2.1
+	github.com/go-chi/chi/v5 v5.2.2
 	github.com/go-chi/cors v1.2.1
 	github.com/go-pdf/fpdf v0.9.0
 	github.com/go-rod/rod v0.116.2
@@ -16,8 +16,8 @@ require (
 	github.com/philippgille/chromem-go v0.7.0
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/xuri/excelize/v2 v2.10.1
-	golang.org/x/crypto v0.48.0
-	golang.org/x/net v0.50.0
+	golang.org/x/crypto v0.51.0
+	golang.org/x/net v0.55.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.51.0
 )
@@ -65,8 +65,8 @@ require (
 	github.com/ysmood/gson v0.7.3 // indirect
 	github.com/ysmood/leakless v0.9.0 // indirect
 	github.com/yuin/goldmark v1.7.8 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
