@@ -10,8 +10,8 @@ test('video edit studio core editing flow', async ({ page }) => {
 
   await page.goto('/');
 
-  // Sidebar mode button (the image studio's "Edit" tab is not mounted here).
-  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  // Open the dedicated Video Edit Studio from the sidebar.
+  await page.getByRole('button', { name: 'Video Edit Studio', exact: true }).click();
   await expect(page.getByText('Video Edit Studio').first()).toBeVisible();
 
   // Create a project from the studio header.
@@ -51,7 +51,7 @@ test('video edit studio clip context menu and clipboard', async ({ page }) => {
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'Video Edit Studio', exact: true }).click();
   await page.getByRole('button', { name: 'Project', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Save timeline' })).toBeVisible();
 

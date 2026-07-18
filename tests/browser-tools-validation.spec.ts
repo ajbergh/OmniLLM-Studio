@@ -1,6 +1,6 @@
 /**
  * Playwright validation suite for the headless browser integration.
- * Targets the running dev server at http://localhost:5173/.
+ * Uses the isolated backend and frontend started by playwright.config.ts.
  *
  * Validates:
  *  1. Settings → Tools tab: Headless Browser settings card visible and functional
@@ -16,8 +16,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-const DEV_URL = 'http://localhost:5173';
-const BACKEND_URL = 'http://localhost:8080';
+const BACKEND_URL = process.env.OMNILLM_PLAYWRIGHT_BACKEND_URL ?? 'http://127.0.0.1:8090';
 
 // Helper: open Settings panel and navigate to a specific tab.
 async function openSettings(page: Page, tab: string) {
@@ -52,7 +51,6 @@ async function closeSettings(page: Page) {
 // ─── Test suite ─────────────────────────────────────────────────────────────
 
 test.describe('Headless Browser — UI & API validation', () => {
-  test.use({ baseURL: DEV_URL });
 
   test.beforeEach(async ({ page }) => {
     // Clear local storage to start from a known state.

@@ -50,7 +50,7 @@ test('music studio renders Lyria-only controls without console errors', async ({
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Music', exact: true }).click();
+  await page.getByRole('button', { name: 'Music Studio', exact: true }).click();
 
   await expect(page.getByText('Music Studio').first()).toBeVisible();
   await expect(page.getByText('Describe a song and generate to start.')).toBeVisible();

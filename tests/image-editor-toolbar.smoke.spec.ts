@@ -14,7 +14,7 @@ interface SeedFixture {
 function seedImageSessionFixture(title: string): SeedFixture {
   const repoRoot = process.cwd();
   const backendDir = path.join(repoRoot, 'backend');
-  const fixtureImage = path.join(backendDir, 'cmd', 'desktop', 'build', 'appicon.png');
+  const fixtureImage = path.join(repoRoot, 'docs', 'assets', 'screenshots', 'chat-studio.png');
 
   // Parallel workers seed against the same SQLite file, so retry on SQLITE_BUSY.
   let lastError: unknown;
@@ -58,15 +58,15 @@ test('floating canvas toolbar responds in image edit mode', async ({ page, brows
 
   await page.goto('/');
 
-  await page.getByRole('button', { name: 'Image', exact: true }).click();
+  await page.getByRole('button', { name: 'Image Studio', exact: true }).click();
   await expect(page.getByText(fixture.title).first()).toBeVisible();
 
   await page.getByText(fixture.title).first().click();
   await expect(page.getByText('Image Edit Studio')).toBeVisible();
 
-  // The sidebar also has an exact "Edit" button (Video Edit Studio); the studio's
-  // Edit mode tab renders later in the DOM.
-  await page.getByRole('button', { name: 'Edit', exact: true }).last().click();
+  // Enter the image editor's Edit mode. The sidebar uses the distinct accessible
+  // name "Video Edit Studio", so the exact Edit selector is unambiguous.
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
 
   const toolbar = page.getByTestId('image-canvas-toolbar');
   const zoomValue = page.getByTestId('canvas-zoom-value');
@@ -115,7 +115,7 @@ test('AI enhance rewrites and can undo an image studio prompt', async ({ page, b
 
   await page.goto('/');
 
-  await page.getByRole('button', { name: 'Image', exact: true }).click();
+  await page.getByRole('button', { name: 'Image Studio', exact: true }).click();
   await expect(page.getByText(fixture.title).first()).toBeVisible();
 
   await page.getByText(fixture.title).first().click();
