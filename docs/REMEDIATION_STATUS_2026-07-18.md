@@ -6,14 +6,14 @@ Date: 2026-07-18
 
 ## Summary
 
-This branch implements the release-blocking and high-priority findings from the July 18, 2026 deep engineering review. The changes intentionally preserve the existing Go/React/SQLite/Wails architecture and are split into reviewable commits.
+This branch implements the release-blocking and high-priority findings from the July 18, 2026 deep engineering review. The changes intentionally preserve the existing Go/React/SQLite/Wails architecture and are split into reviewable commits. Post-remediation local validation and a cleanup commit are included; GitHub Actions remains the release authority.
 
 ## Phase 0 — Release blockers
 
 | Finding | Status | Implementation |
 |---|---|---|
-| Desktop loopback API trust | Complete | Wails now generates a cryptographically random per-launch URL prefix, never logs the secret, removes wildcard CORS, tightens local file permissions, and makes browser automation opt-in. |
-| Plugin runtime deadlock | Complete | Plugin JSON-RPC uses separate state/write locks, asynchronous response dispatch, request cancellation, bounded initialization/shutdown, stderr capture, and lifecycle tests. |
+| Desktop loopback API trust | Complete | Wails now generates a cryptographically random per-launch URL-prefix capability, never logs or persists the secret, rejects unprefixed/wrong-secret requests before router dispatch, removes wildcard CORS, tightens local file permissions, and makes browser automation opt-in. |
+| Plugin runtime deadlock | Complete | Plugin JSON-RPC uses separate state/write locks, asynchronous response dispatch, request cancellation, bounded initialization/shutdown, stderr capture, and lifecycle tests. Windows handles `EvalSymlinks` permission failures through a fail-closed lexical containment fallback that rejects symlink components. |
 | Ollama discovery SSRF | Complete | Discovery is admin-or-solo only, validates provider URLs, restricts redirects, supports stored provider profiles, and no longer accepts OpenRouter API keys in query strings. |
 | Browser isolation | Substantially complete | Every session receives an incognito browser context; operations are serialized; quotas are per user; profiles are ephemeral; final navigation destinations are revalidated; sandbox disablement requires an explicit override. Full CDP interception of every subresource remains a follow-up hardening item. |
 
@@ -58,10 +58,14 @@ This branch implements the release-blocking and high-priority findings from the 
 - Session-token hashing and lookup/delete behavior.
 - Bundle ownership, workspace, branch, parent-message, and user-field restoration.
 - Attachment MIME mismatch and unknown-binary rejection.
+- Desktop loopback secret-path rejection (unprefixed and wrong-secret requests).
+- Windows plugin lifecycle and entrypoint-containment coverage in CI.
 
 ## Validation state
 
-GitHub Actions is the authoritative validation environment for this branch because the current execution environment cannot clone the repository or run its Go/Node toolchains locally. The draft pull request should not be merged until all new quality, security, container, and Helm checks are green.
+Local validation on 2026-07-18 completed clean root and frontend `npm ci`, `gofmt -l .`, frontend lint (three pre-existing Fast Refresh warnings), 29 frontend unit tests, production build, root `npm audit`, frontend high-severity audit threshold, and the plugin lifecycle test on Windows. The frontend audit still reports one moderate transitive `brace-expansion` advisory.
+
+The Wails desktop package, complete backend/race suite, Playwright, Helm, container, CodeQL, and vulnerability scans remain authoritative in GitHub Actions. The branch should not be merged until those required checks are green.
 
 ## Explicit follow-up items
 

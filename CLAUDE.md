@@ -156,6 +156,7 @@ The required pull-request gate is `.github/workflows/ci.yml`:
 - backend unit/integration tests
 - Go race detector
 - frontend lint, unit tests, and production build
+- Windows plugin lifecycle and path-containment test
 - complete Playwright Chromium suite
 - Helm lint and template validation
 

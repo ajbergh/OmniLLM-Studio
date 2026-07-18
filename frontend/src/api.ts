@@ -118,8 +118,10 @@ import type {
 
 // In the Wails desktop build the API runs on a real local HTTP server
 // (required for SSE streaming). The Go App.GetAPIBase() binding returns
-// the URL (e.g. "http://127.0.0.1:54321/v1").  In normal web mode we
-// use the relative path which the Vite proxy forwards to the Go backend.
+// the capability URL (e.g. "http://127.0.0.1:54321/__desktop/<launch-secret>/v1").
+// It contains a per-launch secret path component and must not be logged or
+// persisted. In normal web mode we use the relative path which the Vite proxy
+// forwards to the Go backend.
 let BASE_URL = '/v1';
 
 // Resolve a relative /v1/ path to an absolute URL when running inside

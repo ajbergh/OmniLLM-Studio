@@ -36,10 +36,10 @@ var (
 	commit  = "dev"
 )
 
-// App exposes methods to the frontend via Wails bindings.
+// App exposes the desktop-only API capability URL to the trusted Wails frontend.
 type App struct {
 	ctx     context.Context
-	apiBase string // e.g. "http://127.0.0.1:54321/__desktop/<token>/v1"
+	apiBase string // e.g. "http://127.0.0.1:54321/__desktop/<launch-secret>/v1"
 }
 
 func NewApp(apiBase string) *App { return &App{apiBase: apiBase} }
@@ -63,7 +63,7 @@ func main() {
 		defer logFile.Close()
 	}
 
-	desktopSecret, err := generateDesktopToken()
+	desktopSecret, err := generateDesktopSecret()
 	if err != nil {
 		log.Fatalf("desktop API secret: %v", err)
 	}
@@ -163,11 +163,16 @@ func main() {
 	}
 }
 
+// desktopLoopbackHandler exposes next only beneath the per-launch secret path.
+// http.StripPrefix returns 404 before invoking next for unprefixed or
+// wrong-secret requests, keeping the capability path out of router logs.
 func desktopLoopbackHandler(prefix string, next http.Handler) http.Handler {
 	return http.StripPrefix(prefix, next)
 }
 
-func generateDesktopToken() (string, error) {
+// generateDesktopSecret returns a cryptographically random 256-bit secret
+// encoded for use as one URL path segment. It must never be logged or persisted.
+func generateDesktopSecret() (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err

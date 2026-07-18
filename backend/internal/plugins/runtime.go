@@ -72,8 +72,9 @@ type PluginProcess struct {
 	doneErr error
 }
 
-// NewPluginProcess creates a new plugin process (not yet started).
-// Returns nil if the entrypoint escapes the plugin directory.
+// NewPluginProcess creates a new plugin process (not yet started). It returns
+// nil when the entrypoint escapes its plugin directory or cannot be safely
+// canonicalized.
 func NewPluginProcess(manifest *models.PluginManifest, pluginDir string) *PluginProcess {
 	if manifest == nil || strings.TrimSpace(manifest.Entrypoint) == "" {
 		log.Printf("WARN: plugin manifest or entrypoint is empty")
@@ -143,6 +144,9 @@ func resolvePluginPath(pluginDir, candidate string) (string, error) {
 	return filepath.Clean(candidate), nil
 }
 
+// rejectSymlinkPath verifies a lexical child path without following any
+// symlink. It is used only by the Windows permission-denied fallback, where
+// EvalSymlinks cannot provide canonical containment.
 func rejectSymlinkPath(root, relativePath string) error {
 	current := root
 	parts := []string{"."}
