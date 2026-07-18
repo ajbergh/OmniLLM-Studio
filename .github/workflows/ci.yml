@@ -13,69 +13,93 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GO_VERSION: '1.25.x'
+  NODE_VERSION: '24'
+
 jobs:
   backend:
     name: Backend tests and race detector
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
       - name: Install desktop build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y gcc pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y gcc pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
       - name: Verify formatting
         working-directory: backend
         run: test -z "$(gofmt -l .)"
       - name: Vet
         working-directory: backend
-        run: go vet ./...
+        env:
+          GOFLAGS: -tags=webkit2_41
+        run: go vet ./... 2>&1 | tee ../backend-vet.log
       - name: Unit and integration tests
         working-directory: backend
         env:
+          GOFLAGS: -tags=webkit2_41
           OMNILLM_MASTER_KEY: 0000000000000000000000000000000000000000000000000000000000000000
-        run: go test ./...
+        run: go test ./... 2>&1 | tee ../backend-test.log
       - name: Race detector
         working-directory: backend
         env:
+          GOFLAGS: -tags=webkit2_41
           OMNILLM_MASTER_KEY: 0000000000000000000000000000000000000000000000000000000000000000
-        run: go test -race ./...
+        run: go test -race ./... 2>&1 | tee ../backend-race.log
+      - name: Upload backend diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-diagnostics
+          path: backend-*.log
+          if-no-files-found: ignore
+          retention-days: 14
 
   frontend:
     name: Frontend lint unit and build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - working-directory: frontend
         run: npm ci
       - working-directory: frontend
-        run: npm run lint
+        run: npm run lint 2>&1 | tee ../frontend-lint.log
       - working-directory: frontend
-        run: npm run test:unit
+        run: npm run test:unit 2>&1 | tee ../frontend-unit.log
       - working-directory: frontend
-        run: npm run build
+        run: npm run build 2>&1 | tee ../frontend-build.log
+      - name: Upload frontend diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-diagnostics
+          path: frontend-*.log
+          if-no-files-found: ignore
+          retention-days: 14
 
   smoke:
     name: Playwright smoke suite
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -83,13 +107,14 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y gcc pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y gcc pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
       - run: npm ci
       - working-directory: frontend
         run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Run all browser specifications
         env:
+          GOFLAGS: -tags=webkit2_41
           OMNILLM_MASTER_KEY: 0000000000000000000000000000000000000000000000000000000000000000
         run: npx playwright test --project=chromium
       - name: Upload Playwright report
@@ -103,7 +128,7 @@ jobs:
 
   helm:
     name: Helm lint and render
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
