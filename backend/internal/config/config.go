@@ -19,6 +19,14 @@ type Config struct {
 	ChromemDir      string // Directory for chromem-go persistent vector files.
 	ChromemCompress bool   // Enable gzip compression for chromem data files.
 
+	// DesktopAPIToken protects the Wails loopback API with a per-launch secret.
+	// It is empty for normal web/server deployments.
+	DesktopAPIToken string
+
+	// MaxUploadBytes is the shared reverse-proxy/backend upload ceiling. Individual
+	// handlers may impose lower media-kind limits.
+	MaxUploadBytes int64
+
 	BrowserEnabled     bool
 	BrowserExecPath    string
 	BrowserCacheDir    string
@@ -91,6 +99,13 @@ func Load() *Config {
 		}
 	}
 
+	maxUploadBytes := int64(500 << 20)
+	if v := strings.TrimSpace(os.Getenv("OMNILLM_MAX_UPLOAD_BYTES")); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			maxUploadBytes = n
+		}
+	}
+
 	origins := []string{"http://localhost:5173", "http://localhost:3000"}
 	if corsEnv := os.Getenv("OMNILLM_CORS_ORIGINS"); corsEnv != "" {
 		origins = strings.Split(corsEnv, ",")
@@ -108,6 +123,8 @@ func Load() *Config {
 		AllowPublicReg:     allowPublicReg,
 		ChromemDir:         chromemDir,
 		ChromemCompress:    chromemCompress,
+		DesktopAPIToken:    strings.TrimSpace(os.Getenv("OMNILLM_DESKTOP_API_TOKEN")),
+		MaxUploadBytes:     maxUploadBytes,
 		BrowserEnabled:     browserEnabled,
 		BrowserExecPath:    browserExecPath,
 		BrowserCacheDir:    browserCacheDir,
