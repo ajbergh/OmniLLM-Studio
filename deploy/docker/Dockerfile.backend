@@ -5,18 +5,16 @@
 # Build context: repository root.
 
 # --- build ---
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS build
+# Build inside the target-platform image. This is slower than pure Go cross
+# compilation under QEMU, but it is deterministic for CGO and guarantees that
+# SQLite links against the correct target libc and headers.
+FROM --platform=$TARGETPLATFORM golang:1.25-bookworm AS build
 
-ARG TARGETOS
-ARG TARGETARCH
 ARG VERSION=dev
 ARG COMMIT=unknown
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        gcc-x86-64-linux-gnu \
-        gcc-aarch64-linux-gnu \
-        ca-certificates \
+    && apt-get install -y --no-install-recommends gcc ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -24,17 +22,10 @@ COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
 
-RUN set -eux; \
-    case "${TARGETARCH}" in \
-      amd64) CC=x86_64-linux-gnu-gcc ;; \
-      arm64) CC=aarch64-linux-gnu-gcc ;; \
-      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} CC=${CC} \
-      go build -trimpath \
-        -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
-        -o /out/omnillm-studio \
-        ./cmd/server
+RUN CGO_ENABLED=1 go build -trimpath \
+      -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+      -o /out/omnillm-studio \
+      ./cmd/server
 
 # --- runtime ---
 FROM debian:bookworm-slim
