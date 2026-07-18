@@ -1,18 +1,22 @@
 {
   "name": "omnillm-studio",
-  "version": "1.0.0",
-  "description": "<p align=\"center\">\r   <img src=\"docs/assets/banner.svg\" alt=\"OmniLLM-Studio\" width=\"100%\"/>\r </p>",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
+  "version": "0.2.0",
+  "private": true,
+  "description": "Local-first multi-provider AI studio for chat, research, images, music, and video.",
   "scripts": {
-    "test:smoke": "playwright test tests/image-editor-toolbar.smoke.spec.ts tests/music-studio.smoke.spec.ts tests/video-editor.smoke.spec.ts --project=chromium",
-    "test:smoke:headed": "playwright test tests/image-editor-toolbar.smoke.spec.ts tests/music-studio.smoke.spec.ts tests/video-editor.smoke.spec.ts --project=chromium --headed"
+    "test:smoke": "playwright test --project=chromium",
+    "test:smoke:headed": "playwright test --project=chromium --headed"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "llm",
+    "ai",
+    "local-first",
+    "wails",
+    "react",
+    "go"
+  ],
+  "author": "ajbergh",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "@playwright/test": "^1.58.2",
