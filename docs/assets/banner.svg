@@ -8,17 +8,17 @@
       <stop offset="1" stop-color="#0A1723"/>
     </linearGradient>
     <linearGradient id="brand" x1="64" y1="48" x2="460" y2="270" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#7C6CFF"/>
-      <stop offset="0.5" stop-color="#C35BFF"/>
-      <stop offset="1" stop-color="#34D5E5"/>
+      <stop stop-color="#42E2CB"/>
+      <stop offset="0.52" stop-color="#27C9EA"/>
+      <stop offset="1" stop-color="#B9F4FF"/>
     </linearGradient>
     <linearGradient id="panel" x1="762" y1="40" x2="1137" y2="320" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#171832" stop-opacity="0.96"/>
-      <stop offset="1" stop-color="#0C1B27" stop-opacity="0.96"/>
+      <stop stop-color="#102943" stop-opacity="0.98"/>
+      <stop offset="1" stop-color="#081B30" stop-opacity="0.98"/>
     </linearGradient>
     <radialGradient id="glowA" cx="0" cy="0" r="1" gradientTransform="translate(934 180) rotate(90) scale(171 218)" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#704CFF" stop-opacity="0.26"/>
-      <stop offset="1" stop-color="#704CFF" stop-opacity="0"/>
+      <stop stop-color="#20BBD5" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#20BBD5" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="glowB" cx="0" cy="0" r="1" gradientTransform="translate(1112 316) rotate(-132) scale(215 250)" gradientUnits="userSpaceOnUse">
       <stop stop-color="#21D4D8" stop-opacity="0.17"/>
@@ -33,6 +33,42 @@
     <filter id="softGlow" x="-70%" y="-70%" width="240%" height="240%">
       <feGaussianBlur stdDeviation="8"/>
     </filter>
+    <filter id="iconDepth" x="-45%" y="-45%" width="190%" height="210%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#020812" flood-opacity="0.58"/>
+    </filter>
+    <linearGradient id="iconTile" x1="4" y1="2" x2="44" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#102A46"/>
+      <stop offset="1" stop-color="#071A30"/>
+    </linearGradient>
+    <linearGradient id="iconLine" x1="10" y1="13" x2="39" y2="32" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#42E2CB"/>
+      <stop offset="0.55" stop-color="#2CCBE7"/>
+      <stop offset="1" stop-color="#B9F4FF"/>
+    </linearGradient>
+    <radialGradient id="nodeMint" cx="0" cy="0" r="1" gradientTransform="translate(10.5 11.5) rotate(48) scale(10)">
+      <stop stop-color="#75F4DF"/><stop offset="1" stop-color="#2BC7B6"/>
+    </radialGradient>
+    <radialGradient id="nodeCyan" cx="0" cy="0" r="1" gradientTransform="translate(27 11.5) rotate(50) scale(10)">
+      <stop stop-color="#6FE9FF"/><stop offset="1" stop-color="#1DAFD7"/>
+    </radialGradient>
+    <radialGradient id="nodeAqua" cx="0" cy="0" r="1" gradientTransform="translate(18 26) rotate(50) scale(10)">
+      <stop stop-color="#83F0FF"/><stop offset="1" stop-color="#2CC4E1"/>
+    </radialGradient>
+    <radialGradient id="nodeIce" cx="0" cy="0" r="1" gradientTransform="translate(36 26) rotate(50) scale(11)">
+      <stop stop-color="#ECFDFF"/><stop offset="1" stop-color="#84DDEC"/>
+    </radialGradient>
+    <symbol id="networkGlyph" viewBox="0 0 48 48">
+      <path d="M11.5 14.5H27.5M11.5 14.5L19.5 29.5M27.5 14.5L38 29.5M19.5 29.5H38" stroke="url(#iconLine)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="11.5" cy="14.5" r="5" fill="url(#nodeMint)" stroke="#6BE7D6" stroke-width="0.7"/>
+      <circle cx="27.5" cy="14.5" r="5" fill="url(#nodeCyan)" stroke="#63DDF4" stroke-width="0.7"/>
+      <circle cx="19.5" cy="29.5" r="5" fill="url(#nodeAqua)" stroke="#72E8F7" stroke-width="0.7"/>
+      <circle cx="38" cy="29.5" r="5" fill="url(#nodeIce)" stroke="#C9F8FF" stroke-width="0.7"/>
+      <rect x="9" y="39" width="30" height="3.6" rx="1.8" fill="#287184" stroke="#3B92A5" stroke-width="0.5"/>
+    </symbol>
+    <symbol id="appIconMark" viewBox="0 0 48 48">
+      <rect x="0.75" y="0.75" width="46.5" height="46.5" rx="13.25" fill="url(#iconTile)" stroke="#2D628E" stroke-width="1.5"/>
+      <use href="#networkGlyph"/>
+    </symbol>
     <clipPath id="frameClip"><rect width="1200" height="360" rx="24"/></clipPath>
   </defs>
 
@@ -43,23 +79,16 @@
     <ellipse cx="1088" cy="322" rx="270" ry="210" fill="url(#glowB)"/>
     <path d="M-24 332C174 250 282 388 494 312C690 242 798 340 996 275C1088 245 1155 246 1235 278" stroke="url(#brand)" stroke-opacity="0.12" stroke-width="2"/>
   </g>
-  <rect x="0.75" y="0.75" width="1198.5" height="358.5" rx="23.25" stroke="#8178C9" stroke-opacity="0.28" stroke-width="1.5"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="358.5" rx="23.25" stroke="#2D6B94" stroke-opacity="0.38" stroke-width="1.5"/>
 
   <!-- Brand lockup -->
   <g transform="translate(62 43)">
     <g filter="url(#shadow)">
-      <rect width="48" height="48" rx="14" fill="#15182E" stroke="#4C4E78"/>
-      <path d="M14 17L24 12L34 17V29L24 35L14 29V17Z" stroke="url(#brand)" stroke-width="1.6"/>
-      <circle cx="14" cy="17" r="3.2" fill="#55E4DF"/>
-      <circle cx="24" cy="12" r="3.2" fill="#8A75FF"/>
-      <circle cx="34" cy="17" r="3.2" fill="#D567F7"/>
-      <circle cx="24" cy="35" r="3.2" fill="#5AA7FF"/>
-      <circle cx="24" cy="24" r="4.3" fill="#F0EDFF"/>
-      <path d="M16.7 18.5L20.2 21.5M31.3 18.5L27.8 21.5M24 15.2V19.5M24 28.5V31.8" stroke="#9794C9" stroke-width="1.2"/>
+      <use href="#appIconMark" width="48" height="48"/>
     </g>
     <text x="62" y="23" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="21" font-weight="760" fill="#F7F5FF">OmniLLM</text>
     <text x="162" y="23" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="21" font-weight="760" fill="url(#brand)">Studio</text>
-    <text x="62" y="41" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="10" font-weight="650" letter-spacing="2.2" fill="#777A9D">LOCAL-FIRST AI WORKSPACE</text>
+    <text x="62" y="41" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="10" font-weight="650" letter-spacing="2.2" fill="#718FA8">LOCAL-FIRST AI WORKSPACE</text>
   </g>
 
   <!-- Mission statement -->
@@ -70,44 +99,39 @@
 
   <!-- Mode chips -->
   <g transform="translate(62 284)" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" font-weight="650">
-    <g><rect width="84" height="30" rx="15" fill="#222044" stroke="#5A55B3"/><circle cx="16" cy="15" r="4" fill="#8B7BFF"/><text x="28" y="19" fill="#D9D5FF">CHAT</text></g>
-    <g transform="translate(94)"><rect width="88" height="30" rx="15" fill="#2A1D3B" stroke="#814C9B"/><path d="M13 18L18 12L22 17" stroke="#D66CF4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="11" r="2" fill="#D66CF4"/><text x="31" y="19" fill="#F0D6FA">IMAGE</text></g>
-    <g transform="translate(192)"><rect width="89" height="30" rx="15" fill="#271D37" stroke="#704C92"/><path d="M20 10V18.5M20 12L14 13.5V20" stroke="#BB72F4" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="20" r="2.5" fill="#BB72F4"/><circle cx="18" cy="19" r="2.5" fill="#BB72F4"/><text x="31" y="19" fill="#EAD8F9">MUSIC</text></g>
+    <g><rect width="84" height="30" rx="15" fill="#102A46" stroke="#316C98"/><circle cx="16" cy="15" r="4" fill="#57D8F1"/><text x="28" y="19" fill="#D9F5FF">CHAT</text></g>
+    <g transform="translate(94)"><rect width="88" height="30" rx="15" fill="#102D39" stroke="#347B78"/><path d="M13 18L18 12L22 17" stroke="#55E2CE" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="11" r="2" fill="#55E2CE"/><text x="31" y="19" fill="#D9FFF7">IMAGE</text></g>
+    <g transform="translate(192)"><rect width="89" height="30" rx="15" fill="#10283C" stroke="#376F91"/><path d="M20 10V18.5M20 12L14 13.5V20" stroke="#62CFF0" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="20" r="2.5" fill="#62CFF0"/><circle cx="18" cy="19" r="2.5" fill="#62CFF0"/><text x="31" y="19" fill="#D8F4FF">MUSIC</text></g>
     <g transform="translate(291)"><rect width="88" height="30" rx="15" fill="#172B39" stroke="#32748A"/><path d="M13 11H21V20H13V11ZM21 14L25 12V19L21 17" stroke="#52D6DF" stroke-width="1.5" stroke-linejoin="round"/><text x="34" y="19" fill="#CDEFF2">VIDEO</text></g>
     <g transform="translate(389)"><rect width="78" height="30" rx="15" fill="#19243D" stroke="#3C6098"/><path d="M13 11V20M18 9V22M23 13V18" stroke="#6FA6FF" stroke-width="1.5" stroke-linecap="round"/><text x="31" y="19" fill="#D2E2FF">EDIT</text></g>
   </g>
 
   <!-- Unified workspace diagram -->
   <g filter="url(#shadow)">
-    <rect x="754" y="38" width="390" height="284" rx="22" fill="url(#panel)" stroke="#4B4A76"/>
+    <rect x="754" y="38" width="390" height="284" rx="22" fill="url(#panel)" stroke="#315D7B"/>
   </g>
   <rect x="774" y="56" width="108" height="24" rx="12" fill="#172B31" stroke="#2D6469"/>
   <circle cx="789" cy="68" r="3" fill="#45DDC9"/>
   <text x="800" y="72" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="0.8" fill="#91E9DD">LOCAL CORE</text>
-  <text x="1121" y="72" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="9" letter-spacing="1.2" fill="#737998">ONE WORKSPACE</text>
+  <text x="1121" y="72" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="9" letter-spacing="1.2" fill="#6E8BA2">ONE WORKSPACE</text>
 
   <g opacity="0.72" stroke-linecap="round">
-    <ellipse cx="948" cy="181" rx="128" ry="82" stroke="#6E69A8" stroke-dasharray="3 7"/>
+    <ellipse cx="948" cy="181" rx="128" ry="82" stroke="#356F91" stroke-dasharray="3 7"/>
     <ellipse cx="948" cy="181" rx="88" ry="56" stroke="#4F7894" stroke-dasharray="2 6"/>
-    <path d="M948 181L844 126M948 181L1051 126M948 181L844 235M948 181L1051 235" stroke="#62658C"/>
+    <path d="M948 181L844 126M948 181L1051 126M948 181L844 235M948 181L1051 235" stroke="#3A6D86"/>
   </g>
-  <circle cx="948" cy="181" r="52" fill="#6F55F5" fill-opacity="0.12" filter="url(#softGlow)"/>
+  <circle cx="948" cy="181" r="52" fill="#28CBE5" fill-opacity="0.13" filter="url(#softGlow)"/>
   <g filter="url(#shadow)">
-    <circle cx="948" cy="181" r="38" fill="#181B38" stroke="url(#brand)" stroke-width="1.5"/>
-    <path d="M934 174L948 166L962 174V190L948 198L934 190V174Z" stroke="url(#brand)" stroke-width="1.6"/>
-    <circle cx="948" cy="182" r="5" fill="#F4F0FF"/>
-    <circle cx="934" cy="174" r="2.6" fill="#5DE0DF"/>
-    <circle cx="948" cy="166" r="2.6" fill="#8B7BFF"/>
-    <circle cx="962" cy="174" r="2.6" fill="#D66CF4"/>
-    <circle cx="948" cy="198" r="2.6" fill="#65A8FF"/>
+    <circle cx="948" cy="181" r="38" fill="#0B223A" stroke="url(#brand)" stroke-width="1.5"/>
+    <use href="#networkGlyph" x="924" y="157" width="48" height="48" filter="url(#iconDepth)"/>
   </g>
-  <text x="948" y="226" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="1.1" fill="#A5A7C8">ORCHESTRATE</text>
+  <text x="948" y="226" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="1.1" fill="#A7D3E0">ORCHESTRATE</text>
 
   <!-- Orbiting studios -->
   <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="10" font-weight="700">
-    <g transform="translate(808 102)"><rect width="78" height="46" rx="12" fill="#1C1C3E" stroke="#655EC4"/><path d="M14 13H27V23H20L16 27V23H14V13Z" stroke="#8C7FFF" stroke-width="1.4" stroke-linejoin="round"/><text x="37" y="22" fill="#DEDBFF">CHAT</text><text x="37" y="34" font-size="8" font-weight="500" fill="#777AA1">agents</text></g>
-    <g transform="translate(1011 102)"><rect width="82" height="46" rx="12" fill="#251A38" stroke="#774898"/><path d="M13 25L20 16L27 24M24 14H27V17" stroke="#D36CF2" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><text x="37" y="22" fill="#F0D8F9">IMAGE</text><text x="37" y="34" font-size="8" font-weight="500" fill="#8F729B">canvas</text></g>
-    <g transform="translate(808 213)"><rect width="78" height="46" rx="12" fill="#241A36" stroke="#6E468D"/><path d="M25 14V24M25 16L17 18V27" stroke="#BE73EE" stroke-width="1.4" stroke-linecap="round"/><circle cx="15" cy="27" r="2.5" fill="#BE73EE"/><circle cx="23" cy="25" r="2.5" fill="#BE73EE"/><text x="37" y="22" fill="#EED9FA">MUSIC</text><text x="37" y="34" font-size="8" font-weight="500" fill="#8D7199">lyria</text></g>
+    <g transform="translate(808 102)"><rect width="78" height="46" rx="12" fill="#112B47" stroke="#326D99"/><path d="M14 13H27V23H20L16 27V23H14V13Z" stroke="#70DCF4" stroke-width="1.4" stroke-linejoin="round"/><text x="37" y="22" fill="#DDF7FF">CHAT</text><text x="37" y="34" font-size="8" font-weight="500" fill="#7193AD">agents</text></g>
+    <g transform="translate(1011 102)"><rect width="82" height="46" rx="12" fill="#102E39" stroke="#347B78"/><path d="M13 25L20 16L27 24M24 14H27V17" stroke="#55E2CE" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><text x="37" y="22" fill="#DAFFF8">IMAGE</text><text x="37" y="34" font-size="8" font-weight="500" fill="#6D9895">canvas</text></g>
+    <g transform="translate(808 213)"><rect width="78" height="46" rx="12" fill="#10283C" stroke="#376F91"/><path d="M25 14V24M25 16L17 18V27" stroke="#62CFF0" stroke-width="1.4" stroke-linecap="round"/><circle cx="15" cy="27" r="2.5" fill="#62CFF0"/><circle cx="23" cy="25" r="2.5" fill="#62CFF0"/><text x="37" y="22" fill="#DCF5FF">MUSIC</text><text x="37" y="34" font-size="8" font-weight="500" fill="#7092A8">lyria</text></g>
     <g transform="translate(1011 213)"><rect width="82" height="46" rx="12" fill="#142833" stroke="#2F7082"/><rect x="13" y="15" width="13" height="12" rx="2" stroke="#55D6DE" stroke-width="1.4"/><path d="M26 19L31 16.5V25.5L26 23" stroke="#55D6DE" stroke-width="1.4" stroke-linejoin="round"/><text x="38" y="22" fill="#D2F0F2">VIDEO</text><text x="38" y="34" font-size="8" font-weight="500" fill="#668A95">timeline</text></g>
   </g>
 
@@ -115,7 +139,7 @@
   <path d="M827 279V292H1069V279" stroke="#3F526D"/>
   <g font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="8" font-weight="700" letter-spacing="0.8">
     <g transform="translate(793 282)"><rect width="96" height="24" rx="12" fill="#111C2E" stroke="#314A6C"/><path d="M12 8H18L21 11V17H12V8Z" stroke="#6EA5F5"/><text x="29" y="16" fill="#9ABBE9">YOUR FILES</text></g>
-    <g transform="translate(901 282)"><rect width="94" height="24" rx="12" fill="#17172D" stroke="#484776"/><path d="M13 9H20M13 12H20M13 15H18" stroke="#9A8DF3" stroke-linecap="round"/><text x="28" y="16" fill="#B8B1ED">TOOLS + MCP</text></g>
+    <g transform="translate(901 282)"><rect width="94" height="24" rx="12" fill="#10283C" stroke="#376F91"/><path d="M13 9H20M13 12H20M13 15H18" stroke="#62CFF0" stroke-linecap="round"/><text x="28" y="16" fill="#B9E5F3">TOOLS + MCP</text></g>
     <g transform="translate(1007 282)"><rect width="111" height="24" rx="12" fill="#102229" stroke="#2C5D63"/><circle cx="15" cy="12" r="4" stroke="#55D5CE"/><path d="M15 8V16M11 12H19" stroke="#55D5CE"/><text x="27" y="16" fill="#A4DBD7">YOUR PROVIDERS</text></g>
   </g>
 </svg>
