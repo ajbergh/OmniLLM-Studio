@@ -11,19 +11,23 @@ on:
 permissions:
   contents: read
 
+env:
+  GO_VERSION: '1.25.x'
+  NODE_VERSION: '24'
+
 jobs:
   dependency-audit:
     name: Dependency vulnerability audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -41,7 +45,7 @@ jobs:
 
   codeql:
     name: CodeQL (${{ matrix.language }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       security-events: write
@@ -51,8 +55,45 @@ jobs:
         language: [go, javascript-typescript]
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        if: matrix.language == 'go'
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        if: matrix.language == 'javascript-typescript'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install Go desktop build dependencies
+        if: matrix.language == 'go'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+
       - uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-      - uses: github/codeql-action/autobuild@v3
+
+      - name: Build Go source for CodeQL
+        if: matrix.language == 'go'
+        working-directory: backend
+        env:
+          GOFLAGS: -tags=webkit2_41
+          OMNILLM_MASTER_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+        run: go build ./...
+
+      - name: Build TypeScript source for CodeQL
+        if: matrix.language == 'javascript-typescript'
+        run: |
+          npm ci
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+
       - uses: github/codeql-action/analyze@v3
