@@ -16,12 +16,12 @@ func ParseMarkdown(raw string) Artifact {
 
 	type parserState int
 	const (
-		stNormal    parserState = iota
-		stCode                  // inside ``` fence
-		stBullet                // accumulating bullet items
-		stOrdered               // accumulating ordered items
-		stTable                 // accumulating table rows
-		stBlockquote            // accumulating blockquote lines
+		stNormal     parserState = iota
+		stCode                   // inside ``` fence
+		stBullet                 // accumulating bullet items
+		stOrdered                // accumulating ordered items
+		stTable                  // accumulating table rows
+		stBlockquote             // accumulating blockquote lines
 	)
 
 	st := stNormal

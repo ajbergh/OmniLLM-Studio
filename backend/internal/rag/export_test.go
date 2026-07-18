@@ -22,4 +22,3 @@ func (r *ChromemRetriever) WithEmbedFuncForTest(fn chromem.EmbeddingFunc) *Chrom
 	r.testEmbedFn = fn
 	return r
 }
-

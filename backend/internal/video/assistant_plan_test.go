@@ -112,10 +112,10 @@ func TestEditPlanAssetClipAndTransformOperations(t *testing.T) {
 	opacity := 0.7
 	valid, _, issues := ValidateEditPlanOperations(doc, EditPlan{Operations: []EditOperation{
 		{Type: "add_asset_clip", AssetID: "asset-a", StartMS: 5000, DurationMS: 3000},
-		{Type: "add_asset_clip", DurationMS: 3000},                                       // missing asset_id
-		{Type: "add_asset_clip", AssetID: "asset-a", DurationMS: 3000, TrackID: "nope"},  // unknown track
+		{Type: "add_asset_clip", DurationMS: 3000},                                      // missing asset_id
+		{Type: "add_asset_clip", AssetID: "asset-a", DurationMS: 3000, TrackID: "nope"}, // unknown track
 		{Type: "set_transform", ClipID: "clip-a", Scale: &scale, Opacity: &opacity},
-		{Type: "set_transform", ClipID: "clip-a"},                                        // no fields
+		{Type: "set_transform", ClipID: "clip-a"}, // no fields
 	}})
 	if len(valid) != 2 || len(issues) != 3 {
 		t.Fatalf("validation = %d valid / %d issues, want 2/3 (%v)", len(valid), len(issues), issues)

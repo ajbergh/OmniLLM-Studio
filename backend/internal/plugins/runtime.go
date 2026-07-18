@@ -54,7 +54,7 @@ type pluginResponse struct {
 // State and blocking I/O intentionally use separate locks. No process read,
 // write, wait, or shutdown operation may execute while mu is held.
 type PluginProcess struct {
-	manifest  *models.PluginManifest
+	manifest   *models.PluginManifest
 	entrypoint string
 
 	mu      sync.Mutex

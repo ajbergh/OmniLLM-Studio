@@ -24,14 +24,14 @@ func TestImportConversationRestoresCurrentFields(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	bundle := &ConversationBundle{
 		Conversation: models.Conversation{
-			ID:          "conversation-1",
-			Title:       "Imported",
-			CreatedAt:   now,
-			UpdatedAt:   now,
-			Kind:        models.ConversationKindChat,
+			ID:           "conversation-1",
+			Title:        "Imported",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+			Kind:         models.ConversationKindChat,
 			MetadataJSON: `{}`,
-			WorkspaceID: &workspaceID,
-			UserID:      &userID,
+			WorkspaceID:  &workspaceID,
+			UserID:       &userID,
 		},
 		Messages: []models.Message{
 			{
