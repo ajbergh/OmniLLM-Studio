@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const BACKEND_URL = process.env.OMNILLM_PLAYWRIGHT_BACKEND_URL ?? 'http://127.0.0.1:8090';
 
@@ -24,7 +24,7 @@ async function closeSettings(page: Page) {
   }
 }
 
-async function expectBrowserRoutesAvailable(request: Parameters<Parameters<typeof test>[1]>[0]['request']) {
+async function expectBrowserRoutesAvailable(request: APIRequestContext) {
   for (const path of ['/v1/browser/status', '/v1/browser/sessions']) {
     const response = await request.get(`${BACKEND_URL}${path}`);
     expect([200, 401], `${path} returned ${response.status()}`).toContain(response.status());
