@@ -1,0 +1,58 @@
+name: Remediate dependency graphs
+
+on:
+  push:
+    branches:
+      - agent/full-remediation-20260718
+
+permissions:
+  contents: write
+
+concurrency:
+  group: remediate-dependencies
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/full-remediation-20260718
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Upgrade vulnerable Go modules
+        working-directory: backend
+        run: |
+          go get golang.org/x/net@v0.55.0
+          go get github.com/go-chi/chi/v5@v5.2.2
+          go mod tidy
+
+      - name: Upgrade vulnerable frontend transitive dependencies
+        working-directory: frontend
+        run: |
+          npm ci
+          npm audit fix
+          npm audit --audit-level=high
+
+      - name: Commit dependency remediation
+        run: |
+          if git diff --quiet -- backend/go.mod backend/go.sum frontend/package.json frontend/package-lock.json; then
+            echo "Dependency graphs already remediated"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/go.mod backend/go.sum frontend/package.json frontend/package-lock.json
+          git commit -m "fix dependencies: remediate Go and frontend advisories"
+          git push origin HEAD:agent/full-remediation-20260718
