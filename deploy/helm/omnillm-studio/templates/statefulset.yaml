@@ -79,6 +79,8 @@ spec:
               value: /data/chromem
             - name: OMNILLM_MAX_UPLOAD_BYTES
               value: {{ .Values.config.maxUploadBytes | quote }}
+            - name: OMNILLM_REQUIRE_MASTER_KEY
+              value: "true"
             - name: OMNILLM_ALLOW_PUBLIC_REGISTRATION
               value: {{ .Values.config.allowPublicRegistration | quote }}
             - name: OMNILLM_CHROMEM_COMPRESS
