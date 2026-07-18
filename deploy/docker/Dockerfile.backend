@@ -58,7 +58,8 @@ ENV OMNILLM_BIND_ADDRESS=0.0.0.0 \
     OMNILLM_DB_PATH=/data/omnillm-studio.db \
     OMNILLM_ATTACHMENTS_DIR=/data/attachments \
     OMNILLM_CHROMEM_DIR=/data/chromem \
-    OMNILLM_MAX_UPLOAD_BYTES=524288000
+    OMNILLM_MAX_UPLOAD_BYTES=524288000 \
+    OMNILLM_REQUIRE_MASTER_KEY=true
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl --fail --silent --show-error http://127.0.0.1:8080/v1/health >/dev/null || exit 1
