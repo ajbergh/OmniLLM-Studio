@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -69,30 +70,19 @@ func UserIDFromContext(ctx context.Context) string {
 }
 
 func isLocalhost(bindAddress string) bool {
-	host := bindAddress
-	if parsedHost, _, err := netSplitHostPortLoose(bindAddress); err == nil {
+	host := strings.TrimSpace(bindAddress)
+	if host == "" {
+		return true
+	}
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
 		host = parsedHost
-	} else if index := strings.LastIndex(bindAddress, ":"); index >= 0 && !strings.Contains(bindAddress, "]") {
-		host = bindAddress[:index]
 	}
 	host = strings.Trim(strings.TrimSpace(host), "[]")
-	return host == "" || host == "127.0.0.1" || strings.EqualFold(host, "localhost") || host == "::1"
-}
-
-// netSplitHostPortLoose handles normal host:port values without requiring a
-// port to be present. Kept local to avoid treating an IPv6 colon as a separator.
-func netSplitHostPortLoose(value string) (string, string, error) {
-	if strings.HasPrefix(value, "[") {
-		end := strings.Index(value, "]")
-		if end > 0 {
-			return value[1:end], strings.TrimPrefix(value[end+1:], ":"), nil
-		}
+	if strings.EqualFold(host, "localhost") {
+		return true
 	}
-	parts := strings.Split(value, ":")
-	if len(parts) == 2 {
-		return parts[0], parts[1], nil
-	}
-	return "", "", fmt.Errorf("not host:port")
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func Middleware(userRepo UserRepo, sessionRepo SessionRepo, getUserByID UserByIDFunc, bindAddress ...string) func(http.Handler) http.Handler {
