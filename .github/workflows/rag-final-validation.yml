@@ -1,0 +1,163 @@
+name: Final RAG Branch Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rag-final-validation.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/rag-modernization-v2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Fix approval test event capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/internal/agent/runner_test.go')
+          text = path.read_text()
+          old = '''func(event Event) {
+              events <- event
+          })'''
+          new = '''func(event Event) {
+              if event.Type == EventApprovalRequired {
+                  events <- event
+              }
+          })'''
+          count = text.count(old)
+          if count != 2:
+              raise RuntimeError(f'expected two approval callback anchors, found {count}')
+          path.write_text(text.replace(old, new))
+          PY
+          gofmt -w backend/internal/agent/runner_test.go
+
+      - name: Remove temporary diagnostic artifacts
+        shell: bash
+        run: |
+          rm -f \
+            .github/workflows/rag-final-validation.yml \
+            .github/workflows/rag-full-test-diagnostic.yml \
+            .github/workflows/rag-package-timeout-diagnostic.yml \
+            docs/RAG_FULL_TEST_DIAGNOSTIC.md \
+            docs/RAG_PACKAGE_TEST_DIAGNOSTIC.md
+
+      - name: Commit test harness correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test(agent): avoid blocking approval event callbacks [skip ci]'
+          git pull --rebase origin feature/rag-modernization-v2
+          git push origin HEAD:feature/rag-modernization-v2
+
+      - name: Validate branch
+        id: checks
+        shell: bash
+        run: |
+          set +e
+          mkdir -p backend/cmd/desktop/frontend_dist
+          printf '<!doctype html><title>validation placeholder</title>' > backend/cmd/desktop/frontend_dist/index.html
+
+          (cd backend && timeout 15m go test -timeout 3m ./...) >/tmp/backend.log 2>&1 &
+          backend_pid=$!
+          (cd backend && timeout 15m go test -race -timeout 5m ./internal/rag ./internal/repository ./internal/filelibrary ./internal/document ./internal/api) >/tmp/race.log 2>&1 &
+          race_pid=$!
+          (cd frontend && timeout 15m bash -lc 'npm ci && npm run build && npm run lint && npm run test:unit') >/tmp/frontend.log 2>&1 &
+          frontend_pid=$!
+
+          wait "$backend_pid"; backend_status=$?
+          wait "$race_pid"; race_status=$?
+          wait "$frontend_pid"; frontend_status=$?
+          git diff --check >/tmp/diff.log 2>&1
+          diff_status=$?
+          rm -rf backend/cmd/desktop/frontend_dist
+
+          label() { if [ "$1" -eq 0 ]; then printf 'PASS'; elif [ "$1" -eq 124 ]; then printf 'TIMEOUT'; else printf 'FAIL'; fi; }
+          backend_label=$(label "$backend_status")
+          race_label=$(label "$race_status")
+          frontend_label=$(label "$frontend_status")
+          diff_label=$(label "$diff_status")
+
+          python3 - "$backend_label" "$race_label" "$frontend_label" "$diff_label" <<'PY'
+          from pathlib import Path
+          import re, sys
+
+          path = Path('docs/RAG_BACKEND_VALIDATION.md')
+          text = path.read_text()
+          table = f'''| Check | Result |
+          |---|---|
+          | `go test -timeout 3m ./...` | **{sys.argv[1]}** |
+          | Focused Go race tests | **{sys.argv[2]}** |
+          | Frontend build, lint, and unit tests | **{sys.argv[3]}** |
+          | `git diff --check` | **{sys.argv[4]}** |'''
+          text = re.sub(r'\| Check \| Result \|\n\|---\|---\|\n(?:\|.*\n){4}', table + '\n', text, count=1)
+          note = '''
+
+## Test harness correction
+
+The repository-wide backend suite originally timed out in `internal/agent.TestExecuteToolCallAskApprovalApproved`. The approval tests used a one-slot event channel while forwarding every post-approval tool event into it, so the callback blocked after the only consumer exited. The branch now filters those test callbacks to `EventApprovalRequired`, which is the event the tests intend to assert. Production agent behavior was not changed.
+'''
+          if '## Test harness correction' not in text:
+              text += note
+          path.write_text(text)
+          PY
+
+          echo "backend=$backend_status" >> "$GITHUB_OUTPUT"
+          echo "race=$race_status" >> "$GITHUB_OUTPUT"
+          echo "frontend=$frontend_status" >> "$GITHUB_OUTPUT"
+          echo "diff=$diff_status" >> "$GITHUB_OUTPUT"
+
+          if [ "$backend_status" -ne 0 ]; then echo '--- backend ---'; tail -n 300 /tmp/backend.log; fi
+          if [ "$race_status" -ne 0 ]; then echo '--- race ---'; tail -n 300 /tmp/race.log; fi
+          if [ "$frontend_status" -ne 0 ]; then echo '--- frontend ---'; tail -n 300 /tmp/frontend.log; fi
+          if [ "$diff_status" -ne 0 ]; then echo '--- diff ---'; cat /tmp/diff.log; fi
+          exit 0
+
+      - name: Publish final validation record
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add docs/RAG_BACKEND_VALIDATION.md
+          git commit -m 'docs(rag): record final branch validation [skip ci]'
+          git pull --rebase origin feature/rag-modernization-v2
+          git push origin HEAD:feature/rag-modernization-v2
+
+      - name: Enforce validation result
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in \
+            '${{ steps.checks.outputs.backend }}' \
+            '${{ steps.checks.outputs.race }}' \
+            '${{ steps.checks.outputs.frontend }}' \
+            '${{ steps.checks.outputs.diff }}'; do
+            if [ "$value" != '0' ]; then
+              exit 1
+            fi
+          done
