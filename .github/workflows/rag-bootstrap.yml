@@ -7,12 +7,19 @@ on:
     paths:
       - '.rag-bootstrap/**'
       - '.github/workflows/rag-bootstrap.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.rag-bootstrap/**'
+      - '.github/workflows/rag-bootstrap.yml'
 
 permissions:
   contents: write
 
 jobs:
   assemble:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
