@@ -36,14 +36,14 @@ func newAgentRuntimeRouterTestConfig(t *testing.T) *config.Config {
 	t.Setenv("HOME", root)
 	t.Setenv("OMNILLM_PLUGIN_DIR", filepath.Join(root, "plugins"))
 	return &config.Config{
-		BindAddress:       "127.0.0.1",
-		AttachmentsDir:    filepath.Join(root, "attachments"),
-		ChromemDir:        filepath.Join(root, "chromem"),
-		BrowserCacheDir:   filepath.Join(root, "browser"),
+		BindAddress:        "127.0.0.1",
+		AttachmentsDir:     filepath.Join(root, "attachments"),
+		ChromemDir:         filepath.Join(root, "chromem"),
+		BrowserCacheDir:    filepath.Join(root, "browser"),
 		BrowserMaxSessions: 1,
-		BrowserSessionTTL: time.Minute,
-		CORSOrigins:       []string{"http://localhost"},
-		MaxUploadBytes:    16 << 20,
+		BrowserSessionTTL:  time.Minute,
+		CORSOrigins:        []string{"http://localhost"},
+		MaxUploadBytes:     16 << 20,
 	}
 }
 
