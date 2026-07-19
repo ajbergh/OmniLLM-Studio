@@ -20,12 +20,12 @@ jobs:
     name: Dependency vulnerability audit
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -88,15 +88,15 @@ jobs:
       matrix:
         language: [go, javascript-typescript]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         if: matrix.language == 'go'
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: matrix.language == 'javascript-typescript'
         with:
           node-version: ${{ env.NODE_VERSION }}
