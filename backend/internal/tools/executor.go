@@ -25,7 +25,7 @@ const ApprovalIDMetadataKey = "approval_id"
 
 // ContextWithApprovalHandler attaches a per-request approval handler used for
 // tools with "ask" policy. Agent mode uses this to integrate approval with its
-// persisted run state; ordinary chat can use the shared broker instead.
+// persisted run state; ordinary chat creates a non-blocking pending approval.
 func ContextWithApprovalHandler(ctx context.Context, handler ApprovalHandler) context.Context {
 	if handler == nil {
 		return ctx
@@ -58,37 +58,25 @@ func NewExecutor(registry *Registry, permissions PermissionResolver, timeout tim
 
 // ApprovalBroker exposes the broker used by API handlers to list and resolve
 // pending ordinary-chat approvals.
-func (e *Executor) ApprovalBroker() *ApprovalBroker {
-	return e.approvals
-}
+func (e *Executor) ApprovalBroker() *ApprovalBroker { return e.approvals }
 
 // Execute runs a single tool call. It validates permissions and arguments, then
 // executes the tool within the configured timeout.
 func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 	scope := InvocationScopeFromContext(ctx)
-	emitEvent(ctx, ToolEvent{
-		Type:       ToolEventQueued,
-		ToolCallID: call.ID,
-		ToolName:   call.Name,
-		Scope:      scope,
-	})
+	emitEvent(ctx, ToolEvent{Type: ToolEventQueued, ToolCallID: call.ID, ToolName: call.Name, Scope: scope})
 
-	// 1. Lookup tool.
 	tool, ok := e.registry.Get(call.Name)
 	if !ok {
 		return e.failure(ctx, call, fmt.Sprintf("unknown tool: %s", call.Name), ToolEventFailed, nil)
 	}
 	def := tool.Definition().Normalized()
-
-	// 2. Check if tool definition is enabled.
 	if !def.Enabled {
 		return e.failure(ctx, call, fmt.Sprintf("tool %q is disabled", call.Name), ToolEventFailed, nil)
 	}
 
-	// 3. Check permission policy.
 	if e.permissions != nil {
-		policy := e.permissions(call.Name)
-		switch policy {
+		switch e.permissions(call.Name) {
 		case "deny":
 			return e.failure(ctx, call, fmt.Sprintf("tool %q is denied by policy", call.Name), ToolEventFailed, nil)
 		case "ask":
@@ -101,28 +89,45 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 				Risk:        def.Risk,
 				ReadOnly:    def.ReadOnly,
 			}
-
-			approved, updatedArgs, err := e.requestApproval(ctx, req)
-			if err != nil {
-				metadata := map[string]interface{}{ApprovalStatusMetadataKey: "error"}
-				return e.failure(ctx, call, fmt.Sprintf("tool %q approval failed: %v", call.Name, err), ToolEventFailed, metadata)
-			}
-			if !approved {
-				metadata := map[string]interface{}{ApprovalStatusMetadataKey: "rejected"}
-				return e.failure(ctx, call, fmt.Sprintf("tool %q was rejected by the user", call.Name), ToolEventFailed, metadata)
-			}
-			if len(updatedArgs) > 0 {
-				call.Arguments = json.RawMessage(updatedArgs)
+			if handler, _ := ctx.Value(approvalContextKey{}).(ApprovalHandler); handler != nil {
+				approved, err := handler(ctx, req)
+				if err != nil {
+					return e.failure(ctx, call, fmt.Sprintf("tool %q approval failed: %v", call.Name, err), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "error"})
+				}
+				if !approved {
+					return e.failure(ctx, call, fmt.Sprintf("tool %q was rejected by the user", call.Name), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "rejected"})
+				}
+			} else {
+				pending := e.approvals.CreatePending(req)
+				metadata := map[string]interface{}{
+					ApprovalStatusMetadataKey: "required",
+					ApprovalIDMetadataKey:     pending.ID,
+					"tool_name":               call.Name,
+					"arguments":               string(call.Arguments),
+					"risk":                    def.Risk,
+					"read_only":               def.ReadOnly,
+				}
+				emitEvent(ctx, ToolEvent{
+					Type:       ToolEventApprovalRequired,
+					ToolCallID: call.ID,
+					ToolName:   call.Name,
+					Scope:      scope,
+					Data:       metadata,
+				})
+				return &ToolResult{
+					ToolCallID: call.ID,
+					Content:    fmt.Sprintf("tool %q requires user approval (approval_id: %s)", call.Name, pending.ID),
+					IsError:    true,
+					Metadata:   metadata,
+				}
 			}
 		}
 	}
 
-	// 4. Validate arguments after approval so edited arguments are validated.
 	if err := tool.Validate(call.Arguments); err != nil {
 		return e.failure(ctx, call, fmt.Sprintf("invalid arguments for %q: %v", call.Name, err), ToolEventFailed, nil)
 	}
 
-	// 5. Execute with the tool-specific timeout when it is more restrictive.
 	timeout := e.timeout
 	if def.DefaultTimeoutMS > 0 {
 		toolTimeout := time.Duration(def.DefaultTimeoutMS) * time.Millisecond
@@ -149,18 +154,12 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 	durationMS := time.Since(started).Milliseconds()
 	if err != nil {
 		if execCtx.Err() == context.DeadlineExceeded {
-			return e.failure(ctx, call, fmt.Sprintf("tool %q timed out after %s", call.Name, timeout), ToolEventTimedOut, map[string]interface{}{
-				"duration_ms": durationMS,
-			})
+			return e.failure(ctx, call, fmt.Sprintf("tool %q timed out after %s", call.Name, timeout), ToolEventTimedOut, map[string]interface{}{"duration_ms": durationMS})
 		}
-		return e.failure(ctx, call, fmt.Sprintf("tool %q failed: %v", call.Name, err), ToolEventFailed, map[string]interface{}{
-			"duration_ms": durationMS,
-		})
+		return e.failure(ctx, call, fmt.Sprintf("tool %q failed: %v", call.Name, err), ToolEventFailed, map[string]interface{}{"duration_ms": durationMS})
 	}
 	if result == nil {
-		return e.failure(ctx, call, fmt.Sprintf("tool %q returned no result", call.Name), ToolEventFailed, map[string]interface{}{
-			"duration_ms": durationMS,
-		})
+		return e.failure(ctx, call, fmt.Sprintf("tool %q returned no result", call.Name), ToolEventFailed, map[string]interface{}{"duration_ms": durationMS})
 	}
 
 	result.ToolCallID = call.ID
@@ -169,7 +168,6 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 	}
 	result.Metadata["duration_ms"] = durationMS
 	result.Metadata["tool_version"] = def.Version
-
 	if def.MaxResultBytes > 0 && len(result.Content) > def.MaxResultBytes {
 		originalBytes := len(result.Content)
 		result.Content = result.Content[:def.MaxResultBytes] + "\n\n[tool result truncated]"
@@ -191,17 +189,6 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 	return result
 }
 
-func (e *Executor) requestApproval(ctx context.Context, req ApprovalRequest) (bool, []byte, error) {
-	if handler, _ := ctx.Value(approvalContextKey{}).(ApprovalHandler); handler != nil {
-		approved, err := handler(ctx, req)
-		return approved, nil, err
-	}
-	if e.approvals == nil {
-		return false, nil, fmt.Errorf("tool %q requires user approval", req.ToolName)
-	}
-	return e.approvals.Request(ctx, req)
-}
-
 func (e *Executor) failure(ctx context.Context, call ToolCall, content string, eventType ToolEventType, metadata map[string]interface{}) *ToolResult {
 	if metadata == nil {
 		metadata = map[string]interface{}{}
@@ -213,12 +200,7 @@ func (e *Executor) failure(ctx context.Context, call ToolCall, content string, e
 		Scope:      InvocationScopeFromContext(ctx),
 		Data:       metadata,
 	})
-	return &ToolResult{
-		ToolCallID: call.ID,
-		Content:    content,
-		IsError:    true,
-		Metadata:   metadata,
-	}
+	return &ToolResult{ToolCallID: call.ID, Content: content, IsError: true, Metadata: metadata}
 }
 
 // ExecuteBatch runs multiple tool calls concurrently and returns results in the
@@ -228,14 +210,12 @@ func (e *Executor) ExecuteBatch(ctx context.Context, calls []ToolCall) []*ToolRe
 	results := make([]*ToolResult, len(calls))
 	var wg sync.WaitGroup
 	wg.Add(len(calls))
-
 	for i, call := range calls {
 		go func(idx int, c ToolCall) {
 			defer wg.Done()
 			results[idx] = e.Execute(ctx, c)
 		}(i, call)
 	}
-
 	wg.Wait()
 	return results
 }
@@ -246,10 +226,7 @@ func (e *Executor) ExecuteJSON(ctx context.Context, raw json.RawMessage) *ToolRe
 	var call ToolCall
 	if err := json.Unmarshal(raw, &call); err != nil {
 		log.Printf("[tools/executor] failed to unmarshal tool call: %v", err)
-		return &ToolResult{
-			Content: fmt.Sprintf("malformed tool call: %v", err),
-			IsError: true,
-		}
+		return &ToolResult{Content: fmt.Sprintf("malformed tool call: %v", err), IsError: true}
 	}
 	return e.Execute(ctx, call)
 }
