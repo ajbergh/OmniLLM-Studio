@@ -53,6 +53,21 @@ jobs:
           bash /tmp/rag_update.sh
           bash /tmp/rag_audit.sh
 
+      - name: Publish audited documentation and source comments
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            .github/workflows/rag-docs-finalize.yml \
+            .github/workflows/rag-doc-comment-audit.yml \
+            docs/RAG_DOC_COMMENT_AUDIT.md
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs(rag): reconcile architecture, operations, and source comments [skip ci]'
+          git pull --rebase origin feature/rag-modernization-v2
+          git push origin HEAD:feature/rag-modernization-v2
+
       - name: Validate backend and frontend
         id: validate
         shell: bash
@@ -102,19 +117,12 @@ jobs:
           if [ "$diff_status" -ne 0 ]; then echo '--- diff check failures ---'; cat /tmp/diffcheck.log; fi
           exit 0
 
-      - name: Commit finalized documentation
+      - name: Publish validation matrix
         shell: bash
         run: |
           set -euo pipefail
-          rm -f \
-            .github/workflows/rag-docs-finalize.yml \
-            .github/workflows/rag-doc-comment-audit.yml \
-            .github/workflows/rag-backend-diagnostic.yml \
-            docs/RAG_DOC_COMMENT_AUDIT.md
-          git add -A
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'docs(rag): reconcile architecture, operations, and source comments [skip ci]'
+          git add docs/RAG_BACKEND_VALIDATION.md
+          git commit -m 'docs(rag): record final validation matrix [skip ci]'
           git pull --rebase origin feature/rag-modernization-v2
           git push origin HEAD:feature/rag-modernization-v2
 
