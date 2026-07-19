@@ -125,6 +125,8 @@ jobs:
           OMNILLM_MASTER_KEY: 0000000000000000000000000000000000000000000000000000000000000000
         run: |
           set -o pipefail
+          mkdir -p cmd/desktop/frontend_dist
+          printf '<!doctype html><title>CodeQL placeholder</title>' > cmd/desktop/frontend_dist/index.html
           go build ./... 2>&1 | tee ../codeql-go-build.log
 
       - name: Build TypeScript source for CodeQL
