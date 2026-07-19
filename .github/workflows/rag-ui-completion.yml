@@ -1,4 +1,4 @@
-name: Diagnose RAG Administration UI
+name: Complete RAG Administration UI
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  diagnose:
+  complete-and-validate:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
@@ -19,66 +19,318 @@ jobs:
           fetch-depth: 0
           ref: feature/rag-modernization-v2
 
-      - name: Record transformation markers
+      - name: Wire RAG health and maintenance UI
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
-          types = Path('frontend/src/types.ts').read_text()
-          api = Path('frontend/src/api.ts').read_text()
-          panel = Path('frontend/src/components/SettingsPanel.tsx').read_text()
+          types_path = Path('frontend/src/types.ts')
+          types = types_path.read_text()
+          replacement_types = '''export interface RAGAttachmentReindexResult {
+            attachment_id: string;
+            chunks_indexed: number;
+            stale_removed: number;
+          }
 
-          old_types = '''export interface ReindexResponse {
+          export interface ReindexResponse {
             conversation_id: string;
-            chunks_created: number;
-            embeddings_stored: number;
+            chunks_indexed: number;
+            attachments: RAGAttachmentReindexResult[];
+            failures?: string[];
+            embed_provider: string;
+            embed_model: string;
           }
 
           export interface IndexAttachmentResponse {
             attachment_id: string;
-            chunks_created: number;
-            embeddings_stored: number;
+            chunks_indexed: number;
+            stale_removed: number;
+            embed_provider: string;
+            embed_model: string;
+          }
+
+          export interface RAGHealthResponse {
+            enabled: boolean;
+            embedding_selection: string;
+            chunk_size: number;
+            chunk_overlap: number;
+            top_k: number;
+            conversations_indexed: number;
+            chunks: number;
+            vector_records: number;
+            physical_collections: number;
+            backend: string;
+            pure_go: boolean;
+            embedding_schema_version: number;
+          }
+
+          export interface RAGRepairResponse {
+            conversations_repaired: number;
+            chunks_indexed: number;
+            failures: string[];
+          }
+
+          export interface RAGReindexAllResponse {
+            conversations_reindexed: number;
+            chunks_indexed: number;
+            failures: string[];
+            note: string;
           }'''
-          old_api = '''  reindexAll: () =>
-            apiFetch<{ conversations_dropped: number; note: string }>('/rag/reindex-all', {
+          types, count = re.subn(
+              r'export interface ReindexResponse \{.*?\n\}\n\nexport interface IndexAttachmentResponse \{.*?\n\}',
+              replacement_types,
+              types,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise RuntimeError(f'RAG type replacement count={count}')
+          types_path.write_text(types)
+
+          api_path = Path('frontend/src/api.ts')
+          api = api_path.read_text()
+          api = api.replace(
+              '  IndexAttachmentResponse,\n',
+              '  IndexAttachmentResponse,\n  RAGHealthResponse,\n  RAGRepairResponse,\n  RAGReindexAllResponse,\n',
+              1,
+          )
+          replacement_api = '''  getRAGHealth: () => apiFetch<RAGHealthResponse>('/rag/health'),
+
+          repairRAG: () =>
+            apiFetch<RAGRepairResponse>('/rag/repair', {
+              method: 'POST',
+            }),
+
+          reindexAll: () =>
+            apiFetch<RAGReindexAllResponse>('/rag/reindex-all', {
               method: 'POST',
             }),'''
-          settings_effect = '''  useEffect(() => {
+          api, count = re.subn(
+              r'  reindexAll: \(\) =>\n\s+apiFetch<\{ conversations_dropped: number; note: string \}>\(\'/rag/reindex-all\', \{\n\s+method: \'POST\',\n\s+\}\),',
+              replacement_api,
+              api,
+              count=1,
+          )
+          if count != 1:
+              raise RuntimeError(f'RAG API replacement count={count}')
+          api_path.write_text(api)
+
+          panel_path = Path('frontend/src/components/SettingsPanel.tsx')
+          panel = panel_path.read_text()
+          panel = panel.replace(
+              "MCPTransport, OpenRouterMetadata, ToolPolicy, UpdateMCPServerRequest } from '../types';",
+              "MCPTransport, OpenRouterMetadata, RAGHealthResponse, ToolPolicy, UpdateMCPServerRequest } from '../types';",
+              1,
+          )
+          panel = panel.replace(
+              '  const [advancedOpen, setAdvancedOpen] = useState(false);',
+              '''  const [advancedOpen, setAdvancedOpen] = useState(false);
+          const [health, setHealth] = useState<RAGHealthResponse | null>(null);
+          const [healthLoading, setHealthLoading] = useState(false);
+          const [healthError, setHealthError] = useState<string | null>(null);
+          const [repairing, setRepairing] = useState(false);''',
+              1,
+          )
+
+          effect_pattern = re.compile(
+              r'  useEffect\(\(\) => \{\n'
+              r'    setRagEnabled\(settings\.rag_enabled \?\? false\);\n'
+              r'    setEmbeddingModel\(settings\.rag_embedding_model \?\? RAG_DEFAULTS\.embeddingModel\);\n'
+              r'    setChunkSize\(settings\.rag_chunk_size \?\? RAG_DEFAULTS\.chunkSize\);\n'
+              r'    setChunkOverlap\(settings\.rag_chunk_overlap \?\? RAG_DEFAULTS\.chunkOverlap\);\n'
+              r'    setTopK\(settings\.rag_top_k \?\? RAG_DEFAULTS\.topK\);\n'
+              r'  \}, \[settings\]\);'
+          )
+          effect_replacement = '''  useEffect(() => {
             setRagEnabled(settings.rag_enabled ?? false);
             setEmbeddingModel(settings.rag_embedding_model ?? RAG_DEFAULTS.embeddingModel);
             setChunkSize(settings.rag_chunk_size ?? RAG_DEFAULTS.chunkSize);
             setChunkOverlap(settings.rag_chunk_overlap ?? RAG_DEFAULTS.chunkOverlap);
             setTopK(settings.rag_top_k ?? RAG_DEFAULTS.topK);
-          }, [settings]);'''
+          }, [settings]);
 
-          rag_start = panel.find('function RAGTab()')
-          maintenance = panel.find('      {/* Maintenance — admin only */}', rag_start)
-          music = panel.find('\n// ============================================\n// Music Studio Settings Tab', rag_start)
-          tail = panel.rfind('\n    </div>\n  );\n}', maintenance, music) if maintenance >= 0 and music >= 0 else -1
+          const loadRAGHealth = useCallback(async () => {
+            setHealthLoading(true);
+            setHealthError(null);
+            try {
+              setHealth(await api.getRAGHealth());
+            } catch (err) {
+              setHealth(null);
+              setHealthError(err instanceof Error ? err.message : 'Unable to load RAG health');
+            } finally {
+              setHealthLoading(false);
+            }
+          }, []);
 
-          checks = {
-            'types_block': old_types in types,
-            'api_block': old_api in api,
-            'api_import_anchor': '  IndexAttachmentResponse,\n' in api,
-            'panel_import_anchor': "MCPTransport, OpenRouterMetadata, ToolPolicy, UpdateMCPServerRequest } from '../types';" in panel,
-            'panel_state_anchor': '  const [advancedOpen, setAdvancedOpen] = useState(false);' in panel,
-            'settings_effect': settings_effect in panel,
-            'reindex_function': '  const handleReindexAll = async () =>' in panel,
-            'rag_start': rag_start >= 0,
-            'maintenance_start': maintenance >= 0,
-            'music_marker': music >= 0,
-            'function_tail': tail >= 0,
-          }
-          lines = ['# RAG UI transformation diagnostic', '']
-          lines.extend(f'- {name}: {value}' for name, value in checks.items())
-          lines.extend(['', f'- rag_start_offset: {rag_start}', f'- maintenance_offset: {maintenance}', f'- music_offset: {music}', f'- tail_offset: {tail}'])
-          Path('docs/RAG_UI_DIAGNOSTIC.md').write_text('\n'.join(lines) + '\n')
+          useEffect(() => {
+            void loadRAGHealth();
+          }, [loadRAGHealth]);'''
+          panel, count = effect_pattern.subn(effect_replacement, panel, count=1)
+          if count != 1:
+              raise RuntimeError(f'RAG effect replacement count={count}')
+          panel = panel.replace(
+              "      toast.success('RAG settings saved');",
+              "      toast.success('RAG settings saved');\n      void loadRAGHealth();",
+              1,
+          )
+
+          def replace_function(source, marker, replacement):
+              start = source.index(marker)
+              brace = source.index('{', start)
+              depth = 0
+              for index in range(brace, len(source)):
+                  if source[index] == '{':
+                      depth += 1
+                  elif source[index] == '}':
+                      depth -= 1
+                      if depth == 0:
+                          return source[:start] + replacement.rstrip() + source[index + 1:]
+              raise RuntimeError(f'unclosed function: {marker}')
+
+          new_reindex = '''  const handleReindexAll = async () => {
+            if (!window.confirm(
+              'Safely rebuild every indexed conversation now? Existing indexes remain searchable until each replacement succeeds.'
+            )) return;
+            setReindexing(true);
+            try {
+              const result = await api.reindexAll();
+              const failureSuffix = result.failures.length > 0 ? `; ${result.failures.length} failed` : '';
+              toast.success(`Reindexed ${result.conversations_reindexed} conversation${result.conversations_reindexed === 1 ? '' : 's'} and ${result.chunks_indexed} chunks${failureSuffix}`);
+              await loadRAGHealth();
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : 'Failed to reindex');
+            } finally {
+              setReindexing(false);
+            }
+          }'''
+          panel = replace_function(panel, '  const handleReindexAll = async () =>', new_reindex)
+          repair = '''
+
+          const handleRepair = async () => {
+            if (!window.confirm(
+              'Check every indexed conversation and rebuild inconsistent indexes? Valid indexes remain available throughout the repair.'
+            )) return;
+            setRepairing(true);
+            try {
+              const result = await api.repairRAG();
+              const failureSuffix = result.failures.length > 0 ? `; ${result.failures.length} still need attention` : '';
+              toast.success(`Repaired ${result.conversations_repaired} conversation${result.conversations_repaired === 1 ? '' : 's'} and ${result.chunks_indexed} chunks${failureSuffix}`);
+              await loadRAGHealth();
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : 'Failed to repair RAG indexes');
+            } finally {
+              setRepairing(false);
+            }
+          }'''
+          panel = panel.replace(new_reindex, new_reindex + repair, 1)
+
+          maintenance_start = panel.index('      {/* Maintenance — admin only */}', panel.index('function RAGTab()'))
+          music_marker = '\n// ============================================\n// Music Studio Settings Tab'
+          music_start = panel.index(music_marker, maintenance_start)
+          function_tail = panel.rfind('\n    </div>\n  );\n}', maintenance_start, music_start)
+          if function_tail < 0:
+              raise RuntimeError('RAG function tail not found')
+
+          maintenance = '''      {/* Index health — admin endpoint; non-admin users see an availability note. */}
+          <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 flex items-center justify-center shadow-md shadow-cyan-500/10">
+                  <CheckCircle2 size={18} className={health && health.vector_records === health.chunks ? 'text-emerald-400' : 'text-cyan-400'} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold">Index Health</h3>
+                  <p className="text-[11px] text-text-muted">Current relational and vector retrieval footprint</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => void loadRAGHealth()} disabled={healthLoading} className="p-2 rounded-lg border border-border text-text-muted hover:text-text hover:bg-surface transition-colors disabled:opacity-50" aria-label="Refresh RAG health">
+                <RefreshCw size={14} className={healthLoading ? 'animate-spin' : ''} />
+              </button>
+            </div>
+
+            {health ? (
+              <>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                  {[
+                    ['Documents', health.conversations_indexed.toLocaleString()],
+                    ['Chunks', health.chunks.toLocaleString()],
+                    ['Vectors', health.vector_records.toLocaleString()],
+                    ['Collections', health.physical_collections.toLocaleString()],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-xl border border-border bg-surface/60 p-3">
+                      <p className="text-[10px] uppercase tracking-wide text-text-muted">{label}</p>
+                      <p className="mt-1 text-lg font-semibold text-text">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-text-muted">
+                  <span className="rounded-md border border-border bg-surface px-2 py-1">{health.backend}</span>
+                  <span className="rounded-md border border-border bg-surface px-2 py-1">Pure Go: {health.pure_go ? 'Yes' : 'No'}</span>
+                  <span className="rounded-md border border-border bg-surface px-2 py-1">Embedding schema v{health.embedding_schema_version}</span>
+                  <span className="rounded-md border border-border bg-surface px-2 py-1">{health.enabled ? 'Enabled' : 'Disabled'}</span>
+                </div>
+              </>
+            ) : healthLoading ? (
+              <div className="flex items-center gap-2 text-xs text-text-muted"><RefreshCw size={13} className="animate-spin" /> Loading index health…</div>
+            ) : (
+              <div className="flex items-start gap-2 rounded-xl border border-border bg-surface/50 p-3 text-[11px] text-text-muted">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                <span>{healthError || 'Index health is available to administrators.'}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Maintenance — admin only */}
+          <div className="p-5 rounded-2xl bg-surface-alt border border-border">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center shadow-md shadow-amber-500/10"><Wrench size={18} className="text-amber-400" /></div>
+              <div><h3 className="text-sm font-bold">Maintenance</h3><p className="text-[11px] text-text-muted">Non-destructive index repair and rebuild</p></div>
+            </div>
+            <p className="text-[11px] text-text-muted mb-4 leading-relaxed">Replacement vectors are built before active relational chunks are swapped. A failed document keeps its previous searchable index instead of leaving a partial rebuild.</p>
+            <div className="flex flex-wrap gap-2">
+              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleRepair} disabled={repairing || reindexing} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                {repairing ? <RefreshCw size={14} className="animate-spin" /> : <Wrench size={14} />} Repair Indexes
+              </motion.button>
+              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleReindexAll} disabled={reindexing || repairing} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                <RefreshCw size={14} className={reindexing ? 'animate-spin' : ''} /> Rebuild All Documents
+              </motion.button>
+            </div>
+          </div>'''
+          panel = panel[:maintenance_start] + maintenance + panel[function_tail:]
+          panel_path.write_text(panel)
           PY
+
+          cat >> docs/RAG_MODERNIZATION_STATUS.md <<'DOC'
+
+          ## Administration UI completion
+
+          - Settings displays live RAG document, chunk, vector, and collection health.
+          - Added explicit non-destructive repair and full rebuild actions.
+          - Frontend contracts match safe reindex and repair API responses.
+          DOC
+
+          rm -f docs/RAG_UI_DIAGNOSTIC.md .github/workflows/rag-ui-completion.yml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Validate and commit UI completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          npm --prefix frontend run lint
+          npm --prefix frontend run test:unit
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add docs/RAG_UI_DIAGNOSTIC.md
-          git commit -m 'build(rag): record UI transformation diagnostic [skip ci]'
+          git add -A
+          git commit -m 'feat(rag): add index health and repair administration UI'
           git push origin HEAD:feature/rag-modernization-v2
