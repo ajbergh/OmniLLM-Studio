@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
 import { api, authApi, browserApi, mcpApi, musicApi, videoApi, setAuthToken } from '../api';
-import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, GitHub as Github, Calculator, Link2, Search, Music2, Film, Route as RouteIcon } from 'lucide-react';
+import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, GitBranch as Github, Calculator, Link2, Search, Music2, Film, Route as RouteIcon } from 'lucide-react';
 import type { BrowserSession, BrowserStatus, CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, ToolPolicy, UpdateMCPServerRequest } from '../types';
 import type { MusicModel, MusicProviderKey } from '../types/music';
 import type { VideoModel, VideoProviderKey } from '../types/video';
