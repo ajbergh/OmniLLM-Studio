@@ -1,0 +1,735 @@
+name: Finalize RAG Documentation and Comments
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rag-docs-finalize.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/rag-modernization-v2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Update documentation and comments
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          cat >/tmp/finalize_rag_docs.py <<'PY'
+          from pathlib import Path
+          import re
+
+          BRANCH = 'feature/rag-modernization-v2'
+
+          def read(path):
+              return Path(path).read_text()
+
+          def write(path, text):
+              Path(path).write_text(text)
+
+          def replace_once(path, old, new):
+              text = read(path)
+              if old not in text:
+                  raise RuntimeError(f'missing replacement anchor in {path}: {old[:120]!r}')
+              text = text.replace(old, new, 1)
+              write(path, text)
+
+          def insert_comment(path, needle, comment):
+              text = read(path)
+              if comment in text:
+                  return
+              if needle not in text:
+                  raise RuntimeError(f'missing declaration in {path}: {needle!r}')
+              text = text.replace(needle, comment + '\n' + needle, 1)
+              write(path, text)
+
+          def add_overview(path, overview):
+              target = Path(path)
+              if not target.exists():
+                  return
+              text = target.read_text()
+              marker = '// File overview:'
+              if marker in '\n'.join(text.splitlines()[:12]):
+                  return
+              match = re.match(r'(package\s+\w+\n)', text)
+              if not match:
+                  raise RuntimeError(f'package declaration not found in {path}')
+              text = text[:match.end()] + '\n' + marker + ' ' + overview + '\n' + text[match.end():]
+              target.write_text(text)
+
+          overviews = {
+              'backend/internal/api/attachment_text.go': 'centralizes attachment MIME eligibility and structure-preserving text extraction for conversation RAG indexing.',
+              'backend/internal/api/rag_admin_v2.go': 'implements administrator-facing RAG footprint reporting and full indexed-conversation rebuild operations.',
+              'backend/internal/api/rag_handler.go': 'contains public conversation and attachment RAG HTTP handlers.',
+              'backend/internal/api/rag_reindex_v2.go': 'orchestrates non-destructive attachment and conversation reindexing.',
+              'backend/internal/document/document.go': 'implements the shared pure-Go structured document parser and Markdown renderer.',
+              'backend/internal/filelibrary/rag_v2.go': 'contains File Library extraction compatibility helpers and hybrid retrieval.',
+              'backend/internal/rag/rag_admin_v2.go': 'provides deterministic administrative snapshots of chromem physical collections.',
+              'backend/internal/rag/rag_chunk_context_v2.go': 'implements deterministic chunking, token estimation, and bounded evidence planning.',
+              'backend/internal/rag/rag_embedding_v2.go': 'defines embedding-space identity, provider resolution, batching, normalization, and retry behavior.',
+              'backend/internal/rag/rag_eval_v2.go': 'provides retrieval-quality metrics and stage-level telemetry helpers.',
+              'backend/internal/rag/rag_remote_v2.go': 'adapts VectorIndex to a bearer-token-protected standard-library HTTP transport.',
+              'backend/internal/rag/rag_retrieval_v2.go': 'implements fusion, diversity, optional planning/reranking, request evidence bridging, and hybrid conversation retrieval.',
+              'backend/internal/rag/rag_store_v2.go': 'manages embedding-space-isolated chromem collections used by the default RAG runtime.',
+              'backend/internal/rag/rag_vector_v2.go': 'defines backend-neutral vector generations plus exact, HNSW, and generation-coordination implementations.',
+              'backend/internal/repository/document_chunk.go': 'persists document chunks and provides FTS5/BM25 retrieval with a bounded lexical fallback.',
+              'backend/internal/repository/document_chunk_replace.go': 'atomically activates replacement chunk sets for one attachment.',
+              'backend/internal/repository/rag_index.go': 'creates and persists RAG v2 embedding-space, generation, job, and telemetry state.',
+              'backend/internal/websearch/orchestrator.go': 'combines live web evidence with previously assembled private RAG evidence without weakening trust boundaries.',
+          }
+          for path, overview in overviews.items():
+              add_overview(path, overview)
+
+          # Parser and structural-node comments.
+          parser_comments = [
+              ('\tNodeDocument  NodeType = "document"', '\t// NodeDocument identifies a whole-document structural node.'),
+              ('\tNodePage      NodeType = "page"', '\t// NodePage identifies text associated with one source page.'),
+              ('\tNodeSlide     NodeType = "slide"', '\t// NodeSlide identifies text associated with one presentation slide.'),
+              ('\tNodeSheet     NodeType = "sheet"', '\t// NodeSheet identifies text associated with one workbook sheet.'),
+              ('\tNodeHeading   NodeType = "heading"', '\t// NodeHeading identifies a heading and its hierarchy path.'),
+              ('\tNodeParagraph NodeType = "paragraph"', '\t// NodeParagraph identifies prose or list-item text.'),
+              ('\tNodeTable     NodeType = "table"', '\t// NodeTable identifies text extracted from a table region.'),
+              ('\tNodeCode      NodeType = "code"', '\t// NodeCode identifies preformatted or source-code text.'),
+              ('func NormalizeMIMEType(mime string) string {', '// NormalizeMIMEType removes parameters and returns a lowercase canonical MIME type.'),
+              ('func IsTextMIME(mime string) bool {', '// IsTextMIME reports whether the parser can treat a MIME type as textual content.'),
+          ]
+          for needle, comment in parser_comments:
+              insert_comment('backend/internal/document/document.go', needle, comment)
+
+          chunk_comments = [
+              ('const ChunkerSchemaVersion = 2', '// ChunkerSchemaVersion identifies the persisted deterministic chunk format.\nconst ChunkerSchemaVersion = 2'),
+          ]
+          path = 'backend/internal/rag/rag_chunk_context_v2.go'
+          text = read(path)
+          if '// ChunkerSchemaVersion identifies' not in text:
+              text = text.replace('const ChunkerSchemaVersion = 2', chunk_comments[0][1], 1)
+              write(path, text)
+          for needle, comment in [
+              ('func DefaultChunkOptions() ChunkOptions {', '// DefaultChunkOptions returns the production defaults for target size and overlap.'),
+              ('func DetectAndChunk(text, mimeType, attachmentID, conversationID string, opts ChunkOptions) []models.DocumentChunk {', '// DetectAndChunk selects Markdown-aware or plain-text chunking from MIME type and structural markers.'),
+              ('func (ConservativeTokenEstimator) Count(text string) int {', '// Count returns a conservative provider-neutral token estimate for text.'),
+              ('func NewContextPlanner(estimator TokenEstimator) *ContextPlanner {', '// NewContextPlanner creates a planner and substitutes the conservative estimator when estimator is nil.'),
+          ]:
+              insert_comment(path, needle, comment)
+
+          insert_comment('backend/internal/rag/rag_embedding_v2.go',
+                         'func ProviderHasEmbeddings(providerType string) bool {',
+                         '// ProviderHasEmbeddings reports whether the provider type has an embedding implementation in llm.Service.')
+
+          for needle, comment in [
+              ('func NewRetrievalTelemetry() *RetrievalTelemetry {', '// NewRetrievalTelemetry starts a UTC-timestamped telemetry measurement.'),
+              ('func (t *RetrievalTelemetry) TotalDuration() time.Duration {', '// TotalDuration returns elapsed wall-clock time since telemetry creation, or zero for an uninitialized value.'),
+          ]:
+              insert_comment('backend/internal/rag/rag_eval_v2.go', needle, comment)
+
+          remote_comments = [
+              ('func NewHTTPVectorIndex(baseURL, token string) *HTTPVectorIndex {', '// NewHTTPVectorIndex creates a remote adapter with a 60-second default HTTP timeout.'),
+              ('func (h *HTTPVectorIndex) CreateGeneration(ctx context.Context, spec IndexSpec) error {', '// CreateGeneration asks the remote index owner to create an immutable generation.'),
+              ('func (h *HTTPVectorIndex) UpsertBatch(ctx context.Context, generationID string, records []VectorRecord) error {', '// UpsertBatch sends vector records to an existing remote generation.'),
+              ('func (h *HTTPVectorIndex) Search(ctx context.Context, generationID string, query []float32, topK int) ([]VectorHit, error) {', '// Search queries one remote generation and returns its ranked nearest-neighbor hits.'),
+              ('func (h *HTTPVectorIndex) Delete(ctx context.Context, generationID string, ids []string) error {', '// Delete removes the supplied record IDs from one remote generation.'),
+              ('func (h *HTTPVectorIndex) Validate(ctx context.Context, generationID string) (IndexStats, error) {', '// Validate requests structural statistics for one remote generation.'),
+              ('func (h *HTTPVectorIndex) Drop(ctx context.Context, generationID string) error {', '// Drop removes one remote generation and all of its vector records.'),
+          ]
+          for needle, comment in remote_comments:
+              insert_comment('backend/internal/rag/rag_remote_v2.go', needle, comment)
+
+          retrieval_comments = [
+              ('func NewLLMQueryPlanner(service chatCompleter) *LLMQueryPlanner {', '// NewLLMQueryPlanner creates an optional query planner backed by a chat-completion service.'),
+              ('func (planner *LLMQueryPlanner) Plan(', '// Plan rewrites a conversational query and returns a deterministic original-query fallback on any planning failure.'),
+              ('type Reranker interface {', '// Reranker reorders retrieval candidates for a query while preserving stable candidate IDs.'),
+              ('func NewLLMReranker(service chatCompleter, provider, model string) *LLMReranker {', '// NewLLMReranker creates an optional provider-backed passage reranker.'),
+              ('func (reranker *LLMReranker) Rerank(ctx context.Context, query string, candidates []RerankCandidate, limit int) ([]RerankResult, error) {', '// Rerank asks the configured model to score candidates and falls back to fused-score order when output is unusable.'),
+              ('func NewChromemRetriever(llmService *llm.Service, chunkRepo *repository.ChunkRepo, vectorStore *VectorStore) *ChromemRetriever {', '// NewChromemRetriever creates the default hybrid conversation retriever.'),
+              ('func (r *ChromemRetriever) WithLegacyEmbeddingRepo(repo *repository.EmbeddingRepo) *ChromemRetriever {', '// WithLegacyEmbeddingRepo enables compatibility migration for legacy, un-fingerprinted embedding collections.'),
+          ]
+          for needle, comment in retrieval_comments:
+              insert_comment('backend/internal/rag/rag_retrieval_v2.go', needle, comment)
+
+          vector_comments = [
+              ('func NewExactVectorIndex() *ExactVectorIndex {', '// NewExactVectorIndex creates an in-memory exact-search backend with no generations.'),
+              ('func (i *ExactVectorIndex) CreateGeneration(_ context.Context, spec IndexSpec) error {', '// CreateGeneration creates an empty exact-search generation after validating its embedding space.'),
+              ('func (i *ExactVectorIndex) UpsertBatch(_ context.Context, generationID string, records []VectorRecord) error {', '// UpsertBatch validates, normalizes, copies, and inserts records into an exact-search generation.'),
+              ('func (i *ExactVectorIndex) Search(_ context.Context, generationID string, query []float32, topK int) ([]VectorHit, error) {', '// Search performs deterministic exhaustive cosine search over an exact-search generation.'),
+              ('func (i *ExactVectorIndex) Delete(_ context.Context, generationID string, ids []string) error {', '// Delete removes record IDs from an exact-search generation and ignores missing generations.'),
+              ('func (i *ExactVectorIndex) Validate(_ context.Context, generationID string) (IndexStats, error) {', '// Validate checks record dimensions and returns exact-search generation statistics.'),
+              ('func (i *ExactVectorIndex) Drop(_ context.Context, generationID string) error {', '// Drop removes an exact-search generation.'),
+              ('func NewHNSWVectorIndex(config HNSWConfig) *HNSWVectorIndex {', '// NewHNSWVectorIndex creates an in-memory HNSW backend with normalized configuration defaults.'),
+              ('func (h *HNSWVectorIndex) CreateGeneration(_ context.Context, spec IndexSpec) error {', '// CreateGeneration creates an empty HNSW generation after validating its embedding space.'),
+              ('func (h *HNSWVectorIndex) UpsertBatch(ctx context.Context, generationID string, records []VectorRecord) error {', '// UpsertBatch validates and inserts or replaces records while maintaining reciprocal HNSW links.'),
+              ('func (h *HNSWVectorIndex) Search(ctx context.Context, generationID string, query []float32, topK int) ([]VectorHit, error) {', '// Search performs approximate cosine nearest-neighbor search using the configured EFSearch breadth.'),
+              ('func (h *HNSWVectorIndex) Delete(_ context.Context, generationID string, ids []string) error {', '// Delete tombstones record IDs and reselects the entry point when necessary.'),
+              ('func (h *HNSWVectorIndex) Validate(_ context.Context, generationID string) (IndexStats, error) {', '// Validate checks dimensions, level metadata, and neighbor references for an HNSW generation.'),
+              ('func (h *HNSWVectorIndex) Drop(_ context.Context, generationID string) error {', '// Drop removes an HNSW generation.'),
+              ('func NewGenerationCoordinator(repo *repository.RAGIndexRepo, backend VectorIndex) *GenerationCoordinator {', '// NewGenerationCoordinator binds generation metadata persistence to a VectorIndex backend.'),
+              ('type BuildGenerationRequest struct {', '// BuildGenerationRequest describes one replacement generation build and activation.'),
+              ('type BuildGenerationResult struct {', '// BuildGenerationResult identifies the activated generation and its validated statistics.'),
+              ('func (c *GenerationCoordinator) BuildAndActivate(ctx context.Context, req BuildGenerationRequest) (*BuildGenerationResult, error) {', '// BuildAndActivate builds, validates, and atomically activates a replacement generation, cleaning it up on failure.'),
+          ]
+          for needle, comment in vector_comments:
+              insert_comment('backend/internal/rag/rag_vector_v2.go', needle, comment)
+
+          repository_comments = [
+              ('func NewChunkRepo(db *sql.DB) *ChunkRepo {', '// NewChunkRepo creates a chunk repository and ensures the RAG v2/FTS schema is available.'),
+              ('func (r *ChunkRepo) Create(c *models.DocumentChunk) error {', '// Create persists one chunk, assigning its ID, timestamps, and default metadata when absent.'),
+              ('func (r *ChunkRepo) CreateBatch(chunks []models.DocumentChunk) error {', '// CreateBatch persists chunks in one transaction and assigns shared creation timestamps.'),
+              ('func (r *ChunkRepo) ListByAttachment(attachmentID string) ([]models.DocumentChunk, error) {', '// ListByAttachment returns chunks for one attachment in chunk order.'),
+              ('func (r *ChunkRepo) ListByConversation(conversationID string) ([]models.DocumentChunk, error) {', '// ListByConversation returns conversation chunks ordered by attachment and chunk index.'),
+              ('func (r *ChunkRepo) ListByLibraryFileID(libraryFileID string) ([]models.DocumentChunk, error) {', '// ListByLibraryFileID returns chunks for one File Library record in chunk order.'),
+              ('func (r *ChunkRepo) GetByIDs(ids []string) ([]models.DocumentChunk, error) {', '// GetByIDs returns existing chunks for the supplied IDs without requiring input-order preservation.'),
+              ('func (r *ChunkRepo) DeleteByAttachment(attachmentID string) error {', '// DeleteByAttachment removes all relational chunks associated with an attachment.'),
+              ('func (r *ChunkRepo) DeleteByConversation(conversationID string) error {', '// DeleteByConversation removes all relational chunks associated with a conversation.'),
+              ('func (r *ChunkRepo) DeleteByLibraryFileID(libraryFileID string) error {', '// DeleteByLibraryFileID removes all relational chunks associated with a File Library record.'),
+              ('func (r *ChunkRepo) DistinctConversationIDsWithChunks() ([]string, error) {', '// DistinctConversationIDsWithChunks lists conversation IDs that currently own persisted chunks.'),
+              ('func (r *ChunkRepo) CountByAttachment(attachmentID string) (int, error) {', '// CountByAttachment returns the persisted chunk count for one attachment.'),
+          ]
+          for needle, comment in repository_comments:
+              insert_comment('backend/internal/repository/document_chunk.go', needle, comment)
+
+          index_comments = [
+              ('func NewRAGIndexRepo(db *sql.DB) (*RAGIndexRepo, error) {', '// NewRAGIndexRepo creates a generation metadata repository after ensuring its schema.'),
+              ('type RAGEmbeddingSpaceRecord struct {', '// RAGEmbeddingSpaceRecord is the persisted representation of one immutable embedding space.'),
+              ('func (r *RAGIndexRepo) UpsertEmbeddingSpace(space RAGEmbeddingSpaceRecord) (string, error) {', '// UpsertEmbeddingSpace creates or refreshes an embedding-space record keyed by fingerprint.'),
+              ('func (r *RAGIndexRepo) EnsureIndex(logicalName, scopeType, scopeID, backend string) (string, error) {', '// EnsureIndex creates or updates the logical index for a scope and returns its stable ID.'),
+              ('func (r *RAGIndexRepo) BeginGeneration(indexID, embeddingSpaceID string, parserVersion, chunkerVersion, expectedChunks int) (string, error) {', '// BeginGeneration creates a queued immutable generation with its expected chunk count.'),
+              ('func (r *RAGIndexRepo) UpdateGeneration(id, status string, indexedChunks int, errorMessage *string) error {', '// UpdateGeneration records a valid lifecycle state, indexed count, and optional error.'),
+              ('func (r *RAGIndexRepo) CreateIngestJob(generationID, libraryFileID, attachmentID string) (string, error) {', '// CreateIngestJob creates a queued ingestion job linked to optional generation and source IDs.'),
+              ('func (r *RAGIndexRepo) UpdateIngestJob(id, status, stage string, progress float64, completedChunks int, errorMessage *string) error {', '// UpdateIngestJob clamps progress and records stage, completion count, timestamps, and errors.'),
+          ]
+          for needle, comment in index_comments:
+              insert_comment('backend/internal/repository/rag_index.go', needle, comment)
+
+          for needle, comment in [
+              ('func NewOrchestrator(provider Provider, llmSvc *llm.Service, jinaReader *JinaReader) *Orchestrator {', '// NewOrchestrator creates a web-search orchestrator with an optional Jina Reader enricher.'),
+              ('func (o *Orchestrator) Reconfigure(provider Provider, jinaReader *JinaReader) {', '// Reconfigure atomically replaces the live search provider and reader configuration.'),
+              ('func (o *Orchestrator) DirectSearch(ctx context.Context, request SearchRequest) (*SearchResponse, error) {', '// DirectSearch executes a search request without classification or LLM summarization.'),
+          ]:
+              insert_comment('backend/internal/websearch/orchestrator.go', needle, comment)
+
+          # Correct stale handler comments and compile defect.
+          handler = read('backend/internal/api/rag_handler.go')
+          handler = handler.replace('\t"log"\n', '', 1)
+          handler = handler.replace(
+              '// Reindex re-chunks and re-embeds all text attachments for a conversation.',
+              '// Reindex non-destructively rebuilds every supported attachment in a conversation, preserving prior searchable data for failed attachments.',
+              1,
+          )
+          handler = handler.replace(
+              '// ReindexAll drops every chromem collection so the next query against each\n// conversation triggers a lazy re-migration from legacy SQL embeddings (or\n// returns empty if none exist). Admin-only — wired in router under /rag/reindex-all.',
+              '// ReindexAll non-destructively rebuilds every conversation that currently has persisted chunks and reports per-conversation failures.',
+              1,
+          )
+          write('backend/internal/api/rag_handler.go', handler)
+
+          admin = read('backend/internal/api/rag_admin_v2.go')
+          admin = admin.replace(
+              '// Repair non-destructively rebuilds all conversations that currently have chunks.',
+              '// Repair non-destructively rebuilds every conversation that currently has persisted chunks; it does not limit work to detected inconsistencies.',
+              1,
+          )
+          write('backend/internal/api/rag_admin_v2.go', admin)
+
+          # Update tests for normalized cosine vectors.
+          embed_test = read('backend/internal/rag/embed_test.go')
+          if '"math"' not in embed_test:
+              embed_test = embed_test.replace('\t"errors"\n', '\t"errors"\n\t"math"\n', 1)
+          embed_test = embed_test.replace(
+              'if len(got) != 3 || got[0] != 0.1 {',
+              'if len(got) != 3 || math.Abs(float64(got[0])-0.26726124) > 1e-6 {',
+              1,
+          )
+          embed_test = embed_test.replace(
+              'if len(got) != 1 || got[0] != 0.5 {',
+              'if len(got) != 1 || math.Abs(float64(got[0])-1.0) > 1e-6 {',
+              1,
+          )
+          write('backend/internal/rag/embed_test.go', embed_test)
+
+          # Frontend top-of-file responsibilities and accurate rebuild wording.
+          for path, line in {
+              'frontend/src/components/SettingsPanel.tsx': '// SettingsPanel renders provider, application, RAG health, and administrative maintenance settings.',
+              'frontend/src/types.ts': '// types.ts defines frontend contracts shared by API clients, stores, and UI components.',
+          }.items():
+              text = read(path)
+              if not text.startswith(line):
+                  write(path, line + '\n' + text)
+
+          panel = read('frontend/src/components/SettingsPanel.tsx')
+          panel = panel.replace(
+              'Check every indexed conversation and rebuild inconsistent indexes? Valid indexes remain available throughout the repair.',
+              'Rebuild every currently indexed conversation using the active parser, chunking, and embedding settings? Existing indexes remain available until each replacement succeeds.',
+          )
+          panel = panel.replace('Repaired ${result.conversations_repaired}', 'Rebuilt ${result.conversations_repaired}')
+          panel = panel.replace('Non-destructive index repair and rebuild', 'Non-destructive indexed-conversation rebuilds')
+          panel = panel.replace('Repair Indexes', 'Rebuild Indexed Conversations')
+          write('frontend/src/components/SettingsPanel.tsx', panel)
+
+          modernization = '''# RAG Modernization Architecture
+
+## Purpose
+
+OmniLLM-Studio's RAG modernization keeps the backend pure Go while improving embedding correctness, document structure, hybrid retrieval, context safety, and operational visibility. Chat generation and embedding generation can use different configured provider profiles.
+
+## Default runtime architecture
+
+The application runtime used by conversation attachments and the File Library is:
+
+```text
+Attachment or File Library source
+  -> shared structural parser
+  -> deterministic structure-aware chunks
+  -> SQLite document_chunks + FTS5/BM25
+  -> batched, normalized embeddings
+  -> embedding-space-isolated chromem collection
+  -> vector candidates + lexical candidates
+  -> reciprocal-rank fusion and source diversity
+  -> token-budgeted untrusted-evidence context
+  -> chat or grounded web summarization
+```
+
+SQLite remains authoritative for chunk text, provenance, lexical retrieval, RAG metadata, and operational records. Chromem-go remains the default embedded exact vector store. Physical collection names include a routing fingerprint so vectors produced by incompatible provider/model/task/schema contracts are never queried together.
+
+## Reindex safety
+
+Conversation and attachment reindexing does not delete the active chunk set first. It builds replacement vectors, atomically replaces the attachment's relational chunks, and then removes stale vector IDs. If extraction, embedding, or vector persistence fails before activation, the prior searchable data remains. A conversation rebuild may report partial attachment failures.
+
+`POST /v1/rag/repair` and `POST /v1/rag/reindex-all` currently perform the same full rebuild over every conversation with persisted chunks. The repair endpoint does not yet perform a cheaper inconsistency-only scan.
+
+## Embedding identity and provider selection
+
+An embedding space is identified by provider profile, model, dimensions when known, distance metric, normalization behavior, task types, and schema version. The `rag_embedding_model` setting accepts either a model ID or the advanced `Provider Profile Name::model-id` form. Without an explicit provider pin, an enabled active chat provider is used when compatible; otherwise the first enabled embedding-capable provider in repository order is selected.
+
+Embedding inputs are sent to the selected embedding provider. Use an Ollama or local compatible provider when document text must remain local.
+
+## Parsing and chunking
+
+The shared `internal/document` parser supports text-like formats, HTML, PDF, DOCX, XLSX, and PPTX without an external parser service. It preserves headings, pages when available, slides, sheets, tables, and code blocks in a common structural representation. The deterministic chunker uses content-derived IDs and records parser/chunker metadata for incremental comparison.
+
+## Retrieval and context
+
+SQLite FTS5/BM25 and semantic candidates are fused with reciprocal-rank fusion. Source diversity reduces repeated passages from one document. SQLite builds without FTS5 use a bounded tokenized `LIKE` fallback. Retrieved text is always wrapped as untrusted evidence, assigned stable source labels, deduplicated, and packed into a conservative token budget.
+
+When live web search is triggered, request-scoped private evidence is preserved and supplied to the grounded summarizer rather than discarded.
+
+## Supporting vector components
+
+The branch also provides a backend-neutral `VectorIndex` contract with:
+
+- `ExactVectorIndex`, an in-memory full-recall reference implementation.
+- `HNSWVectorIndex`, a pure-Go approximate implementation with validation and gob persistence.
+- `HTTPVectorIndex` and `NewVectorIndexHTTPHandler`, a bearer-token-capable HTTP transport for a dedicated index owner.
+- `GenerationCoordinator`, which builds and validates immutable generations before changing an active-generation pointer in SQLite.
+
+These components are implemented and tested as library capabilities. The normal desktop/server runtime still uses embedding-space-isolated chromem collections; HNSW, the HTTP adapter, and `GenerationCoordinator` are not selected by runtime configuration or wired into Docker/Helm deployment on this branch.
+
+## Persistence
+
+RAG v2 lazily creates `rag_embedding_spaces`, `rag_indexes`, `rag_index_generations`, `rag_ingest_jobs`, `rag_retrieval_events`, and the `document_chunks_fts` virtual table and triggers.
+
+## Administration
+
+Administrators can use:
+
+- `GET /v1/rag/health` for current settings and relational/vector footprint counts.
+- `POST /v1/rag/repair` to rebuild all indexed conversations non-destructively.
+- `POST /v1/rag/reindex-all` to rebuild all indexed conversations non-destructively.
+- Settings -> RAG for the same health snapshot and rebuild controls.
+
+The health endpoint reports counts, not a proof that every relational chunk has a matching vector. Compare `chunks` and `vector_records` as an operational signal, accounting for multiple embedding spaces or legacy collections.
+
+## Evaluation and benchmarks
+
+The RAG package includes Recall@K, MRR, nDCG@K, hit rate, metric deltas, stage telemetry, exact-search tests, and HNSW recall tests. Run vector benchmarks with:
+
+```bash
+cd backend
+go test -run '^$' -bench BenchmarkVectorIndexes -benchmem ./internal/rag
+```
+
+See [RAG modernization status](RAG_MODERNIZATION_STATUS.md) and [RAG validation](RAG_BACKEND_VALIDATION.md) for branch-specific completion and validation results.
+'''
+          write('docs/RAG_MODERNIZATION.md', modernization)
+
+          status = '''# RAG Modernization Implementation Status
+
+Branch: `feature/rag-modernization-v2`
+
+## Runtime releases
+
+| Area | Status | Current branch behavior |
+|---|---|---|
+| Embedding-space isolation | Complete | Provider/model/task/metric/schema routing fingerprints isolate physical chromem collections. |
+| Chat/embedding decoupling | Complete | Embedding provider selection can be independent of the chat provider; advanced API configuration supports `Provider Profile::model`. |
+| Batched embeddings | Complete | Bounded batches, validation, cosine normalization, retry/backoff, and dimensional consistency checks. |
+| Shared parser | Complete | Text-like files, HTML, PDF, DOCX, XLSX, and PPTX use `internal/document`. |
+| Deterministic structural chunks | Complete | Stable IDs plus heading/page/slide/sheet metadata and boundary-aware splitting. |
+| Hybrid retrieval | Complete | Conversation RAG and File Library combine vector and SQLite FTS5/BM25 candidates using RRF and source diversity. |
+| Context planning | Complete | Deduplication, source quotas, conservative token budgeting, stable labels, and untrusted-evidence boundaries. |
+| Private evidence plus web | Complete | Request-scoped private evidence is preserved when grounded web summarization runs. |
+| Safe attachment/conversation rebuild | Complete | Replacement vectors are built before relational activation; failed attachments retain prior searchable data. |
+| Admin health and rebuild UI | Complete | Settings displays footprint counts and exposes full non-destructive rebuild actions. |
+
+## Supporting and opt-in capabilities
+
+| Capability | Status | Integration boundary |
+|---|---|---|
+| Query rewriting / multi-query planning | Implemented, opt-in API | `LLMQueryPlanner` exists but is not enabled by default in chat retrieval settings. |
+| LLM reranking | Implemented, opt-in API | `LLMReranker` exists; RRF and diversity remain the default ranking path. |
+| Exact `VectorIndex` | Implemented and tested | Reference in-memory generation backend; default runtime remains chromem-go. |
+| HNSW `VectorIndex` | Implemented and tested | Pure-Go ANN with persistence and recall tests; no runtime selector is wired on this branch. |
+| HTTP vector adapter | Implemented | Client/server adapter exists; Docker, Helm, discovery, and lifecycle wiring are not included. |
+| Generation coordinator | Implemented | Atomic SQLite generation activation is available as a library component; default attachment reindex uses safe vector-first/chunk-replace activation instead. |
+| Retrieval evaluation | Implemented | Recall@K, MRR, nDCG@K, hit rate, deltas, and stage telemetry helpers. |
+
+## Administrative endpoint semantics
+
+`POST /v1/rag/repair` and `POST /v1/rag/reindex-all` both rebuild every conversation that currently has persisted chunks. Neither endpoint currently restricts work to indexes proven inconsistent. Each response reports completed conversations, indexed chunks, and failures.
+
+## Validation
+
+See [RAG backend and frontend validation](RAG_BACKEND_VALIDATION.md) for the exact commands and latest branch results.
+'''
+          write('docs/RAG_MODERNIZATION_STATUS.md', status)
+
+          validation = '''# RAG Modernization Validation
+
+This document records validation for `feature/rag-modernization-v2`. It is generated by the documentation-finalization workflow after source comments and public documentation are reconciled.
+
+## Validation scope
+
+- Go formatting and exported production-symbol comment audit.
+- Full backend package tests with a transient desktop embed placeholder.
+- Focused race tests for RAG, repositories, File Library, document parsing, and API handlers.
+- Frontend production build, ESLint, and unit tests.
+- Whitespace/error-marker validation with `git diff --check`.
+
+## Results
+
+<!-- VALIDATION_RESULTS -->
+
+## Commands
+
+```bash
+cd backend
+go test ./...
+go test -race ./internal/rag ./internal/repository ./internal/filelibrary ./internal/document ./internal/api
+
+cd ../frontend
+npm ci
+npm run build
+npm run lint
+npm run test:unit
+```
+
+The workflow creates `backend/cmd/desktop/frontend_dist/index.html` only in the runner worktree so the Wails `go:embed` package can compile; that placeholder is not committed.
+'''
+          write('docs/RAG_BACKEND_VALIDATION.md', validation)
+
+          faq = read('docs/Feature FAQ.md')
+          start = faq.index('## 1. RAG (Retrieval-Augmented Generation)')
+          end = faq.index('\n## 1b. File Library', start)
+          rag_faq = '''## 1. RAG (Retrieval-Augmented Generation)
+
+**Configuration:** Settings -> RAG (`rag_enabled`, embedding selection, chunk size, overlap, and top-k)
+
+### What is RAG?
+
+RAG lets the assistant answer from uploaded documents. OmniLLM-Studio parses supported files into structure-aware chunks, retrieves relevant passages through both semantic and keyword channels, and injects bounded, cited evidence into the model request.
+
+### How does it work?
+
+1. Upload a supported attachment to a conversation or ingest it into the File Library.
+2. The shared pure-Go parser extracts text and structural metadata from text-like files, HTML, PDF, DOCX, XLSX, and PPTX.
+3. The deterministic chunker preserves headings, pages when available, slides, and sheets. Defaults are approximately 1,000 Unicode code points with 200 code points of overlap.
+4. Chunk text is persisted in SQLite and indexed in FTS5/BM25. Embeddings are generated in bounded batches and stored in a physical chromem collection isolated by embedding provider/model/task/schema identity.
+5. Retrieval combines vector and lexical rankings with reciprocal-rank fusion and applies source diversity before selecting the configured top-k evidence.
+6. Evidence is deduplicated, assigned `[Source N]` labels, treated as untrusted content, and packed into a conservative token budget.
+7. When a live web search also runs, private document evidence remains in the grounded summarizer request.
+
+### Configuration and operations
+
+- Enable or tune RAG through Settings -> RAG or `PATCH /v1/settings`.
+- `rag_embedding_model` may be a model ID. Advanced API users may use `Provider Profile Name::model-id` to pin both provider profile and model.
+- `POST /v1/conversations/{id}/reindex` safely rebuilds supported attachments in one conversation.
+- `POST /v1/attachments/{id}/index` safely rebuilds one attachment.
+- Administrators can inspect `GET /v1/rag/health`.
+- `POST /v1/rag/repair` and `POST /v1/rag/reindex-all` both rebuild every indexed conversation; completed work and failures are returned explicitly.
+
+Rebuilds create replacement vectors before swapping relational chunks. If an attachment fails before activation, its previous searchable data remains. A conversation-level rebuild can therefore succeed partially and report failed attachment IDs.
+
+### Embedding provider selection and privacy
+
+If the active chat provider is enabled and supports the requested embedding model, it is preferred. Otherwise the first enabled embedding-capable provider in repository order is selected. Supported provider types are OpenAI, OpenRouter, Mistral, Together, Ollama, and Gemini. Pin a profile explicitly when provider choice must not depend on configuration order.
+
+Document chunks sent for embedding are visible to the selected embedding provider, and selected retrieved passages are visible to the chat provider that answers the question. Configure Ollama or another local compatible endpoint for both stages when document content must remain on the machine.
+
+### Storage and migration
+
+SQLite is authoritative for chunk text, provenance, FTS5, index metadata, jobs, and telemetry. Chromem-go stores the default runtime vectors under `OMNILLM_CHROMEM_DIR`; physical collection names include the logical scope and an embedding routing fingerprint.
+
+Legacy SQL embeddings do not carry a trustworthy provider/model fingerprint. Compatibility migration is limited to the legacy collection path. Production fingerprinted embedding spaces rebuild using their configured embedding provider rather than assuming old vectors are compatible.
+
+### Supported files
+
+Conversation and File Library extraction share support for text and Markdown, code and common data formats treated as text, HTML, PDF, DOCX, XLSX, and PPTX. Image-only PDFs still require extractable text; OCR is not part of this pipeline.
+
+### FAQ
+
+**Q: Can I control how many chunks are used?**  
+A: Yes. Change `rag_top_k` (default 5). Higher values provide more evidence but consume more prompt tokens.
+
+**Q: What happens when I change embedding model or provider?**  
+A: The new routing fingerprint selects a separate physical collection. Rebuild affected documents so that the new space has complete vectors; incompatible spaces are never mixed.
+
+**Q: Is the Repair action an inconsistency-only check?**  
+A: No. On this branch Repair is a full non-destructive rebuild of all conversations that currently have chunks.
+
+**Q: Does RAG work when my chat provider cannot embed?**  
+A: Yes, when another enabled embedding-capable provider is configured. The embedding provider and chat provider may be different.
+
+---
+'''
+          faq = faq[:start] + rag_faq + faq[end:]
+          write('docs/Feature FAQ.md', faq)
+
+          readme = read('README.md')
+          readme = readme.replace(
+              '- [Feature FAQ](docs/Feature%20FAQ.md) — how the major capabilities behave in practice\n',
+              '- [Feature FAQ](docs/Feature%20FAQ.md) — how the major capabilities behave in practice\n- [RAG modernization architecture](docs/RAG_MODERNIZATION.md) — hybrid retrieval, embedding isolation, safe rebuilds, and optional vector backends\n- [RAG implementation status](docs/RAG_MODERNIZATION_STATUS.md) — default runtime versus implemented opt-in components\n',
+              1,
+          )
+          readme = readme.replace(
+              'OmniLLM-Studio pairs a Go backend with a React and TypeScript interface, SQLite persistence, streaming responses, encrypted secrets, an embedded vector store, and FFmpeg-powered media rendering.',
+              'OmniLLM-Studio pairs a Go backend with a React and TypeScript interface, SQLite persistence and FTS5 retrieval, embedding-space-isolated chromem vector collections, streaming responses, encrypted secrets, and FFmpeg-powered media rendering.',
+              1,
+          )
+          write('README.md', readme)
+
+          tech = read('docs/TECHNICAL_REFERENCE.md')
+          tech = tech.replace(
+              '| **RAG Pipeline** | Document chunking, embedding generation, and persistent vector retrieval (chromem-go) over uploaded files — auto-indexes attachments synchronously so context is available immediately |',
+              '| **RAG Pipeline** | Shared structural parsing, deterministic chunks, SQLite FTS5/BM25 plus embedding-space-isolated chromem retrieval, RRF fusion, bounded untrusted-evidence context, and non-destructive rebuilds |',
+              1,
+          )
+          rag_arch = '''### RAG architecture and operations
+
+The default conversation and File Library runtime uses SQLite as the authoritative chunk/provenance and lexical store, with exact chromem-go vector collections isolated by embedding routing fingerprint. Vector and FTS5/BM25 candidates are combined with reciprocal-rank fusion and source diversity before context planning. SQLite builds without FTS5 use a bounded lexical fallback.
+
+Embedding selection is independent from chat generation when configured as `Provider Profile Name::model-id`. Without an explicit profile, the active chat provider is preferred when embedding-compatible; otherwise the first enabled embedding-capable provider in repository order is used. Document text is sent to that provider for embedding, so use local providers when required.
+
+Conversation and attachment rebuilds index replacement vectors before atomically replacing relational chunks and removing stale vector IDs. Failure before activation leaves previous searchable data intact. `POST /v1/rag/repair` and `POST /v1/rag/reindex-all` are currently full rebuild operations over every conversation with chunks.
+
+The codebase also includes exact and pure-Go HNSW `VectorIndex` implementations, a generation coordinator, and a bearer-token HTTP adapter. These are supporting library capabilities on this branch; the normal runtime remains chromem-go and deployment configuration does not yet select HNSW or a remote index owner.
+
+Detailed design: [RAG modernization architecture](RAG_MODERNIZATION.md). Branch status: [RAG modernization status](RAG_MODERNIZATION_STATUS.md).
+
+'''
+          tech = tech.replace('### Image Studio\n', rag_arch + '### Image Studio\n', 1)
+          tech = tech.replace(
+              '| `POST` | `/v1/rag/reindex-all` | **Admin** — drop all chromem collections so subsequent retrievals lazy-migrate from legacy embeddings |',
+              '| `GET` | `/v1/rag/health` | **Admin** — report effective RAG settings and current relational/vector footprint counts |\n| `POST` | `/v1/rag/repair` | **Admin** — non-destructively rebuild every conversation that currently has chunks |\n| `POST` | `/v1/rag/reindex-all` | **Admin** — non-destructively rebuild every conversation that currently has chunks and report failures |',
+              1,
+          )
+          tech = tech.replace(
+              '| `OMNILLM_CHROMEM_DIR` | `<dir of OMNILLM_DB_PATH>/chromem` | Directory for chromem-go RAG vector files (one subdirectory per conversation) |',
+              '| `OMNILLM_CHROMEM_DIR` | `<dir of OMNILLM_DB_PATH>/chromem` | Directory for persistent chromem-go data; logical scopes may have multiple physical collections keyed by embedding routing fingerprint |',
+              1,
+          )
+          write('docs/TECHNICAL_REFERENCE.md', tech)
+          PY
+          python3 /tmp/finalize_rag_docs.py
+          gofmt -w \
+            backend/internal/api/attachment_text.go \
+            backend/internal/api/rag_admin_v2.go \
+            backend/internal/api/rag_handler.go \
+            backend/internal/api/rag_reindex_v2.go \
+            backend/internal/document/document.go \
+            backend/internal/filelibrary/rag_v2.go \
+            backend/internal/rag/rag_admin_v2.go \
+            backend/internal/rag/rag_chunk_context_v2.go \
+            backend/internal/rag/rag_embedding_v2.go \
+            backend/internal/rag/rag_eval_v2.go \
+            backend/internal/rag/rag_remote_v2.go \
+            backend/internal/rag/rag_retrieval_v2.go \
+            backend/internal/rag/rag_store_v2.go \
+            backend/internal/rag/rag_vector_v2.go \
+            backend/internal/rag/embed_test.go \
+            backend/internal/repository/document_chunk.go \
+            backend/internal/repository/document_chunk_replace.go \
+            backend/internal/repository/rag_index.go \
+            backend/internal/websearch/orchestrator.go
+
+      - name: Audit production comments
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/comment_audit.go <<'EOF'
+          package main
+          import (
+            "fmt"
+            "go/ast"
+            "go/parser"
+            "go/token"
+            "os"
+            "os/exec"
+            "reflect"
+            "sort"
+            "strings"
+          )
+          func receiverName(expr ast.Expr) string {
+            switch value := expr.(type) {
+            case *ast.Ident: return value.Name
+            case *ast.StarExpr: return receiverName(value.X)
+            case *ast.IndexExpr: return receiverName(value.X)
+            case *ast.IndexListExpr: return receiverName(value.X)
+            }
+            return ""
+          }
+          func firstLine(text string) string {
+            text = strings.TrimSpace(text)
+            if i := strings.IndexByte(text, '\n'); i >= 0 { text = text[:i] }
+            return strings.TrimSpace(text)
+          }
+          func main() {
+            raw, err := exec.Command("git", "diff", "--name-only", "origin/main...HEAD", "--", "*.go").Output()
+            if err != nil { panic(err) }
+            paths := strings.Fields(string(raw))
+            sort.Strings(paths)
+            var failures []string
+            for _, path := range paths {
+              if strings.HasSuffix(path, "_test.go") { continue }
+              if _, err := os.Stat(path); err != nil { continue }
+              content, _ := os.ReadFile(path)
+              head := string(content)
+              if len(head) > 800 { head = head[:800] }
+              if !strings.Contains(head, "// File overview:") && !strings.Contains(head, "Package ") {
+                failures = append(failures, path+": missing accurate top-of-file responsibility comment")
+              }
+              fset := token.NewFileSet()
+              file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+              if err != nil { failures = append(failures, path+": "+err.Error()); continue }
+              for _, decl := range file.Decls {
+                switch value := decl.(type) {
+                case *ast.FuncDecl:
+                  name := value.Name.Name
+                  if !ast.IsExported(name) { continue }
+                  if value.Recv != nil && len(value.Recv.List) > 0 {
+                    recv := receiverName(value.Recv.List[0].Type)
+                    if recv != "" && !ast.IsExported(recv) { continue }
+                  }
+                  doc := ""; if value.Doc != nil { doc = firstLine(value.Doc.Text()) }
+                  if !strings.HasPrefix(doc, name) { failures = append(failures, fmt.Sprintf("%s:%d: %s comment must start with symbol name", path, fset.Position(value.Pos()).Line, name)) }
+                case *ast.GenDecl:
+                  for _, spec := range value.Specs {
+                    var names []*ast.Ident
+                    var doc *ast.CommentGroup
+                    switch item := spec.(type) {
+                    case *ast.TypeSpec: names = []*ast.Ident{item.Name}; doc = item.Doc; if doc == nil { doc = value.Doc }
+                    case *ast.ValueSpec: names = item.Names; doc = item.Doc; if doc == nil { doc = value.Doc }
+                    default: continue
+                    }
+                    for _, ident := range names {
+                      if !ast.IsExported(ident.Name) { continue }
+                      line := ""; if doc != nil { line = firstLine(doc.Text()) }
+                      if !strings.HasPrefix(line, ident.Name) { failures = append(failures, fmt.Sprintf("%s:%d: %s comment must start with symbol name", path, fset.Position(ident.Pos()).Line, ident.Name)) }
+                    }
+                  }
+                }
+              }
+            }
+            if len(failures) > 0 {
+              for _, item := range failures { fmt.Fprintln(os.Stderr, item) }
+              os.Exit(1)
+            }
+            fmt.Printf("comment audit passed for %d changed Go paths (%s)\n", len(paths), reflect.TypeOf(paths))
+          }
+          EOF
+          go run /tmp/comment_audit.go
+
+      - name: Validate branch
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          mkdir -p backend/cmd/desktop/frontend_dist
+          printf '<!doctype html><title>validation placeholder</title>' > backend/cmd/desktop/frontend_dist/index.html
+
+          (cd backend && go test ./...) >/tmp/backend.log 2>&1
+          backend_status=$?
+          (cd backend && go test -race ./internal/rag ./internal/repository ./internal/filelibrary ./internal/document ./internal/api) >/tmp/race.log 2>&1
+          race_status=$?
+          (cd frontend && npm ci && npm run build && npm run lint && npm run test:unit) >/tmp/frontend.log 2>&1
+          frontend_status=$?
+          git diff --check >/tmp/diffcheck.log 2>&1
+          diff_status=$?
+          rm -rf backend/cmd/desktop/frontend_dist
+
+          label() { if [ "$1" -eq 0 ]; then printf 'PASS'; else printf 'FAIL'; fi; }
+          python3 - "$(label "$backend_status")" "$(label "$race_status")" "$(label "$frontend_status")" "$(label "$diff_status")" <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path('docs/RAG_BACKEND_VALIDATION.md')
+          text = path.read_text()
+          rows = f'''| Check | Result |\n|---|---|\n| `go test ./...` | **{sys.argv[1]}** |\n| Focused Go race tests | **{sys.argv[2]}** |\n| Frontend build, lint, and unit tests | **{sys.argv[3]}** |\n| `git diff --check` | **{sys.argv[4]}** |'''
+          text = text.replace('<!-- VALIDATION_RESULTS -->', rows)
+          path.write_text(text)
+          PY
+
+          printf 'backend_status=%s\n' "$backend_status" >> "$GITHUB_OUTPUT"
+          printf 'race_status=%s\n' "$race_status" >> "$GITHUB_OUTPUT"
+          printf 'frontend_status=%s\n' "$frontend_status" >> "$GITHUB_OUTPUT"
+          printf 'diff_status=%s\n' "$diff_status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Commit finalized documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            .github/workflows/rag-docs-finalize.yml \
+            .github/workflows/rag-doc-comment-audit.yml \
+            .github/workflows/rag-backend-diagnostic.yml \
+            docs/RAG_DOC_COMMENT_AUDIT.md
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs(rag): reconcile architecture, operations, and source comments [skip ci]'
+          git push origin HEAD:feature/rag-modernization-v2
+
+      - name: Enforce validation result
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          for value in \
+            '${{ steps.validate.outputs.backend_status }}' \
+            '${{ steps.validate.outputs.race_status }}' \
+            '${{ steps.validate.outputs.frontend_status }}' \
+            '${{ steps.validate.outputs.diff_status }}'; do
+            if [ "$value" != '0' ]; then status=1; fi
+          done
+          if [ "$status" -ne 0 ]; then
+            echo 'One or more validation groups failed; see the committed validation matrix and this job log.'
+            exit 1
+          fi
