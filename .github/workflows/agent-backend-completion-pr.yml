@@ -10,6 +10,7 @@ permissions:
 jobs:
   complete-backend:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -37,7 +38,16 @@ jobs:
         run: |
           gofmt -w ./cmd ./internal
           export OMNILLM_MASTER_KEY="$(printf '0%.0s' {1..64})"
-          go test ./internal/auth ./internal/tools ./internal/agent ./internal/db ./internal/api
+          set -o pipefail
+          go test -v ./internal/auth ./internal/tools ./internal/agent ./internal/db ./internal/api 2>&1 | tee ../backend-completion.log
+      - name: Upload backend completion diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-completion-diagnostics
+          path: backend-completion.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Commit backend completion
         run: |
           if git diff --quiet; then
