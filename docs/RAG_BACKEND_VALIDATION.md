@@ -12,7 +12,12 @@ This document records validation for `feature/rag-modernization-v2`. It is gener
 
 ## Results
 
-<!-- VALIDATION_RESULTS -->
+| Check | Result |
+|---|---|
+| `go test ./...` | **FAIL** |
+| Focused Go race tests | **PASS** |
+| Frontend build, lint, and unit tests | **PASS** |
+| `git diff --check` | **PASS** |
 
 ## Commands
 
