@@ -15,7 +15,10 @@ func SetGlobalEventSink(sink func(Event)) {
 	globalAgentEvents.Unlock()
 }
 
-func emitGlobalEvent(event Event) {
+// PublishEvent forwards an event to the application-wide durable sink. API
+// transports call this before writing SSE so disconnected clients do not affect
+// persistence.
+func PublishEvent(event Event) {
 	globalAgentEvents.RLock()
 	sink := globalAgentEvents.sink
 	globalAgentEvents.RUnlock()
