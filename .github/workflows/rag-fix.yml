@@ -1,0 +1,71 @@
+name: Apply RAG Compatibility Fixes
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/rag-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-validate:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/rag-modernization-v2
+
+      - name: Apply repository compatibility fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          chunk = Path('backend/internal/repository/document_chunk.go')
+          text = chunk.read_text()
+          text = text.replace('type rowScanner interface {', 'type chunkRowScanner interface {')
+          text = text.replace('row rowScanner', 'row chunkRowScanner')
+          chunk.write_text(text)
+
+          index = Path('backend/internal/repository/rag_index.go')
+          text = index.read_text()
+          text = text.replace('nullableString(generationID)', 'ragNullableString(generationID)')
+          text = text.replace('nullableString(libraryFileID)', 'ragNullableString(libraryFileID)')
+          text = text.replace('nullableString(attachmentID)', 'ragNullableString(attachmentID)')
+          text = text.replace('func nullableString(value string) any {', 'func ragNullableString(value string) any {')
+          index.write_text(text)
+          PY
+
+          gofmt -w backend/internal/repository/document_chunk.go backend/internal/repository/rag_index.go
+          rm -f docs/RAG_TEST_FAILURE.md .github/workflows/rag-debug.yml .github/workflows/rag-fix.yml
+
+      - name: Commit compatibility fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(rag): resolve repository compatibility conflicts'
+          git push origin HEAD:feature/rag-modernization-v2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend validation
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p cmd/desktop/frontend_dist
+          printf '<!doctype html><title>test</title>' > cmd/desktop/frontend_dist/index.html
+          go test ./...
+          go test -race ./internal/rag ./internal/repository ./internal/filelibrary ./internal/document
