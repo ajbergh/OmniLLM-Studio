@@ -1,0 +1,10 @@
+combined_base64_bytes=64748
+decode_status=0
+archive_bytes=48560
+archive_sha256=6c99890690b5ed0d7f6b0ba51fb379d00daa67cf4c2f4a8c71a6f03d1a60169e
+gzip_status=1
+tar_status=2
+tar_error= gzip: stdin: invalid compressed data--crc error  gzip: stdin: invalid compressed data--length error tar: Child returned status 1 tar: Error is not recoverable: exiting now 
+expected_base64_bytes=64756
+expected_archive_bytes=48566
+expected_archive_sha256=f67366adc965e8619ba17fcfbccfdba11751d726f166c361d07e5e9c076e51fb
