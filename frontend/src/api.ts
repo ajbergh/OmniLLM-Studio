@@ -29,6 +29,9 @@ import type {
   DocumentChunk,
   ReindexResponse,
   IndexAttachmentResponse,
+  RAGHealthResponse,
+  RAGRepairResponse,
+  RAGReindexAllResponse,
   ToolDefinition,
   ToolResult,
   UsageSummary,
@@ -601,10 +604,17 @@ export const api = {
       method: 'POST',
     }),
 
-  reindexAll: () =>
-    apiFetch<{ conversations_dropped: number; note: string }>('/rag/reindex-all', {
-      method: 'POST',
-    }),
+  getRAGHealth: () => apiFetch<RAGHealthResponse>('/rag/health'),
+
+repairRAG: () =>
+  apiFetch<RAGRepairResponse>('/rag/repair', {
+    method: 'POST',
+  }),
+
+reindexAll: () =>
+  apiFetch<RAGReindexAllResponse>('/rag/reindex-all', {
+    method: 'POST',
+  }),
 
   // ---- Tools ----
 

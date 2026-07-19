@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
 import { api, authApi, browserApi, mcpApi, musicApi, videoApi, setAuthToken } from '../api';
 import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, GitBranch as Github, Calculator, Link2, Search, Music2, Film, Route as RouteIcon } from 'lucide-react';
-import type { BrowserSession, BrowserStatus, CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, ToolPolicy, UpdateMCPServerRequest } from '../types';
+import type { BrowserSession, BrowserStatus, CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, RAGHealthResponse, ToolPolicy, UpdateMCPServerRequest } from '../types';
 import type { MusicModel, MusicProviderKey } from '../types/music';
 import type { VideoModel, VideoProviderKey } from '../types/video';
 import { useTheme, THEMES } from '../theme';
@@ -1672,14 +1672,35 @@ function RAGTab() {
   const [saving, setSaving] = useState(false);
   const [reindexing, setReindexing] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+const [health, setHealth] = useState<RAGHealthResponse | null>(null);
+const [healthLoading, setHealthLoading] = useState(false);
+const [healthError, setHealthError] = useState<string | null>(null);
+const [repairing, setRepairing] = useState(false);
 
   useEffect(() => {
-    setRagEnabled(settings.rag_enabled ?? false);
-    setEmbeddingModel(settings.rag_embedding_model ?? RAG_DEFAULTS.embeddingModel);
-    setChunkSize(settings.rag_chunk_size ?? RAG_DEFAULTS.chunkSize);
-    setChunkOverlap(settings.rag_chunk_overlap ?? RAG_DEFAULTS.chunkOverlap);
-    setTopK(settings.rag_top_k ?? RAG_DEFAULTS.topK);
-  }, [settings]);
+  setRagEnabled(settings.rag_enabled ?? false);
+  setEmbeddingModel(settings.rag_embedding_model ?? RAG_DEFAULTS.embeddingModel);
+  setChunkSize(settings.rag_chunk_size ?? RAG_DEFAULTS.chunkSize);
+  setChunkOverlap(settings.rag_chunk_overlap ?? RAG_DEFAULTS.chunkOverlap);
+  setTopK(settings.rag_top_k ?? RAG_DEFAULTS.topK);
+}, [settings]);
+
+const loadRAGHealth = useCallback(async () => {
+  setHealthLoading(true);
+  setHealthError(null);
+  try {
+    setHealth(await api.getRAGHealth());
+  } catch (err) {
+    setHealth(null);
+    setHealthError(err instanceof Error ? err.message : 'Unable to load RAG health');
+  } finally {
+    setHealthLoading(false);
+  }
+}, []);
+
+useEffect(() => {
+  void loadRAGHealth();
+}, [loadRAGHealth]);
 
   const isCustomized =
     embeddingModel !== RAG_DEFAULTS.embeddingModel ||
@@ -1705,6 +1726,7 @@ function RAGTab() {
         rag_top_k: topK,
       });
       toast.success('RAG settings saved');
+      void loadRAGHealth();
     } catch {
       toast.error('Failed to save RAG settings');
     } finally {
@@ -1713,21 +1735,38 @@ function RAGTab() {
   };
 
   const handleReindexAll = async () => {
-    if (!window.confirm(
-      'Drop every conversation\'s vector index? Each conversation will lazy-rebuild from existing chunk text on its next query. This is safe but may make the first retrieval per conversation a bit slower.'
-    )) {
-      return;
-    }
-    setReindexing(true);
-    try {
-      const result = await api.reindexAll();
-      toast.success(`Reset ${result.conversations_dropped} conversation${result.conversations_dropped === 1 ? '' : 's'}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to reindex');
-    } finally {
-      setReindexing(false);
-    }
-  };
+  if (!window.confirm(
+    'Safely rebuild every indexed conversation now? Existing indexes remain searchable until each replacement succeeds.'
+  )) return;
+  setReindexing(true);
+  try {
+    const result = await api.reindexAll();
+    const failureSuffix = result.failures.length > 0 ? `; ${result.failures.length} failed` : '';
+    toast.success(`Reindexed ${result.conversations_reindexed} conversation${result.conversations_reindexed === 1 ? '' : 's'} and ${result.chunks_indexed} chunks${failureSuffix}`);
+    await loadRAGHealth();
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : 'Failed to reindex');
+  } finally {
+    setReindexing(false);
+  }
+}
+
+const handleRepair = async () => {
+  if (!window.confirm(
+    'Check every indexed conversation and rebuild inconsistent indexes? Valid indexes remain available throughout the repair.'
+  )) return;
+  setRepairing(true);
+  try {
+    const result = await api.repairRAG();
+    const failureSuffix = result.failures.length > 0 ? `; ${result.failures.length} still need attention` : '';
+    toast.success(`Repaired ${result.conversations_repaired} conversation${result.conversations_repaired === 1 ? '' : 's'} and ${result.chunks_indexed} chunks${failureSuffix}`);
+    await loadRAGHealth();
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : 'Failed to repair RAG indexes');
+  } finally {
+    setRepairing(false);
+  }
+};
 
   return (
     <div className="space-y-6">
@@ -1933,37 +1972,71 @@ function RAGTab() {
         </div>
       </div>
 
-      {/* Maintenance — admin only */}
-      <div className="p-5 rounded-2xl bg-surface-alt border border-border">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center shadow-md shadow-amber-500/10">
-            <RefreshCw size={18} className="text-amber-400" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold">Maintenance</h3>
-            <p className="text-[11px] text-text-muted">Vector store cleanup &amp; migration</p>
-          </div>
-        </div>
-
-        <p className="text-[11px] text-text-muted mb-3 leading-relaxed">
-          Reset every conversation's vector index. Each conversation lazy-rebuilds from existing
-          chunks on its next query — no re-embedding network call required for documents that
-          were indexed before the chromem-go upgrade.
-        </p>
-
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={handleReindexAll}
-          disabled={reindexing}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25
-                     border border-amber-500/30 text-amber-300 text-sm font-medium
-                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {reindexing ? <RefreshCw size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          Reindex All Documents
-        </motion.button>
+      {/* Index health — admin endpoint; non-admin users see an availability note. */}
+<div className="p-5 rounded-2xl bg-surface-alt border border-border">
+  <div className="flex items-center justify-between gap-3 mb-4">
+    <div className="flex items-center gap-3">
+      <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 flex items-center justify-center shadow-md shadow-cyan-500/10">
+        <CheckCircle2 size={18} className={health && health.vector_records === health.chunks ? 'text-emerald-400' : 'text-cyan-400'} />
       </div>
+      <div>
+        <h3 className="text-sm font-bold">Index Health</h3>
+        <p className="text-[11px] text-text-muted">Current relational and vector retrieval footprint</p>
+      </div>
+    </div>
+    <button type="button" onClick={() => void loadRAGHealth()} disabled={healthLoading} className="p-2 rounded-lg border border-border text-text-muted hover:text-text hover:bg-surface transition-colors disabled:opacity-50" aria-label="Refresh RAG health">
+      <RefreshCw size={14} className={healthLoading ? 'animate-spin' : ''} />
+    </button>
+  </div>
+
+  {health ? (
+    <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        {[
+          ['Documents', health.conversations_indexed.toLocaleString()],
+          ['Chunks', health.chunks.toLocaleString()],
+          ['Vectors', health.vector_records.toLocaleString()],
+          ['Collections', health.physical_collections.toLocaleString()],
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-xl border border-border bg-surface/60 p-3">
+            <p className="text-[10px] uppercase tracking-wide text-text-muted">{label}</p>
+            <p className="mt-1 text-lg font-semibold text-text">{value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-text-muted">
+        <span className="rounded-md border border-border bg-surface px-2 py-1">{health.backend}</span>
+        <span className="rounded-md border border-border bg-surface px-2 py-1">Pure Go: {health.pure_go ? 'Yes' : 'No'}</span>
+        <span className="rounded-md border border-border bg-surface px-2 py-1">Embedding schema v{health.embedding_schema_version}</span>
+        <span className="rounded-md border border-border bg-surface px-2 py-1">{health.enabled ? 'Enabled' : 'Disabled'}</span>
+      </div>
+    </>
+  ) : healthLoading ? (
+    <div className="flex items-center gap-2 text-xs text-text-muted"><RefreshCw size={13} className="animate-spin" /> Loading index health…</div>
+  ) : (
+    <div className="flex items-start gap-2 rounded-xl border border-border bg-surface/50 p-3 text-[11px] text-text-muted">
+      <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+      <span>{healthError || 'Index health is available to administrators.'}</span>
+    </div>
+  )}
+</div>
+
+{/* Maintenance — admin only */}
+<div className="p-5 rounded-2xl bg-surface-alt border border-border">
+  <div className="flex items-center gap-3 mb-3">
+    <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center shadow-md shadow-amber-500/10"><Wrench size={18} className="text-amber-400" /></div>
+    <div><h3 className="text-sm font-bold">Maintenance</h3><p className="text-[11px] text-text-muted">Non-destructive index repair and rebuild</p></div>
+  </div>
+  <p className="text-[11px] text-text-muted mb-4 leading-relaxed">Replacement vectors are built before active relational chunks are swapped. A failed document keeps its previous searchable index instead of leaving a partial rebuild.</p>
+  <div className="flex flex-wrap gap-2">
+    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleRepair} disabled={repairing || reindexing} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+      {repairing ? <RefreshCw size={14} className="animate-spin" /> : <Wrench size={14} />} Repair Indexes
+    </motion.button>
+    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleReindexAll} disabled={reindexing || repairing} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+      <RefreshCw size={14} className={reindexing ? 'animate-spin' : ''} /> Rebuild All Documents
+    </motion.button>
+  </div>
+</div>
     </div>
   );
 }

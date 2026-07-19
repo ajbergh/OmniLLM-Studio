@@ -75,3 +75,9 @@ The branch is designed to remain CGO-free. No Python, ONNX Runtime, external vec
 - Reindexing now builds replacement vectors before atomically replacing relational chunks; failed attachments retain the previous searchable index.
 - Added admin RAG health and repair endpoints.
 - Added a token-protected pure-Go HTTP VectorIndex client/server adapter for dedicated index-owner and multi-replica deployments.
+
+## Administration UI completion
+
+- Settings displays live RAG document, chunk, vector, and collection health.
+- Added explicit non-destructive repair and full rebuild actions.
+- Frontend contracts match safe reindex and repair API responses.

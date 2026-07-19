@@ -357,16 +357,55 @@ export interface RAGSourceRef {
   preview: string;
 }
 
+export interface RAGAttachmentReindexResult {
+  attachment_id: string;
+  chunks_indexed: number;
+  stale_removed: number;
+}
+
 export interface ReindexResponse {
   conversation_id: string;
-  chunks_created: number;
-  embeddings_stored: number;
+  chunks_indexed: number;
+  attachments: RAGAttachmentReindexResult[];
+  failures?: string[];
+  embed_provider: string;
+  embed_model: string;
 }
 
 export interface IndexAttachmentResponse {
   attachment_id: string;
-  chunks_created: number;
-  embeddings_stored: number;
+  chunks_indexed: number;
+  stale_removed: number;
+  embed_provider: string;
+  embed_model: string;
+}
+
+export interface RAGHealthResponse {
+  enabled: boolean;
+  embedding_selection: string;
+  chunk_size: number;
+  chunk_overlap: number;
+  top_k: number;
+  conversations_indexed: number;
+  chunks: number;
+  vector_records: number;
+  physical_collections: number;
+  backend: string;
+  pure_go: boolean;
+  embedding_schema_version: number;
+}
+
+export interface RAGRepairResponse {
+  conversations_repaired: number;
+  chunks_indexed: number;
+  failures: string[];
+}
+
+export interface RAGReindexAllResponse {
+  conversations_reindexed: number;
+  chunks_indexed: number;
+  failures: string[];
+  note: string;
 }
 
 // ---- File Library Types ----
