@@ -99,28 +99,12 @@ func (h *ToolHandler) ExecuteTool(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusOK, h.executor.ApprovalBroker().List(tools.InvocationScope{UserID: userID}))
 		return
 	case "resolve_approval":
-		if req.ApprovalID == "" {
-			respondError(w, http.StatusBadRequest, "approval_id is required")
-			return
-		}
-		pending, ok := h.executor.ApprovalBroker().Get(req.ApprovalID)
-		if !ok {
-			respondError(w, http.StatusNotFound, "approval not found")
-			return
-		}
-		if pending.Request.Scope.UserID != "" && pending.Request.Scope.UserID != userID {
-			respondError(w, http.StatusForbidden, "approval does not belong to current user")
-			return
-		}
-		if len(req.Arguments) > 0 && !json.Valid(req.Arguments) {
-			respondError(w, http.StatusBadRequest, "arguments must be valid JSON")
-			return
-		}
-		if err := h.executor.ApprovalBroker().Resolve(req.ApprovalID, req.Approved, req.Arguments); err != nil {
+		result, err := h.resolveAndExecuteApproval(r, userID, req.ApprovalID, req.Approved, req.Arguments)
+		if err != nil {
 			respondApprovalError(w, err)
 			return
 		}
-		respondJSON(w, http.StatusOK, map[string]interface{}{"approval_id": req.ApprovalID, "approved": req.Approved})
+		respondJSON(w, http.StatusOK, map[string]interface{}{"approval_id": req.ApprovalID, "approved": req.Approved, "result": result})
 		return
 	case "":
 	default:
@@ -149,17 +133,6 @@ func (h *ToolHandler) ListApprovals(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ToolHandler) ResolveApproval(w http.ResponseWriter, r *http.Request) {
-	approvalID := chi.URLParam(r, "approvalId")
-	pending, ok := h.executor.ApprovalBroker().Get(approvalID)
-	if !ok {
-		respondError(w, http.StatusNotFound, "approval not found")
-		return
-	}
-	userID := auth.UserIDFromContext(r.Context())
-	if pending.Request.Scope.UserID != "" && pending.Request.Scope.UserID != userID {
-		respondError(w, http.StatusForbidden, "approval does not belong to current user")
-		return
-	}
 	var req struct {
 		Approved bool            `json:"approved"`
 		Arguments json.RawMessage `json:"arguments,omitempty"`
@@ -168,15 +141,44 @@ func (h *ToolHandler) ResolveApproval(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if len(req.Arguments) > 0 && !json.Valid(req.Arguments) {
-		respondError(w, http.StatusBadRequest, "arguments must be valid JSON")
-		return
-	}
-	if err := h.executor.ApprovalBroker().Resolve(approvalID, req.Approved, req.Arguments); err != nil {
+	approvalID := chi.URLParam(r, "approvalId")
+	result, err := h.resolveAndExecuteApproval(r, auth.UserIDFromContext(r.Context()), approvalID, req.Approved, req.Arguments)
+	if err != nil {
 		respondApprovalError(w, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]interface{}{"approval_id": approvalID, "approved": req.Approved})
+	respondJSON(w, http.StatusOK, map[string]interface{}{"approval_id": approvalID, "approved": req.Approved, "result": result})
+}
+
+func (h *ToolHandler) resolveAndExecuteApproval(r *http.Request, userID, approvalID string, approved bool, editedArguments json.RawMessage) (*tools.ToolResult, error) {
+	if approvalID == "" {
+		return nil, errors.New("approval_id is required")
+	}
+	pending, ok := h.executor.ApprovalBroker().Get(approvalID)
+	if !ok {
+		return nil, tools.ErrApprovalNotFound
+	}
+	if pending.Request.Scope.UserID != "" && pending.Request.Scope.UserID != userID {
+		return nil, errors.New("approval does not belong to current user")
+	}
+	arguments := pending.Request.Arguments
+	if len(editedArguments) > 0 {
+		if !json.Valid(editedArguments) {
+			return nil, errors.New("arguments must be valid JSON")
+		}
+		arguments = editedArguments
+	}
+	if err := h.executor.ApprovalBroker().Resolve(approvalID, approved, arguments); err != nil {
+		return nil, err
+	}
+	if !approved {
+		return nil, nil
+	}
+	ctx := tools.ContextWithInvocationScope(r.Context(), pending.Request.Scope)
+	result := h.executor.ExecuteApproved(ctx, tools.ToolCall{
+		ID: pending.Request.ToolCallID, Name: pending.Request.ToolName, Arguments: arguments,
+	})
+	return result, nil
 }
 
 func respondApprovalError(w http.ResponseWriter, err error) {
