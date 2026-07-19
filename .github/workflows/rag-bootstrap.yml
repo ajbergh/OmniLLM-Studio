@@ -21,35 +21,52 @@ jobs:
           fetch-depth: 0
           ref: feature/rag-modernization-v2
 
-      - name: Diagnose source payload
+      - name: Assemble source payload
         shell: bash
         run: |
-          set +e
+          set -euo pipefail
           cat .rag-bootstrap/part-* > /tmp/rag-modernization.b64
-          combined_bytes=$(wc -c < /tmp/rag-modernization.b64)
-          base64 --decode --ignore-garbage /tmp/rag-modernization.b64 > /tmp/rag-modernization.tar.gz
-          decode_status=$?
-          archive_bytes=$(wc -c < /tmp/rag-modernization.tar.gz)
-          archive_sha=$(sha256sum /tmp/rag-modernization.tar.gz | cut -d' ' -f1)
-          gzip -t /tmp/rag-modernization.tar.gz
-          gzip_status=$?
-          tar --list --gzip --file /tmp/rag-modernization.tar.gz >/tmp/rag-tar-list.txt 2>/tmp/rag-tar-error.txt
-          tar_status=$?
-          {
-            echo "combined_base64_bytes=${combined_bytes}"
-            echo "decode_status=${decode_status}"
-            echo "archive_bytes=${archive_bytes}"
-            echo "archive_sha256=${archive_sha}"
-            echo "gzip_status=${gzip_status}"
-            echo "tar_status=${tar_status}"
-            echo "tar_error=$(tr '\n' ' ' </tmp/rag-tar-error.txt)"
-            echo "expected_base64_bytes=64756"
-            echo "expected_archive_bytes=48566"
-            echo "expected_archive_sha256=f67366adc965e8619ba17fcfbccfdba11751d726f166c361d07e5e9c076e51fb"
-          } > .rag-bootstrap/diagnostic.txt
+          test "$(wc -c < /tmp/rag-modernization.b64)" -eq 64756
+          base64 --decode /tmp/rag-modernization.b64 > /tmp/rag-modernization.tar.gz
+          echo 'f67366adc965e8619ba17fcfbccfdba11751d726f166c361d07e5e9c076e51fb  /tmp/rag-modernization.tar.gz' | sha256sum --check -
+          tar --list --gzip --file /tmp/rag-modernization.tar.gz >/dev/null
 
+          rm -f \
+            backend/internal/rag/chunker.go \
+            backend/internal/rag/context_builder.go \
+            backend/internal/rag/embed.go \
+            backend/internal/rag/embed_resolver.go \
+            backend/internal/rag/retriever_chromem.go \
+            backend/internal/rag/store.go \
+            backend/internal/filelibrary/extract.go \
+            backend/internal/filelibrary/search.go
+
+          tar --extract --gzip --file /tmp/rag-modernization.tar.gz --directory .
+          rm -rf .rag-bootstrap .github/workflows/rag-bootstrap.yml
+
+      - name: Format and validate generated tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(gofmt -l backend/internal/api/attachment_text.go backend/internal/document backend/internal/filelibrary/rag_v2.go backend/internal/rag backend/internal/repository/document_chunk.go backend/internal/repository/rag_index.go backend/internal/websearch/orchestrator.go)"
+
+      - name: Commit assembled implementation
+        shell: bash
+        run: |
+          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .rag-bootstrap/diagnostic.txt
-          git commit -m 'build(rag): record bootstrap diagnostics [skip ci]'
+          git add -A
+          git commit -m 'feat(rag): implement provider-neutral hybrid RAG modernization'
           git push origin HEAD:feature/rag-modernization-v2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: backend/go.sum
+
+      - name: Backend validation
+        working-directory: backend
+        run: |
+          go test ./...
+          go test -race ./internal/rag ./internal/repository ./internal/filelibrary ./internal/document
