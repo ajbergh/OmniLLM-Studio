@@ -90,10 +90,14 @@ export function AgentRunView({ conversationId }: AgentRunViewProps) {
 
   const handleStreamEvent = useCallback((event: AgentStreamEvent) => {
     let payload: ParsedAgentEvent = {};
-    try { payload = event.data ? JSON.parse(event.data) as ParsedAgentEvent : {}; } catch { /* ignore malformed individual event */ }
+    try {
+      payload = event.data ? JSON.parse(event.data) as ParsedAgentEvent : {};
+    } catch {
+      // Ignore malformed individual events without stopping the stream.
+    }
     const runId = payload.run_id || payload.id || activeRunIdRef.current || undefined;
     if (runId) activeRunIdRef.current = runId;
-    setActivity(eventLabels[event.type] || event.type.replaceAll('_', ' '));
+    setActivity(eventLabels[event.type] || event.type.split('_').join(' '));
 
     switch (event.type) {
       case AgentEventType.ApprovalRequired:
@@ -227,7 +231,11 @@ export function AgentRunView({ conversationId }: AgentRunViewProps) {
     return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${entry.className}`}><Icon size={10} className={status === AgentRunStatus.Running ? 'animate-spin' : ''} />{status}</span>;
   };
 
-  const canControl = activeRun && [AgentRunStatus.Planning, AgentRunStatus.Running, AgentRunStatus.AwaitingApproval].includes(activeRun.status);
+  const canControl = activeRun !== null && (
+    activeRun.status === AgentRunStatus.Planning
+    || activeRun.status === AgentRunStatus.Running
+    || activeRun.status === AgentRunStatus.AwaitingApproval
+  );
 
   return (
     <div className="glass overflow-hidden rounded-xl">
@@ -308,7 +316,9 @@ function parseStepOutput(raw?: string): string | null {
       return JSON.stringify(parsed, null, 2);
     }
     return String(parsed);
-  } catch { return raw; }
+  } catch {
+    return raw;
+  }
 }
 
 function StepCard({ step, index, statusBadge, stepTypeIcon, onApprove }: {
