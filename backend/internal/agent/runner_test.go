@@ -501,7 +501,9 @@ func TestExecuteToolCallAskApprovalApproved(t *testing.T) {
 	}()
 
 	output, err := runner.executeToolCall(context.Background(), rc, run, step, func(event Event) {
-		events <- event
+		if event.Type == EventApprovalRequired {
+			events <- event
+		}
 	})
 	if err != nil {
 		t.Fatalf("executeToolCall: %v", err)
@@ -542,7 +544,9 @@ func TestExecuteToolCallAskApprovalRejected(t *testing.T) {
 	}()
 
 	_, err := runner.executeToolCall(context.Background(), rc, run, step, func(event Event) {
-		events <- event
+		if event.Type == EventApprovalRequired {
+			events <- event
+		}
 	})
 	if !errors.Is(err, errToolApprovalRejected) {
 		t.Fatalf("error = %v, want errToolApprovalRejected", err)
