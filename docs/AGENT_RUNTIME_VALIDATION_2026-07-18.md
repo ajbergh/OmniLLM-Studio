@@ -2,12 +2,12 @@
 
 **Branch:** `agent/chat-studio-agent-runtime-20260718`  
 **Pull request:** #24  
-**Validated head:** `1264499a53ccabf62bdde08fd7e67ce3ce6f7ada`  
+**Validated code head:** `1264499a53ccabf62bdde08fd7e67ce3ce6f7ada`  
 **Validation date:** 2026-07-19
 
 ## Result
 
-All configured GitHub Actions validation workflows completed successfully on the validated head.
+All configured GitHub Actions validation workflows completed successfully on the validated code head. Subsequent commits only update implementation and validation documentation; their automatically triggered workflow reruns should still be allowed to complete before the pull request is marked ready.
 
 ## Quality Gate
 
