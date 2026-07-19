@@ -10,6 +10,7 @@ import (
 
 	"github.com/ajbergh/omnillm-studio/internal/agent"
 	"github.com/ajbergh/omnillm-studio/internal/llm"
+	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	"github.com/go-chi/chi/v5"
 )
@@ -190,7 +191,6 @@ func (h *AgentHandler) ResumeRun(w http.ResponseWriter, r *http.Request) {
 		Provider string `json:"provider,omitempty"`
 		Model    string `json:"model,omitempty"`
 	}
-	// Empty body is valid for backward compatibility.
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := decodeJSON(r, &req); err != nil {
 			respondError(w, http.StatusBadRequest, "invalid request body")
