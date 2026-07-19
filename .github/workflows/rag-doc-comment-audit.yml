@@ -13,7 +13,7 @@ jobs:
   finalize:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,17 +61,21 @@ jobs:
           mkdir -p backend/cmd/desktop/frontend_dist
           printf '<!doctype html><title>validation placeholder</title>' > backend/cmd/desktop/frontend_dist/index.html
 
-          (cd backend && go test ./...) >/tmp/backend.log 2>&1
-          backend_status=$?
-          (cd backend && go test -race ./internal/rag ./internal/repository ./internal/filelibrary ./internal/document ./internal/api) >/tmp/race.log 2>&1
-          race_status=$?
-          (cd frontend && npm ci && npm run build && npm run lint && npm run test:unit) >/tmp/frontend.log 2>&1
-          frontend_status=$?
+          (cd backend && timeout 15m go test ./...) >/tmp/backend.log 2>&1 &
+          backend_pid=$!
+          (cd backend && timeout 15m go test -race ./internal/rag ./internal/repository ./internal/filelibrary ./internal/document ./internal/api) >/tmp/race.log 2>&1 &
+          race_pid=$!
+          (cd frontend && timeout 15m bash -lc 'npm ci && npm run build && npm run lint && npm run test:unit') >/tmp/frontend.log 2>&1 &
+          frontend_pid=$!
+
+          wait "$backend_pid"; backend_status=$?
+          wait "$race_pid"; race_status=$?
+          wait "$frontend_pid"; frontend_status=$?
           git diff --check >/tmp/diffcheck.log 2>&1
           diff_status=$?
           rm -rf backend/cmd/desktop/frontend_dist
 
-          label() { if [ "$1" -eq 0 ]; then printf 'PASS'; else printf 'FAIL'; fi; }
+          label() { if [ "$1" -eq 0 ]; then printf 'PASS'; elif [ "$1" -eq 124 ]; then printf 'TIMEOUT'; else printf 'FAIL'; fi; }
           python3 - "$(label "$backend_status")" "$(label "$race_status")" "$(label "$frontend_status")" "$(label "$diff_status")" <<'PY'
           from pathlib import Path
           import sys
