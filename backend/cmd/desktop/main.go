@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"log"
@@ -34,19 +36,20 @@ var (
 	commit  = "dev"
 )
 
-// App exposes methods to the frontend via Wails bindings.
+// App exposes the desktop-only API capability URL to the trusted Wails frontend.
 type App struct {
 	ctx     context.Context
-	apiBase string // e.g. "http://127.0.0.1:54321/v1"
+	apiBase string // e.g. "http://127.0.0.1:54321/__desktop/<launch-secret>/v1"
 }
 
 func NewApp(apiBase string) *App { return &App{apiBase: apiBase} }
 
 func (a *App) startup(ctx context.Context) { a.ctx = ctx }
 
-// GetAPIBase returns the base URL for the local API server so the frontend
-// can route fetch()/SSE calls to the real HTTP server (SSE streaming does
-// not work through the Wails AssetServer handler).
+// GetAPIBase returns the protected base URL for the local API server so the
+// frontend can route fetch()/SSE/media calls to the real HTTP server. The
+// random path component is generated for each application launch and is never
+// written to logs.
 func (a *App) GetAPIBase() string { return a.apiBase }
 
 func main() {
@@ -55,11 +58,15 @@ func main() {
 	// In GUI mode (windowsgui subsystem), stderr is disconnected.
 	// Route all logging to a file so errors are visible.
 	logPath := filepath.Join(desktopDataDir(), "omnillm-studio.log")
-	if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+	if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600); err == nil {
 		log.SetOutput(logFile)
 		defer logFile.Close()
 	}
 
+	desktopSecret, err := generateDesktopSecret()
+	if err != nil {
+		log.Fatalf("desktop API secret: %v", err)
+	}
 	cfg := config.Load()
 
 	database, err := db.Open(cfg.DatabasePath)
@@ -81,14 +88,20 @@ func main() {
 		log.Fatalf("listen: %v", err)
 	}
 	apiPort := ln.Addr().(*net.TCPAddr).Port
-	apiBase := fmt.Sprintf("http://127.0.0.1:%d/v1", apiPort)
-	log.Printf("[desktop] API server listening on %s", apiBase)
+	desktopPrefix := "/__desktop/" + desktopSecret
+	apiBase := fmt.Sprintf("http://127.0.0.1:%d%s/v1", apiPort, desktopPrefix)
+	log.Printf("[desktop] protected API server listening on 127.0.0.1:%d", apiPort)
 
+	// StripPrefix returns 404 for every request that does not contain the random
+	// per-launch path. The underlying router and request logger never see or log
+	// the secret prefix.
+	loopbackHandler := desktopLoopbackHandler(desktopPrefix, router)
 	srv := &http.Server{
-		Handler:      router,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 0, // SSE needs unlimited write time
-		IdleTimeout:  120 * time.Second,
+		Handler:           loopbackHandler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       0, // large local media uploads and SSE are independently bounded by handlers
+		WriteTimeout:      0, // SSE needs unlimited write time
+		IdleTimeout:       120 * time.Second,
 	}
 	go func() {
 		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -130,8 +143,8 @@ func main() {
 		Width:  1280,
 		Height: 800,
 		AssetServer: &assetserver.Options{
-			Assets:  frontendFS, // serves the React SPA static files
-			Handler: router,     // handles /v1/* requests from the WebView (e.g. <img> tags)
+			Assets:  frontendFS,
+			Handler: router, // trusted in-process requests from the Wails asset server
 		},
 		Bind:      []interface{}{app},
 		OnStartup: app.startup,
@@ -140,7 +153,9 @@ func main() {
 			if err := shutdownAPI(ctx); err != nil {
 				log.Printf("[desktop] API runtime shutdown: %v", err)
 			}
-			srv.Shutdown(ctx)
+			if err := srv.Shutdown(ctx); err != nil {
+				log.Printf("[desktop] HTTP shutdown: %v", err)
+			}
 		},
 	})
 	if err != nil {
@@ -148,34 +163,51 @@ func main() {
 	}
 }
 
+// desktopLoopbackHandler exposes next only beneath the per-launch secret path.
+// http.StripPrefix returns 404 before invoking next for unprefixed or
+// wrong-secret requests, keeping the capability path out of router logs.
+func desktopLoopbackHandler(prefix string, next http.Handler) http.Handler {
+	return http.StripPrefix(prefix, next)
+}
+
+// generateDesktopSecret returns a cryptographically random 256-bit secret
+// encoded for use as one URL path segment. It must never be logged or persisted.
+func generateDesktopSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
 // setDesktopDefaults configures OS-appropriate default paths for the database
 // and attachments directory so a desktop user doesn't need env vars.
 func setDesktopDefaults() {
-	// In desktop mode all origins are same-app; allow all to avoid
-	// WebView origin mismatches (wails://, http://wails.localhost, etc.).
+	// Restrict cross-origin API access to known Wails origins. The random path
+	// prefix remains the actual authorization boundary for the loopback listener.
 	if os.Getenv("OMNILLM_CORS_ORIGINS") == "" {
-		os.Setenv("OMNILLM_CORS_ORIGINS", "*")
+		os.Setenv("OMNILLM_CORS_ORIGINS", "http://wails.localhost,https://wails.localhost,wails://wails.localhost")
 	}
 
 	dataDir := desktopDataDir()
 
 	if os.Getenv("OMNILLM_DB_PATH") == "" {
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		if err := os.MkdirAll(dataDir, 0700); err != nil {
 			log.Printf("warn: cannot create data dir %s: %v", dataDir, err)
 		}
 		os.Setenv("OMNILLM_DB_PATH", filepath.Join(dataDir, "omnillm-studio.db"))
 	}
 	if os.Getenv("OMNILLM_ATTACHMENTS_DIR") == "" {
 		dir := filepath.Join(dataDir, "attachments")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0700); err != nil {
 			log.Printf("warn: cannot create attachments dir %s: %v", dir, err)
 		}
 		os.Setenv("OMNILLM_ATTACHMENTS_DIR", dir)
 	}
-	// Enable the headless browser runtime by default in desktop mode.
-	// Users installing the desktop app expect features to work out-of-the-box.
+	// Browser automation is powerful and launches a local Chromium process. It
+	// is opt-in unless an explicit environment or settings value enables it.
 	if os.Getenv("OMNILLM_BROWSER_ENABLED") == "" {
-		os.Setenv("OMNILLM_BROWSER_ENABLED", "true")
+		os.Setenv("OMNILLM_BROWSER_ENABLED", "false")
 	}
 }
 

@@ -1,29 +1,42 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides implementation guidance for contributors and coding agents working in this repository.
 
 ## Commands
 
-### Backend (Go 1.24+, requires GCC for cgo/SQLite)
+### Backend
+
+Go 1.25+ is required. Linux desktop builds also require GCC, GTK3, and WebKit2GTK. Ubuntu 24.04 uses WebKit2GTK 4.1 and the `webkit2_41` build tag.
 
 ```bash
 cd backend
-go run ./cmd/server                 # Run dev server on :8080
-go test ./...                       # Run all tests
-go test ./internal/rag -run TestX   # Run a single test
-go build ./cmd/server               # Build headless server binary
-go build ./cmd/desktop              # Build Wails desktop binary
+go run ./cmd/server
+go test ./...
+go test -race ./...
+go vet ./...
+go build ./cmd/server
 ```
 
-### Frontend (Node 18+)
+On Ubuntu 24.04 when a command includes the Wails desktop package:
+
+```bash
+GOFLAGS=-tags=webkit2_41 go test ./...
+GOFLAGS=-tags=webkit2_41 go vet ./...
+```
+
+Use `scripts/build-wails-linux.sh` rather than invoking the Linux Wails build manually; the script detects WebKit2GTK 4.0 versus 4.1 and supplies the correct tag.
+
+### Frontend
+
+Node.js 24 is the CI and container build toolchain.
 
 ```bash
 cd frontend
-npm install
-npm run dev          # Vite dev server on :5173, proxies /v1/* to :8080
-npm run build        # tsc -b && vite build
-npm run lint         # eslint .
-npm run test:unit    # vitest store-level unit tests (node environment)
+npm ci
+npm run dev
+npm run lint
+npm run test:unit
+npm run build
 ```
 
 ### Both at once
@@ -34,109 +47,142 @@ scripts/start-dev.sh         # Linux/macOS
 scripts/start-wails-dev.bat  # Wails hot-reload desktop dev
 ```
 
-### Playwright smoke tests (root)
+### Playwright
 
 ```bash
-npm run test:smoke           # Headless Chromium: video-editor, image-editor, and music-studio specs
-npm run test:smoke:headed    # Same with browser visible
+npm ci
+npx playwright install --with-deps chromium
+npm run test:smoke
+npm run test:smoke:headed
 ```
 
-`playwright.config.ts` boots its own backend on port 8090 with an isolated SQLite DB at `backend/test-results/playwright-smoke/smoke.db` and a Vite preview on 4173 — do not point smoke runs at the dev DB.
+`npm run test:smoke` runs the complete Chromium Playwright suite. `playwright.config.ts` boots an isolated backend on port 8090 with its SQLite database under `backend/test-results/playwright-smoke/`; never point smoke tests at a development database.
 
-### Production / release builds
+### Production and release builds
 
-`scripts/build-all.sh` orchestrates Wails desktop (`build-wails-{windows,linux,macos}.{bat,sh}`) and headless web server (`build-web-*`) builds. CGO cross-compilation is not practical — use platform-native runners. See `.github/workflows/release.yml`.
+`scripts/build-all.sh` orchestrates native Wails and headless web builds. CGO desktop builds must run on platform-native runners. Release behavior is defined by `.github/workflows/release.yml`; do not replace pinned Go, Node, or Wails versions with `latest`.
 
 ## Architecture
 
 ### Big picture
 
-Local-first LLM chat app: **Go backend** (Chi + SQLite) + **React/TypeScript frontend** (Vite + Tailwind v4 + Zustand). All HTTP routes live under `/v1/`. Same Go binary can run headless (`cmd/server`) or as a Wails desktop app (`cmd/desktop`) — desktop mode embeds the built frontend via `//go:embed` and starts the HTTP server on a random loopback port for SSE compatibility.
+OmniLLM-Studio is a local-first Go and React application. The backend uses Chi, SQLite, Server-Sent Events, durable media storage, and chromem-go. The frontend uses React, TypeScript, Vite, Tailwind, and Zustand. The same backend runs headless or inside a Wails desktop application.
+
+Desktop mode starts a loopback HTTP server because SSE cannot pass through the Wails asset handler. That server is protected by a cryptographically random per-launch URL prefix. Do not log, persist, weaken, or replace that prefix with wildcard CORS or localhost-only trust.
 
 ### Composition root
 
-[backend/internal/api/router.go](backend/internal/api/router.go) is **the** place to start when tracing any feature. `NewRouter()` wires every repo → service → handler → chi route. There is no DI framework — read this file top-to-bottom to understand dependencies.
+`backend/internal/api/router.go` is the composition root. Read it top-to-bottom when tracing a feature. It constructs repositories, services, handlers, tools, and routes without a dependency-injection framework.
 
-### Layered backend
+### Backend layers
 
-`api/` (HTTP handlers) → domain services (`llm/`, `agent/`, `search/`, `analytics/`, `bundle/`, `rag/`, `tools/`, `templates/`, `plugins/`, `eval/`, `websearch/`, `auth/`) → `repository/` (raw `database/sql`) → `models/` → `db/`. No ORM. IDs are UUIDs from `github.com/google/uuid`. Models live in a single [backend/internal/models/models.go](backend/internal/models/models.go) with `snake_case` JSON tags; optional fields are pointers with `omitempty`.
+`api/` handlers call domain packages such as `llm/`, `agent/`, `search/`, `analytics/`, `bundle/`, `rag/`, `tools/`, `templates/`, `plugins/`, `eval/`, `websearch/`, `auth/`, `browser/`, `music/`, and `video/`. Repositories use raw `database/sql`; models use snake_case JSON tags and pointer fields for optional values.
 
 ### Database
 
-Single SQLite file (default `omnillm-studio.db`) in WAL mode with tuned PRAGMAs (cache_size 64MB, mmap 256MB, synchronous=NORMAL). Versioned migrations live in [backend/internal/db/db.go](backend/internal/db/db.go) — each migration is a SQL constant appended to the `versionedMigrations()` slice and tracked in a `schema_versions` table. New tables always use `CREATE TABLE IF NOT EXISTS`; new columns must have defaults so older rows still load.
+SQLite runs in WAL mode with a busy timeout and tuned cache/mmap settings. Versioned migrations live in `backend/internal/db/db.go` and are tracked in `schema_versions`.
 
-### Auth modes
+Foreign-key enforcement remains intentionally staged. Do not enable it without first auditing and repairing orphaned records and validating every delete path against existing user databases.
 
-Solo-mode (no users registered) → auth middleware passes through. Multi-user mode activates the moment the first user registers; subsequent registration requires `OMNILLM_ALLOW_PUBLIC_REGISTRATION=true` or admin invite. Bearer-token sessions, cleaned up by a 15-minute ticker in [cmd/server/main.go](backend/cmd/server/main.go).
+### Authentication and secrets
+
+Solo mode bypasses user sessions only when no users exist and the server binds to loopback. Multi-user mode accepts a bearer token or the first-party HttpOnly session cookie. Session tokens are SHA-256 hashed at rest and expired rows are cleaned periodically.
+
+Provider credentials use AES-256-GCM. Persistent container and Kubernetes deployments must provide a stable `OMNILLM_MASTER_KEY`; the runtime sets `OMNILLM_REQUIRE_MASTER_KEY=true`. Local desktop/server mode may use the machine-scoped seed file.
+
+### Network and browser security
+
+URL fetches must use the repository SSRF-safe transports. Validation and dialing must use the same resolved IP; never validate a hostname and then dial it through a second DNS lookup or an uncontrolled proxy.
+
+Headless-browser sessions use isolated incognito contexts, serialized page operations, per-user quotas, destination validation, and Chromium sandboxing by default. `OMNILLM_BROWSER_NO_SANDBOX=true` is an explicit compatibility override, not a normal setting. New browser capabilities must preserve user/session storage isolation and reject private, loopback, metadata, reserved, non-HTTP, and credential-bearing destinations.
 
 ### Streaming
 
-SSE (`event:` + `data:` frames) for token-by-token chat, agent steps, web search progress, tool calls, file search, RAG indexing, and URL context. Server uses `WriteTimeout: 5m` on the headless HTTP server. The frontend parses streams via raw `fetch()` + `ReadableStream` in [frontend/src/api.ts](frontend/src/api.ts). Event names include `token`, `done`, `web_search_*`, `file_search`, `file_search_results`, `rag_indexing`, `url_context`, `tool_start`, `agent_*`.
+SSE carries chat tokens, agent steps, tool progress, file search, RAG indexing, web search, generation progress, and URL context events. The frontend parses streams with `fetch()` and `ReadableStream` in `frontend/src/api.ts`. Preserve cancellation and terminal error/done events when modifying a stream.
 
 ### LLM provider routing
 
-[backend/internal/llm/service.go](backend/internal/llm/service.go) is the single entry point for chat, embeddings, and image generation across OpenAI / Anthropic / Gemini / Ollama / OpenRouter / Groq / Together / Mistral / any OpenAI-compatible API. Provider profiles (with AES-256-GCM-encrypted keys via `internal/crypto/`) are stored per-user in `provider_profiles`. Reasoning/thinking effort maps per-provider — for Anthropic, `low/medium/high` maps to extended-thinking `budget_tokens` of 2k / 8k / 16k.
+`backend/internal/llm/service.go` is the primary entry point for chat, embeddings, and image generation. Provider discovery and connectivity checks are privileged network operations. Do not accept provider API keys in URLs or query strings.
 
-### RAG
+### RAG and File Library
 
-Two-store design:
+Chunk text and metadata live in SQLite. Vectors live in chromem-go collections scoped by conversation, workspace, or global identity. Only `internal/rag/store.go` should import chromem directly.
 
-- **Chunk text + metadata** stay in SQLite (`document_chunks`).
-- **Vectors** live in [`chromem-go`](https://github.com/philippgille/chromem-go), with collections per conversation, workspace, and global scope under `<OMNILLM_CHROMEM_DIR>/<scope_id>/`.
-
-The wrapper is `internal/rag/store.go` (`VectorStore`); **never import `chromem` directly from call sites**. The retriever is `ChromemRetriever`. Legacy `document_embeddings` SQL rows lazy-migrate into chromem on first retrieve (`tryLazyMigrate`) — `POST /v1/rag/reindex-all` (admin) drops collections to force a re-migration.
-
-Attachment indexing runs **synchronously** so chunks are available when `injectRAGContext` retrieves them. SSE events (`rag_indexing`) are emitted before and after indexing so the frontend can show meaningful status.
-
-### File Library
-
-Durable file storage with three scopes: `conversation`, `workspace`, `global`. The `internal/filelibrary/` package provides:
-- `IngestFile` — attachment ingest with checksum deduplication, text extraction, chunking, and vector indexing
-- `Search` — hybrid vector + keyword retrieval with scope/filter support and citation formatting
-- `Summarize` / `Compare` — citation-aware LLM generation over selected files
-- `Fetch` / `ListFiles` / `UpdateFile` / `DeleteFile` / `ReindexFile` — full lifecycle
-
-File intent detection (`DetectFileIntent`) runs as a preflight step in the message handler before web search, so file-grounded queries take priority. SSE events (`file_search`, `file_search_results`) stream status to the frontend.
-
-API routes under `/v1/file-library/` and `/v1/conversations/:id/file-library/`. Frontend panel at `frontend/src/components/FileLibraryPanel.tsx`.
+Attachments are content-sniffed before persistence and indexing. Unknown binary data and declared/content MIME mismatches must remain rejected. File Library indexing is synchronous where the next chat turn depends on immediate retrieval.
 
 ### Image Studio
 
-Distinct from quick image generation. A "session" is a tree of generate/edit/variation nodes with masks and reference assets. Sessions, nodes, assets, masks, and references are relational. Provider adapters under `internal/llm/` route per-model to OpenAI / Gemini / Stable Diffusion / Together / OpenRouter. Frontend lives in [frontend/src/components/image/](frontend/src/components/image/) with a Zustand store at [frontend/src/stores/imageEditor.ts](frontend/src/stores/imageEditor.ts).
+Image sessions form a relational tree of generation, edit, mask, reference, and variant nodes. Backend provider adapters live under `internal/llm/`; frontend state is in `frontend/src/stores/imageEditor.ts`.
 
-### Video Studio / Video Edit Studio
+### Music and Video Studios
 
-Two workspaces over one backend (`internal/video/`, routes under `/v1/video`): AI generation (provider adapters for OpenRouter Video, Gemini Veo, Luma) and a timeline editor. Timelines are neutral JSON documents validated by `ValidateTimelineDocument` in [backend/internal/video/timeline.go](backend/internal/video/timeline.go) (schema version 1, generic `layer` tracks, clips with transforms/effects/transitions/keyframes/shapes/cursor metadata); rendering is FFmpeg via [backend/internal/video/renderer.go](backend/internal/video/renderer.go), whose export-fidelity matrix in `renderer_capabilities.go` must track every feature the renderer supports, partially supports, or skips — the frontend derives all "preview only" warnings from it. The frontend store is [frontend/src/stores/videoStudio.ts](frontend/src/stores/videoStudio.ts) (every timeline mutation: clone → mutate → one undo snapshot → autosave; drags commit once on pointer-up). Frontend registries under `frontend/src/components/video/effects/` (effects, transitions, annotations, motion presets) are the single source of truth for editor UI and must stay in sync with renderer capabilities. Timeline types in [frontend/src/types/video.ts](frontend/src/types/video.ts) mirror the Go structs exactly. Docs: `docs/VIDEO_STUDIO.md`, `docs/VIDEO_STUDIO_ARCHITECTURE.md`, `docs/VIDEO_TIMELINE_SCHEMA.md`, `docs/VIDEO_RENDERING.md`.
+Music and video share provider-profile and durable-asset conventions. Video creation and timeline editing share `internal/video/` and `/v1/video` while exposing separate frontend workspaces.
+
+Timeline JSON is validated by `ValidateTimelineDocument`. `renderer_capabilities.go` must match actual FFmpeg behavior because the frontend derives export-fidelity warnings from it. Frontend timeline types must mirror Go structs. Each mutation follows clone, mutate, one undo snapshot, then autosave; pointer drags commit once on pointer-up.
+
+The backend container intentionally includes FFmpeg and FFprobe. Do not remove them while container deployments advertise probing and rendering.
 
 ### Frontend state
 
-Zustand stores in [frontend/src/stores/index.ts](frontend/src/stores/index.ts) — separate slices for conversations, messages, providers, settings, feature flags. **No router** — navigation is conditional rendering in [frontend/src/App.tsx](frontend/src/App.tsx) with framer-motion `AnimatePresence` modal overlays. TypeScript types in [frontend/src/types.ts](frontend/src/types.ts) mirror Go model JSON tags exactly (`snake_case`).
+Zustand stores live under `frontend/src/stores/`. Navigation is primarily conditional rendering in `App.tsx`; do not introduce a second competing navigation model without an explicit redesign. TypeScript request and response types must mirror backend JSON contracts.
 
-## Conventions
+## Adding a backend feature
 
-### Adding a new backend feature (end-to-end)
+1. Add a versioned migration when persistence changes.
+2. Add or update Go models with snake_case JSON tags.
+3. Add repository methods using existing error and transaction conventions.
+4. Add a domain service when logic should not live in a handler.
+5. Add a handler using shared JSON/error helpers.
+6. Wire it in `router.go` inside the correct auth/role scope.
+7. Update frontend types, API client methods, state, and UI.
+8. Add feature gating where appropriate.
+9. Add cancellation/progress events for long-running operations.
+10. Add backend, frontend, and Playwright coverage appropriate to the change.
 
-1. Migration appended to `versionedMigrations()` in `db/db.go` (new tables = `CREATE TABLE IF NOT EXISTS`; new columns must have defaults).
-2. Struct in `models/models.go` with `snake_case` JSON tags.
-3. Repository in `repository/xxx.go` with `NewXxxRepo(db *sql.DB)` and CRUD methods returning `(*model, error)` or `([]model, error)`.
-4. Optional service package under `internal/`.
-5. Handler in `api/xxx_handler.go` with `NewXxxHandler(deps...)` constructor.
-6. Wire in `router.go` (composition root) inside the auth group.
-7. Frontend: add types to `types.ts`, typed API functions to `api.ts`, component in `components/`, integrate in `App.tsx`.
-8. Gate behind a feature flag when appropriate (`feature_flags` table; check via `FeatureFlagRepo`).
-9. If the feature involves file processing, add SSE events (`rag_indexing`, `file_search`, etc.) so the frontend can show meaningful status during long operations.
+## Handler and repository conventions
 
-### Handler / repository idioms
+- Responses: `respondJSON`, `respondError`, `respondErrorWithCode`, and `respondInternalError`.
+- Requests: `decodeJSON`; path parameters via `chi.URLParam`.
+- User-owned resources must be loaded through ownership-aware repository/service methods.
+- Do not expose raw provider errors, secrets, filesystem paths, or subprocess command lines to clients.
+- Never interpolate untrusted input into shell commands; pass discrete argv values.
 
-- Responses: `respondJSON(w, status, data)`, `respondError(w, status, msg)`, `respondErrorWithCode(w, status, code, msg, details)` — all from [backend/internal/api/helpers.go](backend/internal/api/helpers.go).
-- Request bodies: `decodeJSON(r, &v)`. Path params: `chi.URLParam(r, "name")`. Query: `r.URL.Query().Get("key")`.
+## Validation
 
-### Tests
+The required pull-request gate is `.github/workflows/ci.yml`:
 
-- Repository tests use in-memory SQLite via the `newTestDB` helper (open `":memory:"` then `db.Migrate`).
-- Internal-package tests (e.g. `rag/chunker_test.go`) use the same package to access unexported helpers.
-- Frontend unit tests use vitest (`frontend/vitest.config.ts`, node environment) — store-level coverage lives next to the store (e.g. `src/stores/videoStudio.test.ts`). Playwright smoke tests at the repo root cover the video, image, and music editors.
+- canonical Go formatting
+- `go vet`
+- backend unit/integration tests
+- Go race detector
+- frontend lint, unit tests, and production build
+- Windows plugin lifecycle and path-containment test
+- complete Playwright Chromium suite
+- Helm lint and template validation
+
+`.github/workflows/security.yml` runs govulncheck, npm audits, and CodeQL. `.github/workflows/container.yml` builds both multi-architecture images and validates the Helm chart. Do not merge a dependency, security-sensitive, deployment, browser, plugin, auth, import/export, or persistence change while its applicable gate is red.
 
 ## Environment variables
 
-`OMNILLM_PORT` (8080), `OMNILLM_BIND_ADDRESS` (127.0.0.1), `OMNILLM_DB_PATH`, `OMNILLM_ATTACHMENTS_DIR`, `OMNILLM_CORS_ORIGINS`, `OMNILLM_ALLOW_PUBLIC_REGISTRATION`, `OMNILLM_PLUGIN_DIR` (`~/.omnillm-studio/plugins`), `OMNILLM_CHROMEM_DIR` (sibling of DB), `OMNILLM_CHROMEM_COMPRESS`. Defaults are in [backend/internal/config/config.go](backend/internal/config/config.go).
+Core variables include:
+
+- `OMNILLM_PORT`
+- `OMNILLM_BIND_ADDRESS`
+- `OMNILLM_DB_PATH`
+- `OMNILLM_ATTACHMENTS_DIR`
+- `OMNILLM_CORS_ORIGINS`
+- `OMNILLM_ALLOW_PUBLIC_REGISTRATION`
+- `OMNILLM_MASTER_KEY`
+- `OMNILLM_REQUIRE_MASTER_KEY`
+- `OMNILLM_PLUGIN_DIR`
+- `OMNILLM_CHROMEM_DIR`
+- `OMNILLM_CHROMEM_COMPRESS`
+- `OMNILLM_MAX_UPLOAD_BYTES`
+- `OMNILLM_BROWSER_ENABLED`
+- `OMNILLM_BROWSER_EXEC_PATH`
+- `OMNILLM_BROWSER_CACHE_DIR`
+- `OMNILLM_BROWSER_MAX_SESSIONS`
+- `OMNILLM_BROWSER_SESSION_TTL`
+- `OMNILLM_BROWSER_NO_SANDBOX`
+
+Defaults and parsing live in `backend/internal/config/config.go`.

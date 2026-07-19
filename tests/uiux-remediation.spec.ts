@@ -36,7 +36,7 @@ function seedChatFixture(title: string): ChatFixture {
 function seedImageSessionFixture(title: string): ImageFixture {
   const repoRoot = process.cwd();
   const backendDir = path.join(repoRoot, 'backend');
-  const fixtureImage = path.join(backendDir, 'cmd', 'desktop', 'build', 'appicon.png');
+  const fixtureImage = path.join(repoRoot, 'docs', 'assets', 'screenshots', 'chat-studio.png');
   const raw = execFileSync(
     'go',
     ['run', './cmd/playwrightseed', '--title', title, '--image', fixtureImage],

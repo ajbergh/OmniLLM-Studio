@@ -359,26 +359,6 @@ function ProvidersTab({
     default_model: '',
     default_image_model: '',
   });
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
-  const [ollamaLoading, setOllamaLoading] = useState(false);
-
-  const fetchOllama = useCallback(async (baseUrl?: string) => {
-    setOllamaLoading(true);
-    const models = await api.fetchOllamaModels(baseUrl);
-    setOllamaModels(models);
-    setOllamaLoading(false);
-  }, []);
-
-  // Auto-fetch Ollama models when type changes to ollama
-  useEffect(() => {
-    if (newProvider.type === 'ollama' && adding) {
-      const timer = window.setTimeout(() => {
-        fetchOllama(newProvider.base_url || undefined);
-      }, 300);
-      return () => window.clearTimeout(timer);
-    }
-  }, [newProvider.type, adding, fetchOllama, newProvider.base_url]);
-
   const handleAdd = async () => {
     if (!newProvider.name) return;
     await onAdd({
@@ -394,7 +374,7 @@ function ProvidersTab({
   };
 
   const selectedMeta = getProviderMeta(newProvider.type);
-  const newProviderChatModels = newProvider.type === 'ollama' ? ollamaModels : getKnownChatModels(newProvider.type);
+  const newProviderChatModels = getKnownChatModels(newProvider.type);
   const newProviderImageModels = getKnownImageModels(newProvider.type);
 
   return (
@@ -462,40 +442,7 @@ function ProvidersTab({
                   placeholder={`My ${selectedMeta.label}`}
                 />
                 <div className="space-y-3">
-                  {newProvider.type === 'ollama' ? (
-                    <div>
-                      <label className="block text-xs text-text-muted mb-1.5 font-medium">
-                        {newProviderImageModels.length > 0 ? 'Default Chat Model' : 'Default Model'}
-                      </label>
-                      <div className="flex gap-2">
-                        <select
-                          value={newProvider.default_model}
-                          onChange={(e) => setNewProvider((s) => ({ ...s, default_model: e.target.value }))}
-                          className="min-w-0 flex-1 px-3 py-2.5 text-sm bg-surface border border-border rounded-xl
-                                     text-text focus:outline-none focus:border-primary transition-all input-glow"
-                        >
-                          <option value="">{ollamaLoading ? 'Loading...' : ollamaModels.length ? 'Select a model...' : 'No models found'}</option>
-                          {ollamaModels.map((m) => (
-                            <option key={m} value={m}>{m}</option>
-                          ))}
-                        </select>
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => fetchOllama(newProvider.base_url || undefined)}
-                          disabled={ollamaLoading}
-                          className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl border border-border hover:bg-surface-hover
-                                     text-text-muted hover:text-text transition-all disabled:opacity-40"
-                          aria-label="Refresh models from Ollama"
-                        >
-                          <RefreshCw size={14} className={ollamaLoading ? 'animate-spin' : ''} />
-                        </motion.button>
-                      </div>
-                      {!ollamaLoading && ollamaModels.length === 0 && (
-                        <p className="text-[11px] text-warning mt-1.5">Could not connect to Ollama. Make sure it&apos;s running.</p>
-                      )}
-                    </div>
-                  ) : newProviderChatModels.length > 0 ? (
+                  {newProviderChatModels.length > 0 ? (
                     <div>
                       <label className="block text-xs text-text-muted mb-1.5 font-medium">
                         {newProviderImageModels.length > 0 ? 'Default Chat Model' : 'Default Model'}
@@ -634,10 +581,10 @@ function ProviderCard({
 
   const fetchOllamaModelsForCard = useCallback(async () => {
     setOllamaLoading(true);
-    const models = await api.fetchOllamaModels(provider.base_url || undefined);
+    const models = await api.fetchOllamaModels(provider.id);
     setOllamaModels(models);
     setOllamaLoading(false);
-  }, [provider.base_url]);
+  }, [provider.id]);
 
   useEffect(() => {
     if (isOllama) {

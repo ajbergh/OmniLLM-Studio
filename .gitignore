@@ -6,7 +6,8 @@
 
 # Desktop build output (Wails)
 /build/
-/backend/cmd/desktop/build/
+/backend/cmd/desktop/build/*
+!/backend/cmd/desktop/build/appicon.png
 /backend/cmd/desktop/frontend_dist/*
 !/backend/cmd/desktop/frontend_dist/.gitkeep
 /build/

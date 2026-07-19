@@ -37,24 +37,24 @@ func TestParseGitHubURL(t *testing.T) {
 		wantKind  URLKind
 	}{
 		{
-			url: "https://github.com/ajbergh/OmniLLM-Studio",
+			url:       "https://github.com/ajbergh/OmniLLM-Studio",
 			wantOwner: "ajbergh", wantRepo: "OmniLLM-Studio",
 			wantKind: URLKindGitHubRepo,
 		},
 		{
-			url: "https://github.com/owner/repo/blob/main/README.md",
+			url:       "https://github.com/owner/repo/blob/main/README.md",
 			wantOwner: "owner", wantRepo: "repo",
 			wantRef: "main", wantPath: "README.md",
 			wantKind: URLKindGitHubFile,
 		},
 		{
-			url: "https://github.com/owner/repo/tree/main/docs",
+			url:       "https://github.com/owner/repo/tree/main/docs",
 			wantOwner: "owner", wantRepo: "repo",
 			wantRef: "main", wantPath: "docs",
 			wantKind: URLKindGitHubDirectory,
 		},
 		{
-			url: "https://raw.githubusercontent.com/owner/repo/main/file.go",
+			url:       "https://raw.githubusercontent.com/owner/repo/main/file.go",
 			wantOwner: "owner", wantRepo: "repo",
 			wantRef: "main", wantPath: "file.go",
 			wantKind: URLKindGitHubRaw,

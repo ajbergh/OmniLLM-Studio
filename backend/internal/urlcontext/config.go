@@ -9,33 +9,33 @@ import (
 
 // Config holds all configuration for the urlcontext service.
 type Config struct {
-	Enabled              bool
-	ForceOnURL           bool
-	MaxURLs              int
-	FetchTimeout         time.Duration
-	MaxBytesPerSource    int64
+	Enabled               bool
+	ForceOnURL            bool
+	MaxURLs               int
+	FetchTimeout          time.Duration
+	MaxBytesPerSource     int64
 	DirectContextMaxChars int
-	RAGThresholdChars    int
-	CacheTTL             time.Duration
-	AllowPrivateNetworks bool
-	AllowedSchemes       []string
-	UserAgent            string
+	RAGThresholdChars     int
+	CacheTTL              time.Duration
+	AllowPrivateNetworks  bool
+	AllowedSchemes        []string
+	UserAgent             string
 
 	// GitHub
-	GitHubEnabled     bool
-	GitHubToken       string // never log or expose
-	GitHubUseAPI      bool
-	GitHubMaxFiles    int
+	GitHubEnabled         bool
+	GitHubToken           string // never log or expose
+	GitHubUseAPI          bool
+	GitHubMaxFiles        int
 	GitHubMaxBytesPerFile int64
 	GitHubMaxTreeEntries  int
-	GitHubIncludeGlobs   []string
-	GitHubExcludeGlobs   []string
+	GitHubIncludeGlobs    []string
+	GitHubExcludeGlobs    []string
 
 	// RAG
-	RAGIngestEnabled    bool
-	RAGScope            string
-	RAGTopK             int
-	RAGMaxChunksPerSrc  int
+	RAGIngestEnabled   bool
+	RAGScope           string
+	RAGTopK            int
+	RAGMaxChunksPerSrc int
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -53,11 +53,11 @@ func DefaultConfig() *Config {
 		AllowedSchemes:        []string{"https", "http"},
 		UserAgent:             "OmniLLM-Studio URLContextResolver/1.0",
 
-		GitHubEnabled:        true,
-		GitHubUseAPI:         true,
-		GitHubMaxFiles:       80,
+		GitHubEnabled:         true,
+		GitHubUseAPI:          true,
+		GitHubMaxFiles:        80,
 		GitHubMaxBytesPerFile: 120_000,
-		GitHubMaxTreeEntries: 100_000,
+		GitHubMaxTreeEntries:  100_000,
 		GitHubIncludeGlobs: []string{
 			"README.md", "README*", "docs/**", "*.md",
 			"backend/**/*.go", "frontend/src/**/*.ts", "frontend/src/**/*.tsx",

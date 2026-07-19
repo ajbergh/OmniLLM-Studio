@@ -9,69 +9,82 @@
     </linearGradient>
     <linearGradient id="headline" x1="60" y1="54" x2="554" y2="115" gradientUnits="userSpaceOnUse">
       <stop stop-color="#F7F5FF"/>
-      <stop offset="0.55" stop-color="#C8C1FF"/>
-      <stop offset="1" stop-color="#79E3E1"/>
+      <stop offset="0.55" stop-color="#B9F4FF"/>
+      <stop offset="1" stop-color="#50E2CD"/>
     </linearGradient>
     <linearGradient id="flow" x1="83" y1="323" x2="1116" y2="323" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#7669F6"/>
-      <stop offset="0.52" stop-color="#BC60EB"/>
-      <stop offset="1" stop-color="#43D5D2"/>
+      <stop stop-color="#42E2CB"/>
+      <stop offset="0.52" stop-color="#27C9EA"/>
+      <stop offset="1" stop-color="#B9F4FF"/>
     </linearGradient>
-    <linearGradient id="pillarA" x1="60" y1="394" x2="404" y2="684" gradientUnits="userSpaceOnUse"><stop stop-color="#171830"/><stop offset="1" stop-color="#111426"/></linearGradient>
-    <linearGradient id="pillarB" x1="428" y1="394" x2="772" y2="684" gradientUnits="userSpaceOnUse"><stop stop-color="#1B1530"/><stop offset="1" stop-color="#121326"/></linearGradient>
+    <linearGradient id="pillarA" x1="60" y1="394" x2="404" y2="684" gradientUnits="userSpaceOnUse"><stop stop-color="#102943"/><stop offset="1" stop-color="#0B1E34"/></linearGradient>
+    <linearGradient id="pillarB" x1="428" y1="394" x2="772" y2="684" gradientUnits="userSpaceOnUse"><stop stop-color="#102B39"/><stop offset="1" stop-color="#0B202F"/></linearGradient>
     <linearGradient id="pillarC" x1="796" y1="394" x2="1140" y2="684" gradientUnits="userSpaceOnUse"><stop stop-color="#11232D"/><stop offset="1" stop-color="#101626"/></linearGradient>
     <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" stroke="#A7ACCA" stroke-opacity="0.045"/></pattern>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#00020A" flood-opacity="0.42"/></filter>
     <filter id="nodeGlow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="6"/></filter>
+    <linearGradient id="iconTile" x1="4" y1="2" x2="44" y2="48" gradientUnits="userSpaceOnUse"><stop stop-color="#102A46"/><stop offset="1" stop-color="#071A30"/></linearGradient>
+    <linearGradient id="iconLine" x1="10" y1="13" x2="39" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#42E2CB"/><stop offset="0.55" stop-color="#2CCBE7"/><stop offset="1" stop-color="#B9F4FF"/></linearGradient>
+    <radialGradient id="nodeMint" cx="0" cy="0" r="1" gradientTransform="translate(10.5 11.5) rotate(48) scale(10)"><stop stop-color="#75F4DF"/><stop offset="1" stop-color="#2BC7B6"/></radialGradient>
+    <radialGradient id="nodeCyan" cx="0" cy="0" r="1" gradientTransform="translate(27 11.5) rotate(50) scale(10)"><stop stop-color="#6FE9FF"/><stop offset="1" stop-color="#1DAFD7"/></radialGradient>
+    <radialGradient id="nodeAqua" cx="0" cy="0" r="1" gradientTransform="translate(18 26) rotate(50) scale(10)"><stop stop-color="#83F0FF"/><stop offset="1" stop-color="#2CC4E1"/></radialGradient>
+    <radialGradient id="nodeIce" cx="0" cy="0" r="1" gradientTransform="translate(36 26) rotate(50) scale(11)"><stop stop-color="#ECFDFF"/><stop offset="1" stop-color="#84DDEC"/></radialGradient>
+    <symbol id="networkGlyph" viewBox="0 0 48 48">
+      <path d="M11.5 14.5H27.5M11.5 14.5L19.5 29.5M27.5 14.5L38 29.5M19.5 29.5H38" stroke="url(#iconLine)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="11.5" cy="14.5" r="5" fill="url(#nodeMint)" stroke="#6BE7D6" stroke-width="0.7"/><circle cx="27.5" cy="14.5" r="5" fill="url(#nodeCyan)" stroke="#63DDF4" stroke-width="0.7"/><circle cx="19.5" cy="29.5" r="5" fill="url(#nodeAqua)" stroke="#72E8F7" stroke-width="0.7"/><circle cx="38" cy="29.5" r="5" fill="url(#nodeIce)" stroke="#C9F8FF" stroke-width="0.7"/>
+      <rect x="9" y="39" width="30" height="3.6" rx="1.8" fill="#287184" stroke="#3B92A5" stroke-width="0.5"/>
+    </symbol>
+    <symbol id="appIconMark" viewBox="0 0 48 48"><rect x="0.75" y="0.75" width="46.5" height="46.5" rx="13.25" fill="url(#iconTile)" stroke="#2D628E" stroke-width="1.5"/><use href="#networkGlyph"/></symbol>
     <clipPath id="frameClip"><rect width="1200" height="780" rx="24"/></clipPath>
   </defs>
 
   <g clip-path="url(#frameClip)">
     <rect width="1200" height="780" fill="url(#bg)"/>
     <rect width="1200" height="780" fill="url(#grid)"/>
-    <ellipse cx="1095" cy="75" rx="280" ry="210" fill="#6B4DF0" fill-opacity="0.075"/>
+    <ellipse cx="1095" cy="75" rx="280" ry="210" fill="#27C9EA" fill-opacity="0.075"/>
     <ellipse cx="95" cy="750" rx="300" ry="210" fill="#31C9D0" fill-opacity="0.055"/>
   </g>
-  <rect x="0.75" y="0.75" width="1198.5" height="778.5" rx="23.25" stroke="#7770B2" stroke-opacity="0.25" stroke-width="1.5"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="778.5" rx="23.25" stroke="#2D6B94" stroke-opacity="0.34" stroke-width="1.5"/>
 
   <!-- Header -->
-  <text x="60" y="56" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="2.4" fill="#7E81A5">THE OMNILLM-STUDIO WORKSPACE</text>
+  <use href="#appIconMark" x="60" y="21" width="42" height="42"/>
+  <text x="116" y="47" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="2.4" fill="#6F9CB8">THE OMNILLM-STUDIO WORKSPACE</text>
   <text x="60" y="105" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="35" font-weight="780" letter-spacing="-1.2" fill="url(#headline)">From first prompt to finished work.</text>
-  <text x="1140" y="83" text-anchor="end" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" fill="#9799B5">One interface across models, media, knowledge, and tools.</text>
-  <text x="1140" y="104" text-anchor="end" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" fill="#6F7392">Local data. Portable workflows. Provider freedom.</text>
+  <text x="1140" y="83" text-anchor="end" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" fill="#92AEBF">One interface across models, media, knowledge, and tools.</text>
+  <text x="1140" y="104" text-anchor="end" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" fill="#66879D">Local data. Portable workflows. Provider freedom.</text>
 
   <!-- Studio cards -->
   <g filter="url(#shadow)">
-    <rect x="60" y="140" width="252" height="116" rx="16" fill="#171730" stroke="#514D93"/>
-    <rect x="328" y="140" width="252" height="116" rx="16" fill="#1D152F" stroke="#71418C"/>
-    <rect x="596" y="140" width="252" height="116" rx="16" fill="#1A152D" stroke="#654080"/>
+    <rect x="60" y="140" width="252" height="116" rx="16" fill="#102A46" stroke="#316C98"/>
+    <rect x="328" y="140" width="252" height="116" rx="16" fill="#102E39" stroke="#347B78"/>
+    <rect x="596" y="140" width="252" height="116" rx="16" fill="#10283C" stroke="#376F91"/>
     <rect x="864" y="140" width="276" height="116" rx="16" fill="#10232D" stroke="#2F6875"/>
   </g>
   <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
     <g transform="translate(60 140)">
-      <rect x="18" y="18" width="36" height="36" rx="10" fill="#7165EE" fill-opacity="0.16" stroke="#625BC0"/>
-      <path d="M28 28H44V39H36L31 44V39H28V28Z" stroke="#9A8DFF" stroke-width="1.6" stroke-linejoin="round"/>
-      <text x="67" y="34" font-size="13" font-weight="750" letter-spacing="0.8" fill="#E8E5FF">CHAT + AGENTS</text>
-      <text x="67" y="51" font-size="10" fill="#8D8EAD">STREAM • REASON • ACT</text>
-      <text x="18" y="78" font-size="11" fill="#B9B8D0">Multi-provider chat, branching, agent plans,</text>
-      <text x="18" y="95" font-size="11" fill="#B9B8D0">tool calls, approvals, and rich responses.</text>
+      <rect x="18" y="18" width="36" height="36" rx="10" fill="#2BBFE6" fill-opacity="0.15" stroke="#347BA4"/>
+      <path d="M28 28H44V39H36L31 44V39H28V28Z" stroke="#70DCF4" stroke-width="1.6" stroke-linejoin="round"/>
+      <text x="67" y="34" font-size="13" font-weight="750" letter-spacing="0.8" fill="#E1F8FF">CHAT + AGENTS</text>
+      <text x="67" y="51" font-size="10" fill="#789AB2">STREAM • REASON • ACT</text>
+      <text x="18" y="78" font-size="11" fill="#B8D4E2">Multi-provider chat, branching, agent plans,</text>
+      <text x="18" y="95" font-size="11" fill="#B8D4E2">tool calls, approvals, and rich responses.</text>
     </g>
     <g transform="translate(328 140)">
-      <rect x="18" y="18" width="36" height="36" rx="10" fill="#BE59E7" fill-opacity="0.14" stroke="#7B4596"/>
-      <path d="M28 42L35 32L43 40M40 28H44V32" stroke="#DC79F3" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="67" y="34" font-size="13" font-weight="750" letter-spacing="0.8" fill="#F2DFF8">IMAGE STUDIO</text>
-      <text x="67" y="51" font-size="10" fill="#9C7AA7">GENERATE • MASK • COMPARE</text>
-      <text x="18" y="78" font-size="11" fill="#C9B7D0">Canvas editing, inpainting, references,</text>
-      <text x="18" y="95" font-size="11" fill="#C9B7D0">variants, and branching visual history.</text>
+      <rect x="18" y="18" width="36" height="36" rx="10" fill="#42E2CB" fill-opacity="0.14" stroke="#367F7A"/>
+      <path d="M28 42L35 32L43 40M40 28H44V32" stroke="#5DE5D2" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="67" y="34" font-size="13" font-weight="750" letter-spacing="0.8" fill="#DFFFF9">IMAGE STUDIO</text>
+      <text x="67" y="51" font-size="10" fill="#719C96">GENERATE • MASK • COMPARE</text>
+      <text x="18" y="78" font-size="11" fill="#B8DCD6">Canvas editing, inpainting, references,</text>
+      <text x="18" y="95" font-size="11" fill="#B8DCD6">variants, and branching visual history.</text>
     </g>
     <g transform="translate(596 140)">
-      <rect x="18" y="18" width="36" height="36" rx="10" fill="#A55BD7" fill-opacity="0.13" stroke="#6F4788"/>
-      <path d="M43 27V39M43 30L33 32V43" stroke="#C97BEA" stroke-width="1.6" stroke-linecap="round"/>
-      <circle cx="31" cy="43" r="3" fill="#C97BEA"/><circle cx="41" cy="40" r="3" fill="#C97BEA"/>
-      <text x="67" y="34" font-size="13" font-weight="750" letter-spacing="0.8" fill="#ECDFF5">MUSIC STUDIO</text>
-      <text x="67" y="51" font-size="10" fill="#967AA2">PROMPT • GENERATE • PLAY</text>
-      <text x="18" y="78" font-size="11" fill="#C4B8CC">Structured Lyria prompting, generation,</text>
-      <text x="18" y="95" font-size="11" fill="#C4B8CC">playback, downloads, and track history.</text>
+      <rect x="18" y="18" width="36" height="36" rx="10" fill="#30BFE7" fill-opacity="0.14" stroke="#377595"/>
+      <path d="M43 27V39M43 30L33 32V43" stroke="#62CFF0" stroke-width="1.6" stroke-linecap="round"/>
+      <circle cx="31" cy="43" r="3" fill="#62CFF0"/><circle cx="41" cy="40" r="3" fill="#62CFF0"/>
+      <text x="67" y="34" font-size="13" font-weight="750" letter-spacing="0.8" fill="#DCF5FF">MUSIC STUDIO</text>
+      <text x="67" y="51" font-size="10" fill="#7296AA">PROMPT • GENERATE • PLAY</text>
+      <text x="18" y="78" font-size="11" fill="#B9D5E2">Structured Lyria prompting, generation,</text>
+      <text x="18" y="95" font-size="11" fill="#B9D5E2">playback, downloads, and track history.</text>
     </g>
     <g transform="translate(864 140)">
       <rect x="18" y="18" width="36" height="36" rx="10" fill="#3CC8D0" fill-opacity="0.12" stroke="#34717A"/>
@@ -85,53 +98,53 @@
   </g>
 
   <!-- Connected workflow -->
-  <text x="600" y="292" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="2" fill="#8587A8">A CONNECTED, CROSS-STUDIO WORKFLOW</text>
-  <path d="M106 329H1094" stroke="#31334F" stroke-width="6" stroke-linecap="round"/>
+  <text x="600" y="292" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="2" fill="#7096AA">A CONNECTED, CROSS-STUDIO WORKFLOW</text>
+  <path d="M106 329H1094" stroke="#29445B" stroke-width="6" stroke-linecap="round"/>
   <path d="M106 329H1094" stroke="url(#flow)" stroke-width="2" stroke-linecap="round"/>
   <g fill="url(#flow)" filter="url(#nodeGlow)" opacity="0.32"><circle cx="106" cy="329" r="12"/><circle cx="353" cy="329" r="12"/><circle cx="600" cy="329" r="12"/><circle cx="847" cy="329" r="12"/><circle cx="1094" cy="329" r="12"/></g>
   <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="10" font-weight="750" text-anchor="middle">
-    <g><circle cx="106" cy="329" r="7" fill="#0F1024" stroke="#7A6DF4" stroke-width="2"/><text x="106" y="357" fill="#AAA6D5">BRIEF</text></g>
-    <g><circle cx="353" cy="329" r="7" fill="#0F1024" stroke="#9368F0" stroke-width="2"/><text x="353" y="357" fill="#B3A5D4">GROUND</text></g>
-    <g><circle cx="600" cy="329" r="9" fill="#E9E5FF" stroke="#B964ED" stroke-width="3"/><text x="600" y="357" fill="#C9A9D8">CREATE</text></g>
-    <g><circle cx="847" cy="329" r="7" fill="#0F1024" stroke="#8A8FE4" stroke-width="2"/><text x="847" y="357" fill="#A8AFD0">REFINE</text></g>
-    <g><circle cx="1094" cy="329" r="7" fill="#0F1024" stroke="#49D3D1" stroke-width="2"/><text x="1094" y="357" fill="#8ECAC9">SHIP</text></g>
+    <g><circle cx="106" cy="329" r="7" fill="#0B2036" stroke="#42E2CB" stroke-width="2"/><text x="106" y="357" fill="#9BDCD3">BRIEF</text></g>
+    <g><circle cx="353" cy="329" r="7" fill="#0B2036" stroke="#37D7DC" stroke-width="2"/><text x="353" y="357" fill="#99D9DD">GROUND</text></g>
+    <g><circle cx="600" cy="329" r="9" fill="#DDFBFF" stroke="#27C9EA" stroke-width="3"/><text x="600" y="357" fill="#A9DEEB">CREATE</text></g>
+    <g><circle cx="847" cy="329" r="7" fill="#0B2036" stroke="#67DDF2" stroke-width="2"/><text x="847" y="357" fill="#A8D7E2">REFINE</text></g>
+    <g><circle cx="1094" cy="329" r="7" fill="#0B2036" stroke="#B9F4FF" stroke-width="2"/><text x="1094" y="357" fill="#A9DDE5">SHIP</text></g>
   </g>
 
   <!-- Capability pillars -->
   <g filter="url(#shadow)">
-    <rect x="60" y="394" width="344" height="286" rx="18" fill="url(#pillarA)" stroke="#42436D"/>
-    <rect x="428" y="394" width="344" height="286" rx="18" fill="url(#pillarB)" stroke="#5A3D70"/>
+    <rect x="60" y="394" width="344" height="286" rx="18" fill="url(#pillarA)" stroke="#315D7B"/>
+    <rect x="428" y="394" width="344" height="286" rx="18" fill="url(#pillarB)" stroke="#316C71"/>
     <rect x="796" y="394" width="344" height="286" rx="18" fill="url(#pillarC)" stroke="#315E6B"/>
   </g>
   <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
     <!-- Pillar A -->
     <g transform="translate(60 394)">
-      <rect x="22" y="22" width="38" height="38" rx="11" fill="#6863D6" fill-opacity="0.14" stroke="#535191"/>
-      <path d="M31 32H40L44 36V49H31V32ZM40 32V36H44" stroke="#9189F2" stroke-width="1.5" stroke-linejoin="round"/>
-      <circle cx="50" cy="46" r="5" stroke="#9189F2" stroke-width="1.5"/><path d="M54 50L58 54" stroke="#9189F2" stroke-width="1.5" stroke-linecap="round"/>
-      <text x="75" y="39" font-size="15" font-weight="760" fill="#E6E4F7">Ground &amp; automate</text>
-      <text x="75" y="56" font-size="10" letter-spacing="0.9" fill="#8586A8">CONTEXT THAT CAN TAKE ACTION</text>
-      <line x1="22" y1="80" x2="322" y2="80" stroke="#353653"/>
+      <rect x="22" y="22" width="38" height="38" rx="11" fill="#2BC3E6" fill-opacity="0.14" stroke="#34799D"/>
+      <path d="M31 32H40L44 36V49H31V32ZM40 32V36H44" stroke="#67DDF2" stroke-width="1.5" stroke-linejoin="round"/>
+      <circle cx="50" cy="46" r="5" stroke="#67DDF2" stroke-width="1.5"/><path d="M54 50L58 54" stroke="#67DDF2" stroke-width="1.5" stroke-linecap="round"/>
+      <text x="75" y="39" font-size="15" font-weight="760" fill="#E0F6FF">Ground &amp; automate</text>
+      <text x="75" y="56" font-size="10" letter-spacing="0.9" fill="#7698AD">CONTEXT THAT CAN TAKE ACTION</text>
+      <line x1="22" y1="80" x2="322" y2="80" stroke="#29445B"/>
       <g font-size="12">
-        <circle cx="28" cy="108" r="3" fill="#8A80EF"/><text x="42" y="112" font-weight="650" fill="#D2D0E3">File Library + hybrid RAG</text><text x="42" y="130" font-size="10" fill="#82849F">Scoped files, citations, vector + keyword search</text>
-        <circle cx="28" cy="158" r="3" fill="#8A80EF"/><text x="42" y="162" font-weight="650" fill="#D2D0E3">Web search + headless browser</text><text x="42" y="180" font-size="10" fill="#82849F">Grounded research and JS-heavy page interaction</text>
-        <circle cx="28" cy="208" r="3" fill="#8A80EF"/><text x="42" y="212" font-weight="650" fill="#D2D0E3">MCP + built-in tools</text><text x="42" y="230" font-size="10" fill="#82849F">External servers, sports, calculator, URL context</text>
-        <circle cx="28" cy="258" r="3" fill="#8A80EF"/><text x="42" y="262" font-weight="650" fill="#D2D0E3">Agent plans + approvals</text>
+        <circle cx="28" cy="108" r="3" fill="#56D1ED"/><text x="42" y="112" font-weight="650" fill="#CFE8F2">File Library + hybrid RAG</text><text x="42" y="130" font-size="10" fill="#7895A7">Scoped files, citations, vector + keyword search</text>
+        <circle cx="28" cy="158" r="3" fill="#56D1ED"/><text x="42" y="162" font-weight="650" fill="#CFE8F2">Web search + headless browser</text><text x="42" y="180" font-size="10" fill="#7895A7">Grounded research and JS-heavy page interaction</text>
+        <circle cx="28" cy="208" r="3" fill="#56D1ED"/><text x="42" y="212" font-weight="650" fill="#CFE8F2">MCP + built-in tools</text><text x="42" y="230" font-size="10" fill="#7895A7">External servers, sports, calculator, URL context</text>
+        <circle cx="28" cy="258" r="3" fill="#56D1ED"/><text x="42" y="262" font-weight="650" fill="#CFE8F2">Agent plans + approvals</text>
       </g>
     </g>
     <!-- Pillar B -->
     <g transform="translate(428 394)">
-      <rect x="22" y="22" width="38" height="38" rx="11" fill="#BA5BE1" fill-opacity="0.13" stroke="#75448D"/>
-      <path d="M31 35H40V44H31V35ZM44 31H52V39H44V31ZM44 46H52V54H44V46Z" stroke="#D176EC" stroke-width="1.5"/>
-      <path d="M40 39H44M40 42L44 49" stroke="#D176EC" stroke-width="1.5"/>
-      <text x="75" y="39" font-size="15" font-weight="760" fill="#F0E3F4">Shape every medium</text>
-      <text x="75" y="56" font-size="10" letter-spacing="0.9" fill="#9B7FA4">ONE IDEA, MANY OUTPUTS</text>
-      <line x1="22" y1="80" x2="322" y2="80" stroke="#403047"/>
+      <rect x="22" y="22" width="38" height="38" rx="11" fill="#42E2CB" fill-opacity="0.13" stroke="#367F7A"/>
+      <path d="M31 35H40V44H31V35ZM44 31H52V39H44V31ZM44 46H52V54H44V46Z" stroke="#59E2CF" stroke-width="1.5"/>
+      <path d="M40 39H44M40 42L44 49" stroke="#59E2CF" stroke-width="1.5"/>
+      <text x="75" y="39" font-size="15" font-weight="760" fill="#DFFFF9">Shape every medium</text>
+      <text x="75" y="56" font-size="10" letter-spacing="0.9" fill="#719B95">ONE IDEA, MANY OUTPUTS</text>
+      <line x1="22" y1="80" x2="322" y2="80" stroke="#294844"/>
       <g font-size="12">
-        <circle cx="28" cy="108" r="3" fill="#CF70E9"/><text x="42" y="112" font-weight="650" fill="#DED1E2">Cross-studio handoffs</text><text x="42" y="130" font-size="10" fill="#958398">Move image and music assets directly into video</text>
-        <circle cx="28" cy="158" r="3" fill="#CF70E9"/><text x="42" y="162" font-weight="650" fill="#DED1E2">Branch, compare, iterate</text><text x="42" y="180" font-size="10" fill="#958398">Explore alternates without losing the active path</text>
-        <circle cx="28" cy="208" r="3" fill="#CF70E9"/><text x="42" y="212" font-weight="650" fill="#DED1E2">Canvas + timeline editing</text><text x="42" y="230" font-size="10" fill="#958398">Masks, references, clips, tracks, effects, keyframes</text>
-        <circle cx="28" cy="258" r="3" fill="#CF70E9"/><text x="42" y="262" font-weight="650" fill="#DED1E2">Multimodal inputs + previews</text>
+        <circle cx="28" cy="108" r="3" fill="#4CDCC7"/><text x="42" y="112" font-weight="650" fill="#D0EAE5">Cross-studio handoffs</text><text x="42" y="130" font-size="10" fill="#799993">Move image and music assets directly into video</text>
+        <circle cx="28" cy="158" r="3" fill="#4CDCC7"/><text x="42" y="162" font-weight="650" fill="#D0EAE5">Branch, compare, iterate</text><text x="42" y="180" font-size="10" fill="#799993">Explore alternates without losing the active path</text>
+        <circle cx="28" cy="208" r="3" fill="#4CDCC7"/><text x="42" y="212" font-weight="650" fill="#D0EAE5">Canvas + timeline editing</text><text x="42" y="230" font-size="10" fill="#799993">Masks, references, clips, tracks, effects, keyframes</text>
+        <circle cx="28" cy="258" r="3" fill="#4CDCC7"/><text x="42" y="262" font-weight="650" fill="#D0EAE5">Multimodal inputs + previews</text>
       </g>
     </g>
     <!-- Pillar C -->
@@ -151,14 +164,14 @@
   </g>
 
   <!-- Local-first foundation -->
-  <rect x="60" y="708" width="1080" height="42" rx="14" fill="#0E1221" stroke="#30364E"/>
+  <rect x="60" y="708" width="1080" height="42" rx="14" fill="#0A1C30" stroke="#29455D"/>
   <g font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="0.8">
     <g transform="translate(82 720)"><circle cx="8" cy="9" r="4" fill="#48D6BE"/><text x="21" y="12" fill="#A8DCD3">LOCAL SQLITE DATA</text></g>
-    <path d="M280 720V738" stroke="#30364E"/>
-    <g transform="translate(314 720)"><path d="M4 8V5C4 1 12 1 12 5V8M3 8H13V16H3V8Z" stroke="#8D82EF"/><text x="24" y="12" fill="#B8B2E8">ENCRYPTED SECRETS</text></g>
-    <path d="M552 720V738" stroke="#30364E"/>
-    <g transform="translate(586 720)"><circle cx="8" cy="9" r="6" stroke="#C66EE7"/><path d="M8 3V15M2 9H14" stroke="#C66EE7"/><text x="24" y="12" fill="#D5AFE2">PROVIDERS YOU CHOOSE</text></g>
-    <path d="M841 720V738" stroke="#30364E"/>
+    <path d="M280 720V738" stroke="#29455D"/>
+    <g transform="translate(314 720)"><path d="M4 8V5C4 1 12 1 12 5V8M3 8H13V16H3V8Z" stroke="#67DDF2"/><text x="24" y="12" fill="#B7DEEA">ENCRYPTED SECRETS</text></g>
+    <path d="M552 720V738" stroke="#29455D"/>
+    <g transform="translate(586 720)"><circle cx="8" cy="9" r="6" stroke="#42E2CB"/><path d="M8 3V15M2 9H14" stroke="#42E2CB"/><text x="24" y="12" fill="#B6E6DE">PROVIDERS YOU CHOOSE</text></g>
+    <path d="M841 720V738" stroke="#29455D"/>
     <g transform="translate(875 720)"><path d="M3 6H8V1H12V6H17V10H12V15H8V10H3V6Z" stroke="#51CDD1"/><text x="29" y="12" fill="#A6D9DB">EXTENSIBLE PLUGIN SDK</text></g>
   </g>
   <text x="600" y="768" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="9" letter-spacing="1.2" fill="#5F637E">YOUR DATA • YOUR PROVIDERS • YOUR WORKFLOW</text>

@@ -1,109 +1,67 @@
 # Default values for omnillm-studio.
 # See deploy/helm/omnillm-studio/README.md for installation guidance.
 
-# -- Override the chart's auto-generated full name (release-name + chart-name).
 fullnameOverride: ""
-# -- Override just the chart name component of the auto-generated full name.
 nameOverride: ""
 
 image:
   registry: ghcr.io
-  # Path under the registry. Final repos: <registry>/<repository>-backend|frontend.
   repository: ajbergh/omnillm-studio
-  # Empty string means "use .Chart.AppVersion".
   backendTag: ""
   frontendTag: ""
   pullPolicy: IfNotPresent
-  # List of imagePullSecret names to attach to the ServiceAccount.
   pullSecrets: []
 
-# -- "combined" runs nginx as a sidecar in the same Pod (single Service).
-# -- "split" runs frontend and backend as separate Deployments and Services.
 topology: combined
 
-# -- Hard-pinned to 1. SQLite + chromem-go on local disk are single-writer.
-# -- The chart will fail-render if you set this to anything else.
+# SQLite + chromem-go on local disk are single-writer.
 replicaCount: 1
 
-# -------------------------------------------------------------------
-# Persistent state (DB, attachments, chromem vectors)
-# -------------------------------------------------------------------
 persistence:
   enabled: true
-  # "" uses the cluster's default StorageClass.
   storageClass: ""
   size: 20Gi
   accessModes:
     - ReadWriteOnce
-  # When true, keeps the PVC after `helm uninstall` (data survives reinstall).
   retainOnDelete: true
 
-# -------------------------------------------------------------------
-# Application config (env passthrough)
-# -------------------------------------------------------------------
 config:
-  # OMNILLM_PORT
   port: 8080
-  # OMNILLM_CORS_ORIGINS — list rendered as a comma-separated env value.
   corsOrigins: []
-  # OMNILLM_ALLOW_PUBLIC_REGISTRATION — disabled by default; first registrant
-  # becomes admin and the chart stays solo-mode-safe.
   allowPublicRegistration: false
-  # OMNILLM_CHROMEM_COMPRESS
   chromemCompress: false
-  # Arbitrary additional env vars rendered into the backend container.
-  # Each entry: { name: STRING, value: STRING } or { name: STRING, valueFrom: {...} }
+  # Shared application/proxy limit. maxUploadBytes is passed to the Go backend;
+  # maxUploadSize is rendered into nginx and should represent the same value.
+  maxUploadBytes: "524288000"
+  maxUploadSize: 500m
   extraEnv: []
 
-# -------------------------------------------------------------------
-# Secrets
-# -------------------------------------------------------------------
-# All secret material is passed via Secret only (never ConfigMap, never values).
-# If existingSecret is non-empty, the chart will reference it and the in-line
-# fields below are ignored.
-#
-# The Secret MUST contain key "OMNILLM_MASTER_KEY" — 64 hex chars (32 bytes).
+# The Secret MUST contain OMNILLM_MASTER_KEY with 64 hex characters.
 secrets:
   existingSecret: ""
-  # When the chart manages the Secret, set this to a 64-char hex string.
-  # Generate one: `openssl rand -hex 32`
   encryptionKey: ""
 
-# -------------------------------------------------------------------
-# Service
-# -------------------------------------------------------------------
 service:
   type: ClusterIP
   port: 80
-  # Container port for the frontend (nginx) — also the Pod-internal port for
-  # the combined topology.
   frontendPort: 8081
-  # Container port for the backend (Go server).
   backendPort: 8080
 
-# -------------------------------------------------------------------
-# Ingress
-# -------------------------------------------------------------------
 ingress:
   enabled: true
   className: nginx
   host: omnillm.local
-  # Extra annotations merged with the SSE-friendly defaults below.
   annotations:
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
     nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
-    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-body-size: "500m"
   tls:
     enabled: false
-    # Existing TLS Secret to reference. Leave empty if tls.enabled=false.
     secretName: ""
 
-# -------------------------------------------------------------------
-# Resources / probes / security
-# -------------------------------------------------------------------
 resources:
   backend:
     requests:
@@ -120,7 +78,6 @@ resources:
       cpu: 200m
       memory: 128Mi
 
-# Pod-level securityContext.
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532
@@ -129,7 +86,6 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
-# Container-level securityContext (applied to both containers).
 containerSecurityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
@@ -155,11 +111,8 @@ probes:
     initialDelaySeconds: 5
     periodSeconds: 5
     timeoutSeconds: 3
-    failureThreshold: 24   # 24 * 5s = 2 min for cold migrations
+    failureThreshold: 24
 
-# -------------------------------------------------------------------
-# ServiceAccount / scheduling / network
-# -------------------------------------------------------------------
 serviceAccount:
   create: true
   name: ""
@@ -169,19 +122,12 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 priorityClassName: ""
-
-# Termination grace must be ≥ backend's 10s shutdown ctx + a margin so SQLite
-# WAL gets a clean checkpoint.
 terminationGracePeriodSeconds: 30
-
 podAnnotations: {}
 podLabels: {}
 
 networkPolicy:
   enabled: false
-  # Sources allowed to reach the backend (combined topology) or the frontend
-  # (split topology). When empty and enabled, only same-namespace ingress-nginx
-  # is allowed by default.
   ingressFrom: []
 
 podDisruptionBudget:

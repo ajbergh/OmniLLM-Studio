@@ -1,14 +1,19 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
 
-// rateLimiter provides a simple in-memory sliding-window rate limiter keyed by
-// arbitrary string (typically client IP). It is safe for concurrent use.
+// rateLimiter provides an in-memory sliding-window limiter keyed by arbitrary
+// strings. Authentication middleware uses both network and account keys so a
+// spoofed forwarded-address header cannot remove account-level throttling.
 type rateLimiter struct {
 	mu          sync.Mutex
 	attempts    map[string][]time.Time
@@ -16,59 +21,51 @@ type rateLimiter struct {
 	maxAttempts int
 }
 
-// newRateLimiter returns a rate limiter that allows at most max requests per
-// window per key. A background goroutine prunes stale entries periodically.
 func newRateLimiter(window time.Duration, max int) *rateLimiter {
-	rl := &rateLimiter{
-		attempts:    make(map[string][]time.Time),
-		window:      window,
-		maxAttempts: max,
+	limiter := &rateLimiter{
+		attempts: make(map[string][]time.Time), window: window, maxAttempts: max,
 	}
 	go func() {
-		for range time.Tick(window) {
-			rl.cleanup()
+		ticker := time.NewTicker(window)
+		defer ticker.Stop()
+		for range ticker.C {
+			limiter.cleanup()
 		}
 	}()
-	return rl
+	return limiter
 }
 
-// Allow returns true if the key has not exceeded maxAttempts within the current
-// window, recording the attempt. Returns false (rate-limited) otherwise.
 func (rl *rateLimiter) Allow(key string) bool {
+	if strings.TrimSpace(key) == "" {
+		key = "unknown"
+	}
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
-
-	// Keep only timestamps within the window.
-	valid := make([]time.Time, 0, len(rl.attempts[key]))
-	for _, t := range rl.attempts[key] {
-		if t.After(cutoff) {
-			valid = append(valid, t)
+	valid := rl.attempts[key][:0]
+	for _, attempt := range rl.attempts[key] {
+		if attempt.After(cutoff) {
+			valid = append(valid, attempt)
 		}
 	}
-
 	if len(valid) >= rl.maxAttempts {
 		rl.attempts[key] = valid
 		return false
 	}
-
 	rl.attempts[key] = append(valid, now)
 	return true
 }
 
-// cleanup removes entries whose most recent attempt is older than the window.
 func (rl *rateLimiter) cleanup() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-
 	cutoff := time.Now().Add(-rl.window)
-	for key, times := range rl.attempts {
-		valid := make([]time.Time, 0, len(times))
-		for _, t := range times {
-			if t.After(cutoff) {
-				valid = append(valid, t)
+	for key, attempts := range rl.attempts {
+		valid := attempts[:0]
+		for _, attempt := range attempts {
+			if attempt.After(cutoff) {
+				valid = append(valid, attempt)
 			}
 		}
 		if len(valid) == 0 {
@@ -79,22 +76,49 @@ func (rl *rateLimiter) cleanup() {
 	}
 }
 
-// RateLimit returns chi-compatible middleware that limits requests per IP using
-// the provided rateLimiter instance.
+// RateLimit limits authentication requests by both source and normalized
+// username. The body is restored before the handler receives it.
 func RateLimit(rl *rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := r.RemoteAddr
-			// Strip port from RemoteAddr (e.g. "127.0.0.1:54321" -> "127.0.0.1")
 			if host, _, err := net.SplitHostPort(ip); err == nil {
 				ip = host
 			}
-			if !rl.Allow(ip) {
-				w.Header().Set("Retry-After", "60")
-				respondError(w, http.StatusTooManyRequests, "too many requests, try again later")
-				return
+			keys := []string{"ip:" + strings.ToLower(strings.TrimSpace(ip))}
+			if account := authAccountKey(r); account != "" {
+				keys = append(keys, "account:"+account)
+			}
+			for _, key := range keys {
+				if !rl.Allow(key) {
+					w.Header().Set("Retry-After", "60")
+					respondError(w, http.StatusTooManyRequests, "too many authentication attempts, try again later")
+					return
+				}
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func authAccountKey(r *http.Request) string {
+	if r.Method != http.MethodPost || r.Body == nil {
+		return ""
+	}
+	const maxAuthBody = 8 << 10
+	data, err := io.ReadAll(io.LimitReader(r.Body, maxAuthBody+1))
+	if err != nil {
+		return ""
+	}
+	r.Body = io.NopCloser(bytes.NewReader(data))
+	if len(data) > maxAuthBody {
+		return ""
+	}
+	var request struct {
+		Username string `json:"username"`
+	}
+	if json.Unmarshal(data, &request) != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(request.Username))
 }

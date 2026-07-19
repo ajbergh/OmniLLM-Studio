@@ -150,10 +150,10 @@ type ChatRequest struct {
 	Temperature     *float64      `json:"temperature,omitempty"`
 
 	// OpenRouter-specific fields (ignored by other providers)
-	ProviderPrefs  *ProviderPreferences `json:"provider,omitempty"` // Provider routing preferences
-	ModelFallbacks []string             `json:"models,omitempty"`   // Fallback models for OpenRouter
-	Route          string               `json:"route,omitempty"`    // "fallback" for automatic fallbacks
-	Plugins        []Plugin             `json:"plugins,omitempty"`  // OpenRouter plugins (web, file-parser, etc.)
+	ProviderPrefs  *ProviderPreferences `json:"provider_prefs,omitempty"` // Provider routing preferences
+	ModelFallbacks []string             `json:"models,omitempty"`         // Fallback models for OpenRouter
+	Route          string               `json:"route,omitempty"`          // "fallback" for automatic fallbacks
+	Plugins        []Plugin             `json:"plugins,omitempty"`        // OpenRouter plugins (web, file-parser, etc.)
 }
 
 // Plugin represents an OpenRouter plugin configuration.

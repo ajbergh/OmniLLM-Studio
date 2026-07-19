@@ -1,8 +1,4 @@
 {{- include "omnillm-studio.validate" . -}}
-{{/*
-nginx config rendered into a ConfigMap so we can flip proxy_pass between
-the sidecar (combined topology) and the backend Service (split topology).
-*/}}
 {{- $proxyTarget := "" -}}
 {{- if eq .Values.topology "combined" -}}
   {{- $proxyTarget = printf "http://127.0.0.1:%d" (int .Values.service.backendPort) -}}
@@ -24,6 +20,12 @@ data:
       root /usr/share/nginx/html;
       index index.html;
 
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-Frame-Options "DENY" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+      add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+      add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; font-src 'self' data:" always;
+
       location / {
         try_files $uri $uri/ /index.html;
       }
@@ -42,16 +44,13 @@ data:
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_set_header   Connection        "";
-
         proxy_buffering          off;
         proxy_cache              off;
         proxy_request_buffering  off;
         chunked_transfer_encoding on;
-
         proxy_read_timeout 600s;
         proxy_send_timeout 600s;
-
-        client_max_body_size 100m;
+        client_max_body_size {{ .Values.config.maxUploadSize }};
       }
 
       location = /healthz {

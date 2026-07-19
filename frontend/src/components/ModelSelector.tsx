@@ -59,7 +59,7 @@ export function ModelSelector({ conversationId }: Props) {
     if (ollamaProvider) {
       setLoadingOllama(true);
       api
-        .fetchOllamaModels(ollamaProvider.base_url)
+        .fetchOllamaModels(ollamaProvider.id)
         .then((models) => {
           setOllamaModels(models);
           setLoadingOllama(false);

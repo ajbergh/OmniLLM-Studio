@@ -184,8 +184,8 @@ func (g *GitHubInspector) getTree(ctx context.Context, owner, repo, branch strin
 	}
 
 	var resp struct {
-		Tree     []ghTreeNode `json:"tree"`
-		Truncated bool        `json:"truncated"`
+		Tree      []ghTreeNode `json:"tree"`
+		Truncated bool         `json:"truncated"`
 	}
 	if err := json.Unmarshal(result.Body, &resp); err != nil {
 		return nil, false, fmt.Errorf("parse tree: %w", err)
