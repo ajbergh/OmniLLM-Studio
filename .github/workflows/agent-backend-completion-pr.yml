@@ -33,6 +33,18 @@ jobs:
           Path('/tmp/complete_backend.py').write_text(script + "\n")
           PY
           python3 /tmp/complete_backend.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('backend/internal/api/router.go')
+          text = path.read_text()
+          for line in (
+              '\ttoolRegistry.MustRegister(tools.NewDateTimeTool())\n',
+              '\ttoolRegistry.MustRegister(tools.NewUnitConvertTool())\n',
+              '\ttoolRegistry.MustRegister(tools.NewPythonAnalysisTool())\n',
+          ):
+              text = text.replace(line, '', 1)
+          path.write_text(text)
+          PY
       - name: Format and run focused backend tests
         working-directory: backend
         run: |
