@@ -219,14 +219,14 @@ func formatToolDescriptions(defs []tools.ToolDefinition) string {
 		return "[]"
 	}
 	type plannerTool struct {
-		Name             string          `json:"name"`
-		Description      string          `json:"description"`
-		Category         string          `json:"category"`
-		Parameters       json.RawMessage `json:"parameters"`
-		Risk             tools.RiskLevel `json:"risk"`
-		ReadOnly         bool            `json:"read_only"`
-		SideEffecting    bool            `json:"side_effecting"`
-		SupportsParallel bool            `json:"supports_parallel"`
+		Name             string              `json:"name"`
+		Description      string              `json:"description"`
+		Category         string              `json:"category"`
+		Parameters       json.RawMessage     `json:"parameters"`
+		Risk             tools.RiskLevel     `json:"risk"`
+		ReadOnly         bool                `json:"read_only"`
+		SideEffecting    bool                `json:"side_effecting"`
+		SupportsParallel bool                `json:"supports_parallel"`
 		Examples         []tools.ToolExample `json:"examples,omitempty"`
 	}
 	out := make([]plannerTool, 0, len(defs))

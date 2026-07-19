@@ -94,14 +94,14 @@ type InvocationScope struct {
 
 // ApprovalRequest describes a tool call waiting on an "ask" policy decision.
 type ApprovalRequest struct {
-	ApprovalID string          `json:"approval_id,omitempty"`
-	ToolCallID string          `json:"tool_call_id"`
-	ToolName   string          `json:"tool_name"`
-	Description string         `json:"description"`
-	Arguments  json.RawMessage `json:"arguments"`
-	Scope      InvocationScope `json:"scope,omitempty"`
-	Risk       RiskLevel       `json:"risk,omitempty"`
-	ReadOnly   bool            `json:"read_only,omitempty"`
+	ApprovalID  string          `json:"approval_id,omitempty"`
+	ToolCallID  string          `json:"tool_call_id"`
+	ToolName    string          `json:"tool_name"`
+	Description string          `json:"description"`
+	Arguments   json.RawMessage `json:"arguments"`
+	Scope       InvocationScope `json:"scope,omitempty"`
+	Risk        RiskLevel       `json:"risk,omitempty"`
+	ReadOnly    bool            `json:"read_only,omitempty"`
 }
 
 // ApprovalHandler returns true to allow the tool call to proceed.

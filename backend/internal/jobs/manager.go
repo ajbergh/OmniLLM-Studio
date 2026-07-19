@@ -242,7 +242,9 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	}
 }
 
-type scanner interface{ Scan(dest ...interface{}) error }
+type scanner interface {
+	Scan(dest ...interface{}) error
+}
 
 func scanJob(row scanner) (*Job, error) {
 	var job Job

@@ -35,7 +35,7 @@ func (t *JobStatusTool) Definition() ToolDefinition {
 
 type jobStatusArgs struct {
 	Operation   string `json:"operation"`
-	JobID      string `json:"job_id"`
+	JobID       string `json:"job_id"`
 	WaitSeconds int    `json:"wait_seconds"`
 	Limit       int    `json:"limit"`
 }
@@ -123,7 +123,9 @@ func (t *JobCancelTool) Definition() ToolDefinition {
 }
 
 func (t *JobCancelTool) Validate(raw json.RawMessage) error {
-	var args struct{ JobID string `json:"job_id"` }
+	var args struct {
+		JobID string `json:"job_id"`
+	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return err
 	}
@@ -134,7 +136,9 @@ func (t *JobCancelTool) Validate(raw json.RawMessage) error {
 }
 
 func (t *JobCancelTool) Execute(ctx context.Context, raw json.RawMessage) (*ToolResult, error) {
-	var args struct{ JobID string `json:"job_id"` }
+	var args struct {
+		JobID string `json:"job_id"`
+	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return nil, err
 	}

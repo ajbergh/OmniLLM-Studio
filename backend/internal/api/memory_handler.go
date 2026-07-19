@@ -47,12 +47,12 @@ func (h *MemoryHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 	var req struct {
-		WorkspaceID    string     `json:"workspace_id,omitempty"`
-		ConversationID string     `json:"conversation_id,omitempty"`
-		Kind           string     `json:"kind"`
-		Content        string     `json:"content"`
-		SourceMessageID string    `json:"source_message_id,omitempty"`
-		ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+		WorkspaceID     string     `json:"workspace_id,omitempty"`
+		ConversationID  string     `json:"conversation_id,omitempty"`
+		Kind            string     `json:"kind"`
+		Content         string     `json:"content"`
+		SourceMessageID string     `json:"source_message_id,omitempty"`
+		ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -98,8 +98,8 @@ func (h *MemoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *MemoryHandler) scopeFromRequest(w http.ResponseWriter, r *http.Request) (memorysvc.Scope, bool) {
 	scope := memorysvc.Scope{
-		UserID: auth.UserIDFromContext(r.Context()),
-		WorkspaceID: strings.TrimSpace(r.URL.Query().Get("workspace_id")),
+		UserID:         auth.UserIDFromContext(r.Context()),
+		WorkspaceID:    strings.TrimSpace(r.URL.Query().Get("workspace_id")),
 		ConversationID: strings.TrimSpace(r.URL.Query().Get("conversation_id")),
 	}
 	if scope.ConversationID != "" && !verifyConversationAccessByID(w, r, h.convos, scope.ConversationID) {

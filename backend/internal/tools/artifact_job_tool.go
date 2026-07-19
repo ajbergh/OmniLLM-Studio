@@ -107,7 +107,7 @@ func (t *ArtifactGenerateJobTool) Execute(ctx context.Context, raw json.RawMessa
 	}
 	structured, _ := json.Marshal(map[string]interface{}{"job_id": job.ID, "status": job.Status, "kind": job.Kind})
 	return &ToolResult{
-		Content: fmt.Sprintf("Artifact generation started as job %s. Use job_status to retrieve the downloadable attachment.", job.ID),
+		Content:    fmt.Sprintf("Artifact generation started as job %s. Use job_status to retrieve the downloadable attachment.", job.ID),
 		Structured: structured, Metadata: map[string]interface{}{"job_id": job.ID, "status": job.Status, "kind": job.Kind},
 	}, nil
 }

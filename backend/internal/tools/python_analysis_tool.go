@@ -172,8 +172,8 @@ func (t *PythonAnalysisTool) Execute(ctx context.Context, raw json.RawMessage) (
 		Content:    content,
 		Structured: structured,
 		Metadata: map[string]interface{}{
-			"runtime":       "restricted-python",
-			"network":       "not exposed by contract",
+			"runtime":        "restricted-python",
+			"network":        "not exposed by contract",
 			"workspace_mode": "temporary",
 		},
 	}, nil

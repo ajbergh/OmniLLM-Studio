@@ -17,8 +17,8 @@ func NewJobHandler(manager *jobs.Manager) *JobHandler { return &JobHandler{manag
 func (h *JobHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	items, err := h.manager.List(jobs.Scope{
-		UserID: auth.UserIDFromContext(r.Context()),
-		WorkspaceID: r.URL.Query().Get("workspace_id"),
+		UserID:         auth.UserIDFromContext(r.Context()),
+		WorkspaceID:    r.URL.Query().Get("workspace_id"),
 		ConversationID: r.URL.Query().Get("conversation_id"),
 	}, limit)
 	if err != nil {

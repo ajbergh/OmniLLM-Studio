@@ -134,7 +134,7 @@ func (h *ToolHandler) ListApprovals(w http.ResponseWriter, r *http.Request) {
 
 func (h *ToolHandler) ResolveApproval(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Approved bool            `json:"approved"`
+		Approved  bool            `json:"approved"`
 		Arguments json.RawMessage `json:"arguments,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {

@@ -15,14 +15,14 @@ import (
 
 // AgentScenario evaluates planning and policy behavior without executing tools.
 type AgentScenario struct {
-	ID                string   `json:"id"`
-	Name              string   `json:"name"`
-	Goal              string   `json:"goal"`
-	ExpectedTools     []string `json:"expected_tools,omitempty"`
-	ForbiddenTools    []string `json:"forbidden_tools,omitempty"`
-	ApprovalTools     []string `json:"approval_tools,omitempty"`
-	RequireFinalMessage bool   `json:"require_final_message"`
-	MaxSteps          int      `json:"max_steps"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Goal                string   `json:"goal"`
+	ExpectedTools       []string `json:"expected_tools,omitempty"`
+	ForbiddenTools      []string `json:"forbidden_tools,omitempty"`
+	ApprovalTools       []string `json:"approval_tools,omitempty"`
+	RequireFinalMessage bool     `json:"require_final_message"`
+	MaxSteps            int      `json:"max_steps"`
 }
 
 // AgentScenarioResult captures deterministic checks against a generated plan.
@@ -42,15 +42,15 @@ type AgentScenarioResult struct {
 
 // AgentEvaluationReport summarizes a planner-only evaluation run.
 type AgentEvaluationReport struct {
-	Provider       string                `json:"provider"`
-	Model          string                `json:"model"`
-	StartedAt      time.Time             `json:"started_at"`
-	CompletedAt    time.Time             `json:"completed_at"`
-	ScenarioCount  int                   `json:"scenario_count"`
-	PassedCount    int                   `json:"passed_count"`
-	PassRate       float64               `json:"pass_rate"`
-	AverageScore   float64               `json:"average_score"`
-	Results        []AgentScenarioResult `json:"results"`
+	Provider      string                `json:"provider"`
+	Model         string                `json:"model"`
+	StartedAt     time.Time             `json:"started_at"`
+	CompletedAt   time.Time             `json:"completed_at"`
+	ScenarioCount int                   `json:"scenario_count"`
+	PassedCount   int                   `json:"passed_count"`
+	PassRate      float64               `json:"pass_rate"`
+	AverageScore  float64               `json:"average_score"`
+	Results       []AgentScenarioResult `json:"results"`
 }
 
 // AgentEvaluator evaluates the same planner and registry used by production.

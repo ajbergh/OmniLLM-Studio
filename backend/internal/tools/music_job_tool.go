@@ -105,7 +105,7 @@ func (t *MusicGenerateJobTool) Execute(ctx context.Context, raw json.RawMessage)
 	}
 	structured, _ := json.Marshal(map[string]interface{}{"job_id": job.ID, "status": job.Status, "kind": job.Kind})
 	return &ToolResult{
-		Content: fmt.Sprintf("Music generation started as job %s. Use job_status to monitor it and retrieve the resulting Music Studio asset.", job.ID),
+		Content:    fmt.Sprintf("Music generation started as job %s. Use job_status to monitor it and retrieve the resulting Music Studio asset.", job.ID),
 		Structured: structured, Metadata: map[string]interface{}{"job_id": job.ID, "status": job.Status, "kind": job.Kind},
 	}, nil
 }

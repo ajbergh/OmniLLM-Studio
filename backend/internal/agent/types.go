@@ -127,8 +127,8 @@ type StartRunRequest struct {
 
 // ApproveRequest is the API request body for approving/rejecting a step.
 type ApproveRequest struct {
-	Approved bool            `json:"approved"`
-	Feedback string          `json:"feedback,omitempty"`
+	Approved  bool            `json:"approved"`
+	Feedback  string          `json:"feedback,omitempty"`
 	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 

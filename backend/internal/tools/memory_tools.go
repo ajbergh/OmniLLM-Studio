@@ -14,14 +14,16 @@ import (
 // current user/workspace/conversation.
 type MemorySearchTool struct{ service *memorysvc.Service }
 
-func NewMemorySearchTool(service *memorysvc.Service) *MemorySearchTool { return &MemorySearchTool{service: service} }
+func NewMemorySearchTool(service *memorysvc.Service) *MemorySearchTool {
+	return &MemorySearchTool{service: service}
+}
 
 func (t *MemorySearchTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "memory_search", Description: "Search explicit user-controlled memories and project decisions visible in the current scope.",
 		Category: "memory", Enabled: t.service != nil, Version: "1", Risk: RiskLow,
 		ReadOnly: true, SupportsParallel: true, DefaultTimeoutMS: 3000, MaxResultBytes: 65536,
-		Parameters: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":100,"default":20}}}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":100,"default":20}}}`),
 		OutputSchema: json.RawMessage(`{"type":"array"}`),
 	}
 }
@@ -69,7 +71,9 @@ func (t *MemorySearchTool) Execute(ctx context.Context, raw json.RawMessage) (*T
 // MemorySaveTool stores one explicit memory and requires approval by default.
 type MemorySaveTool struct{ service *memorysvc.Service }
 
-func NewMemorySaveTool(service *memorysvc.Service) *MemorySaveTool { return &MemorySaveTool{service: service} }
+func NewMemorySaveTool(service *memorysvc.Service) *MemorySaveTool {
+	return &MemorySaveTool{service: service}
+}
 
 func (t *MemorySaveTool) Definition() ToolDefinition {
 	return ToolDefinition{
@@ -141,7 +145,9 @@ func (t *MemorySaveTool) Execute(ctx context.Context, raw json.RawMessage) (*Too
 // MemoryDeleteTool permanently deletes one owned memory.
 type MemoryDeleteTool struct{ service *memorysvc.Service }
 
-func NewMemoryDeleteTool(service *memorysvc.Service) *MemoryDeleteTool { return &MemoryDeleteTool{service: service} }
+func NewMemoryDeleteTool(service *memorysvc.Service) *MemoryDeleteTool {
+	return &MemoryDeleteTool{service: service}
+}
 
 func (t *MemoryDeleteTool) Definition() ToolDefinition {
 	return ToolDefinition{
@@ -153,7 +159,9 @@ func (t *MemoryDeleteTool) Definition() ToolDefinition {
 }
 
 func (t *MemoryDeleteTool) Validate(raw json.RawMessage) error {
-	var args struct{ MemoryID string `json:"memory_id"` }
+	var args struct {
+		MemoryID string `json:"memory_id"`
+	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return err
 	}
@@ -164,7 +172,9 @@ func (t *MemoryDeleteTool) Validate(raw json.RawMessage) error {
 }
 
 func (t *MemoryDeleteTool) Execute(ctx context.Context, raw json.RawMessage) (*ToolResult, error) {
-	var args struct{ MemoryID string `json:"memory_id"` }
+	var args struct {
+		MemoryID string `json:"memory_id"`
+	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return nil, err
 	}

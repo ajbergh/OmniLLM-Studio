@@ -10,9 +10,9 @@ import (
 
 // AgentEventHandler exposes cursor-based replay for disconnected clients.
 type AgentEventHandler struct {
-	events   *repository.AgentEventRepo
-	runs     *repository.AgentRunRepo
-	convos   *repository.ConversationRepo
+	events *repository.AgentEventRepo
+	runs   *repository.AgentRunRepo
+	convos *repository.ConversationRepo
 }
 
 func NewAgentEventHandler(events *repository.AgentEventRepo, runs *repository.AgentRunRepo, convos *repository.ConversationRepo) *AgentEventHandler {

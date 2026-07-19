@@ -42,12 +42,12 @@ func (t *WeatherLookupTool) Definition() ToolDefinition {
 }
 
 type weatherArgs struct {
-	Location        string  `json:"location"`
+	Location        string   `json:"location"`
 	Latitude        *float64 `json:"latitude"`
 	Longitude       *float64 `json:"longitude"`
-	ForecastDays    int     `json:"forecast_days"`
-	TemperatureUnit string  `json:"temperature_unit"`
-	WindSpeedUnit   string  `json:"wind_speed_unit"`
+	ForecastDays    int      `json:"forecast_days"`
+	TemperatureUnit string   `json:"temperature_unit"`
+	WindSpeedUnit   string   `json:"wind_speed_unit"`
 }
 
 type geocodeResponse struct {
@@ -62,11 +62,11 @@ type geocodeResponse struct {
 }
 
 type weatherResponse struct {
-	Latitude          float64 `json:"latitude"`
-	Longitude         float64 `json:"longitude"`
-	Timezone          string  `json:"timezone"`
-	CurrentUnits      map[string]string `json:"current_units"`
-	Current           struct {
+	Latitude     float64           `json:"latitude"`
+	Longitude    float64           `json:"longitude"`
+	Timezone     string            `json:"timezone"`
+	CurrentUnits map[string]string `json:"current_units"`
+	Current      struct {
 		Time                string  `json:"time"`
 		Temperature2M       float64 `json:"temperature_2m"`
 		ApparentTemperature float64 `json:"apparent_temperature"`
@@ -77,14 +77,14 @@ type weatherResponse struct {
 		WindGusts10M        float64 `json:"wind_gusts_10m"`
 	} `json:"current"`
 	DailyUnits map[string]string `json:"daily_units"`
-	Daily struct {
-		Time                  []string  `json:"time"`
-		WeatherCode           []int     `json:"weather_code"`
-		Temperature2MMax      []float64 `json:"temperature_2m_max"`
-		Temperature2MMin      []float64 `json:"temperature_2m_min"`
-		PrecipitationSum      []float64 `json:"precipitation_sum"`
+	Daily      struct {
+		Time                        []string  `json:"time"`
+		WeatherCode                 []int     `json:"weather_code"`
+		Temperature2MMax            []float64 `json:"temperature_2m_max"`
+		Temperature2MMin            []float64 `json:"temperature_2m_min"`
+		PrecipitationSum            []float64 `json:"precipitation_sum"`
 		PrecipitationProbabilityMax []float64 `json:"precipitation_probability_max"`
-		WindSpeed10MMax       []float64 `json:"wind_speed_10m_max"`
+		WindSpeed10MMax             []float64 `json:"wind_speed_10m_max"`
 	} `json:"daily"`
 }
 
@@ -198,20 +198,20 @@ func (t *WeatherLookupTool) Execute(ctx context.Context, raw json.RawMessage) (*
 }
 
 func (t *WeatherLookupTool) geocode(ctx context.Context, location string) (struct {
-	Name string
-	Latitude float64
+	Name      string
+	Latitude  float64
 	Longitude float64
-	Country string
-	Admin1 string
-	Timezone string
+	Country   string
+	Admin1    string
+	Timezone  string
 }, error) {
 	var result struct {
-		Name string
-		Latitude float64
+		Name      string
+		Latitude  float64
 		Longitude float64
-		Country string
-		Admin1 string
-		Timezone string
+		Country   string
+		Admin1    string
+		Timezone  string
 	}
 	query := url.Values{"name": []string{location}, "count": []string{"1"}, "language": []string{"en"}, "format": []string{"json"}}
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://geocoding-api.open-meteo.com/v1/search?"+query.Encode(), nil)

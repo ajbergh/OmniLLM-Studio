@@ -12,14 +12,16 @@ import (
 // AppCatalogTool lists supported app families and declared scopes.
 type AppCatalogTool struct{ service *apps.Service }
 
-func NewAppCatalogTool(service *apps.Service) *AppCatalogTool { return &AppCatalogTool{service: service} }
+func NewAppCatalogTool(service *apps.Service) *AppCatalogTool {
+	return &AppCatalogTool{service: service}
+}
 
 func (t *AppCatalogTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name: "app_catalog", Description: "List governed connected-app families, capabilities, and declared scopes.",
 		Category: "apps", Enabled: t.service != nil, Version: "1", Risk: RiskLow,
 		ReadOnly: true, SupportsParallel: true, DefaultTimeoutMS: 3000, MaxResultBytes: 65536,
-		Parameters: json.RawMessage(`{"type":"object","properties":{"app_key":{"type":"string"}}}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"app_key":{"type":"string"}}}`),
 		OutputSchema: json.RawMessage(`{"type":"array"}`),
 	}
 }
@@ -30,7 +32,9 @@ func (t *AppCatalogTool) Validate(raw json.RawMessage) error {
 }
 
 func (t *AppCatalogTool) Execute(_ context.Context, raw json.RawMessage) (*ToolResult, error) {
-	var args struct{ AppKey string `json:"app_key"` }
+	var args struct {
+		AppKey string `json:"app_key"`
+	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return nil, err
 	}
@@ -54,7 +58,9 @@ func (t *AppCatalogTool) Execute(_ context.Context, raw json.RawMessage) (*ToolR
 // AppConnectionsTool lists current user's app-to-MCP mappings.
 type AppConnectionsTool struct{ service *apps.Service }
 
-func NewAppConnectionsTool(service *apps.Service) *AppConnectionsTool { return &AppConnectionsTool{service: service} }
+func NewAppConnectionsTool(service *apps.Service) *AppConnectionsTool {
+	return &AppConnectionsTool{service: service}
+}
 
 func (t *AppConnectionsTool) Definition() ToolDefinition {
 	return ToolDefinition{
@@ -90,7 +96,9 @@ func (t *AppConnectionsTool) Execute(ctx context.Context, _ json.RawMessage) (*T
 // AppConnectMCPTool registers an existing MCP server as a governed app.
 type AppConnectMCPTool struct{ service *apps.Service }
 
-func NewAppConnectMCPTool(service *apps.Service) *AppConnectMCPTool { return &AppConnectMCPTool{service: service} }
+func NewAppConnectMCPTool(service *apps.Service) *AppConnectMCPTool {
+	return &AppConnectMCPTool{service: service}
+}
 
 func (t *AppConnectMCPTool) Definition() ToolDefinition {
 	return ToolDefinition{
@@ -154,7 +162,9 @@ func (t *AppConnectMCPTool) Execute(ctx context.Context, raw json.RawMessage) (*
 // AppDisconnectTool removes an app mapping but does not delete the MCP server.
 type AppDisconnectTool struct{ service *apps.Service }
 
-func NewAppDisconnectTool(service *apps.Service) *AppDisconnectTool { return &AppDisconnectTool{service: service} }
+func NewAppDisconnectTool(service *apps.Service) *AppDisconnectTool {
+	return &AppDisconnectTool{service: service}
+}
 
 func (t *AppDisconnectTool) Definition() ToolDefinition {
 	return ToolDefinition{
@@ -166,7 +176,9 @@ func (t *AppDisconnectTool) Definition() ToolDefinition {
 }
 
 func (t *AppDisconnectTool) Validate(raw json.RawMessage) error {
-	var args struct{ ConnectionID string `json:"connection_id"` }
+	var args struct {
+		ConnectionID string `json:"connection_id"`
+	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return err
 	}
@@ -177,7 +189,9 @@ func (t *AppDisconnectTool) Validate(raw json.RawMessage) error {
 }
 
 func (t *AppDisconnectTool) Execute(ctx context.Context, raw json.RawMessage) (*ToolResult, error) {
-	var args struct{ ConnectionID string `json:"connection_id"` }
+	var args struct {
+		ConnectionID string `json:"connection_id"`
+	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return nil, err
 	}

@@ -334,7 +334,9 @@ func (s *Scheduler) Shutdown(ctx context.Context) error {
 	}
 }
 
-type scanner interface{ Scan(dest ...interface{}) error }
+type scanner interface {
+	Scan(dest ...interface{}) error
+}
 
 func scanTask(row scanner) (*Task, error) {
 	var task Task

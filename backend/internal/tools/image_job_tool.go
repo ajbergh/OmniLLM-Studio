@@ -45,7 +45,7 @@ func (t *ImageGenerateJobTool) Definition() ToolDefinition {
 			}
 		}`),
 		OutputSchema: json.RawMessage(`{"type":"object","properties":{"job_id":{"type":"string"},"status":{"type":"string"}}}`),
-		Examples: []ToolExample{{Description: "Generate one image", Arguments: json.RawMessage(`{"prompt":"A modern local-first AI studio workspace","size":"1024x1024","n":1}`)}},
+		Examples:     []ToolExample{{Description: "Generate one image", Arguments: json.RawMessage(`{"prompt":"A modern local-first AI studio workspace","size":"1024x1024","n":1}`)}},
 	}
 }
 
@@ -143,7 +143,7 @@ func (t *ImageGenerateJobTool) Execute(ctx context.Context, raw json.RawMessage)
 	}
 	structured, _ := json.Marshal(map[string]interface{}{"job_id": job.ID, "status": job.Status, "kind": job.Kind})
 	return &ToolResult{
-		Content: fmt.Sprintf("Image generation started as job %s. Use job_status with operation=await or get to retrieve the saved image attachments.", job.ID),
+		Content:    fmt.Sprintf("Image generation started as job %s. Use job_status with operation=await or get to retrieve the saved image attachments.", job.ID),
 		Structured: structured, Metadata: map[string]interface{}{"job_id": job.ID, "status": job.Status, "kind": job.Kind},
 	}, nil
 }

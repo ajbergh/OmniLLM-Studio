@@ -18,8 +18,8 @@ var (
 
 // ApprovalDecision records a user's decision for a pending invocation.
 type ApprovalDecision struct {
-	Approved  bool            `json:"approved"`
-	Arguments jsonRawMessage  `json:"-"`
+	Approved  bool           `json:"approved"`
+	Arguments jsonRawMessage `json:"-"`
 }
 
 // jsonRawMessage is kept private so the broker does not need custom marshaling;
@@ -29,14 +29,14 @@ type jsonRawMessage = []byte
 // PendingApproval is safe to expose through the API. The decision channel is
 // intentionally excluded from serialization.
 type PendingApproval struct {
-	ID          string          `json:"id"`
-	Request     ApprovalRequest `json:"request"`
-	Status      string          `json:"status"`
-	CreatedAt   time.Time       `json:"created_at"`
-	ExpiresAt   time.Time       `json:"expires_at"`
-	ResolvedAt  *time.Time      `json:"resolved_at,omitempty"`
-	Approved    *bool           `json:"approved,omitempty"`
-	result      chan approvalResolution
+	ID         string          `json:"id"`
+	Request    ApprovalRequest `json:"request"`
+	Status     string          `json:"status"`
+	CreatedAt  time.Time       `json:"created_at"`
+	ExpiresAt  time.Time       `json:"expires_at"`
+	ResolvedAt *time.Time      `json:"resolved_at,omitempty"`
+	Approved   *bool           `json:"approved,omitempty"`
+	result     chan approvalResolution
 }
 
 type approvalResolution struct {

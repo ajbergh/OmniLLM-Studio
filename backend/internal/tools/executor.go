@@ -181,8 +181,8 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 		ToolName:   call.Name,
 		Scope:      scope,
 		Data: map[string]interface{}{
-			"duration_ms": durationMS,
-			"is_error":    result.IsError,
+			"duration_ms":  durationMS,
+			"is_error":     result.IsError,
 			"result_bytes": len(result.Content),
 		},
 	})
