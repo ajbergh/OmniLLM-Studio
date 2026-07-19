@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/ajbergh/omnillm-studio/internal/auth"
+	"github.com/go-chi/chi/v5"
 )
 
 type invocationScopeContextKey struct{}
@@ -36,15 +37,21 @@ func ContextWithInvocationScope(ctx context.Context, scope InvocationScope) cont
 	if scope.UserID == "" {
 		scope.UserID = auth.UserIDFromContext(ctx)
 	}
+	if scope.ConversationID == "" {
+		scope.ConversationID = chi.URLParamFromCtx(ctx, "conversationId")
+	}
 	return context.WithValue(ctx, invocationScopeContextKey{}, scope)
 }
 
 // InvocationScopeFromContext returns explicit invocation metadata and inherits
-// the authenticated user when no explicit scope was attached.
+// the authenticated user and Chi conversation route when available.
 func InvocationScopeFromContext(ctx context.Context) InvocationScope {
 	scope, _ := ctx.Value(invocationScopeContextKey{}).(InvocationScope)
 	if scope.UserID == "" {
 		scope.UserID = auth.UserIDFromContext(ctx)
+	}
+	if scope.ConversationID == "" {
+		scope.ConversationID = chi.URLParamFromCtx(ctx, "conversationId")
 	}
 	return scope
 }
