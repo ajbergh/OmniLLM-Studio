@@ -8,7 +8,7 @@
 # Build inside the target-platform image. This is slower than pure Go cross
 # compilation under QEMU, but it is deterministic for CGO and guarantees that
 # SQLite links against the correct target libc and headers.
-FROM --platform=$TARGETPLATFORM golang:1.25-bookworm AS build
+FROM --platform=$TARGETPLATFORM golang:1.26-bookworm AS build
 
 ARG VERSION=dev
 ARG COMMIT=unknown
