@@ -1,5 +1,7 @@
 package repository
 
+// File overview: persists document chunks and provides FTS5/BM25 retrieval with a bounded lexical fallback.
+
 import (
 	"database/sql"
 	"fmt"
@@ -18,6 +20,7 @@ type ChunkRepo struct {
 	db *sql.DB
 }
 
+// NewChunkRepo creates a chunk repository and ensures the RAG v2/FTS schema is available.
 func NewChunkRepo(db *sql.DB) *ChunkRepo {
 	if err := ensureRAGV2Schema(db); err != nil {
 		log.Printf("[rag] initialize RAG v2 schema: %v", err)
@@ -25,6 +28,7 @@ func NewChunkRepo(db *sql.DB) *ChunkRepo {
 	return &ChunkRepo{db: db}
 }
 
+// Create persists one chunk, assigning its ID, timestamps, and default metadata when absent.
 func (r *ChunkRepo) Create(c *models.DocumentChunk) error {
 	if c.ID == "" {
 		c.ID = uuid.New().String()
@@ -49,6 +53,7 @@ func (r *ChunkRepo) Create(c *models.DocumentChunk) error {
 	return nil
 }
 
+// CreateBatch persists chunks in one transaction and assigns shared creation timestamps.
 func (r *ChunkRepo) CreateBatch(chunks []models.DocumentChunk) error {
 	if len(chunks) == 0 {
 		return nil
@@ -92,6 +97,7 @@ func (r *ChunkRepo) CreateBatch(chunks []models.DocumentChunk) error {
 	return tx.Commit()
 }
 
+// ListByAttachment returns chunks for one attachment in chunk order.
 func (r *ChunkRepo) ListByAttachment(attachmentID string) ([]models.DocumentChunk, error) {
 	rows, err := r.db.Query(chunkSelect+` WHERE attachment_id = ? ORDER BY chunk_index ASC`, attachmentID)
 	if err != nil {
@@ -101,6 +107,7 @@ func (r *ChunkRepo) ListByAttachment(attachmentID string) ([]models.DocumentChun
 	return scanChunks(rows)
 }
 
+// ListByConversation returns conversation chunks ordered by attachment and chunk index.
 func (r *ChunkRepo) ListByConversation(conversationID string) ([]models.DocumentChunk, error) {
 	rows, err := r.db.Query(chunkSelect+` WHERE conversation_id = ? ORDER BY attachment_id, chunk_index ASC`, conversationID)
 	if err != nil {
@@ -110,6 +117,7 @@ func (r *ChunkRepo) ListByConversation(conversationID string) ([]models.Document
 	return scanChunks(rows)
 }
 
+// ListByLibraryFileID returns chunks for one File Library record in chunk order.
 func (r *ChunkRepo) ListByLibraryFileID(libraryFileID string) ([]models.DocumentChunk, error) {
 	rows, err := r.db.Query(chunkSelect+` WHERE library_file_id = ? ORDER BY chunk_index ASC`, libraryFileID)
 	if err != nil {
@@ -400,6 +408,7 @@ func (r *ChunkRepo) searchLexicalFallback(libraryFileIDs []string, queryText str
 
 const maxSQLiteParams = 900
 
+// GetByIDs returns existing chunks for the supplied IDs without requiring input-order preservation.
 func (r *ChunkRepo) GetByIDs(ids []string) ([]models.DocumentChunk, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -430,6 +439,7 @@ func (r *ChunkRepo) GetByIDs(ids []string) ([]models.DocumentChunk, error) {
 	return allResults, nil
 }
 
+// DeleteByAttachment removes all relational chunks associated with an attachment.
 func (r *ChunkRepo) DeleteByAttachment(attachmentID string) error {
 	_, err := r.db.Exec("DELETE FROM document_chunks WHERE attachment_id = ?", attachmentID)
 	if err != nil {
@@ -438,6 +448,7 @@ func (r *ChunkRepo) DeleteByAttachment(attachmentID string) error {
 	return nil
 }
 
+// DeleteByConversation removes all relational chunks associated with a conversation.
 func (r *ChunkRepo) DeleteByConversation(conversationID string) error {
 	_, err := r.db.Exec("DELETE FROM document_chunks WHERE conversation_id = ?", conversationID)
 	if err != nil {
@@ -446,6 +457,7 @@ func (r *ChunkRepo) DeleteByConversation(conversationID string) error {
 	return nil
 }
 
+// DeleteByLibraryFileID removes all relational chunks associated with a File Library record.
 func (r *ChunkRepo) DeleteByLibraryFileID(libraryFileID string) error {
 	_, err := r.db.Exec("DELETE FROM document_chunks WHERE library_file_id = ?", libraryFileID)
 	if err != nil {
@@ -454,6 +466,7 @@ func (r *ChunkRepo) DeleteByLibraryFileID(libraryFileID string) error {
 	return nil
 }
 
+// DistinctConversationIDsWithChunks lists conversation IDs that currently own persisted chunks.
 func (r *ChunkRepo) DistinctConversationIDsWithChunks() ([]string, error) {
 	rows, err := r.db.Query(`SELECT DISTINCT conversation_id FROM document_chunks`)
 	if err != nil {
@@ -471,6 +484,7 @@ func (r *ChunkRepo) DistinctConversationIDsWithChunks() ([]string, error) {
 	return ids, rows.Err()
 }
 
+// CountByAttachment returns the persisted chunk count for one attachment.
 func (r *ChunkRepo) CountByAttachment(attachmentID string) (int, error) {
 	var count int
 	err := r.db.QueryRow("SELECT COUNT(*) FROM document_chunks WHERE attachment_id = ?", attachmentID).Scan(&count)

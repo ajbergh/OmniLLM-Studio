@@ -2,82 +2,37 @@
 
 Branch: `feature/rag-modernization-v2`
 
-## Release A — Correctness foundation
+## Runtime releases
 
-| Work item | Status | Implementation |
+| Area | Status | Current branch behavior |
 |---|---|---|
-| Embedding-space identity | Complete | Provider/model/task/metric/schema fingerprints and physical collection isolation |
-| Chat/embedding decoupling | Complete | Explicit `Provider Profile::model` pinning plus provider-neutral embedding functions |
-| Batched embeddings | Complete | Bounded 64-item batches, validation, normalization, retry/backoff/jitter |
-| Durable RAG schema | Complete | Embedding spaces, indexes, generations, jobs, retrieval telemetry |
-| Generation coordinator | Complete | Build, validate, mark ready, and atomically activate replacement generations |
-| Legacy compatibility | Complete | Historical Retriever and VectorStore APIs remain available |
-| Partial-index detection foundation | Complete | Expected/indexed counts and generation validation |
+| Embedding-space isolation | Complete | Provider/model/task/metric/schema routing fingerprints isolate physical chromem collections. |
+| Chat/embedding decoupling | Complete | Embedding provider selection can be independent of the chat provider; advanced API configuration supports `Provider Profile::model`. |
+| Batched embeddings | Complete | Bounded batches, validation, cosine normalization, retry/backoff, and dimensional consistency checks. |
+| Shared parser | Complete | Text-like files, HTML, PDF, DOCX, XLSX, and PPTX use `internal/document`. |
+| Deterministic structural chunks | Complete | Stable IDs plus heading/page/slide/sheet metadata and boundary-aware splitting. |
+| Hybrid retrieval | Complete | Conversation RAG and File Library combine vector and SQLite FTS5/BM25 candidates using RRF and source diversity. |
+| Context planning | Complete | Deduplication, source quotas, conservative token budgeting, stable labels, and untrusted-evidence boundaries. |
+| Private evidence plus web | Complete | Request-scoped private evidence is preserved when grounded web summarization runs. |
+| Safe attachment/conversation rebuild | Complete | Replacement vectors are built before relational activation; failed attachments retain prior searchable data. |
+| Admin health and rebuild UI | Complete | Settings displays footprint counts and exposes full non-destructive rebuild actions. |
 
-## Release B — Retrieval quality
+## Supporting and opt-in capabilities
 
-| Work item | Status | Implementation |
+| Capability | Status | Integration boundary |
 |---|---|---|
-| Shared parser | Complete | Text, Markdown, HTML, PDF, DOCX, XLSX, and PPTX through `internal/document` |
-| Deterministic chunks | Complete | Content-hash IDs and chunker version metadata |
-| Structure-aware chunking | Complete | Heading/page/slide/sheet preservation and boundary-aware splitting |
-| Provider-neutral token budgeting | Complete | Conservative estimator abstraction and bounded context planner |
-| FTS5/BM25 | Complete | External-content index, triggers, scoped queries, fallback lexical search |
-| Hybrid conversation RAG | Complete | Vector + BM25 + RRF + source diversity |
-| Hybrid File Library | Complete | Metadata no longer prefilters semantic candidates; RRF replaces fixed score weighting |
-| Private RAG + web composition | Complete | Request-scoped evidence bridge and grounded web summarizer |
-| Prompt-injection boundary | Complete | Retrieved evidence consistently marked untrusted |
+| Query rewriting / multi-query planning | Implemented, opt-in API | `LLMQueryPlanner` exists but is not enabled by default in chat retrieval settings. |
+| LLM reranking | Implemented, opt-in API | `LLMReranker` exists; RRF and diversity remain the default ranking path. |
+| Exact `VectorIndex` | Implemented and tested | Reference in-memory generation backend; default runtime remains chromem-go. |
+| HNSW `VectorIndex` | Implemented and tested | Pure-Go ANN with persistence and recall tests; no runtime selector is wired on this branch. |
+| HTTP vector adapter | Implemented | Client/server adapter exists; Docker, Helm, discovery, and lifecycle wiring are not included. |
+| Generation coordinator | Implemented | Atomic SQLite generation activation is available as a library component; default attachment reindex uses safe vector-first/chunk-replace activation instead. |
+| Retrieval evaluation | Implemented | Recall@K, MRR, nDCG@K, hit rate, deltas, and stage telemetry helpers. |
 
-## Release C — Capability
+## Administrative endpoint semantics
 
-| Work item | Status | Implementation |
-|---|---|---|
-| Unified provenance model | Complete in RAG core | Page/section metadata and stable labels retained by context planning |
-| Query rewriting | Complete, opt-in | Provider-neutral LLM standalone/multi-query planner with deterministic fallback |
-| Optional reranking | Complete, opt-in | Any configured chat provider can rerank structured candidates |
-| RRF/MMR default | Complete | Zero-cost deterministic ranking remains default |
+`POST /v1/rag/repair` and `POST /v1/rag/reindex-all` both rebuild every conversation that currently has persisted chunks. Neither endpoint currently restricts work to indexes proven inconsistent. Each response reports completed conversations, indexed chunks, and failures.
 
-## Release D — Scale
+## Validation
 
-| Work item | Status | Implementation |
-|---|---|---|
-| Vector interface | Complete | Backend-neutral generation API |
-| Exact reference backend | Complete | Pure-Go normalized dot-product search |
-| HNSW backend | Complete | Pure-Go ANN, persistence, validation, and recall tests |
-| Benchmarks | Complete | 1k/10k/100k exact and HNSW benchmarks |
-| Incremental identity | Complete in core | Deterministic chunks and embedding-space/content hashes enable reuse |
-
-## Release E — Validation and operations
-
-| Work item | Status | Implementation |
-|---|---|---|
-| Retrieval metrics | Complete | Recall@K, MRR, nDCG, hit rate, deltas |
-| Stage telemetry model | Complete | Embedding/vector/keyword/fusion/rerank/context timings |
-| FTS integration test | Complete | Exact identifier and conversation-scope coverage |
-| Parser tests | Complete | HTML trust/noise behavior and plain-text extraction |
-| HNSW recall test | Complete | ANN compared against exact top-1 results |
-| Administration UI | Deferred | Schema and health primitives exist; a dedicated UI is intentionally separated from core migration |
-| Distributed index service | Deferred | Not required for the current single-process desktop/server architecture |
-
-## Validation commands
-
-```bash
-cd backend
-go test ./...
-go test -race ./internal/rag ./internal/repository ./internal/filelibrary ./internal/document
-go test -run '^$' -bench BenchmarkVectorIndexes -benchmem ./internal/rag
-```
-
-The branch is designed to remain CGO-free. No Python, ONNX Runtime, external vector database, or sidecar is required.
-
-## Operational completion follow-up
-
-- Reindexing now builds replacement vectors before atomically replacing relational chunks; failed attachments retain the previous searchable index.
-- Added admin RAG health and repair endpoints.
-- Added a token-protected pure-Go HTTP VectorIndex client/server adapter for dedicated index-owner and multi-replica deployments.
-
-## Administration UI completion
-
-- Settings displays live RAG document, chunk, vector, and collection health.
-- Added explicit non-destructive repair and full rebuild actions.
-- Frontend contracts match safe reindex and repair API responses.
+See [RAG backend and frontend validation](RAG_BACKEND_VALIDATION.md) for the exact commands and latest branch results.

@@ -1,5 +1,7 @@
 package api
 
+// File overview: centralizes attachment MIME eligibility and structure-preserving text extraction for conversation RAG indexing.
+
 import (
 	"fmt"
 	"strings"

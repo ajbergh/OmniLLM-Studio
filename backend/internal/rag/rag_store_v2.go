@@ -1,5 +1,7 @@
 package rag
 
+// File overview: manages embedding-space-isolated chromem collections used by the default RAG runtime.
+
 import (
 	"context"
 	"fmt"

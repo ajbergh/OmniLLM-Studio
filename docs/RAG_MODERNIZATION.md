@@ -1,78 +1,83 @@
 # RAG Modernization Architecture
 
-## Goals
+## Purpose
 
-OmniLLM-Studio's RAG v2 architecture keeps the backend pure Go and CGO-free while improving correctness, retrieval quality, throughput, and scale. The implementation is provider-neutral: chat generation, embeddings, query planning, and reranking may use different configured providers.
+OmniLLM-Studio's RAG modernization keeps the backend pure Go while improving embedding correctness, document structure, hybrid retrieval, context safety, and operational visibility. Chat generation and embedding generation can use different configured provider profiles.
 
-## Core principles
+## Default runtime architecture
 
-1. SQLite remains the authoritative store for source metadata, chunks, lexical search, index state, jobs, and telemetry.
-2. Embedding spaces are immutable and fingerprinted by provider, model, dimensions, metric, normalization, task type, and schema version.
-3. Logical scopes and physical vector collections are separate. A conversation, workspace, or global scope can have multiple isolated embedding spaces without mixing incompatible vectors.
-4. Rebuilds use index generations and atomic active-generation pointers rather than delete-first replacement.
-5. Retrieval is hybrid: FTS5/BM25 and semantic candidates are fused with reciprocal-rank fusion and source diversity.
-6. Retrieved content is always treated as untrusted evidence.
-7. Vector backends implement one Go interface. Exact search is the reference; pure-Go HNSW is available for larger indexes.
-
-## Implemented pipeline
+The application runtime used by conversation attachments and the File Library is:
 
 ```text
-Document / URL / attachment
-  -> shared pure-Go structural parser
+Attachment or File Library source
+  -> shared structural parser
   -> deterministic structure-aware chunks
-  -> SQLite chunks + FTS5
-  -> batched provider-neutral embeddings
-  -> embedding-space-isolated vector collection
-  -> vector + BM25 candidate retrieval
-  -> reciprocal-rank fusion
-  -> source diversity
-  -> optional provider-neutral LLM query planning/reranking
-  -> token-budgeted context planner
-  -> chat generation with stable evidence labels
+  -> SQLite document_chunks + FTS5/BM25
+  -> batched, normalized embeddings
+  -> embedding-space-isolated chromem collection
+  -> vector candidates + lexical candidates
+  -> reciprocal-rank fusion and source diversity
+  -> token-budgeted untrusted-evidence context
+  -> chat or grounded web summarization
 ```
 
-## Embedding space identity
+SQLite remains authoritative for chunk text, provenance, lexical retrieval, RAG metadata, and operational records. Chromem-go remains the default embedded exact vector store. Physical collection names include a routing fingerprint so vectors produced by incompatible provider/model/task/schema contracts are never queried together.
 
-The physical collection suffix is derived from an immutable routing fingerprint. Changing the chat model does not alter the embedding space. Changing the embedding provider/model creates a separate physical collection rather than querying old vectors with an incompatible query vector.
+## Reindex safety
 
-## Storage
+Conversation and attachment reindexing does not delete the active chunk set first. It builds replacement vectors, atomically replaces the attachment's relational chunks, and then removes stale vector IDs. If extraction, embedding, or vector persistence fails before activation, the prior searchable data remains. A conversation rebuild may report partial attachment failures.
 
-RAG v2 lazily creates:
+`POST /v1/rag/repair` and `POST /v1/rag/reindex-all` currently perform the same full rebuild over every conversation with persisted chunks. The repair endpoint does not yet perform a cheaper inconsistency-only scan.
 
-- `rag_embedding_spaces`
-- `rag_indexes`
-- `rag_index_generations`
-- `rag_ingest_jobs`
-- `rag_retrieval_events`
-- `document_chunks_fts`
+## Embedding identity and provider selection
 
-The FTS5 index uses external-content triggers over `document_chunks`. SQLite builds without FTS5 fall back to bounded tokenized `LIKE` retrieval.
+An embedding space is identified by provider profile, model, dimensions when known, distance metric, normalization behavior, task types, and schema version. The `rag_embedding_model` setting accepts either a model ID or the advanced `Provider Profile Name::model-id` form. Without an explicit provider pin, an enabled active chat provider is used when compatible; otherwise the first enabled embedding-capable provider in repository order is selected.
 
-## Vector backends
+Embedding inputs are sent to the selected embedding provider. Use an Ollama or local compatible provider when document text must remain local.
 
-`VectorIndex` supports generation creation, batched upsert, search, delete, validation, and drop.
+## Parsing and chunking
 
-Implemented backends:
+The shared `internal/document` parser supports text-like formats, HTML, PDF, DOCX, XLSX, and PPTX without an external parser service. It preserves headings, pages when available, slides, sheets, tables, and code blocks in a common structural representation. The deterministic chunker uses content-derived IDs and records parser/chunker metadata for incremental comparison.
 
-- `ExactVectorIndex`: deterministic full-recall reference backend.
-- `HNSWVectorIndex`: pure-Go approximate backend with configurable M, construction/search breadth, deletion, validation, and gob snapshots.
-- Existing chromem-go storage remains available through `VectorStore`, now isolated by embedding space and supplied with precomputed batch embeddings.
+## Retrieval and context
 
-Run vector benchmarks with:
+SQLite FTS5/BM25 and semantic candidates are fused with reciprocal-rank fusion. Source diversity reduces repeated passages from one document. SQLite builds without FTS5 use a bounded tokenized `LIKE` fallback. Retrieved text is always wrapped as untrusted evidence, assigned stable source labels, deduplicated, and packed into a conservative token budget.
+
+When live web search is triggered, request-scoped private evidence is preserved and supplied to the grounded summarizer rather than discarded.
+
+## Supporting vector components
+
+The branch also provides a backend-neutral `VectorIndex` contract with:
+
+- `ExactVectorIndex`, an in-memory full-recall reference implementation.
+- `HNSWVectorIndex`, a pure-Go approximate implementation with validation and gob persistence.
+- `HTTPVectorIndex` and `NewVectorIndexHTTPHandler`, a bearer-token-capable HTTP transport for a dedicated index owner.
+- `GenerationCoordinator`, which builds and validates immutable generations before changing an active-generation pointer in SQLite.
+
+These components are implemented and tested as library capabilities. The normal desktop/server runtime still uses embedding-space-isolated chromem collections; HNSW, the HTTP adapter, and `GenerationCoordinator` are not selected by runtime configuration or wired into Docker/Helm deployment on this branch.
+
+## Persistence
+
+RAG v2 lazily creates `rag_embedding_spaces`, `rag_indexes`, `rag_index_generations`, `rag_ingest_jobs`, `rag_retrieval_events`, and the `document_chunks_fts` virtual table and triggers.
+
+## Administration
+
+Administrators can use:
+
+- `GET /v1/rag/health` for current settings and relational/vector footprint counts.
+- `POST /v1/rag/repair` to rebuild all indexed conversations non-destructively.
+- `POST /v1/rag/reindex-all` to rebuild all indexed conversations non-destructively.
+- Settings -> RAG for the same health snapshot and rebuild controls.
+
+The health endpoint reports counts, not a proof that every relational chunk has a matching vector. Compare `chunks` and `vector_records` as an operational signal, accounting for multiple embedding spaces or legacy collections.
+
+## Evaluation and benchmarks
+
+The RAG package includes Recall@K, MRR, nDCG@K, hit rate, metric deltas, stage telemetry, exact-search tests, and HNSW recall tests. Run vector benchmarks with:
 
 ```bash
 cd backend
 go test -run '^$' -bench BenchmarkVectorIndexes -benchmem ./internal/rag
 ```
 
-## Retrieval evaluation
-
-The `rag` package provides Recall@K, MRR, nDCG, hit rate, and metric-delta helpers. Evaluation datasets should contain query IDs, relevant chunk IDs, and ranked retrieval results. Exact search is the ANN recall reference.
-
-## Operational guidance
-
-- Use exact search for small and medium local indexes until benchmarks show a latency problem.
-- Enable HNSW only when its measured recall and memory profile meet the deployment target.
-- Keep reranking optional. RRF + diversity remains the deterministic zero-cost default.
-- Treat embedding model changes as new index generations.
-- Never delete the active generation before replacement validation and activation.
+See [RAG modernization status](RAG_MODERNIZATION_STATUS.md) and [RAG validation](RAG_BACKEND_VALIDATION.md) for branch-specific completion and validation results.

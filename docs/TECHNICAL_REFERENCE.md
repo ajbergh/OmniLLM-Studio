@@ -53,7 +53,7 @@
 | Feature | Description |
 |---------|-------------|
 | **Agent Mode** | Autonomous multi-step task execution with planning, tool calling, and step approval |
-| **RAG Pipeline** | Document chunking, embedding generation, and persistent vector retrieval (chromem-go) over uploaded files — auto-indexes attachments synchronously so context is available immediately |
+| **RAG Pipeline** | Shared structural parsing, deterministic chunks, SQLite FTS5/BM25 plus embedding-space-isolated chromem retrieval, RRF fusion, bounded untrusted-evidence context, and non-destructive rebuilds |
 | **File Library** | Durable file storage with conversation, workspace, and global scopes — hybrid vector + keyword search, citation-aware summarization and comparison, and a dedicated UI panel |
 | **Conversation Branching** | Fork any message into parallel branches — explore different response paths |
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
@@ -63,6 +63,18 @@
 | **MCP Servers** | Model Context Protocol support — connect to external MCP servers to securely use their tools within chat and agent workflows |
 | **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, and document generation |
 | **Artifact Export** | Ask the LLM for any supported format and it generates a downloadable file automatically — `.docx` (Word), `.xlsx` (Excel), `.csv`, `.pdf`, `.md` (Markdown), `.html`, `.json`, `.yaml` — no copy-pasting required |
+
+### RAG architecture and operations
+
+The default conversation and File Library runtime uses SQLite as the authoritative chunk/provenance and lexical store, with exact chromem-go vector collections isolated by embedding routing fingerprint. Vector and FTS5/BM25 candidates are combined with reciprocal-rank fusion and source diversity before context planning. SQLite builds without FTS5 use a bounded lexical fallback.
+
+Embedding selection is independent from chat generation when configured as `Provider Profile Name::model-id`. Without an explicit profile, the active chat provider is preferred when embedding-compatible; otherwise the first enabled embedding-capable provider in repository order is used. Document text is sent to that provider for embedding, so use local providers when required.
+
+Conversation and attachment rebuilds index replacement vectors before atomically replacing relational chunks and removing stale vector IDs. Failure before activation leaves previous searchable data intact. `POST /v1/rag/repair` and `POST /v1/rag/reindex-all` are currently full rebuild operations over every conversation with chunks.
+
+The codebase also includes exact and pure-Go HNSW `VectorIndex` implementations, a generation coordinator, and a bearer-token HTTP adapter. These are supporting library capabilities on this branch; the normal runtime remains chromem-go and deployment configuration does not yet select HNSW or a remote index owner.
+
+Detailed design: [RAG modernization architecture](RAG_MODERNIZATION.md). Branch status: [RAG modernization status](RAG_MODERNIZATION_STATUS.md).
 
 ### Image Studio
 
@@ -579,7 +591,9 @@ All routes are under `/v1/`.
 | `POST` | `/v1/conversations/:id/reindex` | Re-chunk + re-embed documents |
 | `GET` | `/v1/attachments/:aid/chunks` | List chunks for attachment |
 | `POST` | `/v1/attachments/:aid/index` | Index attachment (chunk + embed) |
-| `POST` | `/v1/rag/reindex-all` | **Admin** — drop all chromem collections so subsequent retrievals lazy-migrate from legacy embeddings |
+| `GET` | `/v1/rag/health` | **Admin** — report effective RAG settings and current relational/vector footprint counts |
+| `POST` | `/v1/rag/repair` | **Admin** — non-destructively rebuild every conversation that currently has chunks |
+| `POST` | `/v1/rag/reindex-all` | **Admin** — non-destructively rebuild every conversation that currently has chunks and report failures |
 
 </details>
 
@@ -773,7 +787,7 @@ For news, use `"intent": "news"` with an optional league or a team-specific quer
 | `OMNILLM_CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Comma-separated allowed CORS origins |
 | `OMNILLM_ALLOW_PUBLIC_REGISTRATION` | `false` | Allow registration after first user is created |
 | `OMNILLM_PLUGIN_DIR` | `~/.omnillm-studio/plugins` | Plugin directory |
-| `OMNILLM_CHROMEM_DIR` | `<dir of OMNILLM_DB_PATH>/chromem` | Directory for chromem-go RAG vector files (one subdirectory per conversation) |
+| `OMNILLM_CHROMEM_DIR` | `<dir of OMNILLM_DB_PATH>/chromem` | Directory for persistent chromem-go data; logical scopes may have multiple physical collections keyed by embedding routing fingerprint |
 | `OMNILLM_CHROMEM_COMPRESS` | `false` | Set to `true` to gzip-compress chromem persistent files |
 | `OMNILLM_MASTER_KEY` | _(machine-scoped seed file)_ | Hex-encoded 32 bytes (64 chars) used by AES-256-GCM to encrypt provider API keys at rest. **Required** for the Kubernetes / container deployment; for desktop and headless installs the seed file is auto-generated under the user config dir. Generate with `openssl rand -hex 32`. |
 

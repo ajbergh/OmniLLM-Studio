@@ -1,3 +1,4 @@
+// SettingsPanel renders provider, application, RAG health, and administrative maintenance settings.
 import { useEffect, useId, useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
@@ -1753,13 +1754,13 @@ useEffect(() => {
 
 const handleRepair = async () => {
   if (!window.confirm(
-    'Check every indexed conversation and rebuild inconsistent indexes? Valid indexes remain available throughout the repair.'
+    'Rebuild every currently indexed conversation using the active parser, chunking, and embedding settings? Existing indexes remain available until each replacement succeeds.'
   )) return;
   setRepairing(true);
   try {
     const result = await api.repairRAG();
     const failureSuffix = result.failures.length > 0 ? `; ${result.failures.length} still need attention` : '';
-    toast.success(`Repaired ${result.conversations_repaired} conversation${result.conversations_repaired === 1 ? '' : 's'} and ${result.chunks_indexed} chunks${failureSuffix}`);
+    toast.success(`Rebuilt ${result.conversations_repaired} conversation${result.conversations_repaired === 1 ? '' : 's'} and ${result.chunks_indexed} chunks${failureSuffix}`);
     await loadRAGHealth();
   } catch (err) {
     toast.error(err instanceof Error ? err.message : 'Failed to repair RAG indexes');
@@ -2025,12 +2026,12 @@ const handleRepair = async () => {
 <div className="p-5 rounded-2xl bg-surface-alt border border-border">
   <div className="flex items-center gap-3 mb-3">
     <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center shadow-md shadow-amber-500/10"><Wrench size={18} className="text-amber-400" /></div>
-    <div><h3 className="text-sm font-bold">Maintenance</h3><p className="text-[11px] text-text-muted">Non-destructive index repair and rebuild</p></div>
+    <div><h3 className="text-sm font-bold">Maintenance</h3><p className="text-[11px] text-text-muted">Non-destructive indexed-conversation rebuilds</p></div>
   </div>
   <p className="text-[11px] text-text-muted mb-4 leading-relaxed">Replacement vectors are built before active relational chunks are swapped. A failed document keeps its previous searchable index instead of leaving a partial rebuild.</p>
   <div className="flex flex-wrap gap-2">
     <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleRepair} disabled={repairing || reindexing} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-      {repairing ? <RefreshCw size={14} className="animate-spin" /> : <Wrench size={14} />} Repair Indexes
+      {repairing ? <RefreshCw size={14} className="animate-spin" /> : <Wrench size={14} />} Rebuild Indexed Conversations
     </motion.button>
     <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleReindexAll} disabled={reindexing || repairing} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
       <RefreshCw size={14} className={reindexing ? 'animate-spin' : ''} /> Rebuild All Documents

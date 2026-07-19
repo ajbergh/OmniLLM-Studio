@@ -1,5 +1,7 @@
 package repository
 
+// File overview: atomically activates replacement chunk sets for one attachment.
+
 import (
 	"fmt"
 	"time"

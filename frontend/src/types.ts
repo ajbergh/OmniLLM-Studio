@@ -1,3 +1,4 @@
+// types.ts defines frontend contracts shared by API clients, stores, and UI components.
 // Types matching the backend data model
 
 export type ConversationKind = 'chat' | 'image' | 'music';

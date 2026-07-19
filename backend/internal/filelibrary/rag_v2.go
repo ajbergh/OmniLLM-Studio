@@ -1,5 +1,7 @@
 package filelibrary
 
+// File overview: contains File Library extraction compatibility helpers and hybrid retrieval.
+
 import (
 	"context"
 	"fmt"

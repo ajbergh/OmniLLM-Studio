@@ -1,5 +1,7 @@
 package websearch
 
+// File overview: combines live web evidence with previously assembled private RAG evidence without weakening trust boundaries.
+
 import (
 	"context"
 	"fmt"
@@ -19,10 +21,12 @@ type Orchestrator struct {
 	jinaReader *JinaReader
 }
 
+// NewOrchestrator creates a web-search orchestrator with an optional Jina Reader enricher.
 func NewOrchestrator(provider Provider, llmSvc *llm.Service, jinaReader *JinaReader) *Orchestrator {
 	return &Orchestrator{provider: provider, llmSvc: llmSvc, jinaReader: jinaReader}
 }
 
+// Reconfigure atomically replaces the live search provider and reader configuration.
 func (o *Orchestrator) Reconfigure(provider Provider, jinaReader *JinaReader) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -194,6 +198,7 @@ func historyEndsWithUserText(messages []llm.ChatMessage, userText string) bool {
 	return false
 }
 
+// DirectSearch executes a search request without classification or LLM summarization.
 func (o *Orchestrator) DirectSearch(ctx context.Context, request SearchRequest) (*SearchResponse, error) {
 	searchProvider, _ := o.snapshot()
 	if searchProvider == nil {

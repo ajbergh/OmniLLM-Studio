@@ -1,7 +1,8 @@
 package api
 
+// File overview: contains public conversation and attachment RAG HTTP handlers.
+
 import (
-	"log"
 	"net/http"
 
 	"github.com/ajbergh/omnillm-studio/internal/llm"
@@ -90,7 +91,7 @@ func (h *RAGHandler) ListAttachmentChunks(w http.ResponseWriter, r *http.Request
 	respondJSON(w, http.StatusOK, chunks)
 }
 
-// Reindex re-chunks and re-embeds all text attachments for a conversation.
+// Reindex non-destructively rebuilds every supported attachment in a conversation, preserving prior searchable data for failed attachments.
 func (h *RAGHandler) Reindex(w http.ResponseWriter, r *http.Request) {
 	if !verifyConversationAccess(w, r, h.convoRepo) {
 		return
@@ -148,9 +149,7 @@ func (h *RAGHandler) IndexAttachment(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ReindexAll drops every chromem collection so the next query against each
-// conversation triggers a lazy re-migration from legacy SQL embeddings (or
-// returns empty if none exist). Admin-only — wired in router under /rag/reindex-all.
+// ReindexAll non-destructively rebuilds every conversation that currently has persisted chunks and reports per-conversation failures.
 func (h *RAGHandler) ReindexAll(w http.ResponseWriter, r *http.Request) {
 	conversationIDs, err := h.chunkRepo.DistinctConversationIDsWithChunks()
 	if err != nil {

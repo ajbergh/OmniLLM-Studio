@@ -1,5 +1,7 @@
 package rag
 
+// File overview: defines backend-neutral vector generations plus exact, HNSW, and generation-coordination implementations.
+
 import (
 	"container/heap"
 	"context"
@@ -66,10 +68,12 @@ type exactGeneration struct {
 	records map[string]VectorRecord
 }
 
+// NewExactVectorIndex creates an in-memory exact-search backend with no generations.
 func NewExactVectorIndex() *ExactVectorIndex {
 	return &ExactVectorIndex{generations: make(map[string]*exactGeneration)}
 }
 
+// CreateGeneration creates an empty exact-search generation after validating its embedding space.
 func (i *ExactVectorIndex) CreateGeneration(_ context.Context, spec IndexSpec) error {
 	if spec.GenerationID == "" {
 		return fmt.Errorf("generation id is required")
@@ -90,6 +94,7 @@ func (i *ExactVectorIndex) CreateGeneration(_ context.Context, spec IndexSpec) e
 	return nil
 }
 
+// UpsertBatch validates, normalizes, copies, and inserts records into an exact-search generation.
 func (i *ExactVectorIndex) UpsertBatch(_ context.Context, generationID string, records []VectorRecord) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -118,6 +123,7 @@ func (i *ExactVectorIndex) UpsertBatch(_ context.Context, generationID string, r
 	return nil
 }
 
+// Search performs deterministic exhaustive cosine search over an exact-search generation.
 func (i *ExactVectorIndex) Search(_ context.Context, generationID string, query []float32, topK int) ([]VectorHit, error) {
 	if len(query) == 0 {
 		return nil, nil
@@ -158,6 +164,7 @@ func (i *ExactVectorIndex) Search(_ context.Context, generationID string, query 
 	return hits, nil
 }
 
+// Delete removes record IDs from an exact-search generation and ignores missing generations.
 func (i *ExactVectorIndex) Delete(_ context.Context, generationID string, ids []string) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -171,6 +178,7 @@ func (i *ExactVectorIndex) Delete(_ context.Context, generationID string, ids []
 	return nil
 }
 
+// Validate checks record dimensions and returns exact-search generation statistics.
 func (i *ExactVectorIndex) Validate(_ context.Context, generationID string) (IndexStats, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -191,6 +199,7 @@ func (i *ExactVectorIndex) Validate(_ context.Context, generationID string) (Ind
 	}, nil
 }
 
+// Drop removes an exact-search generation.
 func (i *ExactVectorIndex) Drop(_ context.Context, generationID string) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -268,6 +277,7 @@ type hnswNode struct {
 	Deleted   bool
 }
 
+// NewHNSWVectorIndex creates an in-memory HNSW backend with normalized configuration defaults.
 func NewHNSWVectorIndex(config HNSWConfig) *HNSWVectorIndex {
 	config = config.normalized()
 	return &HNSWVectorIndex{
@@ -277,6 +287,7 @@ func NewHNSWVectorIndex(config HNSWConfig) *HNSWVectorIndex {
 	}
 }
 
+// CreateGeneration creates an empty HNSW generation after validating its embedding space.
 func (h *HNSWVectorIndex) CreateGeneration(_ context.Context, spec IndexSpec) error {
 	if spec.GenerationID == "" {
 		return fmt.Errorf("generation id is required")
@@ -298,6 +309,7 @@ func (h *HNSWVectorIndex) CreateGeneration(_ context.Context, spec IndexSpec) er
 	return nil
 }
 
+// UpsertBatch validates and inserts or replaces records while maintaining reciprocal HNSW links.
 func (h *HNSWVectorIndex) UpsertBatch(ctx context.Context, generationID string, records []VectorRecord) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -392,6 +404,7 @@ func (h *HNSWVectorIndex) insert(g *hnswGeneration, record VectorRecord) error {
 	return nil
 }
 
+// Search performs approximate cosine nearest-neighbor search using the configured EFSearch breadth.
 func (h *HNSWVectorIndex) Search(ctx context.Context, generationID string, query []float32, topK int) ([]VectorHit, error) {
 	if len(query) == 0 {
 		return nil, nil
@@ -449,6 +462,7 @@ func (h *HNSWVectorIndex) Search(ctx context.Context, generationID string, query
 	return hits, nil
 }
 
+// Delete tombstones record IDs and reselects the entry point when necessary.
 func (h *HNSWVectorIndex) Delete(_ context.Context, generationID string, ids []string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -467,6 +481,7 @@ func (h *HNSWVectorIndex) Delete(_ context.Context, generationID string, ids []s
 	return nil
 }
 
+// Validate checks dimensions, level metadata, and neighbor references for an HNSW generation.
 func (h *HNSWVectorIndex) Validate(_ context.Context, generationID string) (IndexStats, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -497,6 +512,7 @@ func (h *HNSWVectorIndex) Validate(_ context.Context, generationID string) (Inde
 	return IndexStats{GenerationID: generationID, Records: active, Dimensions: g.Dimensions, Backend: "hnsw-go"}, nil
 }
 
+// Drop removes an HNSW generation.
 func (h *HNSWVectorIndex) Drop(_ context.Context, generationID string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -748,10 +764,12 @@ type GenerationCoordinator struct {
 	backend VectorIndex
 }
 
+// NewGenerationCoordinator binds generation metadata persistence to a VectorIndex backend.
 func NewGenerationCoordinator(repo *repository.RAGIndexRepo, backend VectorIndex) *GenerationCoordinator {
 	return &GenerationCoordinator{repo: repo, backend: backend}
 }
 
+// BuildGenerationRequest describes one replacement generation build and activation.
 type BuildGenerationRequest struct {
 	LogicalName      string
 	ScopeType        string
@@ -765,12 +783,14 @@ type BuildGenerationRequest struct {
 	BatchSize        int
 }
 
+// BuildGenerationResult identifies the activated generation and its validated statistics.
 type BuildGenerationResult struct {
 	IndexID      string
 	GenerationID string
 	Stats        IndexStats
 }
 
+// BuildAndActivate builds, validates, and atomically activates a replacement generation, cleaning it up on failure.
 func (c *GenerationCoordinator) BuildAndActivate(ctx context.Context, req BuildGenerationRequest) (*BuildGenerationResult, error) {
 	if c == nil || c.repo == nil || c.backend == nil {
 		return nil, fmt.Errorf("generation coordinator is not configured")

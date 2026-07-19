@@ -1,5 +1,7 @@
 package api
 
+// File overview: implements administrator-facing RAG footprint reporting and full indexed-conversation rebuild operations.
+
 import (
 	"net/http"
 
@@ -48,7 +50,7 @@ func (h *RAGHandler) Health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Repair non-destructively rebuilds all conversations that currently have chunks.
+// Repair non-destructively rebuilds every conversation that currently has persisted chunks; it does not limit work to detected inconsistencies.
 func (h *RAGHandler) Repair(w http.ResponseWriter, r *http.Request) {
 	conversationIDs, err := h.chunkRepo.DistinctConversationIDsWithChunks()
 	if err != nil {

@@ -1,5 +1,7 @@
 package rag
 
+// File overview: provides deterministic administrative snapshots of chromem physical collections.
+
 import "sort"
 
 // CollectionCounts returns a stable snapshot of every physical collection.

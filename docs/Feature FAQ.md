@@ -27,64 +27,62 @@ A comprehensive guide to all features in OmniLLM-Studio, covering what each feat
 
 ## 1. RAG (Retrieval-Augmented Generation)
 
-**Configuration:** Settings -> RAG (`rag_enabled`, embedding model, chunk size, overlap, and top-k)
+**Configuration:** Settings -> RAG (`rag_enabled`, embedding selection, chunk size, overlap, and top-k)
 
 ### What is RAG?
 
-RAG (Retrieval-Augmented Generation) allows the LLM to answer questions grounded in your uploaded documents. When you upload a file to a conversation, OmniLLM-Studio automatically splits it into searchable chunks, generates vector embeddings, and retrieves the most relevant portions when you ask a question — giving the AI real context from your own data instead of relying only on its training knowledge.
+RAG lets the assistant answer from uploaded documents. OmniLLM-Studio parses supported files into structure-aware chunks, retrieves relevant passages through both semantic and keyword channels, and injects bounded, cited evidence into the model request.
 
 ### How does it work?
 
-1. **Upload a document** (PDF, text, markdown) to a conversation via the attachment feature.
-2. OmniLLM-Studio **automatically chunks** the document into manageable segments (default ~1000 characters with 200-character overlap). Indexing runs **synchronously** so chunks are available immediately when the LLM queries.
-3. Each chunk is **embedded** using an embed-capable provider (resolved automatically — see "Provider fallback" below) and stored in a per-conversation collection inside the embedded [chromem-go](https://github.com/philippgille/chromem-go) vector database.
-4. When you send a message, OmniLLM-Studio **retrieves the top-k most relevant chunks** (default 5) via chromem-go's multi-threaded nearest-neighbor search.
-5. The relevant chunks are **injected into the prompt** as cited context, and the AI responds with `[Source N]` citations pointing back to your documents.
-6. During indexing, the UI shows a **"Reading and understanding the document…"** status indicator so you know what's happening.
+1. Upload a supported attachment to a conversation or ingest it into the File Library.
+2. The shared pure-Go parser extracts text and structural metadata from text-like files, HTML, PDF, DOCX, XLSX, and PPTX.
+3. The deterministic chunker preserves headings, pages when available, slides, and sheets. Defaults are approximately 1,000 Unicode code points with 200 code points of overlap.
+4. Chunk text is persisted in SQLite and indexed in FTS5/BM25. Embeddings are generated in bounded batches and stored in a physical chromem collection isolated by embedding provider/model/task/schema identity.
+5. Retrieval combines vector and lexical rankings with reciprocal-rank fusion and applies source diversity before selecting the configured top-k evidence.
+6. Evidence is deduplicated, assigned `[Source N]` labels, treated as untrusted content, and packed into a conservative token budget.
+7. When a live web search also runs, private document evidence remains in the grounded summarizer request.
 
-### How do I use it?
+### Configuration and operations
 
-- **Enable RAG** in Settings → RAG, or set the `rag_enabled` key via the Settings API (`PUT /v1/settings`).
-- **Configure** the embedding model, chunk size, chunk overlap, and top-k retrieval count via Settings → RAG, or the API keys: `rag_embedding_model`, `rag_chunk_size`, `rag_chunk_overlap`, `rag_top_k`.
-- **Upload files** to any conversation — they'll be indexed automatically.
-- **Reindex** a single conversation via `POST /v1/conversations/{id}/reindex` (re-chunks + re-embeds from raw text).
-- **Admin reindex-all** — `POST /v1/rag/reindex-all` drops every chromem collection so subsequent retrievals lazy-migrate from legacy SQL embeddings (useful right after upgrading).
-- RAG source citations are included in the assistant message metadata when relevant documents are found.
+- Enable or tune RAG through Settings -> RAG or `PATCH /v1/settings`.
+- `rag_embedding_model` may be a model ID. Advanced API users may use `Provider Profile Name::model-id` to pin both provider profile and model.
+- `POST /v1/conversations/{id}/reindex` safely rebuilds supported attachments in one conversation.
+- `POST /v1/attachments/{id}/index` safely rebuilds one attachment.
+- Administrators can inspect `GET /v1/rag/health`.
+- `POST /v1/rag/repair` and `POST /v1/rag/reindex-all` both rebuild every indexed conversation; completed work and failures are returned explicitly.
 
-> **UI:** RAG settings live in Settings → **RAG** — toggle RAG on/off, pick the embedding model, and tune chunk size, overlap, and top-k. When RAG sources are used, an inline **RAG Sources** panel appears below the assistant's message showing which document chunks were retrieved.
+Rebuilds create replacement vectors before swapping relational chunks. If an attachment fails before activation, its previous searchable data remains. A conversation-level rebuild can therefore succeed partially and report failed attachment IDs.
 
-### Provider fallback
+### Embedding provider selection and privacy
 
-If your conversation's active provider doesn't expose an embeddings API (e.g., Anthropic, Groq), OmniLLM-Studio automatically falls back to the first enabled provider whose type does. The fallback order considered is **OpenAI → Mistral → Together → Ollama → Gemini → OpenRouter**. You don't need to pick an "embedding provider" yourself — just make sure at least one embed-capable provider is configured.
+If the active chat provider is enabled and supports the requested embedding model, it is preferred. Otherwise the first enabled embedding-capable provider in repository order is selected. Supported provider types are OpenAI, OpenRouter, Mistral, Together, Ollama, and Gemini. Pin a profile explicitly when provider choice must not depend on configuration order.
 
-### Storage
+Document chunks sent for embedding are visible to the selected embedding provider, and selected retrieved passages are visible to the chat provider that answers the question. Configure Ollama or another local compatible endpoint for both stages when document content must remain on the machine.
 
-Vectors are persisted under `<OMNILLM_CHROMEM_DIR>/<conversation_id>/` (default `<dir of OMNILLM_DB_PATH>/chromem`). Chunk text + metadata stay in the SQLite `document_chunks` table. The chromem directory is included automatically in workspace bundle exports and restored on import — no extra step.
+### Storage and migration
 
-### What are the benefits?
+SQLite is authoritative for chunk text, provenance, FTS5, index metadata, jobs, and telemetry. Chromem-go stores the default runtime vectors under `OMNILLM_CHROMEM_DIR`; physical collection names include the logical scope and an embedding routing fingerprint.
 
-- **Accurate, cited answers** from your own documents — no hallucination about content you've provided.
-- **Works with large files** that exceed the LLM context window by intelligently selecting only the most relevant passages.
-- **Supports multiple file types** including plain text, markdown, and PDFs.
-- **Fully local** — your documents stay on your machine, never sent to third parties (only your configured LLM provider sees the relevant chunks).
-- **Persistent + fast** — vectors survive restarts in chromem-go's gob-encoded files; queries run multi-threaded.
+Legacy SQL embeddings do not carry a trustworthy provider/model fingerprint. Compatibility migration is limited to the legacy collection path. Production fingerprinted embedding spaces rebuild using their configured embedding provider rather than assuming old vectors are compatible.
+
+### Supported files
+
+Conversation and File Library extraction share support for text and Markdown, code and common data formats treated as text, HTML, PDF, DOCX, XLSX, and PPTX. Image-only PDFs still require extractable text; OCR is not part of this pipeline.
 
 ### FAQ
 
-**Q: What file types are supported?**
-A: Plain text, markdown, and PDF. The chunker auto-detects format and uses heading-aware splitting for markdown.
+**Q: Can I control how many chunks are used?**  
+A: Yes. Change `rag_top_k` (default 5). Higher values provide more evidence but consume more prompt tokens.
 
-**Q: Can I control how many document chunks are used per query?**
-A: Yes — adjust the `rag_top_k` setting (default 5). Higher values give more context but use more tokens.
+**Q: What happens when I change embedding model or provider?**  
+A: The new routing fingerprint selects a separate physical collection. Rebuild affected documents so that the new space has complete vectors; incompatible spaces are never mixed.
 
-**Q: What happens if I update a document?**
-A: Re-upload the file, or call the reindex API (`POST /v1/conversations/{id}/reindex`) to re-chunk and re-embed all attachments in the conversation.
+**Q: Is the Repair action an inconsistency-only check?**  
+A: No. On this branch Repair is a full non-destructive rebuild of all conversations that currently have chunks.
 
-**Q: I upgraded from an older version — do I need to re-embed all my documents?**
-A: No. The first time you query a conversation after upgrading, its existing SQL-stored embeddings are copied straight into chromem-go (no network call, no re-embedding). It happens once per conversation, transparently.
-
-**Q: My active provider is Anthropic / Groq — does RAG still work?**
-A: Yes. OmniLLM-Studio detects that the active provider has no embeddings API and automatically routes embedding calls to the first available provider that does (OpenAI, Mistral, Together, Ollama, or Gemini). If none are configured, RAG returns a clear error asking you to add one.
+**Q: Does RAG work when my chat provider cannot embed?**  
+A: Yes, when another enabled embedding-capable provider is configured. The embedding provider and chat provider may be different.
 
 ---
 

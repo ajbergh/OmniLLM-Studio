@@ -1,5 +1,7 @@
 package rag
 
+// File overview: implements deterministic chunking, token estimation, and bounded evidence planning.
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,6 +15,7 @@ import (
 	"unicode/utf8"
 )
 
+// ChunkerSchemaVersion identifies the persisted deterministic chunk format.
 const ChunkerSchemaVersion = 2
 
 var (
@@ -28,6 +31,7 @@ type ChunkOptions struct {
 	MaxTokens int // optional provider-aware token budget; zero uses ChunkSize only
 }
 
+// DefaultChunkOptions returns the production defaults for target size and overlap.
 func DefaultChunkOptions() ChunkOptions {
 	return ChunkOptions{ChunkSize: 1000, Overlap: 200, MaxTokens: 0}
 }
@@ -159,6 +163,7 @@ func ChunkMarkdown(text, attachmentID, conversationID string, opts ChunkOptions)
 	return chunks
 }
 
+// DetectAndChunk selects Markdown-aware or plain-text chunking from MIME type and structural markers.
 func DetectAndChunk(text, mimeType, attachmentID, conversationID string, opts ChunkOptions) []models.DocumentChunk {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -446,6 +451,7 @@ type TokenEstimator interface {
 // overestimates English prose slightly and handles non-ASCII text by rune count.
 type ConservativeTokenEstimator struct{}
 
+// Count returns a conservative provider-neutral token estimate for text.
 func (ConservativeTokenEstimator) Count(text string) int {
 	if text == "" {
 		return 0
@@ -497,6 +503,7 @@ type ContextPlanner struct {
 	estimator TokenEstimator
 }
 
+// NewContextPlanner creates a planner and substitutes the conservative estimator when estimator is nil.
 func NewContextPlanner(estimator TokenEstimator) *ContextPlanner {
 	if estimator == nil {
 		estimator = ConservativeTokenEstimator{}

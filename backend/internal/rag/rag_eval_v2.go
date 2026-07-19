@@ -1,5 +1,7 @@
 package rag
 
+// File overview: provides retrieval-quality metrics and stage-level telemetry helpers.
+
 import (
 	"math"
 	"sort"
@@ -130,10 +132,12 @@ type RetrievalTelemetry struct {
 	ContextTokens      int `json:"context_tokens"`
 }
 
+// NewRetrievalTelemetry starts a UTC-timestamped telemetry measurement.
 func NewRetrievalTelemetry() *RetrievalTelemetry {
 	return &RetrievalTelemetry{StartedAt: time.Now().UTC()}
 }
 
+// TotalDuration returns elapsed wall-clock time since telemetry creation, or zero for an uninitialized value.
 func (t *RetrievalTelemetry) TotalDuration() time.Duration {
 	if t == nil || t.StartedAt.IsZero() {
 		return 0

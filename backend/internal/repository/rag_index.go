@@ -1,5 +1,7 @@
 package repository
 
+// File overview: creates and persists RAG v2 embedding-space, generation, job, and telemetry state.
+
 import (
 	"database/sql"
 	"fmt"
@@ -163,6 +165,7 @@ type RAGIndexRepo struct {
 	db *sql.DB
 }
 
+// NewRAGIndexRepo creates a generation metadata repository after ensuring its schema.
 func NewRAGIndexRepo(db *sql.DB) (*RAGIndexRepo, error) {
 	if err := ensureRAGV2Schema(db); err != nil {
 		return nil, err
@@ -170,6 +173,7 @@ func NewRAGIndexRepo(db *sql.DB) (*RAGIndexRepo, error) {
 	return &RAGIndexRepo{db: db}, nil
 }
 
+// RAGEmbeddingSpaceRecord is the persisted representation of one immutable embedding space.
 type RAGEmbeddingSpaceRecord struct {
 	ID                string
 	ProviderProfileID string
@@ -184,6 +188,7 @@ type RAGEmbeddingSpaceRecord struct {
 	Fingerprint       string
 }
 
+// UpsertEmbeddingSpace creates or refreshes an embedding-space record keyed by fingerprint.
 func (r *RAGIndexRepo) UpsertEmbeddingSpace(space RAGEmbeddingSpaceRecord) (string, error) {
 	if strings.TrimSpace(space.Fingerprint) == "" {
 		return "", fmt.Errorf("embedding-space fingerprint is required")
@@ -222,6 +227,7 @@ func (r *RAGIndexRepo) UpsertEmbeddingSpace(space RAGEmbeddingSpaceRecord) (stri
 	return id, nil
 }
 
+// EnsureIndex creates or updates the logical index for a scope and returns its stable ID.
 func (r *RAGIndexRepo) EnsureIndex(logicalName, scopeType, scopeID, backend string) (string, error) {
 	if logicalName == "" || scopeType == "" || scopeID == "" {
 		return "", fmt.Errorf("logical name, scope type, and scope id are required")
@@ -249,6 +255,7 @@ func (r *RAGIndexRepo) EnsureIndex(logicalName, scopeType, scopeID, backend stri
 	return id, nil
 }
 
+// BeginGeneration creates a queued immutable generation with its expected chunk count.
 func (r *RAGIndexRepo) BeginGeneration(indexID, embeddingSpaceID string, parserVersion, chunkerVersion, expectedChunks int) (string, error) {
 	if indexID == "" || embeddingSpaceID == "" {
 		return "", fmt.Errorf("index id and embedding space id are required")
@@ -267,6 +274,7 @@ func (r *RAGIndexRepo) BeginGeneration(indexID, embeddingSpaceID string, parserV
 	return id, nil
 }
 
+// UpdateGeneration records a valid lifecycle state, indexed count, and optional error.
 func (r *RAGIndexRepo) UpdateGeneration(id, status string, indexedChunks int, errorMessage *string) error {
 	if !validGenerationStatus(status) {
 		return fmt.Errorf("invalid generation status %q", status)
@@ -328,6 +336,7 @@ func (r *RAGIndexRepo) ActivateGeneration(indexID, generationID string) error {
 	return tx.Commit()
 }
 
+// CreateIngestJob creates a queued ingestion job linked to optional generation and source IDs.
 func (r *RAGIndexRepo) CreateIngestJob(generationID, libraryFileID, attachmentID string) (string, error) {
 	id := "job_" + uuid.NewString()
 	_, err := r.db.Exec(`
@@ -339,6 +348,7 @@ func (r *RAGIndexRepo) CreateIngestJob(generationID, libraryFileID, attachmentID
 	return id, err
 }
 
+// UpdateIngestJob clamps progress and records stage, completion count, timestamps, and errors.
 func (r *RAGIndexRepo) UpdateIngestJob(id, status, stage string, progress float64, completedChunks int, errorMessage *string) error {
 	if progress < 0 {
 		progress = 0

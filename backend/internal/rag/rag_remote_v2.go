@@ -1,5 +1,7 @@
 package rag
 
+// File overview: adapts VectorIndex to a bearer-token-protected standard-library HTTP transport.
+
 import (
 	"bytes"
 	"context"
@@ -18,6 +20,7 @@ type HTTPVectorIndex struct {
 	Client  *http.Client
 }
 
+// NewHTTPVectorIndex creates a remote adapter with a 60-second default HTTP timeout.
 func NewHTTPVectorIndex(baseURL, token string) *HTTPVectorIndex {
 	return &HTTPVectorIndex{
 		BaseURL: strings.TrimRight(baseURL, "/"),
@@ -57,25 +60,36 @@ func (h *HTTPVectorIndex) call(ctx context.Context, path string, requestBody, re
 	return nil
 }
 
+// CreateGeneration asks the remote index owner to create an immutable generation.
 func (h *HTTPVectorIndex) CreateGeneration(ctx context.Context, spec IndexSpec) error {
 	return h.call(ctx, "/generations/create", spec, nil)
 }
+
+// UpsertBatch sends vector records to an existing remote generation.
 func (h *HTTPVectorIndex) UpsertBatch(ctx context.Context, generationID string, records []VectorRecord) error {
 	return h.call(ctx, "/generations/upsert", map[string]any{"generation_id": generationID, "records": records}, nil)
 }
+
+// Search queries one remote generation and returns its ranked nearest-neighbor hits.
 func (h *HTTPVectorIndex) Search(ctx context.Context, generationID string, query []float32, topK int) ([]VectorHit, error) {
 	var hits []VectorHit
 	err := h.call(ctx, "/generations/search", map[string]any{"generation_id": generationID, "query": query, "top_k": topK}, &hits)
 	return hits, err
 }
+
+// Delete removes the supplied record IDs from one remote generation.
 func (h *HTTPVectorIndex) Delete(ctx context.Context, generationID string, ids []string) error {
 	return h.call(ctx, "/generations/delete", map[string]any{"generation_id": generationID, "ids": ids}, nil)
 }
+
+// Validate requests structural statistics for one remote generation.
 func (h *HTTPVectorIndex) Validate(ctx context.Context, generationID string) (IndexStats, error) {
 	var stats IndexStats
 	err := h.call(ctx, "/generations/validate", map[string]string{"generation_id": generationID}, &stats)
 	return stats, err
 }
+
+// Drop removes one remote generation and all of its vector records.
 func (h *HTTPVectorIndex) Drop(ctx context.Context, generationID string) error {
 	return h.call(ctx, "/generations/drop", map[string]string{"generation_id": generationID}, nil)
 }

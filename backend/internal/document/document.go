@@ -1,5 +1,7 @@
 package document
 
+// File overview: implements the shared pure-Go structured document parser and Markdown renderer.
+
 import (
 	"archive/zip"
 	"bufio"
@@ -22,14 +24,22 @@ import (
 type NodeType string
 
 const (
-	NodeDocument  NodeType = "document"
-	NodePage      NodeType = "page"
-	NodeSlide     NodeType = "slide"
-	NodeSheet     NodeType = "sheet"
-	NodeHeading   NodeType = "heading"
+	// NodeDocument identifies a whole-document structural node.
+	NodeDocument NodeType = "document"
+	// NodePage identifies text associated with one source page.
+	NodePage NodeType = "page"
+	// NodeSlide identifies text associated with one presentation slide.
+	NodeSlide NodeType = "slide"
+	// NodeSheet identifies text associated with one workbook sheet.
+	NodeSheet NodeType = "sheet"
+	// NodeHeading identifies a heading and its hierarchy path.
+	NodeHeading NodeType = "heading"
+	// NodeParagraph identifies prose or list-item text.
 	NodeParagraph NodeType = "paragraph"
-	NodeTable     NodeType = "table"
-	NodeCode      NodeType = "code"
+	// NodeTable identifies text extracted from a table region.
+	NodeTable NodeType = "table"
+	// NodeCode identifies preformatted or source-code text.
+	NodeCode NodeType = "code"
 )
 
 // Node preserves source structure before RAG chunking.
@@ -88,6 +98,7 @@ func ExtractFileText(path, mime string) (string, error) {
 	return text, nil
 }
 
+// NormalizeMIMEType removes parameters and returns a lowercase canonical MIME type.
 func NormalizeMIMEType(mime string) string {
 	if index := strings.Index(mime, ";"); index >= 0 {
 		mime = mime[:index]
@@ -95,6 +106,7 @@ func NormalizeMIMEType(mime string) string {
 	return strings.TrimSpace(strings.ToLower(mime))
 }
 
+// IsTextMIME reports whether the parser can treat a MIME type as textual content.
 func IsTextMIME(mime string) bool {
 	mime = NormalizeMIMEType(mime)
 	return strings.HasPrefix(mime, "text/") ||

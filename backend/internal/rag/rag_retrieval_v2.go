@@ -1,5 +1,7 @@
 package rag
 
+// File overview: implements fusion, diversity, optional planning/reranking, request evidence bridging, and hybrid conversation retrieval.
+
 import (
 	"context"
 	"encoding/json"
@@ -191,10 +193,12 @@ type LLMQueryPlanner struct {
 	service chatCompleter
 }
 
+// NewLLMQueryPlanner creates an optional query planner backed by a chat-completion service.
 func NewLLMQueryPlanner(service chatCompleter) *LLMQueryPlanner {
 	return &LLMQueryPlanner{service: service}
 }
 
+// Plan rewrites a conversational query and returns a deterministic original-query fallback on any planning failure.
 func (planner *LLMQueryPlanner) Plan(
 	ctx context.Context,
 	provider, model, query string,
@@ -412,6 +416,7 @@ type RerankResult struct {
 	Reason         string  `json:"reason,omitempty"`
 }
 
+// Reranker reorders retrieval candidates for a query while preserving stable candidate IDs.
 type Reranker interface {
 	Rerank(context.Context, string, []RerankCandidate, int) ([]RerankResult, error)
 }
@@ -425,10 +430,12 @@ type LLMReranker struct {
 	model    string
 }
 
+// NewLLMReranker creates an optional provider-backed passage reranker.
 func NewLLMReranker(service chatCompleter, provider, model string) *LLMReranker {
 	return &LLMReranker{service: service, provider: provider, model: model}
 }
 
+// Rerank asks the configured model to score candidates and falls back to fused-score order when output is unusable.
 func (reranker *LLMReranker) Rerank(ctx context.Context, query string, candidates []RerankCandidate, limit int) ([]RerankResult, error) {
 	if limit <= 0 || limit > len(candidates) {
 		limit = len(candidates)
@@ -555,10 +562,12 @@ type ChromemRetriever struct {
 	testEmbedFn   chromem.EmbeddingFunc
 }
 
+// NewChromemRetriever creates the default hybrid conversation retriever.
 func NewChromemRetriever(llmService *llm.Service, chunkRepo *repository.ChunkRepo, vectorStore *VectorStore) *ChromemRetriever {
 	return &ChromemRetriever{llmService: llmService, chunkRepo: chunkRepo, vectorStore: vectorStore}
 }
 
+// WithLegacyEmbeddingRepo enables compatibility migration for legacy, un-fingerprinted embedding collections.
 func (r *ChromemRetriever) WithLegacyEmbeddingRepo(repo *repository.EmbeddingRepo) *ChromemRetriever {
 	r.legacyEmbeds = repo
 	return r

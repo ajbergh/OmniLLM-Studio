@@ -1,5 +1,7 @@
 package rag
 
+// File overview: defines embedding-space identity, provider resolution, batching, normalization, and retry behavior.
+
 import (
 	"context"
 	"crypto/sha256"
@@ -361,6 +363,7 @@ func modelCompatibleWithProvider(providerType, model string) bool {
 	}
 }
 
+// ProviderHasEmbeddings reports whether the provider type has an embedding implementation in llm.Service.
 func ProviderHasEmbeddings(providerType string) bool {
 	_, ok := embedCapableTypes[strings.ToLower(strings.TrimSpace(providerType))]
 	return ok

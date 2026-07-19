@@ -1,5 +1,7 @@
 package api
 
+// File overview: orchestrates non-destructive attachment and conversation reindexing.
+
 import (
 	"context"
 	"fmt"
