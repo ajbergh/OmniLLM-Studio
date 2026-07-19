@@ -13,9 +13,14 @@ type Registry struct {
 	tools map[string]Tool
 }
 
-// NewRegistry creates an empty tool registry.
+// NewRegistry creates a registry with dependency-free core utilities. Tools
+// requiring application services are still registered by api/router.go.
 func NewRegistry() *Registry {
-	return &Registry{tools: make(map[string]Tool)}
+	r := &Registry{tools: make(map[string]Tool)}
+	r.MustRegister(NewDateTimeTool())
+	r.MustRegister(NewUnitConvertTool())
+	r.MustRegister(NewPythonAnalysisTool())
+	return r
 }
 
 // Register adds a tool to the registry. Returns an error if a tool with the same
