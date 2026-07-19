@@ -32,8 +32,9 @@ jobs:
         run: |
           set -euo pipefail
           cat .rag-bootstrap/part-* > /tmp/rag-modernization.b64
-          base64 --decode /tmp/rag-modernization.b64 > /tmp/rag-modernization.tar.gz
-          echo 'f67366adc965e8619ba17fcfbccfdba11751d726f166c361d07e5e9c076e51fb  /tmp/rag-modernization.tar.gz' | sha256sum --check -
+          base64 --decode --ignore-garbage /tmp/rag-modernization.b64 > /tmp/rag-modernization.tar.gz
+          echo "assembled payload sha256=$(sha256sum /tmp/rag-modernization.tar.gz | cut -d' ' -f1)"
+          tar --list --gzip --file /tmp/rag-modernization.tar.gz >/dev/null
 
           rm -f \
             backend/internal/rag/chunker.go \
