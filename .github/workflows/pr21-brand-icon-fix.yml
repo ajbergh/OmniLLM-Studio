@@ -1,0 +1,30 @@
+name: PR21 Brand Icon Fix
+
+on:
+  push:
+    branches:
+      - dependabot/npm_and_yarn/frontend/frontend-production-dependencies-bc5d9a50f4
+    paths:
+      - .github/pr21-brand-fix-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: dependabot/npm_and_yarn/frontend/frontend-production-dependencies-bc5d9a50f4
+          fetch-depth: 0
+      - name: Replace removed brand icon
+        run: sed -i 's/GitHub as Github/GitBranch as Github/' frontend/src/components/SettingsPanel.tsx
+      - name: Commit source fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/components/SettingsPanel.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "fix(frontend): replace removed GitHub brand icon"
+          git push origin HEAD:dependabot/npm_and_yarn/frontend/frontend-production-dependencies-bc5d9a50f4
