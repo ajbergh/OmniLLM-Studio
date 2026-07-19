@@ -111,6 +111,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'docs(rag): reconcile architecture, operations, and source comments [skip ci]'
+          git pull --rebase origin feature/rag-modernization-v2
           git push origin HEAD:feature/rag-modernization-v2
 
       - name: Enforce validation result
