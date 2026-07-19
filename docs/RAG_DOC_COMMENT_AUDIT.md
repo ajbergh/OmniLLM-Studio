@@ -35,6 +35,7 @@ Generated from `origin/main...feature/rag-modernization-v2` using the Go parser.
 - `backend/internal/repository/rag_v2_test.go`
 - `backend/internal/websearch/orchestrator.go`
 - `docs/RAG_BACKEND_VALIDATION.md`
+- `docs/RAG_DOC_COMMENT_AUDIT.md`
 - `docs/RAG_MODERNIZATION.md`
 - `docs/RAG_MODERNIZATION_STATUS.md`
 - `frontend/src/api.ts`
