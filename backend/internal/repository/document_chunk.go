@@ -495,11 +495,11 @@ func scanChunks(rows *sql.Rows) ([]models.DocumentChunk, error) {
 	return chunks, rows.Err()
 }
 
-type rowScanner interface {
+type chunkRowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanChunk(row rowScanner) (models.DocumentChunk, error) {
+func scanChunk(row chunkRowScanner) (models.DocumentChunk, error) {
 	var chunk models.DocumentChunk
 	var libraryFileID, scope, workspaceID, sourceType, sectionTitle, chunkMetaJSON sql.NullString
 	var pageNumber sql.NullInt64
@@ -514,7 +514,7 @@ func scanChunk(row rowScanner) (models.DocumentChunk, error) {
 	return chunk, nil
 }
 
-func scanChunkWithScore(row rowScanner) (models.DocumentChunk, float64, error) {
+func scanChunkWithScore(row chunkRowScanner) (models.DocumentChunk, float64, error) {
 	var chunk models.DocumentChunk
 	var libraryFileID, scope, workspaceID, sourceType, sectionTitle, chunkMetaJSON sql.NullString
 	var pageNumber sql.NullInt64

@@ -334,7 +334,7 @@ func (r *RAGIndexRepo) CreateIngestJob(generationID, libraryFileID, attachmentID
         INSERT INTO rag_ingest_jobs (
             id, generation_id, library_file_id, attachment_id, status, stage
         ) VALUES (?, ?, ?, ?, 'queued', 'queued')`,
-		id, nullableString(generationID), nullableString(libraryFileID), nullableString(attachmentID),
+		id, ragNullableString(generationID), ragNullableString(libraryFileID), ragNullableString(attachmentID),
 	)
 	return id, err
 }
@@ -376,7 +376,7 @@ func boolInt(value bool) int {
 	return 0
 }
 
-func nullableString(value string) any {
+func ragNullableString(value string) any {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
