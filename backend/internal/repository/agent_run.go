@@ -10,20 +10,14 @@ import (
 )
 
 // AgentRunRepo handles agent run persistence.
-type AgentRunRepo struct {
-	db *sql.DB
-}
+type AgentRunRepo struct{ db *sql.DB }
 
-// NewAgentRunRepo creates a new AgentRunRepo.
-func NewAgentRunRepo(db *sql.DB) *AgentRunRepo {
-	return &AgentRunRepo{db: db}
-}
+func NewAgentRunRepo(db *sql.DB) *AgentRunRepo { return &AgentRunRepo{db: db} }
 
 // Create inserts a new agent run.
 func (r *AgentRunRepo) Create(conversationID, goal string) (*models.AgentRun, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
-
 	_, err := r.db.Exec(`
 		INSERT INTO agent_runs (id, conversation_id, status, goal, plan_json, result_summary, created_at, updated_at)
 		VALUES (?, ?, 'planning', ?, '[]', '', ?, ?)
@@ -31,17 +25,14 @@ func (r *AgentRunRepo) Create(conversationID, goal string) (*models.AgentRun, er
 	if err != nil {
 		return nil, fmt.Errorf("insert agent run: %w", err)
 	}
-
 	return r.GetByID(id)
 }
 
-// GetByID retrieves an agent run by ID.
 func (r *AgentRunRepo) GetByID(id string) (*models.AgentRun, error) {
 	row := r.db.QueryRow(`
 		SELECT id, conversation_id, status, goal, plan_json, result_summary, created_at, updated_at, completed_at
 		FROM agent_runs WHERE id = ?
 	`, id)
-
 	var run models.AgentRun
 	if err := row.Scan(
 		&run.ID, &run.ConversationID, &run.Status, &run.Goal, &run.PlanJSON,
@@ -55,7 +46,6 @@ func (r *AgentRunRepo) GetByID(id string) (*models.AgentRun, error) {
 	return &run, nil
 }
 
-// ListByConversation returns all agent runs for a conversation.
 func (r *AgentRunRepo) ListByConversation(conversationID string) ([]models.AgentRun, error) {
 	rows, err := r.db.Query(`
 		SELECT id, conversation_id, status, goal, plan_json, result_summary, created_at, updated_at, completed_at
@@ -65,7 +55,6 @@ func (r *AgentRunRepo) ListByConversation(conversationID string) ([]models.Agent
 		return nil, fmt.Errorf("list agent runs: %w", err)
 	}
 	defer rows.Close()
-
 	var runs []models.AgentRun
 	for rows.Next() {
 		var run models.AgentRun
@@ -80,7 +69,6 @@ func (r *AgentRunRepo) ListByConversation(conversationID string) ([]models.Agent
 	return runs, rows.Err()
 }
 
-// UpdateStatus updates the status of an agent run.
 func (r *AgentRunRepo) UpdateStatus(id, status string) error {
 	now := time.Now().UTC()
 	var completedAt *time.Time
@@ -96,26 +84,34 @@ func (r *AgentRunRepo) UpdateStatus(id, status string) error {
 	return nil
 }
 
-// UpdatePlan updates the plan JSON.
 func (r *AgentRunRepo) UpdatePlan(id, planJSON string) error {
 	now := time.Now().UTC()
-	_, err := r.db.Exec(`
-		UPDATE agent_runs SET plan_json = ?, updated_at = ? WHERE id = ?
-	`, planJSON, now, id)
+	_, err := r.db.Exec(`UPDATE agent_runs SET plan_json = ?, updated_at = ? WHERE id = ?`, planJSON, now, id)
 	if err != nil {
 		return fmt.Errorf("update agent run plan: %w", err)
 	}
 	return nil
 }
 
-// UpdateResult sets the result summary.
 func (r *AgentRunRepo) UpdateResult(id, resultSummary string) error {
 	now := time.Now().UTC()
-	_, err := r.db.Exec(`
-		UPDATE agent_runs SET result_summary = ?, updated_at = ? WHERE id = ?
-	`, resultSummary, now, id)
+	_, err := r.db.Exec(`UPDATE agent_runs SET result_summary = ?, updated_at = ? WHERE id = ?`, resultSummary, now, id)
 	if err != nil {
 		return fmt.Errorf("update agent run result: %w", err)
 	}
 	return nil
+}
+
+// MarkInterruptedPaused converts runs left in volatile execution states into
+// resumable paused runs. It is safe to call every time the application starts.
+func (r *AgentRunRepo) MarkInterruptedPaused() (int64, error) {
+	result, err := r.db.Exec(`
+		UPDATE agent_runs
+		SET status = 'paused', updated_at = datetime('now'), completed_at = NULL
+		WHERE status IN ('running', 'planning')
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("pause interrupted agent runs: %w", err)
+	}
+	return result.RowsAffected()
 }
