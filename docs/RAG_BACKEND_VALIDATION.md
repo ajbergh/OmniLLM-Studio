@@ -14,7 +14,7 @@ This document records validation for `feature/rag-modernization-v2`. It is gener
 
 | Check | Result |
 |---|---|
-| `go test ./...` | **FAIL** |
+| `go test -timeout 3m ./...` | **PASS** |
 | Focused Go race tests | **PASS** |
 | Frontend build, lint, and unit tests | **PASS** |
 | `git diff --check` | **PASS** |
@@ -34,3 +34,8 @@ npm run test:unit
 ```
 
 The workflow creates `backend/cmd/desktop/frontend_dist/index.html` only in the runner worktree so the Wails `go:embed` package can compile; that placeholder is not committed.
+
+
+## Test harness correction
+
+The initial repository-wide backend run timed out in `internal/agent.TestExecuteToolCallAskApprovalApproved`. Both approval tests used a one-slot event channel while forwarding every post-approval tool event, so the callback could block after the only consumer exited. The test callbacks now forward only `EventApprovalRequired`, which is the event under assertion. Production agent behavior was not changed.
