@@ -1,0 +1,583 @@
+name: Complete RAG Operational Releases
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rag-release-completion.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  complete-and-validate:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/rag-modernization-v2
+
+      - name: Add operational RAG components
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > backend/internal/repository/document_chunk_replace.go <<'GO'
+          package repository
+
+          import (
+            "fmt"
+            "time"
+
+            "github.com/ajbergh/omnillm-studio/internal/models"
+            "github.com/google/uuid"
+          )
+
+          // ReplaceAttachmentChunks atomically replaces the relational chunk set
+          // after the replacement vectors have been indexed. It returns only stale
+          // chunk IDs that no longer exist in the replacement set.
+          func (r *ChunkRepo) ReplaceAttachmentChunks(attachmentID string, chunks []models.DocumentChunk) ([]string, error) {
+            oldChunks, err := r.ListByAttachment(attachmentID)
+            if err != nil {
+              return nil, err
+            }
+            newIDs := make(map[string]struct{}, len(chunks))
+            for index := range chunks {
+              if chunks[index].ID == "" {
+                chunks[index].ID = uuid.NewString()
+              }
+              newIDs[chunks[index].ID] = struct{}{}
+            }
+
+            tx, err := r.db.Begin()
+            if err != nil {
+              return nil, fmt.Errorf("begin chunk replacement: %w", err)
+            }
+            defer tx.Rollback()
+            if _, err := tx.Exec("DELETE FROM document_chunks WHERE attachment_id = ?", attachmentID); err != nil {
+              return nil, fmt.Errorf("delete previous attachment chunks: %w", err)
+            }
+            stmt, err := tx.Prepare(`
+              INSERT INTO document_chunks (
+                id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+                chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+                chunk_metadata_json, metadata_json, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            if err != nil {
+              return nil, fmt.Errorf("prepare replacement insert: %w", err)
+            }
+            defer stmt.Close()
+            now := time.Now().UTC()
+            for index := range chunks {
+              chunk := &chunks[index]
+              chunk.CreatedAt = now
+              if chunk.MetadataJSON == "" {
+                chunk.MetadataJSON = "{}"
+              }
+              if chunk.ChunkMetaJSON == "" {
+                chunk.ChunkMetaJSON = "{}"
+              }
+              if _, err := stmt.Exec(
+                chunk.ID, chunk.AttachmentID, chunk.ConversationID, chunk.LibraryFileID,
+                chunkScopeOrDefault(chunk.Scope), chunk.WorkspaceID, chunk.SourceType,
+                chunk.ChunkIndex, chunk.Content, chunk.CharOffset, chunk.CharLength,
+                chunk.TokenCount, chunk.PageNumber, chunk.SectionTitle,
+                chunkMetaOrDefault(chunk.ChunkMetaJSON), chunk.MetadataJSON, chunk.CreatedAt,
+              ); err != nil {
+                return nil, fmt.Errorf("insert replacement chunk %d: %w", index, err)
+              }
+            }
+            if err := tx.Commit(); err != nil {
+              return nil, fmt.Errorf("commit chunk replacement: %w", err)
+            }
+
+            stale := make([]string, 0)
+            for _, old := range oldChunks {
+              if _, retained := newIDs[old.ID]; !retained {
+                stale = append(stale, old.ID)
+              }
+            }
+            return stale, nil
+          }
+          GO
+
+          cat > backend/internal/rag/rag_admin_v2.go <<'GO'
+          package rag
+
+          import "sort"
+
+          // CollectionCounts returns a stable snapshot of every physical collection.
+          func (s *VectorStore) CollectionCounts() map[string]int {
+            out := map[string]int{}
+            if s == nil || s.db == nil {
+              return out
+            }
+            for name, collection := range s.db.ListCollections() {
+              if collection != nil {
+                out[name] = collection.Count()
+              }
+            }
+            return out
+          }
+
+          // CollectionNames returns physical collection names in deterministic order.
+          func (s *VectorStore) CollectionNames() []string {
+            counts := s.CollectionCounts()
+            names := make([]string, 0, len(counts))
+            for name := range counts {
+              names = append(names, name)
+            }
+            sort.Strings(names)
+            return names
+          }
+          GO
+
+          cat > backend/internal/api/rag_reindex_v2.go <<'GO'
+          package api
+
+          import (
+            "context"
+            "fmt"
+            "strings"
+
+            "github.com/ajbergh/omnillm-studio/internal/models"
+            "github.com/ajbergh/omnillm-studio/internal/rag"
+          )
+
+          type ragAttachmentReindexResult struct {
+            AttachmentID string `json:"attachment_id"`
+            ChunksIndexed int    `json:"chunks_indexed"`
+            StaleRemoved  int    `json:"stale_removed"`
+          }
+
+          type ragConversationReindexResult struct {
+            ConversationID string                       `json:"conversation_id"`
+            ChunksIndexed   int                          `json:"chunks_indexed"`
+            Attachments     []ragAttachmentReindexResult `json:"attachments"`
+            Failures        []string                     `json:"failures,omitempty"`
+            EmbedProvider   string                       `json:"embed_provider"`
+            EmbedModel      string                       `json:"embed_model"`
+          }
+
+          func (h *RAGHandler) reindexAttachmentSafe(ctx context.Context, attachment *models.Attachment, settings models.AppSettings, embedProvider, embedModel string) (ragAttachmentReindexResult, error) {
+            result := ragAttachmentReindexResult{AttachmentID: attachment.ID}
+            if !canExtractAttachmentText(attachment.MimeType) {
+              return result, fmt.Errorf("attachment type %q is not supported", attachment.MimeType)
+            }
+            safePath, err := SafeJoin(h.storageDir, attachment.StoragePath)
+            if err != nil {
+              return result, err
+            }
+            content, err := extractAttachmentText(safePath, attachment.MimeType)
+            if err != nil {
+              return result, err
+            }
+            chunkOptions := rag.ChunkOptions{ChunkSize: settings.RAGChunkSize, Overlap: settings.RAGChunkOverlap}
+            if chunkOptions.ChunkSize <= 0 {
+              chunkOptions = rag.DefaultChunkOptions()
+            }
+            chunks := rag.DetectAndChunk(content, attachment.MimeType, attachment.ID, attachment.ConversationID, chunkOptions)
+            embedFunc := rag.NewLLMEmbeddingFunc(h.llmSvc, embedProvider, embedModel)
+            providerType := h.providerTypeFor(embedProvider)
+
+            // Build vectors first. If embedding or vector persistence fails, the
+            // currently active relational and vector records remain untouched.
+            if len(chunks) > 0 {
+              if err := h.vectorStore.IndexChunks(ctx, attachment.ConversationID, chunks, providerType, embedFunc); err != nil {
+                return result, fmt.Errorf("index replacement vectors: %w", err)
+              }
+            }
+            staleIDs, err := h.chunkRepo.ReplaceAttachmentChunks(attachment.ID, chunks)
+            if err != nil {
+              return result, fmt.Errorf("activate replacement chunks: %w", err)
+            }
+            if len(staleIDs) > 0 {
+              if err := h.vectorStore.DeleteDocuments(ctx, attachment.ConversationID, staleIDs...); err != nil {
+                return result, fmt.Errorf("remove stale vectors: %w", err)
+              }
+            }
+            result.ChunksIndexed = len(chunks)
+            result.StaleRemoved = len(staleIDs)
+            return result, nil
+          }
+
+          func (h *RAGHandler) reindexConversationSafe(ctx context.Context, conversationID string) (*ragConversationReindexResult, error) {
+            settings, err := h.settingsRepo.GetTyped()
+            if err != nil {
+              return nil, err
+            }
+            if !settings.RAGEnabled {
+              return nil, fmt.Errorf("RAG is not enabled")
+            }
+            conversation, err := h.convoRepo.GetByID(conversationID)
+            if err != nil {
+              return nil, err
+            }
+            activeProvider := ""
+            if conversation != nil && conversation.DefaultProvider != nil {
+              activeProvider = *conversation.DefaultProvider
+            }
+            embedProvider, embedModel, err := rag.ResolveEmbeddingProvider(activeProvider, settings, h.providerRepo)
+            if err != nil {
+              return nil, err
+            }
+            attachments, err := h.attachRepo.ListByConversation(conversationID)
+            if err != nil {
+              return nil, err
+            }
+            result := &ragConversationReindexResult{
+              ConversationID: conversationID,
+              EmbedProvider: embedProvider,
+              EmbedModel: embedModel,
+            }
+            for index := range attachments {
+              attachment := &attachments[index]
+              if !canExtractAttachmentText(attachment.MimeType) {
+                continue
+              }
+              item, itemErr := h.reindexAttachmentSafe(ctx, attachment, settings, embedProvider, embedModel)
+              if itemErr != nil {
+                result.Failures = append(result.Failures, fmt.Sprintf("%s: %v", attachment.ID, itemErr))
+                continue
+              }
+              result.Attachments = append(result.Attachments, item)
+              result.ChunksIndexed += item.ChunksIndexed
+            }
+            if len(result.Attachments) == 0 && len(result.Failures) > 0 {
+              return result, fmt.Errorf("all attachment reindex operations failed: %s", strings.Join(result.Failures, "; "))
+            }
+            return result, nil
+          }
+          GO
+
+          cat > backend/internal/api/rag_admin_v2.go <<'GO'
+          package api
+
+          import (
+            "net/http"
+
+            "github.com/ajbergh/omnillm-studio/internal/rag"
+          )
+
+          // Health reports the effective RAG configuration and persisted index footprint.
+          func (h *RAGHandler) Health(w http.ResponseWriter, r *http.Request) {
+            settings, err := h.settingsRepo.GetTyped()
+            if err != nil {
+              respondInternalError(w, err)
+              return
+            }
+            conversationIDs, err := h.chunkRepo.DistinctConversationIDsWithChunks()
+            if err != nil {
+              respondInternalError(w, err)
+              return
+            }
+            totalChunks := 0
+            for _, conversationID := range conversationIDs {
+              chunks, chunkErr := h.chunkRepo.ListByConversation(conversationID)
+              if chunkErr != nil {
+                respondInternalError(w, chunkErr)
+                return
+              }
+              totalChunks += len(chunks)
+            }
+            collections := h.vectorStore.CollectionCounts()
+            vectorRecords := 0
+            for _, count := range collections {
+              vectorRecords += count
+            }
+            respondJSON(w, http.StatusOK, map[string]interface{}{
+              "enabled": settings.RAGEnabled,
+              "embedding_selection": settings.RAGEmbeddingModel,
+              "chunk_size": settings.RAGChunkSize,
+              "chunk_overlap": settings.RAGChunkOverlap,
+              "top_k": settings.RAGTopK,
+              "conversations_indexed": len(conversationIDs),
+              "chunks": totalChunks,
+              "vector_records": vectorRecords,
+              "physical_collections": len(collections),
+              "backend": "chromem-exact+sqlite-fts5",
+              "pure_go": true,
+              "embedding_schema_version": rag.EmbeddingSchemaVersion,
+            })
+          }
+
+          // Repair non-destructively rebuilds all conversations that currently have chunks.
+          func (h *RAGHandler) Repair(w http.ResponseWriter, r *http.Request) {
+            conversationIDs, err := h.chunkRepo.DistinctConversationIDsWithChunks()
+            if err != nil {
+              respondInternalError(w, err)
+              return
+            }
+            repaired := 0
+            indexed := 0
+            failures := []string{}
+            for _, conversationID := range conversationIDs {
+              result, reindexErr := h.reindexConversationSafe(r.Context(), conversationID)
+              if reindexErr != nil {
+                failures = append(failures, conversationID+": "+reindexErr.Error())
+                continue
+              }
+              repaired++
+              indexed += result.ChunksIndexed
+            }
+            respondJSON(w, http.StatusOK, map[string]interface{}{
+              "conversations_repaired": repaired,
+              "chunks_indexed": indexed,
+              "failures": failures,
+            })
+          }
+          GO
+
+          cat > backend/internal/rag/rag_remote_v2.go <<'GO'
+          package rag
+
+          import (
+            "bytes"
+            "context"
+            "encoding/json"
+            "fmt"
+            "net/http"
+            "strings"
+            "time"
+          )
+
+          // HTTPVectorIndex is a pure-Go remote VectorIndex adapter for deployments
+          // where one process owns mutable index generations and API replicas query it.
+          type HTTPVectorIndex struct {
+            BaseURL string
+            Token   string
+            Client  *http.Client
+          }
+
+          func NewHTTPVectorIndex(baseURL, token string) *HTTPVectorIndex {
+            return &HTTPVectorIndex{
+              BaseURL: strings.TrimRight(baseURL, "/"),
+              Token: token,
+              Client: &http.Client{Timeout: 60 * time.Second},
+            }
+          }
+
+          func (h *HTTPVectorIndex) call(ctx context.Context, path string, requestBody, responseBody any) error {
+            payload, err := json.Marshal(requestBody)
+            if err != nil {
+              return err
+            }
+            request, err := http.NewRequestWithContext(ctx, http.MethodPost, h.BaseURL+path, bytes.NewReader(payload))
+            if err != nil {
+              return err
+            }
+            request.Header.Set("Content-Type", "application/json")
+            if h.Token != "" {
+              request.Header.Set("Authorization", "Bearer "+h.Token)
+            }
+            client := h.Client
+            if client == nil {
+              client = &http.Client{Timeout: 60 * time.Second}
+            }
+            response, err := client.Do(request)
+            if err != nil {
+              return err
+            }
+            defer response.Body.Close()
+            if response.StatusCode < 200 || response.StatusCode >= 300 {
+              return fmt.Errorf("remote vector index returned status %d", response.StatusCode)
+            }
+            if responseBody != nil {
+              return json.NewDecoder(response.Body).Decode(responseBody)
+            }
+            return nil
+          }
+
+          func (h *HTTPVectorIndex) CreateGeneration(ctx context.Context, spec IndexSpec) error {
+            return h.call(ctx, "/generations/create", spec, nil)
+          }
+          func (h *HTTPVectorIndex) UpsertBatch(ctx context.Context, generationID string, records []VectorRecord) error {
+            return h.call(ctx, "/generations/upsert", map[string]any{"generation_id": generationID, "records": records}, nil)
+          }
+          func (h *HTTPVectorIndex) Search(ctx context.Context, generationID string, query []float32, topK int) ([]VectorHit, error) {
+            var hits []VectorHit
+            err := h.call(ctx, "/generations/search", map[string]any{"generation_id": generationID, "query": query, "top_k": topK}, &hits)
+            return hits, err
+          }
+          func (h *HTTPVectorIndex) Delete(ctx context.Context, generationID string, ids []string) error {
+            return h.call(ctx, "/generations/delete", map[string]any{"generation_id": generationID, "ids": ids}, nil)
+          }
+          func (h *HTTPVectorIndex) Validate(ctx context.Context, generationID string) (IndexStats, error) {
+            var stats IndexStats
+            err := h.call(ctx, "/generations/validate", map[string]string{"generation_id": generationID}, &stats)
+            return stats, err
+          }
+          func (h *HTTPVectorIndex) Drop(ctx context.Context, generationID string) error {
+            return h.call(ctx, "/generations/drop", map[string]string{"generation_id": generationID}, nil)
+          }
+
+          // NewVectorIndexHTTPHandler exposes a VectorIndex as a token-protected
+          // standard-library HTTP service suitable for a dedicated index owner.
+          func NewVectorIndexHTTPHandler(backend VectorIndex, token string) http.Handler {
+            mux := http.NewServeMux()
+            authorize := func(next http.HandlerFunc) http.HandlerFunc {
+              return func(w http.ResponseWriter, r *http.Request) {
+                if token != "" && r.Header.Get("Authorization") != "Bearer "+token {
+                  http.Error(w, "unauthorized", http.StatusUnauthorized)
+                  return
+                }
+                next(w, r)
+              }
+            }
+            decode := func(r *http.Request, target any) error { return json.NewDecoder(r.Body).Decode(target) }
+            write := func(w http.ResponseWriter, value any) {
+              w.Header().Set("Content-Type", "application/json")
+              _ = json.NewEncoder(w).Encode(value)
+            }
+            mux.HandleFunc("/generations/create", authorize(func(w http.ResponseWriter, r *http.Request) {
+              var spec IndexSpec
+              if decode(r, &spec) != nil || backend.CreateGeneration(r.Context(), spec) != nil { http.Error(w, "create failed", 400); return }
+              w.WriteHeader(http.StatusNoContent)
+            }))
+            mux.HandleFunc("/generations/upsert", authorize(func(w http.ResponseWriter, r *http.Request) {
+              var body struct { GenerationID string `json:"generation_id"`; Records []VectorRecord `json:"records"` }
+              if decode(r, &body) != nil || backend.UpsertBatch(r.Context(), body.GenerationID, body.Records) != nil { http.Error(w, "upsert failed", 400); return }
+              w.WriteHeader(http.StatusNoContent)
+            }))
+            mux.HandleFunc("/generations/search", authorize(func(w http.ResponseWriter, r *http.Request) {
+              var body struct { GenerationID string `json:"generation_id"`; Query []float32 `json:"query"`; TopK int `json:"top_k"` }
+              if decode(r, &body) != nil { http.Error(w, "invalid request", 400); return }
+              hits, err := backend.Search(r.Context(), body.GenerationID, body.Query, body.TopK)
+              if err != nil { http.Error(w, err.Error(), 400); return }
+              write(w, hits)
+            }))
+            mux.HandleFunc("/generations/delete", authorize(func(w http.ResponseWriter, r *http.Request) {
+              var body struct { GenerationID string `json:"generation_id"`; IDs []string `json:"ids"` }
+              if decode(r, &body) != nil || backend.Delete(r.Context(), body.GenerationID, body.IDs) != nil { http.Error(w, "delete failed", 400); return }
+              w.WriteHeader(http.StatusNoContent)
+            }))
+            mux.HandleFunc("/generations/validate", authorize(func(w http.ResponseWriter, r *http.Request) {
+              var body struct { GenerationID string `json:"generation_id"` }
+              if decode(r, &body) != nil { http.Error(w, "invalid request", 400); return }
+              stats, err := backend.Validate(r.Context(), body.GenerationID)
+              if err != nil { http.Error(w, err.Error(), 400); return }
+              write(w, stats)
+            }))
+            mux.HandleFunc("/generations/drop", authorize(func(w http.ResponseWriter, r *http.Request) {
+              var body struct { GenerationID string `json:"generation_id"` }
+              if decode(r, &body) != nil || backend.Drop(r.Context(), body.GenerationID) != nil { http.Error(w, "drop failed", 400); return }
+              w.WriteHeader(http.StatusNoContent)
+            }))
+            return mux
+          }
+          GO
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_func(path, marker, replacement):
+              p = Path(path)
+              text = p.read_text()
+              start = text.index(marker)
+              brace = text.index('{', start)
+              depth = 0
+              end = None
+              for i in range(brace, len(text)):
+                  if text[i] == '{': depth += 1
+                  elif text[i] == '}':
+                      depth -= 1
+                      if depth == 0:
+                          end = i + 1
+                          break
+              if end is None:
+                  raise RuntimeError(f'unclosed function {marker}')
+              p.write_text(text[:start] + replacement.rstrip() + text[end:])
+
+          replace_func('backend/internal/api/rag_handler.go', 'func (h *RAGHandler) Reindex(', '''func (h *RAGHandler) Reindex(w http.ResponseWriter, r *http.Request) {
+            if !verifyConversationAccess(w, r, h.convoRepo) { return }
+            result, err := h.reindexConversationSafe(r.Context(), chi.URLParam(r, "conversationId"))
+            if err != nil { respondError(w, http.StatusBadGateway, err.Error()); return }
+            respondJSON(w, http.StatusOK, result)
+          }''')
+
+          replace_func('backend/internal/api/rag_handler.go', 'func (h *RAGHandler) IndexAttachment(', '''func (h *RAGHandler) IndexAttachment(w http.ResponseWriter, r *http.Request) {
+            attachmentID := chi.URLParam(r, "attachmentId")
+            attachment, err := h.attachRepo.GetByID(attachmentID)
+            if err != nil || attachment == nil { respondError(w, http.StatusNotFound, "attachment not found"); return }
+            if !verifyConversationAccessByID(w, r, h.convoRepo, attachment.ConversationID) { return }
+            settings, err := h.settingsRepo.GetTyped()
+            if err != nil { respondInternalError(w, err); return }
+            conversation, err := h.convoRepo.GetByID(attachment.ConversationID)
+            if err != nil { respondInternalError(w, err); return }
+            activeProvider := ""
+            if conversation != nil && conversation.DefaultProvider != nil { activeProvider = *conversation.DefaultProvider }
+            embedProvider, embedModel, err := rag.ResolveEmbeddingProvider(activeProvider, settings, h.providerRepo)
+            if err != nil { respondError(w, http.StatusBadRequest, err.Error()); return }
+            result, err := h.reindexAttachmentSafe(r.Context(), attachment, settings, embedProvider, embedModel)
+            if err != nil { respondError(w, http.StatusBadGateway, err.Error()); return }
+            respondJSON(w, http.StatusOK, map[string]interface{}{
+              "attachment_id": result.AttachmentID,
+              "chunks_indexed": result.ChunksIndexed,
+              "stale_removed": result.StaleRemoved,
+              "embed_provider": embedProvider,
+              "embed_model": embedModel,
+            })
+          }''')
+
+          replace_func('backend/internal/api/rag_handler.go', 'func (h *RAGHandler) ReindexAll(', '''func (h *RAGHandler) ReindexAll(w http.ResponseWriter, r *http.Request) {
+            conversationIDs, err := h.chunkRepo.DistinctConversationIDsWithChunks()
+            if err != nil { respondInternalError(w, err); return }
+            rebuilt := 0
+            chunks := 0
+            failures := []string{}
+            for _, conversationID := range conversationIDs {
+              result, rebuildErr := h.reindexConversationSafe(r.Context(), conversationID)
+              if rebuildErr != nil { failures = append(failures, conversationID+": "+rebuildErr.Error()); continue }
+              rebuilt++
+              chunks += result.ChunksIndexed
+            }
+            respondJSON(w, http.StatusOK, map[string]interface{}{
+              "conversations_reindexed": rebuilt,
+              "chunks_indexed": chunks,
+              "failures": failures,
+              "note": "replacement vectors are built before relational activation; failed attachments retain their previous index",
+            })
+          }''')
+
+          router = Path('backend/internal/api/router.go')
+          text = router.read_text()
+          text = text.replace('r.Post("/rag/reindex-all", ragHandler.ReindexAll)', 'r.Get("/rag/health", ragHandler.Health)\n\t\t\t\tr.Post("/rag/repair", ragHandler.Repair)\n\t\t\t\tr.Post("/rag/reindex-all", ragHandler.ReindexAll)')
+          router.write_text(text)
+          PY
+
+          cat >> docs/RAG_MODERNIZATION_STATUS.md <<'DOC'
+
+          ## Operational completion follow-up
+
+          - Reindexing now builds replacement vectors before atomically replacing relational chunks; failed attachments retain the previous searchable index.
+          - Added admin RAG health and repair endpoints.
+          - Added a token-protected pure-Go HTTP VectorIndex client/server adapter for dedicated index-owner and multi-replica deployments.
+          DOC
+
+          gofmt -w backend/internal/repository/document_chunk_replace.go backend/internal/rag/rag_admin_v2.go backend/internal/rag/rag_remote_v2.go backend/internal/api/rag_reindex_v2.go backend/internal/api/rag_admin_v2.go backend/internal/api/rag_handler.go backend/internal/api/router.go
+          rm -f .github/workflows/rag-release-completion.yml .github/workflows/rag-debug.yml .github/workflows/rag-fix.yml docs/RAG_TEST_FAILURE.md
+
+      - name: Commit operational completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(rag): complete operational and distributed RAG releases'
+          git push origin HEAD:feature/rag-modernization-v2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: backend/go.sum
+
+      - name: Validate backend
+        working-directory: backend
+        run: |
+          mkdir -p cmd/desktop/frontend_dist
+          printf '<!doctype html><title>test</title>' > cmd/desktop/frontend_dist/index.html
+          go test ./...
+          go test -race ./internal/rag ./internal/repository ./internal/filelibrary ./internal/document ./internal/api
