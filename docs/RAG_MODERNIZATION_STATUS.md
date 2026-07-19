@@ -69,3 +69,9 @@ go test -run '^$' -bench BenchmarkVectorIndexes -benchmem ./internal/rag
 ```
 
 The branch is designed to remain CGO-free. No Python, ONNX Runtime, external vector database, or sidecar is required.
+
+## Operational completion follow-up
+
+- Reindexing now builds replacement vectors before atomically replacing relational chunks; failed attachments retain the previous searchable index.
+- Added admin RAG health and repair endpoints.
+- Added a token-protected pure-Go HTTP VectorIndex client/server adapter for dedicated index-owner and multi-replica deployments.
