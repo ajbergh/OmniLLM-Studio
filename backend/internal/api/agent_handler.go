@@ -254,6 +254,7 @@ func prepareAgentSSE(w http.ResponseWriter) (http.Flusher, func(agent.Event), bo
 	w.Header().Set("X-Accel-Buffering", "no")
 	var writeMu sync.Mutex
 	onEvent := func(event agent.Event) {
+		agent.PublishEvent(event)
 		data, _ := json.Marshal(event)
 		writeMu.Lock()
 		defer writeMu.Unlock()
@@ -265,7 +266,9 @@ func prepareAgentSSE(w http.ResponseWriter) (http.Flusher, func(agent.Event), bo
 
 func finishAgentSSE(w http.ResponseWriter, flusher http.Flusher, run *models.AgentRun, err error) {
 	if err != nil {
-		data, _ := json.Marshal(agent.Event{Type: agent.EventError, Data: map[string]string{"error": err.Error()}})
+		event := agent.Event{Type: agent.EventError, Data: map[string]string{"error": err.Error()}}
+		agent.PublishEvent(event)
+		data, _ := json.Marshal(event)
 		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", agent.EventError, data)
 		flusher.Flush()
 		return
