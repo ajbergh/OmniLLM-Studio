@@ -103,6 +103,13 @@ func (s *Service) ConnectMCP(userID, workspaceID, appKey, displayName, serverID 
 	if displayName = strings.TrimSpace(displayName); displayName == "" {
 		displayName = definition.DisplayName
 	}
+	var serverExists int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM mcp_servers WHERE id = ?`, serverID).Scan(&serverExists); err != nil {
+		return nil, fmt.Errorf("verify MCP server: %w", err)
+	}
+	if serverExists == 0 {
+		return nil, fmt.Errorf("MCP server not found")
+	}
 	if len(metadata) == 0 {
 		metadata = json.RawMessage(`{}`)
 	}

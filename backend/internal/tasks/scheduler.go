@@ -13,6 +13,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/agent"
 	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
+	"github.com/ajbergh/omnillm-studio/internal/tools"
 	"github.com/google/uuid"
 )
 
@@ -285,7 +286,12 @@ func (s *Scheduler) execute(task Task) {
 	if task.ScheduleKind == KindCondition {
 		prompt = "Check this condition using current evidence. Only produce a user-facing notification when the condition is met; otherwise state that no notification is required: " + task.Prompt
 	}
-	run, runErr := s.runner.StartRunWithOptions(s.ctx, task.ConversationID, prompt, provider, model, history, agent.RunOptions{Profile: agent.RunProfile(task.Profile)}, nil)
+	scope := tools.InvocationScope{UserID: task.UserID, ConversationID: task.ConversationID}
+	if convo.WorkspaceID != nil {
+		scope.WorkspaceID = *convo.WorkspaceID
+	}
+	runCtx := tools.ContextWithInvocationScope(s.ctx, scope)
+	run, runErr := s.runner.StartRunWithOptions(runCtx, task.ConversationID, prompt, provider, model, history, agent.RunOptions{Profile: agent.RunProfile(task.Profile)}, nil)
 	runID := ""
 	if run != nil {
 		runID = run.ID

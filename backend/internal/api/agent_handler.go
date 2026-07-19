@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/agent"
+	"github.com/ajbergh/omnillm-studio/internal/auth"
 	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
+	"github.com/ajbergh/omnillm-studio/internal/tools"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -68,7 +70,10 @@ func (h *AgentHandler) StartRun(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
-	ctx := context.WithoutCancel(r.Context())
+	ctx := tools.ContextWithInvocationScope(
+		context.WithoutCancel(r.Context()),
+		agentInvocationScope(r, convo, conversationID, ""),
+	)
 	run, runErr := h.runner.StartRunWithOptions(ctx, conversationID, req.Goal, req.Provider, req.Model, history, agent.RunOptions{Profile: req.Profile, Budgets: req.Budgets}, onEvent)
 	finishAgentSSE(w, flusher, run, runErr)
 }
@@ -208,7 +213,10 @@ func (h *AgentHandler) ResumeRun(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
-	ctx := context.WithoutCancel(r.Context())
+	ctx := tools.ContextWithInvocationScope(
+		context.WithoutCancel(r.Context()),
+		agentInvocationScope(r, convo, run.ConversationID, run.ID),
+	)
 	resumed, resumeErr := h.runner.ResumeRun(ctx, runID, provider, model, history, onEvent)
 	finishAgentSSE(w, flusher, resumed, resumeErr)
 }
@@ -227,6 +235,18 @@ func (h *AgentHandler) loadExecutionContext(conversationID string) (*models.Conv
 		history = append(history, llm.ChatMessage{Role: message.Role, Content: message.Content})
 	}
 	return convo, history, nil
+}
+
+func agentInvocationScope(r *http.Request, convo *models.Conversation, conversationID, runID string) tools.InvocationScope {
+	scope := tools.InvocationScope{
+		UserID:         auth.ScopeUserIDFromContext(r.Context()),
+		ConversationID: conversationID,
+		RunID:          runID,
+	}
+	if convo != nil && convo.WorkspaceID != nil {
+		scope.WorkspaceID = *convo.WorkspaceID
+	}
+	return scope
 }
 
 func resolveAgentProviderModel(convo *models.Conversation, provider, model *string) {
@@ -254,7 +274,6 @@ func prepareAgentSSE(w http.ResponseWriter) (http.Flusher, func(agent.Event), bo
 	w.Header().Set("X-Accel-Buffering", "no")
 	var writeMu sync.Mutex
 	onEvent := func(event agent.Event) {
-		agent.PublishEvent(event)
 		data, _ := json.Marshal(event)
 		writeMu.Lock()
 		defer writeMu.Unlock()
@@ -266,8 +285,11 @@ func prepareAgentSSE(w http.ResponseWriter) (http.Flusher, func(agent.Event), bo
 
 func finishAgentSSE(w http.ResponseWriter, flusher http.Flusher, run *models.AgentRun, err error) {
 	if err != nil {
-		event := agent.Event{Type: agent.EventError, Data: map[string]string{"error": err.Error()}}
-		agent.PublishEvent(event)
+		runID := ""
+		if run != nil {
+			runID = run.ID
+		}
+		event := agent.Event{Type: agent.EventError, RunID: runID, Data: map[string]string{"error": err.Error()}}
 		data, _ := json.Marshal(event)
 		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", agent.EventError, data)
 		flusher.Flush()

@@ -14,14 +14,18 @@ import (
 
 	"github.com/ajbergh/omnillm-studio/internal/agent"
 	"github.com/ajbergh/omnillm-studio/internal/analytics"
+	"github.com/ajbergh/omnillm-studio/internal/apps"
 	"github.com/ajbergh/omnillm-studio/internal/artifacts"
 	"github.com/ajbergh/omnillm-studio/internal/auth"
 	"github.com/ajbergh/omnillm-studio/internal/browser"
 	"github.com/ajbergh/omnillm-studio/internal/bundle"
 	"github.com/ajbergh/omnillm-studio/internal/config"
+	evalsvc "github.com/ajbergh/omnillm-studio/internal/eval"
 	"github.com/ajbergh/omnillm-studio/internal/filelibrary"
+	"github.com/ajbergh/omnillm-studio/internal/jobs"
 	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/mcpclient"
+	memorysvc "github.com/ajbergh/omnillm-studio/internal/memory"
 	"github.com/ajbergh/omnillm-studio/internal/music"
 	"github.com/ajbergh/omnillm-studio/internal/plugins"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
@@ -29,6 +33,8 @@ import (
 	intentrouter "github.com/ajbergh/omnillm-studio/internal/router"
 	"github.com/ajbergh/omnillm-studio/internal/search"
 	"github.com/ajbergh/omnillm-studio/internal/sports"
+	"github.com/ajbergh/omnillm-studio/internal/tasks"
+	"github.com/ajbergh/omnillm-studio/internal/tasktools"
 	"github.com/ajbergh/omnillm-studio/internal/templates"
 	"github.com/ajbergh/omnillm-studio/internal/tools"
 	"github.com/ajbergh/omnillm-studio/internal/urlcontext"
@@ -62,6 +68,18 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit string) (http.Handler, func(context.Context) error) {
 	r := chi.NewRouter()
 	shutdownFns := []func(context.Context) error{}
+
+	if err := repository.EnsureAgentRuntimeSchema(database); err != nil {
+		log.Fatalf("init agent runtime schema: %v", err)
+	}
+	jobManager, err := jobs.NewManager(database)
+	if err != nil {
+		log.Fatalf("init agent job manager: %v", err)
+	}
+	memoryService := memorysvc.NewService(database)
+	appService := apps.NewService(database)
+	toolEventRecorder := NewToolEventRecorder(database)
+	tools.SetGlobalEventSink(toolEventRecorder.Record)
 
 	// Middleware
 	r.Use(middleware.Logger)
@@ -140,6 +158,19 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	// Tool Calling Framework
 	toolPermRepo := repository.NewToolPermissionRepo(database)
 	toolRegistry := tools.NewRegistry()
+	toolRegistry.MustRegister(tools.NewWeatherLookupTool())
+	toolRegistry.MustRegister(tools.NewCurrencyConvertTool())
+	toolRegistry.MustRegister(tools.NewJobStatusTool(jobManager))
+	toolRegistry.MustRegister(tools.NewJobCancelTool(jobManager))
+	toolRegistry.MustRegister(tools.NewMemorySearchTool(memoryService))
+	toolRegistry.MustRegister(tools.NewMemorySaveTool(memoryService))
+	toolRegistry.MustRegister(tools.NewMemoryDeleteTool(memoryService))
+	toolRegistry.MustRegister(tools.NewAppCatalogTool(appService))
+	toolRegistry.MustRegister(tools.NewAppConnectionsTool(appService))
+	toolRegistry.MustRegister(tools.NewAppConnectMCPTool(appService))
+	toolRegistry.MustRegister(tools.NewAppDisconnectTool(appService))
+	toolRegistry.MustRegister(tools.NewImageGenerateJobTool(jobManager, llmService, attachRepo, cfg.AttachmentsDir))
+	toolRegistry.MustRegister(tools.NewArtifactGenerateJobTool(jobManager, artifactGen, attachRepo))
 	toolRegistry.MustRegister(tools.NewWebSearchTool(orchestrator, "", ""))
 	toolRegistry.MustRegister(tools.NewCalculatorTool())
 	toolRegistry.MustRegister(tools.NewURLFetchTool())
@@ -210,9 +241,13 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	// Agent Mode
 	agentRunRepo := repository.NewAgentRunRepo(database)
 	agentStepRepo := repository.NewAgentStepRepo(database)
+	agentEventRepo := repository.NewAgentEventRepo(database)
+	agentEventRecorder := NewAgentEventRecorder(agentEventRepo)
+	agent.SetGlobalEventSink(agentEventRecorder.Record)
 	agentPlanner := agent.NewPlanner(llmService, toolRegistry)
 	agentRunner := agent.NewRunner(agentPlanner, llmService, toolExecutor, agentRunRepo, agentStepRepo, msgRepo)
 	agentHandler := NewAgentHandler(agentRunner, agentRunRepo, agentStepRepo, msgRepo, convoRepo)
+	agentEventHandler := NewAgentEventHandler(agentEventRepo, agentRunRepo, convoRepo)
 
 	// Conversation Branching
 	branchRepo := repository.NewBranchRepo(database)
@@ -252,6 +287,51 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	go videoService.RecoverPendingGenerations()
 	go videoService.RecoverInterruptedRenderJobs()
 	crossoverHandler := NewCrossoverHandler(llmService, providerRepo)
+
+	// Complete Agent Runtime composition after Studio services exist.
+	toolRegistry.MustRegister(tools.NewMusicGenerateJobTool(jobManager, musicService))
+	toolRegistry.MustRegister(tools.NewVideoGenerateJobTool(jobManager, videoService))
+	taskScheduler, err := tasks.NewScheduler(database, agentRunner, convoRepo, msgRepo)
+	if err != nil {
+		log.Fatalf("init scheduled agent tasks: %v", err)
+	}
+	toolRegistry.MustRegister(tasktools.NewListTool(taskScheduler))
+	toolRegistry.MustRegister(tasktools.NewCreateTool(taskScheduler))
+	toolRegistry.MustRegister(tasktools.NewUpdateTool(taskScheduler))
+
+	jobHandler := NewJobHandler(jobManager)
+	memoryHandler := NewMemoryHandler(memoryService, convoRepo)
+	taskHandler := NewTaskHandler(taskScheduler, convoRepo)
+	appHandler := NewAppHandler(appService)
+	agentEvalHandler := NewAgentEvalHandler(evalsvc.NewAgentEvaluator(agentPlanner, toolRegistry))
+
+	seedDefaultToolPolicies(database, map[string]string{
+		"job_cancel":        "ask",
+		"memory_save":       "ask",
+		"memory_delete":     "ask",
+		"image_generate":    "ask",
+		"music_generate":    "ask",
+		"video_generate":    "ask",
+		"artifact_generate": "ask",
+		"python_analysis":   "ask",
+		"task_create":       "ask",
+		"task_update":       "ask",
+		"app_connect_mcp":   "ask",
+		"app_disconnect":    "ask",
+	})
+
+	shutdownFns = append(shutdownFns,
+		taskScheduler.Shutdown,
+		jobManager.Shutdown,
+		func(ctx context.Context) error {
+			tools.SetGlobalEventSink(nil)
+			return toolEventRecorder.Shutdown(ctx)
+		},
+		func(ctx context.Context) error {
+			agent.SetGlobalEventSink(nil)
+			return agentEventRecorder.Shutdown(ctx)
+		},
+	)
 
 	// Semantic Search
 	msgEmbeddingRepo := repository.NewMessageEmbeddingRepo(database)
@@ -525,10 +605,43 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Route("/tools", func(r chi.Router) {
 				r.Get("/", toolHandler.ListTools)
 				r.Post("/execute", toolHandler.ExecuteTool)
+				r.Get("/approvals", toolHandler.ListApprovals)
+				r.Post("/approvals/{approvalId}", toolHandler.ResolveApproval)
 				r.Group(func(r chi.Router) {
 					r.Use(auth.RequireRole("admin"))
 					r.Patch("/{toolName}/permission", toolHandler.UpdatePermission)
 				})
+			})
+
+			// Durable asynchronous jobs.
+			r.Route("/jobs", func(r chi.Router) {
+				r.Get("/", jobHandler.List)
+				r.Get("/{jobId}", jobHandler.Get)
+				r.Post("/{jobId}/cancel", jobHandler.Cancel)
+			})
+
+			// Explicit user-controlled memory.
+			r.Route("/memories", func(r chi.Router) {
+				r.Get("/", memoryHandler.List)
+				r.Post("/", memoryHandler.Create)
+				r.Patch("/{memoryId}", memoryHandler.Update)
+				r.Delete("/{memoryId}", memoryHandler.Delete)
+			})
+
+			// One-time, recurring, and condition-watch tasks.
+			r.Route("/tasks", func(r chi.Router) {
+				r.Get("/", taskHandler.List)
+				r.Post("/", taskHandler.Create)
+				r.Patch("/{taskId}", taskHandler.UpdateStatus)
+				r.Delete("/{taskId}", taskHandler.Delete)
+			})
+
+			// Governed connected-app catalog and MCP mappings.
+			r.Route("/apps", func(r chi.Router) {
+				r.Get("/catalog", appHandler.Catalog)
+				r.Get("/connections", appHandler.List)
+				r.Post("/connections/mcp", appHandler.ConnectMCP)
+				r.Delete("/connections/{connectionId}", appHandler.Delete)
 			})
 
 			// MCP Servers (admin only)
@@ -601,6 +714,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			// Agent Runs (by run ID)
 			r.Route("/agent/runs/{runId}", func(r chi.Router) {
 				r.Get("/", agentHandler.GetRun)
+				r.Get("/events", agentEventHandler.List)
 				r.Post("/approve/{stepId}", agentHandler.ApproveStep)
 				r.Post("/cancel", agentHandler.CancelRun)
 				r.Post("/resume", agentHandler.ResumeRun)
@@ -654,6 +768,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 				r.Use(auth.RequireRole("admin"))
 				r.Post("/run", evalHandler.RunEval)
 				r.Get("/runs", evalHandler.ListRuns)
+				r.Get("/agent/scenarios", agentEvalHandler.Scenarios)
+				r.Post("/agent/run", agentEvalHandler.Run)
 				r.Route("/runs/{id}", func(r chi.Router) {
 					r.Get("/", evalHandler.GetRun)
 					r.Delete("/", evalHandler.DeleteRun)
@@ -671,6 +787,23 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			}
 		}
 		return firstErr
+	}
+}
+
+func seedDefaultToolPolicies(db *sql.DB, policies map[string]string) {
+	for name, policy := range policies {
+		switch policy {
+		case "allow", "deny", "ask":
+		default:
+			log.Printf("WARN: skip invalid default tool policy %s=%s", name, policy)
+			continue
+		}
+		if _, err := db.Exec(`
+			INSERT OR IGNORE INTO tool_permissions (tool_name, policy, updated_at)
+			VALUES (?, ?, datetime('now'))
+		`, name, policy); err != nil {
+			log.Printf("WARN: seed tool policy %s=%s: %v", name, policy, err)
+		}
 	}
 }
 

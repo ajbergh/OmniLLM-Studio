@@ -17,7 +17,7 @@ func NewJobHandler(manager *jobs.Manager) *JobHandler { return &JobHandler{manag
 func (h *JobHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	items, err := h.manager.List(jobs.Scope{
-		UserID:         auth.UserIDFromContext(r.Context()),
+		UserID:         auth.ScopeUserIDFromContext(r.Context()),
 		WorkspaceID:    r.URL.Query().Get("workspace_id"),
 		ConversationID: r.URL.Query().Get("conversation_id"),
 	}, limit)
@@ -34,7 +34,7 @@ func (h *JobHandler) Get(w http.ResponseWriter, r *http.Request) {
 		respondInternalError(w, err)
 		return
 	}
-	userID := auth.UserIDFromContext(r.Context())
+	userID := auth.ScopeUserIDFromContext(r.Context())
 	if job == nil || (job.UserID != "" && userID != job.UserID) {
 		respondError(w, http.StatusNotFound, "job not found")
 		return
@@ -43,7 +43,7 @@ func (h *JobHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *JobHandler) Cancel(w http.ResponseWriter, r *http.Request) {
-	if err := h.manager.Cancel(chi.URLParam(r, "jobId"), auth.UserIDFromContext(r.Context())); err != nil {
+	if err := h.manager.Cancel(chi.URLParam(r, "jobId"), auth.ScopeUserIDFromContext(r.Context())); err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}

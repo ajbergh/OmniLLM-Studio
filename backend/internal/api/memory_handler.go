@@ -45,7 +45,7 @@ func (h *MemoryHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
-	userID := auth.UserIDFromContext(r.Context())
+	userID := auth.ScopeUserIDFromContext(r.Context())
 	var req struct {
 		WorkspaceID     string     `json:"workspace_id,omitempty"`
 		ConversationID  string     `json:"conversation_id,omitempty"`
@@ -80,7 +80,7 @@ func (h *MemoryHandler) Update(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	item, err := h.service.Update(chi.URLParam(r, "memoryId"), auth.UserIDFromContext(r.Context()), req.Content, req.ExpiresAt)
+	item, err := h.service.Update(chi.URLParam(r, "memoryId"), auth.ScopeUserIDFromContext(r.Context()), req.Content, req.ExpiresAt)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
@@ -89,7 +89,7 @@ func (h *MemoryHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MemoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.service.Delete(chi.URLParam(r, "memoryId"), auth.UserIDFromContext(r.Context())); err != nil {
+	if err := h.service.Delete(chi.URLParam(r, "memoryId"), auth.ScopeUserIDFromContext(r.Context())); err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -98,7 +98,7 @@ func (h *MemoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *MemoryHandler) scopeFromRequest(w http.ResponseWriter, r *http.Request) (memorysvc.Scope, bool) {
 	scope := memorysvc.Scope{
-		UserID:         auth.UserIDFromContext(r.Context()),
+		UserID:         auth.ScopeUserIDFromContext(r.Context()),
 		WorkspaceID:    strings.TrimSpace(r.URL.Query().Get("workspace_id")),
 		ConversationID: strings.TrimSpace(r.URL.Query().Get("conversation_id")),
 	}

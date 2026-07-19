@@ -86,14 +86,16 @@ func main() {
 	log.Println("shutting down server...")
 	close(stopCleanup)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := shutdownAPI(ctx); err != nil {
+	serverCtx, cancelServer := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := srv.Shutdown(serverCtx); err != nil {
+		log.Printf("server shutdown failed: %v", err)
+	}
+	cancelServer()
+
+	runtimeCtx, cancelRuntime := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := shutdownAPI(runtimeCtx); err != nil {
 		log.Printf("API runtime shutdown failed: %v", err)
 	}
-
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("server shutdown failed: %v", err)
-	}
+	cancelRuntime()
 	log.Println("server stopped")
 }

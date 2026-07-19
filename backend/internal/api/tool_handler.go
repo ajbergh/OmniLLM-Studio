@@ -93,7 +93,7 @@ func (h *ToolHandler) ExecuteTool(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	userID := auth.UserIDFromContext(r.Context())
+	userID := auth.ScopeUserIDFromContext(r.Context())
 	switch req.Action {
 	case "list_approvals":
 		respondJSON(w, http.StatusOK, h.executor.ApprovalBroker().List(tools.InvocationScope{UserID: userID}))
@@ -129,7 +129,7 @@ func (h *ToolHandler) ExecuteTool(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ToolHandler) ListApprovals(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, h.executor.ApprovalBroker().List(tools.InvocationScope{UserID: auth.UserIDFromContext(r.Context())}))
+	respondJSON(w, http.StatusOK, h.executor.ApprovalBroker().List(tools.InvocationScope{UserID: auth.ScopeUserIDFromContext(r.Context())}))
 }
 
 func (h *ToolHandler) ResolveApproval(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +142,7 @@ func (h *ToolHandler) ResolveApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	approvalID := chi.URLParam(r, "approvalId")
-	result, err := h.resolveAndExecuteApproval(r, auth.UserIDFromContext(r.Context()), approvalID, req.Approved, req.Arguments)
+	result, err := h.resolveAndExecuteApproval(r, auth.ScopeUserIDFromContext(r.Context()), approvalID, req.Approved, req.Arguments)
 	if err != nil {
 		respondApprovalError(w, err)
 		return

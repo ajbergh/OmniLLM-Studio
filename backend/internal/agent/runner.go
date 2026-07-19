@@ -831,6 +831,7 @@ func (r *Runner) generateSummary(ctx context.Context, provider, model, goal stri
 }
 
 func emit(callback func(Event), event Event) {
+	PublishEvent(event)
 	if callback != nil {
 		callback(event)
 	}

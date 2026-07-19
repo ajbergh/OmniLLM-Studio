@@ -24,7 +24,7 @@ func NewTaskHandler(scheduler *tasks.Scheduler, convos *repository.ConversationR
 
 func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, err := h.scheduler.List(auth.UserIDFromContext(r.Context()), limit)
+	items, err := h.scheduler.List(auth.ScopeUserIDFromContext(r.Context()), limit)
 	if err != nil {
 		respondInternalError(w, err)
 		return
@@ -51,7 +51,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item, err := h.scheduler.Create(tasks.CreateRequest{
-		UserID: auth.UserIDFromContext(r.Context()), ConversationID: req.ConversationID,
+		UserID: auth.ScopeUserIDFromContext(r.Context()), ConversationID: req.ConversationID,
 		Title: req.Title, Prompt: req.Prompt, Profile: req.Profile, Timezone: req.Timezone,
 		ScheduleKind: req.ScheduleKind, NextRunAt: req.NextRunAt, IntervalSeconds: req.IntervalSeconds,
 	})
@@ -70,7 +70,7 @@ func (h *TaskHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if err := h.scheduler.SetStatus(chi.URLParam(r, "taskId"), auth.UserIDFromContext(r.Context()), req.Status); err != nil {
+	if err := h.scheduler.SetStatus(chi.URLParam(r, "taskId"), auth.ScopeUserIDFromContext(r.Context()), req.Status); err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -78,7 +78,7 @@ func (h *TaskHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.scheduler.Delete(chi.URLParam(r, "taskId"), auth.UserIDFromContext(r.Context())); err != nil {
+	if err := h.scheduler.Delete(chi.URLParam(r, "taskId"), auth.ScopeUserIDFromContext(r.Context())); err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}

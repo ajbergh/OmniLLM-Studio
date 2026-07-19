@@ -19,7 +19,7 @@ func (h *AppHandler) Catalog(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *AppHandler) List(w http.ResponseWriter, r *http.Request) {
-	items, err := h.service.List(auth.UserIDFromContext(r.Context()), r.URL.Query().Get("workspace_id"))
+	items, err := h.service.List(auth.ScopeUserIDFromContext(r.Context()), r.URL.Query().Get("workspace_id"))
 	if err != nil {
 		respondInternalError(w, err)
 		return
@@ -40,7 +40,7 @@ func (h *AppHandler) ConnectMCP(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	connection, err := h.service.ConnectMCP(auth.UserIDFromContext(r.Context()), req.WorkspaceID, req.AppKey, req.DisplayName, req.ServerID, req.Scopes, req.Metadata)
+	connection, err := h.service.ConnectMCP(auth.ScopeUserIDFromContext(r.Context()), req.WorkspaceID, req.AppKey, req.DisplayName, req.ServerID, req.Scopes, req.Metadata)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
@@ -49,7 +49,7 @@ func (h *AppHandler) ConnectMCP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AppHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	if err := h.service.Delete(chi.URLParam(r, "connectionId"), auth.UserIDFromContext(r.Context())); err != nil {
+	if err := h.service.Delete(chi.URLParam(r, "connectionId"), auth.ScopeUserIDFromContext(r.Context())); err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}

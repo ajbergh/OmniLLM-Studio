@@ -150,11 +150,11 @@ func main() {
 		OnStartup: app.startup,
 		OnShutdown: func(ctx context.Context) {
 			close(stopCleanup)
-			if err := shutdownAPI(ctx); err != nil {
-				log.Printf("[desktop] API runtime shutdown: %v", err)
-			}
 			if err := srv.Shutdown(ctx); err != nil {
 				log.Printf("[desktop] HTTP shutdown: %v", err)
+			}
+			if err := shutdownAPI(ctx); err != nil {
+				log.Printf("[desktop] API runtime shutdown: %v", err)
 			}
 		},
 	})

@@ -34,8 +34,24 @@ type ToolEvent struct {
 type EventSink func(event ToolEvent)
 
 func ContextWithInvocationScope(ctx context.Context, scope InvocationScope) context.Context {
+	inherited, _ := ctx.Value(invocationScopeContextKey{}).(InvocationScope)
 	if scope.UserID == "" {
-		scope.UserID = auth.UserIDFromContext(ctx)
+		scope.UserID = inherited.UserID
+	}
+	if scope.WorkspaceID == "" {
+		scope.WorkspaceID = inherited.WorkspaceID
+	}
+	if scope.ConversationID == "" {
+		scope.ConversationID = inherited.ConversationID
+	}
+	if scope.MessageID == "" {
+		scope.MessageID = inherited.MessageID
+	}
+	if scope.RunID == "" {
+		scope.RunID = inherited.RunID
+	}
+	if scope.UserID == "" {
+		scope.UserID = auth.ScopeUserIDFromContext(ctx)
 	}
 	if scope.ConversationID == "" {
 		scope.ConversationID = chi.URLParamFromCtx(ctx, "conversationId")
@@ -48,7 +64,7 @@ func ContextWithInvocationScope(ctx context.Context, scope InvocationScope) cont
 func InvocationScopeFromContext(ctx context.Context) InvocationScope {
 	scope, _ := ctx.Value(invocationScopeContextKey{}).(InvocationScope)
 	if scope.UserID == "" {
-		scope.UserID = auth.UserIDFromContext(ctx)
+		scope.UserID = auth.ScopeUserIDFromContext(ctx)
 	}
 	if scope.ConversationID == "" {
 		scope.ConversationID = chi.URLParamFromCtx(ctx, "conversationId")

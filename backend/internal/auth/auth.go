@@ -69,6 +69,20 @@ func UserIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+// LocalScopeUserID is the stable owner used by user-scoped subsystems when
+// OmniLLM-Studio is running in its default local solo mode without accounts.
+const LocalScopeUserID = "local"
+
+// ScopeUserIDFromContext returns the authenticated user ID, or a stable
+// local owner ID in solo mode. Use this only behind the authenticated route
+// group (where solo-mode bypass has already been evaluated).
+func ScopeUserIDFromContext(ctx context.Context) string {
+	if userID := UserIDFromContext(ctx); userID != "" {
+		return userID
+	}
+	return LocalScopeUserID
+}
+
 func isLocalhost(bindAddress string) bool {
 	host := strings.TrimSpace(bindAddress)
 	if host == "" {
