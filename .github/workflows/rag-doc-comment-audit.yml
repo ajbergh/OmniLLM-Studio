@@ -1,0 +1,199 @@
+name: RAG Documentation and Comment Audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rag-doc-comment-audit.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/rag-modernization-v2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Generate documentation audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          cat >/tmp/rag_doc_audit.go <<'EOF'
+          package main
+
+          import (
+            "bufio"
+            "fmt"
+            "go/ast"
+            "go/parser"
+            "go/token"
+            "os"
+            "os/exec"
+            "sort"
+            "strings"
+          )
+
+          type finding struct {
+            File string
+            Kind string
+            Name string
+            Line int
+            Doc  string
+            Issue string
+          }
+
+          func firstLine(text string) string {
+            text = strings.TrimSpace(text)
+            if text == "" { return "" }
+            if i := strings.IndexByte(text, '\n'); i >= 0 { text = text[:i] }
+            return strings.TrimSpace(text)
+          }
+
+          func declarationDoc(gen *ast.GenDecl, spec ast.Spec) string {
+            switch value := spec.(type) {
+            case *ast.TypeSpec:
+              if value.Doc != nil { return value.Doc.Text() }
+              if value.Comment != nil { return value.Comment.Text() }
+            case *ast.ValueSpec:
+              if value.Doc != nil { return value.Doc.Text() }
+              if value.Comment != nil { return value.Comment.Text() }
+            }
+            if gen.Doc != nil { return gen.Doc.Text() }
+            return ""
+          }
+
+          func inspectFile(path string) ([]finding, string, error) {
+            fset := token.NewFileSet()
+            file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+            if err != nil { return nil, "", err }
+            packageDoc := ""
+            if file.Doc != nil { packageDoc = firstLine(file.Doc.Text()) }
+            var out []finding
+            add := func(kind, name string, pos token.Pos, doc string) {
+              if !ast.IsExported(name) { return }
+              issue := ""
+              line := firstLine(doc)
+              if line == "" {
+                issue = "missing"
+              } else if !strings.HasPrefix(line, name) {
+                issue = "does not start with symbol name"
+              }
+              out = append(out, finding{File:path, Kind:kind, Name:name, Line:fset.Position(pos).Line, Doc:line, Issue:issue})
+            }
+            for _, decl := range file.Decls {
+              switch value := decl.(type) {
+              case *ast.FuncDecl:
+                doc := ""
+                if value.Doc != nil { doc = value.Doc.Text() }
+                add("func", value.Name.Name, value.Pos(), doc)
+              case *ast.GenDecl:
+                for _, spec := range value.Specs {
+                  doc := declarationDoc(value, spec)
+                  switch item := spec.(type) {
+                  case *ast.TypeSpec:
+                    add("type", item.Name.Name, item.Pos(), doc)
+                  case *ast.ValueSpec:
+                    kind := strings.ToLower(value.Tok.String())
+                    for _, name := range item.Names { add(kind, name.Name, item.Pos(), doc) }
+                  }
+                }
+              }
+            }
+            return out, packageDoc, nil
+          }
+
+          func main() {
+            cmd := exec.Command("git", "diff", "--name-only", "origin/main...HEAD", "--", "*.go", "*.md", "*.ts", "*.tsx")
+            raw, err := cmd.Output()
+            if err != nil { panic(err) }
+            var files []string
+            scanner := bufio.NewScanner(strings.NewReader(string(raw)))
+            for scanner.Scan() {
+              path := strings.TrimSpace(scanner.Text())
+              if path != "" { files = append(files, path) }
+            }
+            sort.Strings(files)
+
+            var findings []finding
+            packageDocs := map[string]string{}
+            for _, path := range files {
+              if !strings.HasSuffix(path, ".go") { continue }
+              if _, err := os.Stat(path); err != nil { continue }
+              rows, packageDoc, err := inspectFile(path)
+              if err != nil {
+                findings = append(findings, finding{File:path, Kind:"parse", Name:"-", Issue:err.Error()})
+                continue
+              }
+              findings = append(findings, rows...)
+              packageDocs[path] = packageDoc
+            }
+
+            output, err := os.Create("docs/RAG_DOC_COMMENT_AUDIT.md")
+            if err != nil { panic(err) }
+            defer output.Close()
+            fmt.Fprintln(output, "# RAG Documentation and Go Comment Audit")
+            fmt.Fprintln(output)
+            fmt.Fprintln(output, "Generated from `origin/main...feature/rag-modernization-v2` using the Go parser. This report is an audit input; semantic accuracy still requires review against implementation behavior.")
+            fmt.Fprintln(output)
+            fmt.Fprintln(output, "## Changed files")
+            fmt.Fprintln(output)
+            for _, path := range files { fmt.Fprintf(output, "- `%s`\n", path) }
+            fmt.Fprintln(output)
+            fmt.Fprintln(output, "## Package/file header comments")
+            fmt.Fprintln(output)
+            fmt.Fprintln(output, "| File | Package comment immediately above `package` |")
+            fmt.Fprintln(output, "|---|---|")
+            var goFiles []string
+            for path := range packageDocs { goFiles = append(goFiles, path) }
+            sort.Strings(goFiles)
+            for _, path := range goFiles {
+              doc := packageDocs[path]
+              if doc == "" { doc = "_None_" }
+              doc = strings.ReplaceAll(doc, "|", "\\|")
+              fmt.Fprintf(output, "| `%s` | %s |\n", path, doc)
+            }
+            fmt.Fprintln(output)
+            fmt.Fprintln(output, "## Exported declarations")
+            fmt.Fprintln(output)
+            fmt.Fprintln(output, "| File | Line | Kind | Symbol | First comment line | Audit issue |")
+            fmt.Fprintln(output, "|---|---:|---|---|---|---|")
+            missing := 0
+            for _, row := range findings {
+              doc := row.Doc
+              if doc == "" { doc = "_None_" }
+              doc = strings.ReplaceAll(doc, "|", "\\|")
+              issue := row.Issue
+              if issue == "" { issue = "—" } else { missing++ }
+              fmt.Fprintf(output, "| `%s` | %d | %s | `%s` | %s | %s |\n", row.File, row.Line, row.Kind, row.Name, doc, issue)
+            }
+            fmt.Fprintln(output)
+            fmt.Fprintf(output, "**Static comment findings:** %d\n", missing)
+            fmt.Fprintln(output)
+            fmt.Fprintln(output, "## Potentially stale wording")
+            fmt.Fprintln(output)
+            patterns := []string{"Deferred", "conversations_dropped", "chunks_created", "embeddings_stored", "delete-first", "drop every", "lazy-rebuild", "lazy rebuild", "chromem-go) over uploaded files"}
+            for _, pattern := range patterns {
+              grep := exec.Command("git", "grep", "-n", "-I", pattern, "--", "*.md", "*.go", "*.ts", "*.tsx")
+              hits, _ := grep.Output()
+              if len(hits) == 0 { continue }
+              fmt.Fprintf(output, "### `%s`\n\n```text\n%s```\n\n", pattern, hits)
+            }
+          }
+          EOF
+          go run /tmp/rag_doc_audit.go
+          git add docs/RAG_DOC_COMMENT_AUDIT.md
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs(rag): record documentation and comment audit [skip ci]'
+          git push origin HEAD:feature/rag-modernization-v2
