@@ -17,7 +17,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// EventType defines provider-independent events emitted during execution.
 type EventType string
 
 const (
@@ -36,7 +35,6 @@ const (
 
 var errToolApprovalRejected = errors.New("tool approval rejected")
 
-// Event is emitted during an agent run.
 type Event struct {
 	Type   EventType   `json:"type"`
 	RunID  string      `json:"run_id"`
@@ -44,21 +42,16 @@ type Event struct {
 	Data   interface{} `json:"data,omitempty"`
 }
 
-// RunOptions controls the execution profile and caller-requested lower budgets.
 type RunOptions struct {
 	Profile RunProfile
 	Budgets *RunBudgets
 }
 
-// runContext holds volatile cancellation and approval signaling. Durable state
-// lives in agent_runs and agent_steps.
 type runContext struct {
 	cancel   context.CancelFunc
 	approval chan bool
 }
 
-// Runner orchestrates planning, checkpointed execution, retries, approvals,
-// bounded parallel reads, adaptive replanning, cancellation, and resume.
 type Runner struct {
 	planner      *Planner
 	llmService   *llm.Service
@@ -72,14 +65,7 @@ type Runner struct {
 	runs map[string]*runContext
 }
 
-func NewRunner(
-	planner *Planner,
-	llmService *llm.Service,
-	toolExecutor *tools.Executor,
-	runRepo *repository.AgentRunRepo,
-	stepRepo *repository.AgentStepRepo,
-	msgRepo *repository.MessageRepo,
-) *Runner {
+func NewRunner(planner *Planner, llmService *llm.Service, toolExecutor *tools.Executor, runRepo *repository.AgentRunRepo, stepRepo *repository.AgentStepRepo, msgRepo *repository.MessageRepo) *Runner {
 	r := &Runner{
 		planner: planner, llmService: llmService, toolExecutor: toolExecutor,
 		runRepo: runRepo, stepRepo: stepRepo, msgRepo: msgRepo,
@@ -122,12 +108,10 @@ func (r *Runner) getRunContext(runID string) *runContext {
 	return r.runs[runID]
 }
 
-// StartRun preserves the original public API and starts with the Agent profile.
 func (r *Runner) StartRun(ctx context.Context, conversationID, goal, provider, model string, history []llm.ChatMessage, onEvent func(Event)) (*models.AgentRun, error) {
 	return r.StartRunWithOptions(ctx, conversationID, goal, provider, model, history, RunOptions{Profile: ProfileAgent}, onEvent)
 }
 
-// StartRunWithOptions creates, plans, persists, and executes a new run.
 func (r *Runner) StartRunWithOptions(ctx context.Context, conversationID, goal, provider, model string, history []llm.ChatMessage, options RunOptions, onEvent func(Event)) (*models.AgentRun, error) {
 	if r.runRepo == nil || r.stepRepo == nil || r.planner == nil {
 		return nil, fmt.Errorf("agent runtime is not fully configured")
@@ -136,7 +120,6 @@ func (r *Runner) StartRunWithOptions(ctx context.Context, conversationID, goal, 
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
-
 	cfg := r.resolveConfig(options)
 	execCtx, cancel := context.WithCancel(ctx)
 	if cfg.MaxDuration > 0 {
@@ -168,11 +151,9 @@ func (r *Runner) StartRunWithOptions(ctx context.Context, conversationID, goal, 
 		return r.failRun(run.ID, "persist plan: "+err.Error(), onEvent)
 	}
 	emit(onEvent, Event{Type: EventPlan, RunID: run.ID, Data: map[string]interface{}{"steps": plan, "profile": options.Profile}})
-
 	return r.executePersisted(execCtx, rc, run, plan, provider, model, history, cfg, onEvent)
 }
 
-// ResumeRun continues a non-terminal run from its first incomplete checkpoint.
 func (r *Runner) ResumeRun(ctx context.Context, runID, provider, model string, history []llm.ChatMessage, onEvent func(Event)) (*models.AgentRun, error) {
 	if r.getRunContext(runID) != nil {
 		return nil, fmt.Errorf("run is already executing")
@@ -197,7 +178,6 @@ func (r *Runner) ResumeRun(ctx context.Context, runID, provider, model string, h
 	if _, err := r.stepRepo.ResetInterrupted(runID); err != nil {
 		return nil, err
 	}
-
 	cfg := r.config
 	execCtx, cancel := context.WithCancel(ctx)
 	if cfg.MaxDuration > 0 {
@@ -334,7 +314,8 @@ func (r *Runner) executePersisted(ctx context.Context, rc *runContext, run *mode
 			outputs, groupErr := r.executeParallelGroup(ctx, rc, run, plan[index:end], steps[index:end], budget, onEvent)
 			if groupErr == nil {
 				for offset, output := range outputs {
-				history = append(history, llm.ChatMessage{Role: "assistant", Content: fmt.Sprintf("[Step %d: tool_call] %s", index+offset+1, output)})
+					history = append(history, llm.ChatMessage{Role: "assistant", Content: fmt.Sprintf("[Step %d: tool_call] %s", index+offset+1, output)})
+					steps[index+offset].Status = StepStatusCompleted
 				}
 				index = end
 				continue
@@ -355,7 +336,6 @@ func (r *Runner) executePersisted(ctx context.Context, rc *runContext, run *mode
 		if err := r.stepRepo.UpdateStatus(step.ID, StepStatusRunning); err != nil {
 			log.Printf("[agent] set step running: %v", err)
 		}
-
 		started := time.Now()
 		output, execErr := r.executeWithRetry(ctx, rc, run, step, planned, provider, model, history, budget, onEvent)
 		durationMS := int(time.Since(started).Milliseconds())
@@ -385,31 +365,27 @@ func (r *Runner) executePersisted(ctx context.Context, rc *runContext, run *mode
 		if step.Type == StepTypeThink {
 			displayOutput = "Analysis checkpoint completed"
 		}
-		emit(onEvent, Event{Type: EventStepComplete, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{
-			"output": displayOutput, "duration_ms": durationMS,
-		}})
-		emit(onEvent, Event{Type: EventCheckpoint, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{
-			"step_index": step.StepIndex, "status": StepStatusCompleted,
-		}})
+		emit(onEvent, Event{Type: EventStepComplete, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{"output": displayOutput, "duration_ms": durationMS}})
+		emit(onEvent, Event{Type: EventCheckpoint, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{"step_index": step.StepIndex, "status": StepStatusCompleted}})
 		history = append(history, llm.ChatMessage{Role: "assistant", Content: fmt.Sprintf("[Step %d: %s] %s", step.StepIndex+1, step.Type, output)})
 		steps[index].Status = StepStatusCompleted
 		steps[index].OutputJSON = string(outputJSON)
 		index++
 	}
 
-	if err := budget.reserveModel(); err != nil {
+	summary := "Agent run completed."
+	if err := budget.reserveModel(); err == nil {
+		summary = r.generateSummary(ctx, provider, model, run.Goal, history)
+	} else {
 		log.Printf("[agent] summary skipped: %v", err)
 	}
-	summary := r.generateSummary(ctx, provider, model, run.Goal, history)
 	if err := r.runRepo.UpdateResult(run.ID, summary); err != nil {
 		log.Printf("[agent] store result summary: %v", err)
 	}
 	if err := r.runRepo.UpdateStatus(run.ID, RunStatusCompleted); err != nil {
 		log.Printf("[agent] complete run: %v", err)
 	}
-	emit(onEvent, Event{Type: EventComplete, RunID: run.ID, Data: map[string]interface{}{
-		"summary": summary, "model_calls": budget.modelCalls, "tool_calls": budget.toolCalls,
-	}})
+	emit(onEvent, Event{Type: EventComplete, RunID: run.ID, Data: map[string]interface{}{"summary": summary, "model_calls": budget.modelCalls, "tool_calls": budget.toolCalls}})
 	final, _ := r.runRepo.GetByID(run.ID)
 	return final, nil
 }
@@ -429,9 +405,7 @@ func (r *Runner) executeWithRetry(ctx context.Context, rc *runContext, run *mode
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := time.Duration(1<<(attempt-1)) * 500 * time.Millisecond
-			emit(onEvent, Event{Type: EventRetry, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{
-				"attempt": attempt + 1, "max_attempts": maxRetries + 1, "delay_ms": delay.Milliseconds(), "error": lastErr.Error(),
-			}})
+			emit(onEvent, Event{Type: EventRetry, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{"attempt": attempt + 1, "max_attempts": maxRetries + 1, "delay_ms": delay.Milliseconds(), "error": lastErr.Error()}})
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
@@ -473,10 +447,7 @@ func (r *Runner) executeStep(ctx context.Context, rc *runContext, run *models.Ag
 }
 
 func (r *Runner) executeThink(ctx context.Context, provider, model, description string, history []llm.ChatMessage) (string, error) {
-	messages := []llm.ChatMessage{{
-		Role: "system",
-		Content: "Perform the requested analysis and return a concise decision summary with assumptions, evidence needed, and next action. Do not reveal private chain-of-thought or hidden reasoning.",
-	}}
+	messages := []llm.ChatMessage{{Role: "system", Content: "Perform the requested analysis and return a concise decision summary with assumptions, evidence needed, and next action. Do not reveal private chain-of-thought or hidden reasoning."}}
 	messages = append(messages, history...)
 	messages = append(messages, llm.ChatMessage{Role: "user", Content: "Analysis objective: " + description})
 	resp, err := r.llmService.ChatComplete(ctx, llm.ChatRequest{Provider: provider, Model: model, Messages: messages})
@@ -486,8 +457,6 @@ func (r *Runner) executeThink(ctx context.Context, provider, model, description 
 	return resp.Content, nil
 }
 
-// executeToolCall executes a tool via the shared executor and preserves the
-// original signature used by the existing state-machine tests.
 func (r *Runner) executeToolCall(ctx context.Context, rc *runContext, run *models.AgentRun, step *models.AgentStep, onEvent func(Event)) (string, error) {
 	toolName := ""
 	if step.ToolName != nil {
@@ -500,12 +469,8 @@ func (r *Runner) executeToolCall(ctx context.Context, rc *runContext, run *model
 	if step.InputJSON != "" && step.InputJSON != "{}" {
 		args = json.RawMessage(step.InputJSON)
 	}
-
-	execCtx := tools.ContextWithInvocationScope(ctx, tools.InvocationScope{
-		ConversationID: run.ConversationID, RunID: run.ID,
-	})
+	execCtx := tools.ContextWithInvocationScope(ctx, tools.InvocationScope{ConversationID: run.ConversationID, RunID: run.ID})
 	execCtx = tools.ContextWithEventSink(execCtx, func(event tools.ToolEvent) {
-		// Approval remains a first-class Agent event emitted by requestToolApproval.
 		if event.Type == tools.ToolEventQueued || event.Type == tools.ToolEventApprovalRequired || event.Type == tools.ToolEventApprovalResolved {
 			return
 		}
@@ -525,10 +490,7 @@ func (r *Runner) executeToolCall(ctx context.Context, rc *runContext, run *model
 }
 
 func (r *Runner) executeMessage(ctx context.Context, _ *models.AgentRun, provider, model, description string, history []llm.ChatMessage) (string, error) {
-	messages := []llm.ChatMessage{{
-		Role: "system",
-		Content: "Compose the final user-facing answer. Synthesize completed steps, distinguish facts from inference, cite supplied sources where available, and state any incomplete work or limitations.",
-	}}
+	messages := []llm.ChatMessage{{Role: "system", Content: "Compose the final user-facing answer. Synthesize completed steps, distinguish facts from inference, cite supplied sources where available, and state any incomplete work or limitations."}}
 	messages = append(messages, history...)
 	messages = append(messages, llm.ChatMessage{Role: "user", Content: "Compose a response for: " + description})
 	resp, err := r.llmService.ChatComplete(ctx, llm.ChatRequest{Provider: provider, Model: model, Messages: messages})
@@ -538,12 +500,10 @@ func (r *Runner) executeMessage(ctx context.Context, _ *models.AgentRun, provide
 	return resp.Content, nil
 }
 
-func (r *Runner) executeApprovalStep(ctx context.Context, rc *runContext, run *models.AgentRun, step *models.AgentStep, onEvent func(Event)) (approved bool, interrupted bool) {
+func (r *Runner) executeApprovalStep(ctx context.Context, rc *runContext, run *models.AgentRun, step *models.AgentStep, onEvent func(Event)) (bool, bool) {
 	_ = r.stepRepo.UpdateStatus(step.ID, StepStatusAwaitingApproval)
 	_ = r.runRepo.UpdateStatus(run.ID, RunStatusAwaitingApproval)
-	emit(onEvent, Event{Type: EventApprovalRequired, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{
-		"description": step.Description, "step_index": step.StepIndex,
-	}})
+	emit(onEvent, Event{Type: EventApprovalRequired, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{"description": step.Description, "step_index": step.StepIndex}})
 	approved, err := r.waitForApproval(ctx, rc)
 	if err != nil {
 		return false, true
@@ -570,10 +530,7 @@ func (r *Runner) requestToolApproval(ctx context.Context, run *models.AgentRun, 
 	if req.Description != "" {
 		description += ": " + req.Description
 	}
-	emit(onEvent, Event{Type: EventApprovalRequired, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{
-		"description": description, "tool_name": req.ToolName, "arguments": arguments,
-		"risk": req.Risk, "read_only": req.ReadOnly, "step_index": step.StepIndex,
-	}})
+	emit(onEvent, Event{Type: EventApprovalRequired, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{"description": description, "tool_name": req.ToolName, "arguments": arguments, "risk": req.Risk, "read_only": req.ReadOnly, "step_index": step.StepIndex}})
 	approved, err := r.waitForApproval(ctx, rc)
 	if err != nil {
 		return false, err
@@ -633,7 +590,6 @@ func (r *Runner) CancelRun(runID string) error {
 	return r.runRepo.UpdateStatus(runID, RunStatusCancelled)
 }
 
-// PauseRun checkpoints a live run without making it terminal.
 func (r *Runner) PauseRun(runID string) error {
 	run, err := r.runRepo.GetByID(runID)
 	if err != nil || run == nil {
@@ -652,7 +608,7 @@ func (r *Runner) PauseRun(runID string) error {
 }
 
 func (r *Runner) parallelGroupEnd(plan []PlanStep, steps []models.AgentStep, start, maxParallel int) int {
-	if start >= len(plan) || start >= len(steps) || maxParallel < 2 {
+	if start >= len(plan) || start >= len(steps) || maxParallel < 2 || r.toolExecutor == nil {
 		return start + 1
 	}
 	group := plan[start].ParallelGroup
@@ -688,9 +644,7 @@ func (r *Runner) executeParallelGroup(ctx context.Context, rc *runContext, run *
 	wg.Add(len(steps))
 	for i := range steps {
 		step := &steps[i]
-		emit(onEvent, Event{Type: EventStepStart, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{
-			"type": step.Type, "description": step.Description, "step_index": step.StepIndex, "parallel_group": planned[i].ParallelGroup,
-		}})
+		emit(onEvent, Event{Type: EventStepStart, RunID: run.ID, StepID: step.ID, Data: map[string]interface{}{"type": step.Type, "description": step.Description, "step_index": step.StepIndex, "parallel_group": planned[i].ParallelGroup}})
 		_ = r.stepRepo.UpdateStatus(step.ID, StepStatusRunning)
 		go func(index int, current *models.AgentStep) {
 			defer wg.Done()
@@ -703,9 +657,7 @@ func (r *Runner) executeParallelGroup(ctx context.Context, rc *runContext, run *
 			}
 			encoded, _ := json.Marshal(map[string]string{"output": outputs[index]})
 			_ = r.stepRepo.UpdateOutput(current.ID, string(encoded), duration)
-			emit(onEvent, Event{Type: EventStepComplete, RunID: run.ID, StepID: current.ID, Data: map[string]interface{}{
-				"output": outputs[index], "duration_ms": duration, "parallel_group": planned[index].ParallelGroup,
-			}})
+			emit(onEvent, Event{Type: EventStepComplete, RunID: run.ID, StepID: current.ID, Data: map[string]interface{}{"output": outputs[index], "duration_ms": duration, "parallel_group": planned[index].ParallelGroup}})
 			emit(onEvent, Event{Type: EventCheckpoint, RunID: run.ID, StepID: current.ID, Data: map[string]interface{}{"step_index": current.StepIndex}})
 		}(i, step)
 	}
@@ -719,7 +671,7 @@ func (r *Runner) executeParallelGroup(ctx context.Context, rc *runContext, run *
 }
 
 func (r *Runner) replanFromFailure(ctx context.Context, run *models.AgentRun, currentPlan []PlanStep, fromIndex int, provider, model string, history []llm.ChatMessage, cause error, cfg RunnerConfig, onEvent func(Event)) ([]PlanStep, []models.AgentStep, error) {
-	if r.planner == nil {
+	if r.planner == nil || fromIndex >= len(currentPlan) {
 		return nil, nil, fmt.Errorf("planner unavailable")
 	}
 	recoveryGoal := fmt.Sprintf("Continue the original goal %q from the failed checkpoint. The failed step was %q and returned: %v. Do not repeat completed work. Produce only the remaining recovery steps and final response.", run.Goal, currentPlan[fromIndex].Description, cause)
@@ -755,9 +707,7 @@ func (r *Runner) replanFromFailure(ctx context.Context, run *models.AgentRun, cu
 	if err != nil {
 		return nil, nil, err
 	}
-	emit(onEvent, Event{Type: EventReplan, RunID: run.ID, Data: map[string]interface{}{
-		"from_step_index": fromIndex, "reason": cause.Error(), "replacement_steps": replacement,
-	}})
+	emit(onEvent, Event{Type: EventReplan, RunID: run.ID, Data: map[string]interface{}{"from_step_index": fromIndex, "reason": cause.Error(), "replacement_steps": replacement}})
 	return merged, steps, nil
 }
 
@@ -777,6 +727,7 @@ func namespacePlan(plan []PlanStep, prefix string) []PlanStep {
 				plan[i].DependsOn[j] = replacement
 			}
 		}
+	}
 	return plan
 }
 
@@ -784,10 +735,7 @@ func (r *Runner) persistConversationMessage(run *models.AgentRun, step *models.A
 	if r.msgRepo == nil || content == "" {
 		return
 	}
-	message := &models.Message{
-		ID: uuid.NewString(), ConversationID: run.ConversationID, Role: "assistant",
-		Content: content, Provider: strPtr(provider), Model: strPtr(model), CreatedAt: time.Now().UTC(),
-	}
+	message := &models.Message{ID: uuid.NewString(), ConversationID: run.ConversationID, Role: "assistant", Content: content, Provider: strPtr(provider), Model: strPtr(model), CreatedAt: time.Now().UTC()}
 	if _, err := r.msgRepo.Create(message); err != nil {
 		log.Printf("[agent] persist final conversation message: %v", err)
 		return
@@ -818,11 +766,10 @@ func planStepAt(plan []PlanStep, index int, step *models.AgentStep) PlanStep {
 	if index < len(plan) {
 		return plan[index]
 	}
-	planned := PlanStep{ID: fmt.Sprintf("step-%d", index+1), Type: step.Type, Description: step.Description}
+	planned := PlanStep{ID: fmt.Sprintf("step-%d", index+1), Type: step.Type, Description: step.Description, InputJSON: json.RawMessage(step.InputJSON)}
 	if step.ToolName != nil {
 		planned.ToolName = *step.ToolName
 	}
-	planned.InputJSON = json.RawMessage(step.InputJSON)
 	return planned
 }
 
