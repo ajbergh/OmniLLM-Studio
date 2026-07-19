@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { ToolApprovalCenter } from './components/ToolApprovalCenter'
 import { initAPIBase } from './api'
 import { ThemeProvider } from './theme'
 import { MotionConfig } from 'framer-motion'
@@ -14,6 +15,7 @@ initAPIBase().then(() => {
       <ThemeProvider>
         <MotionConfig reducedMotion="user">
           <App />
+          <ToolApprovalCenter />
         </MotionConfig>
       </ThemeProvider>
     </StrictMode>,
