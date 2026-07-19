@@ -18,7 +18,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- runtime ---
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 
 # Default config: backend on localhost:8080 (combined / sidecar topology).
 # Helm chart mounts a ConfigMap-backed override for the split topology.
