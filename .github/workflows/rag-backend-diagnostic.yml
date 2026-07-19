@@ -1,0 +1,71 @@
+name: RAG Backend Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rag-backend-diagnostic.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/rag-modernization-v2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: backend/go.sum
+
+      - name: Run bounded validation and record results
+        shell: bash
+        run: |
+          set +e
+          cd backend
+          mkdir -p cmd/desktop/frontend_dist
+          printf '<!doctype html><title>test</title>' > cmd/desktop/frontend_dist/index.html
+
+          timeout 10m go test -run '^$' ./... >/tmp/rag-compile.log 2>&1
+          compile_status=$?
+          timeout 10m go test -count=1 -timeout 9m ./internal/rag ./internal/repository ./internal/filelibrary ./internal/document ./internal/api >/tmp/rag-focused.log 2>&1
+          focused_status=$?
+          timeout 10m go test -race -count=1 -timeout 9m ./internal/rag ./internal/repository ./internal/filelibrary ./internal/document >/tmp/rag-race.log 2>&1
+          race_status=$?
+          cd ..
+
+          {
+            echo '# RAG backend validation diagnostic'
+            echo
+            echo "- compile_status: ${compile_status}"
+            echo "- focused_status: ${focused_status}"
+            echo "- race_status: ${race_status}"
+            echo
+            echo '## Compile all packages'
+            echo '```text'
+            tail -n 300 /tmp/rag-compile.log
+            echo '```'
+            echo
+            echo '## Focused RAG and API tests'
+            echo '```text'
+            tail -n 500 /tmp/rag-focused.log
+            echo '```'
+            echo
+            echo '## Focused race tests'
+            echo '```text'
+            tail -n 500 /tmp/rag-race.log
+            echo '```'
+          } > docs/RAG_BACKEND_VALIDATION.md
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/RAG_BACKEND_VALIDATION.md
+          git commit -m 'build(rag): record bounded backend validation [skip ci]'
+          git push origin HEAD:feature/rag-modernization-v2
