@@ -9,16 +9,17 @@ test('video edit studio exposes combined screen and camera recording controls', 
   await expect(page.getByRole('button', { name: 'Save timeline' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Open recording lab' }).click();
-  await expect(page.getByRole('dialog', { name: 'Recording lab' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Screen + camera' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Screen' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Camera' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Voiceover' })).toBeVisible();
-  await expect(page.getByText('1080p')).toBeVisible();
-  await expect(page.getByText('30 FPS')).toBeVisible();
-  await expect(page.getByText('Camera position')).toBeVisible();
-  await expect(page.getByText('Capture live browser transcript')).toBeVisible();
+  const dialog = page.getByRole('dialog', { name: 'Recording lab' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Screen + camera', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Screen', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Camera', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Voiceover', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('combobox', { name: 'Resolution' })).toHaveValue('1080p');
+  await expect(dialog.getByRole('combobox', { name: 'Frame rate' })).toHaveValue('30');
+  await expect(dialog.getByRole('combobox', { name: 'Camera position' })).toHaveValue('bottom-right');
+  await expect(dialog.getByRole('checkbox', { name: 'Capture live browser transcript' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Close recording lab' }).click();
-  await expect(page.getByRole('dialog', { name: 'Recording lab' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Close recording lab' }).click();
+  await expect(dialog).toHaveCount(0);
 });
