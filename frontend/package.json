@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "prelint": "python -c \"from pathlib import Path; print('VIDEO_XZ02_CONTENT=' + Path('../scripts/video_phase_chunks/xz-02.b64').read_text().strip())\" && python ../scripts/ci_generate_video_phases.py",
+    "prelint": "python ../scripts/ci_generate_video_phases.py",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:unit": "vitest run"
