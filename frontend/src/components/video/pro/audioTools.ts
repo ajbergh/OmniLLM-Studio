@@ -77,24 +77,3 @@ export async function limitProjectGain(maximum = 1): Promise<boolean> {
     };
   });
 }
-
-export async function panSelectedAudio(pan: -1 | 0 | 1): Promise<boolean> {
-  return commitTimelineCommand('Set selected audio pan', (document, state) => {
-    const selected = new Set(state.selectedClipIds.length ? state.selectedClipIds : state.selectedClipId ? [state.selectedClipId] : []);
-    if (!selected.size) return { changed: false, message: 'Select one or more audio/video clips first' };
-    let changed = 0;
-    for (const track of document.tracks) {
-      if (track.locked) continue;
-      for (const clip of track.clips) {
-        if (!selected.has(clip.id)) continue;
-        clip.text = clip.text || { text: '' };
-        clip.text.params = { ...(clip.text.params || {}), audio_pan: pan };
-        changed += 1;
-      }
-    }
-    return {
-      changed: changed > 0,
-      message: changed > 0 ? `Stored ${pan === 0 ? 'center' : pan < 0 ? 'left' : 'right'} pan metadata on ${changed} clip${changed === 1 ? '' : 's'}` : 'No unlocked selected clips were found',
-    };
-  });
-}
