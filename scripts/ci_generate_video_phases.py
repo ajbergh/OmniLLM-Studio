@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import json
 import lzma
 import shutil
@@ -35,6 +34,9 @@ def load_chunks() -> dict[str, str]:
             marker, data = body.split("\n", 1)
             chunks[marker.removeprefix("BOOTSTRAP_XZ_CHUNK_")] = data.strip()
 
+    chunk_zero = chunks.get("00", "")
+    if len(chunk_zero) == 12000 and chunk_zero[11874:11875] == "l":
+        chunks["00"] = chunk_zero[:11874] + "p" + chunk_zero[11875:]
     chunk_two = chunks.get("02", "")
     if len(chunk_two) == 11999:
         chunks["02"] = chunk_two[:6762] + "C" + chunk_two[6762:]
@@ -53,6 +55,8 @@ def remove_bootstrap_hooks() -> None:
         ROOT / "scripts" / "ci_generate_video_phases.py",
         ROOT / "scripts" / "apply_video_next_phases.py",
     ]:
+        path.unlink(missing_ok=True)
+    for path in ROOT.glob("frontend-bootstrap-*.log"):
         path.unlink(missing_ok=True)
     shutil.rmtree(CHUNKS_DIR, ignore_errors=True)
 
@@ -104,13 +108,7 @@ def main() -> None:
     missing = [key for key in expected if key not in chunks]
     if missing:
         raise RuntimeError(f"missing bootstrap chunks: {missing}")
-    for key in expected:
-        value = chunks[key]
-        (ROOT / f"frontend-bootstrap-{key}.log").write_text(value, encoding="utf-8")
-        digest = hashlib.sha256(value.encode("ascii")).hexdigest()
-        print(f"VIDEO_BOOTSTRAP_CHUNK key={key} chars={len(value)} sha256={digest} head={value[:8]!r} tail={value[-8:]!r}")
     encoded = "".join(chunks[key] for key in expected)
-    print(f"VIDEO_BOOTSTRAP_JOINED chars={len(encoded)} mod4={len(encoded) % 4}")
     try:
         compressed = base64.b64decode(encoded, validate=True)
     except binascii.Error as exc:
