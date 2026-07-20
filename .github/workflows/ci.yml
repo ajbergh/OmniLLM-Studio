@@ -91,9 +91,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - working-directory: frontend
-        run: |
-          set -o pipefail
-          npm ci 2>&1 | tee ../frontend-npm-ci.log
+        run: npm ci
       - working-directory: frontend
         run: npm run lint 2>&1 | tee ../frontend-lint.log
       - working-directory: frontend
