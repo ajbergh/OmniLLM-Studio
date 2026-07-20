@@ -47,7 +47,7 @@ Start with a rough idea. Research it against the web and your own files. Turn it
 | **04** | **Generate cinematic video** | Move from text, images, audio, or reference video to generated scenes with guided camera, composition, lighting, continuity, and native-audio controls. |
 | **05** | **Edit on a real timeline** | Combine video, images, audio, music, captions, shapes, effects, transitions, speed changes, fades, and keyframes—then render with FFmpeg. |
 | **06** | **Work from your own knowledge** | Search a durable File Library with hybrid keyword + vector retrieval, bring citations into the conversation, and keep private files ahead of web results. |
-| **07** | **Research and automate** | Use provider-native web grounding when the selected model supports it, fall back to Brave/DuckDuckGo plus Jina for local or unsupported models, read full pages, operate a headless browser, pull live sports data, call MCP servers, and extend the system with plugins. |
+| **07** | **Research and automate** | Search the web, read full pages, operate a headless browser, pull live sports data, call MCP servers, and extend the system with plugins. |
 | **08** | **Compare, measure, and deliver** | Run model evaluations, track usage and cost, organize workspaces, and export polished Word, Excel, CSV, PDF, Markdown, HTML, JSON, and YAML artifacts. |
 
 ## One idea can travel through the whole studio
@@ -77,17 +77,6 @@ No single provider is best at everything. OmniLLM-Studio lets each one do what i
 **Music and video:** Gemini Lyria, Gemini Omni, Gemini Veo, OpenRouter Video, and Luma-backed workflows.
 
 Ollama models are discovered from your local instance. Provider catalogs can be refreshed as new models arrive. For the detailed compatibility matrix, see the [technical reference](docs/TECHNICAL_REFERENCE.md#supported-models).
-
-### Provider-aware current information
-
-Chat Studio chooses the lowest-cost capable retrieval path for each turn instead of forcing every model through the same web-search pipeline:
-
-- **OpenAI direct:** supported GPT-4.1, GPT-5, o3, and o4 families use OpenAI web search options.
-- **Gemini direct:** supported Gemini 2.x and 3.x models use native Google Search grounding.
-- **OpenRouter:** models use OpenRouter's server-side web search tool with bounded result and context limits.
-- **Local and unsupported models:** Ollama, Anthropic direct, Groq, Together, Mistral, and generic OpenAI-compatible endpoints use the configured Brave or DuckDuckGo search provider, with selective Jina Reader enrichment.
-
-Simple lookups use a small search context and short answer budget. Research prompts expand the query plan and evidence budget. Browser timezone and locale are propagated per request so dates and event times can be rendered in the user's local context. See [Provider-aware search](docs/PROVIDER_AWARE_SEARCH.md) for the routing matrix, fallback behavior, citations, and validation rules.
 
 ## Local-first without giving up powerful models
 
@@ -188,8 +177,9 @@ Prefer a native desktop window, helper scripts, containers, or Kubernetes? Jump 
 ### Start here
 
 - [Technical reference](docs/TECHNICAL_REFERENCE.md) — models, architecture, API routes, environment variables, builds, and deployment
-- [Provider-aware search](docs/PROVIDER_AWARE_SEARCH.md) — native grounding, adaptive search plans, local-model fallback, timezone handling, citations, and sports lookup behavior
 - [Feature FAQ](docs/Feature%20FAQ.md) — how the major capabilities behave in practice
+- [RAG modernization architecture](docs/RAG_MODERNIZATION.md) — hybrid retrieval, embedding isolation, safe rebuilds, and optional vector backends
+- [RAG implementation status](docs/RAG_MODERNIZATION_STATUS.md) — default runtime versus implemented opt-in components
 - [MCP guide and FAQ](docs/MCP_HOW_TO_FAQ.md) — connect external tool servers to chat and agent workflows
 
 ### Video creation and editing
@@ -207,7 +197,7 @@ Prefer a native desktop window, helper scripts, containers, or Kubernetes? Jump 
 
 ## Under the hood
 
-OmniLLM-Studio pairs a Go backend with a React and TypeScript interface, SQLite persistence, streaming responses, encrypted secrets, an embedded vector store, provider-aware current-information routing, and FFmpeg-powered media rendering. It can run as a Wails desktop app, a headless web service, or a single-replica Kubernetes deployment.
+OmniLLM-Studio pairs a Go backend with a React and TypeScript interface, SQLite persistence and FTS5 retrieval, embedding-space-isolated chromem vector collections, streaming responses, encrypted secrets, and FFmpeg-powered media rendering. It can run as a Wails desktop app, a headless web service, or a single-replica Kubernetes deployment.
 
 That is the short version. The diagrams, API surface, data model, environment variables, provider matrices, build scripts, and deployment details now live in the [technical reference](docs/TECHNICAL_REFERENCE.md).
 

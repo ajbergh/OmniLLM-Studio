@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white" alt="Go"/>
+  <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go&logoColor=white" alt="Go"/>
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React"/>
   <img src="https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white" alt="SQLite"/>
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript"/>
@@ -53,49 +53,28 @@
 | Feature | Description |
 |---------|-------------|
 | **Agent Mode** | Autonomous multi-step task execution with planning, tool calling, and step approval |
-| **RAG Pipeline** | Document chunking, embedding generation, and persistent vector retrieval (chromem-go) over uploaded files — auto-indexes attachments synchronously so context is available immediately |
+| **RAG Pipeline** | Shared structural parsing, deterministic chunks, SQLite FTS5/BM25 plus embedding-space-isolated chromem retrieval, RRF fusion, bounded untrusted-evidence context, and non-destructive rebuilds |
 | **File Library** | Durable file storage with conversation, workspace, and global scopes — hybrid vector + keyword search, citation-aware summarization and comparison, and a dedicated UI panel |
 | **Conversation Branching** | Fork any message into parallel branches — explore different response paths |
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
-| **Web Search** | Provider-aware current-information orchestration: native OpenAI, Gemini, or OpenRouter grounding when supported, with Brave/DuckDuckGo and selective Jina fallback for local or unsupported models; file search remains higher priority |
-| **Live Sports Lookup** | Deterministic ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, the FIFA World Cup, IPL cricket, and broad sports headlines; single-event times are localized |
+| **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction — runs after file search so private documents take priority |
+| **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, IPL cricket, and broad sports headlines |
 | **Headless Browser** | Full Chromium-powered browsing via go-rod — `browser_navigate`, `browser_screenshot`, `browser_interact`, `browser_pdf`, and `browser_session` tools for JS-heavy pages, research, and stateful multi-step browsing; auto-downloads Chromium on first use; stealth mode for anti-bot bypass |
 | **MCP Servers** | Model Context Protocol support — connect to external MCP servers to securely use their tools within chat and agent workflows |
 | **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, and document generation |
 | **Artifact Export** | Ask the LLM for any supported format and it generates a downloadable file automatically — `.docx` (Word), `.xlsx` (Excel), `.csv`, `.pdf`, `.md` (Markdown), `.html`, `.json`, `.yaml` — no copy-pasting required |
 
-### Provider-aware current-information routing
+### RAG architecture and operations
 
-Current-information handling is split into planning, provider adaptation, fallback retrieval, answer validation, and structured sports lookup.
+The default conversation and File Library runtime uses SQLite as the authoritative chunk/provenance and lexical store, with exact chromem-go vector collections isolated by embedding routing fingerprint. Vector and FTS5/BM25 candidates are combined with reciprocal-rank fusion and source diversity before context planning. SQLite builds without FTS5 use a bounded lexical fallback.
 
-```text
-User turn
-  ├─ File Library retrieval (private context first)
-  ├─ deterministic sports preflight when ESPN can answer cheaply
-  └─ web-search plan
-       ├─ OpenAI native web search
-       ├─ Gemini Google Search grounding
-       ├─ OpenRouter server-side web search
-       └─ Brave or DuckDuckGo + selective Jina fallback
-              ↓
-       direct-answer validation / citation normalization
-              ↓
-       existing SSE message stream
-```
+Embedding selection is independent from chat generation when configured as `Provider Profile Name::model-id`. Without an explicit profile, the active chat provider is preferred when embedding-compatible; otherwise the first enabled embedding-capable provider in repository order is used. Document text is sent to that provider for embedding, so use local providers when required.
 
-| Component | Responsibility |
-|---|---|
-| `internal/websearch/planner.go` | Detect current-information need; classify intent and answer shape; set query, result, iteration, context, and domain limits |
-| `internal/websearch/orchestrator.go` | Prefer the cheapest native path, execute local fallback retrieval, build constrained prompts, and retry rejected native streams before content is emitted |
-| `internal/websearch/answerability.go` | Reject empty, indirect, overly long, or fact-missing direct answers |
-| `internal/llm/native_search.go` | Translate the provider-neutral marker to OpenAI, Gemini, or OpenRouter requests; normalize citations and Gemini response shapes |
-| `internal/turncontext/context.go` | Resolve validated browser timezone and locale for date interpretation and localized schedules |
-| `internal/router/deterministic.go` / `internal/sports/` | Route obvious ESPN queries without paying for an LLM router or web search; localize event times and render direct one-event answers |
-| `frontend/src/clientContextFetch.ts` | Add timezone and locale only to Omni API requests without introducing custom-header CORS preflights |
+Conversation and attachment rebuilds index replacement vectors before atomically replacing relational chunks and removing stale vector IDs. Failure before activation leaves previous searchable data intact. `POST /v1/rag/repair` and `POST /v1/rag/reindex-all` are currently full rebuild operations over every conversation with chunks.
 
-The native-search transport is installed only on `llm.Service` HTTP clients. It must not wrap `http.DefaultTransport`, because unrelated provider checks, URL fetches, uploads, plugins, and browser traffic must not be inspected or rewritten.
+The codebase also includes exact and pure-Go HNSW `VectorIndex` implementations, a generation coordinator, and a bearer-token HTTP adapter. These are supporting library capabilities on this branch; the normal runtime remains chromem-go and deployment configuration does not yet select HNSW or a remote index owner.
 
-Detailed provider matrix, cost policy, failure behavior, and test coverage: [Provider-aware search](PROVIDER_AWARE_SEARCH.md).
+Detailed design: [RAG modernization architecture](RAG_MODERNIZATION.md). Branch status: [RAG modernization status](RAG_MODERNIZATION_STATUS.md).
 
 ### Image Studio
 
@@ -612,7 +591,9 @@ All routes are under `/v1/`.
 | `POST` | `/v1/conversations/:id/reindex` | Re-chunk + re-embed documents |
 | `GET` | `/v1/attachments/:aid/chunks` | List chunks for attachment |
 | `POST` | `/v1/attachments/:aid/index` | Index attachment (chunk + embed) |
-| `POST` | `/v1/rag/reindex-all` | **Admin** — drop all chromem collections so subsequent retrievals lazy-migrate from legacy embeddings |
+| `GET` | `/v1/rag/health` | **Admin** — report effective RAG settings and current relational/vector footprint counts |
+| `POST` | `/v1/rag/repair` | **Admin** — non-destructively rebuild every conversation that currently has chunks |
+| `POST` | `/v1/rag/reindex-all` | **Admin** — non-destructively rebuild every conversation that currently has chunks and report failures |
 
 </details>
 
@@ -806,7 +787,7 @@ For news, use `"intent": "news"` with an optional league or a team-specific quer
 | `OMNILLM_CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Comma-separated allowed CORS origins |
 | `OMNILLM_ALLOW_PUBLIC_REGISTRATION` | `false` | Allow registration after first user is created |
 | `OMNILLM_PLUGIN_DIR` | `~/.omnillm-studio/plugins` | Plugin directory |
-| `OMNILLM_CHROMEM_DIR` | `<dir of OMNILLM_DB_PATH>/chromem` | Directory for chromem-go RAG vector files (one subdirectory per conversation) |
+| `OMNILLM_CHROMEM_DIR` | `<dir of OMNILLM_DB_PATH>/chromem` | Directory for persistent chromem-go data; logical scopes may have multiple physical collections keyed by embedding routing fingerprint |
 | `OMNILLM_CHROMEM_COMPRESS` | `false` | Set to `true` to gzip-compress chromem persistent files |
 | `OMNILLM_MASTER_KEY` | _(machine-scoped seed file)_ | Hex-encoded 32 bytes (64 chars) used by AES-256-GCM to encrypt provider API keys at rest. **Required** for the Kubernetes / container deployment; for desktop and headless installs the seed file is auto-generated under the user config dir. Generate with `openssl rand -hex 32`. |
 
