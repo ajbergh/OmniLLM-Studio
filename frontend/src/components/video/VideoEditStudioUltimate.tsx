@@ -160,42 +160,44 @@ export function VideoEditStudioUltimate() {
   const [mediaOpen, setMediaOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
 
+  const launcherClass = 'inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-full border bg-surface-raised px-2.5 text-xs font-semibold text-text shadow-xl disabled:cursor-not-allowed disabled:opacity-40 sm:px-3';
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <VideoEditStudioEnhanced />
-      <div className="fixed bottom-14 right-44 z-[64] flex items-center gap-2">
+      <div className="fixed bottom-28 right-4 z-[64] flex items-center gap-2 sm:bottom-14 sm:right-44">
         <button
           type="button"
           onClick={() => setSourceOpen(true)}
           disabled={!activeProjectId}
-          className="inline-flex min-h-10 items-center gap-2 rounded-full border border-primary/30 bg-surface-raised px-3 text-xs font-semibold text-text shadow-xl hover:border-primary/60 disabled:cursor-not-allowed disabled:opacity-40"
+          className={`${launcherClass} border-primary/30 hover:border-primary/60`}
           aria-label="Open source monitor"
           title={activeProjectId ? 'Mark source in/out and insert or overwrite at the playhead' : 'Create or select a video project first'}
         >
           <Scissors size={12} className="text-primary" />
-          Source
+          <span className="hidden sm:inline">Source</span>
         </button>
         <button
           type="button"
           onClick={() => setMediaOpen(true)}
           disabled={!activeProjectId}
-          className="inline-flex min-h-10 items-center gap-2 rounded-full border border-primary/30 bg-surface-raised px-3 text-xs font-semibold text-text shadow-xl hover:border-primary/60 disabled:cursor-not-allowed disabled:opacity-40"
+          className={`${launcherClass} border-primary/30 hover:border-primary/60`}
           aria-label="Open media relink lab"
           title={activeProjectId ? 'Inspect, relink, and export project media metadata' : 'Create or select a video project first'}
         >
           <Files size={12} className="text-primary" />
-          Media Lab
+          <span className="hidden sm:inline">Media Lab</span>
         </button>
         <button
           type="button"
           onClick={() => setRecordingOpen(true)}
           disabled={!activeProjectId}
-          className="inline-flex min-h-10 items-center gap-2 rounded-full border border-red-400/30 bg-surface-raised px-3 text-xs font-semibold text-text shadow-xl hover:border-red-400/60 disabled:cursor-not-allowed disabled:opacity-40"
+          className={`${launcherClass} border-red-400/30 hover:border-red-400/60`}
           aria-label="Open recording lab"
           title={activeProjectId ? 'Record screen and camera, screen, camera, or voiceover' : 'Create or select a video project first'}
         >
           <Circle size={11} className="text-red-400" fill="currentColor" />
-          Recording Lab
+          <span className="hidden sm:inline">Recording Lab</span>
         </button>
       </div>
       <SourceMonitorLab open={sourceOpen} onClose={() => setSourceOpen(false)} />
