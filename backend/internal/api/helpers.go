@@ -15,6 +15,7 @@ import (
 
 	"github.com/ajbergh/omnillm-studio/internal/auth"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
+	"github.com/ajbergh/omnillm-studio/internal/turncontext"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -55,6 +56,9 @@ func respondErrorWithCode(w http.ResponseWriter, status int, code string, messag
 const maxJSONBodySize = 1 << 20
 
 func decodeJSON(r *http.Request, v interface{}) error {
+	if attached := turncontext.AttachRequest(r); attached != nil {
+		*r = *attached
+	}
 	defer r.Body.Close()
 	limited := io.LimitReader(r.Body, maxJSONBodySize+1)
 	dec := json.NewDecoder(limited)

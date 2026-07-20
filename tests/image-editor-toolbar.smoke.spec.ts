@@ -97,7 +97,8 @@ test('AI enhance rewrites and can undo an image studio prompt', async ({ page, b
   let requestBody: Record<string, unknown> | undefined;
 
   await page.addInitScript(() => window.localStorage.clear());
-  await page.route('**/v1/conversations/*/images/sessions/*/enhance-prompt', async (route) => {
+  // Omni API requests now include browser timezone/locale query parameters.
+  await page.route('**/v1/conversations/*/images/sessions/*/enhance-prompt**', async (route) => {
     requestBody = route.request().postDataJSON() as Record<string, unknown>;
     await route.fulfill({
       status: 200,
@@ -117,13 +118,19 @@ test('AI enhance rewrites and can undo an image studio prompt', async ({ page, b
   await page.getByText(fixture.title).first().click();
   await expect(page.getByText('Image Edit Studio')).toBeVisible();
 
+  // Keep the exact placeholder as an accessibility/copy contract; the failure
+  // was the unmatched query string on the mocked API route, not this locator.
   const promptInput = page.getByPlaceholder('Describe the image you want to generate...');
   await promptInput.fill(originalPrompt);
+  const enhanceResponse = page.waitForResponse((response) =>
+    new URL(response.url()).pathname.endsWith('/enhance-prompt'),
+  );
   await page.getByRole('button', { name: /AI enhance prompt/i }).click();
+  await enhanceResponse;
 
-  await expect(promptInput).toHaveValue(enhancedPrompt);
+  await expect(promptInput).toHaveValue(enhancedPrompt, { timeout: 10_000 });
   expect(requestBody).toMatchObject({ prompt: originalPrompt, mode: 'generate' });
 
   await page.getByRole('button', { name: 'Undo AI enhance' }).click();
-  await expect(promptInput).toHaveValue(originalPrompt);
+  await expect(promptInput).toHaveValue(originalPrompt, { timeout: 5_000 });
 });

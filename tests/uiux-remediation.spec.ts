@@ -262,12 +262,35 @@ test('slow conversation switching never renders the previous transcript under th
   await page.getByText(first.title, { exact: true }).first().click();
   await expect(page.getByText('Show me a provider comparison table.', { exact: true })).toBeVisible();
 
-  await page.route(`**/conversations/${second.conversation_id}/messages`, async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 750));
+  let releaseMessages!: () => void;
+  const messagesGate = new Promise<void>((resolve) => {
+    releaseMessages = resolve;
+  });
+
+  // Query parameters carry browser timezone/locale, so match the path plus any suffix.
+  await page.route(`**/conversations/${second.conversation_id}/messages**`, async (route) => {
+    await messagesGate;
     await route.continue();
   });
+
+  const secondMessagesPath = `/conversations/${second.conversation_id}/messages`;
+  const messagesRequest = page.waitForRequest((request) =>
+    new URL(request.url()).pathname.endsWith(secondMessagesPath),
+  );
+  const messagesResponse = page.waitForResponse((response) =>
+    new URL(response.url()).pathname.endsWith(secondMessagesPath),
+  );
+
   await page.getByText(second.title, { exact: true }).first().click();
-  await expect(page.getByRole('status').filter({ hasText: 'Loading conversation' })).toBeVisible();
-  await expect(page.getByText('Show me a provider comparison table.', { exact: true })).toBeHidden();
+  await messagesRequest;
+
+  try {
+    await expect(page.getByRole('status').filter({ hasText: /loading conversation/i })).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('Show me a provider comparison table.', { exact: true })).toBeHidden();
+  } finally {
+    releaseMessages();
+  }
+
+  await messagesResponse;
   await expect(page.getByText('Show me a provider comparison table.', { exact: true })).toBeVisible();
 });
