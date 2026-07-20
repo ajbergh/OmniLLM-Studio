@@ -22,6 +22,7 @@ import (
 	intentrouter "github.com/ajbergh/omnillm-studio/internal/router"
 	"github.com/ajbergh/omnillm-studio/internal/sports"
 	"github.com/ajbergh/omnillm-studio/internal/tools"
+	"github.com/ajbergh/omnillm-studio/internal/turncontext"
 	"github.com/ajbergh/omnillm-studio/internal/urlcontext"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
 	"github.com/ajbergh/omnillm-studio/internal/wordgen"
@@ -960,30 +961,53 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			appendToBaseSystemPrompt(wsLLMReq, artifacts.ArtifactSystemDirective(streamArtifactFormat))
 		}
 
-		// Stream the summarizer LLM response
-		err = h.llmSvc.ChatStream(r.Context(), *wsLLMReq, func(chunk llm.StreamChunk) {
-			fullContent += chunk.Content
-			provider = chunk.Provider
-			model = chunk.Model
-			if chunk.TokenInput > 0 {
-				tokenIn = chunk.TokenInput
-			}
-			if chunk.TokenOutput > 0 {
-				tokenOut = chunk.TokenOutput
-			}
-			if chunk.Thinking != "" {
-				fullThinking += chunk.Thinking
-			}
-			if chunk.Cost != nil {
-				cost = *chunk.Cost
-			}
+		// Stream the search response. If a provider rejects its native
+		// grounding request before emitting content, retry transparently
+		// through the configured Brave/DDG/Jina fallback.
+		streamSearchResponse := func(searchRequest llm.ChatRequest) error {
+			return h.llmSvc.ChatStream(r.Context(), searchRequest, func(chunk llm.StreamChunk) {
+				fullContent += chunk.Content
+				provider = chunk.Provider
+				model = chunk.Model
+				if chunk.TokenInput > 0 {
+					tokenIn = chunk.TokenInput
+				}
+				if chunk.TokenOutput > 0 {
+					tokenOut = chunk.TokenOutput
+				}
+				if chunk.Thinking != "" {
+					fullThinking += chunk.Thinking
+				}
+				if chunk.Cost != nil {
+					cost = *chunk.Cost
+				}
+				if chunk.Content != "" {
+					sendSSE(w, flusher, "token", map[string]string{"content": chunk.Content})
+				}
+			})
+		}
 
-			if chunk.Content != "" {
-				sendSSE(w, flusher, "token", map[string]string{
-					"content": chunk.Content,
+		err = streamSearchResponse(*wsLLMReq)
+		if err != nil && fullContent == "" && len(searchResp.Results) == 0 {
+			fallbackResp, fallbackReq, fallbackToolCall, fallbackErr := h.orchestrator.ProcessStreamFallback(
+				r.Context(), req.Content, providerName, modelName,
+			)
+			if fallbackErr == nil && fallbackResp != nil && fallbackReq != nil {
+				searchResp = fallbackResp
+				wsLLMReq = fallbackReq
+				toolCall = fallbackToolCall
+				sendSSE(w, flusher, "web_search", map[string]interface{}{
+					"tool_call": toolCall,
+					"status":    "fallback",
 				})
+				sourcesJSON, _ := json.Marshal(searchResp.Results)
+				sendSSE(w, flusher, "web_search_results", map[string]interface{}{
+					"query":   searchResp.Query,
+					"results": json.RawMessage(sourcesJSON),
+				})
+				err = streamSearchResponse(*fallbackReq)
 			}
-		})
+		}
 	} else {
 		// Normal LLM streaming (no web search, or search failed — fall through)
 		if wsErr != nil && toolCall != nil {
@@ -2063,7 +2087,7 @@ func composeSystemPrompt(userPrompt string) string {
 
 const sportsLookupFeatureFlag = "sports_lookup_enabled"
 
-const sportsLookupSystemDirective = `You have access to a local sports_lookup capability that can retrieve ESPN-backed sports standings, scores, schedules, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders using ESPN public APIs, including IPL cricket. For current sports questions, betting odds questions, and ESPN-specific sports data questions, do not answer from memory and do not say you cannot access current sports data. Request or use sports_lookup and present the returned Markdown table. If the tool returns an error or unsupported league, explain that clearly.`
+const sportsLookupSystemDirective = `You have access to a local sports_lookup capability that can retrieve ESPN-backed sports standings, scores, schedules, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and league leaders using ESPN public APIs, including IPL cricket. For current sports questions, betting odds questions, and ESPN-specific sports data questions, do not answer from memory and do not say you cannot access current sports data. Request or use sports_lookup and present the returned concise answer or Markdown table. If the tool returns an error or unsupported league, explain that clearly.`
 
 func (h *MessageHandler) handleSportsLookupMessage(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool) {
 	return h.handleSportsLookupMessageWithTelemetry(ctx, conversationID, messageID, query, nil)
@@ -2084,6 +2108,9 @@ func (h *MessageHandler) handleSportsLookupMessageWithTelemetry(ctx context.Cont
 
 func (h *MessageHandler) handleSportsLookupRequest(ctx context.Context, conversationID, messageID string, req *sports.SportsRequest, routerTelemetry *intentrouter.RouterTelemetry) *models.Message {
 	start := time.Now()
+	if req != nil && strings.TrimSpace(req.Timezone) == "" {
+		req.Timezone = turncontext.FromContext(ctx).Timezone
+	}
 	var result *sports.SportsLookupResult
 	err := sports.ValidateDateInQuery(req.RawQuery, start)
 	if err == nil {
@@ -2166,7 +2193,9 @@ func (h *MessageHandler) tryRouterSportsLookup(ctx context.Context, conversation
 		}
 		return h.handleSportsLookupRequest(ctx, conversationID, messageID, sportsReq, &telemetry), true, &telemetry
 	case intentrouter.RouteNormalLLM, intentrouter.RouteNone:
-		return nil, true, &telemetry
+		// A probabilistic router decision must not suppress the cheap,
+		// deterministic sports detector.
+		return nil, false, &telemetry
 	case intentrouter.RouteClarify:
 		settings, settingsErr := h.settingsRepo.GetTyped()
 		if settingsErr == nil && settings.RouterFallbackBehavior == intentrouter.FallbackClarify && strings.TrimSpace(resp.Decision.ClarifyingQuestion) != "" {

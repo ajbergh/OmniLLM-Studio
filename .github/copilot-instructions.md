@@ -9,7 +9,7 @@ Local-first LLM chat app: **Go backend** (API + SQLite) + **React/TypeScript fro
 - **Entry point:** `cmd/server/main.go` — opens SQLite DB, runs migrations, builds router, starts HTTP server with graceful shutdown.
 - **Router:** `internal/api/router.go` — single `NewRouter()` function wires ALL repos → services → handlers → chi routes. This is the composition root; understand it first when tracing any feature.
 - **Layered architecture:** `api/` handlers → domain services (`llm/`, `agent/`, `search/`, `analytics/`, `bundle/`, `rag/`, `tools/`, `templates/`, `plugins/`, `eval/`, `websearch/`, `auth/`) → `repository/` → `models/` → `db/`.
-- **Database:** SQLite with WAL mode, `MaxOpenConns(1)`. Versioned migrations in `internal/db/db.go` (V1–V33). New tables always use `CREATE TABLE IF NOT EXISTS` with defaults on new columns. Migration versions are tracked in a `schema_versions` table.
+- **Database:** SQLite with WAL mode and single-writer safety. Numbered migrations live in `internal/db/db.go`; inspect the current highest migration before adding the next one. New tables use `CREATE TABLE IF NOT EXISTS`, new columns require backward-compatible defaults, and applied versions are tracked in `schema_versions`.
 - **Auth:** Solo-mode by default (no users = middleware passthrough). Multi-user mode activates when first user registers. Auth middleware in `auth/auth.go` uses Bearer tokens (`Authorization` header).
 - **Streaming:** SSE (Server-Sent Events) for LLM responses. `WriteTimeout: 0` on the HTTP server. SSE events use `event:` + `data:` format (e.g., `token`, `done`, `web_search_*`, `file_search`, `file_search_results`, `rag_indexing`, `url_context`, `tool_start`, `agent_*`).
 
@@ -23,10 +23,10 @@ Local-first LLM chat app: **Go backend** (API + SQLite) + **React/TypeScript fro
 ## Development Workflow
 
 ```bash
-# Backend (requires Go 1.23+ and GCC for cgo/SQLite)
+# Backend (requires Go 1.25+; Linux desktop builds also require GTK/WebKit2GTK)
 cd backend && go run ./cmd/server
 
-# Frontend (requires Node 18+)
+# Frontend (Node.js 24 is the CI and container toolchain)
 cd frontend && npm install && npm run dev
 
 # Both at once (Windows)
@@ -47,6 +47,16 @@ The SQLite database file (`omnillm-studio.db`) is created in the `backend/` work
 - **Models:** All in `internal/models/models.go`. JSON tags use `snake_case`. Optional fields use pointers with `omitempty`. No ORM — raw SQL with `database/sql`.
 - **Config:** Environment variables with `OMNILLM_` prefix (`OMNILLM_PORT`, `OMNILLM_DB_PATH`, `OMNILLM_ATTACHMENTS_DIR`, `OMNILLM_PLUGIN_DIR`). Defaults in `config/config.go`.
 - **Feature flags:** Stored in `feature_flags` table. Check via `FeatureFlagRepo`. Gate new features behind flags (e.g. `agent_mode`, `branching`, `semantic_search`).
+
+## Provider-aware Current Information
+
+- `internal/websearch/planner.go` assigns current-information intent, answer shape, query count, result cap, and search context size.
+- Native grounding is preferred for supported OpenAI, Gemini, and OpenRouter models because it removes a separate search-plus-summarization call.
+- Ollama, Anthropic direct, Groq, Together, Mistral, generic OpenAI-compatible providers, and rejected native requests use the configured Brave/DuckDuckGo provider and optional Jina enrichment.
+- `frontend/src/clientContextFetch.ts` adds `omnillm_timezone` and `omnillm_locale` only to Omni API URLs. `internal/turncontext` resolves and validates that context.
+- Direct schedule lookups should return the exact event and localized start time, not a generic explanation or a large table. Preserve FIFA World Cup aliases and the deterministic ESPN route.
+- Do not add a second OpenRouter web plugin, send GPT-5-only fields to older OpenAI models, leak internal marker plugins, or install provider adapters globally.
+- Update `docs/PROVIDER_AWARE_SEARCH.md`, `docs/Feature FAQ.md`, and `docs/TECHNICAL_REFERENCE.md` when changing this behavior.
 
 ## Frontend Conventions
 
@@ -74,12 +84,12 @@ The SQLite database file (`omnillm-studio.db`) is created in the `backend/` work
 
 - Backend tests use `*_test.go` in the same or `_test` package. Repository tests use in-memory SQLite: `db.Open(":memory:")` + `db.Migrate(database)` (see `repository/repository_test.go`'s `newTestDB` helper).
 - Internal package tests (like `rag/chunker_test.go`) use the same package for access to unexported functions.
-- No frontend test framework is currently configured.
+- Frontend unit tests run with Vitest via `npm run test:unit`; Playwright smoke coverage runs from the repository root via `npm run test:smoke`.
 
 ## External Dependencies
 
 - **LLM providers:** OpenAI-compatible API format. `llm/service.go` handles provider routing, streaming, embeddings, and image generation.
-- **Web search:** Brave Search API (key in settings) or DuckDuckGo (zero-config fallback). Jina Reader for URL content extraction.
+- **Web search:** `internal/websearch/` plans answer shape and cost. Supported OpenAI, Gemini, and OpenRouter models use provider-native grounding; local and unsupported models fall back to Brave Search or DuckDuckGo, with selective Jina Reader extraction. The native adapter in `internal/llm/native_search.go` is scoped to `llm.Service` HTTP clients and must never modify the global transport.
 - **RAG vector store:** [`chromem-go`](https://github.com/philippgille/chromem-go) v0.7.0 — embedded, persistent, zero-deps Go vector DB. Collections per conversation, workspace, and global scope, persisted under `<OMNILLM_CHROMEM_DIR>/<scope_id>/`. The wrapper lives at `internal/rag/store.go` (`VectorStore`); call sites never import chromem directly. Chunk text + metadata still live in the SQLite `document_chunks` table (chromem stores vectors only). Legacy `document_embeddings` rows lazy-migrate into chromem on first retrieve via `ChromemRetriever.tryLazyMigrate`.
 - **File Library:** Durable file storage with conversation, workspace, and global scopes. Package at `internal/filelibrary/`. Hybrid vector + keyword search with citation formatting. SSE events (`file_search`, `file_search_results`, `rag_indexing`) stream status to the frontend. API routes under `/v1/file-library/`. Frontend panel at `frontend/src/components/FileLibraryPanel.tsx`.
 - **Plugins:** JSON-RPC subprocess model. Plugin directory: `~/.omnillm-studio/plugins/` (override with `OMNILLM_PLUGIN_DIR`).

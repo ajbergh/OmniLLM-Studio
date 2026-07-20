@@ -218,7 +218,8 @@ func NewService(providerRepo *repository.ProviderRepo, settingsRepo *repository.
 		providerRepo: providerRepo,
 		settingsRepo: settingsRepo,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout:   120 * time.Second,
+			Transport: &nativeSearchTransport{base: http.DefaultTransport},
 		},
 		ollamaModelCache: make(map[string]struct{}),
 	}
@@ -870,8 +871,9 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	// Use a client without timeout for streaming
-	streamClient := &http.Client{}
+	// Use a client without timeout for streaming while retaining the
+	// LLM-scoped provider-native search adapter.
+	streamClient := &http.Client{Transport: s.httpClient.Transport}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {

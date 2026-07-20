@@ -118,3 +118,27 @@ The repository Quality Gate remains the authoritative full-suite validation and 
 - Python analysis remains a constrained subprocess, not a hardened sandbox.
 - Connected apps remain MCP-backed; a generalized OAuth broker is not part of this release.
 - Scheduled results are written to conversations; external notification delivery is not part of this release.
+
+## Provider-aware search follow-on — 2026-07-19
+
+**Branch:** `agent/provider-aware-search-orchestration-20260719`
+
+**Pull request:** #26
+
+The Chat Studio runtime now includes a provider-aware current-information layer that complements the Agent/tool foundation documented above.
+
+Implemented:
+
+- Adaptive direct, brief, standard, and research answer plans
+- OpenAI `web_search_options` for supported OpenAI models
+- Native Gemini Google Search grounding for supported Gemini models
+- OpenRouter `openrouter:web_search` server-side grounding
+- Brave/DuckDuckGo plus selective Jina fallback for local, unsupported, or rejected native requests
+- Pre-content streaming retry from native grounding to the local search stack
+- Answerability validation for direct factual lookups
+- Browser timezone and locale propagation through `internal/turncontext`
+- Deterministic FIFA World Cup routing, ESPN timezone conversion, and concise single-event schedule rendering
+- Provider citation normalization into the existing SSE response path
+- LLM-scoped transport isolation so native grounding cannot rewrite unrelated backend HTTP traffic
+
+The canonical design and operational reference is [Provider-aware search](PROVIDER_AWARE_SEARCH.md). User-facing behavior is documented in [Feature FAQ](Feature%20FAQ.md), and the component map is documented in [Technical Reference](TECHNICAL_REFERENCE.md#provider-aware-current-information-routing).

@@ -235,6 +235,7 @@ func (c *ESPNClient) LookupScores(ctx context.Context, req SportsRequest) (*Spor
 	leagueLogoURL := logoURLFromScoreboard(sb, cfg)
 	req.LeagueLogoURL = leagueLogoURL
 	rows := normalizeScoreboard(sb)
+	localizeGameRows(rows, sb, req.Timezone)
 	if wantsPitchingMatchups(req) && cfg.League == espn.LeagueMLB {
 		if rawRows, rawErr := c.lookupPitchingMatchupRows(ctx, cfg, req); rawErr == nil && len(rawRows) > 0 {
 			rows = mergePitchingMatchups(rows, rawRows)
@@ -846,6 +847,37 @@ func wrapESPNError(ctx context.Context, err error) error {
 		return fmt.Errorf("%w: %v", ErrNoSportsData, err)
 	}
 	return err
+}
+
+func localizeGameRows(rows []GameRow, sb *espn.Scoreboard, timezone string) {
+	if len(rows) == 0 || sb == nil || strings.TrimSpace(timezone) == "" {
+		return
+	}
+	loc, err := time.LoadLocation(strings.TrimSpace(timezone))
+	if err != nil {
+		return
+	}
+	rowIndex := 0
+	for _, event := range sb.Events {
+		if rowIndex >= len(rows) {
+			break
+		}
+		var comp espn.Competition
+		if len(event.Competitions) > 0 {
+			comp = event.Competitions[0]
+		}
+		away, home := splitCompetitors(comp.Competitors)
+		if away == nil && home == nil {
+			continue
+		}
+		eventDate := firstNonEmpty(comp.Date, event.Date)
+		if parsed, ok := parseESPNTime(eventDate); ok {
+			local := parsed.In(loc)
+			rows[rowIndex].Date = local.Format("Mon Jan 2")
+			rows[rowIndex].Time = local.Format("3:04 PM MST")
+		}
+		rowIndex++
+	}
 }
 
 func normalizeScoreboard(sb *espn.Scoreboard) []GameRow {

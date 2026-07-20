@@ -105,6 +105,7 @@ type SportsRequest struct {
 	Limit              int
 	RenderMode         SportsRenderMode
 	LeagueLogoURL      string
+	Timezone           string
 }
 
 type LeagueConfig struct {

@@ -14,7 +14,8 @@ test('music studio renders Lyria-only controls without console errors', async ({
     window.localStorage.clear();
   });
 
-  await page.route('**/v1/music/providers', async (route) => {
+  // Omni API requests now include browser timezone/locale query parameters.
+  await page.route('**/v1/music/providers**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -22,7 +23,7 @@ test('music studio renders Lyria-only controls without console errors', async ({
     });
   });
 
-  await page.route('**/v1/music/sessions', async (route) => {
+  await page.route('**/v1/music/sessions**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -54,11 +55,16 @@ test('music studio renders Lyria-only controls without console errors', async ({
 
   await expect(page.getByText('Music Studio').first()).toBeVisible();
   await expect(page.getByText('Describe a song and generate to start.')).toBeVisible();
-  await expect(page.getByRole('combobox', { name: 'Music provider' })).toHaveValue('openrouter');
-  await expect(page.getByRole('combobox', { name: 'Music model' })).toHaveValue('google/lyria-3-clip-preview');
 
-  await page.getByRole('combobox', { name: 'Music provider' }).selectOption('gemini');
-  await expect(page.getByRole('combobox', { name: 'Music model' })).toHaveValue('lyria-3-clip-preview');
+  // Keep these locators strict: duplicate or incorrectly labelled controls are
+  // accessibility regressions and should fail instead of being hidden by first().
+  const providerSelect = page.getByRole('combobox', { name: 'Music provider' });
+  const modelSelect = page.getByRole('combobox', { name: 'Music model' });
+  await expect(providerSelect).toHaveValue('openrouter', { timeout: 10_000 });
+  await expect(modelSelect).toHaveValue('google/lyria-3-clip-preview', { timeout: 10_000 });
+
+  await providerSelect.selectOption('gemini');
+  await expect(modelSelect).toHaveValue('lyria-3-clip-preview', { timeout: 10_000 });
 
   const generateButton = page.getByRole('button', { name: /Generate Track/i });
   await expect(generateButton).toBeDisabled();

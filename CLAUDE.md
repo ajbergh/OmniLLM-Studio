@@ -76,7 +76,7 @@ Desktop mode starts a loopback HTTP server because SSE cannot pass through the W
 
 ### Backend layers
 
-`api/` handlers call domain packages such as `llm/`, `agent/`, `search/`, `analytics/`, `bundle/`, `rag/`, `tools/`, `templates/`, `plugins/`, `eval/`, `websearch/`, `auth/`, `browser/`, `music/`, and `video/`. Repositories use raw `database/sql`; models use snake_case JSON tags and pointer fields for optional values.
+`api/` handlers call domain packages such as `llm/`, `agent/`, `search/`, `analytics/`, `bundle/`, `rag/`, `tools/`, `templates/`, `plugins/`, `eval/`, `websearch/`, `turncontext/`, `sports/`, `auth/`, `browser/`, `music/`, and `video/`. Repositories use raw `database/sql`; models use snake_case JSON tags and pointer fields for optional values.
 
 ### Database
 
@@ -98,11 +98,31 @@ Headless-browser sessions use isolated incognito contexts, serialized page opera
 
 ### Streaming
 
-SSE carries chat tokens, agent steps, tool progress, file search, RAG indexing, web search, generation progress, and URL context events. The frontend parses streams with `fetch()` and `ReadableStream` in `frontend/src/api.ts`. Preserve cancellation and terminal error/done events when modifying a stream.
+SSE carries chat tokens, agent steps, tool progress, file search, RAG indexing, web search, generation progress, and URL context events. The frontend parses streams with `fetch()` and `ReadableStream` in `frontend/src/api.ts`. Browser timezone and locale are attached to Omni API requests by `frontend/src/clientContextFetch.ts` and resolved through `internal/turncontext`; preserve that context through preflight, sports, native-grounding, and fallback paths. Preserve cancellation and terminal error/done events when modifying a stream.
 
 ### LLM provider routing
 
 `backend/internal/llm/service.go` is the primary entry point for chat, embeddings, and image generation. Provider discovery and connectivity checks are privileged network operations. Do not accept provider API keys in URLs or query strings.
+
+Provider-native search is implemented by the LLM-scoped transport in `backend/internal/llm/native_search.go`. It must remain scoped to `llm.Service` clients; never install it as `http.DefaultTransport` or wrap unrelated backend HTTP calls. The internal native-search marker must be removed before the request leaves the process.
+
+### Current-information orchestration
+
+`backend/internal/websearch/planner.go` classifies current-information turns by intent and answer shape. `orchestrator.go` selects the execution path:
+
+1. Prefer native grounding for supported OpenAI, Gemini, and OpenRouter models.
+2. Validate direct factual responses with `answerability.go`.
+3. Fall back to configured Brave/DuckDuckGo retrieval and selective Jina enrichment for local, unsupported, or rejected native requests.
+4. Bound direct lookups to low search context, small result sets, low temperature, and short output budgets; reserve broader iteration for explicit research requests.
+
+Preserve provider-specific contracts:
+
+- OpenAI uses `web_search_options`; only GPT-5 models receive the optional `verbosity` field.
+- Gemini uses native `generateContent` / `streamGenerateContent` with `google_search`, then converts responses back to the existing OpenAI-compatible internal shape.
+- OpenRouter uses `openrouter:web_search`; remove the deprecated `web` plugin when the server tool is present so the request contains only one web mechanism.
+- Streaming native-search failures may retry locally only before answer content has been emitted.
+
+Sports lookup remains the cheaper deterministic path when ESPN can answer the question. `internal/router/deterministic.go` and `internal/sports/` must preserve browser-timezone conversion and concise one-event schedule answers. Detailed design: `docs/PROVIDER_AWARE_SEARCH.md`.
 
 ### RAG and File Library
 

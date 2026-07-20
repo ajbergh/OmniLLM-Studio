@@ -57,6 +57,16 @@ func (s *Service) Route(ctx context.Context, req RouteRequest) (*RouteResponse, 
 	if len(available) == 0 {
 		available = []RouteName{RouteSportsLookup, RouteNormalLLM, RouteClarify}
 	}
+	if mode == RouterModeSportsOnly {
+		if decision, ok := deterministicSportsRoute(req.UserMessage, time.Now()); ok {
+			telemetry.Provider = "local"
+			telemetry.Model = "deterministic"
+			telemetry.Confidence = 1
+			telemetry.Route = RouteSportsLookup
+			telemetry.Validated = true
+			return &RouteResponse{Decision: decision, Telemetry: telemetry, Valid: true}, nil
+		}
+	}
 	timeout := time.Duration(settings.RouterTimeoutMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 8 * time.Second

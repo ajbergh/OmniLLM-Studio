@@ -10,6 +10,9 @@ import (
 )
 
 func RenderGamesMarkdown(req SportsRequest, cfg LeagueConfig, rows []GameRow, retrievedAt time.Time) string {
+	if direct := renderDirectScheduleAnswer(req, rows); direct != "" {
+		return direct
+	}
 	switch renderMode(req) {
 	case SportsRenderPlainMarkdown:
 		return renderGamesPlainMarkdown(req, cfg, rows, retrievedAt)
@@ -18,6 +21,28 @@ func RenderGamesMarkdown(req SportsRequest, cfg LeagueConfig, rows []GameRow, re
 	default:
 		return renderGamesEnhancedMarkdown(req, cfg, rows, retrievedAt)
 	}
+}
+
+func renderDirectScheduleAnswer(req SportsRequest, rows []GameRow) string {
+	if req.Intent != SportsIntentSchedule || len(rows) != 1 || !isDirectScheduleQuestion(req.RawQuery) {
+		return ""
+	}
+	row := rows[0]
+	away := firstNonEmpty(row.Away.DisplayName, row.AwayTeam, row.AwayAbbr)
+	home := firstNonEmpty(row.Home.DisplayName, row.HomeTeam, row.HomeAbbr)
+	start := strings.TrimSpace(firstNonEmpty(row.Time, row.Status))
+	if away == "" || home == "" || start == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s vs. %s starts at %s.", away, home, start)
+}
+
+func isDirectScheduleQuestion(query string) bool {
+	norm := normalizeText(query)
+	return hasAnyPhrase(norm,
+		"what time", "when does", "when is", "start time",
+		"kickoff", "tip off", "puck drop", "first pitch",
+	)
 }
 
 func renderGamesPlainMarkdown(req SportsRequest, cfg LeagueConfig, rows []GameRow, retrievedAt time.Time) string {

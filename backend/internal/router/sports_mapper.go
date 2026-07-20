@@ -118,6 +118,7 @@ func sportsLeague(league, sport string) (string, string, bool) {
 		"ncaamb": {espn.LeagueMensCollegeBball, espn.SportBasketball}, "menscollegebasketball": {espn.LeagueMensCollegeBball, espn.SportBasketball},
 		"ncaawb": {espn.LeagueWomensCollegeBall, espn.SportBasketball}, "womenscollegebasketball": {espn.LeagueWomensCollegeBall, espn.SportBasketball},
 		"epl": {espn.LeagueEPL, espn.SportSoccer}, "premierleague": {espn.LeagueEPL, espn.SportSoccer}, "mls": {espn.LeagueMLS, espn.SportSoccer},
+		"worldcup": {sports.LeagueFIFAWorldCup, espn.SportSoccer}, "fifaworldcup": {sports.LeagueFIFAWorldCup, espn.SportSoccer},
 		"ucl": {espn.LeagueChampionsLg, espn.SportSoccer}, "championsleague": {espn.LeagueChampionsLg, espn.SportSoccer},
 		"laliga": {espn.LeagueLaLiga, espn.SportSoccer}, "bundesliga": {espn.LeagueBundesliga, espn.SportSoccer},
 		"seriea": {espn.LeagueSerieA, espn.SportSoccer}, "ligue1": {espn.LeagueLigue1, espn.SportSoccer}, "ipl": {sports.LeagueIPL, espn.SportCricket},
