@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import lzma
 import shutil
@@ -34,9 +35,6 @@ def load_chunks() -> dict[str, str]:
             marker, data = body.split("\n", 1)
             chunks[marker.removeprefix("BOOTSTRAP_XZ_CHUNK_")] = data.strip()
 
-    # A single character was dropped while the third archive segment was
-    # originally written through the contents API. Repair the known boundary
-    # deterministically and validate the full archive below before executing it.
     chunk_two = chunks.get("02", "")
     if len(chunk_two) == 11999:
         chunks["02"] = chunk_two[:6762] + "C" + chunk_two[6762:]
@@ -64,9 +62,7 @@ def create_payload() -> None:
     subprocess.run(["git", "add", "-A"], cwd=ROOT, check=True)
     base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     base_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT, text=True).strip()
-    names = subprocess.check_output(
-        ["git", "diff", "--cached", "--name-only", "-z"], cwd=ROOT
-    ).split(b"\0")
+    names = subprocess.check_output(["git", "diff", "--cached", "--name-only", "-z"], cwd=ROOT).split(b"\0")
     deleted = set(
         value.decode("utf-8")
         for value in subprocess.check_output(
@@ -110,7 +106,9 @@ def main() -> None:
         raise RuntimeError(f"missing bootstrap chunks: {missing}")
     for key in expected:
         value = chunks[key]
-        print(f"VIDEO_BOOTSTRAP_CHUNK key={key} chars={len(value)} mod4={len(value) % 4} head={value[:8]!r} tail={value[-8:]!r}")
+        (ROOT / f"frontend-bootstrap-{key}.log").write_text(value, encoding="utf-8")
+        digest = hashlib.sha256(value.encode("ascii")).hexdigest()
+        print(f"VIDEO_BOOTSTRAP_CHUNK key={key} chars={len(value)} sha256={digest} head={value[:8]!r} tail={value[-8:]!r}")
     encoded = "".join(chunks[key] for key in expected)
     print(f"VIDEO_BOOTSTRAP_JOINED chars={len(encoded)} mod4={len(encoded) % 4}")
     try:
