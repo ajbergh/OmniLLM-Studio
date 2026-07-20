@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Circle, Files } from 'lucide-react';
+import { Circle, Files, Scissors } from 'lucide-react';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import type { VideoTimelineDocument } from '../../types/video';
 import { VideoEditStudioEnhanced } from './VideoEditStudioEnhanced';
 import { MediaRelinkLab } from './pro/MediaRelinkLab';
 import { RecordingLab } from './pro/RecordingLab';
+import { SourceMonitorLab } from './pro/SourceMonitorLab';
 import { createTimelineBranch } from './pro/timelineCommandEngine';
 
 function documentBytes(document: VideoTimelineDocument): number {
@@ -147,8 +148,8 @@ function useAssistantEditCheckpoints() {
 /**
  * Top-level Video Edit Studio runtime. It preserves the accepted editor shell,
  * adds the advanced workflow drawer, installs bounded playback UI updates and
- * timeline-history memory, checkpoints assistant edits, and exposes recording
- * and media-relink labs.
+ * timeline-history memory, checkpoints assistant edits, and exposes source,
+ * recording, and media-relink labs.
  */
 export function VideoEditStudioUltimate() {
   usePlaybackUpdateCoalescing();
@@ -157,11 +158,23 @@ export function VideoEditStudioUltimate() {
   const activeProjectId = useVideoStudioStore((state) => state.activeProjectId);
   const [recordingOpen, setRecordingOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
+  const [sourceOpen, setSourceOpen] = useState(false);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <VideoEditStudioEnhanced />
       <div className="fixed bottom-14 right-44 z-[64] flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setSourceOpen(true)}
+          disabled={!activeProjectId}
+          className="inline-flex min-h-10 items-center gap-2 rounded-full border border-primary/30 bg-surface-raised px-3 text-xs font-semibold text-text shadow-xl hover:border-primary/60 disabled:cursor-not-allowed disabled:opacity-40"
+          aria-label="Open source monitor"
+          title={activeProjectId ? 'Mark source in/out and insert or overwrite at the playhead' : 'Create or select a video project first'}
+        >
+          <Scissors size={12} className="text-primary" />
+          Source
+        </button>
         <button
           type="button"
           onClick={() => setMediaOpen(true)}
@@ -185,6 +198,7 @@ export function VideoEditStudioUltimate() {
           Recording Lab
         </button>
       </div>
+      <SourceMonitorLab open={sourceOpen} onClose={() => setSourceOpen(false)} />
       <MediaRelinkLab open={mediaOpen} onClose={() => setMediaOpen(false)} />
       <RecordingLab open={recordingOpen} onClose={() => setRecordingOpen(false)} />
     </div>
