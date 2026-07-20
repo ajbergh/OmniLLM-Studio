@@ -8,7 +8,7 @@ import { ChatView } from './components/ChatView';
 import { ImageEditStudio } from './components/image/ImageEditStudio';
 import { MusicStudio } from './components/music/MusicStudio';
 import { VideoStudio } from './components/video/VideoStudio';
-import { VideoEditStudioEnhanced } from './components/video/VideoEditStudioEnhanced';
+import { VideoEditStudioUltimate } from './components/video/VideoEditStudioUltimate';
 import { SettingsPanel } from './components/SettingsPanel';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { LoginScreen } from './components/LoginScreen';
@@ -482,7 +482,7 @@ function App() {
           {appMode === 'image' && <ImageEditStudio />}
           {appMode === 'music' && <MusicStudio />}
           {appMode === 'video' && <VideoStudio />}
-          {appMode === 'video-edit' && <VideoEditStudioEnhanced />}
+          {appMode === 'video-edit' && <VideoEditStudioUltimate />}
         </main>
 
         <DialogShell
