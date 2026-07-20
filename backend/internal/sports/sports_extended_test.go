@@ -503,6 +503,14 @@ func TestDetectSportsIntentNegative(t *testing.T) {
 		"What year did the Cubs last win the World Series?",
 		// two leagues detected; Unknown intent; no temporal phrase
 		"compare the NBA and NFL offseason",
+		// Generic current-news topics must continue through web search / the LLM,
+		// never be treated as athlete names by the ESPN fallback.
+		"What's the latest tech news?",
+		"What's the latest news in politics?",
+		"Give me the latest AI headlines",
+		"What is new in cybersecurity?",
+		"latest business news",
+		"latest entertainment headlines",
 	}
 
 	for _, q := range queries {

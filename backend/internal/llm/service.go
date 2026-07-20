@@ -27,14 +27,64 @@ import (
 
 // ToolCall represents a tool call made by the LLM.
 type ToolCall struct {
-	Index            int    `json:"index,omitempty"`
-	ID               string `json:"id"`
-	Type             string `json:"type"`                        // "function"
-	ThoughtSignature string `json:"thought_signature,omitempty"` // Gemini 3.1+ requires this
+	Index int    `json:"index,omitempty"`
+	ID    string `json:"id"`
+	Type  string `json:"type"` // "function"
+	// ThoughtSignature supports older compatibility proxies that returned the
+	// signature at the tool-call root. Google's OpenAI-compatible API uses
+	// extra_content.google.thought_signature instead.
+	ThoughtSignature string                `json:"thought_signature,omitempty"`
+	ExtraContent     *ToolCallExtraContent `json:"extra_content,omitempty"`
 	Function         struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
+}
+
+type ToolCallExtraContent struct {
+	Google *GoogleToolCallExtraContent `json:"google,omitempty"`
+}
+
+type GoogleToolCallExtraContent struct {
+	ThoughtSignature string `json:"thought_signature,omitempty"`
+}
+
+// GeminiThoughtSignature returns the signature from Google's documented
+// OpenAI-compatible envelope, with support for the older root-level shape.
+func (tc ToolCall) GeminiThoughtSignature() string {
+	if tc.ExtraContent != nil && tc.ExtraContent.Google != nil {
+		if signature := tc.ExtraContent.Google.ThoughtSignature; signature != "" {
+			return signature
+		}
+	}
+	return tc.ThoughtSignature
+}
+
+// MergeToolCallDelta folds a streamed tool-call fragment into an accumulated
+// call without losing metadata that may arrive after the arguments fragment.
+func MergeToolCallDelta(accumulated *ToolCall, delta ToolCall) {
+	if accumulated == nil {
+		return
+	}
+	if delta.ID != "" {
+		accumulated.ID = delta.ID
+	}
+	if delta.Type != "" {
+		accumulated.Type = delta.Type
+	}
+	if delta.Function.Name != "" {
+		accumulated.Function.Name = delta.Function.Name
+	}
+	accumulated.Function.Arguments += delta.Function.Arguments
+	if signature := delta.GeminiThoughtSignature(); signature != "" {
+		if delta.ExtraContent != nil && delta.ExtraContent.Google != nil {
+			accumulated.ExtraContent = &ToolCallExtraContent{
+				Google: &GoogleToolCallExtraContent{ThoughtSignature: signature},
+			}
+		} else {
+			accumulated.ThoughtSignature = signature
+		}
+	}
 }
 
 // Tool represents a tool that the LLM can call.
@@ -943,18 +993,9 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 					var chunk struct {
 						Choices []struct {
 							Delta struct {
-								Content   string `json:"content"`
-								Thinking  string `json:"thinking"`
-								ToolCalls []struct {
-									Index            int    `json:"index"`
-									ID               string `json:"id"`
-									Type             string `json:"type"`
-									ThoughtSignature string `json:"thought_signature,omitempty"`
-									Function         struct {
-										Name      string `json:"name"`
-										Arguments string `json:"arguments"`
-									} `json:"function"`
-								} `json:"tool_calls"`
+								Content   string     `json:"content"`
+								Thinking  string     `json:"thinking"`
+								ToolCalls []ToolCall `json:"tool_calls"`
 							} `json:"delta"`
 						} `json:"choices"`
 						Usage *struct {
@@ -970,28 +1011,11 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 
 					if len(chunk.Choices) > 0 {
 						delta := chunk.Choices[0].Delta
-						var parsedToolCalls []ToolCall
-						for _, tc := range delta.ToolCalls {
-							parsedToolCalls = append(parsedToolCalls, ToolCall{
-								Index:            tc.Index,
-								ID:               tc.ID,
-								Type:             tc.Type,
-								ThoughtSignature: tc.ThoughtSignature,
-								Function: struct {
-									Name      string `json:"name"`
-									Arguments string `json:"arguments"`
-								}{
-									Name:      tc.Function.Name,
-									Arguments: tc.Function.Arguments,
-								},
-							})
-						}
-
-						if delta.Content != "" || delta.Thinking != "" || len(parsedToolCalls) > 0 {
+						if delta.Content != "" || delta.Thinking != "" || len(delta.ToolCalls) > 0 {
 							onChunk(StreamChunk{
 								Content:   delta.Content,
 								Thinking:  delta.Thinking,
-								ToolCalls: parsedToolCalls,
+								ToolCalls: delta.ToolCalls,
 								Provider:  providerType,
 								Model:     model,
 							})

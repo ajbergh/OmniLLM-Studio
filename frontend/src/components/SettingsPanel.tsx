@@ -2595,7 +2595,7 @@ function BrowserSettingsCard({
           <div className="mr-4">
             <label className="text-xs font-medium text-text-secondary block">Browser Tools Enabled</label>
             <p className="text-[10px] text-text-muted mt-0.5">
-              Tool visibility is controlled here; the runtime also requires OMNILLM_BROWSER_ENABLED on the backend.
+              Tool visibility is controlled here; Chromium starts lazily on first use.
             </p>
           </div>
           <button

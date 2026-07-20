@@ -204,10 +204,12 @@ func setDesktopDefaults() {
 		}
 		os.Setenv("OMNILLM_ATTACHMENTS_DIR", dir)
 	}
-	// Browser automation is powerful and launches a local Chromium process. It
-	// is opt-in unless an explicit environment or settings value enables it.
+	// The desktop app exposes the headless-browser feature as an enabled-by-default
+	// tool, so its lazily launched Chromium runtime must be available by default as
+	// well. An explicit environment value still lets managed installations disable
+	// the runtime.
 	if os.Getenv("OMNILLM_BROWSER_ENABLED") == "" {
-		os.Setenv("OMNILLM_BROWSER_ENABLED", "false")
+		os.Setenv("OMNILLM_BROWSER_ENABLED", "true")
 	}
 }
 

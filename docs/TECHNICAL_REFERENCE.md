@@ -395,12 +395,12 @@ The backend detects high-confidence sports intent, calls ESPN public APIs throug
 
 ### 6. Enable Headless Browser Tools (optional)
 
-The headless browser feature is **enabled by default** for new installations. It requires one additional environment variable to activate the runtime:
+The headless browser feature and its Chromium runtime are **enabled by default** for new installations. To disable the runtime for a managed installation, set:
 
 ```bash
-export OMNILLM_BROWSER_ENABLED=true   # Linux / macOS
-set OMNILLM_BROWSER_ENABLED=true      # Windows CMD
-$env:OMNILLM_BROWSER_ENABLED="true"   # Windows PowerShell
+export OMNILLM_BROWSER_ENABLED=false   # Linux / macOS
+set OMNILLM_BROWSER_ENABLED=false      # Windows CMD
+$env:OMNILLM_BROWSER_ENABLED="false"   # Windows PowerShell
 ```
 
 On first use, go-rod automatically downloads a compatible Chromium build to the cache directory (default: `~/.omnillm-studio/chromium-cache` on macOS/Linux, `%AppData%\OmniLLM-Studio\chromium-cache` on Windows). No manual browser installation is needed.
@@ -425,7 +425,7 @@ Example prompts:
 
 | Variable | Default | Description |
 |---|---|---|
-| `OMNILLM_BROWSER_ENABLED` | `false` | Activate the Chromium runtime (feature flag controls tool visibility) |
+| `OMNILLM_BROWSER_ENABLED` | `true` | Activate the Chromium runtime (feature flag controls tool visibility) |
 | `OMNILLM_BROWSER_CACHE_DIR` | `~/.omnillm-studio/chromium-cache` | Where go-rod downloads and caches Chromium |
 | `OMNILLM_BROWSER_EXEC` | *(auto)* | Path to an existing Chromium/Chrome binary — skips the auto-download |
 

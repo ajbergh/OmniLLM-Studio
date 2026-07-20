@@ -86,6 +86,10 @@ func Load() *Config {
 			browserSessionTTL = parsed
 		}
 	}
+	browserEnabled := true
+	if value := strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_ENABLED")); value != "" {
+		browserEnabled = strings.EqualFold(value, "true")
+	}
 	maxUploadBytes := int64(500 << 20)
 	if value := strings.TrimSpace(os.Getenv("OMNILLM_MAX_UPLOAD_BYTES")); value != "" {
 		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed > 0 {
@@ -115,7 +119,7 @@ func Load() *Config {
 		ChromemDir:         chromemDir,
 		ChromemCompress:    strings.EqualFold(os.Getenv("OMNILLM_CHROMEM_COMPRESS"), "true"),
 		MaxUploadBytes:     maxUploadBytes,
-		BrowserEnabled:     strings.EqualFold(os.Getenv("OMNILLM_BROWSER_ENABLED"), "true"),
+		BrowserEnabled:     browserEnabled,
 		BrowserExecPath:    strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_EXEC_PATH")),
 		BrowserCacheDir:    browserCacheDir,
 		BrowserMaxSessions: browserMaxSessions,

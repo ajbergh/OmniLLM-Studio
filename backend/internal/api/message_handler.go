@@ -1022,26 +1022,24 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			}}, llmReq.Messages...)
 		}
 
-		// Inject tools from registry (skip for Gemini 3.1+ which requires
-		// thought_signature in function call parts — the preflight file search
-		// and RAG paths already handle file queries without tool calling).
+		// Inject tools from the registry. Gemini thought signatures are preserved
+		// in llm.ToolCall.extra_content and returned with assistant tool-call
+		// history, so Gemini can participate in the same tool loop.
 		providerType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
 		var llmTools []llm.Tool
-		if !strings.EqualFold(providerType, "gemini") {
-			for _, def := range h.toolRegistry.ListEnabled() {
-				llmTools = append(llmTools, llm.Tool{
-					Type: "function",
-					Function: struct {
-						Name        string          `json:"name"`
-						Description string          `json:"description,omitempty"`
-						Parameters  json.RawMessage `json:"parameters,omitempty"`
-					}{
-						Name:        def.Name,
-						Description: def.Description,
-						Parameters:  def.Parameters,
-					},
-				})
-			}
+		for _, def := range h.toolRegistry.ListEnabled() {
+			llmTools = append(llmTools, llm.Tool{
+				Type: "function",
+				Function: struct {
+					Name        string          `json:"name"`
+					Description string          `json:"description,omitempty"`
+					Parameters  json.RawMessage `json:"parameters,omitempty"`
+				}{
+					Name:        def.Name,
+					Description: def.Description,
+					Parameters:  def.Parameters,
+				},
+			})
 		}
 		const maxToolLoops = 10
 		const maxBrowserNavsPerTurn = 3
@@ -1082,7 +1080,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				// Accumulate tool calls
 				for _, tc := range chunk.ToolCalls {
 					if existing, ok := chunkToolCalls[tc.Index]; ok {
-						existing.Function.Arguments += tc.Function.Arguments
+						llm.MergeToolCallDelta(existing, tc)
 					} else {
 						newTC := tc
 						chunkToolCalls[tc.Index] = &newTC

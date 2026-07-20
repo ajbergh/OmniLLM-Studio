@@ -762,10 +762,13 @@ func DetectSportsIntent(query string, now time.Time) (*SportsRequest, bool) {
 		return nil, false
 	}
 	if !hasLeague && intent == SportsIntentNews && !hasBroadSportsNewsPhrase(norm) {
-		// Fall back to athlete news when an athlete name can be extracted from the
-		// query.  Guard against generic phrases like "latest sports movies" whose
-		// cleaned residual still contains the word "sports".
-		if aq := extractAthleteQuery(raw, norm, LeagueConfig{}, false, SportsIntentAthleteNews); aq != "" && !hasPhrase(aq, "sports") {
+		// A residual word after removing "latest" and "news" is not enough to
+		// identify an athlete: generic topics such as "tech" and "politics" would
+		// otherwise be sent to ESPN as player names. Keep this local fallback
+		// conservative and require an explicit athlete signal. Ambiguous news
+		// requests continue through the normal router/LLM path.
+		if aq := extractAthleteQuery(raw, norm, LeagueConfig{}, false, SportsIntentAthleteNews); aq != "" &&
+			isExplicitAthleteNewsQuery(raw, aq) {
 			return &SportsRequest{
 				RawQuery:     raw,
 				Intent:       SportsIntentAthleteNews,
@@ -1277,6 +1280,15 @@ func hasBroadSportsNewsPhrase(norm string) bool {
 			"news", "headlines", "latest news", "latest espn news", "espn news", "espn headlines",
 			"what is new", "what s new",
 		)
+}
+
+func isExplicitAthleteNewsQuery(raw, athleteQuery string) bool {
+	// Possessive names are a strong enough local signal for natural requests
+	// such as "Caitlin Clark's latest news". Mark the apostrophe before
+	// normalizing so contractions such as "what's" cannot match the extracted
+	// subject (for example, "tech" in "what's the latest tech news").
+	marked := strings.NewReplacer("'s", " possessive marker ", "’s", " possessive marker ").Replace(strings.ToLower(raw))
+	return hasPhrase(normalizeText(marked), normalizeText(athleteQuery)+" possessive marker")
 }
 
 func hasBroadSportsOddsPhrase(norm string) bool {
