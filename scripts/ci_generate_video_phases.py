@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import lzma
 import shutil
@@ -100,7 +101,16 @@ def main() -> None:
     missing = [key for key in expected if key not in chunks]
     if missing:
         raise RuntimeError(f"missing bootstrap chunks: {missing}")
-    script_bytes = lzma.decompress(base64.b64decode("".join(chunks[key] for key in expected)))
+    for key in expected:
+        value = chunks[key]
+        print(f"VIDEO_BOOTSTRAP_CHUNK key={key} chars={len(value)} mod4={len(value) % 4} head={value[:8]!r} tail={value[-8:]!r}")
+    encoded = "".join(chunks[key] for key in expected)
+    print(f"VIDEO_BOOTSTRAP_JOINED chars={len(encoded)} mod4={len(encoded) % 4}")
+    try:
+        compressed = base64.b64decode(encoded, validate=True)
+    except binascii.Error as exc:
+        raise RuntimeError(f"invalid bootstrap base64: {exc}") from exc
+    script_bytes = lzma.decompress(compressed)
     script_path = ROOT / "scripts" / "apply_video_next_phases.py"
     script_path.write_bytes(script_bytes)
     compile(script_bytes, str(script_path), "exec")
