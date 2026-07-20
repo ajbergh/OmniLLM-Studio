@@ -1,17 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Circle } from 'lucide-react';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import type { VideoTimelineDocument } from '../../types/video';
 import { VideoEditStudioEnhanced } from './VideoEditStudioEnhanced';
 import { RecordingLab } from './pro/RecordingLab';
-
-const DEFAULT_HISTORY_BUDGET_BYTES = 32 * 1024 * 1024;
+import { createTimelineBranch } from './pro/timelineCommandEngine';
 
 function documentBytes(document: VideoTimelineDocument): number {
   return new TextEncoder().encode(JSON.stringify(document)).byteLength;
 }
 
-function fitHistoryToBudget(history: VideoTimelineDocument[], budgetBytes: number): VideoTimelineDocument[] {
+export function fitHistoryToBudget(history: VideoTimelineDocument[], budgetBytes: number): VideoTimelineDocument[] {
   let total = 0;
   const retained: VideoTimelineDocument[] = [];
   for (let index = history.length - 1; index >= 0; index -= 1) {
@@ -118,14 +117,42 @@ function usePlaybackUpdateCoalescing() {
 }
 
 /**
+ * Every assistant apply is preceded by a named timeline version. The existing
+ * validated plan application remains authoritative; this wrapper only adds a
+ * durable, user-visible rollback point and restores the original action when
+ * the editor unmounts.
+ */
+function useAssistantEditCheckpoints() {
+  useEffect(() => {
+    const original = useVideoStudioStore.getState().applyAssistantPlan;
+    const checkpointed: typeof original = async (operationIndexes) => {
+      const state = useVideoStudioStore.getState();
+      if (state.timeline && state.assistantPlan) {
+        const instruction = state.assistantInstruction.trim();
+        const label = instruction ? `Before AI: ${instruction.slice(0, 64)}` : `Before AI edit ${new Date().toLocaleTimeString()}`;
+        await createTimelineBranch(label);
+      }
+      await original(operationIndexes);
+    };
+    useVideoStudioStore.setState({ applyAssistantPlan: checkpointed });
+    return () => {
+      if (useVideoStudioStore.getState().applyAssistantPlan === checkpointed) {
+        useVideoStudioStore.setState({ applyAssistantPlan: original });
+      }
+    };
+  }, []);
+}
+
+/**
  * Top-level Video Edit Studio runtime. It preserves the accepted editor shell,
  * adds the advanced workflow drawer, installs bounded playback UI updates and
- * timeline-history memory, and exposes a combined screen/camera/voiceover
- * recording lab.
+ * timeline-history memory, checkpoints assistant edits, and exposes a combined
+ * screen/camera/voiceover recording lab.
  */
 export function VideoEditStudioUltimate() {
   usePlaybackUpdateCoalescing();
   useTimelineHistoryBudget();
+  useAssistantEditCheckpoints();
   const activeProjectId = useVideoStudioStore((state) => state.activeProjectId);
   const [recordingOpen, setRecordingOpen] = useState(false);
 
