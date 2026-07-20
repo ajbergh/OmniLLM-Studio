@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Circle } from 'lucide-react';
+import { Circle, Files } from 'lucide-react';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import type { VideoTimelineDocument } from '../../types/video';
 import { VideoEditStudioEnhanced } from './VideoEditStudioEnhanced';
+import { MediaRelinkLab } from './pro/MediaRelinkLab';
 import { RecordingLab } from './pro/RecordingLab';
 import { createTimelineBranch } from './pro/timelineCommandEngine';
 
@@ -146,8 +147,8 @@ function useAssistantEditCheckpoints() {
 /**
  * Top-level Video Edit Studio runtime. It preserves the accepted editor shell,
  * adds the advanced workflow drawer, installs bounded playback UI updates and
- * timeline-history memory, checkpoints assistant edits, and exposes a combined
- * screen/camera/voiceover recording lab.
+ * timeline-history memory, checkpoints assistant edits, and exposes recording
+ * and media-relink labs.
  */
 export function VideoEditStudioUltimate() {
   usePlaybackUpdateCoalescing();
@@ -155,21 +156,36 @@ export function VideoEditStudioUltimate() {
   useAssistantEditCheckpoints();
   const activeProjectId = useVideoStudioStore((state) => state.activeProjectId);
   const [recordingOpen, setRecordingOpen] = useState(false);
+  const [mediaOpen, setMediaOpen] = useState(false);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <VideoEditStudioEnhanced />
-      <button
-        type="button"
-        onClick={() => setRecordingOpen(true)}
-        disabled={!activeProjectId}
-        className="fixed bottom-14 right-44 z-[64] inline-flex min-h-10 items-center gap-2 rounded-full border border-red-400/30 bg-surface-raised px-3 text-xs font-semibold text-text shadow-xl hover:border-red-400/60 disabled:cursor-not-allowed disabled:opacity-40"
-        aria-label="Open recording lab"
-        title={activeProjectId ? 'Record screen and camera, screen, camera, or voiceover' : 'Create or select a video project first'}
-      >
-        <Circle size={11} className="text-red-400" fill="currentColor" />
-        Recording Lab
-      </button>
+      <div className="fixed bottom-14 right-44 z-[64] flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setMediaOpen(true)}
+          disabled={!activeProjectId}
+          className="inline-flex min-h-10 items-center gap-2 rounded-full border border-primary/30 bg-surface-raised px-3 text-xs font-semibold text-text shadow-xl hover:border-primary/60 disabled:cursor-not-allowed disabled:opacity-40"
+          aria-label="Open media relink lab"
+          title={activeProjectId ? 'Inspect, relink, and export project media metadata' : 'Create or select a video project first'}
+        >
+          <Files size={12} className="text-primary" />
+          Media Lab
+        </button>
+        <button
+          type="button"
+          onClick={() => setRecordingOpen(true)}
+          disabled={!activeProjectId}
+          className="inline-flex min-h-10 items-center gap-2 rounded-full border border-red-400/30 bg-surface-raised px-3 text-xs font-semibold text-text shadow-xl hover:border-red-400/60 disabled:cursor-not-allowed disabled:opacity-40"
+          aria-label="Open recording lab"
+          title={activeProjectId ? 'Record screen and camera, screen, camera, or voiceover' : 'Create or select a video project first'}
+        >
+          <Circle size={11} className="text-red-400" fill="currentColor" />
+          Recording Lab
+        </button>
+      </div>
+      <MediaRelinkLab open={mediaOpen} onClose={() => setMediaOpen(false)} />
       <RecordingLab open={recordingOpen} onClose={() => setRecordingOpen(false)} />
     </div>
   );
