@@ -1,8 +1,58 @@
 import { useEffect, useRef, useState } from 'react';
 import { Circle } from 'lucide-react';
 import { useVideoStudioStore } from '../../stores/videoStudio';
+import type { VideoTimelineDocument } from '../../types/video';
 import { VideoEditStudioEnhanced } from './VideoEditStudioEnhanced';
 import { RecordingLab } from './pro/RecordingLab';
+
+const DEFAULT_HISTORY_BUDGET_BYTES = 32 * 1024 * 1024;
+
+function documentBytes(document: VideoTimelineDocument): number {
+  return new TextEncoder().encode(JSON.stringify(document)).byteLength;
+}
+
+function fitHistoryToBudget(history: VideoTimelineDocument[], budgetBytes: number): VideoTimelineDocument[] {
+  let total = 0;
+  const retained: VideoTimelineDocument[] = [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const document = history[index];
+    const bytes = documentBytes(document);
+    if (retained.length > 0 && total + bytes > budgetBytes) break;
+    retained.push(document);
+    total += bytes;
+  }
+  return retained.reverse();
+}
+
+/**
+ * Bound snapshot-based undo/redo memory while the store remains compatible
+ * with the current timeline-history contract. The newest snapshot is always
+ * retained, even when a single very large timeline exceeds the configured
+ * budget. A future timeline schema can replace snapshots with command patches
+ * without requiring this compatibility guard.
+ */
+function useTimelineHistoryBudget() {
+  useEffect(() => {
+    let previousUndo = useVideoStudioStore.getState().timelineUndoStack;
+    let previousRedo = useVideoStudioStore.getState().timelineRedoStack;
+    let compacting = false;
+    return useVideoStudioStore.subscribe((state) => {
+      if (compacting || (state.timelineUndoStack === previousUndo && state.timelineRedoStack === previousRedo)) return;
+      previousUndo = state.timelineUndoStack;
+      previousRedo = state.timelineRedoStack;
+      const configuredMb = Number(window.localStorage.getItem('omnillm-video-history-budget-mb') || 32);
+      const budget = Math.max(8, Math.min(256, Number.isFinite(configuredMb) ? configuredMb : 32)) * 1024 * 1024;
+      const undo = fitHistoryToBudget(state.timelineUndoStack, Math.round(budget * 0.8));
+      const redo = fitHistoryToBudget(state.timelineRedoStack, Math.round(budget * 0.2));
+      if (undo.length === state.timelineUndoStack.length && redo.length === state.timelineRedoStack.length) return;
+      compacting = true;
+      useVideoStudioStore.setState({ timelineUndoStack: undo, timelineRedoStack: redo });
+      previousUndo = undo;
+      previousRedo = redo;
+      compacting = false;
+    });
+  }, []);
+}
 
 /**
  * Coalesce high-frequency rAF playhead writes while media elements continue
@@ -11,11 +61,8 @@ import { RecordingLab } from './pro/RecordingLab';
  * timeline resets. The original store action is restored on unmount.
  */
 function usePlaybackUpdateCoalescing() {
-  const originalRef = useRef<ReturnType<typeof useVideoStudioStore.getState>['setPlayhead'] | null>(null);
-
   useEffect(() => {
     const original = useVideoStudioStore.getState().setPlayhead;
-    originalRef.current = original;
     let lastCommittedAt = 0;
     let pendingTime: number | null = null;
     let timer: number | null = null;
@@ -72,11 +119,13 @@ function usePlaybackUpdateCoalescing() {
 
 /**
  * Top-level Video Edit Studio runtime. It preserves the accepted editor shell,
- * adds the advanced workflow drawer, installs bounded playback UI updates, and
- * exposes a combined screen/camera/voiceover recording lab.
+ * adds the advanced workflow drawer, installs bounded playback UI updates and
+ * timeline-history memory, and exposes a combined screen/camera/voiceover
+ * recording lab.
  */
 export function VideoEditStudioUltimate() {
   usePlaybackUpdateCoalescing();
+  useTimelineHistoryBudget();
   const activeProjectId = useVideoStudioStore((state) => state.activeProjectId);
   const [recordingOpen, setRecordingOpen] = useState(false);
 
