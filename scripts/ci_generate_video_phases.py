@@ -33,6 +33,13 @@ def load_chunks() -> dict[str, str]:
                 continue
             marker, data = body.split("\n", 1)
             chunks[marker.removeprefix("BOOTSTRAP_XZ_CHUNK_")] = data.strip()
+
+    # A single character was dropped while the third archive segment was
+    # originally written through the contents API. Repair the known boundary
+    # deterministically and validate the full archive below before executing it.
+    chunk_two = chunks.get("02", "")
+    if len(chunk_two) == 11999:
+        chunks["02"] = chunk_two[:6762] + "C" + chunk_two[6762:]
     return chunks
 
 
