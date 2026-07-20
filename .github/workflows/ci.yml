@@ -83,13 +83,8 @@ jobs:
   frontend:
     name: Frontend lint unit and build
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -111,21 +106,6 @@ jobs:
           path: frontend-*.log
           if-no-files-found: ignore
           retention-days: 14
-      - name: Commit generated Video Edit Studio implementation
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/video-renderer-reliability-transcription-scalability-20260720'
-        run: |
-          set -euo pipefail
-          rm -f frontend-generated.log frontend-lint.log frontend-unit.log frontend-build.log
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git diff --cached --check
-          if git diff --cached --quiet; then
-            echo "No generated changes to commit"
-            exit 0
-          fi
-          git commit -m 'feat(video): implement renderer reliability and scalability program'
-          git push origin HEAD:feature/video-renderer-reliability-transcription-scalability-20260720
 
   smoke:
     name: Playwright smoke suite
