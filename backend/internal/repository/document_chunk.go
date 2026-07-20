@@ -1,26 +1,34 @@
 package repository
 
+// File overview: persists document chunks and provides FTS5/BM25 retrieval with a bounded lexical fallback.
+
 import (
 	"database/sql"
 	"fmt"
+	"log"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/ajbergh/omnillm-studio/internal/models"
 	"github.com/google/uuid"
 )
 
-// ChunkRepo handles document chunk persistence.
+// ChunkRepo handles document chunk persistence and FTS5 lexical retrieval.
 type ChunkRepo struct {
 	db *sql.DB
 }
 
-// NewChunkRepo creates a new ChunkRepo.
+// NewChunkRepo creates a chunk repository and ensures the RAG v2/FTS schema is available.
 func NewChunkRepo(db *sql.DB) *ChunkRepo {
+	if err := ensureRAGV2Schema(db); err != nil {
+		log.Printf("[rag] initialize RAG v2 schema: %v", err)
+	}
 	return &ChunkRepo{db: db}
 }
 
-// Create inserts a single document chunk.
+// Create persists one chunk, assigning its ID, timestamps, and default metadata when absent.
 func (r *ChunkRepo) Create(c *models.DocumentChunk) error {
 	if c.ID == "" {
 		c.ID = uuid.New().String()
@@ -29,14 +37,12 @@ func (r *ChunkRepo) Create(c *models.DocumentChunk) error {
 	if c.MetadataJSON == "" {
 		c.MetadataJSON = "{}"
 	}
-
 	_, err := r.db.Exec(`
-		INSERT INTO document_chunks (
-			id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
-			chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
-			chunk_metadata_json, metadata_json, created_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        INSERT INTO document_chunks (
+            id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+            chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+            chunk_metadata_json, metadata_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ID, c.AttachmentID, c.ConversationID, c.LibraryFileID, chunkScopeOrDefault(c.Scope), c.WorkspaceID, c.SourceType,
 		c.ChunkIndex, c.Content, c.CharOffset, c.CharLength, c.TokenCount, c.PageNumber, c.SectionTitle,
 		chunkMetaOrDefault(c.ChunkMetaJSON), c.MetadataJSON, c.CreatedAt,
@@ -47,62 +53,53 @@ func (r *ChunkRepo) Create(c *models.DocumentChunk) error {
 	return nil
 }
 
-// CreateBatch inserts multiple document chunks in a single transaction.
+// CreateBatch persists chunks in one transaction and assigns shared creation timestamps.
 func (r *ChunkRepo) CreateBatch(chunks []models.DocumentChunk) error {
 	if len(chunks) == 0 {
 		return nil
 	}
-
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
-
 	stmt, err := tx.Prepare(`
-		INSERT INTO document_chunks (
-			id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
-			chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
-			chunk_metadata_json, metadata_json, created_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        INSERT INTO document_chunks (
+            id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+            chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+            chunk_metadata_json, metadata_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare stmt: %w", err)
 	}
 	defer stmt.Close()
-
 	now := time.Now().UTC()
-	for i := range chunks {
-		c := &chunks[i]
-		if c.ID == "" {
-			c.ID = uuid.New().String()
+	for index := range chunks {
+		chunk := &chunks[index]
+		if chunk.ID == "" {
+			chunk.ID = uuid.New().String()
 		}
-		c.CreatedAt = now
-		if c.MetadataJSON == "" {
-			c.MetadataJSON = "{}"
+		chunk.CreatedAt = now
+		if chunk.MetadataJSON == "" {
+			chunk.MetadataJSON = "{}"
 		}
-		if c.ChunkMetaJSON == "" {
-			c.ChunkMetaJSON = "{}"
+		if chunk.ChunkMetaJSON == "" {
+			chunk.ChunkMetaJSON = "{}"
 		}
 		if _, err := stmt.Exec(
-			c.ID, c.AttachmentID, c.ConversationID, c.LibraryFileID, chunkScopeOrDefault(c.Scope), c.WorkspaceID, c.SourceType,
-			c.ChunkIndex, c.Content, c.CharOffset, c.CharLength, c.TokenCount, c.PageNumber, c.SectionTitle,
-			c.ChunkMetaJSON, c.MetadataJSON, c.CreatedAt,
+			chunk.ID, chunk.AttachmentID, chunk.ConversationID, chunk.LibraryFileID, chunkScopeOrDefault(chunk.Scope), chunk.WorkspaceID, chunk.SourceType,
+			chunk.ChunkIndex, chunk.Content, chunk.CharOffset, chunk.CharLength, chunk.TokenCount, chunk.PageNumber, chunk.SectionTitle,
+			chunk.ChunkMetaJSON, chunk.MetadataJSON, chunk.CreatedAt,
 		); err != nil {
-			return fmt.Errorf("insert chunk %d: %w", i, err)
+			return fmt.Errorf("insert chunk %d: %w", index, err)
 		}
 	}
-
 	return tx.Commit()
 }
 
-// ListByAttachment returns all chunks for a given attachment.
+// ListByAttachment returns chunks for one attachment in chunk order.
 func (r *ChunkRepo) ListByAttachment(attachmentID string) ([]models.DocumentChunk, error) {
-	rows, err := r.db.Query(`
-		SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
-		       chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
-		       chunk_metadata_json, metadata_json, created_at
-		FROM document_chunks WHERE attachment_id = ? ORDER BY chunk_index ASC`, attachmentID)
+	rows, err := r.db.Query(chunkSelect+` WHERE attachment_id = ? ORDER BY chunk_index ASC`, attachmentID)
 	if err != nil {
 		return nil, fmt.Errorf("list chunks by attachment: %w", err)
 	}
@@ -110,13 +107,9 @@ func (r *ChunkRepo) ListByAttachment(attachmentID string) ([]models.DocumentChun
 	return scanChunks(rows)
 }
 
-// ListByConversation returns all chunks for a given conversation.
+// ListByConversation returns conversation chunks ordered by attachment and chunk index.
 func (r *ChunkRepo) ListByConversation(conversationID string) ([]models.DocumentChunk, error) {
-	rows, err := r.db.Query(`
-		SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
-		       chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
-		       chunk_metadata_json, metadata_json, created_at
-		FROM document_chunks WHERE conversation_id = ? ORDER BY attachment_id, chunk_index ASC`, conversationID)
+	rows, err := r.db.Query(chunkSelect+` WHERE conversation_id = ? ORDER BY attachment_id, chunk_index ASC`, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("list chunks by conversation: %w", err)
 	}
@@ -124,13 +117,9 @@ func (r *ChunkRepo) ListByConversation(conversationID string) ([]models.Document
 	return scanChunks(rows)
 }
 
-// ListByLibraryFileID returns chunks linked to a library file in chunk order.
+// ListByLibraryFileID returns chunks for one File Library record in chunk order.
 func (r *ChunkRepo) ListByLibraryFileID(libraryFileID string) ([]models.DocumentChunk, error) {
-	rows, err := r.db.Query(`
-		SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
-		       chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
-		       chunk_metadata_json, metadata_json, created_at
-		FROM document_chunks WHERE library_file_id = ? ORDER BY chunk_index ASC`, libraryFileID)
+	rows, err := r.db.Query(chunkSelect+` WHERE library_file_id = ? ORDER BY chunk_index ASC`, libraryFileID)
 	if err != nil {
 		return nil, fmt.Errorf("list chunks by library file id: %w", err)
 	}
@@ -138,70 +127,305 @@ func (r *ChunkRepo) ListByLibraryFileID(libraryFileID string) ([]models.Document
 	return scanChunks(rows)
 }
 
-// SearchByLibraryFileIDs performs keyword search over chunk content for a set
-// of library file IDs and returns best matches ordered by newest then chunk.
-func (r *ChunkRepo) SearchByLibraryFileIDs(libraryFileIDs []string, queryText string, limit int) ([]models.DocumentChunk, error) {
-	if len(libraryFileIDs) == 0 {
+// KeywordChunkHit is one BM25 or lexical-fallback candidate. Lower BM25 values
+// are better in SQLite FTS5, so Score is normalized to a positive higher-is-
+// better value before returning.
+type KeywordChunkHit struct {
+	Chunk models.DocumentChunk
+	Score float64
+	Rank  int
+}
+
+// SearchFTSByLibraryFileIDs performs scoped FTS5/BM25 retrieval. It batches file
+// filters to stay below SQLite parameter limits and falls back to tokenized LIKE
+// retrieval when FTS5 is unavailable.
+func (r *ChunkRepo) SearchFTSByLibraryFileIDs(libraryFileIDs []string, queryText string, limit int) ([]KeywordChunkHit, error) {
+	if len(libraryFileIDs) == 0 || strings.TrimSpace(queryText) == "" {
 		return nil, nil
 	}
 	if limit <= 0 {
-		limit = 8
+		limit = 24
+	}
+	ftsQuery := buildFTSQuery(queryText)
+	if ftsQuery == "" {
+		return nil, nil
 	}
 
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(libraryFileIDs)), ",")
-	args := make([]interface{}, 0, len(libraryFileIDs)+2)
-	for _, id := range libraryFileIDs {
-		args = append(args, id)
+	var all []KeywordChunkHit
+	batchSize := maxSQLiteParams - 4
+	for start := 0; start < len(libraryFileIDs); start += batchSize {
+		end := start + batchSize
+		if end > len(libraryFileIDs) {
+			end = len(libraryFileIDs)
+		}
+		batch := libraryFileIDs[start:end]
+		hits, err := r.searchFTSBatch(batch, ftsQuery, limit*3)
+		if err != nil {
+			if isFTSUnavailable(err) {
+				return r.searchLexicalFallback(libraryFileIDs, queryText, limit)
+			}
+			return nil, err
+		}
+		all = append(all, hits...)
 	}
-	args = append(args, "%"+strings.TrimSpace(queryText)+"%", limit)
 
-	rows, err := r.db.Query(fmt.Sprintf(`
-		SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
-		       chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
-		       chunk_metadata_json, metadata_json, created_at
-		FROM document_chunks
-		WHERE library_file_id IN (%s) AND content LIKE ?
-		ORDER BY created_at DESC, chunk_index ASC
-		LIMIT ?`, placeholders), args...)
-	if err != nil {
-		return nil, fmt.Errorf("search chunks by library file ids: %w", err)
+	best := make(map[string]KeywordChunkHit, len(all))
+	for _, hit := range all {
+		if existing, ok := best[hit.Chunk.ID]; !ok || hit.Score > existing.Score {
+			best[hit.Chunk.ID] = hit
+		}
 	}
-	defer rows.Close()
-	return scanChunks(rows)
+	all = all[:0]
+	for _, hit := range best {
+		all = append(all, hit)
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].Score == all[j].Score {
+			return all[i].Chunk.ID < all[j].Chunk.ID
+		}
+		return all[i].Score > all[j].Score
+	})
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	for index := range all {
+		all[index].Rank = index
+	}
+	return all, nil
 }
 
-// maxSQLiteParams is the maximum number of parameters in a single query.
-// SQLite default SQLITE_MAX_VARIABLE_NUMBER is 999; we use 900 for safety.
+// SearchFTSByConversation performs BM25 retrieval over all chunks linked to one
+// conversation. It powers the compatibility Retriever so legacy attachment RAG
+// benefits from the same hybrid lexical/vector pipeline as the File Library.
+func (r *ChunkRepo) SearchFTSByConversation(conversationID, queryText string, limit int) ([]KeywordChunkHit, error) {
+	if strings.TrimSpace(conversationID) == "" || strings.TrimSpace(queryText) == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 24
+	}
+	ftsQuery := buildFTSQuery(queryText)
+	if ftsQuery == "" {
+		return nil, nil
+	}
+	rows, err := r.db.Query(`
+        SELECT c.id, c.attachment_id, c.conversation_id, c.library_file_id, c.scope, c.workspace_id, c.source_type,
+               c.chunk_index, c.content, c.char_offset, c.char_length, c.token_count, c.page_number, c.section_title,
+               c.chunk_metadata_json, c.metadata_json, c.created_at,
+               bm25(document_chunks_fts, 1.0, 2.0) AS rank_score
+        FROM document_chunks_fts
+        JOIN document_chunks c ON c.rowid = document_chunks_fts.rowid
+        WHERE document_chunks_fts MATCH ? AND c.conversation_id = ?
+        ORDER BY rank_score ASC
+        LIMIT ?`, ftsQuery, conversationID, limit)
+	if err != nil {
+		if isFTSUnavailable(err) {
+			return r.searchConversationLexicalFallback(conversationID, queryText, limit)
+		}
+		return nil, fmt.Errorf("search conversation chunks fts: %w", err)
+	}
+	defer rows.Close()
+	var hits []KeywordChunkHit
+	for rows.Next() {
+		chunk, rankScore, err := scanChunkWithScore(rows)
+		if err != nil {
+			return nil, err
+		}
+		score := 1.0 / (1.0 + absFloat(rankScore))
+		if rankScore < 0 {
+			score = 1.0 + absFloat(rankScore)
+		}
+		hits = append(hits, KeywordChunkHit{Chunk: chunk, Score: score})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for index := range hits {
+		hits[index].Rank = index
+	}
+	return hits, nil
+}
+
+func (r *ChunkRepo) searchConversationLexicalFallback(conversationID, queryText string, limit int) ([]KeywordChunkHit, error) {
+	terms := lexicalTerms(queryText)
+	if len(terms) == 0 {
+		return nil, nil
+	}
+	conditions := make([]string, len(terms))
+	args := make([]any, 0, len(terms)+2)
+	args = append(args, conversationID)
+	for index, term := range terms {
+		conditions[index] = "LOWER(content) LIKE ?"
+		args = append(args, "%"+strings.ToLower(term)+"%")
+	}
+	args = append(args, limit*3)
+	query := fmt.Sprintf(`
+        SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+               chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+               chunk_metadata_json, metadata_json, created_at
+        FROM document_chunks
+        WHERE conversation_id = ? AND (%s)
+        LIMIT ?`, strings.Join(conditions, " OR "))
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search conversation chunks fallback: %w", err)
+	}
+	chunks, err := scanChunks(rows)
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	hits := make([]KeywordChunkHit, 0, len(chunks))
+	for _, chunk := range chunks {
+		hits = append(hits, KeywordChunkHit{Chunk: chunk, Score: lexicalMatchScore(chunk.Content, terms)})
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].Score == hits[j].Score {
+			return hits[i].Chunk.ID < hits[j].Chunk.ID
+		}
+		return hits[i].Score > hits[j].Score
+	})
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	for index := range hits {
+		hits[index].Rank = index
+	}
+	return hits, nil
+}
+
+func (r *ChunkRepo) searchFTSBatch(fileIDs []string, ftsQuery string, limit int) ([]KeywordChunkHit, error) {
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(fileIDs)), ",")
+	args := make([]any, 0, len(fileIDs)+2)
+	args = append(args, ftsQuery)
+	for _, id := range fileIDs {
+		args = append(args, id)
+	}
+	args = append(args, limit)
+	query := fmt.Sprintf(`
+        SELECT c.id, c.attachment_id, c.conversation_id, c.library_file_id, c.scope, c.workspace_id, c.source_type,
+               c.chunk_index, c.content, c.char_offset, c.char_length, c.token_count, c.page_number, c.section_title,
+               c.chunk_metadata_json, c.metadata_json, c.created_at,
+               bm25(document_chunks_fts, 1.0, 2.0) AS rank_score
+        FROM document_chunks_fts
+        JOIN document_chunks c ON c.rowid = document_chunks_fts.rowid
+        WHERE document_chunks_fts MATCH ?
+          AND c.library_file_id IN (%s)
+        ORDER BY rank_score ASC
+        LIMIT ?`, placeholders)
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search chunks fts: %w", err)
+	}
+	defer rows.Close()
+	var hits []KeywordChunkHit
+	for rows.Next() {
+		chunk, rankScore, err := scanChunkWithScore(rows)
+		if err != nil {
+			return nil, err
+		}
+		// FTS5 bm25 is usually negative for strong matches. Convert it into a
+		// monotonic positive score without relying on cross-query calibration.
+		score := 1.0 / (1.0 + absFloat(rankScore))
+		if rankScore < 0 {
+			score = 1.0 + absFloat(rankScore)
+		}
+		hits = append(hits, KeywordChunkHit{Chunk: chunk, Score: score})
+	}
+	return hits, rows.Err()
+}
+
+// SearchByLibraryFileIDs retains the historical API but now uses FTS5/BM25.
+func (r *ChunkRepo) SearchByLibraryFileIDs(libraryFileIDs []string, queryText string, limit int) ([]models.DocumentChunk, error) {
+	hits, err := r.SearchFTSByLibraryFileIDs(libraryFileIDs, queryText, limit)
+	if err != nil {
+		return nil, err
+	}
+	chunks := make([]models.DocumentChunk, len(hits))
+	for index := range hits {
+		chunks[index] = hits[index].Chunk
+	}
+	return chunks, nil
+}
+
+func (r *ChunkRepo) searchLexicalFallback(libraryFileIDs []string, queryText string, limit int) ([]KeywordChunkHit, error) {
+	terms := lexicalTerms(queryText)
+	if len(terms) == 0 {
+		return nil, nil
+	}
+	batchSize := maxSQLiteParams - len(terms) - 2
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	var hits []KeywordChunkHit
+	for start := 0; start < len(libraryFileIDs); start += batchSize {
+		end := start + batchSize
+		if end > len(libraryFileIDs) {
+			end = len(libraryFileIDs)
+		}
+		batch := libraryFileIDs[start:end]
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(batch)), ",")
+		conditions := make([]string, len(terms))
+		args := make([]any, 0, len(batch)+len(terms)+1)
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		for index, term := range terms {
+			conditions[index] = "LOWER(content) LIKE ?"
+			args = append(args, "%"+strings.ToLower(term)+"%")
+		}
+		args = append(args, limit*3)
+		query := fmt.Sprintf(`
+            SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+                   chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+                   chunk_metadata_json, metadata_json, created_at
+            FROM document_chunks
+            WHERE library_file_id IN (%s) AND (%s)
+            LIMIT ?`, placeholders, strings.Join(conditions, " OR "))
+		rows, err := r.db.Query(query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("search chunks fallback: %w", err)
+		}
+		chunks, err := scanChunks(rows)
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		for _, chunk := range chunks {
+			score := lexicalMatchScore(chunk.Content, terms)
+			hits = append(hits, KeywordChunkHit{Chunk: chunk, Score: score})
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	for index := range hits {
+		hits[index].Rank = index
+	}
+	return hits, nil
+}
+
 const maxSQLiteParams = 900
 
-// GetByIDs returns chunks matching the given IDs, batching to stay within
-// SQLite's parameter limit.
+// GetByIDs returns existing chunks for the supplied IDs without requiring input-order preservation.
 func (r *ChunkRepo) GetByIDs(ids []string) ([]models.DocumentChunk, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-
 	var allResults []models.DocumentChunk
-	for i := 0; i < len(ids); i += maxSQLiteParams {
-		end := i + maxSQLiteParams
+	for start := 0; start < len(ids); start += maxSQLiteParams {
+		end := start + maxSQLiteParams
 		if end > len(ids) {
 			end = len(ids)
 		}
-		batch := ids[i:end]
-
-		placeholders := strings.Repeat("?,", len(batch))
-		placeholders = placeholders[:len(placeholders)-1]
-
-		args := make([]interface{}, len(batch))
-		for j, id := range batch {
-			args[j] = id
+		batch := ids[start:end]
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(batch)), ",")
+		args := make([]any, len(batch))
+		for index, id := range batch {
+			args[index] = id
 		}
-
-		rows, err := r.db.Query(fmt.Sprintf(`
-		SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
-		       chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
-		       chunk_metadata_json, metadata_json, created_at
-		FROM document_chunks WHERE id IN (%s) ORDER BY chunk_index ASC`, placeholders), args...)
+		rows, err := r.db.Query(chunkSelect+fmt.Sprintf(` WHERE id IN (%s) ORDER BY chunk_index ASC`, placeholders), args...)
 		if err != nil {
 			return nil, fmt.Errorf("get chunks by ids: %w", err)
 		}
@@ -215,7 +439,7 @@ func (r *ChunkRepo) GetByIDs(ids []string) ([]models.DocumentChunk, error) {
 	return allResults, nil
 }
 
-// DeleteByAttachment removes all chunks for an attachment.
+// DeleteByAttachment removes all relational chunks associated with an attachment.
 func (r *ChunkRepo) DeleteByAttachment(attachmentID string) error {
 	_, err := r.db.Exec("DELETE FROM document_chunks WHERE attachment_id = ?", attachmentID)
 	if err != nil {
@@ -224,7 +448,7 @@ func (r *ChunkRepo) DeleteByAttachment(attachmentID string) error {
 	return nil
 }
 
-// DeleteByConversation removes all chunks for a conversation.
+// DeleteByConversation removes all relational chunks associated with a conversation.
 func (r *ChunkRepo) DeleteByConversation(conversationID string) error {
 	_, err := r.db.Exec("DELETE FROM document_chunks WHERE conversation_id = ?", conversationID)
 	if err != nil {
@@ -233,7 +457,7 @@ func (r *ChunkRepo) DeleteByConversation(conversationID string) error {
 	return nil
 }
 
-// DeleteByLibraryFileID removes all chunks for a library file.
+// DeleteByLibraryFileID removes all relational chunks associated with a File Library record.
 func (r *ChunkRepo) DeleteByLibraryFileID(libraryFileID string) error {
 	_, err := r.db.Exec("DELETE FROM document_chunks WHERE library_file_id = ?", libraryFileID)
 	if err != nil {
@@ -242,8 +466,7 @@ func (r *ChunkRepo) DeleteByLibraryFileID(libraryFileID string) error {
 	return nil
 }
 
-// DistinctConversationIDsWithChunks returns the unique conversation IDs that
-// currently have at least one document chunk in SQLite.
+// DistinctConversationIDsWithChunks lists conversation IDs that currently own persisted chunks.
 func (r *ChunkRepo) DistinctConversationIDsWithChunks() ([]string, error) {
 	rows, err := r.db.Query(`SELECT DISTINCT conversation_id FROM document_chunks`)
 	if err != nil {
@@ -261,56 +484,157 @@ func (r *ChunkRepo) DistinctConversationIDsWithChunks() ([]string, error) {
 	return ids, rows.Err()
 }
 
-// CountByAttachment returns the number of chunks for an attachment.
+// CountByAttachment returns the persisted chunk count for one attachment.
 func (r *ChunkRepo) CountByAttachment(attachmentID string) (int, error) {
 	var count int
 	err := r.db.QueryRow("SELECT COUNT(*) FROM document_chunks WHERE attachment_id = ?", attachmentID).Scan(&count)
 	return count, err
 }
 
+const chunkSelect = `
+SELECT id, attachment_id, conversation_id, library_file_id, scope, workspace_id, source_type,
+       chunk_index, content, char_offset, char_length, token_count, page_number, section_title,
+       chunk_metadata_json, metadata_json, created_at
+FROM document_chunks`
+
 func scanChunks(rows *sql.Rows) ([]models.DocumentChunk, error) {
 	var chunks []models.DocumentChunk
 	for rows.Next() {
-		var c models.DocumentChunk
-		var libraryFileID sql.NullString
-		var scope sql.NullString
-		var workspaceID sql.NullString
-		var sourceType sql.NullString
-		var pageNumber sql.NullInt64
-		var sectionTitle sql.NullString
-		var chunkMetaJSON sql.NullString
-		if err := rows.Scan(
-			&c.ID, &c.AttachmentID, &c.ConversationID, &libraryFileID, &scope, &workspaceID, &sourceType,
-			&c.ChunkIndex, &c.Content, &c.CharOffset, &c.CharLength, &c.TokenCount, &pageNumber, &sectionTitle,
-			&chunkMetaJSON, &c.MetadataJSON, &c.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan chunk: %w", err)
+		chunk, err := scanChunk(rows)
+		if err != nil {
+			return nil, err
 		}
-		if libraryFileID.Valid {
-			c.LibraryFileID = &libraryFileID.String
-		}
-		if scope.Valid {
-			c.Scope = &scope.String
-		}
-		if workspaceID.Valid {
-			c.WorkspaceID = &workspaceID.String
-		}
-		if sourceType.Valid {
-			c.SourceType = &sourceType.String
-		}
-		if pageNumber.Valid {
-			v := int(pageNumber.Int64)
-			c.PageNumber = &v
-		}
-		if sectionTitle.Valid {
-			c.SectionTitle = &sectionTitle.String
-		}
-		if chunkMetaJSON.Valid {
-			c.ChunkMetaJSON = chunkMetaJSON.String
-		}
-		chunks = append(chunks, c)
+		chunks = append(chunks, chunk)
 	}
 	return chunks, rows.Err()
+}
+
+type chunkRowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanChunk(row chunkRowScanner) (models.DocumentChunk, error) {
+	var chunk models.DocumentChunk
+	var libraryFileID, scope, workspaceID, sourceType, sectionTitle, chunkMetaJSON sql.NullString
+	var pageNumber sql.NullInt64
+	if err := row.Scan(
+		&chunk.ID, &chunk.AttachmentID, &chunk.ConversationID, &libraryFileID, &scope, &workspaceID, &sourceType,
+		&chunk.ChunkIndex, &chunk.Content, &chunk.CharOffset, &chunk.CharLength, &chunk.TokenCount, &pageNumber, &sectionTitle,
+		&chunkMetaJSON, &chunk.MetadataJSON, &chunk.CreatedAt,
+	); err != nil {
+		return models.DocumentChunk{}, fmt.Errorf("scan chunk: %w", err)
+	}
+	applyNullableChunkFields(&chunk, libraryFileID, scope, workspaceID, sourceType, pageNumber, sectionTitle, chunkMetaJSON)
+	return chunk, nil
+}
+
+func scanChunkWithScore(row chunkRowScanner) (models.DocumentChunk, float64, error) {
+	var chunk models.DocumentChunk
+	var libraryFileID, scope, workspaceID, sourceType, sectionTitle, chunkMetaJSON sql.NullString
+	var pageNumber sql.NullInt64
+	var score float64
+	if err := row.Scan(
+		&chunk.ID, &chunk.AttachmentID, &chunk.ConversationID, &libraryFileID, &scope, &workspaceID, &sourceType,
+		&chunk.ChunkIndex, &chunk.Content, &chunk.CharOffset, &chunk.CharLength, &chunk.TokenCount, &pageNumber, &sectionTitle,
+		&chunkMetaJSON, &chunk.MetadataJSON, &chunk.CreatedAt, &score,
+	); err != nil {
+		return models.DocumentChunk{}, 0, fmt.Errorf("scan chunk with score: %w", err)
+	}
+	applyNullableChunkFields(&chunk, libraryFileID, scope, workspaceID, sourceType, pageNumber, sectionTitle, chunkMetaJSON)
+	return chunk, score, nil
+}
+
+func applyNullableChunkFields(chunk *models.DocumentChunk, libraryFileID, scope, workspaceID, sourceType sql.NullString, pageNumber sql.NullInt64, sectionTitle, chunkMetaJSON sql.NullString) {
+	if libraryFileID.Valid {
+		chunk.LibraryFileID = &libraryFileID.String
+	}
+	if scope.Valid {
+		chunk.Scope = &scope.String
+	}
+	if workspaceID.Valid {
+		chunk.WorkspaceID = &workspaceID.String
+	}
+	if sourceType.Valid {
+		chunk.SourceType = &sourceType.String
+	}
+	if pageNumber.Valid {
+		value := int(pageNumber.Int64)
+		chunk.PageNumber = &value
+	}
+	if sectionTitle.Valid {
+		chunk.SectionTitle = &sectionTitle.String
+	}
+	if chunkMetaJSON.Valid {
+		chunk.ChunkMetaJSON = chunkMetaJSON.String
+	}
+}
+
+func buildFTSQuery(query string) string {
+	terms := lexicalTerms(query)
+	if len(terms) == 0 {
+		return ""
+	}
+	parts := make([]string, len(terms))
+	for index, term := range terms {
+		term = strings.ReplaceAll(term, `"`, `""`)
+		parts[index] = `"` + term + `"`
+	}
+	return strings.Join(parts, " OR ")
+}
+
+func lexicalTerms(query string) []string {
+	fields := strings.FieldsFunc(query, func(r rune) bool {
+		return !(unicode.IsLetter(r) || unicode.IsNumber(r) || r == '_' || r == '-' || r == '.')
+	})
+	seen := make(map[string]struct{}, len(fields))
+	terms := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if len([]rune(field)) < 2 {
+			continue
+		}
+		key := strings.ToLower(field)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		terms = append(terms, field)
+		if len(terms) >= 16 {
+			break
+		}
+	}
+	return terms
+}
+
+func lexicalMatchScore(content string, terms []string) float64 {
+	lower := strings.ToLower(content)
+	matches := 0
+	for _, term := range terms {
+		if strings.Contains(lower, strings.ToLower(term)) {
+			matches++
+		}
+	}
+	if len(terms) == 0 {
+		return 0
+	}
+	return float64(matches) / float64(len(terms))
+}
+
+func isFTSUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "no such table: document_chunks_fts") ||
+		strings.Contains(message, "no such module: fts5") ||
+		strings.Contains(message, "unable to use function bm25")
+}
+
+func absFloat(value float64) float64 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func chunkMetaOrDefault(meta string) string {

@@ -3,6 +3,7 @@ package rag
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/ajbergh/omnillm-studio/internal/llm"
@@ -40,7 +41,7 @@ func TestNewLLMEmbeddingFunc_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 3 || got[0] != 0.1 {
+	if len(got) != 3 || math.Abs(float64(got[0])-0.26726124) > 1e-6 {
 		t.Fatalf("unexpected embedding: %v", got)
 	}
 	if svc.calls != 1 {
@@ -59,7 +60,7 @@ func TestNewLLMEmbeddingFunc_RetryOnTransient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected retry to succeed, got error: %v", err)
 	}
-	if len(got) != 1 || got[0] != 0.5 {
+	if len(got) != 1 || math.Abs(float64(got[0])-1.0) > 1e-6 {
 		t.Fatalf("unexpected embedding: %v", got)
 	}
 	if svc.calls != 2 {

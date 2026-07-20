@@ -178,6 +178,8 @@ Prefer a native desktop window, helper scripts, containers, or Kubernetes? Jump 
 
 - [Technical reference](docs/TECHNICAL_REFERENCE.md) — models, architecture, API routes, environment variables, builds, and deployment
 - [Feature FAQ](docs/Feature%20FAQ.md) — how the major capabilities behave in practice
+- [RAG modernization architecture](docs/RAG_MODERNIZATION.md) — hybrid retrieval, embedding isolation, safe rebuilds, and optional vector backends
+- [RAG implementation status](docs/RAG_MODERNIZATION_STATUS.md) — default runtime versus implemented opt-in components
 - [MCP guide and FAQ](docs/MCP_HOW_TO_FAQ.md) — connect external tool servers to chat and agent workflows
 
 ### Video creation and editing
@@ -195,7 +197,7 @@ Prefer a native desktop window, helper scripts, containers, or Kubernetes? Jump 
 
 ## Under the hood
 
-OmniLLM-Studio pairs a Go backend with a React and TypeScript interface, SQLite persistence, streaming responses, encrypted secrets, an embedded vector store, and FFmpeg-powered media rendering. It can run as a Wails desktop app, a headless web service, or a single-replica Kubernetes deployment.
+OmniLLM-Studio pairs a Go backend with a React and TypeScript interface, SQLite persistence and FTS5 retrieval, embedding-space-isolated chromem vector collections, streaming responses, encrypted secrets, and FFmpeg-powered media rendering. It can run as a Wails desktop app, a headless web service, or a single-replica Kubernetes deployment.
 
 That is the short version. The diagrams, API surface, data model, environment variables, provider matrices, build scripts, and deployment details now live in the [technical reference](docs/TECHNICAL_REFERENCE.md).
 

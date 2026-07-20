@@ -1,22 +1,16 @@
 package api
 
+// File overview: centralizes attachment MIME eligibility and structure-preserving text extraction for conversation RAG indexing.
+
 import (
-	"archive/zip"
-	"bytes"
-	"encoding/xml"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 
-	"github.com/ledongthuc/pdf"
+	"github.com/ajbergh/omnillm-studio/internal/document"
 )
 
 func normalizeMIMEType(mime string) string {
-	if i := strings.Index(mime, ";"); i >= 0 {
-		mime = mime[:i]
-	}
-	return strings.TrimSpace(strings.ToLower(mime))
+	return document.NormalizeMIMEType(mime)
 }
 
 func isPDFMIME(mime string) bool {
@@ -35,160 +29,38 @@ func isPptxMIME(mime string) bool {
 	return normalizeMIMEType(mime) == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 }
 
-// canExtractAttachmentText reports whether we can derive text content
-// suitable for LLM prompt context or RAG chunking.
+// canExtractAttachmentText reports whether a pure-Go parser can derive text
+// suitable for prompt context and RAG chunking.
 func canExtractAttachmentText(mime string) bool {
-	return isTextMIME(mime) || isPDFMIME(mime) || isDocxMIME(mime) || isXlsxMIME(mime) || isPptxMIME(mime)
+	m := normalizeMIMEType(mime)
+	return document.IsTextMIME(m) || isPDFMIME(m) || isDocxMIME(m) || isXlsxMIME(m) || isPptxMIME(m) || m == "application/xhtml+xml"
 }
 
-// extractAttachmentText returns extracted text for text-like attachments.
 func extractAttachmentText(path, mime string) (string, error) {
-	if isTextMIME(mime) {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
+	if !canExtractAttachmentText(mime) {
+		return "", fmt.Errorf("unsupported attachment mime type: %s", mime)
 	}
-
-	if isPDFMIME(mime) {
-		return extractPDFText(path)
-	}
-
-	if isDocxMIME(mime) {
-		return extractDocxText(path)
-	}
-
-	if isXlsxMIME(mime) {
-		return extractXlsxText(path)
-	}
-
-	if isPptxMIME(mime) {
-		return extractPptxText(path)
-	}
-
-	return "", fmt.Errorf("unsupported attachment mime type: %s", mime)
+	return document.ExtractFileText(path, mime)
 }
 
 func extractPDFText(path string) (string, error) {
-	f, r, err := pdf.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open pdf: %w", err)
-	}
-	defer f.Close()
-
-	plainTextReader, err := r.GetPlainText()
-	if err != nil {
-		return "", fmt.Errorf("extract pdf text: %w", err)
-	}
-
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, plainTextReader); err != nil {
-		return "", fmt.Errorf("read extracted pdf text: %w", err)
-	}
-
-	text := strings.TrimSpace(buf.String())
-	if text == "" {
-		return "", fmt.Errorf("pdf has no extractable text")
-	}
-
-	return text, nil
-}
-
-// extractOOXMLText extracts all text runs from a named XML entry inside an
-// OOXML (ZIP-based) file. The caller supplies the list of entry names to check
-// (e.g. "word/document.xml" for docx) and the XML element name that wraps
-// individual text runs (e.g. "t" for Word/PowerPoint, "v" for Excel).
-func extractOOXMLText(zipPath string, entries []string, runElement string) (string, error) {
-	r, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return "", fmt.Errorf("open zip: %w", err)
-	}
-	defer r.Close()
-
-	var sb strings.Builder
-	for _, f := range r.File {
-		matched := false
-		for _, e := range entries {
-			if f.Name == e {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			continue
-		}
-
-		rc, err := f.Open()
-		if err != nil {
-			continue
-		}
-		data, err := io.ReadAll(rc)
-		rc.Close()
-		if err != nil {
-			continue
-		}
-
-		dec := xml.NewDecoder(bytes.NewReader(data))
-		inRun := false
-		for {
-			tok, err := dec.Token()
-			if err != nil {
-				break
-			}
-			switch t := tok.(type) {
-			case xml.StartElement:
-				if t.Name.Local == runElement {
-					inRun = true
-				}
-			case xml.EndElement:
-				if t.Name.Local == runElement {
-					inRun = false
-				}
-			case xml.CharData:
-				if inRun {
-					sb.Write(t)
-					sb.WriteByte(' ')
-				}
-			}
-		}
-		sb.WriteByte('\n')
-	}
-
-	text := strings.TrimSpace(sb.String())
-	if text == "" {
-		return "", fmt.Errorf("document has no extractable text")
-	}
-	return text, nil
+	return document.ExtractFileText(path, "application/pdf")
 }
 
 func extractDocxText(path string) (string, error) {
-	return extractOOXMLText(path, []string{"word/document.xml"}, "t")
+	return document.ExtractFileText(path, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 }
 
 func extractXlsxText(path string) (string, error) {
-	// Shared strings table holds most cell text values in xlsx
-	return extractOOXMLText(path, []string{"xl/sharedStrings.xml"}, "t")
+	return document.ExtractFileText(path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 }
 
 func extractPptxText(path string) (string, error) {
-	// Collect all slide XML files from ppt/slides/
-	r, err := zip.OpenReader(path)
-	if err != nil {
-		return "", fmt.Errorf("open zip: %w", err)
-	}
-	defer r.Close()
+	return document.ExtractFileText(path, "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+}
 
-	var slideEntries []string
-	for _, f := range r.File {
-		if strings.HasPrefix(f.Name, "ppt/slides/slide") && strings.HasSuffix(f.Name, ".xml") {
-			slideEntries = append(slideEntries, f.Name)
-		}
-	}
-	r.Close()
-
-	if len(slideEntries) == 0 {
-		return "", fmt.Errorf("no slides found in presentation")
-	}
-	return extractOOXMLText(path, slideEntries, "t")
+// normalizeExtractedText is retained for callers/tests that need a stable
+// whitespace-normalized comparison.
+func normalizeExtractedText(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
