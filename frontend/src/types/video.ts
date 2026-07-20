@@ -420,6 +420,8 @@ export interface VideoExportSettings {
   range_end_ms?: number;
   /** Audio bitrate override in kbps (32–512). */
   audio_bitrate_kbps?: number;
+  priority?: number;
+  workspace_id?: string;
 }
 
 export interface VideoRenderJob {

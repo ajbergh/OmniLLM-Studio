@@ -280,12 +280,15 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	videoAssetRepo := repository.NewVideoAssetRepo(database)
 	videoTimelineRepo := repository.NewVideoTimelineRepo(database)
 	videoRenderJobRepo := repository.NewVideoRenderJobRepo(database)
+	videoTranscriptRepo := repository.NewVideoTranscriptionRepo(database)
 	videoService := video.NewService(videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, providerRepo, cfg.AttachmentsDir, llmService)
 	videoService.ConfigureExternalAssetSources(libraryFileRepo, musicSessionRepo, musicAssetRepo, imgAssetRepo, attachRepo, convoRepo, cfg.AttachmentsDir)
 	videoHandler := NewVideoHandler(videoService, videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, convoRepo, attachRepo, fileLibrarySvc, cfg.AttachmentsDir)
+	videoTranscriptionService := video.NewVideoTranscriptionService(videoTranscriptRepo, providerRepo, videoProjectRepo, videoAssetRepo, cfg.AttachmentsDir)
+	videoTranscriptionHandler := NewVideoTranscriptionHandler(videoTranscriptionService)
 	// Resume any generation poll goroutines that were in-flight when the server last stopped.
 	go videoService.RecoverPendingGenerations()
-	go videoService.RecoverInterruptedRenderJobs()
+	go videoService.RecoverInterruptedRenderJobsDurable()
 	crossoverHandler := NewCrossoverHandler(llmService, providerRepo)
 
 	// Complete Agent Runtime composition after Studio services exist.
@@ -321,6 +324,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	})
 
 	shutdownFns = append(shutdownFns,
+		videoService.Shutdown,
 		taskScheduler.Shutdown,
 		jobManager.Shutdown,
 		func(ctx context.Context) error {
@@ -510,6 +514,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 					r.Put("/timeline", videoHandler.SaveTimeline)
 					r.Post("/timeline/import-asset", videoHandler.ImportAssetToTimeline)
 					r.Post("/render", videoHandler.StartRender)
+					r.Get("/transcriptions", videoTranscriptionHandler.List)
+					r.Post("/transcriptions", videoTranscriptionHandler.Start)
 					r.Post("/assistant/storyboard", videoHandler.AssistantStoryboard)
 					r.Post("/assistant/timeline-plan", videoHandler.AssistantTimelinePlan)
 					r.Post("/assistant/edit-plan", videoHandler.AssistantEditPlan)
@@ -527,6 +533,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Post("/video/render-jobs/{jobId}/cancel", videoHandler.CancelRenderJob)
 			r.Delete("/video/render-jobs/{jobId}", videoHandler.DeleteRenderJob)
 			r.Get("/video/render/capabilities", videoHandler.RendererCapabilities)
+			r.Get("/video/transcriptions/{transcriptId}", videoTranscriptionHandler.Get)
+			r.Post("/video/transcriptions/{transcriptId}/captions", videoTranscriptionHandler.Captions)
 			r.Get("/video/assets/{assetId}", videoHandler.GetAsset)
 			r.Patch("/video/assets/{assetId}", videoHandler.UpdateAsset)
 			r.Get("/video/assets/{assetId}/download", videoHandler.DownloadAsset)

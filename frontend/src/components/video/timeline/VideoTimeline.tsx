@@ -163,6 +163,7 @@ export function VideoTimeline() {
   const [menu, setMenu] = useState<TimelineMenuState | null>(null);
   const [dialog, setDialog] = useState<TimelineDialogState | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [visibleWindow, setVisibleWindow] = useState({ start: 0, end: 60_000 });
   const marqueeRef = useRef<{ startX: number; startY: number; moved: boolean } | null>(null);
   const [marqueeRect, setMarqueeRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
@@ -609,6 +610,8 @@ export function VideoTimeline() {
             onFadeClip={(clipId, fade) => { void updateClipFade(clipId, fade); }}
             onUpdateClipKeyframe={(clipId, keyframeId, patch) => { void updateKeyframe(clipId, keyframeId, patch); }}
             onTransitionContextMenu={(clipId, trackId, x, y) => setMenu({ kind: 'transition', clipId, trackId, x, y })}
+            visibleStartMs={visibleWindow.start}
+            visibleEndMs={visibleWindow.end}
             onHeaderContextMenu={(trackId, x, y) => setMenu({ kind: 'track', trackId, x, y })}
             onLaneContextMenu={(trackId, timeMs, x, y) => setMenu({ kind: 'lane', trackId, timeMs, x, y })}
           />

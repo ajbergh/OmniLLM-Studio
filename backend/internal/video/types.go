@@ -230,4 +230,8 @@ type ExportSettings struct {
 	RangeEndMS   int64 `json:"range_end_ms,omitempty"`
 	// AudioBitrateKbps overrides the encoder's default audio bitrate (32–512).
 	AudioBitrateKbps int `json:"audio_bitrate_kbps,omitempty"`
+	// Priority controls scheduler ordering; higher values render first (-100..100).
+	Priority int `json:"priority,omitempty"`
+	// WorkspaceID applies per-workspace render admission when supplied.
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }

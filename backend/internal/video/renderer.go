@@ -643,6 +643,7 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 				"asetpts=PTS-STARTPTS",
 			}
 			chain = append(chain, atempoFilters(clipPlaybackRate(rc.clip))...)
+			chain = append(chain, timelineAudioProcessingFilters(doc.Metadata)...)
 			// Volume keyframes override the static volume (matching the preview).
 			// The retimed stream starts at 0, so keyframe time is `t` directly.
 			if expr := positionKeyframeExpr(rc.clip.Keyframes, "volume", 0); expr != "" {
