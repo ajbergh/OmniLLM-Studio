@@ -1122,6 +1122,32 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 			resultLimitReached := false
 			for _, tc := range finalToolCalls {
+				if resultLimitReached {
+					limitMessage := "Tool was not executed because this turn reached the tool result context limit."
+					skipped := tools.ToolResult{
+						ToolCallID: tc.ID,
+						Content:    limitMessage,
+						IsError:    true,
+						Metadata: map[string]interface{}{
+							"error_code": "TOOL_RESULT_LIMIT",
+							"retryable":  false,
+							"tool_name":  tc.Function.Name,
+						},
+					}
+					toolResults = append(toolResults, skipped)
+					sendSSE(w, flusher, "tool_result", map[string]interface{}{
+						"tool_call_id": tc.ID,
+						"tool_name":    tc.Function.Name,
+						"result":       skipped,
+					})
+					llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
+						Role:       "tool",
+						Content:    limitMessage,
+						ToolCallID: tc.ID,
+						Name:       tc.Function.Name,
+					})
+					continue
+				}
 				toolCtx := browser.WithProviderType(r.Context(), providerType)
 				toolCtx = browser.WithProgress(toolCtx, func(event string, payload any) {
 					sendSSE(w, flusher, event, payload)
@@ -1201,7 +1227,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 					Name:       tc.Function.Name,
 				})
 				if resultLimitReached {
-					break
+					continue
 				}
 			}
 

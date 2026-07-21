@@ -416,7 +416,7 @@ export const api = {
             case 'tool_timed_out':
             case 'tool_loop_limit':
             case 'tool_result_limit':
-              callbacks.onToolEvent?.(payload);
+              callbacks.onToolEvent?.({ ...payload, type: payload.type || eventType });
               break;
             case 'error':
               reportError(payload.error || 'Unknown error', { code: payload.code, retryable: payload.retryable });
