@@ -4,13 +4,22 @@ on:
   push:
     branches:
       - fix/chat-tool-lifecycle-reliability-20260721
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      (github.event_name == 'push' || github.event.pull_request.head.ref == 'fix/chat-tool-lifecycle-reliability-20260721')
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
