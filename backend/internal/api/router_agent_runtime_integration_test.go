@@ -18,7 +18,11 @@ import (
 
 func newAgentRuntimeRouterTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
+	// A SQLite :memory: database is private to each physical connection. The
+	// production connection pool may open another connection during router
+	// composition, especially under -race, which would observe an empty schema.
+	// Use a temporary file so every pooled connection shares one migrated DB.
+	database, err := db.Open(filepath.Join(t.TempDir(), "agent-runtime-router.db"))
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
 	}
