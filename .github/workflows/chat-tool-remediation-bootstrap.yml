@@ -85,6 +85,7 @@ jobs:
           path.write_text(content, encoding='utf-8')
           PY
           python /tmp/remediate_chat_tools.py 2>&1 | tee bootstrap-apply.log
+          rm -f backend/internal/tools/executor_policy.go
 
       - name: Format Go sources
         shell: bash
@@ -98,7 +99,6 @@ jobs:
             backend/internal/tools/approval_broker.go \
             backend/internal/tools/approval_broker_pending.go \
             backend/internal/tools/executor.go \
-            backend/internal/tools/executor_policy.go \
             backend/internal/tools/inline_approval.go \
             backend/internal/tools/inline_approval_test.go \
             backend/internal/tools/types.go 2>&1 | tee bootstrap-format.log
