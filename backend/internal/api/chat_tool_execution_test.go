@@ -118,21 +118,27 @@ func TestNewChatToolExecutionUsesPolicyAwarePlan(t *testing.T) {
 	}
 }
 
-func TestExecuteGenericChatToolRoundPreservesResultOrder(t *testing.T) {
+func TestExecuteChatToolStepPreservesResultOrder(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.MustRegister(chatExecutionTestTool{name: "read_a", readOnly: true, supportsParallel: true})
 	registry.MustRegister(chatExecutionTestTool{name: "read_b", readOnly: true, supportsParallel: true})
 	executor := tools.NewExecutor(registry, nil, 0)
-	calls := []llm.ToolCall{
+	execution := newChatToolExecution(executor, []llm.ToolCall{
 		llmTestToolCall("call-a", "read_a", `{}`),
 		llmTestToolCall("call-b", "read_b", `{}`),
+	})
+	if len(execution.Plan) != 1 || !execution.Plan[0].Parallel {
+		t.Fatalf("parallel plan = %#v", execution.Plan)
 	}
 
-	results, ok := executeGenericChatToolRound(context.Background(), executor, calls)
-	if !ok {
-		t.Fatal("expected generic tool round to execute through ordered runtime")
-	}
+	results := executeChatToolStep(context.Background(), executor, execution.Plan[0])
 	if len(results) != 2 || results[0].ToolCallID != "call-a" || results[0].Content != "read_a" || results[1].ToolCallID != "call-b" || results[1].Content != "read_b" {
 		t.Fatalf("ordered results = %#v", results)
+	}
+}
+
+func TestExecuteChatToolStepReturnsNilForEmptyInput(t *testing.T) {
+	if results := executeChatToolStep(context.Background(), nil, tools.ExecutionStep{}); results != nil {
+		t.Fatalf("nil executor results = %#v", results)
 	}
 }
