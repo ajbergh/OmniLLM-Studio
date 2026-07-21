@@ -10,7 +10,8 @@ export interface IndexedTimelineClip {
   track: VideoTimelineTrack;
   trackIndex: number;
   asset?: VideoAsset;
-  endMs: number;
+  /** Cached interval end. Optional so preview-layer projections remain assignable. */
+  endMs?: number;
 }
 
 export interface TimelineIntervalIndex {
@@ -30,6 +31,10 @@ function upperBound(values: number[], target: number): number {
     else high = middle;
   }
   return low;
+}
+
+function clipEnd(item: IndexedTimelineClip): number {
+  return item.endMs ?? item.clip.start_ms + item.clip.duration_ms;
 }
 
 export function buildTimelineIntervalIndex(
@@ -53,14 +58,14 @@ export function buildTimelineIntervalIndex(
 
   clips.sort((left, right) => (
     left.clip.start_ms - right.clip.start_ms
-    || left.endMs - right.endMs
+    || clipEnd(left) - clipEnd(right)
     || left.trackIndex - right.trackIndex
   ));
   const starts = clips.map((item) => item.clip.start_ms);
   const prefixMaxEnd: number[] = [];
   let maxEnd = Number.NEGATIVE_INFINITY;
   for (const item of clips) {
-    maxEnd = Math.max(maxEnd, item.endMs);
+    maxEnd = Math.max(maxEnd, clipEnd(item));
     prefixMaxEnd.push(maxEnd);
   }
 
@@ -82,7 +87,7 @@ export function queryActiveClips(
   for (let position = endExclusive - 1; position >= 0; position -= 1) {
     if (index.prefixMaxEnd[position] <= timeMs) break;
     const item = index.clips[position];
-    if (item.endMs > timeMs) result.push(item);
+    if (clipEnd(item) > timeMs) result.push(item);
   }
 
   return result.reverse();
