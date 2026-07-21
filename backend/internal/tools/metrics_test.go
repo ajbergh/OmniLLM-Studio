@@ -51,3 +51,28 @@ func TestToolMetricsSnapshotTracksCancellation(t *testing.T) {
 		t.Fatalf("cancellation metrics = %#v", snapshot)
 	}
 }
+
+func TestToolMetricsSnapshotForUserIsolatesScopes(t *testing.T) {
+	resetToolMetricsForTest()
+	t.Cleanup(resetToolMetricsForTest)
+
+	emitEvent(context.Background(), ToolEvent{
+		Type: ToolEventCompleted, ToolCallID: "user-a-call", ToolName: "calculator",
+		Scope: InvocationScope{UserID: "user-a"},
+		Data: map[string]interface{}{"duration_ms": int64(5), "is_error": false},
+	})
+	emitEvent(context.Background(), ToolEvent{
+		Type: ToolEventFailed, ToolCallID: "user-b-call", ToolName: "browser_navigate",
+		Scope: InvocationScope{UserID: "user-b"},
+		Data: map[string]interface{}{"duration_ms": int64(9)},
+	})
+
+	userA := ToolMetricsSnapshotForUser("user-a")
+	if len(userA) != 1 || userA[0].ToolName != "calculator" || userA[0].Successes != 1 {
+		t.Fatalf("user-a metrics = %#v", userA)
+	}
+	userB := ToolMetricsSnapshotForUser("user-b")
+	if len(userB) != 1 || userB[0].ToolName != "browser_navigate" || userB[0].Failures != 1 {
+		t.Fatalf("user-b metrics = %#v", userB)
+	}
+}
