@@ -82,7 +82,7 @@ func TestExecutePlanRunsParallelStepConcurrentlyAndPreservesResultOrder(t *testi
 	}()
 
 	seen := map[string]bool{}
-	for range 2 {
+	for i := 0; i < 2; i++ {
 		select {
 		case name := <-started:
 			seen[name] = true
