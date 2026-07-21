@@ -79,8 +79,9 @@ func (h *ToolHandler) UpdatePermission(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"tool_name": toolName, "policy": req.Policy})
 }
 
-// ExecuteTool supports ordinary invocation plus approval actions through the
-// existing authenticated route, preserving compatibility with deployed routers.
+// ExecuteTool supports ordinary invocation plus approval and runtime metrics
+// actions through the existing authenticated route, preserving compatibility
+// with deployed routers.
 func (h *ToolHandler) ExecuteTool(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Action     string          `json:"action,omitempty"`
@@ -105,6 +106,12 @@ func (h *ToolHandler) ExecuteTool(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		respondJSON(w, http.StatusOK, map[string]interface{}{"approval_id": req.ApprovalID, "approved": req.Approved, "result": result})
+		return
+	case "metrics":
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"scope": "user",
+			"tools": tools.ToolMetricsSnapshotForUser(userID),
+		})
 		return
 	case "":
 	default:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -58,12 +59,42 @@ func (t sideEffectTool) Execute(context.Context, json.RawMessage) (*ToolResult, 
 	return &ToolResult{Content: "created"}, nil
 }
 
+type cancellationTool struct {
+	attempts *int
+}
+
+func (t cancellationTool) Definition() ToolDefinition {
+	return ToolDefinition{
+		Name:        "cancellation_tool",
+		Description: "Cancellation-aware read-only tool",
+		Parameters:  json.RawMessage(`{"type":"object"}`),
+		Category:    "test",
+		Enabled:     true,
+		ReadOnly:    true,
+	}
+}
+
+func (t cancellationTool) Validate(json.RawMessage) error { return nil }
+func (t cancellationTool) Execute(ctx context.Context, _ json.RawMessage) (*ToolResult, error) {
+	(*t.attempts)++
+	return nil, fmt.Errorf("upstream aborted: %w", ctx.Err())
+}
+
 func TestIsRetryableExecutionError(t *testing.T) {
 	if !IsRetryableExecutionError(transientError{message: "temporary"}) {
 		t.Fatal("expected RetryableError to be retryable")
 	}
 	if IsRetryableExecutionError(errors.New("permanent")) {
 		t.Fatal("plain error should not be retryable")
+	}
+	if IsRetryableExecutionError(context.Canceled) {
+		t.Fatal("context cancellation must never be retryable")
+	}
+	if IsRetryableExecutionError(fmt.Errorf("wrapped cancellation: %w", context.Canceled)) {
+		t.Fatal("wrapped context cancellation must never be retryable")
+	}
+	if IsRetryableExecutionError(context.DeadlineExceeded) {
+		t.Fatal("context deadlines must never be retryable")
 	}
 }
 
@@ -102,5 +133,25 @@ func TestExecutorDoesNotReplaySideEffectingCall(t *testing.T) {
 	}
 	if replay, _ := second.Metadata["idempotent_replay"].(bool); !replay {
 		t.Fatalf("second result metadata = %#v, want idempotent_replay=true", second.Metadata)
+	}
+}
+
+func TestExecutorDoesNotRetryCanceledReadOnlyCall(t *testing.T) {
+	attempts := 0
+	registry := NewRegistry()
+	registry.MustRegister(cancellationTool{attempts: &attempts})
+	executor := NewExecutor(registry, nil, 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := executor.Execute(ctx, ToolCall{ID: "cancel-call", Name: "cancellation_tool", Arguments: json.RawMessage(`{}`)})
+	if !result.IsError {
+		t.Fatal("expected canceled tool execution to fail")
+	}
+	if attempts != 1 {
+		t.Fatalf("canceled execution attempts = %d, want 1", attempts)
+	}
+	if retryable, _ := result.Metadata["retryable"].(bool); retryable {
+		t.Fatalf("canceled result metadata = %#v, want retryable=false", result.Metadata)
 	}
 }
