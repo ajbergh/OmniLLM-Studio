@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ajbergh/omnillm-studio/internal/auth"
 	"github.com/go-chi/chi/v5"
@@ -80,7 +81,27 @@ func ContextWithEventSink(ctx context.Context, sink EventSink) context.Context {
 	return context.WithValue(ctx, eventSinkContextKey{}, sink)
 }
 
+func normalizeContextTerminalEvent(ctx context.Context, event ToolEvent) ToolEvent {
+	if event.Type != ToolEventFailed || ctx == nil {
+		return event
+	}
+	if event.Data == nil {
+		event.Data = map[string]interface{}{}
+	}
+	switch {
+	case errors.Is(ctx.Err(), context.Canceled):
+		event.Type = ToolEventCancelled
+		event.Data["cancelled"] = true
+		event.Data["retryable"] = false
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		event.Type = ToolEventTimedOut
+		event.Data["retryable"] = false
+	}
+	return event
+}
+
 func emitEvent(ctx context.Context, event ToolEvent) {
+	event = normalizeContextTerminalEvent(ctx, event)
 	recordGlobalToolMetric(event)
 	emitGlobalEvent(event)
 	if sink, ok := ctx.Value(eventSinkContextKey{}).(EventSink); ok && sink != nil {
