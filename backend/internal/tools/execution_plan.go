@@ -11,7 +11,10 @@ type ExecutionStep struct {
 // BuildExecutionPlan preserves the model's tool-call order while coalescing
 // contiguous parallel-safe calls into a single batch. Unknown, disabled,
 // side-effecting, or non-parallel tools always remain single sequential steps.
-// This deliberately does not move read-only calls across a side-effect boundary.
+// Permission policy is enforced again by Executor.Execute; callers should avoid
+// marking approval-gated tools SupportsParallel because an inline approval wait
+// is inherently sequential. This deliberately does not move read-only calls
+// across a side-effect boundary.
 func BuildExecutionPlan(registry *Registry, calls []ToolCall) []ExecutionStep {
 	steps := make([]ExecutionStep, 0, len(calls))
 	parallelBatch := make([]ToolCall, 0)
