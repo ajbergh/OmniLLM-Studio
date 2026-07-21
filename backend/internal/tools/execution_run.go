@@ -10,6 +10,11 @@ import (
 // ExecuteBatch only after the executor independently revalidates every call and
 // its current policy; sequential steps execute one call at a time.
 //
+// Callers should build runtime plans with Executor.BuildExecutionPlan. The
+// executor still treats every supplied step as untrusted and falls back to
+// sequential execution whenever current definitions or policy no longer permit
+// batching.
+//
 // If the parent context is already cancelled before a step begins, the executor
 // does not invoke any remaining tools. Instead it emits terminal cancellation
 // results for each remaining call so callers can preserve one response per tool
