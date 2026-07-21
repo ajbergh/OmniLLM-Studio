@@ -83,3 +83,22 @@ func TestProcessChatToolStepResultsReturnsOneMessageForMissingResult(t *testing.
 		t.Fatalf("missing result metadata = %#v, want error", processed[0].MetadataResult)
 	}
 }
+
+func TestSkippedChatToolResultsPreservesCardinalityAndLimitMetadata(t *testing.T) {
+	calls := []tools.ToolCall{{ID: "skip-a", Name: "task_create"}, {ID: "skip-b", Name: "memory_save"}}
+	processed := skippedChatToolResults(calls)
+	if len(processed) != 2 {
+		t.Fatalf("processed count = %d, want 2", len(processed))
+	}
+	for index, item := range processed {
+		if item.ToolCallID != calls[index].ID || item.Message.ToolCallID != calls[index].ID {
+			t.Fatalf("processed[%d] = %#v", index, item)
+		}
+		if !item.MetadataResult.IsError || item.MetadataResult.Content != toolSkippedAfterContextLimitMessage {
+			t.Fatalf("limit result[%d] = %#v", index, item.MetadataResult)
+		}
+		if code, _ := item.MetadataResult.Metadata["error_code"].(string); code != "TOOL_RESULT_LIMIT" {
+			t.Fatalf("limit error code[%d] = %q", index, code)
+		}
+	}
+}
