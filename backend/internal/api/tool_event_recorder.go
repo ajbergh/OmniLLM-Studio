@@ -21,11 +21,13 @@ type ToolEventRecorder struct {
 func NewToolEventRecorder(db *sql.DB) *ToolEventRecorder {
 	ctx, cancel := context.WithCancel(context.Background())
 	recorder := &ToolEventRecorder{
-		db: db, events: make(chan tools.ToolEvent, 512), cancel: cancel, done: make(chan struct{}),
+		db: databaseOrNil(db), events: make(chan tools.ToolEvent, 512), cancel: cancel, done: make(chan struct{}),
 	}
 	go recorder.loop(ctx)
 	return recorder
 }
+
+func databaseOrNil(db *sql.DB) *sql.DB { return db }
 
 // Record is safe for streaming paths and drops only when the bounded audit
 // buffer is saturated; a warning is emitted so overload is observable.
@@ -104,7 +106,7 @@ func (r *ToolEventRecorder) persist(event tools.ToolEvent) error {
 	if event.Type == tools.ToolEventStarted {
 		startedAt = now
 	}
-	if event.Type == tools.ToolEventCompleted || event.Type == tools.ToolEventFailed || event.Type == tools.ToolEventTimedOut {
+	if event.Type == tools.ToolEventCompleted || event.Type == tools.ToolEventFailed || event.Type == tools.ToolEventTimedOut || event.Type == tools.ToolEventCancelled {
 		completedAt = now
 	}
 
