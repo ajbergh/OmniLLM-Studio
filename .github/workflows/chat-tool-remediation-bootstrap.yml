@@ -80,7 +80,7 @@ jobs:
       - name: Format Go sources
         shell: bash
         run: |
-          set -euo pipefail
+          set -o pipefail
           gofmt -w \
             backend/internal/api/chat_tool_runtime.go \
             backend/internal/api/chat_tool_runtime_test.go \
@@ -92,7 +92,7 @@ jobs:
             backend/internal/tools/executor_policy.go \
             backend/internal/tools/inline_approval.go \
             backend/internal/tools/inline_approval_test.go \
-            backend/internal/tools/types.go
+            backend/internal/tools/types.go 2>&1 | tee bootstrap-format.log
 
       - name: Run focused backend tests
         run: cd backend && go test ./internal/tools ./internal/api
@@ -115,7 +115,7 @@ jobs:
           set -euo pipefail
           git rm .github/workflows/chat-tool-remediation-bootstrap.yml
           git rm scripts/.remediate_chat_tools.part.*
-          git rm -f bootstrap-diagnostics.txt bootstrap-apply.log || true
+          git rm -f bootstrap-diagnostics.txt bootstrap-apply.log bootstrap-format.log || true
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
@@ -144,6 +144,8 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add bootstrap-diagnostics.txt
-          if [ -f bootstrap-apply.log ]; then git add bootstrap-apply.log; fi
+          for log in bootstrap-apply.log bootstrap-format.log; do
+            if [ -f "$log" ]; then git add "$log"; fi
+          done
           git commit -m 'chore: record remediation bootstrap diagnostics' || true
           git push origin HEAD:fix/chat-tool-lifecycle-reliability-20260721
