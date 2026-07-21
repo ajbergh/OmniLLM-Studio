@@ -18,13 +18,13 @@ func TestParallelStepSafeRejectsSideEffectsUnknownNonParallelAndApprovalCalls(t 
 	if !executor.parallelStepSafe([]ToolCall{{Name: "read_parallel"}, {Name: "read_parallel"}}) {
 		t.Fatal("expected two explicitly parallel-safe allowed reads to pass revalidation")
 	}
-	cases := [][]ToolCall{
+	unsafeCases := [][]ToolCall{
 		{{Name: "read_parallel"}},
 		{{Name: "read_parallel"}, {Name: "read_serial"}},
 		{{Name: "read_parallel"}, {Name: "write"}},
 		{{Name: "read_parallel"}, {Name: "unknown"}},
 	}
-	for _, calls := range cases {
+	for _, calls := range unsafeCases {
 		if executor.parallelStepSafe(calls) {
 			t.Fatalf("unsafe calls passed parallel revalidation: %#v", calls)
 		}
