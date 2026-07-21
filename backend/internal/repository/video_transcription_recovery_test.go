@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/ajbergh/omnillm-studio/internal/db"
@@ -8,7 +9,7 @@ import (
 )
 
 func TestVideoTranscriptionRepoFailInterrupted(t *testing.T) {
-	database, err := db.Open(":memory:")
+	database, err := db.Open(filepath.Join(t.TempDir(), "transcription-recovery.db"))
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
