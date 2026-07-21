@@ -1,7 +1,13 @@
 package llm
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -57,6 +63,9 @@ func TestNormalizeToolCallContainsMalformedArguments(t *testing.T) {
 	if got.Function.Arguments == "{}" {
 		t.Fatal("malformed provider payload should remain observable")
 	}
+	if !json.Valid([]byte(got.Function.Arguments)) {
+		t.Fatalf("contained provider arguments are not valid JSON: %q", got.Function.Arguments)
+	}
 }
 
 func TestIsRetryableProviderStatus(t *testing.T) {
@@ -77,5 +86,71 @@ func TestProviderRequestID(t *testing.T) {
 	headers.Set("X-Request-ID", "req_123")
 	if got := ProviderRequestID(headers); got != "req_123" {
 		t.Fatalf("ProviderRequestID() = %q, want req_123", got)
+	}
+}
+
+func TestDoProviderRequestWithRetryRetriesBeforeBodyConsumption(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt := attempts.Add(1)
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Equal(body, []byte(`{"hello":"world"}`)) {
+			t.Fatalf("request body = %q", string(body))
+		}
+		if r.Header.Get("X-OmniLLM-Request-ID") != "llm_test" {
+			t.Fatalf("request correlation header = %q", r.Header.Get("X-OmniLLM-Request-ID"))
+		}
+		if attempt == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("X-Request-ID", "upstream_123")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	body := []byte(`{"hello":"world"}`)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-OmniLLM-Request-ID", "llm_test")
+
+	resp, gotAttempts, err := doProviderRequestWithRetry(context.Background(), server.Client(), req, body, "openai", "llm_test")
+	if err != nil {
+		t.Fatalf("doProviderRequestWithRetry() error = %v", err)
+	}
+	defer resp.Body.Close()
+	if gotAttempts != 2 || attempts.Load() != 2 {
+		t.Fatalf("attempts = %d server=%d, want 2", gotAttempts, attempts.Load())
+	}
+	if got := ProviderRequestID(resp.Header); got != "upstream_123" {
+		t.Fatalf("upstream request ID = %q, want upstream_123", got)
+	}
+}
+
+func TestDoProviderRequestWithRetryDoesNotRetryPermanentStatus(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusUnprocessableEntity)
+	}))
+	defer server.Close()
+
+	body := []byte(`{}`)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, gotAttempts, err := doProviderRequestWithRetry(context.Background(), server.Client(), req, body, "openai", "llm_test")
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	defer resp.Body.Close()
+	if gotAttempts != 1 || attempts.Load() != 1 {
+		t.Fatalf("attempts = %d server=%d, want 1", gotAttempts, attempts.Load())
+	}
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
 	}
 }
