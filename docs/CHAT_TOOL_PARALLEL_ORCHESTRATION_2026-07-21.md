@@ -38,8 +38,8 @@ It does not become one global read batch followed by writes, because that would 
 `backend/internal/tools/execution_plan.go` provides:
 
 - `ExecutionStep`;
-- `BuildExecutionPlan(registry, calls)` for definition-only planning;
-- `Executor.BuildExecutionPlan(calls)` for runtime policy-aware planning.
+- `BuildExecutionPlan(registry, calls)` for definition-only planning and focused tests;
+- `Executor.BuildExecutionPlan(calls)` as the required runtime entry point because it incorporates effective permission policy.
 
 `backend/internal/tools/execution_run.go` provides:
 
@@ -84,7 +84,7 @@ The branch covers:
 
 ## Deliberately deferred Chat handler migration
 
-The existing `backend/internal/api/message_handler.go` loop still invokes each tool sequentially. Migrating that large stateful loop should be a separate focused change using this runtime API rather than embedding new concurrency logic directly in the handler.
+The existing `backend/internal/api/message_handler.go` loop still invokes each tool sequentially. Migrating that large stateful loop should be a separate focused change using `Executor.BuildExecutionPlan` and `Executor.ExecutePlan` rather than embedding new concurrency logic directly in the handler.
 
 That migration must preserve:
 
