@@ -109,14 +109,21 @@ export function visibleClips(
   return result;
 }
 
+/**
+ * Limit simultaneously mounted video decoders. The selected video is promoted
+ * ahead of ordinary z-order candidates so direct manipulation never degrades
+ * into a non-interactive poster frame.
+ */
 export function applyDecoderBudget<T extends IndexedTimelineClip>(
   items: T[],
   limit: number,
+  preferredClipId?: string | null,
 ): { mounted: T[]; posters: T[] } {
   const videos = items
     .filter((item) => item.asset?.mime_type.startsWith('video/'))
     .sort((left, right) => (
-      right.trackIndex - left.trackIndex
+      Number(right.clip.id === preferredClipId) - Number(left.clip.id === preferredClipId)
+      || right.trackIndex - left.trackIndex
       || (right.clip.z_index ?? 0) - (left.clip.z_index ?? 0)
     ));
   const mountedIds = new Set(
