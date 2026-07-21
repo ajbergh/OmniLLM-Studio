@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const schedulerCancellationGrace = 5 * time.Second
+
 // RenderSchedulerConfig controls global and scoped FFmpeg admission.
 type RenderSchedulerConfig struct {
 	MaxConcurrent   int
@@ -70,6 +72,7 @@ type scheduledRenderResult struct {
 	result *RenderResult
 	err    error
 }
+
 type scheduledRender struct {
 	id          uint64
 	ctx         context.Context
@@ -92,23 +95,29 @@ func (q renderPriorityQueue) Less(i, j int) bool {
 	}
 	return q[i].priority > q[j].priority
 }
-func (q renderPriorityQueue) Swap(i, j int) { q[i], q[j] = q[j], q[i]; q[i].index = i; q[j].index = j }
-func (q *renderPriorityQueue) Push(x any) {
-	item := x.(*scheduledRender)
+func (q renderPriorityQueue) Swap(i, j int) {
+	q[i], q[j] = q[j], q[i]
+	q[i].index = i
+	q[j].index = j
+}
+func (q *renderPriorityQueue) Push(value any) {
+	item := value.(*scheduledRender)
 	item.index = len(*q)
 	*q = append(*q, item)
 }
 func (q *renderPriorityQueue) Pop() any {
 	old := *q
-	n := len(old)
-	item := old[n-1]
-	old[n-1] = nil
+	last := len(old) - 1
+	item := old[last]
+	old[last] = nil
 	item.index = -1
-	*q = old[:n-1]
+	*q = old[:last]
 	return item
 }
 
-// ScheduledRenderer applies bounded, priority-aware admission around another renderer.
+// ScheduledRenderer applies bounded, priority-aware admission around another
+// renderer. Shutdown cancels queued and active work and waits for workers, so
+// FFmpeg processes do not outlive the application runtime.
 type ScheduledRenderer struct {
 	delegate          Renderer
 	config            RenderSchedulerConfig
@@ -118,9 +127,12 @@ type ScheduledRenderer struct {
 	active            int
 	activeByUser      map[string]int
 	activeByWorkspace map[string]int
+	activeCancels     map[uint64]context.CancelFunc
 	sequence          atomic.Uint64
 	closed            bool
 	workers           sync.WaitGroup
+	rootCtx           context.Context
+	rootCancel        context.CancelFunc
 }
 
 // NewScheduledRenderer starts a bounded render scheduler.
@@ -128,14 +140,26 @@ func NewScheduledRenderer(delegate Renderer, config RenderSchedulerConfig) *Sche
 	if config.MaxConcurrent <= 0 {
 		config = RenderSchedulerConfigFromEnv()
 	}
+	if config.MaxPerUser <= 0 {
+		config.MaxPerUser = config.MaxConcurrent
+	}
+	if config.MaxPerWorkspace <= 0 {
+		config.MaxPerWorkspace = config.MaxConcurrent
+	}
+	rootCtx, rootCancel := context.WithCancel(context.Background())
 	scheduler := &ScheduledRenderer{
-		delegate: delegate, config: config,
-		activeByUser: map[string]int{}, activeByWorkspace: map[string]int{},
+		delegate:          delegate,
+		config:            config,
+		activeByUser:      map[string]int{},
+		activeByWorkspace: map[string]int{},
+		activeCancels:     map[uint64]context.CancelFunc{},
+		rootCtx:           rootCtx,
+		rootCancel:        rootCancel,
 	}
 	scheduler.cond = sync.NewCond(&scheduler.mu)
 	heap.Init(&scheduler.queue)
 	cleanupStaleRenderTemps(config.TempMaxAge)
-	for i := 0; i < config.MaxConcurrent; i++ {
+	for index := 0; index < config.MaxConcurrent; index++ {
 		scheduler.workers.Add(1)
 		go scheduler.worker()
 	}
@@ -150,39 +174,67 @@ func NewProductionRenderer(binary string) Renderer {
 }
 
 // Render enqueues one render and waits for completion or cancellation.
-func (s *ScheduledRenderer) Render(ctx context.Context, req RenderRequest, progress func(RenderProgress)) (*RenderResult, error) {
+func (s *ScheduledRenderer) Render(
+	ctx context.Context,
+	req RenderRequest,
+	progress func(RenderProgress),
+) (*RenderResult, error) {
 	if s == nil || s.delegate == nil {
 		return nil, fmt.Errorf("render scheduler is not configured")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	if err := renderDiskPreflight(req, s.config.MinFreeBytes); err != nil {
 		return nil, err
 	}
 	item := &scheduledRender{
-		id: s.sequence.Add(1), ctx: ctx, req: req, progress: progress,
-		result: make(chan scheduledRenderResult, 1), priority: req.Settings.Priority,
-		userID: renderUserID(req), workspaceID: renderWorkspaceID(req), enqueuedAt: time.Now(),
+		id:          s.sequence.Add(1),
+		ctx:         ctx,
+		req:         req,
+		progress:    progress,
+		result:      make(chan scheduledRenderResult, 1),
+		priority:    req.Settings.Priority,
+		userID:      renderUserID(req),
+		workspaceID: renderWorkspaceID(req),
+		enqueuedAt:  time.Now(),
+		index:       -1,
 	}
+
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return nil, fmt.Errorf("render scheduler is shutting down")
+		return nil, errSchedulerClosed
 	}
 	heap.Push(&s.queue, item)
 	position := s.queue.Len()
 	s.cond.Broadcast()
 	s.mu.Unlock()
 	if progress != nil {
-		progress(RenderProgress{Stage: "queued", Message: fmt.Sprintf("Queued for renderer (position %d)", position), Progress: 0.01})
+		progress(RenderProgress{
+			Stage: "queued", Message: fmt.Sprintf("Queued for renderer (position %d)", position), Progress: 0.01,
+		})
 	}
+
 	select {
 	case outcome := <-item.result:
 		return outcome.result, outcome.err
 	case <-ctx.Done():
-		s.mu.Lock()
-		s.cond.Broadcast()
-		s.mu.Unlock()
+		s.cancelQueued(item)
 		return nil, ctx.Err()
+	case <-s.rootCtx.Done():
+		s.cancelQueued(item)
+		return nil, errSchedulerClosed
 	}
+}
+
+func (s *ScheduledRenderer) cancelQueued(item *scheduledRender) {
+	s.mu.Lock()
+	if item.index >= 0 && item.index < s.queue.Len() && s.queue[item.index] == item {
+		heap.Remove(&s.queue, item.index)
+	}
+	s.cond.Broadcast()
+	s.mu.Unlock()
 }
 
 func (s *ScheduledRenderer) worker() {
@@ -263,64 +315,117 @@ func (s *ScheduledRenderer) nextEligibleLocked() *scheduledRender {
 
 func (s *ScheduledRenderer) execute(item *scheduledRender) (*RenderResult, error) {
 	ctx, cancel := context.WithCancel(item.ctx)
-	defer cancel()
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		cancel()
+		return nil, errSchedulerClosed
+	}
+	s.activeCancels[item.id] = cancel
+	s.mu.Unlock()
+	defer func() {
+		cancel()
+		s.mu.Lock()
+		delete(s.activeCancels, item.id)
+		s.mu.Unlock()
+	}()
+
 	var lastProgress atomic.Int64
 	lastProgress.Store(time.Now().UnixNano())
-	progress := func(update RenderProgress) {
+	forwardProgress := func(update RenderProgress) {
 		lastProgress.Store(time.Now().UnixNano())
 		if item.progress != nil {
 			item.progress(update)
 		}
 	}
-	if progress != nil {
-		progress(RenderProgress{Stage: "preflight", Message: "Renderer slot acquired", Progress: 0.03})
-	}
+	forwardProgress(RenderProgress{Stage: "preflight", Message: "Renderer slot acquired", Progress: 0.03})
+
 	resultCh := make(chan scheduledRenderResult, 1)
 	go func() {
-		result, err := s.delegate.Render(ctx, item.req, progress)
+		result, err := s.delegate.Render(ctx, item.req, forwardProgress)
 		resultCh <- scheduledRenderResult{result: result, err: err}
 	}()
-	ticker := time.NewTicker(minDuration(10*time.Second, s.config.StallTimeout/4))
+
+	watchInterval := minDuration(10*time.Second, s.config.StallTimeout/4)
+	if watchInterval <= 0 {
+		watchInterval = 10 * time.Second
+	}
+	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case result := <-resultCh:
 			return result.result, result.err
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return s.waitForCancelledDelegate(resultCh, ctx.Err())
+		case <-s.rootCtx.Done():
+			cancel()
+			return s.waitForCancelledDelegate(resultCh, errSchedulerClosed)
 		case <-ticker.C:
 			if s.config.StallTimeout > 0 && time.Since(time.Unix(0, lastProgress.Load())) > s.config.StallTimeout {
 				cancel()
-				return nil, fmt.Errorf("render stalled for more than %s", s.config.StallTimeout)
+				return s.waitForCancelledDelegate(
+					resultCh,
+					fmt.Errorf("render stalled for more than %s", s.config.StallTimeout),
+				)
 			}
 		}
 	}
 }
 
-func minDuration(a, b time.Duration) time.Duration {
-	if b <= 0 || a < b {
-		return a
+func (s *ScheduledRenderer) waitForCancelledDelegate(
+	resultCh <-chan scheduledRenderResult,
+	reason error,
+) (*RenderResult, error) {
+	timer := time.NewTimer(schedulerCancellationGrace)
+	defer timer.Stop()
+	select {
+	case result := <-resultCh:
+		if result.err != nil && !errors.Is(result.err, context.Canceled) {
+			return result.result, result.err
+		}
+		return nil, reason
+	case <-timer.C:
+		return nil, fmt.Errorf("%w; renderer did not stop within %s", reason, schedulerCancellationGrace)
 	}
-	return b
 }
 
-// Shutdown stops admission, cancels queued waits, and waits for active workers.
+func minDuration(left, right time.Duration) time.Duration {
+	if right <= 0 || left < right {
+		return left
+	}
+	return right
+}
+
+// Shutdown stops admission, cancels queued and active jobs, and waits for all
+// workers. A caller-provided deadline bounds application shutdown.
 func (s *ScheduledRenderer) Shutdown(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
 	s.mu.Lock()
 	if !s.closed {
 		s.closed = true
+		s.rootCancel()
 		for s.queue.Len() > 0 {
 			item := heap.Pop(&s.queue).(*scheduledRender)
 			select {
-			case item.result <- scheduledRenderResult{err: context.Canceled}:
+			case item.result <- scheduledRenderResult{err: errSchedulerClosed}:
 			default:
 			}
+		}
+		for _, cancel := range s.activeCancels {
+			cancel()
 		}
 		s.cond.Broadcast()
 	}
 	s.mu.Unlock()
+
 	done := make(chan struct{})
-	go func() { s.workers.Wait(); close(done) }()
+	go func() {
+		s.workers.Wait()
+		close(done)
+	}()
 	select {
 	case <-done:
 		return nil
@@ -343,6 +448,7 @@ func renderUserID(req RenderRequest) string {
 	}
 	return ""
 }
+
 func renderWorkspaceID(req RenderRequest) string {
 	if strings.TrimSpace(req.Settings.WorkspaceID) != "" {
 		return strings.TrimSpace(req.Settings.WorkspaceID)
@@ -372,7 +478,11 @@ func renderDiskPreflight(req RenderRequest, minFree uint64) error {
 	estimate += seconds * 2 * 1024 * 1024
 	required := minFree + estimate
 	if free < required {
-		return fmt.Errorf("insufficient temporary disk space: %d MiB free, %d MiB required", free/(1024*1024), required/(1024*1024))
+		return fmt.Errorf(
+			"insufficient temporary disk space: %d MiB free, %d MiB required",
+			free/(1024*1024),
+			required/(1024*1024),
+		)
 	}
 	return nil
 }
