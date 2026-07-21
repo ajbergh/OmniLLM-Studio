@@ -15,10 +15,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: chat-tool-remediation-bootstrap
-  cancel-in-progress: true
-
 jobs:
   apply:
     if: >-
