@@ -117,4 +117,12 @@ describe('timeline interval index', () => {
     expect(result.mounted.filter((item) => item.asset?.mime_type.startsWith('video/'))).toHaveLength(1);
     expect(result.posters).toHaveLength(1);
   });
+
+  it('promotes the selected video into the decoder budget', () => {
+    const index = buildTimelineIntervalIndex(document, assets);
+    const active = queryActiveClips(index, 1500);
+    const result = applyDecoderBudget(active, 1, 'long');
+    expect(result.mounted.find((item) => item.asset?.mime_type.startsWith('video/'))?.clip.id).toBe('long');
+    expect(result.posters.map((item) => item.clip.id)).toContain('short');
+  });
 });
