@@ -1,0 +1,188 @@
+name: Chat tool provider conformance integration
+
+on:
+  push:
+    branches:
+      - feat/chat-tool-provider-conformance-observability-20260721
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/chat-tool-provider-conformance-observability-20260721
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Apply integration patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one marker, found {count}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Provider request correlation, retry classification, and normalized tool calls.
+          replace_once(
+              'backend/internal/llm/service.go',
+              '''\tTokenOutput *int       `json:"token_output,omitempty"`\n\n\t// OpenRouter-specific response fields''',
+              '''\tTokenOutput       *int   `json:"token_output,omitempty"`\n\tRequestID         string `json:"request_id,omitempty"`\n\tUpstreamRequestID string `json:"upstream_request_id,omitempty"`\n\tAttempts          int    `json:"attempts,omitempty"`\n\n\t// OpenRouter-specific response fields''',
+          )
+          replace_once(
+              'backend/internal/llm/service.go',
+              '''\tTokenOutput int        `json:"token_output,omitempty"` // populated in the final usage chunk\n\n\t// OpenRouter-specific response fields''',
+              '''\tTokenOutput       int    `json:"token_output,omitempty"` // populated in the final usage chunk\n\tRequestID         string `json:"request_id,omitempty"`\n\tUpstreamRequestID string `json:"upstream_request_id,omitempty"`\n\n\t// OpenRouter-specific response fields''',
+          )
+          replace_once(
+              'backend/internal/llm/service.go',
+              '''\thttpReq, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))\n\tif err != nil {\n\t\treturn nil, fmt.Errorf("create request: %w", err)\n\t}\n\n\thttpReq.Header.Set("Content-Type", "application/json")''',
+              '''\trequestID := newProviderRequestID()\n\thttpReq, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))\n\tif err != nil {\n\t\treturn nil, fmt.Errorf("create request: %w", err)\n\t}\n\n\thttpReq.Header.Set("Content-Type", "application/json")\n\thttpReq.Header.Set("X-OmniLLM-Request-ID", requestID)''',
+          )
+          replace_once(
+              'backend/internal/llm/service.go',
+              '''\tresp, err := s.httpClient.Do(httpReq)\n\tif err != nil {\n\t\treturn nil, fmt.Errorf("http request: %w", err)\n\t}\n\tdefer resp.Body.Close()\n\n\tif resp.StatusCode != http.StatusOK {\n\t\tbodyBytes, _ := io.ReadAll(resp.Body)\n\t\treturn nil, fmt.Errorf("provider returned status %d: %s", resp.StatusCode, string(bodyBytes))\n\t}''',
+              '''\tresp, attempts, err := doProviderRequestWithRetry(ctx, s.httpClient, httpReq, jsonBody, providerType, requestID)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tdefer resp.Body.Close()\n\tupstreamRequestID := ProviderRequestID(resp.Header)\n\n\tif resp.StatusCode != http.StatusOK {\n\t\tbodyBytes, _ := io.ReadAll(resp.Body)\n\t\tlog.Printf("[llm] provider request failed provider=%s request_id=%s upstream_request_id=%s status=%d body=%q", providerType, requestID, upstreamRequestID, resp.StatusCode, string(bodyBytes))\n\t\treturn nil, &ProviderRequestError{Provider: providerType, StatusCode: resp.StatusCode, Code: "PROVIDER_HTTP_ERROR", RequestID: requestID, UpstreamRequestID: upstreamRequestID, Retryable: IsRetryableProviderStatus(resp.StatusCode)}\n\t}''',
+          )
+          replace_once(
+              'backend/internal/llm/service.go',
+              '''\t\ttoolCalls = result.Choices[0].Message.ToolCalls\n\t}\n\n\ttokenIn := result.Usage.PromptTokens''',
+              '''\t\ttoolCalls = NormalizeToolCalls(providerType, result.Choices[0].Message.ToolCalls)\n\t}\n\n\ttokenIn := result.Usage.PromptTokens''',
+          )
+          replace_once(
+              'backend/internal/llm/service.go',
+              '''\t\tTokenInput:  &tokenIn,\n\t\tTokenOutput: &tokenOut,\n\t\tCost:        cost,''',
+              '''\t\tTokenInput:         &tokenIn,\n\t\tTokenOutput:        &tokenOut,\n\t\tRequestID:          requestID,\n\t\tUpstreamRequestID:  upstreamRequestID,\n\t\tAttempts:           attempts,\n\t\tCost:               cost,''',
+          )
+          # Streaming requests are correlated but never retried after a stream is opened.
+          replace_once(
+              'backend/internal/llm/service.go',
+              '''\t// Use a client without timeout for streaming while retaining the\n\t// LLM-scoped provider-native search adapter.\n\tstreamClient := &http.Client{Transport: s.httpClient.Transport}\n\n\thttpReq, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))''',
+              '''\t// Use a client without timeout for streaming while retaining the\n\t// LLM-scoped provider-native search adapter. Streaming is not automatically\n\t// retried because a retry after the first emitted chunk could duplicate text\n\t// or side-effecting tool calls.\n\tstreamClient := &http.Client{Transport: s.httpClient.Transport}\n\trequestID := newProviderRequestID()\n\n\thttpReq, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))''',
+          )
+          replace_once(
+              'backend/internal/llm/service.go',
+              '''\thttpReq.Header.Set("Content-Type", "application/json")\n\thttpReq.Header.Set("Accept", "text/event-stream")''',
+              '''\thttpReq.Header.Set("Content-Type", "application/json")\n\thttpReq.Header.Set("Accept", "text/event-stream")\n\thttpReq.Header.Set("X-OmniLLM-Request-ID", requestID)''',
+          )
+          replace_once(
+              'backend/internal/llm/service.go',
+              '''\tresp, err := streamClient.Do(httpReq)\n\tif err != nil {\n\t\treturn fmt.Errorf("http request: %w", err)\n\t}\n\tdefer resp.Body.Close()\n\n\tif resp.StatusCode != http.StatusOK {\n\t\tbodyBytes, _ := io.ReadAll(resp.Body)\n\t\treturn fmt.Errorf("provider returned status %d: %s", resp.StatusCode, string(bodyBytes))\n\t}\n\n\t// Parse SSE stream''',
+              '''\tresp, err := streamClient.Do(httpReq)\n\tif err != nil {\n\t\treturn &ProviderRequestError{Provider: providerType, Code: "PROVIDER_TRANSPORT_ERROR", RequestID: requestID, Retryable: retryableProviderTransportError(err), Cause: err}\n\t}\n\tdefer resp.Body.Close()\n\tupstreamRequestID := ProviderRequestID(resp.Header)\n\n\tif resp.StatusCode != http.StatusOK {\n\t\tbodyBytes, _ := io.ReadAll(resp.Body)\n\t\tlog.Printf("[llm] provider stream failed provider=%s request_id=%s upstream_request_id=%s status=%d body=%q", providerType, requestID, upstreamRequestID, resp.StatusCode, string(bodyBytes))\n\t\treturn &ProviderRequestError{Provider: providerType, StatusCode: resp.StatusCode, Code: "PROVIDER_HTTP_ERROR", RequestID: requestID, UpstreamRequestID: upstreamRequestID, Retryable: IsRetryableProviderStatus(resp.StatusCode)}\n\t}\n\n\t// Parse SSE stream''',
+          )
+          # Add correlation to every stream chunk constructed in ChatStream.
+          service = Path('backend/internal/llm/service.go')
+          text = service.read_text(encoding='utf-8')
+          marker = '''\t\t\t\t\t\t\t\tProvider:  providerType,\n\t\t\t\t\t\t\t\tModel:     model,'''
+          replacement = '''\t\t\t\t\t\t\t\tProvider:          providerType,\n\t\t\t\t\t\t\t\tModel:             model,\n\t\t\t\t\t\t\t\tRequestID:         requestID,\n\t\t\t\t\t\t\t\tUpstreamRequestID: upstreamRequestID,'''
+          if text.count(marker) != 1:
+              raise SystemExit(f'service.go: content chunk marker count={text.count(marker)}')
+          text = text.replace(marker, replacement, 1)
+          marker = '''\t\t\t\t\t\t\tProvider:    providerType,\n\t\t\t\t\t\t\tModel:       model,\n\t\t\t\t\t\t\tTokenInput:  chunk.Usage.PromptTokens,'''
+          replacement = '''\t\t\t\t\t\t\tProvider:          providerType,\n\t\t\t\t\t\t\tModel:             model,\n\t\t\t\t\t\t\tRequestID:         requestID,\n\t\t\t\t\t\t\tUpstreamRequestID: upstreamRequestID,\n\t\t\t\t\t\t\tTokenInput:         chunk.Usage.PromptTokens,'''
+          if text.count(marker) != 1:
+              raise SystemExit(f'service.go: usage chunk marker count={text.count(marker)}')
+          service.write_text(text.replace(marker, replacement, 1), encoding='utf-8')
+
+          # Normalize complete streamed calls before they enter the executor.
+          replace_once(
+              'backend/internal/api/message_handler.go',
+              '''\t\t\tfinalToolCalls := orderedToolCalls(chunkToolCalls)\n\t\t\tfor index := range finalToolCalls {\n\t\t\t\tif finalToolCalls[index].ID == "" {\n\t\t\t\t\tfinalToolCalls[index].ID = uuid.NewString()\n\t\t\t\t}\n\t\t\t}''',
+              '''\t\t\tfinalToolCalls := llm.NormalizeToolCalls(providerType, orderedToolCalls(chunkToolCalls))''',
+          )
+
+          # Tool executor: retry read-only transient failures and replay successful
+          # side-effecting calls by stable call ID instead of executing twice.
+          replace_once(
+              'backend/internal/tools/executor.go',
+              '''\tapprovals   *ApprovalBroker\n}''',
+              '''\tapprovals     *ApprovalBroker\n\tidempotencyMu sync.Mutex\n\tidempotency   map[string]*ToolResult\n}''',
+          )
+          replace_once(
+              'backend/internal/tools/executor.go',
+              '''\t\tapprovals:   NewApprovalBroker(15 * time.Minute),\n\t}''',
+              '''\t\tapprovals:     NewApprovalBroker(15 * time.Minute),\n\t\tidempotency:   make(map[string]*ToolResult),\n\t}''',
+          )
+          replace_once(
+              'backend/internal/tools/executor.go',
+              '''\tif !def.Enabled {\n\t\treturn e.failure(ctx, call, fmt.Sprintf("tool %q is disabled", call.Name), ToolEventFailed, nil)\n\t}\n\n\tif e.permissions != nil {''',
+              '''\tif !def.Enabled {\n\t\treturn e.failure(ctx, call, fmt.Sprintf("tool %q is disabled", call.Name), ToolEventFailed, nil)\n\t}\n\tif def.SideEffecting {\n\t\tif cached := e.cachedSideEffectResult(scope, call); cached != nil {\n\t\t\treturn cached\n\t\t}\n\t}\n\n\tif e.permissions != nil {''',
+          )
+          replace_once(
+              'backend/internal/tools/executor.go',
+              '''\texecCtx, cancel := context.WithTimeout(ctx, timeout)\n\tdefer cancel()\n\n\temitEvent(ctx, ToolEvent{\n\t\tType:       ToolEventStarted,\n\t\tToolCallID: call.ID,\n\t\tToolName:   call.Name,\n\t\tScope:      scope,\n\t\tData: map[string]interface{}{\n\t\t\t"arguments": string(call.Arguments),\n\t\t\t"risk":      def.Risk,\n\t\t\t"read_only": def.ReadOnly,\n\t\t},\n\t})\n\tstarted := time.Now()\n\tresult, err := tool.Execute(execCtx, call.Arguments)\n\tdurationMS := time.Since(started).Milliseconds()\n\tif err != nil {\n\t\tif execCtx.Err() == context.DeadlineExceeded {\n\t\t\treturn e.failure(ctx, call, fmt.Sprintf("tool %q timed out after %s", call.Name, timeout), ToolEventTimedOut, map[string]interface{}{"duration_ms": durationMS})\n\t\t}\n\t\treturn e.failure(ctx, call, fmt.Sprintf("tool %q failed: %v", call.Name, err), ToolEventFailed, map[string]interface{}{"duration_ms": durationMS})\n\t}\n\tif result == nil {\n\t\treturn e.failure(ctx, call, fmt.Sprintf("tool %q returned no result", call.Name), ToolEventFailed, map[string]interface{}{"duration_ms": durationMS})\n\t}''',
+              '''\temitEvent(ctx, ToolEvent{\n\t\tType:       ToolEventStarted,\n\t\tToolCallID: call.ID,\n\t\tToolName:   call.Name,\n\t\tScope:      scope,\n\t\tData: map[string]interface{}{\n\t\t\t"arguments": string(call.Arguments),\n\t\t\t"risk":      def.Risk,\n\t\t\t"read_only": def.ReadOnly,\n\t\t},\n\t})\n\tstarted := time.Now()\n\tmaxAttempts := 1\n\tif def.ReadOnly && !def.SideEffecting {\n\t\tmaxAttempts = 2\n\t}\n\tvar result *ToolResult\n\tvar execErr error\n\tattemptCount := 0\n\tfor attempt := 1; attempt <= maxAttempts; attempt++ {\n\t\tattemptCount = attempt\n\t\texecCtx, cancel := context.WithTimeout(ctx, timeout)\n\t\tresult, execErr = tool.Execute(execCtx, call.Arguments)\n\t\ttimedOut := execCtx.Err() == context.DeadlineExceeded\n\t\tcancel()\n\t\tif execErr == nil {\n\t\t\tbreak\n\t\t}\n\t\tif timedOut {\n\t\t\tdurationMS := time.Since(started).Milliseconds()\n\t\t\treturn e.failure(ctx, call, fmt.Sprintf("tool %q timed out after %s", call.Name, timeout), ToolEventTimedOut, map[string]interface{}{"duration_ms": durationMS, "attempt_count": attemptCount})\n\t\t}\n\t\tif attempt >= maxAttempts || !IsRetryableExecutionError(execErr) {\n\t\t\tbreak\n\t\t}\n\t\temitEvent(ctx, ToolEvent{Type: ToolEventProgress, ToolCallID: call.ID, ToolName: call.Name, Scope: scope, Data: map[string]interface{}{"status": "retrying", "attempt": attempt + 1}})\n\t}\n\tdurationMS := time.Since(started).Milliseconds()\n\tif execErr != nil {\n\t\treturn e.failure(ctx, call, fmt.Sprintf("tool %q failed: %v", call.Name, execErr), ToolEventFailed, map[string]interface{}{"duration_ms": durationMS, "attempt_count": attemptCount, "retryable": IsRetryableExecutionError(execErr)})\n\t}\n\tif result == nil {\n\t\treturn e.failure(ctx, call, fmt.Sprintf("tool %q returned no result", call.Name), ToolEventFailed, map[string]interface{}{"duration_ms": durationMS, "attempt_count": attemptCount})\n\t}''',
+          )
+          replace_once(
+              'backend/internal/tools/executor.go',
+              '''\tresult.Metadata["duration_ms"] = durationMS\n\tresult.Metadata["tool_version"] = def.Version''',
+              '''\tresult.Metadata["duration_ms"] = durationMS\n\tresult.Metadata["tool_version"] = def.Version\n\tresult.Metadata["attempt_count"] = attemptCount''',
+          )
+          replace_once(
+              'backend/internal/tools/executor.go',
+              '''\temitEvent(ctx, ToolEvent{\n\t\tType:       ToolEventCompleted,''',
+              '''\tif def.SideEffecting && !result.IsError {\n\t\te.cacheSideEffectResult(scope, call, result)\n\t}\n\n\temitEvent(ctx, ToolEvent{\n\t\tType:       ToolEventCompleted,''',
+          )
+          replace_once(
+              'backend/internal/tools/executor.go',
+              '''func (e *Executor) failure(ctx context.Context, call ToolCall, content string, eventType ToolEventType, metadata map[string]interface{}) *ToolResult {''',
+              '''func sideEffectCacheKey(scope InvocationScope, call ToolCall) string {\n\treturn strings.Join([]string{scope.UserID, scope.WorkspaceID, scope.ConversationID, scope.MessageID, call.ID, call.Name, string(call.Arguments)}, "\\x00")\n}\n\nfunc cloneToolResult(result *ToolResult) *ToolResult {\n\tif result == nil {\n\t\treturn nil\n\t}\n\tclone := *result\n\tif result.Metadata != nil {\n\t\tclone.Metadata = make(map[string]interface{}, len(result.Metadata)+1)\n\t\tfor key, value := range result.Metadata {\n\t\t\tclone.Metadata[key] = value\n\t\t}\n\t}\n\tclone.Artifacts = append([]ToolArtifact(nil), result.Artifacts...)\n\tclone.Structured = append(json.RawMessage(nil), result.Structured...)\n\treturn &clone\n}\n\nfunc (e *Executor) cachedSideEffectResult(scope InvocationScope, call ToolCall) *ToolResult {\n\tif call.ID == "" {\n\t\treturn nil\n\t}\n\te.idempotencyMu.Lock()\n\tdefer e.idempotencyMu.Unlock()\n\tresult := cloneToolResult(e.idempotency[sideEffectCacheKey(scope, call)])\n\tif result != nil {\n\t\tif result.Metadata == nil {\n\t\t\tresult.Metadata = map[string]interface{}{}\n\t\t}\n\t\tresult.Metadata["idempotent_replay"] = true\n\t}\n\treturn result\n}\n\nfunc (e *Executor) cacheSideEffectResult(scope InvocationScope, call ToolCall, result *ToolResult) {\n\tif call.ID == "" || result == nil {\n\t\treturn\n\t}\n\te.idempotencyMu.Lock()\n\tdefer e.idempotencyMu.Unlock()\n\te.idempotency[sideEffectCacheKey(scope, call)] = cloneToolResult(result)\n}\n\nfunc (e *Executor) failure(ctx context.Context, call ToolCall, content string, eventType ToolEventType, metadata map[string]interface{}) *ToolResult {''',
+          )
+
+          # executor now uses strings for deterministic cache keys.
+          executor = Path('backend/internal/tools/executor.go')
+          text = executor.read_text(encoding='utf-8')
+          marker = '"log"\n\t"sync"'
+          if text.count(marker) != 1:
+              raise SystemExit(f'executor imports marker count={text.count(marker)}')
+          executor.write_text(text.replace(marker, '"log"\n\t"strings"\n\t"sync"', 1), encoding='utf-8')
+
+          # Fix test increment syntax generated in the initial test fixture.
+          test = Path('backend/internal/tools/executor_reliability_test.go')
+          text = test.read_text(encoding='utf-8').replace('*t.attempts++', '(*t.attempts)++')
+          test.write_text(text, encoding='utf-8')
+          PY
+          gofmt -w backend/internal/llm/tool_conformance.go backend/internal/llm/tool_conformance_test.go backend/internal/llm/service.go backend/internal/api/message_handler.go backend/internal/tools/executor.go backend/internal/tools/retry.go backend/internal/tools/executor_reliability_test.go
+
+      - name: Backend validation
+        run: cd backend && go test ./internal/llm ./internal/tools ./internal/api
+
+      - name: Frontend validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd frontend
+          npm ci
+          npm run test:unit
+          npm run lint
+          npm run build
+
+      - name: Commit integrated changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/internal/llm backend/internal/tools backend/internal/api/message_handler.go
+          git commit -m 'feat(chat): enforce provider conformance and tool execution safeguards'
+          git push origin HEAD:feat/chat-tool-provider-conformance-observability-20260721
