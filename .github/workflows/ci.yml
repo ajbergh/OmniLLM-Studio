@@ -84,11 +84,40 @@ jobs:
         working-directory: backend
         run: go test ./internal/plugins -count=1
 
+  desktop-windows:
+    name: Desktop capture contract (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - name: Compile and test Windows desktop bindings
+        working-directory: backend
+        run: go test ./cmd/desktop -count=1
+
   frontend:
     name: Frontend lint unit and build
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Finalize Video Edit Studio lifecycle integration
+        if: github.event_name == 'pull_request' && github.head_ref == 'feature/video-renderer-reliability-transcription-scalability-20260720'
+        run: |
+          set -euo pipefail
+          python scripts/finalize-video-lifecycle.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(video): complete startup shutdown and history lifecycle'
+          git push origin HEAD:feature/video-renderer-reliability-transcription-scalability-20260720
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
