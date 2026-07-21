@@ -49,7 +49,9 @@ function usePatchTimelineHistory() {
       if (state.timelineUndoStack === undoRef && state.timelineRedoStack === redoRef) return;
       if (!state.timeline || state.timelineUndoStack.length === 0) {
         if (state.timelineUndoStack.length === 0 && state.timelineRedoStack.length === 0) history.reset();
-        undoRef = state.timelineUndoStack; redoRef = state.timelineRedoStack; return;
+        undoRef = state.timelineUndoStack;
+        redoRef = state.timelineRedoStack;
+        return;
       }
       const previous = state.timelineUndoStack[state.timelineUndoStack.length - 1];
       const patch = createTimelinePatch(previous, state.timeline);
@@ -57,25 +59,50 @@ function usePatchTimelineHistory() {
       applying = true;
       const undoSentinel = history.undo.length ? [previous] : [];
       useVideoStudioStore.setState({ timelineUndoStack: undoSentinel, timelineRedoStack: [] });
-      undoRef = undoSentinel; redoRef = [];
+      undoRef = undoSentinel;
+      redoRef = [];
       applying = false;
     });
     const undo: typeof originalUndo = async () => {
-      const state = useVideoStudioStore.getState(); const patch = history.popUndo();
+      const state = useVideoStudioStore.getState();
+      const patch = history.popUndo();
       if (!state.timeline || !patch) return;
       const next = revertTimelinePatch(state.timeline, patch);
-      applying = true; useVideoStudioStore.setState({ timeline: next, timelineUndoStack: history.undo.length ? [next] : [], timelineRedoStack: history.redo.length ? [state.timeline] : [] }); applying = false;
+      applying = true;
+      useVideoStudioStore.setState({
+        timeline: next,
+        timelineUndoStack: history.undo.length ? [next] : [],
+        timelineRedoStack: history.redo.length ? [state.timeline] : [],
+      });
+      applying = false;
       await useVideoStudioStore.getState().saveTimeline(next);
     };
     const redo: typeof originalRedo = async () => {
-      const state = useVideoStudioStore.getState(); const patch = history.popRedo();
+      const state = useVideoStudioStore.getState();
+      const patch = history.popRedo();
       if (!state.timeline || !patch) return;
       const next = applyTimelinePatch(state.timeline, patch);
-      applying = true; useVideoStudioStore.setState({ timeline: next, timelineUndoStack: history.undo.length ? [state.timeline] : [], timelineRedoStack: history.redo.length ? [next] : [] }); applying = false;
+      applying = true;
+      useVideoStudioStore.setState({
+        timeline: next,
+        timelineUndoStack: history.undo.length ? [state.timeline] : [],
+        timelineRedoStack: history.redo.length ? [next] : [],
+      });
+      applying = false;
       await useVideoStudioStore.getState().saveTimeline(next);
     };
     useVideoStudioStore.setState({ undoTimeline: undo, redoTimeline: redo });
-    return () => { unsubscribe(); if (useVideoStudioStore.getState().undoTimeline === undo) useVideoStudioStore.setState({ undoTimeline: originalUndo, redoTimeline: originalRedo }); };
+    return () => {
+      unsubscribe();
+      if (useVideoStudioStore.getState().undoTimeline === undo) {
+        useVideoStudioStore.setState({
+          undoTimeline: originalUndo,
+          redoTimeline: originalRedo,
+          timelineUndoStack: [],
+          timelineRedoStack: [],
+        });
+      }
+    };
   }, []);
 }
 
