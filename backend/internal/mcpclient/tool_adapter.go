@@ -232,6 +232,7 @@ func normalizeContentBlock(item map[string]interface{}) string {
 			if mimeType, ok := resource["mimeType"].(string); ok {
 				return "[Resource: " + mimeType + "]"
 			}
+		}
 	}
 
 	data, err := json.Marshal(item)
