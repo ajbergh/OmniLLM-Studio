@@ -31,24 +31,30 @@ func TestParallelStepSafeRejectsSideEffectsUnknownNonParallelAndApprovalCalls(t 
 	}
 }
 
-func TestExecutorBuildExecutionPlanKeepsAskPolicySequential(t *testing.T) {
+func TestExecutorBuildExecutionPlanKeepsAskAndDenyPoliciesSequential(t *testing.T) {
 	registry := NewRegistry()
 	registry.MustRegister(planningTool{name: "allowed_read", readOnly: true, supportsParallel: true})
 	registry.MustRegister(planningTool{name: "approval_read", readOnly: true, supportsParallel: true})
+	registry.MustRegister(planningTool{name: "denied_read", readOnly: true, supportsParallel: true})
 	executor := NewExecutor(registry, func(name string) string {
-		if name == "approval_read" {
+		switch name {
+		case "approval_read":
 			return "ask"
+		case "denied_read":
+			return "deny"
+		default:
+			return "allow"
 		}
-		return "allow"
 	}, 0)
 
 	plan := executor.BuildExecutionPlan([]ToolCall{
 		{ID: "1", Name: "allowed_read"},
 		{ID: "2", Name: "approval_read"},
-		{ID: "3", Name: "allowed_read"},
+		{ID: "3", Name: "denied_read"},
+		{ID: "4", Name: "allowed_read"},
 	})
-	if len(plan) != 3 {
-		t.Fatalf("plan length = %d, want 3: %#v", len(plan), plan)
+	if len(plan) != 4 {
+		t.Fatalf("plan length = %d, want 4: %#v", len(plan), plan)
 	}
 	for i, step := range plan {
 		if step.Parallel || len(step.Calls) != 1 {
