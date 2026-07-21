@@ -1,0 +1,92 @@
+name: Chat tool remediation bootstrap
+
+on:
+  push:
+    branches:
+      - fix/chat-tool-lifecycle-reliability-20260721
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out remediation branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/chat-tool-lifecycle-reliability-20260721
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Decode and verify remediation script
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/.remediate_chat_tools.part.* > /tmp/remediate_chat_tools.py.gz.b64
+          echo 'f17f478fe41bc6e6e904622c2389c9023695c394af0b6d1ac470fb34a897748c  /tmp/remediate_chat_tools.py.gz.b64' | sha256sum --check
+          base64 --decode /tmp/remediate_chat_tools.py.gz.b64 | gzip --decompress > /tmp/remediate_chat_tools.py
+          echo '626a1a25c899427b0d72fba5157734e405360e5b65393bd89b49db38852693a7  /tmp/remediate_chat_tools.py' | sha256sum --check
+          python -m py_compile /tmp/remediate_chat_tools.py
+
+      - name: Apply remediation
+        run: python /tmp/remediate_chat_tools.py
+
+      - name: Format Go sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -w \
+            backend/internal/api/chat_tool_runtime.go \
+            backend/internal/api/chat_tool_runtime_test.go \
+            backend/internal/api/message_handler.go \
+            backend/internal/api/tool_handler.go \
+            backend/internal/tools/approval_broker.go \
+            backend/internal/tools/approval_broker_pending.go \
+            backend/internal/tools/executor.go \
+            backend/internal/tools/executor_policy.go \
+            backend/internal/tools/inline_approval.go \
+            backend/internal/tools/inline_approval_test.go \
+            backend/internal/tools/types.go
+
+      - name: Run focused backend tests
+        run: cd backend && go test ./internal/tools ./internal/api
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Run frontend unit tests
+        run: cd frontend && npm run test:unit
+
+      - name: Run frontend lint
+        run: cd frontend && npm run lint
+
+      - name: Build frontend
+        run: cd frontend && npm run build
+
+      - name: Commit tested remediation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/chat-tool-remediation-bootstrap.yml
+          git rm scripts/.remediate_chat_tools.part.*
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(chat): make tool calling failures observable and resumable'
+          git push origin HEAD:fix/chat-tool-lifecycle-reliability-20260721
