@@ -96,4 +96,4 @@ That migration must preserve:
 - result-context truncation and final-answer fallback;
 - cancellation of the complete request batch.
 
-GitHub Actions remain temporarily non-blocking due to the repository-owner budget suspension.
+GitHub Actions remain temporarily non-blocking due to the repository-owner budget suspension. The branch has been source-reviewed against the post-#34 codebase; automated validation should be restored when the Actions budget is available again.
