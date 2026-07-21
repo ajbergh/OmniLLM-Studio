@@ -1,9 +1,3 @@
-Expected segment checksums:
-5f30ca3bb031e37352b78067ab0db23f73990d82c64cec4fd3a99b4b1ed8f159  scripts/.remediate_chat_tools.part.00
-8631918c0bd2e4c33096a359ec910194236552d4f7285ddf5cbda107e2d3c11f  scripts/.remediate_chat_tools.part.01
-e94e6103775eabb1b316e976de2a5912959bb11f750202ff74ce9fddf9903c9f  scripts/.remediate_chat_tools.part.02
-388c8f46a384028b6d03cb2ceb2fdfd90a1969fc766e2515527025372ca6b3fa  scripts/.remediate_chat_tools.part.03
-
 Actual segment sizes and checksums:
  1100 scripts/.remediate_chat_tools.part.00.00
  1100 scripts/.remediate_chat_tools.part.00.01
