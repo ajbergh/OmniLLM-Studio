@@ -1,11 +1,17 @@
 package llm
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"strings"
+	"time"
 )
 
 // NormalizeToolCalls applies provider-neutral invariants before tool calls enter
@@ -25,8 +31,8 @@ func NormalizeToolCalls(provider string, calls []ToolCall) []ToolCall {
 
 // NormalizeToolCall returns a copy with a stable call ID, function type, index,
 // and syntactically valid argument payload. Invalid or empty argument fragments
-// are represented as an empty object so downstream validation can return a
-// normal tool error instead of failing the provider protocol.
+// are represented as an observable wrapper object so downstream validation can
+// return a normal tool error instead of failing the provider protocol.
 func NormalizeToolCall(provider string, call ToolCall, fallbackIndex int) ToolCall {
 	call.Index = fallbackIndex
 	call.Type = strings.TrimSpace(call.Type)
@@ -38,8 +44,6 @@ func NormalizeToolCall(provider string, call ToolCall, fallbackIndex int) ToolCa
 	if call.Function.Arguments == "" {
 		call.Function.Arguments = "{}"
 	} else if !json.Valid([]byte(call.Function.Arguments)) {
-		// Preserve the malformed provider payload for observability while making
-		// the tool invocation itself safe to parse and validate downstream.
 		call.Function.Arguments = fmt.Sprintf(`{"_provider_arguments":%q}`, call.Function.Arguments)
 	}
 	if strings.TrimSpace(call.ID) == "" {
@@ -85,6 +89,9 @@ func (e *ProviderRequestError) Error() string {
 	if e.Code != "" {
 		message += " (" + e.Code + ")"
 	}
+	if e.RequestID != "" {
+		message += " [request_id=" + e.RequestID + "]"
+	}
 	return message
 }
 
@@ -112,4 +119,72 @@ func ProviderRequestID(headers map[string][]string) string {
 		}
 	}
 	return ""
+}
+
+func newProviderRequestID() string {
+	return fmt.Sprintf("llm_%d", time.Now().UnixNano())
+}
+
+func retryableProviderTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if ok := errorAs(err, &netErr); ok {
+		return netErr.Timeout() || netErr.Temporary()
+	}
+	return false
+}
+
+// errorAs is isolated for straightforward testing and to avoid exposing the
+// standard-library errors package through the provider conformance API.
+func errorAs(err error, target interface{}) bool {
+	switch typed := target.(type) {
+	case *net.Error:
+		for err != nil {
+			if value, ok := err.(net.Error); ok {
+				*typed = value
+				return true
+			}
+			unwrapper, ok := err.(interface{ Unwrap() error })
+			if !ok {
+				break
+			}
+			err = unwrapper.Unwrap()
+		}
+	}
+	return false
+}
+
+// doProviderRequestWithRetry retries only failures that occur before any chat
+// response body is consumed. This makes non-streaming provider retries safe
+// while avoiding duplicate streamed tokens or tool calls.
+func doProviderRequestWithRetry(ctx context.Context, client *http.Client, request *http.Request, body []byte, provider, requestID string) (*http.Response, int, error) {
+	const maxAttempts = 2
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		clone := request.Clone(ctx)
+		clone.Body = io.NopCloser(bytes.NewReader(body))
+		clone.ContentLength = int64(len(body))
+		resp, err := client.Do(clone)
+		if err != nil {
+			retryable := retryableProviderTransportError(err) && ctx.Err() == nil
+			if retryable && attempt < maxAttempts {
+				continue
+			}
+			return nil, attempt, &ProviderRequestError{
+				Provider:   provider,
+				Code:       "PROVIDER_TRANSPORT_ERROR",
+				RequestID:  requestID,
+				Retryable:  retryable,
+				Cause:      err,
+			}
+		}
+		if IsRetryableProviderStatus(resp.StatusCode) && attempt < maxAttempts {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			continue
+		}
+		return resp, attempt, nil
+	}
+	return nil, maxAttempts, &ProviderRequestError{Provider: provider, Code: "PROVIDER_RETRY_EXHAUSTED", RequestID: requestID, Retryable: false}
 }
