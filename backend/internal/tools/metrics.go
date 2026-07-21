@@ -2,11 +2,12 @@ package tools
 
 import (
 	"sort"
+	"strings"
 	"sync"
 )
 
 // ToolMetricSummary is a privacy-safe aggregate of terminal tool lifecycle
-// events. It intentionally excludes arguments and result content.
+// events. It intentionally excludes arguments, result content, and user IDs.
 type ToolMetricSummary struct {
 	ToolName        string `json:"tool_name"`
 	Calls           int64  `json:"calls"`
@@ -22,11 +23,15 @@ type ToolMetricSummary struct {
 
 var runtimeToolMetrics struct {
 	sync.RWMutex
-	byTool map[string]*ToolMetricSummary
+	byScopeTool map[string]*ToolMetricSummary
 }
 
 func init() {
-	runtimeToolMetrics.byTool = make(map[string]*ToolMetricSummary)
+	runtimeToolMetrics.byScopeTool = make(map[string]*ToolMetricSummary)
+}
+
+func toolMetricKey(userID, toolName string) string {
+	return userID + "\x00" + toolName
 }
 
 func recordGlobalToolMetric(event ToolEvent) {
@@ -39,10 +44,11 @@ func recordGlobalToolMetric(event ToolEvent) {
 
 	runtimeToolMetrics.Lock()
 	defer runtimeToolMetrics.Unlock()
-	metric := runtimeToolMetrics.byTool[event.ToolName]
+	key := toolMetricKey(event.Scope.UserID, event.ToolName)
+	metric := runtimeToolMetrics.byScopeTool[key]
 	if metric == nil {
 		metric = &ToolMetricSummary{ToolName: event.ToolName}
-		runtimeToolMetrics.byTool[event.ToolName] = metric
+		runtimeToolMetrics.byScopeTool[key] = metric
 	}
 	metric.Calls++
 	metric.LastEvent = string(event.Type)
@@ -84,22 +90,64 @@ func int64MetricValue(value interface{}) int64 {
 	}
 }
 
-// ToolMetricsSnapshot returns a stable name-sorted copy of the current runtime
-// aggregates. Metrics reset when the process restarts; the existing
-// tool_invocations audit table remains the durable event history.
-func ToolMetricsSnapshot() []ToolMetricSummary {
+func mergeToolMetric(target *ToolMetricSummary, source ToolMetricSummary) {
+	target.Calls += source.Calls
+	target.Successes += source.Successes
+	target.Failures += source.Failures
+	target.Timeouts += source.Timeouts
+	target.Cancellations += source.Cancellations
+	target.Retries += source.Retries
+	target.TotalDurationMS += source.TotalDurationMS
+	if source.LastDurationMS != 0 || source.LastEvent != "" {
+		target.LastDurationMS = source.LastDurationMS
+		target.LastEvent = source.LastEvent
+	}
+}
+
+func snapshotToolMetrics(userID *string) []ToolMetricSummary {
 	runtimeToolMetrics.RLock()
-	out := make([]ToolMetricSummary, 0, len(runtimeToolMetrics.byTool))
-	for _, metric := range runtimeToolMetrics.byTool {
-		out = append(out, *metric)
+	aggregated := make(map[string]*ToolMetricSummary)
+	for key, metric := range runtimeToolMetrics.byScopeTool {
+		separator := strings.IndexByte(key, 0)
+		metricUserID := ""
+		if separator >= 0 {
+			metricUserID = key[:separator]
+		}
+		if userID != nil && metricUserID != *userID {
+			continue
+		}
+		current := aggregated[metric.ToolName]
+		if current == nil {
+			copyMetric := *metric
+			aggregated[metric.ToolName] = &copyMetric
+			continue
+		}
+		mergeToolMetric(current, *metric)
 	}
 	runtimeToolMetrics.RUnlock()
+
+	out := make([]ToolMetricSummary, 0, len(aggregated))
+	for _, metric := range aggregated {
+		out = append(out, *metric)
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ToolName < out[j].ToolName })
 	return out
 }
 
+// ToolMetricsSnapshot returns process-wide runtime aggregates for internal
+// diagnostics and tests. It does not include user identifiers.
+func ToolMetricsSnapshot() []ToolMetricSummary {
+	return snapshotToolMetrics(nil)
+}
+
+// ToolMetricsSnapshotForUser returns only metrics recorded under the supplied
+// authenticated user scope. Solo mode naturally uses the empty user ID scope.
+func ToolMetricsSnapshotForUser(userID string) []ToolMetricSummary {
+	return snapshotToolMetrics(&userID)
+}
+
 func resetToolMetricsForTest() {
 	runtimeToolMetrics.Lock()
-	runtimeToolMetrics.byTool = make(map[string]*ToolMetricSummary)
+	runtimeToolMetrics.byScopeTool = make(map[string]*ToolMetricSummary)
 	runtimeToolMetrics.Unlock()
 }
