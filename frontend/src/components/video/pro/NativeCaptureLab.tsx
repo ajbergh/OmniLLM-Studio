@@ -9,6 +9,7 @@ interface NativeCaptureCapabilities {
   audio_devices: string[];
   video_devices: string[];
   system_audio_devices: string[];
+  reconnect_supported: boolean;
   reason?: string;
 }
 
@@ -67,6 +68,7 @@ export function NativeCaptureLab({
         audio_devices: [],
         video_devices: [],
         system_audio_devices: [],
+        reconnect_supported: false,
         reason: 'Native capture is available in the Windows Wails build.',
       });
       return;
@@ -83,6 +85,7 @@ export function NativeCaptureLab({
           audio_devices: [],
           video_devices: [],
           system_audio_devices: [],
+          reconnect_supported: false,
           reason: reason instanceof Error ? reason.message : 'Could not inspect native capture capabilities.',
         });
       });
@@ -113,7 +116,7 @@ export function NativeCaptureLab({
         audio_device: audioDevice,
         capture_cursor: captureCursor,
         capture_keystrokes: captureKeystrokes,
-        reconnect: true,
+        reconnect: false,
       });
       setSessionId(result.session_id);
       setStatus('recording');
@@ -213,10 +216,16 @@ export function NativeCaptureLab({
                 />
                 <span>
                   <strong className="block text-text">Capture keystroke telemetry</strong>
-                  Opt in only when no passwords or sensitive text will be entered. Key timing is stored locally.
+                  Opt in only when no passwords or sensitive text will be entered. Virtual-key timing is stored locally; typed text is not reconstructed.
                 </span>
               </label>
             </div>
+
+            {!capabilities.reconnect_supported && (
+              <p className="rounded border border-border bg-surface-alt p-2 text-xs text-text-muted">
+                Device reconnect is not seamless. If an audio device disconnects, stop the recording, reconnect it, refresh the device list, and begin a new take.
+              </p>
+            )}
 
             {error && (
               <p role="alert" className="rounded border border-red-400/30 bg-red-400/10 p-2 text-xs text-red-200">
