@@ -76,6 +76,7 @@ const assets: VideoAsset[] = [
   {
     id: 'video-long',
     project_id: 'project',
+    source_type: 'upload',
     kind: 'video',
     file_name: 'long.mp4',
     mime_type: 'video/mp4',
@@ -86,6 +87,7 @@ const assets: VideoAsset[] = [
   {
     id: 'video-short',
     project_id: 'project',
+    source_type: 'upload',
     kind: 'video',
     file_name: 'short.mp4',
     mime_type: 'video/mp4',
