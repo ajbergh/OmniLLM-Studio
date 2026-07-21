@@ -1,16 +1,6 @@
 Traceback (most recent call last):
-  File "/tmp/remediate_chat_tools.py", line 41, in <module>
+  File "/tmp/remediate_chat_tools.py", line 1003, in <module>
     replace_once(
-  File "/tmp/remediate_chat_tools.py", line 19, in replace_once
-    content = read(path)
-              ^^^^^^^^^^
-  File "/tmp/remediate_chat_tools.py", line 9, in read
-    return (ROOT / path).read_text(encoding="utf-8")
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/pathlib.py", line 1029, in read_text
-    with self.open(mode='r', encoding=encoding, errors=errors) as f:
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
-    return io.open(self, mode, buffering, encoding, errors, newline)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: [Errno 2] No such file or directory: '/backend/internal/tools/types.go'
+  File "/tmp/remediate_chat_tools.py", line 22, in replace_once
+    raise RuntimeError(f"{path}: expected one match, found {count}: {old[:120]!r}")
+RuntimeError: frontend/src/api.ts: expected one match, found 3: 'import type {\n'
