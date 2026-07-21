@@ -1,0 +1,120 @@
+name: Chat tool protocol follow-up
+
+on:
+  push:
+    branches:
+      - fix/chat-tool-lifecycle-reliability-20260721
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/chat-tool-lifecycle-reliability-20260721
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Patch tool-limit protocol handling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          message_path = Path('backend/internal/api/message_handler.go')
+          message = message_path.read_text(encoding='utf-8')
+          old_loop = '''\t\t\tfor _, tc := range finalToolCalls {
+          \t\t\t\ttoolCtx := browser.WithProviderType(r.Context(), providerType)
+          '''
+          new_loop = '''\t\t\tfor _, tc := range finalToolCalls {
+          \t\t\t\tif resultLimitReached {
+          \t\t\t\t\tlimitMessage := "Tool was not executed because this turn reached the tool result context limit."
+          \t\t\t\t\tskipped := tools.ToolResult{
+          \t\t\t\t\t\tToolCallID: tc.ID,
+          \t\t\t\t\t\tContent:    limitMessage,
+          \t\t\t\t\t\tIsError:    true,
+          \t\t\t\t\t\tMetadata: map[string]interface{}{
+          \t\t\t\t\t\t\t"error_code": "TOOL_RESULT_LIMIT",
+          \t\t\t\t\t\t\t"retryable":  false,
+          \t\t\t\t\t\t\t"tool_name":  tc.Function.Name,
+          \t\t\t\t\t\t},
+          \t\t\t\t\t}
+          \t\t\t\t\ttoolResults = append(toolResults, skipped)
+          \t\t\t\t\tsendSSE(w, flusher, "tool_result", map[string]interface{}{
+          \t\t\t\t\t\t"tool_call_id": tc.ID,
+          \t\t\t\t\t\t"tool_name":    tc.Function.Name,
+          \t\t\t\t\t\t"result":       skipped,
+          \t\t\t\t\t})
+          \t\t\t\t\tllmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
+          \t\t\t\t\t\tRole:       "tool",
+          \t\t\t\t\t\tContent:    limitMessage,
+          \t\t\t\t\t\tToolCallID: tc.ID,
+          \t\t\t\t\t\tName:       tc.Function.Name,
+          \t\t\t\t\t})
+          \t\t\t\t\tcontinue
+          \t\t\t\t}
+          \t\t\t\ttoolCtx := browser.WithProviderType(r.Context(), providerType)
+          '''
+          if message.count(old_loop) != 1:
+              raise SystemExit(f'expected one tool loop marker, found {message.count(old_loop)}')
+          message = message.replace(old_loop, new_loop, 1)
+          old_break = '''\t\t\t\tif resultLimitReached {
+          \t\t\t\t\tbreak
+          \t\t\t\t}
+          '''
+          new_continue = '''\t\t\t\tif resultLimitReached {
+          \t\t\t\t\tcontinue
+          \t\t\t\t}
+          '''
+          if message.count(old_break) != 1:
+              raise SystemExit(f'expected one result-limit break, found {message.count(old_break)}')
+          message_path.write_text(message.replace(old_break, new_continue, 1), encoding='utf-8')
+
+          api_path = Path('frontend/src/api.ts')
+          api = api_path.read_text(encoding='utf-8')
+          old_event = '              callbacks.onToolEvent?.(payload);'
+          new_event = '              callbacks.onToolEvent?.({ ...payload, type: payload.type || eventType });'
+          if api.count(old_event) != 1:
+              raise SystemExit(f'expected one tool event dispatch marker, found {api.count(old_event)}')
+          api_path.write_text(api.replace(old_event, new_event, 1), encoding='utf-8')
+          PY
+          gofmt -w backend/internal/api/message_handler.go
+
+      - name: Validate backend
+        run: cd backend && go test ./internal/tools ./internal/api
+
+      - name: Validate frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd frontend
+          npm ci
+          npm run test:unit
+          npm run lint
+          npm run build
+
+      - name: Commit validated follow-up
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/internal/api/message_handler.go frontend/src/api.ts
+          git commit -m 'fix(chat): complete tool-limit protocol handling'
+          git push origin HEAD:fix/chat-tool-lifecycle-reliability-20260721
