@@ -87,6 +87,7 @@ jobs:
               ''' + "'''" + '''import { describe, expect, it } from 'vitest';''': '''write(
               "frontend/src/sse.test.ts",
               r''' + "'''" + '''import { describe, expect, it } from 'vitest';''',
+              "  constructor(private readonly defaultEvent = 'message') {}": "  private readonly defaultEvent: string;\n\n  constructor(defaultEvent = 'message') {\n    this.defaultEvent = defaultEvent;\n  }",
           }
           for before, after in fixes.items():
               if content.count(before) != 1:
