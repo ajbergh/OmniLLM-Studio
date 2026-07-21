@@ -234,8 +234,13 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 	return result
 }
 
+const maxSideEffectReplayEntries = 1024
+
 func sideEffectCacheKey(scope InvocationScope, call ToolCall) string {
-	return strings.Join([]string{scope.UserID, scope.WorkspaceID, scope.ConversationID, scope.MessageID, call.ID, call.Name, string(call.Arguments)}, "\x00")
+	// A stable provider call ID identifies one side effect. Deliberately exclude
+	// arguments so an approval-edited invocation is still protected if the model
+	// repeats the original call after approval.
+	return strings.Join([]string{scope.UserID, scope.WorkspaceID, scope.ConversationID, scope.MessageID, call.ID, call.Name}, "\x00")
 }
 
 func cloneToolResult(result *ToolResult) *ToolResult {
@@ -276,6 +281,12 @@ func (e *Executor) cacheSideEffectResult(scope InvocationScope, call ToolCall, r
 	}
 	e.idempotencyMu.Lock()
 	defer e.idempotencyMu.Unlock()
+	if len(e.idempotency) >= maxSideEffectReplayEntries {
+		// The cache is a short-lived duplicate-execution guard, not durable state.
+		// Resetting at the cap keeps server memory bounded while preserving safety
+		// for the current working set of calls.
+		e.idempotency = make(map[string]*ToolResult)
+	}
 	e.idempotency[sideEffectCacheKey(scope, call)] = cloneToolResult(result)
 }
 

@@ -1024,7 +1024,7 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 					}
 
 					if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-						continue // skip malformed chunks
+						return &ProviderRequestError{Provider: providerType, Code: "PROVIDER_STREAM_PROTOCOL_ERROR", RequestID: requestID, UpstreamRequestID: upstreamRequestID, Retryable: false, Cause: err}
 					}
 
 					if len(chunk.Choices) > 0 {
@@ -1066,11 +1066,11 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("read stream: %w", err)
+			return &ProviderRequestError{Provider: providerType, Code: "PROVIDER_STREAM_READ_ERROR", RequestID: requestID, UpstreamRequestID: upstreamRequestID, Retryable: retryableProviderTransportError(err), Cause: err}
 		}
 	}
 
-	return nil
+	return &ProviderRequestError{Provider: providerType, Code: "PROVIDER_STREAM_INTERRUPTED", RequestID: requestID, UpstreamRequestID: upstreamRequestID, Retryable: true}
 }
 
 // isImageCapableProvider returns true if the given provider type supports
