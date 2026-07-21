@@ -13,10 +13,11 @@ type VideoTranscriptionHandler struct {
 	service *video.VideoTranscriptionService
 }
 
+// NewVideoTranscriptionHandler performs startup recovery synchronously before
+// exposing routes. This keeps composition deterministic and avoids racing
+// SQLite in-memory test databases with an untracked background query.
 func NewVideoTranscriptionHandler(service *video.VideoTranscriptionService) *VideoTranscriptionHandler {
-	// API composition happens once per runtime. Recover interrupted provider jobs
-	// here so server and Wails entry points share identical startup behavior.
-	go service.RecoverInterrupted()
+	service.RecoverInterrupted()
 	return &VideoTranscriptionHandler{service: service}
 }
 
