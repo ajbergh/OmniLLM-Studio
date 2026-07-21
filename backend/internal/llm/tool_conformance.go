@@ -172,11 +172,11 @@ func doProviderRequestWithRetry(ctx context.Context, client *http.Client, reques
 				continue
 			}
 			return nil, attempt, &ProviderRequestError{
-				Provider:   provider,
-				Code:       "PROVIDER_TRANSPORT_ERROR",
-				RequestID:  requestID,
-				Retryable:  retryable,
-				Cause:      err,
+				Provider:  provider,
+				Code:      "PROVIDER_TRANSPORT_ERROR",
+				RequestID: requestID,
+				Retryable: retryable,
+				Cause:     err,
 			}
 		}
 		if IsRetryableProviderStatus(resp.StatusCode) && attempt < maxAttempts {

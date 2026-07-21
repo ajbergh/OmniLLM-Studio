@@ -9,8 +9,8 @@ import (
 
 type transientError struct{ message string }
 
-func (e transientError) Error() string    { return e.message }
-func (e transientError) Retryable() bool  { return true }
+func (e transientError) Error() string   { return e.message }
+func (e transientError) Retryable() bool { return true }
 
 type retryTool struct {
 	attempts *int
@@ -29,7 +29,7 @@ func (t retryTool) Definition() ToolDefinition {
 
 func (t retryTool) Validate(json.RawMessage) error { return nil }
 func (t retryTool) Execute(context.Context, json.RawMessage) (*ToolResult, error) {
-	*t.attempts++
+	(*t.attempts)++
 	if *t.attempts == 1 {
 		return nil, transientError{message: "temporary"}
 	}
@@ -54,7 +54,7 @@ func (t sideEffectTool) Definition() ToolDefinition {
 
 func (t sideEffectTool) Validate(json.RawMessage) error { return nil }
 func (t sideEffectTool) Execute(context.Context, json.RawMessage) (*ToolResult, error) {
-	*t.attempts++
+	(*t.attempts)++
 	return &ToolResult{Content: "created"}, nil
 }
 
