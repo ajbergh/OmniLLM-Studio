@@ -47,11 +47,11 @@ func newChatToolExecution(executor *tools.Executor, calls []llm.ToolCall) chatTo
 }
 
 // genericRuntimeEligible reports whether a complete provider tool-call round can
-// execute through the generic ordered runtime. A single browser-managed call
-// keeps the entire round sequential so result ordering and browser state remain
-// governed by the existing handler implementation.
+// use the generic ordered runtime. A single browser-managed call keeps the entire
+// round on the existing sequential handler path so browser state and provider
+// result order continue to be governed by one implementation.
 func (e chatToolExecution) genericRuntimeEligible() bool {
-	if len(e.RuntimeCalls) == 0 {
+	if len(e.RuntimeCalls) == 0 || len(e.Plan) == 0 {
 		return false
 	}
 	for _, call := range e.RuntimeCalls {
@@ -62,16 +62,14 @@ func (e chatToolExecution) genericRuntimeEligible() bool {
 	return true
 }
 
-// executeGenericChatToolRound executes an eligible round through the reviewed
-// policy-aware planner/runtime introduced by the parallel orchestration work.
-// The returned result slice has the same order and cardinality as calls.
-func executeGenericChatToolRound(ctx context.Context, executor *tools.Executor, calls []llm.ToolCall) ([]*tools.ToolResult, bool) {
-	if executor == nil {
-		return nil, false
+// executeChatToolStep executes exactly one planned step. Chat Studio must apply
+// its per-turn result-context budget before starting the next step. This retains
+// the existing behavior that later sequential or side-effecting calls do not run
+// after the result limit is reached, while planner-approved read-only calls in a
+// single parallel step may execute concurrently.
+func executeChatToolStep(ctx context.Context, executor *tools.Executor, step tools.ExecutionStep) []*tools.ToolResult {
+	if executor == nil || len(step.Calls) == 0 {
+		return nil
 	}
-	execution := newChatToolExecution(executor, calls)
-	if !execution.genericRuntimeEligible() {
-		return nil, false
-	}
-	return executor.ExecutePlan(ctx, execution.Plan), true
+	return executor.ExecutePlan(ctx, []tools.ExecutionStep{step})
 }
