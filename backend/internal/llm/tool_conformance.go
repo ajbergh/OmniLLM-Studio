@@ -1,0 +1,115 @@
+package llm
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// NormalizeToolCalls applies provider-neutral invariants before tool calls enter
+// the Chat Studio orchestration loop. Providers and OpenAI-compatible proxies
+// differ on whether they populate IDs and type fields, so the application must
+// not rely on either being present upstream.
+func NormalizeToolCalls(provider string, calls []ToolCall) []ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]ToolCall, len(calls))
+	for i := range calls {
+		out[i] = NormalizeToolCall(provider, calls[i], i)
+	}
+	return out
+}
+
+// NormalizeToolCall returns a copy with a stable call ID, function type, index,
+// and syntactically valid argument payload. Invalid or empty argument fragments
+// are represented as an empty object so downstream validation can return a
+// normal tool error instead of failing the provider protocol.
+func NormalizeToolCall(provider string, call ToolCall, fallbackIndex int) ToolCall {
+	call.Index = fallbackIndex
+	call.Type = strings.TrimSpace(call.Type)
+	if call.Type == "" {
+		call.Type = "function"
+	}
+	call.Function.Name = strings.TrimSpace(call.Function.Name)
+	call.Function.Arguments = strings.TrimSpace(call.Function.Arguments)
+	if call.Function.Arguments == "" {
+		call.Function.Arguments = "{}"
+	} else if !json.Valid([]byte(call.Function.Arguments)) {
+		// Preserve the malformed provider payload for observability while making
+		// the tool invocation itself safe to parse and validate downstream.
+		call.Function.Arguments = fmt.Sprintf(`{"_provider_arguments":%q}`, call.Function.Arguments)
+	}
+	if strings.TrimSpace(call.ID) == "" {
+		call.ID = stableToolCallID(provider, call, fallbackIndex)
+	}
+	return call
+}
+
+func stableToolCallID(provider string, call ToolCall, index int) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		strings.ToLower(strings.TrimSpace(provider)),
+		call.Function.Name,
+		call.Function.Arguments,
+		fmt.Sprintf("%d", index),
+	}, "\x00")))
+	return "call_" + hex.EncodeToString(sum[:8])
+}
+
+// ProviderRequestError is the normalized error returned when a provider rejects
+// or cannot complete a chat request. It intentionally keeps the raw response
+// body out of Error() so API layers can expose the error safely.
+type ProviderRequestError struct {
+	Provider          string
+	StatusCode        int
+	Code              string
+	RequestID         string
+	UpstreamRequestID string
+	Retryable         bool
+	Cause             error
+}
+
+func (e *ProviderRequestError) Error() string {
+	if e == nil {
+		return "provider request failed"
+	}
+	message := "provider request failed"
+	if e.Provider != "" {
+		message = e.Provider + " request failed"
+	}
+	if e.StatusCode > 0 {
+		message += fmt.Sprintf(" with status %d", e.StatusCode)
+	}
+	if e.Code != "" {
+		message += " (" + e.Code + ")"
+	}
+	return message
+}
+
+func (e *ProviderRequestError) Unwrap() error { return e.Cause }
+
+// IsRetryableProviderStatus reports whether an HTTP response is safe to retry
+// before any streaming output has been delivered.
+func IsRetryableProviderStatus(status int) bool {
+	switch status {
+	case 408, 409, 425, 429, 500, 502, 503, 504:
+		return true
+	default:
+		return false
+	}
+}
+
+// ProviderRequestID extracts the common request-correlation headers used by
+// OpenAI, Anthropic, OpenRouter, and compatible gateways.
+func ProviderRequestID(headers map[string][]string) string {
+	for _, key := range []string{"x-request-id", "request-id", "openai-request-id", "x-trace-id"} {
+		for header, values := range headers {
+			if strings.EqualFold(header, key) && len(values) > 0 && strings.TrimSpace(values[0]) != "" {
+				return strings.TrimSpace(values[0])
+			}
+		}
+	}
+	return ""
+}
