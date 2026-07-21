@@ -21,6 +21,7 @@ const (
 	ToolEventCompleted        ToolEventType = "tool_completed"
 	ToolEventFailed           ToolEventType = "tool_failed"
 	ToolEventTimedOut         ToolEventType = "tool_timed_out"
+	ToolEventCancelled        ToolEventType = "tool_cancelled"
 )
 
 type ToolEvent struct {
@@ -80,6 +81,7 @@ func ContextWithEventSink(ctx context.Context, sink EventSink) context.Context {
 }
 
 func emitEvent(ctx context.Context, event ToolEvent) {
+	recordGlobalToolMetric(event)
 	emitGlobalEvent(event)
 	if sink, ok := ctx.Value(eventSinkContextKey{}).(EventSink); ok && sink != nil {
 		sink(event)
