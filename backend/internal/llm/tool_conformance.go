@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -130,28 +131,8 @@ func retryableProviderTransportError(err error) bool {
 		return false
 	}
 	var netErr net.Error
-	if ok := errorAs(err, &netErr); ok {
+	if errors.As(err, &netErr) {
 		return netErr.Timeout() || netErr.Temporary()
-	}
-	return false
-}
-
-// errorAs is isolated for straightforward testing and to avoid exposing the
-// standard-library errors package through the provider conformance API.
-func errorAs(err error, target interface{}) bool {
-	switch typed := target.(type) {
-	case *net.Error:
-		for err != nil {
-			if value, ok := err.(net.Error); ok {
-				*typed = value
-				return true
-			}
-			unwrapper, ok := err.(interface{ Unwrap() error })
-			if !ok {
-				break
-			}
-			err = unwrapper.Unwrap()
-		}
 	}
 	return false
 }
