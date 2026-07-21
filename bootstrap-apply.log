@@ -1,6 +1,1 @@
-Traceback (most recent call last):
-  File "/tmp/remediate_chat_tools.py", line 1003, in <module>
-    replace_once(
-  File "/tmp/remediate_chat_tools.py", line 22, in replace_once
-    raise RuntimeError(f"{path}: expected one match, found {count}: {old[:120]!r}")
-RuntimeError: frontend/src/api.ts: expected one match, found 3: 'import type {\n'
+Chat Studio tool remediation patches applied
