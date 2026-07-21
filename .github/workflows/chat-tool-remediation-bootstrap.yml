@@ -15,6 +15,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: chat-tool-remediation-bootstrap
+  cancel-in-progress: true
+
 jobs:
   apply:
     if: >-
@@ -48,8 +52,6 @@ jobs:
         run: |
           set -euo pipefail
           cat scripts/.remediate_chat_tools.part.* > /tmp/remediate_chat_tools.py.gz.b64
-          wc -c /tmp/remediate_chat_tools.py.gz.b64
-          sha256sum /tmp/remediate_chat_tools.py.gz.b64
           base64 --decode /tmp/remediate_chat_tools.py.gz.b64 | gzip --decompress > /tmp/remediate_chat_tools.py
           echo '626a1a25c899427b0d72fba5157734e405360e5b65393bd89b49db38852693a7  /tmp/remediate_chat_tools.py' | sha256sum --check
           python -m py_compile /tmp/remediate_chat_tools.py
@@ -108,12 +110,6 @@ jobs:
         run: |
           set +e
           {
-            echo 'Expected segment checksums:'
-            echo '5f30ca3bb031e37352b78067ab0db23f73990d82c64cec4fd3a99b4b1ed8f159  scripts/.remediate_chat_tools.part.00'
-            echo '8631918c0bd2e4c33096a359ec910194236552d4f7285ddf5cbda107e2d3c11f  scripts/.remediate_chat_tools.part.01'
-            echo 'e94e6103775eabb1b316e976de2a5912959bb11f750202ff74ce9fddf9903c9f  scripts/.remediate_chat_tools.part.02'
-            echo '388c8f46a384028b6d03cb2ceb2fdfd90a1969fc766e2515527025372ca6b3fa  scripts/.remediate_chat_tools.part.03'
-            echo
             echo 'Actual segment sizes and checksums:'
             wc -c scripts/.remediate_chat_tools.part.*
             sha256sum scripts/.remediate_chat_tools.part.*
