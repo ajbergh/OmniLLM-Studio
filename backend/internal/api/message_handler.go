@@ -1107,12 +1107,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			finalToolCalls := orderedToolCalls(chunkToolCalls)
-			for index := range finalToolCalls {
-				if finalToolCalls[index].ID == "" {
-					finalToolCalls[index].ID = uuid.NewString()
-				}
-			}
+			finalToolCalls := llm.NormalizeToolCalls(providerType, orderedToolCalls(chunkToolCalls))
 			llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
 				Role:      "assistant",
 				Content:   loopContent,

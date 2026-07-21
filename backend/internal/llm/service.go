@@ -224,13 +224,16 @@ type ProviderPreferences struct {
 
 // ChatResponse holds the result of a non-streaming chat completion.
 type ChatResponse struct {
-	Content     string     `json:"content"`
-	Thinking    string     `json:"thinking,omitempty"` // Ollama-only: model's thinking content
-	ToolCalls   []ToolCall `json:"tool_calls,omitempty"`
-	Provider    string     `json:"provider"`
-	Model       string     `json:"model"`
-	TokenInput  *int       `json:"token_input,omitempty"`
-	TokenOutput *int       `json:"token_output,omitempty"`
+	Content           string     `json:"content"`
+	Thinking          string     `json:"thinking,omitempty"` // Ollama-only: model's thinking content
+	ToolCalls         []ToolCall `json:"tool_calls,omitempty"`
+	Provider          string     `json:"provider"`
+	Model             string     `json:"model"`
+	TokenInput        *int       `json:"token_input,omitempty"`
+	TokenOutput       *int       `json:"token_output,omitempty"`
+	RequestID         string     `json:"request_id,omitempty"`
+	UpstreamRequestID string     `json:"upstream_request_id,omitempty"`
+	Attempts          int        `json:"attempts,omitempty"`
 
 	// OpenRouter-specific response fields
 	Cost               *float64 `json:"cost,omitempty"`                 // Credit cost of the request
@@ -239,13 +242,15 @@ type ChatResponse struct {
 
 // StreamChunk represents a single token/chunk from a streaming response.
 type StreamChunk struct {
-	Content     string     `json:"content"`
-	Thinking    string     `json:"thinking,omitempty"` // Ollama-only: thinking content
-	ToolCalls   []ToolCall `json:"tool_calls,omitempty"`
-	Provider    string     `json:"provider"`
-	Model       string     `json:"model"`
-	TokenInput  int        `json:"token_input,omitempty"`  // populated in the final usage chunk
-	TokenOutput int        `json:"token_output,omitempty"` // populated in the final usage chunk
+	Content           string     `json:"content"`
+	Thinking          string     `json:"thinking,omitempty"` // Ollama-only: thinking content
+	ToolCalls         []ToolCall `json:"tool_calls,omitempty"`
+	Provider          string     `json:"provider"`
+	Model             string     `json:"model"`
+	TokenInput        int        `json:"token_input,omitempty"`  // populated in the final usage chunk
+	TokenOutput       int        `json:"token_output,omitempty"` // populated in the final usage chunk
+	RequestID         string     `json:"request_id,omitempty"`
+	UpstreamRequestID string     `json:"upstream_request_id,omitempty"`
 
 	// OpenRouter-specific response fields
 	Cost               *float64 `json:"cost,omitempty"`                 // Credit cost of the request
@@ -761,12 +766,14 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
+	requestID := newProviderRequestID()
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-OmniLLM-Request-ID", requestID)
 	if apiKey != "" {
 		if strings.ToLower(providerType) == "anthropic" {
 			httpReq.Header.Set("x-api-key", apiKey)
@@ -784,15 +791,17 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 		httpReq.Header.Set("X-Title", "OmniLLM-Studio")
 	}
 
-	resp, err := s.httpClient.Do(httpReq)
+	resp, attempts, err := doProviderRequestWithRetry(ctx, s.httpClient, httpReq, jsonBody, providerType, requestID)
 	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
+	upstreamRequestID := ProviderRequestID(resp.Header)
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("provider returned status %d: %s", resp.StatusCode, string(bodyBytes))
+		log.Printf("[llm] provider request failed provider=%s request_id=%s upstream_request_id=%s status=%d body=%q", providerType, requestID, upstreamRequestID, resp.StatusCode, string(bodyBytes))
+		return nil, &ProviderRequestError{Provider: providerType, StatusCode: resp.StatusCode, Code: "PROVIDER_HTTP_ERROR", RequestID: requestID, UpstreamRequestID: upstreamRequestID, Retryable: IsRetryableProviderStatus(resp.StatusCode)}
 	}
 
 	var result struct {
@@ -817,7 +826,7 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 	var toolCalls []ToolCall
 	if len(result.Choices) > 0 {
 		content = result.Choices[0].Message.Content
-		toolCalls = result.Choices[0].Message.ToolCalls
+		toolCalls = NormalizeToolCalls(providerType, result.Choices[0].Message.ToolCalls)
 	}
 
 	tokenIn := result.Usage.PromptTokens
@@ -829,13 +838,16 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 	}
 
 	return &ChatResponse{
-		Content:     content,
-		ToolCalls:   toolCalls,
-		Provider:    providerType,
-		Model:       model,
-		TokenInput:  &tokenIn,
-		TokenOutput: &tokenOut,
-		Cost:        cost,
+		Content:           content,
+		ToolCalls:         toolCalls,
+		Provider:          providerType,
+		Model:             model,
+		TokenInput:        &tokenIn,
+		TokenOutput:       &tokenOut,
+		RequestID:         requestID,
+		UpstreamRequestID: upstreamRequestID,
+		Attempts:          attempts,
+		Cost:              cost,
 	}, nil
 }
 
@@ -922,8 +934,11 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 	}
 
 	// Use a client without timeout for streaming while retaining the
-	// LLM-scoped provider-native search adapter.
+	// LLM-scoped provider-native search adapter. Streaming is not automatically
+	// retried because a retry after the first emitted chunk could duplicate text
+	// or side-effecting tool calls.
 	streamClient := &http.Client{Transport: s.httpClient.Transport}
+	requestID := newProviderRequestID()
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
@@ -932,6 +947,7 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
+	httpReq.Header.Set("X-OmniLLM-Request-ID", requestID)
 	if apiKey != "" {
 		if strings.ToLower(providerType) == "anthropic" {
 			httpReq.Header.Set("x-api-key", apiKey)
@@ -951,13 +967,15 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 
 	resp, err := streamClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("http request: %w", err)
+		return &ProviderRequestError{Provider: providerType, Code: "PROVIDER_TRANSPORT_ERROR", RequestID: requestID, Retryable: retryableProviderTransportError(err), Cause: err}
 	}
 	defer resp.Body.Close()
+	upstreamRequestID := ProviderRequestID(resp.Header)
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("provider returned status %d: %s", resp.StatusCode, string(bodyBytes))
+		log.Printf("[llm] provider stream failed provider=%s request_id=%s upstream_request_id=%s status=%d body=%q", providerType, requestID, upstreamRequestID, resp.StatusCode, string(bodyBytes))
+		return &ProviderRequestError{Provider: providerType, StatusCode: resp.StatusCode, Code: "PROVIDER_HTTP_ERROR", RequestID: requestID, UpstreamRequestID: upstreamRequestID, Retryable: IsRetryableProviderStatus(resp.StatusCode)}
 	}
 
 	// Parse SSE stream
@@ -1006,18 +1024,20 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 					}
 
 					if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-						continue // skip malformed chunks
+						return &ProviderRequestError{Provider: providerType, Code: "PROVIDER_STREAM_PROTOCOL_ERROR", RequestID: requestID, UpstreamRequestID: upstreamRequestID, Retryable: false, Cause: err}
 					}
 
 					if len(chunk.Choices) > 0 {
 						delta := chunk.Choices[0].Delta
 						if delta.Content != "" || delta.Thinking != "" || len(delta.ToolCalls) > 0 {
 							onChunk(StreamChunk{
-								Content:   delta.Content,
-								Thinking:  delta.Thinking,
-								ToolCalls: delta.ToolCalls,
-								Provider:  providerType,
-								Model:     model,
+								Content:           delta.Content,
+								Thinking:          delta.Thinking,
+								ToolCalls:         delta.ToolCalls,
+								Provider:          providerType,
+								Model:             model,
+								RequestID:         requestID,
+								UpstreamRequestID: upstreamRequestID,
 							})
 						}
 					}
@@ -1029,11 +1049,13 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 							cost = &c
 						}
 						onChunk(StreamChunk{
-							Provider:    providerType,
-							Model:       model,
-							TokenInput:  chunk.Usage.PromptTokens,
-							TokenOutput: chunk.Usage.CompletionTokens,
-							Cost:        cost,
+							Provider:          providerType,
+							Model:             model,
+							RequestID:         requestID,
+							UpstreamRequestID: upstreamRequestID,
+							TokenInput:        chunk.Usage.PromptTokens,
+							TokenOutput:       chunk.Usage.CompletionTokens,
+							Cost:              cost,
 						})
 					}
 				}
@@ -1044,11 +1066,11 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("read stream: %w", err)
+			return &ProviderRequestError{Provider: providerType, Code: "PROVIDER_STREAM_READ_ERROR", RequestID: requestID, UpstreamRequestID: upstreamRequestID, Retryable: retryableProviderTransportError(err), Cause: err}
 		}
 	}
 
-	return nil
+	return &ProviderRequestError{Provider: providerType, Code: "PROVIDER_STREAM_INTERRUPTED", RequestID: requestID, UpstreamRequestID: upstreamRequestID, Retryable: true}
 }
 
 // isImageCapableProvider returns true if the given provider type supports

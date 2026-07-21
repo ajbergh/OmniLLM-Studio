@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -36,10 +37,12 @@ func ContextWithApprovalHandler(ctx context.Context, handler ApprovalHandler) co
 // Executor orchestrates tool lookup, policy checks, approvals, validation,
 // lifecycle events, timeouts, and result limits.
 type Executor struct {
-	registry    *Registry
-	permissions PermissionResolver
-	timeout     time.Duration
-	approvals   *ApprovalBroker
+	registry      *Registry
+	permissions   PermissionResolver
+	timeout       time.Duration
+	approvals     *ApprovalBroker
+	idempotencyMu sync.Mutex
+	idempotency   map[string]*ToolResult
 }
 
 // NewExecutor creates an Executor with the given registry and permission
@@ -53,6 +56,7 @@ func NewExecutor(registry *Registry, permissions PermissionResolver, timeout tim
 		permissions: permissions,
 		timeout:     timeout,
 		approvals:   NewApprovalBroker(15 * time.Minute),
+		idempotency: make(map[string]*ToolResult),
 	}
 }
 
@@ -73,6 +77,11 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 	def := tool.Definition().Normalized()
 	if !def.Enabled {
 		return e.failure(ctx, call, fmt.Sprintf("tool %q is disabled", call.Name), ToolEventFailed, nil)
+	}
+	if def.SideEffecting {
+		if cached := e.cachedSideEffectResult(scope, call); cached != nil {
+			return cached
+		}
 	}
 
 	if e.permissions != nil {
@@ -148,9 +157,6 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 			timeout = toolTimeout
 		}
 	}
-	execCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	emitEvent(ctx, ToolEvent{
 		Type:       ToolEventStarted,
 		ToolCallID: call.ID,
@@ -163,16 +169,37 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 		},
 	})
 	started := time.Now()
-	result, err := tool.Execute(execCtx, call.Arguments)
-	durationMS := time.Since(started).Milliseconds()
-	if err != nil {
-		if execCtx.Err() == context.DeadlineExceeded {
-			return e.failure(ctx, call, fmt.Sprintf("tool %q timed out after %s", call.Name, timeout), ToolEventTimedOut, map[string]interface{}{"duration_ms": durationMS})
+	maxAttempts := 1
+	if def.ReadOnly && !def.SideEffecting {
+		maxAttempts = 2
+	}
+	var result *ToolResult
+	var execErr error
+	attemptCount := 0
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		attemptCount = attempt
+		execCtx, cancel := context.WithTimeout(ctx, timeout)
+		result, execErr = tool.Execute(execCtx, call.Arguments)
+		timedOut := execCtx.Err() == context.DeadlineExceeded
+		cancel()
+		if execErr == nil {
+			break
 		}
-		return e.failure(ctx, call, fmt.Sprintf("tool %q failed: %v", call.Name, err), ToolEventFailed, map[string]interface{}{"duration_ms": durationMS})
+		if timedOut {
+			durationMS := time.Since(started).Milliseconds()
+			return e.failure(ctx, call, fmt.Sprintf("tool %q timed out after %s", call.Name, timeout), ToolEventTimedOut, map[string]interface{}{"duration_ms": durationMS, "attempt_count": attemptCount})
+		}
+		if attempt >= maxAttempts || !IsRetryableExecutionError(execErr) {
+			break
+		}
+		emitEvent(ctx, ToolEvent{Type: ToolEventProgress, ToolCallID: call.ID, ToolName: call.Name, Scope: scope, Data: map[string]interface{}{"status": "retrying", "attempt": attempt + 1}})
+	}
+	durationMS := time.Since(started).Milliseconds()
+	if execErr != nil {
+		return e.failure(ctx, call, fmt.Sprintf("tool %q failed: %v", call.Name, execErr), ToolEventFailed, map[string]interface{}{"duration_ms": durationMS, "attempt_count": attemptCount, "retryable": IsRetryableExecutionError(execErr)})
 	}
 	if result == nil {
-		return e.failure(ctx, call, fmt.Sprintf("tool %q returned no result", call.Name), ToolEventFailed, map[string]interface{}{"duration_ms": durationMS})
+		return e.failure(ctx, call, fmt.Sprintf("tool %q returned no result", call.Name), ToolEventFailed, map[string]interface{}{"duration_ms": durationMS, "attempt_count": attemptCount})
 	}
 
 	result.ToolCallID = call.ID
@@ -181,11 +208,16 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 	}
 	result.Metadata["duration_ms"] = durationMS
 	result.Metadata["tool_version"] = def.Version
+	result.Metadata["attempt_count"] = attemptCount
 	if def.MaxResultBytes > 0 && len(result.Content) > def.MaxResultBytes {
 		originalBytes := len(result.Content)
 		result.Content = result.Content[:def.MaxResultBytes] + "\n\n[tool result truncated]"
 		result.Metadata["truncated"] = true
 		result.Metadata["original_bytes"] = originalBytes
+	}
+
+	if def.SideEffecting && !result.IsError {
+		e.cacheSideEffectResult(scope, call, result)
 	}
 
 	emitEvent(ctx, ToolEvent{
@@ -200,6 +232,62 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 		},
 	})
 	return result
+}
+
+const maxSideEffectReplayEntries = 1024
+
+func sideEffectCacheKey(scope InvocationScope, call ToolCall) string {
+	// A stable provider call ID identifies one side effect. Deliberately exclude
+	// arguments so an approval-edited invocation is still protected if the model
+	// repeats the original call after approval.
+	return strings.Join([]string{scope.UserID, scope.WorkspaceID, scope.ConversationID, scope.MessageID, call.ID, call.Name}, "\x00")
+}
+
+func cloneToolResult(result *ToolResult) *ToolResult {
+	if result == nil {
+		return nil
+	}
+	clone := *result
+	if result.Metadata != nil {
+		clone.Metadata = make(map[string]interface{}, len(result.Metadata)+1)
+		for key, value := range result.Metadata {
+			clone.Metadata[key] = value
+		}
+	}
+	clone.Artifacts = append([]ToolArtifact(nil), result.Artifacts...)
+	clone.Structured = append(json.RawMessage(nil), result.Structured...)
+	return &clone
+}
+
+func (e *Executor) cachedSideEffectResult(scope InvocationScope, call ToolCall) *ToolResult {
+	if call.ID == "" {
+		return nil
+	}
+	e.idempotencyMu.Lock()
+	defer e.idempotencyMu.Unlock()
+	result := cloneToolResult(e.idempotency[sideEffectCacheKey(scope, call)])
+	if result != nil {
+		if result.Metadata == nil {
+			result.Metadata = map[string]interface{}{}
+		}
+		result.Metadata["idempotent_replay"] = true
+	}
+	return result
+}
+
+func (e *Executor) cacheSideEffectResult(scope InvocationScope, call ToolCall, result *ToolResult) {
+	if call.ID == "" || result == nil {
+		return
+	}
+	e.idempotencyMu.Lock()
+	defer e.idempotencyMu.Unlock()
+	if len(e.idempotency) >= maxSideEffectReplayEntries {
+		// The cache is a short-lived duplicate-execution guard, not durable state.
+		// Resetting at the cap keeps server memory bounded while preserving safety
+		// for the current working set of calls.
+		e.idempotency = make(map[string]*ToolResult)
+	}
+	e.idempotency[sideEffectCacheKey(scope, call)] = cloneToolResult(result)
 }
 
 func (e *Executor) failure(ctx context.Context, call ToolCall, content string, eventType ToolEventType, metadata map[string]interface{}) *ToolResult {

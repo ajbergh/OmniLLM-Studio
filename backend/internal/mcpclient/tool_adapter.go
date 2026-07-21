@@ -40,6 +40,22 @@ func NewToolAdapter(serverID, serverName, internalName string, tool Tool, client
 	}
 }
 
+type toolAnnotations struct {
+	ReadOnlyHint    *bool `json:"readOnlyHint,omitempty"`
+	DestructiveHint *bool `json:"destructiveHint,omitempty"`
+	IdempotentHint  *bool `json:"idempotentHint,omitempty"`
+	OpenWorldHint   *bool `json:"openWorldHint,omitempty"`
+}
+
+func parseToolAnnotations(raw json.RawMessage) toolAnnotations {
+	var annotations toolAnnotations
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return annotations
+	}
+	_ = json.Unmarshal(raw, &annotations)
+	return annotations
+}
+
 // Definition returns the tool metadata exposed to OmniLLM.
 func (a *ToolAdapter) Definition() tools.ToolDefinition {
 	params := a.tool.InputSchema
@@ -55,12 +71,31 @@ func (a *ToolAdapter) Definition() tools.ToolDefinition {
 		description = fmt.Sprintf("MCP tool %s from server %s.", a.tool.Name, a.serverName)
 	}
 
+	annotations := parseToolAnnotations(a.tool.Annotations)
+	readOnly := annotations.ReadOnlyHint != nil && *annotations.ReadOnlyHint
+	// MCP annotations are hints. The MCP specification defaults readOnlyHint to
+	// false, so an omitted or malformed annotation must be treated conservatively
+	// as potentially side-effecting. This prevents automatic retries of unknown
+	// remote write tools.
+	sideEffecting := !readOnly
+	risk := tools.RiskHigh
+	if readOnly {
+		risk = tools.RiskLow
+	}
+
 	return tools.ToolDefinition{
-		Name:        a.internalName,
-		Description: description,
-		Parameters:  params,
-		Category:    "mcp",
-		Enabled:     true,
+		Name:             a.internalName,
+		Description:      description,
+		Parameters:       params,
+		OutputSchema:     a.tool.OutputSchema,
+		Category:         "mcp",
+		Enabled:          true,
+		Version:          "1",
+		Risk:             risk,
+		ReadOnly:         readOnly,
+		SideEffecting:    sideEffecting,
+		RequiresNetwork:  true,
+		SupportsParallel: readOnly,
 	}
 }
 
