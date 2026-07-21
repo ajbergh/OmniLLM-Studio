@@ -9,13 +9,34 @@ type ExecutionStep struct {
 }
 
 // BuildExecutionPlan preserves the model's tool-call order while coalescing
-// contiguous parallel-safe calls into a single batch. Unknown, disabled,
-// side-effecting, or non-parallel tools always remain single sequential steps.
-// Permission policy is enforced again by Executor.Execute; callers should avoid
-// marking approval-gated tools SupportsParallel because an inline approval wait
-// is inherently sequential. This deliberately does not move read-only calls
-// across a side-effect boundary.
+// contiguous definition-level parallel-safe calls into a single batch. It is
+// useful for tests and callers without an Executor. Runtime orchestration should
+// prefer Executor.BuildExecutionPlan so persisted allow/ask/deny policy is also
+// part of the safety decision.
 func BuildExecutionPlan(registry *Registry, calls []ToolCall) []ExecutionStep {
+	return buildExecutionPlan(calls, func(call ToolCall) bool {
+		tool, ok := registry.Get(call.Name)
+		if !ok {
+			return false
+		}
+		return definitionParallelSafe(tool.Definition().Normalized())
+	})
+}
+
+// BuildExecutionPlan creates a policy-aware runtime plan. Approval-gated and
+// denied tools always remain sequential, even when their definitions advertise
+// read-only parallel support.
+func (e *Executor) BuildExecutionPlan(calls []ToolCall) []ExecutionStep {
+	return buildExecutionPlan(calls, func(call ToolCall) bool {
+		if e.Policy(call.Name) != "allow" {
+			return false
+		}
+		definition, ok := e.Definition(call.Name)
+		return ok && definitionParallelSafe(definition)
+	})
+}
+
+func buildExecutionPlan(calls []ToolCall, parallelSafe func(ToolCall) bool) []ExecutionStep {
 	steps := make([]ExecutionStep, 0, len(calls))
 	parallelBatch := make([]ToolCall, 0)
 	flushParallel := func() {
@@ -28,15 +49,7 @@ func BuildExecutionPlan(registry *Registry, calls []ToolCall) []ExecutionStep {
 	}
 
 	for _, call := range calls {
-		tool, ok := registry.Get(call.Name)
-		if !ok {
-			flushParallel()
-			steps = append(steps, ExecutionStep{Calls: []ToolCall{call}})
-			continue
-		}
-		definition := tool.Definition().Normalized()
-		parallelSafe := definition.Enabled && definition.ReadOnly && !definition.SideEffecting && definition.SupportsParallel
-		if parallelSafe {
+		if parallelSafe(call) {
 			parallelBatch = append(parallelBatch, call)
 			continue
 		}
@@ -45,4 +58,8 @@ func BuildExecutionPlan(registry *Registry, calls []ToolCall) []ExecutionStep {
 	}
 	flushParallel()
 	return steps
+}
+
+func definitionParallelSafe(definition ToolDefinition) bool {
+	return definition.Enabled && definition.ReadOnly && !definition.SideEffecting && definition.SupportsParallel
 }
