@@ -109,8 +109,8 @@ func (h *ToolHandler) ExecuteTool(w http.ResponseWriter, r *http.Request) {
 		return
 	case "metrics":
 		respondJSON(w, http.StatusOK, map[string]interface{}{
-			"scope": "process",
-			"tools": tools.ToolMetricsSnapshot(),
+			"scope": "user",
+			"tools": tools.ToolMetricsSnapshotForUser(userID),
 		})
 		return
 	case "":
