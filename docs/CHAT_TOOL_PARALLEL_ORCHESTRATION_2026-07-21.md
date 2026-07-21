@@ -53,6 +53,8 @@ It does not globally regroup reads and writes, because that would alter the mode
 - pre-step cancellation checks that prevent pending side-effecting tools from starting after the request is cancelled;
 - one terminal result per skipped tool call ID.
 
+Runtime callers should always use `Executor.BuildExecutionPlan`; `ExecutePlan` still treats all supplied steps as untrusted and revalidates them immediately before execution.
+
 Provider calls are normalized before reaching this layer by the conformance work merged in PR #33.
 
 ## Cancellation lifecycle
