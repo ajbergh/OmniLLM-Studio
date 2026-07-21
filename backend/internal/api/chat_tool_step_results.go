@@ -7,6 +7,7 @@ import (
 
 const toolResultContextLimitMessage = "Tool result context limit reached for this turn."
 const toolResultContextTruncationSuffix = "\n\n[tool result truncated at the per-turn context limit]"
+const toolSkippedAfterContextLimitMessage = "Tool was not executed because this turn reached the tool result context limit."
 
 // chatToolStepResult contains the two representations Chat Studio needs after a
 // generic tool call completes: a sanitized user-visible result and the provider
@@ -63,4 +64,35 @@ func processChatToolStepResults(calls []tools.ToolCall, results []*tools.ToolRes
 	}
 
 	return processed, usedChars, limitReached
+}
+
+// skippedChatToolResults creates terminal results for calls in execution steps
+// that must not start after a previous step exhausted the per-turn context
+// budget. It mirrors the existing sequential handler's TOOL_RESULT_LIMIT shape.
+func skippedChatToolResults(calls []tools.ToolCall) []chatToolStepResult {
+	processed := make([]chatToolStepResult, 0, len(calls))
+	for _, call := range calls {
+		metadataResult := tools.ToolResult{
+			ToolCallID: call.ID,
+			Content:    toolSkippedAfterContextLimitMessage,
+			IsError:    true,
+			Metadata: map[string]interface{}{
+				"error_code": "TOOL_RESULT_LIMIT",
+				"retryable":  false,
+				"tool_name":  call.Name,
+			},
+		}
+		processed = append(processed, chatToolStepResult{
+			ToolCallID:     call.ID,
+			ToolName:       call.Name,
+			MetadataResult: metadataResult,
+			Message: llm.ChatMessage{
+				Role:       "tool",
+				Content:    toolSkippedAfterContextLimitMessage,
+				ToolCallID: call.ID,
+				Name:       call.Name,
+			},
+		})
+	}
+	return processed
 }
