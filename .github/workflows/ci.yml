@@ -43,12 +43,15 @@ jobs:
         working-directory: backend
         env:
           GOFLAGS: -tags=webkit2_41
-        run: go vet ./... 2>&1 | tee ../backend-vet.log
+        run: |
+          set -o pipefail
+          go vet ./... 2>&1 | tee ../backend-vet.log
       - name: Unit and integration tests
         working-directory: backend
         env:
           GOFLAGS: -tags=webkit2_41
         run: |
+          set -o pipefail
           export OMNILLM_MASTER_KEY="$(printf '0%.0s' {1..64})"
           go test ./... 2>&1 | tee ../backend-test.log
       - name: Race detector
@@ -56,6 +59,7 @@ jobs:
         env:
           GOFLAGS: -tags=webkit2_41
         run: |
+          set -o pipefail
           export OMNILLM_MASTER_KEY="$(printf '0%.0s' {1..64})"
           go test -race ./... 2>&1 | tee ../backend-race.log
       - name: Upload backend diagnostics
@@ -92,12 +96,21 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - working-directory: frontend
         run: npm ci
-      - working-directory: frontend
-        run: npm run lint 2>&1 | tee ../frontend-lint.log
-      - working-directory: frontend
-        run: npm run test:unit 2>&1 | tee ../frontend-unit.log
-      - working-directory: frontend
-        run: npm run build 2>&1 | tee ../frontend-build.log
+      - name: Frontend lint
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee ../frontend-lint.log
+      - name: Frontend unit tests
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm run test:unit 2>&1 | tee ../frontend-unit.log
+      - name: Frontend production build
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee ../frontend-build.log
       - name: Upload frontend diagnostics
         if: always()
         uses: actions/upload-artifact@v7
