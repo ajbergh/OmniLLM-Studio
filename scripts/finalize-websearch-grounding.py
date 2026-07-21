@@ -7,7 +7,6 @@ source change, removes this helper, and removes its own write-enabled step.
 
 from pathlib import Path
 import re
-import subprocess
 
 BRANCH = "feature/video-renderer-reliability-transcription-scalability-20260720"
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,7 +32,6 @@ if occurrences != 4:
     raise SystemExit(f"expected four duplicate user-question suffixes, found {occurrences}")
 source = source.replace(question_suffix, "`, location, resultsBlock)")
 SOURCE.write_text(source, encoding="utf-8")
-subprocess.run(["gofmt", "-w", str(SOURCE)], check=True)
 
 workflow = WORKFLOW.read_text(encoding="utf-8")
 workflow = workflow.replace(
