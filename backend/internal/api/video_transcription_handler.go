@@ -14,8 +14,12 @@ type VideoTranscriptionHandler struct {
 }
 
 func NewVideoTranscriptionHandler(service *video.VideoTranscriptionService) *VideoTranscriptionHandler {
+	// API composition happens once per runtime. Recover interrupted provider jobs
+	// here so server and Wails entry points share identical startup behavior.
+	go service.RecoverInterrupted()
 	return &VideoTranscriptionHandler{service: service}
 }
+
 func (h *VideoTranscriptionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	var request video.TranscriptionRequest
 	if err := decodeJSON(r, &request); err != nil {
@@ -29,6 +33,7 @@ func (h *VideoTranscriptionHandler) Start(w http.ResponseWriter, r *http.Request
 	}
 	respondJSON(w, http.StatusAccepted, item)
 }
+
 func (h *VideoTranscriptionHandler) List(w http.ResponseWriter, r *http.Request) {
 	items, err := h.service.List(auth.UserIDFromContext(r.Context()), chi.URLParam(r, "projectId"))
 	if err != nil {
@@ -37,6 +42,7 @@ func (h *VideoTranscriptionHandler) List(w http.ResponseWriter, r *http.Request)
 	}
 	respondJSON(w, http.StatusOK, items)
 }
+
 func (h *VideoTranscriptionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	item, err := h.service.Get(auth.UserIDFromContext(r.Context()), chi.URLParam(r, "transcriptId"))
 	if err != nil || item == nil {
@@ -45,6 +51,7 @@ func (h *VideoTranscriptionHandler) Get(w http.ResponseWriter, r *http.Request) 
 	}
 	respondJSON(w, http.StatusOK, item)
 }
+
 func (h *VideoTranscriptionHandler) Captions(w http.ResponseWriter, r *http.Request) {
 	clips, err := h.service.CaptionClips(auth.UserIDFromContext(r.Context()), chi.URLParam(r, "transcriptId"))
 	if err != nil {
