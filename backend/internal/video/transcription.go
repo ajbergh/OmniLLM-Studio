@@ -128,15 +128,15 @@ func (s *VideoTranscriptionService) Start(
 	}
 
 	privacy, _ := json.Marshal(map[string]any{
-		"remote_processing":          true,
-		"retain_provider_data":       request.RetainProviderData,
+		"remote_processing":         true,
+		"retain_provider_data":      request.RetainProviderData,
 		"requested_word_timestamps": request.WordTimestamps,
-		"requested_diarization":      request.Diarization,
+		"requested_diarization":     request.Diarization,
 	})
 	metadata, _ := json.Marshal(map[string]any{
-		"api_version":  TranscriptionAPIVersion,
+		"api_version":   TranscriptionAPIVersion,
 		"request_model": model,
-		"translate_to": request.TranslateTo,
+		"translate_to":  request.TranslateTo,
 	})
 	uid := userID
 	item := &models.VideoTranscript{
