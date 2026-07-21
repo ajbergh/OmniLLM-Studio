@@ -12,9 +12,10 @@ Tool calls remain in model order. The planner may combine calls into a parallel 
 - enabled;
 - explicitly read-only;
 - not side-effecting;
-- explicitly marked `SupportsParallel`.
+- explicitly marked `SupportsParallel`;
+- currently permitted with effective policy `allow`.
 
-Unknown, disabled, side-effecting, approval-sensitive, or non-parallel tools are emitted as single sequential steps.
+Unknown, disabled, side-effecting, approval-gated (`ask`), denied, or non-parallel tools are emitted as single sequential steps.
 
 Most importantly, the planner never moves a read-only call across a side-effecting or otherwise sequential call. For example:
 
@@ -37,7 +38,8 @@ It does not become one global read batch followed by writes, because that would 
 `backend/internal/tools/execution_plan.go` provides:
 
 - `ExecutionStep`;
-- `BuildExecutionPlan(registry, calls)`.
+- `BuildExecutionPlan(registry, calls)` for definition-only planning;
+- `Executor.BuildExecutionPlan(calls)` for runtime policy-aware planning.
 
 `backend/internal/tools/execution_run.go` provides:
 
@@ -45,7 +47,8 @@ It does not become one global read batch followed by writes, because that would 
 - ordered result collection across sequential and parallel steps;
 - `Executor.ExecuteBatch` use only for planner-approved parallel steps;
 - executor-side revalidation of every caller-supplied parallel step;
-- automatic sequential fallback when a step contains an unknown, disabled, side-effecting, or non-parallel tool;
+- current-policy revalidation immediately before batching;
+- automatic sequential fallback when a step contains an unknown, disabled, side-effecting, approval-gated, denied, or non-parallel tool;
 - pre-step cancellation checks that prevent pending side-effecting tools from starting after the request is cancelled;
 - one terminal result per skipped tool call ID.
 
@@ -71,6 +74,7 @@ The branch covers:
 - preserving a side-effect boundary between read batches;
 - keeping unknown tools sequential;
 - keeping read-only tools without `SupportsParallel` sequential;
+- keeping approval-gated reads sequential;
 - keeping a single parallel-safe tool as a sequential singleton;
 - proving two planned reads actually begin concurrently;
 - preserving result order even when execution is concurrent;
