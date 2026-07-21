@@ -4,7 +4,7 @@
 
 ## Scope
 
-This follow-up to the Chat Studio tool lifecycle remediation hardens provider-facing tool calling and execution safety across OpenAI, Anthropic, Gemini, OpenRouter, Ollama, and OpenAI-compatible gateways.
+This follow-up to the Chat Studio tool lifecycle remediation hardens provider-facing tool calling and execution safety across OpenAI, Anthropic, Gemini, OpenRouter, Ollama, OpenAI-compatible gateways, and dynamically registered MCP tools.
 
 ## Provider conformance
 
@@ -32,8 +32,19 @@ This follow-up to the Chat Studio tool lifecycle remediation hardens provider-fa
 - The replay cache is bounded and is intentionally process-local; it is a duplicate-execution guard, not durable business state.
 - Tool results report attempt counts and retry lifecycle events.
 
+## MCP safety
+
+- MCP `readOnlyHint:true` is mapped to a read-only, parallel-eligible local tool definition.
+- MCP tools without a valid read-only annotation are conservatively treated as potentially side-effecting.
+- Unannotated remote MCP tools therefore cannot become automatically retryable through the legacy local-tool defaults.
+- MCP annotations remain advisory; OmniLLM still applies its own permissions and approval policies around the resulting tool definition.
+
+## Mutation metadata audit
+
+Verified side-effect classification for memory writes/deletes, scheduled task creation/updates, asynchronous job cancellation, app/MCP connection changes, and image, music, video, and artifact generation jobs.
+
 ## Validation
 
-Focused tests cover provider normalization for OpenAI, Anthropic, Gemini, OpenRouter, Ollama, and generic OpenAI-compatible providers; stable missing IDs; malformed arguments; retryable provider statuses; request ID extraction; safe pre-response HTTP retries; read-only tool retries; and side-effect replay protection.
+Focused tests cover provider normalization for OpenAI, Anthropic, Gemini, OpenRouter, Ollama, and generic OpenAI-compatible providers; stable missing IDs; malformed arguments; retryable provider statuses; request ID extraction; safe pre-response HTTP retries; read-only tool retries; side-effect replay protection; and conservative MCP annotation handling.
 
 The repository Quality Gate, Security Scan, and container workflows remain authoritative before merge.
