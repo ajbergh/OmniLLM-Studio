@@ -1,27 +1,28 @@
 # Video Rendering
 
-Video Edit Studio separates interactive timeline preview from final export. Video Studio remains focused on AI video creation and selected-output playback.
+Video Edit Studio separates responsive interactive preview from final FFmpeg export. Video Studio remains focused on AI video creation and selected-output playback, while Video Edit Studio owns timeline composition, recording, transcription, audio finishing, durable rendering, and export.
 
 ## Preview
 
-The frontend preview composites **all** active visual clips at the current
-playhead, stacked by track order (later tracks on top) and per-clip `z_index`,
-with transforms, fades, effects, and text styling applied. It uses muted visual
-`<video>` elements plus managed audio elements, so video soundtracks and audio
-assets both audition clip volume, volume keyframes, fades, track solo, constant
-0.25×–4× speed, and the preview-only master volume. It is intended for
-responsive editing, not frame-perfect export. Track solo and master volume are
-preview-only monitoring controls; exports ignore both.
+The frontend preview composites active visual clips at the current playhead, stacked by track order (later tracks on top) and per-clip `z_index`, with transforms, fades, effects, annotations, cursor overlays, and text styling applied. It uses muted visual `<video>` elements plus managed audio elements, so video soundtracks and audio assets both audition clip volume, volume keyframes, fades, track solo, constant 0.25×–4× speed, and the preview-only master volume.
+
+Preview is optimized for editing responsiveness rather than frame-perfect export. Track solo and master volume are monitoring controls; exports ignore both.
+
+Large projects use an interval index for active-clip lookup and a configurable decoder budget. Active videos outside the decoder budget display generated poster/thumbnail frames instead of mounting another decoder. The selected video is promoted into the budget so direct manipulation stays interactive. The local-storage key `omnillm-video-decoder-budget` accepts 1–12 mounted video decoders and defaults to 4.
 
 Asset display in the preview canvas:
 
 | Asset type | Rendered as |
 |------------|-------------|
-| `video/*` MIME | Native muted `<video>` element with `src` pointing to the download URL; its soundtrack is played by the managed audio element |
+| `video/*` MIME within the decoder budget | Native muted `<video>` element with soundtrack routed through managed audio |
+| `video/*` MIME outside the decoder budget | Generated thumbnail/poster frame |
 | `image/*` MIME | `<img>` element |
-| Text/caption clip | Inline styled text div |
-| `audio/*` MIME or `audio_only` video clip | No visual element; managed hidden `<audio>` element |
-| Other asset without text/shape clip data | No visual output |
+| Text/caption clip | Inline styled text |
+| Shape, annotation, or cursor data | Preview overlay |
+| `audio/*` MIME or `audio_only` video clip | No visual element; managed hidden audio |
+| Other asset without visual timeline data | No visual output |
+
+Timeline rows are horizontally virtualized from the visible scroll window with overscan. Undo/redo uses reversible patch commands with a bounded memory budget instead of retaining an unbounded sequence of full timeline documents. `omnillm-video-history-budget-mb` defaults to 32 MiB and is clamped to 8–256 MiB. Playback UI updates are coalesced to 30 Hz by default through `omnillm-video-playback-ui-hz`, while media elements continue native playback.
 
 ## Export Jobs
 
@@ -34,67 +35,89 @@ POST   /v1/video/render-jobs/{jobId}/cancel
 DELETE /v1/video/render-jobs/{jobId}
 ```
 
-Deleting a render job removes only the job record (terminal jobs only — cancel active jobs first); the output export asset, if any, is an independent record and survives.
+Deleting a render job removes only a terminal job record; cancel active work first. The output export asset is an independent `VideoAsset` row with `kind = "export"` and survives job deletion.
 
-Render outputs become `VideoAsset` rows with `kind = "export"`.
+The production renderer wraps the FFmpeg renderer with fidelity expansion and a durable scheduler. The scheduler provides:
+
+- Configurable global concurrency.
+- Per-user and per-workspace admission limits.
+- Priority-aware queued-job ordering with FIFO order inside one priority.
+- Queued and active cancellation.
+- Startup recovery for interrupted persisted jobs.
+- Progress persistence and stalled-job detection.
+- Temporary-disk preflight and stale temporary-file cleanup.
+- Graceful application shutdown that cancels active FFmpeg processes and waits for workers.
+
+Scheduler environment variables:
+
+| Variable | Default | Accepted range | Purpose |
+|----------|---------|----------------|---------|
+| `OMNILLM_VIDEO_RENDER_CONCURRENCY` | `1` | 1–16 | Global simultaneous FFmpeg jobs |
+| `OMNILLM_VIDEO_RENDER_PER_USER` | `1` | 1–8 | Simultaneous jobs admitted for one user |
+| `OMNILLM_VIDEO_RENDER_PER_WORKSPACE` | `1` | 1–8 | Simultaneous jobs admitted for one workspace |
+| `OMNILLM_VIDEO_RENDER_STALL_SECONDS` | `300` | 30–3600 | Cancel a job that emits no progress for this period |
+| `OMNILLM_VIDEO_RENDER_MIN_FREE_BYTES` | `536870912` | 0–2^50 | Free-space reserve before estimated temporary render usage |
+| `OMNILLM_VIDEO_RENDER_TEMP_MAX_HOURS` | `24` | 1–720 | Age threshold for stale `omnillm-video-render-*` temporary files |
+
+Desktop defaults remain deliberately conservative: one FFmpeg render at a time unless explicitly configured otherwise.
 
 ## FFmpeg Renderer
 
-The default renderer is FFmpeg-backed. It creates real MP4/WebM bytes from the neutral timeline canvas, compositing real video and image assets alongside text, caption, and callout clips. Outputs are stored as `VideoAsset` rows with `kind = "export"`.
+The default renderer creates real MP4/WebM bytes from the neutral timeline canvas, compositing real video and image assets alongside text, captions, callouts, annotations, cursor effects, and mixed audio.
 
-Current FFmpeg export coverage:
+Current export coverage includes:
 
-- Canvas size, background color, duration, FPS, format, quality, and optional silent audio.
-- **Export settings extensions** — `codec` (`h264` default for MP4, `h265` via libx265 when the FFmpeg build has it, `vp9` for WebM), `audio_bitrate_kbps` (32–512, default 128), `range_start_ms`/`range_end_ms` (renders only that timeline window — clips slice, trims/keyframes/markers rebase via `SliceTimelineRange`), `burn_in_captions` (default true; false strips caption-track clips from the frame), and `sidecar_captions` (`srt`/`vtt`; writes the captions as a sibling `kind:"caption"` asset and records `captions_sidecar_asset_id` in the job metadata).
-- **Pixelate regions** — `pixelate` shape clips export as a true mosaic via crop → downscale → nearest-neighbor upscale → overlay; `rounded_rectangle` and `label` annotations export as square-corner drawbox approximations. Other annotation kinds (arrow, ellipse, spotlight, …) are preview-only and reported as such by the capability matrix.
-- **Video asset compositing** — video clips with `asset_id` pointing to a real video file are overlaid on the canvas at the correct start/duration using FFmpeg `-itsoffset` and `overlay` filter graph entries.
-- **Constant clip speed** — video and audio clips support `playback_rate` from
-  0.25× to 4×. The renderer consumes `duration_ms × playback_rate` source
-  time, retimes video with `setpts`, and applies one or more pitch-preserving
-  `atempo` stages to the corresponding audio so A/V duration remains aligned.
-- **Image asset compositing** — image clips are overlaid on the canvas at the correct start/duration using FFmpeg `overlay` filters.
-- **Per-clip transform** — `x`/`y` position offset, `scale`, **`rotation`** (via `rotate` with transparent fill), and fractional `crop` (`{top, right, bottom, left}`, 0–0.95 each).
-- **Position keyframes** — keyframed `x`/`y` animate via piecewise-linear `overlay` time expressions (keyframe `time_ms` is clip-relative; easing curves are approximated linearly).
-- **Volume keyframes** — keyframed `volume` exports as a frame-evaluated `volume` filter expression and overrides the static clip volume.
-- **Rotation keyframes** — keyframed `rotation` exports via a per-frame `rotate` angle expression inside a fixed diagonal bounding box, overriding static rotation.
-- **Opacity** — applied via `colorchannelmixer`.
-- **Fades** — video fade in/out as alpha fades; audio fade in/out via `afade`.
-- **Transitions** — `fade`, `crossfade`, and `dip_to_black` render as alpha fades; `slide` renders as an animated overlay position (enters from the chosen edge, exits the opposite edge).
-- **Effects** — `brightness`, `contrast`, `saturation`, `blur`, `grayscale`, `sharpen` (`unsharp`), `vignette`, and `chroma_key` (`chromakey`, default green with `color`/`similarity`/`blend` params) map to FFmpeg filters.
-- **Text styling** — font family (fontconfig best match), stroke color + width, line spacing, plus the existing size/color/background box/shadow.
-- **Audio/music mixing** — per-clip `volume`, volume keyframes, fades,
-  constant playback speed, timeline placement via `adelay`, and multi-track
-  `amix` mixdown. Audio from video clips joins the mix when the asset carries
-  an audio stream (`has_audio` recorded at ingest, ffprobe fallback at render).
-- **Clip mute & detached audio** — `clip.muted` silences a clip without changing volume; `clip.audio_only` suppresses a video clip's visuals so it acts as detached audio (the editor's "Detach audio" command pairs a muted original with an audio-only twin).
-- **Track semantics** — hidden tracks drop their video (their video clips' audio still mixes); muted tracks drop their audio.
-- **Layer-order compositing** — visual clips (media and text alike) composite bottom-to-top by track array order, then `z_index`, then start time, matching the preview. Start time controls only when a clip is enabled, never its stacking. Text clips on any visible track (including generic `layer` tracks) interleave into the same compositing chain, so a text clip on a lower layer renders beneath media on a higher layer.
-- Text/caption/callout clips with timing, font size, text color, optional background box, stroke, and shadow.
-- **Callout shapes** — `rectangle` (outlined) and `highlight` (filled) shape clips render via `drawbox` at the clip's transform position/scale, with the transform opacity folded into the box color; a callout's text label draws above its own box. `blur` regions render via a split→crop→boxblur→overlay subgraph, blurring whatever has composited beneath them (preview uses CSS backdrop-filter for the same semantics).
-- Render diagnostics — the FFmpeg command (and stderr on failure) is persisted in `video_render_jobs.metadata_json`.
-- Clear render failure if `ffmpeg` is unavailable or returns an encoding error.
+- Canvas size, background, duration, FPS, format, quality, codec, optional audio, range rendering, caption burn-in, and SRT/VTT sidecar captions.
+- Real video and image compositing with timeline placement, trim, layer ordering, `z_index`, scaling, position, fractional crop, rotation, opacity, and fades.
+- Constant 0.25×–4× video/audio retiming with pitch-preserving `atempo` filters.
+- Position, scale, rotation, opacity, volume, and effect-amount keyframes expanded into deterministic sampled segments. Linear, ease-in, ease-out, ease-in-out, and step interpolation are supported; continuous curves remain approximations.
+- Fade, dip, slide, sampled zoom, and directional wipe transitions. Crossfade remains an alpha-fade approximation rather than a true two-input blend.
+- Brightness, contrast, saturation, blur, grayscale, sharpen, vignette, chroma key, and sampled effect-amount animation.
+- Text/caption/callout styling including font, size, color, line height, stroke, shadow, background, transform, opacity, fades, and deterministic alignment/letter-spacing approximation.
+- Rectangle, highlight, pixelate, blur-region, and normalized fallback annotation output. Complex geometry such as ellipse, arrow, and speech bubble currently exports as simpler deterministic primitives.
+- Cursor paths, highlights, and click rings through sampled overlays. Click audio is not synthesized.
+- Multi-track audio mix with video soundtracks, per-clip volume/mute, volume keyframes, fades, timeline delay, constant speed, and `amix` mixdown.
+- Optional final audio processing: denoise, EQ preset, compression, LUFS normalization, limiting, and mono/stereo conversion.
+- Render diagnostics persisted in `video_render_jobs.metadata_json` and explicit failures when FFmpeg is unavailable or encoding fails.
 
-### Not yet rendered in export
+### Known preview/export differences
 
-The following are stored in the timeline JSON and shown in the editor but are **not yet applied by the FFmpeg renderer**:
+The capability endpoint intentionally reports partial support where output is deterministic but approximate:
 
-- Keyframes for `scale` and `opacity` (position, volume, and rotation keyframes render; easing curves are linearized)
-- `wipe`/`zoom` transitions (true `xfade` directional transitions)
-- `shadow` and `background_blur` effects
-- Text letter spacing, border radius, and alignment (preview-only)
-- Track solo (preview-only monitoring control; exports mix all unmuted tracks)
-- Chroma key in the preview (CSS cannot key colors — the canvas shows the unkeyed frame; export applies it)
+- Crop values are source-frame fractions; wipe transitions are sampled crop segments.
+- Rounded text-box corners remain preview-only.
+- Crossfade is an alpha-fade approximation.
+- Drop shadow and background-blur effects remain unsupported by export.
+- Keyframe curves are sampled rather than continuously evaluated.
+- Complex annotation geometry normalizes to simpler primitives.
+- Cursor click audio is not synthesized.
+- Track solo is preview-only; exports mix all unmuted tracks.
+- Chroma key is applied by FFmpeg but cannot be represented faithfully by the CSS preview.
 
-Renderer support is reported by `GET /v1/video/render/capabilities` (see `backend/internal/video/renderer_capabilities.go`). The inspector and render panel derive their export-fidelity warnings from that endpoint, so warnings stay accurate as renderer support evolves.
+Renderer support is reported by `GET /v1/video/render/capabilities`. `backend/internal/video/renderer_capabilities.go` is the source of truth used by the inspector, assistant, and render panel. Upgrade a capability only after the corresponding renderer path and tests are complete.
 
-Render/export uses `NewFFmpegRenderer("")` by default. There is no package-local mock renderer.
+## Transcription and Caption Regeneration
 
-## Production Adapter Direction
+Video Edit Studio includes a versioned, provider-neutral transcription contract with durable transcript and segment persistence. The current OpenAI/OpenAI-compatible adapter supports optional source language, word and segment timestamps, speaker-label requests when the provider supports them, and translation to English.
 
-A higher-fidelity adapter can still implement `video.Renderer` and delegate to:
+Remote processing requires explicit user consent. Provider privacy terms and charges still apply; the UI exposes the selected provider profile, retention choice, returned language, speaker availability, and reported cost when available. Interrupted queued/running jobs are marked failed on startup with a retryable message because the neutral contract does not persist a resumable provider operation ID.
 
-- Remotion through a Node render worker.
-- A richer FFmpeg timeline composition graph.
-- A provider-hosted render API.
+Completed transcripts can regenerate ordinary caption clips from persisted segments without retranscribing the source asset.
 
-The adapter should preserve the neutral OmniLLM timeline as the saved source of truth and treat renderer-specific manifests as derived artifacts.
+## Windows Native Capture
+
+The Wails Windows build can record the desktop through FFmpeg `gdigrab`, optionally capture a selected DirectShow microphone or loopback device, and store cursor/click telemetry plus explicitly opted-in virtual-key timing. Typed text is not reconstructed.
+
+DirectShow devices are enumerated and validated again when capture starts. Seamless device reconnect is not implemented: stop the take, reconnect the device, refresh the list, and start a new take. FFmpeg receives a graceful `q` stop first and is forcibly terminated after the shutdown timeout if necessary. Completed captures import only into their originating project, then temporary capture and telemetry files are removed.
+
+## Validation
+
+Renderer reliability is covered by unit tests for fidelity expansion, capability reporting, scheduler limits/priorities/cancellation/stalls/shutdown, audio-processing filters, transcription parsing/recovery, interval indexing, decoder budgeting, and patch history.
+
+`TestRendererGoldenMedia` generates deterministic source video and audio at test time, performs a real FFmpeg round trip, and validates decoded frame composition, dimensions, duration, audio-stream presence, and non-silent samples. It uses semantic pixel/audio thresholds rather than encoded-file hashes because codec bytes can differ across FFmpeg builds.
+
+The Windows CI job compiles and tests the desktop capture contract on a native Windows runner. The standard pull-request gate also runs Go formatting/vet/tests/race detection, frontend lint/unit/build, the complete Chromium Playwright suite, and Helm validation.
+
+## Adapter Boundary
+
+`video.Renderer` remains the neutral adapter boundary. A future renderer may delegate to Remotion, a richer FFmpeg graph, or a provider-hosted render API, but the saved OmniLLM timeline remains the source of truth and renderer-specific manifests remain derived artifacts.
