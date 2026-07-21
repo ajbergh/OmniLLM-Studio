@@ -74,7 +74,7 @@ The branch covers:
 - preserving a side-effect boundary between read batches;
 - keeping unknown tools sequential;
 - keeping read-only tools without `SupportsParallel` sequential;
-- keeping approval-gated reads sequential;
+- keeping approval-gated and denied reads sequential;
 - keeping a single parallel-safe tool as a sequential singleton;
 - proving two planned reads actually begin concurrently;
 - preserving result order even when execution is concurrent;
