@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,7 +72,7 @@ func TestRendererGoldenMedia(t *testing.T) {
 			Clips: []TimelineClip{{
 				ID: "box", StartMS: 0, DurationMS: duration, TrimOutMS: duration,
 				Transform: map[string]any{"x": -110.0, "y": -55.0, "scale": 1.0, "rotation": 0.0, "opacity": 1.0},
-				Shape: &TimelineShape{Kind: ShapeKindRectangle, Width: 70, Height: 40, Stroke: "#00ff00", StrokeWidth: 4},
+				Shape:     &TimelineShape{Kind: ShapeKindRectangle, Width: 70, Height: 40, Stroke: "#00ff00", StrokeWidth: 4},
 			}},
 		},
 	}
@@ -84,11 +83,11 @@ func TestRendererGoldenMedia(t *testing.T) {
 		DurationMS: &duration, Width: &width, Height: &height, FPS: &fps,
 	}
 	request := RenderRequest{
-		Project: models.VideoProject{ID: projectID, Width: 320, Height: 180, FPS: 30, DurationMS: duration},
-		Timeline: document,
-		Settings: ExportSettings{Format: "mp4", Resolution: "project", FPS: 30, Quality: "draft", IncludeAudio: true},
+		Project:        models.VideoProject{ID: projectID, Width: 320, Height: 180, FPS: 30, DurationMS: duration},
+		Timeline:       document,
+		Settings:       ExportSettings{Format: "mp4", Resolution: "project", FPS: 30, Quality: "draft", IncludeAudio: true},
 		AttachmentsDir: directory,
-		Assets: map[string]models.VideoAsset{"source-asset": asset},
+		Assets:         map[string]models.VideoAsset{"source-asset": asset},
 	}
 	result, err := NewFidelityRenderer(NewFFmpegRenderer(ffmpeg)).Render(context.Background(), request, nil)
 	if err != nil {
@@ -172,5 +171,4 @@ func TestRendererGoldenMedia(t *testing.T) {
 	if command, _ := result.Metadata["ffmpeg_command"].(string); command == "" {
 		t.Fatal("renderer metadata omitted FFmpeg command diagnostics")
 	}
-	_ = fmt.Sprintf("golden fixture validated with %d frame bytes and %d audio bytes", len(frame), len(audio))
 }
