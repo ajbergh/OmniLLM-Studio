@@ -85,9 +85,9 @@ The branch covers:
 - emitting `tool_cancelled` for the skipped call;
 - rejecting unsafe caller-supplied parallel steps at execution time.
 
-## Deliberately deferred Chat handler migration
+## Follow-on Chat handler migration
 
-The existing `backend/internal/api/message_handler.go` loop still invokes each tool sequentially. Migrating that large stateful loop should be a separate focused change using `Executor.BuildExecutionPlan` and `Executor.ExecutePlan` rather than embedding new concurrency logic directly in the handler.
+The existing `backend/internal/api/message_handler.go` loop still invokes each tool sequentially. Its migration belongs in the next focused branch and should use `Executor.BuildExecutionPlan` and `Executor.ExecutePlan` rather than embedding new concurrency logic directly in the handler.
 
 That migration must preserve:
 
