@@ -30,7 +30,7 @@ test('video edit studio converts pasted transcript into captions', async ({ page
   await expect(page.getByRole('button', { name: 'Save timeline' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Open advanced timeline tools' }).click();
-  await page.getByRole('button', { name: 'Transcript' }).click();
+  await page.getByRole('button', { name: 'Transcript', exact: true }).click();
   await page.getByPlaceholder('Paste transcript text…').fill('First caption line.\nSecond caption line.');
   await page.getByRole('button', { name: 'Create captions' }).click();
 
