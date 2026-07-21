@@ -151,6 +151,7 @@ export function ChatView() {
     webSearching, webSearchQuery, urlContextStatus, urlContextKind,
     browserStatus, browserStatusDetail, browserProgress,
     ragIndexingStatus, ragIndexingDetail, imageGenerating,
+    streamingTools, waitingForToolApproval,
     regenerateLastMessage, editAndResend, generateImage,
   } = useMessageStore();
   const [input, setInput] = useState('');
@@ -959,6 +960,26 @@ export function ChatView() {
             </motion.div>
           )}
 
+          {/* Generic tool lifecycle */}
+          {streaming && Object.keys(streamingTools).length > 0 && (
+            <div className="space-y-1.5">
+              {Object.values(streamingTools).map((tool) => (
+                <ToolCallCard
+                  key={tool.tool_call_id}
+                  toolName={tool.tool_name}
+                  args={tool.args}
+                  result={tool.result}
+                  status={tool.status}
+                />
+              ))}
+              {waitingForToolApproval && (
+                <p className="text-xs text-amber-400" role="status" aria-live="polite">
+                  Waiting for tool approval…
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Streaming content */}
           {streaming && streamingContent && (
             <motion.div
@@ -970,7 +991,7 @@ export function ChatView() {
           )}
 
           {/* Thinking indicator */}
-          {streaming && !streamingContent && !webSearching && !urlContextStatus && !imageGenerating && (
+          {streaming && !streamingContent && !webSearching && !urlContextStatus && !imageGenerating && Object.keys(streamingTools).length === 0 && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1274,7 +1295,7 @@ export function ChatView() {
               }
               title={
                 !toolsSupported
-                  ? `Web search requires function calling. ${activeProvider?.type === 'gemini' ? 'Gemini models do not currently support tool use in this app.' : 'Switch to a model that supports tool calling (e.g. Claude, GPT-4o, or llama3.1 via Ollama).'}`
+                  ? 'Web search requires function calling. Switch to a model that supports tool calling or refresh the provider model catalog.'
                   : webSearchEnabled ? 'Web search ON (click to disable)' : 'Web search OFF (click to enable)'
               }
             >
@@ -1555,7 +1576,7 @@ function MessageBubble({
     : metadata?.tool_call
       ? [metadata.tool_call]
       : [];
-  const browserToolResults: ToolResult[] = metadata?.browser_tool_results ?? [];
+  const toolResults: ToolResult[] = metadata?.tool_results ?? metadata?.browser_tool_results ?? [];
   const isImageGenerationMessage = Boolean(metadata?.image_generation) || message.metadata_json?.includes('image_generation') || false;
   const generatedAttachmentIDs = Array.from(new Set(Array.from(
     message.content.matchAll(/\/v1\/attachments\/([a-f0-9-]+)\/download/g)
@@ -2078,15 +2099,15 @@ function MessageBubble({
         {!isUser && toolCalls.length > 0 && (
           <div className="mt-2 space-y-1.5 border-t border-border/30 pt-2">
             {toolCalls.map((call, index) => {
-              const result = browserToolResults.find((item) => item.tool_call_id && call.id && item.tool_call_id === call.id)
-                || browserToolResults[index];
+              const result = toolResults.find((item) => item.tool_call_id && call.id && item.tool_call_id === call.id)
+                || toolResults[index];
               return (
                 <ToolCallCard
                   key={call.id || `${getToolCallName(call)}-${index}`}
                   toolName={getToolCallName(call)}
                   args={getToolCallArgs(call)}
                   result={result}
-                  status={result?.is_error ? 'error' : 'success'}
+                  status={result ? (result.is_error ? 'error' : 'success') : 'error'}
                 />
               );
             })}

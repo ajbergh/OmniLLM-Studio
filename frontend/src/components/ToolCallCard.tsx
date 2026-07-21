@@ -70,6 +70,11 @@ export function ToolCallCard({ toolName, args, result, status = 'running' }: Too
       )}
 
       {/* Result */}
+      {!result && status === 'error' && (
+        <div className="text-xs p-2 rounded-lg bg-red-500/10 text-red-400">
+          No tool result was recorded. Retry the request or inspect the tool policy and provider logs.
+        </div>
+      )}
       {result && (
         <div>
           <div className="text-xs text-text-muted mb-1">Result</div>

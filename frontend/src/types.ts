@@ -236,7 +236,8 @@ export interface MessageMetadata {
   browser_tool?: boolean;
   browser_navigated_urls?: string[];
   tool_calls?: ToolCall[];
-  browser_tool_results?: ToolResult[];
+  tool_results?: ToolResult[];
+  browser_tool_results?: ToolResult[]; // compatibility with older saved messages
   cost?: number; // OpenRouter credit cost
   image_generation?: boolean;
   router?: RouterTelemetry;
@@ -496,7 +497,22 @@ export interface ToolResult {
   tool_call_id: string;
   content: string;
   is_error: boolean;
+  structured?: unknown;
+  artifacts?: Array<{
+    id?: string;
+    name?: string;
+    mime_type?: string;
+    url?: string;
+    bytes?: number;
+  }>;
   metadata?: Record<string, unknown>;
+}
+
+export interface ToolLifecycleEvent {
+  type: string;
+  tool_call_id?: string;
+  tool_name?: string;
+  data?: Record<string, unknown>;
 }
 
 export interface ToolPermission {

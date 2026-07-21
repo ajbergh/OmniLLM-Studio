@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { api } from '../api';
-import type { Conversation, Message, ProviderProfile, SendMessageRequest, WebSearchResult, FeatureFlag } from '../types';
+import type { Conversation, Message, ProviderProfile, SendMessageRequest, WebSearchResult, FeatureFlag, ToolLifecycleEvent, ToolResult } from '../types';
 
 function getInitialConversationId(): string | null {
   if (typeof window === 'undefined') return null;
@@ -124,6 +124,14 @@ function dedupeMessages(messages: Message[]): Message[] {
   return deduped;
 }
 
+interface StreamingToolState {
+  tool_call_id: string;
+  tool_name: string;
+  args?: Record<string, unknown>;
+  status: 'running' | 'success' | 'error';
+  result?: ToolResult;
+}
+
 interface MessageState {
   messages: Message[];
   loadedConversationId: string | null;
@@ -145,6 +153,8 @@ interface MessageState {
   ragIndexingStatus: string | null;
   ragIndexingDetail: string | null;
   imageGenerating: boolean;
+  streamingTools: Record<string, StreamingToolState>;
+  waitingForToolApproval: boolean;
 
   fetchMessages: (conversationId: string) => Promise<void>;
   replaceMessages: (conversationId: string, messages: Message[]) => void;
@@ -178,6 +188,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   ragIndexingStatus: null,
   ragIndexingDetail: null,
   imageGenerating: false,
+  streamingTools: {},
+  waitingForToolApproval: false,
 
   fetchMessages: async (conversationId: string) => {
     // Increment counter to detect stale responses from rapid switching
@@ -207,7 +219,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }) => {
-    set({ loadedConversationId: conversationId, streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, ragIndexingStatus: null, ragIndexingDetail: null, imageGenerating: false });
+    set({ loadedConversationId: conversationId, streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, ragIndexingStatus: null, ragIndexingDetail: null, imageGenerating: false, streamingTools: {}, waitingForToolApproval: false });
 
     const reqBody: SendMessageRequest = { content };
     if (override) reqBody.override = override;
@@ -240,6 +252,49 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         },
         onThinking: (thinkingContent) => {
           set((s) => ({ streamingThinking: s.streamingThinking + thinkingContent }));
+        },
+        onToolEvent: (event: ToolLifecycleEvent) => {
+          const callId = event.tool_call_id || `${event.tool_name || 'tool'}-unknown`;
+          const rawArguments = event.data?.arguments;
+          let args: Record<string, unknown> | undefined;
+          if (typeof rawArguments === 'string') {
+            try { args = JSON.parse(rawArguments); } catch { args = { arguments: rawArguments }; }
+          } else if (rawArguments && typeof rawArguments === 'object') {
+            args = rawArguments as Record<string, unknown>;
+          }
+          const failed = event.type === 'tool_failed' || event.type === 'tool_timed_out';
+          const completed = event.type === 'tool_completed';
+          set((state) => ({
+            waitingForToolApproval: event.type === 'tool_approval_required'
+              ? true
+              : event.type === 'tool_approval_resolved'
+                ? false
+                : state.waitingForToolApproval,
+            streamingTools: {
+              ...state.streamingTools,
+              [callId]: {
+                ...state.streamingTools[callId],
+                tool_call_id: callId,
+                tool_name: event.tool_name || state.streamingTools[callId]?.tool_name || 'tool',
+                args: args || state.streamingTools[callId]?.args,
+                status: failed ? 'error' : completed ? 'success' : state.streamingTools[callId]?.status || 'running',
+              },
+            },
+          }));
+        },
+        onToolResult: (data) => {
+          set((state) => ({
+            streamingTools: {
+              ...state.streamingTools,
+              [data.tool_call_id]: {
+                ...state.streamingTools[data.tool_call_id],
+                tool_call_id: data.tool_call_id,
+                tool_name: data.tool_name || state.streamingTools[data.tool_call_id]?.tool_name || 'tool',
+                status: data.result.is_error ? 'error' : 'success',
+                result: data.result,
+              },
+            },
+          }));
         },
         onWebSearch: (data) => {
           set({ webSearching: true, webSearchQuery: data?.tool_call?.arguments?.query || null });
@@ -315,6 +370,12 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           if (data.tool_calls && data.tool_calls.length > 0) {
             metadata.tool_calls = data.tool_calls;
           }
+          const completedToolResults = data.tool_results && data.tool_results.length > 0
+            ? data.tool_results
+            : Object.values(get().streamingTools).flatMap((tool) => tool.result ? [tool.result] : []);
+          if (completedToolResults.length > 0) {
+            metadata.tool_results = completedToolResults;
+          }
           if (data.browser_tool_results && data.browser_tool_results.length > 0) {
             metadata.browser_tool_results = data.browser_tool_results;
           }
@@ -357,10 +418,27 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             browserStatusDetail: null,
             browserProgress: null,
             imageGenerating: false,
+            streamingTools: {},
+            waitingForToolApproval: false,
           }));
         },
         onError: (error) => {
-          set({ error, streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, imageGenerating: false });
+          const state = get();
+          const partialResults = Object.values(state.streamingTools).flatMap((tool) => tool.result ? [tool.result] : []);
+          if (state.streamingContent.trim()) {
+            const partialMsg: Message = {
+              id: `partial-error-${Date.now()}`,
+              conversation_id: state.streamingConversationId || conversationId,
+              role: 'assistant',
+              content: `${state.streamingContent}
+
+*[The response was interrupted before completion.]*`,
+              created_at: new Date().toISOString(),
+              metadata_json: partialResults.length > 0 ? JSON.stringify({ tool_results: partialResults }) : undefined,
+            };
+            set((current) => ({ messages: dedupeMessages([...current.messages, partialMsg]) }));
+          }
+          set({ error, streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, imageGenerating: false, streamingTools: {}, waitingForToolApproval: false });
         },
       }
     );
@@ -370,7 +448,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   clearMessages: (conversationId?: string) => {
     ++fetchMessageCounter;
-    set({ messages: [], loadedConversationId: conversationId ?? null, loading: false, error: null, streamingContent: '', streamingThinking: '', streaming: false, streamingConversationId: null, webSearching: false, webSearchResults: null, webSearchQuery: null, browserStatus: null, browserStatusDetail: null, browserProgress: null });
+    set({ messages: [], loadedConversationId: conversationId ?? null, loading: false, error: null, streamingContent: '', streamingThinking: '', streaming: false, streamingConversationId: null, webSearching: false, webSearchResults: null, webSearchQuery: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, streamingTools: {}, waitingForToolApproval: false });
   },
 
   stopStreaming: () => {

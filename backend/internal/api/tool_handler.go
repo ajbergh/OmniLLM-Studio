@@ -171,7 +171,10 @@ func (h *ToolHandler) resolveAndExecuteApproval(r *http.Request, userID, approva
 	if err := h.executor.ApprovalBroker().Resolve(approvalID, approved, arguments); err != nil {
 		return nil, err
 	}
-	if !approved {
+	if !approved || pending.Request.ContinuationMode == "inline" {
+		// Inline Chat Studio approvals resume inside the original executor call.
+		// The waiting SSE request will emit the eventual tool result and continue
+		// the same model turn, so this endpoint must not execute the tool twice.
 		return nil, nil
 	}
 	ctx := tools.ContextWithInvocationScope(r.Context(), pending.Request.Scope)

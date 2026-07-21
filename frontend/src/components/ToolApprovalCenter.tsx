@@ -80,6 +80,8 @@ export function ToolApprovalCenter() {
       if (response.result) {
         setCompleted({ approval, result: response.result });
         toast.success(response.result.is_error ? 'Approved tool returned an error' : 'Approved tool completed');
+      } else {
+        toast.success('Approval granted — continuing the original chat turn');
       }
     } catch (error) {
       toast.error((error as Error).message);
