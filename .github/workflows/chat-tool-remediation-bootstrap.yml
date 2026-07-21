@@ -73,7 +73,16 @@ jobs:
           )'''
           if content.count(old) != 1:
               raise SystemExit(f'expected one api import patch marker, found {content.count(old)}')
-          path.write_text(content.replace(old, new, 1), encoding='utf-8')
+          content = content.replace(old, new, 1)
+          fixes = {
+              r'+ "\n\n[tool result truncated for display]"': r'+ "\\n\\n[tool result truncated for display]"',
+              r'+ "\n\n[tool result truncated at the per-turn context limit]"': r'+ "\\n\\n[tool result truncated at the per-turn context limit]"',
+          }
+          for before, after in fixes.items():
+              if content.count(before) != 1:
+                  raise SystemExit(f'expected one Go string template marker, found {content.count(before)}: {before}')
+              content = content.replace(before, after, 1)
+          path.write_text(content, encoding='utf-8')
           PY
           python /tmp/remediate_chat_tools.py 2>&1 | tee bootstrap-apply.log
 
@@ -95,19 +104,35 @@ jobs:
             backend/internal/tools/types.go 2>&1 | tee bootstrap-format.log
 
       - name: Run focused backend tests
-        run: cd backend && go test ./internal/tools ./internal/api
+        shell: bash
+        run: |
+          set -o pipefail
+          cd backend
+          go test ./internal/tools ./internal/api 2>&1 | tee ../bootstrap-backend-test.log
 
       - name: Install frontend dependencies
         run: cd frontend && npm ci
 
       - name: Run frontend unit tests
-        run: cd frontend && npm run test:unit
+        shell: bash
+        run: |
+          set -o pipefail
+          cd frontend
+          npm run test:unit 2>&1 | tee ../bootstrap-frontend-test.log
 
       - name: Run frontend lint
-        run: cd frontend && npm run lint
+        shell: bash
+        run: |
+          set -o pipefail
+          cd frontend
+          npm run lint 2>&1 | tee ../bootstrap-frontend-lint.log
 
       - name: Build frontend
-        run: cd frontend && npm run build
+        shell: bash
+        run: |
+          set -o pipefail
+          cd frontend
+          npm run build 2>&1 | tee ../bootstrap-frontend-build.log
 
       - name: Commit tested remediation
         shell: bash
@@ -115,7 +140,7 @@ jobs:
           set -euo pipefail
           git rm .github/workflows/chat-tool-remediation-bootstrap.yml
           git rm scripts/.remediate_chat_tools.part.*
-          git rm -f bootstrap-diagnostics.txt bootstrap-apply.log bootstrap-format.log || true
+          git rm -f bootstrap-diagnostics.txt bootstrap-apply.log bootstrap-format.log bootstrap-backend-test.log bootstrap-frontend-test.log bootstrap-frontend-lint.log bootstrap-frontend-build.log || true
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
@@ -144,7 +169,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add bootstrap-diagnostics.txt
-          for log in bootstrap-apply.log bootstrap-format.log; do
+          for log in bootstrap-apply.log bootstrap-format.log bootstrap-backend-test.log bootstrap-frontend-test.log bootstrap-frontend-lint.log bootstrap-frontend-build.log; do
             if [ -f "$log" ]; then git add "$log"; fi
           done
           git commit -m 'chore: record remediation bootstrap diagnostics' || true
