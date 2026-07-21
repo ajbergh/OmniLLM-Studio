@@ -104,6 +104,8 @@ func (r *ToolEventRecorder) persist(event tools.ToolEvent) error {
 	if event.Type == tools.ToolEventStarted {
 		startedAt = now
 	}
+	// Every terminal event, including request cancellation, closes the durable
+	// invocation record so operational views do not leave it appearing in-flight.
 	if event.Type == tools.ToolEventCompleted || event.Type == tools.ToolEventFailed || event.Type == tools.ToolEventTimedOut || event.Type == tools.ToolEventCancelled {
 		completedAt = now
 	}
