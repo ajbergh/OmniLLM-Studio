@@ -163,6 +163,7 @@ export function VideoTimeline() {
   const [menu, setMenu] = useState<TimelineMenuState | null>(null);
   const [dialog, setDialog] = useState<TimelineDialogState | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [visibleWindow, setVisibleWindow] = useState({ start: 0, end: 60_000 });
   const marqueeRef = useRef<{ startX: number; startY: number; moved: boolean } | null>(null);
   const [marqueeRect, setMarqueeRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
@@ -215,6 +216,37 @@ export function VideoTimeline() {
   };
   const pxPerMs = useMemo(() => 0.02 * zoom, [zoom]);
   const width = Math.max(900, (timeline?.duration_ms || 30000) * pxPerMs);
+
+  // Virtualize clip DOM by translating the horizontal viewport into timeline
+  // time. ResizeObserver covers panel resizing while requestAnimationFrame
+  // coalesces scroll bursts into at most one update per display frame.
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node || pxPerMs <= 0) return;
+    let frame: number | null = null;
+    const update = () => {
+      frame = null;
+      const start = Math.max(0, (node.scrollLeft - TRACK_HEADER_WIDTH) / pxPerMs);
+      const end = Math.max(start, (node.scrollLeft + node.clientWidth - TRACK_HEADER_WIDTH) / pxPerMs);
+      setVisibleWindow((previous) => (
+        Math.abs(previous.start - start) < 1 && Math.abs(previous.end - end) < 1
+          ? previous
+          : { start, end }
+      ));
+    };
+    const schedule = () => {
+      if (frame === null) frame = requestAnimationFrame(update);
+    };
+    const observer = new ResizeObserver(schedule);
+    observer.observe(node);
+    node.addEventListener('scroll', schedule, { passive: true });
+    update();
+    return () => {
+      node.removeEventListener('scroll', schedule);
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [pxPerMs, timeline?.duration_ms]);
 
   // Snap targets, typed so the drop guide can say what it snapped to. When a
   // position matches several targets, precedence is playhead > marker > clip
@@ -609,6 +641,8 @@ export function VideoTimeline() {
             onFadeClip={(clipId, fade) => { void updateClipFade(clipId, fade); }}
             onUpdateClipKeyframe={(clipId, keyframeId, patch) => { void updateKeyframe(clipId, keyframeId, patch); }}
             onTransitionContextMenu={(clipId, trackId, x, y) => setMenu({ kind: 'transition', clipId, trackId, x, y })}
+            visibleStartMs={visibleWindow.start}
+            visibleEndMs={visibleWindow.end}
             onHeaderContextMenu={(trackId, x, y) => setMenu({ kind: 'track', trackId, x, y })}
             onLaneContextMenu={(trackId, timeMs, x, y) => setMenu({ kind: 'lane', trackId, timeMs, x, y })}
           />

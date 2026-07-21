@@ -143,6 +143,7 @@ func versionedMigrations() []Migration {
 		{Version: 40, Name: "video_generation_input_assets", SQL: migrationVideoGenerationInputAssets},
 		{Version: 41, Name: "video_render_job_metadata", SQL: migrationVideoRenderJobMetadata},
 		{Version: 42, Name: "agent_runtime", SQL: migrationAgentRuntime},
+		{Version: 43, Name: "video_transcriptions", SQL: migrationVideoTranscriptions},
 	}
 }
 
@@ -1237,4 +1238,41 @@ CREATE TABLE IF NOT EXISTS app_connections (
 	UNIQUE(user_id, workspace_id, app_key, server_id)
 );
 CREATE INDEX IF NOT EXISTS idx_app_connections_user ON app_connections(user_id, workspace_id, app_key);
+`
+
+const migrationVideoTranscriptions = `
+CREATE TABLE IF NOT EXISTS video_transcripts (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    asset_id TEXT NOT NULL,
+    user_id TEXT,
+    provider_profile_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    language TEXT DEFAULT '',
+    translated_language TEXT DEFAULT '',
+    text TEXT DEFAULT '',
+    cost_usd REAL,
+    privacy_json TEXT NOT NULL DEFAULT '{}',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    error TEXT,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    completed_at DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_video_transcripts_project_created ON video_transcripts(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_video_transcripts_asset ON video_transcripts(asset_id);
+CREATE TABLE IF NOT EXISTS video_transcript_segments (
+    id TEXT PRIMARY KEY,
+    transcript_id TEXT NOT NULL,
+    segment_index INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    speaker TEXT DEFAULT '',
+    confidence REAL,
+    words_json TEXT NOT NULL DEFAULT '[]'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_transcript_segments_order ON video_transcript_segments(transcript_id, segment_index);
 `

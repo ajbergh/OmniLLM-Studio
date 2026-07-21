@@ -31,6 +31,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y gcc pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: Prepare desktop embed placeholder
+        working-directory: backend
+        run: |
+          mkdir -p cmd/desktop/frontend_dist
+          printf '<!doctype html><title>test</title>' > cmd/desktop/frontend_dist/index.html
       - name: Verify formatting
         working-directory: backend
         run: |
@@ -43,12 +48,15 @@ jobs:
         working-directory: backend
         env:
           GOFLAGS: -tags=webkit2_41
-        run: go vet ./... 2>&1 | tee ../backend-vet.log
+        run: |
+          set -o pipefail
+          go vet ./... 2>&1 | tee ../backend-vet.log
       - name: Unit and integration tests
         working-directory: backend
         env:
           GOFLAGS: -tags=webkit2_41
         run: |
+          set -o pipefail
           export OMNILLM_MASTER_KEY="$(printf '0%.0s' {1..64})"
           go test ./... 2>&1 | tee ../backend-test.log
       - name: Race detector
@@ -56,6 +64,7 @@ jobs:
         env:
           GOFLAGS: -tags=webkit2_41
         run: |
+          set -o pipefail
           export OMNILLM_MASTER_KEY="$(printf '0%.0s' {1..64})"
           go test -race ./... 2>&1 | tee ../backend-race.log
       - name: Upload backend diagnostics
@@ -80,6 +89,36 @@ jobs:
         working-directory: backend
         run: go test ./internal/plugins -count=1
 
+  desktop-windows:
+    name: Desktop capture contract (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - name: Prepare desktop embed placeholder
+        working-directory: backend
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path cmd/desktop/frontend_dist | Out-Null
+          Set-Content -Path cmd/desktop/frontend_dist/index.html -Value '<!doctype html><title>test</title>'
+      - name: Compile and test Windows desktop bindings
+        working-directory: backend
+        shell: pwsh
+        run: |
+          go test ./cmd/desktop -count=1 2>&1 | Tee-Object ../desktop-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload Windows desktop diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-windows-diagnostics
+          path: desktop-windows.log
+          if-no-files-found: ignore
+          retention-days: 14
+
   frontend:
     name: Frontend lint unit and build
     runs-on: ubuntu-24.04
@@ -92,12 +131,21 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - working-directory: frontend
         run: npm ci
-      - working-directory: frontend
-        run: npm run lint 2>&1 | tee ../frontend-lint.log
-      - working-directory: frontend
-        run: npm run test:unit 2>&1 | tee ../frontend-unit.log
-      - working-directory: frontend
-        run: npm run build 2>&1 | tee ../frontend-build.log
+      - name: Frontend lint
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee ../frontend-lint.log
+      - name: Frontend unit tests
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm run test:unit 2>&1 | tee ../frontend-unit.log
+      - name: Frontend production build
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee ../frontend-build.log
       - name: Upload frontend diagnostics
         if: always()
         uses: actions/upload-artifact@v7
@@ -128,6 +176,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y gcc pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: Prepare desktop embed placeholder
+        working-directory: backend
+        run: |
+          mkdir -p cmd/desktop/frontend_dist
+          printf '<!doctype html><title>test</title>' > cmd/desktop/frontend_dist/index.html
       - run: npm ci
       - working-directory: frontend
         run: npm ci

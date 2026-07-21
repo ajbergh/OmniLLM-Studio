@@ -75,7 +75,7 @@ func NewService(
 		attachmentsDir:   attachmentsDir,
 		storage:          NewStorage(attachmentsDir),
 		registry:         NewModelRegistry(NewOpenRouterProvider("", ""), NewGeminiProvider("", ""), NewLumaProvider("", "")),
-		renderer:         NewFFmpegRenderer(""),
+		renderer:         NewProductionRenderer(""),
 		llm:              llmSvc,
 		renderCancels:    map[string]context.CancelFunc{},
 	}

@@ -8,6 +8,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Eye, EyeOff, Lock, Unlock, Volume2, VolumeX } from 'lucide-react';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineTrack as Track, VideoTimelineTrackType } from '../../../types/video';
 import { TimelineClip } from './TimelineClip';
+import { visibleClips } from '../pro/timelineIndex';
 
 // Snap a drop position to nearby clip edges / playhead within this pixel radius.
 const SNAP_RADIUS_PX = 8;
@@ -67,6 +68,8 @@ export function TimelineTrack({
   onFadeClip,
   onUpdateClipKeyframe,
   onTransitionContextMenu,
+  visibleStartMs = 0,
+  visibleEndMs = Number.MAX_SAFE_INTEGER,
 }: {
   track: Track;
   assets: VideoAsset[];
@@ -94,6 +97,8 @@ export function TimelineTrack({
   onTransitionContextMenu?: (clipId: string, trackId: string, clientX: number, clientY: number) => void;
   onHeaderContextMenu?: (trackId: string, clientX: number, clientY: number) => void;
   onLaneContextMenu?: (trackId: string, timeMs: number, clientX: number, clientY: number) => void;
+  visibleStartMs?: number;
+  visibleEndMs?: number;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(track.name);
@@ -273,7 +278,7 @@ export function TimelineTrack({
             )}
           </div>
         )}
-        {track.clips.map((clip) => (
+        {visibleClips(track.clips, visibleStartMs, visibleEndMs).map((clip) => (
           <TimelineClip
             key={clip.id}
             clip={clip}

@@ -149,6 +149,7 @@ func main() {
 		Bind:      []interface{}{app},
 		OnStartup: app.startup,
 		OnShutdown: func(ctx context.Context) {
+			shutdownNativeCaptures()
 			close(stopCleanup)
 			if err := srv.Shutdown(ctx); err != nil {
 				log.Printf("[desktop] HTTP shutdown: %v", err)

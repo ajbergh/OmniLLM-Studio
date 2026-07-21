@@ -14,7 +14,7 @@
  * elements synchronized to the timeline.
  */
 import { Check, Crop, Crosshair, Grid3x3, Maximize2, Minimize2, Pause, Play, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { videoApi } from '../../api';
 import { useVideoStudioStore } from '../../stores/videoStudio';
@@ -24,6 +24,7 @@ import { composePreviewFilter } from './effects/effectRegistry';
 import { sampleKeyframes } from './effects/keyframeUtils';
 import { ShapePreview } from './ShapePreview';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineTrack } from '../../types/video';
+import { applyDecoderBudget, buildTimelineIntervalIndex, queryActiveClips } from './pro/timelineIndex';
 
 function formatTime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -196,37 +197,36 @@ export function VideoPreviewCanvas() {
   const canvasHeight = timeline?.canvas.height || 1080;
   const stageScale = stageSize.width > 0 ? stageSize.width / canvasWidth : 0;
 
-  // Visible tracks contribute visuals even when muted (mute only silences audio,
-  // matching export semantics); hidden tracks contribute nothing.
-  const layers: LayerEntry[] = (timeline?.tracks || [])
-    .flatMap((track, trackIndex) => track.clips.map((clip) => ({ track, trackIndex, clip })))
+  const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
+  const activeIndexed = queryActiveClips(intervalIndex, playheadMs)
     .filter(({ track }) => track.visible)
-    .filter(({ clip }) => playheadMs >= clip.start_ms && playheadMs < clip.start_ms + clip.duration_ms)
-    .map((entry) => ({ ...entry, asset: entry.clip.asset_id ? assets.find((item) => item.id === entry.clip.asset_id) : undefined }))
-    // Audio-only and detached-audio clips contribute no visuals.
-    .filter(({ clip, asset }) => !clip.audio_only && (Boolean(clip.text) || !asset || !asset.mime_type.startsWith('audio/')))
+    .sort((a, b) => (a.trackIndex - b.trackIndex) || ((a.clip.z_index ?? 0) - (b.clip.z_index ?? 0)));
+  const visualIndexed = activeIndexed.filter(({ clip, asset }) => (
+    !clip.audio_only && (Boolean(clip.text) || Boolean(clip.shape) || !asset || !asset.mime_type.startsWith('audio/'))
+  ));
+  const decoderLimit = Math.max(1, Math.min(12, Number(window.localStorage.getItem('omnillm-video-decoder-budget') || 4)));
+  const budgeted = applyDecoderBudget(visualIndexed, decoderLimit, selectedClipId);
+  const layers: LayerEntry[] = budgeted.mounted;
+  const posterLayers: LayerEntry[] = budgeted.posters;
+  const posterClipIds = new Set(posterLayers.map(({ clip }) => clip.id));
+  const previewLayers = [...layers, ...posterLayers]
     .sort((a, b) => (a.trackIndex - b.trackIndex) || ((a.clip.z_index ?? 0) - (b.clip.z_index ?? 0)));
 
-  // Audio clips active at the playhead mount hidden <audio> elements so the
-  // preview is audible — on any unmuted track, matching export semantics where
-  // the asset (not the track type) decides audio contribution.
-  const audioLayers = (timeline?.tracks || [])
-    .filter((track) => !track.muted && (!soloTrackId || track.id === soloTrackId))
-    .flatMap((track) => track.clips)
-    .filter((clip) => playheadMs >= clip.start_ms && playheadMs < clip.start_ms + clip.duration_ms)
-    .map((clip) => ({ clip, asset: clip.asset_id ? assets.find((item) => item.id === clip.asset_id) : undefined }))
-    // Route every time-based asset through managed hidden audio. Visual video
-    // elements stay muted, which gives ordinary video soundtracks the same
-    // fades, keyframes, solo, master gain, and retiming as detached audio.
-    .filter((entry): entry is { clip: VideoTimelineClip; asset: VideoAsset } =>
-      Boolean(entry.asset && !entry.clip.muted &&
-        (entry.asset.mime_type.startsWith('audio/') || entry.asset.mime_type.startsWith('video/'))));
+  // Audio uses the same interval index as visuals, eliminating full timeline
+  // scans and repeated asset lookups on every playhead update.
+  const audioLayers = activeIndexed
+    .filter(({ track }) => !track.muted && (!soloTrackId || track.id === soloTrackId))
+    .filter((entry): entry is LayerEntry & { asset: VideoAsset } => Boolean(
+      entry.asset && !entry.clip.muted &&
+      (entry.asset.mime_type.startsWith('audio/') || entry.asset.mime_type.startsWith('video/')),
+    ))
+    .map(({ clip, asset }) => ({ clip, asset }));
 
   layersRef.current = layers;
   audioLayersRef.current = audioLayers;
   timelineDurationRef.current = timeline?.duration_ms ?? 0;
 
-  const selectedEntry = layers.find((layer) => layer.clip.id === selectedClipId);
+  const selectedEntry = previewLayers.find((layer) => layer.clip.id === selectedClipId);
   const selectedIsMedia = Boolean(
     selectedEntry?.asset && (selectedEntry.asset.mime_type.startsWith('video/') || selectedEntry.asset.mime_type.startsWith('image/')),
   );
@@ -605,7 +605,7 @@ export function VideoPreviewCanvas() {
     }
   };
 
-  const renderLayer = (entry: LayerEntry) => {
+  const renderLayer = (entry: LayerEntry, poster = false) => {
     const { clip, track, asset } = entry;
     const transform = { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, ...(clip.transform || {}) };
     // Keyframes (clip-relative time) override static transform values; an
@@ -650,7 +650,17 @@ export function VideoPreviewCanvas() {
 
     let content = null;
     if (asset && asset.mime_type.startsWith('video/')) {
-      content = (
+      content = poster ? (
+        <div className="relative h-full w-full bg-black/60" title="Video decoder budget: showing thumbnail">
+          <img
+            src={videoApi.artifactUrl(asset.id, 'thumbnail')}
+            alt={`${asset.file_name} thumbnail`}
+            className="h-full w-full object-contain"
+            style={{ clipPath }}
+          />
+          <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[9px] text-white/60">proxy frame</span>
+        </div>
+      ) : (
         <video
           ref={(node) => {
             if (node) videoRefs.current.set(clip.id, node);
@@ -991,8 +1001,8 @@ export function VideoPreviewCanvas() {
             setMenu({ clipId: null, x: event.clientX, y: event.clientY });
           }}
         >
-          {layers.map((entry) => renderLayer(entry))}
-          {layers.length === 0 && (
+          {previewLayers.map((entry) => renderLayer(entry, posterClipIds.has(entry.clip.id)))}
+          {previewLayers.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center text-xs text-white/55">
               No active visual clip at playhead
             </div>
@@ -1047,7 +1057,7 @@ export function VideoPreviewCanvas() {
         </div>
       </div>
       {menu && (() => {
-        const entry = menu.clipId ? layers.find((layer) => layer.clip.id === menu.clipId) : undefined;
+        const entry = menu.clipId ? previewLayers.find((layer) => layer.clip.id === menu.clipId) : undefined;
         // Cover the canvas while preserving the asset's aspect ratio
         // (object-contain renders at scale 1 = fit).
         const fillScale = (asset?: VideoAsset): number => {

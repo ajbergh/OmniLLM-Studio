@@ -20,10 +20,13 @@ func TestAgentRuntimeMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 42 {
-		t.Fatalf("expected schema version 42, got %d", version)
+	if version != 43 {
+		t.Fatalf("expected schema version 43, got %d", version)
 	}
-	for _, table := range []string{"tool_invocations", "agent_events", "agent_jobs", "scheduled_tasks", "memories", "app_connections"} {
+	for _, table := range []string{
+		"tool_invocations", "agent_events", "agent_jobs", "scheduled_tasks", "memories", "app_connections",
+		"video_transcripts", "video_transcript_segments",
+	} {
 		var name string
 		if err := database.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name); err != nil {
 			t.Fatalf("runtime table %s missing: %v", table, err)

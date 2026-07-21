@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Circle, Files, Scissors } from 'lucide-react';
+import { AudioLines, Captions, Circle, Files, MonitorUp, Scissors } from 'lucide-react';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import type { VideoTimelineDocument } from '../../types/video';
 import { VideoEditStudioEnhanced } from './VideoEditStudioEnhanced';
 import { MediaRelinkLab } from './pro/MediaRelinkLab';
 import { RecordingLab } from './pro/RecordingLab';
+import { AudioProcessingLab } from './pro/AudioProcessingLab';
+import { NativeCaptureLab } from './pro/NativeCaptureLab';
+import { TranscriptionLab } from './pro/TranscriptionLab';
+import { PatchHistory, createTimelinePatch, revertTimelinePatch, applyTimelinePatch } from './pro/patchHistory';
 import { SourceMonitorLab } from './pro/SourceMonitorLab';
 import { createTimelineBranch } from './pro/timelineCommandEngine';
 
@@ -26,32 +30,79 @@ export function fitHistoryToBudget(history: VideoTimelineDocument[], budgetBytes
 }
 
 /**
- * Bound snapshot-based undo/redo memory while the store remains compatible
- * with the current timeline-history contract. The newest snapshot is always
- * retained, even when a single very large timeline exceeds the configured
- * budget. A future timeline schema can replace snapshots with command patches
- * without requiring this compatibility guard.
+ * Replace unbounded document snapshots with compact reversible JSON patches.
+ * The existing store actions remain API-compatible: their temporary snapshot
+ * push is converted immediately, while one sentinel document keeps existing
+ * canUndo/canRedo selectors working.
  */
-function useTimelineHistoryBudget() {
+function usePatchTimelineHistory() {
   useEffect(() => {
-    let previousUndo = useVideoStudioStore.getState().timelineUndoStack;
-    let previousRedo = useVideoStudioStore.getState().timelineRedoStack;
-    let compacting = false;
-    return useVideoStudioStore.subscribe((state) => {
-      if (compacting || (state.timelineUndoStack === previousUndo && state.timelineRedoStack === previousRedo)) return;
-      previousUndo = state.timelineUndoStack;
-      previousRedo = state.timelineRedoStack;
-      const configuredMb = Number(window.localStorage.getItem('omnillm-video-history-budget-mb') || 32);
-      const budget = Math.max(8, Math.min(256, Number.isFinite(configuredMb) ? configuredMb : 32)) * 1024 * 1024;
-      const undo = fitHistoryToBudget(state.timelineUndoStack, Math.round(budget * 0.8));
-      const redo = fitHistoryToBudget(state.timelineRedoStack, Math.round(budget * 0.2));
-      if (undo.length === state.timelineUndoStack.length && redo.length === state.timelineRedoStack.length) return;
-      compacting = true;
-      useVideoStudioStore.setState({ timelineUndoStack: undo, timelineRedoStack: redo });
-      previousUndo = undo;
-      previousRedo = redo;
-      compacting = false;
+    const configuredMb = Number(window.localStorage.getItem('omnillm-video-history-budget-mb') || 32);
+    const history = new PatchHistory(Math.max(8, Math.min(256, Number.isFinite(configuredMb) ? configuredMb : 32)) * 1024 * 1024);
+    const originalUndo = useVideoStudioStore.getState().undoTimeline;
+    const originalRedo = useVideoStudioStore.getState().redoTimeline;
+    let undoRef = useVideoStudioStore.getState().timelineUndoStack;
+    let redoRef = useVideoStudioStore.getState().timelineRedoStack;
+    let applying = false;
+    const unsubscribe = useVideoStudioStore.subscribe((state) => {
+      if (applying) return;
+      if (state.timelineUndoStack === undoRef && state.timelineRedoStack === redoRef) return;
+      if (!state.timeline || state.timelineUndoStack.length === 0) {
+        if (state.timelineUndoStack.length === 0 && state.timelineRedoStack.length === 0) history.reset();
+        undoRef = state.timelineUndoStack;
+        redoRef = state.timelineRedoStack;
+        return;
+      }
+      const previous = state.timelineUndoStack[state.timelineUndoStack.length - 1];
+      const patch = createTimelinePatch(previous, state.timeline);
+      history.record(patch);
+      applying = true;
+      const undoSentinel = history.undo.length ? [previous] : [];
+      useVideoStudioStore.setState({ timelineUndoStack: undoSentinel, timelineRedoStack: [] });
+      undoRef = undoSentinel;
+      redoRef = [];
+      applying = false;
     });
+    const undo: typeof originalUndo = async () => {
+      const state = useVideoStudioStore.getState();
+      const patch = history.popUndo();
+      if (!state.timeline || !patch) return;
+      const next = revertTimelinePatch(state.timeline, patch);
+      applying = true;
+      useVideoStudioStore.setState({
+        timeline: next,
+        timelineUndoStack: history.undo.length ? [next] : [],
+        timelineRedoStack: history.redo.length ? [state.timeline] : [],
+      });
+      applying = false;
+      await useVideoStudioStore.getState().saveTimeline(next);
+    };
+    const redo: typeof originalRedo = async () => {
+      const state = useVideoStudioStore.getState();
+      const patch = history.popRedo();
+      if (!state.timeline || !patch) return;
+      const next = applyTimelinePatch(state.timeline, patch);
+      applying = true;
+      useVideoStudioStore.setState({
+        timeline: next,
+        timelineUndoStack: history.undo.length ? [state.timeline] : [],
+        timelineRedoStack: history.redo.length ? [next] : [],
+      });
+      applying = false;
+      await useVideoStudioStore.getState().saveTimeline(next);
+    };
+    useVideoStudioStore.setState({ undoTimeline: undo, redoTimeline: redo });
+    return () => {
+      unsubscribe();
+      if (useVideoStudioStore.getState().undoTimeline === undo) {
+        useVideoStudioStore.setState({
+          undoTimeline: originalUndo,
+          redoTimeline: originalRedo,
+          timelineUndoStack: [],
+          timelineRedoStack: [],
+        });
+      }
+    };
   }, []);
 }
 
@@ -153,12 +204,15 @@ function useAssistantEditCheckpoints() {
  */
 export function VideoEditStudioUltimate() {
   usePlaybackUpdateCoalescing();
-  useTimelineHistoryBudget();
+  usePatchTimelineHistory();
   useAssistantEditCheckpoints();
   const activeProjectId = useVideoStudioStore((state) => state.activeProjectId);
   const [recordingOpen, setRecordingOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
+  const [transcriptionOpen, setTranscriptionOpen] = useState(false);
+  const [audioOpen, setAudioOpen] = useState(false);
+  const [nativeCaptureOpen, setNativeCaptureOpen] = useState(false);
 
   const launcherClass = 'inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-full border bg-surface-raised px-2.5 text-xs font-semibold text-text shadow-xl disabled:cursor-not-allowed disabled:opacity-40 sm:px-3';
 
@@ -188,6 +242,9 @@ export function VideoEditStudioUltimate() {
           <Files size={12} className="text-primary" />
           <span className="hidden sm:inline">Media Lab</span>
         </button>
+        <button type="button" onClick={() => setTranscriptionOpen(true)} disabled={!activeProjectId} className={`${launcherClass} border-sky-400/30 hover:border-sky-400/60`} aria-label="Open transcription lab" title="Provider-backed transcription and reusable captions"><Captions size={12} className="text-sky-300"/><span className="hidden xl:inline">Transcribe</span></button>
+        <button type="button" onClick={() => setAudioOpen(true)} disabled={!activeProjectId} className={`${launcherClass} border-emerald-400/30 hover:border-emerald-400/60`} aria-label="Open audio processing" title="Denoise, EQ, compression, LUFS normalization, and limiting"><AudioLines size={12} className="text-emerald-300"/><span className="hidden xl:inline">Audio</span></button>
+        <button type="button" onClick={() => setNativeCaptureOpen(true)} disabled={!activeProjectId} className={`${launcherClass} border-violet-400/30 hover:border-violet-400/60`} aria-label="Open Windows native capture" title="Native Windows screen/audio capture"><MonitorUp size={12} className="text-violet-300"/><span className="hidden xl:inline">Native</span></button>
         <button
           type="button"
           onClick={() => setRecordingOpen(true)}
@@ -203,6 +260,9 @@ export function VideoEditStudioUltimate() {
       <SourceMonitorLab open={sourceOpen} onClose={() => setSourceOpen(false)} />
       <MediaRelinkLab open={mediaOpen} onClose={() => setMediaOpen(false)} />
       <RecordingLab open={recordingOpen} onClose={() => setRecordingOpen(false)} />
+      <TranscriptionLab open={transcriptionOpen} onClose={() => setTranscriptionOpen(false)} />
+      <AudioProcessingLab open={audioOpen} onClose={() => setAudioOpen(false)} />
+      <NativeCaptureLab open={nativeCaptureOpen} onClose={() => setNativeCaptureOpen(false)} />
     </div>
   );
 }
