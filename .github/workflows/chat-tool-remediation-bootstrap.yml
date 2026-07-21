@@ -61,6 +61,24 @@ jobs:
         run: |
           set -o pipefail
           sed -i 's|ROOT = Path(__file__).resolve().parents\[1\]|ROOT = Path.cwd()|' /tmp/remediate_chat_tools.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/remediate_chat_tools.py')
+          content = path.read_text(encoding='utf-8')
+          old = '''replace_once(
+              "frontend/src/api.ts",
+              "import type {\\n",
+              "import { SSEDecoder } from './sse';\\nimport type {\\n",
+          )'''
+          new = '''replace_once(
+              "frontend/src/api.ts",
+              "import type {\\n  Conversation,",
+              "import { SSEDecoder } from './sse';\\nimport type {\\n  Conversation,",
+          )'''
+          if content.count(old) != 1:
+              raise SystemExit(f'expected one api import patch marker, found {content.count(old)}')
+          path.write_text(content.replace(old, new, 1), encoding='utf-8')
+          PY
           python /tmp/remediate_chat_tools.py 2>&1 | tee bootstrap-apply.log
 
       - name: Format Go sources
