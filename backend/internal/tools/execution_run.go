@@ -7,8 +7,8 @@ import (
 
 // ExecutePlan runs a previously constructed execution plan and returns results
 // in the same order as the calls represented by the plan. Parallel steps use
-// ExecuteBatch only after the executor independently revalidates every call;
-// sequential steps execute one call at a time.
+// ExecuteBatch only after the executor independently revalidates every call and
+// its current policy; sequential steps execute one call at a time.
 //
 // If the parent context is already cancelled before a step begins, the executor
 // does not invoke any remaining tools. Instead it emits terminal cancellation
@@ -51,12 +51,11 @@ func (e *Executor) parallelStepSafe(calls []ToolCall) bool {
 		return false
 	}
 	for _, call := range calls {
-		tool, ok := e.registry.Get(call.Name)
-		if !ok {
+		if e.Policy(call.Name) != "allow" {
 			return false
 		}
-		definition := tool.Definition().Normalized()
-		if !definition.Enabled || !definition.ReadOnly || definition.SideEffecting || !definition.SupportsParallel {
+		definition, ok := e.Definition(call.Name)
+		if !ok || !definitionParallelSafe(definition) {
 			return false
 		}
 	}
