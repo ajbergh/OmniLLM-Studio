@@ -25,6 +25,7 @@ func (t planningTool) Definition() ToolDefinition {
 		SupportsParallel: t.supportsParallel,
 	}
 }
+
 func (t planningTool) Validate(json.RawMessage) error { return nil }
 func (t planningTool) Execute(context.Context, json.RawMessage) (*ToolResult, error) {
 	return &ToolResult{Content: t.name}, nil
