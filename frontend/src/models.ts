@@ -410,11 +410,12 @@ const OLLAMA_TOOL_CALLING_MODELS = [
   'command-r', 'command-r-plus',
 ];
 
-// Provider-level defaults. false = backend excludes this provider from all tool calling.
+// Provider-level defaults. The backend preserves Gemini thought signatures,
+// so current Gemini chat models participate in the normal function-call loop.
 const TOOL_CALLING_PROVIDER_DEFAULT: Record<string, boolean> = {
   openai:      true,
   anthropic:   true,
-  gemini:      false, // excluded in message_handler.go (thought_signature requirement)
+  gemini:      true,
   groq:        true,
   mistral:     true,
   together:    true,

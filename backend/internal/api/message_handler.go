@@ -699,12 +699,6 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 
-	// Send initial event with message ID
-	sendSSE(w, flusher, "start", map[string]string{
-		"message_id":      msgID,
-		"user_message_id": userMsg.ID,
-	})
-
 	// ----- URL context preflight (streaming) -----
 	var urlCtxResult *urlcontext.ResolveResult
 	var urlCtxWebSearchBypass bool
@@ -927,9 +921,10 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var toolCall *websearch.ToolCall
 	var wsErr error
 	var allToolCalls []llm.ToolCall
+	var toolResults []tools.ToolResult
 	var browserToolResults []tools.ToolResult
 	var browserNavigatedURLs []string
-	if webSearchEnabled {
+	if webSearchEnabled && !requiresComposableToolLoop(req.Content) {
 		searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
 			r.Context(), req.Content, providerName, modelName,
 		)
@@ -1022,31 +1017,49 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			}}, llmReq.Messages...)
 		}
 
-		// Inject tools from the registry. Gemini thought signatures are preserved
-		// in llm.ToolCall.extra_content and returned with assistant tool-call
-		// history, so Gemini can participate in the same tool loop.
+		// Inject a policy-aware, intent-selected tool catalog. Gemini thought
+		// signatures are preserved in llm.ToolCall.extra_content and returned with
+		// assistant tool-call history.
 		providerType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
-		var llmTools []llm.Tool
-		for _, def := range h.toolRegistry.ListEnabled() {
-			llmTools = append(llmTools, llm.Tool{
-				Type: "function",
-				Function: struct {
-					Name        string          `json:"name"`
-					Description string          `json:"description,omitempty"`
-					Parameters  json.RawMessage `json:"parameters,omitempty"`
-				}{
-					Name:        def.Name,
-					Description: def.Description,
-					Parameters:  def.Parameters,
-				},
-			})
-		}
+		llmTools := selectChatTools(h.toolRegistry, h.toolExecutor, req.Content)
 		const maxToolLoops = 10
 		const maxBrowserNavsPerTurn = 3
 		const maxToolResultCharsPerTurn = 150000
 		browserNavCount := 0
 		totalToolResultChars := 0
 		visitedURLs := map[string]string{}
+		toolWorkspaceID := ""
+		if convo.WorkspaceID != nil {
+			toolWorkspaceID = *convo.WorkspaceID
+		}
+
+		streamFinalAnswer := func(reason string) error {
+			llmReq.Tools = nil
+			llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
+				Role:    "system",
+				Content: reason + " Do not call any more tools. Give the best possible final answer using the tool results already present in the conversation.",
+			})
+			return h.llmSvc.ChatStream(r.Context(), llmReq, func(chunk llm.StreamChunk) {
+				fullContent += chunk.Content
+				provider = chunk.Provider
+				model = chunk.Model
+				if chunk.TokenInput > 0 {
+					tokenIn += chunk.TokenInput
+				}
+				if chunk.TokenOutput > 0 {
+					tokenOut += chunk.TokenOutput
+				}
+				if chunk.Thinking != "" {
+					fullThinking += chunk.Thinking
+				}
+				if chunk.Cost != nil {
+					cost = *chunk.Cost
+				}
+				if chunk.Content != "" {
+					sendSSE(w, flusher, "token", map[string]string{"content": chunk.Content})
+				}
+			})
+		}
 
 		for loopIndex := 0; loopIndex < maxToolLoops; loopIndex++ {
 			if browserNavCount >= maxBrowserNavsPerTurn {
@@ -1055,7 +1068,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				llmReq.Tools = llmTools
 			}
 
-			var chunkToolCalls = make(map[int]*llm.ToolCall)
+			chunkToolCalls := make(map[int]*llm.ToolCall)
 			var loopContent string
 
 			err = h.llmSvc.ChatStream(r.Context(), llmReq, func(chunk llm.StreamChunk) {
@@ -1072,12 +1085,12 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				if chunk.Thinking != "" {
 					fullThinking += chunk.Thinking
 				}
-				// Capture OpenRouter credit cost
 				if chunk.Cost != nil {
 					cost = *chunk.Cost
 				}
-
-				// Accumulate tool calls
+				if chunk.Content != "" {
+					sendSSE(w, flusher, "token", map[string]string{"content": chunk.Content})
+				}
 				for _, tc := range chunk.ToolCalls {
 					if existing, ok := chunkToolCalls[tc.Index]; ok {
 						llm.MergeToolCallDelta(existing, tc)
@@ -1087,25 +1100,19 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			})
-
 			if err != nil {
 				break
 			}
-
 			if len(chunkToolCalls) == 0 {
-				// Model did not request any tools, conversation turn is complete.
 				break
 			}
 
-			// Flatten tool calls (ordered by index)
-			var finalToolCalls []llm.ToolCall
-			for i := 0; i < len(chunkToolCalls); i++ {
-				if tc, ok := chunkToolCalls[i]; ok {
-					finalToolCalls = append(finalToolCalls, *tc)
+			finalToolCalls := orderedToolCalls(chunkToolCalls)
+			for index := range finalToolCalls {
+				if finalToolCalls[index].ID == "" {
+					finalToolCalls[index].ID = uuid.NewString()
 				}
 			}
-
-			// Append the Assistant's message with tool calls to context
 			llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
 				Role:      "assistant",
 				Content:   loopContent,
@@ -1113,16 +1120,21 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			})
 			allToolCalls = append(allToolCalls, finalToolCalls...)
 
-			// Execute each tool and append the results
-			stopToolExecution := false
+			resultLimitReached := false
 			for _, tc := range finalToolCalls {
-				msg := fmt.Sprintf("\n\n> 🛠️ **Using tool:** `%s`\n\n", tc.Function.Name)
-				fullContent += msg
-				sendSSE(w, flusher, "token", map[string]string{"content": msg})
-
 				toolCtx := browser.WithProviderType(r.Context(), providerType)
 				toolCtx = browser.WithProgress(toolCtx, func(event string, payload any) {
 					sendSSE(w, flusher, event, payload)
+				})
+				toolCtx = tools.ContextWithInvocationScope(toolCtx, tools.InvocationScope{
+					UserID:         auth.ScopeUserIDFromContext(r.Context()),
+					WorkspaceID:    toolWorkspaceID,
+					ConversationID: convoID,
+					MessageID:      msgID,
+				})
+				toolCtx = tools.ContextWithInlineApproval(toolCtx)
+				toolCtx = tools.ContextWithEventSink(toolCtx, func(event tools.ToolEvent) {
+					sendToolEventSSE(w, flusher, event)
 				})
 
 				var res *tools.ToolResult
@@ -1147,14 +1159,34 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 						Arguments: []byte(tc.Function.Arguments),
 					})
 				}
+
+				metadataResult := safeToolResultForMetadata(tc.Function.Name, res)
 				if res != nil && strings.HasPrefix(tc.Function.Name, "browser_") {
-					browserToolResults = append(browserToolResults, browserToolResultForMetadata(tc.Function.Name, res))
+					browserResult := browserToolResultForMetadata(tc.Function.Name, res)
+					metadataResult = safeToolResultForMetadata(tc.Function.Name, &browserResult)
+					browserToolResults = append(browserToolResults, browserResult)
 				}
+				toolResults = append(toolResults, metadataResult)
+				sendSSE(w, flusher, "tool_result", map[string]interface{}{
+					"tool_call_id": tc.ID,
+					"tool_name":    tc.Function.Name,
+					"result":       metadataResult,
+				})
 
 				toolOutput := ""
 				if res != nil {
 					toolOutput = res.Content
 				}
+				remaining := maxToolResultCharsPerTurn - totalToolResultChars
+				if remaining <= 0 {
+					toolOutput = "Tool result context limit reached for this turn."
+					resultLimitReached = true
+				} else if len(toolOutput) > remaining {
+					toolOutput = toolOutput[:remaining] + "\n\n[tool result truncated at the per-turn context limit]"
+					resultLimitReached = true
+				}
+				totalToolResultChars += len(toolOutput)
+
 				if tc.Function.Name == "browser_navigate" {
 					browserNavCount++
 					if toolURL != "" && (res == nil || !res.IsError) {
@@ -1162,27 +1194,32 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 						browserNavigatedURLs = append(browserNavigatedURLs, toolURL)
 					}
 				}
-				totalToolResultChars += len(toolOutput)
-
 				llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
 					Role:       "tool",
 					Content:    toolOutput,
 					ToolCallID: tc.ID,
 					Name:       tc.Function.Name,
 				})
-				if totalToolResultChars > maxToolResultCharsPerTurn {
-					llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
-						Role:       "tool",
-						Content:    "Tool result context limit reached for this turn. Stop calling tools and answer using the gathered results.",
-						ToolCallID: tc.ID,
-						Name:       tc.Function.Name,
-					})
-					stopToolExecution = true
+				if resultLimitReached {
 					break
 				}
 			}
-			if stopToolExecution {
-				continue
+
+			if resultLimitReached {
+				sendSSE(w, flusher, "tool_result_limit", map[string]interface{}{
+					"code":  "TOOL_RESULT_LIMIT",
+					"limit": maxToolResultCharsPerTurn,
+				})
+				err = streamFinalAnswer("The tool result context budget was reached.")
+				break
+			}
+			if loopIndex == maxToolLoops-1 {
+				sendSSE(w, flusher, "tool_loop_limit", map[string]interface{}{
+					"code":  "TOOL_LOOP_LIMIT",
+					"limit": maxToolLoops,
+				})
+				err = streamFinalAnswer("The maximum number of tool-call rounds was reached.")
+				break
 			}
 		}
 	}
@@ -1191,7 +1228,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		log.Printf("ERROR: LLM stream: %v", err)
-		sendSSE(w, flusher, "error", map[string]string{"error": "internal server error"})
+		sendStreamFailure(w, flusher, "LLM_STREAM_FAILED", "The model stream failed before the turn completed.", true)
 		return
 	}
 
@@ -1288,6 +1325,9 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if len(allToolCalls) > 0 {
 		metaMap["tool_calls"] = allToolCalls
 	}
+	if len(toolResults) > 0 {
+		metaMap["tool_results"] = toolResults
+	}
 	if len(browserToolResults) > 0 {
 		metaMap["browser_tool_results"] = browserToolResults
 	}
@@ -1365,6 +1405,9 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(allToolCalls) > 0 {
 		donePayload["tool_calls"] = allToolCalls
+	}
+	if len(toolResults) > 0 {
+		donePayload["tool_results"] = toolResults
 	}
 	if len(browserToolResults) > 0 {
 		donePayload["browser_tool_results"] = browserToolResults

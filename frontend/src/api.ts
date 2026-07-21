@@ -2,6 +2,7 @@
 // It wraps `fetch` to automatically attach bearer tokens, handles error parsing,
 // and implements SSE stream parsing for chunked LLM generation.
 
+import { SSEDecoder } from './sse';
 import type {
   Conversation,
   ConversationKind,
@@ -307,8 +308,11 @@ export const api = {
       onToken: (content: string) => void;
       onThinking?: (content: string) => void;
       onStart?: (data: { message_id: string; user_message_id: string }) => void;
-      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; content?: string; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; browser_tool?: boolean; browser_navigated_urls?: string[]; tool_calls?: ToolCall[]; browser_tool_results?: ToolResult[]; thinking?: string; cost?: number; image_generation?: boolean; router?: RouterTelemetry }) => void;
-      onError?: (error: string) => void;
+      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; content?: string; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; browser_tool?: boolean; browser_navigated_urls?: string[]; tool_calls?: ToolCall[]; tool_results?: ToolResult[]; browser_tool_results?: ToolResult[]; thinking?: string; cost?: number; image_generation?: boolean; router?: RouterTelemetry }) => void;
+      onError?: (error: string, details?: { code?: string; retryable?: boolean }) => void;
+      onToolEvent?: (data: import('./types').ToolLifecycleEvent) => void;
+      onToolResult?: (data: { tool_call_id: string; tool_name: string; result: ToolResult }) => void;
+      onHeartbeat?: () => void;
       onWebSearch?: (data: { tool_call: ToolCall; status: string }) => void;
       onWebSearchResults?: (data: { query: string; results: WebSearchResult[] }) => void;
       onFileSearch?: (data: { status: string; scope?: string; query?: string; count?: number }) => void;
@@ -324,164 +328,137 @@ export const api = {
     }
   ) => {
     const controller = new AbortController();
-    const INACTIVITY_TIMEOUT_MS = 60_000; // 60s inactivity timeout
+    const INACTIVITY_TIMEOUT_MS = 60_000;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
     fetch(`${BASE_URL}/conversations/${conversationId}/messages/stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
+      credentials: 'include',
       body: JSON.stringify(data),
       signal: controller.signal,
     })
       .then(async (response) => {
         if (!response.ok) {
           const body = await response.json().catch(() => ({ error: response.statusText }));
-          callbacks.onError?.(body.error || `Stream error: ${response.status}`);
+          callbacks.onError?.(body.error || `Stream error: ${response.status}`, body);
           return;
         }
 
         const reader = response.body?.getReader();
         if (!reader) {
-          callbacks.onError?.('No readable stream');
+          callbacks.onError?.('No readable stream', { code: 'STREAM_BODY_MISSING', retryable: true });
           return;
         }
 
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let currentEvent = 'token';
+        const textDecoder = new TextDecoder();
+        const sseDecoder = new SSEDecoder('token');
         let receivedTerminal = false;
-        let startMessageId = ''; // Track message_id from start event
+        let errorReported = false;
         let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const reportError = (message: string, details?: { code?: string; retryable?: boolean }) => {
+          if (errorReported || receivedTerminal) return;
+          errorReported = true;
+          receivedTerminal = true;
+          callbacks.onError?.(message, details);
+        };
 
         const resetInactivityTimer = () => {
           if (inactivityTimer) clearTimeout(inactivityTimer);
           inactivityTimer = setTimeout(() => {
             if (!receivedTerminal) {
-              callbacks.onError?.('Stream timed out — no data received for 60 seconds');
+              reportError('Stream timed out — no data received for 60 seconds', { code: 'STREAM_TIMEOUT', retryable: true });
               controller.abort();
             }
           }, INACTIVITY_TIMEOUT_MS);
         };
 
         const processEvent = (eventType: string, dataStr: string) => {
+          // SSE payload shapes vary by event type and are validated at dispatch.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let payload: any;
           try {
-            const payload = JSON.parse(dataStr);
-            switch (eventType) {
-              case 'start':
-                startMessageId = payload.message_id || '';
-                callbacks.onStart?.(payload);
-                break;
-              case 'token':
-                callbacks.onToken(payload.content || '');
-                break;
-              case 'thinking':
-                callbacks.onThinking?.(payload.content || '');
-                break;
-              case 'done':
-                receivedTerminal = true;
-                callbacks.onDone?.(payload);
-                break;
-              case 'web_search':
-                callbacks.onWebSearch?.(payload);
-                break;
-              case 'web_search_results':
-                callbacks.onWebSearchResults?.(payload);
-                break;
-              case 'file_search':
-                callbacks.onFileSearch?.(payload);
-                break;
-              case 'file_search_results':
-                callbacks.onFileSearchResults?.(payload);
-                break;
-              case 'image_generation':
-                callbacks.onImageGeneration?.(payload);
-                break;
-              case 'url_context':
-                callbacks.onURLContext?.(payload);
-                break;
-              case 'url_context_browser_fallback':
-                callbacks.onURLContextBrowserFallback?.(payload);
-                break;
-              case 'browser_downloading':
-                callbacks.onBrowserDownloading?.(payload);
-                break;
-              case 'browser_navigating':
-                callbacks.onBrowserNavigating?.(payload);
-                break;
-              case 'browser_screenshot_done':
-                callbacks.onBrowserScreenshotDone?.(payload);
-                break;
-              case 'browser_interact_done':
-                callbacks.onBrowserInteractDone?.(payload);
-                break;
-              case 'rag_indexing':
-                callbacks.onRAGIndexing?.(payload);
-                break;
-              case 'error':
-                receivedTerminal = true;
-                callbacks.onError?.(payload.error || 'Unknown error');
-                break;
-            }
+            payload = JSON.parse(dataStr);
           } catch {
-            // skip malformed JSON
+            throw new Error(`Invalid JSON in SSE event "${eventType}"`);
           }
+          switch (eventType) {
+            case 'start': callbacks.onStart?.(payload); break;
+            case 'token': callbacks.onToken(payload.content || ''); break;
+            case 'thinking': callbacks.onThinking?.(payload.content || ''); break;
+            case 'done':
+              receivedTerminal = true;
+              callbacks.onDone?.(payload);
+              break;
+            case 'web_search': callbacks.onWebSearch?.(payload); break;
+            case 'web_search_results': callbacks.onWebSearchResults?.(payload); break;
+            case 'file_search': callbacks.onFileSearch?.(payload); break;
+            case 'file_search_results': callbacks.onFileSearchResults?.(payload); break;
+            case 'image_generation': callbacks.onImageGeneration?.(payload); break;
+            case 'url_context': callbacks.onURLContext?.(payload); break;
+            case 'url_context_browser_fallback': callbacks.onURLContextBrowserFallback?.(payload); break;
+            case 'browser_downloading': callbacks.onBrowserDownloading?.(payload); break;
+            case 'browser_navigating': callbacks.onBrowserNavigating?.(payload); break;
+            case 'browser_screenshot_done': callbacks.onBrowserScreenshotDone?.(payload); break;
+            case 'browser_interact_done': callbacks.onBrowserInteractDone?.(payload); break;
+            case 'rag_indexing': callbacks.onRAGIndexing?.(payload); break;
+            case 'tool_result': callbacks.onToolResult?.(payload); break;
+            case 'heartbeat': callbacks.onHeartbeat?.(); break;
+            case 'tool_queued':
+            case 'tool_started':
+            case 'tool_progress':
+            case 'tool_approval_required':
+            case 'tool_approval_resolved':
+            case 'tool_completed':
+            case 'tool_failed':
+            case 'tool_timed_out':
+            case 'tool_loop_limit':
+            case 'tool_result_limit':
+              callbacks.onToolEvent?.(payload);
+              break;
+            case 'error':
+              reportError(payload.error || 'Unknown error', { code: payload.code, retryable: payload.retryable });
+              break;
+            default:
+              // Forward-compatible: unknown events are ignored but their valid
+              // framing still resets the inactivity timer.
+              break;
+          }
+        };
+
+        const processMessages = (messages: Array<{ event: string; data: string }>) => {
+          for (const message of messages) processEvent(message.event, message.data);
         };
 
         try {
           resetInactivityTimer();
-
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-
             resetInactivityTimer();
-            buffer += decoder.decode(value, { stream: true });
-
-            // Parse SSE: split on double newlines for complete events
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            let pendingData = '';
-
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (trimmed === '') {
-                // Empty line = end of event block, dispatch if we have data
-                if (pendingData) {
-                  processEvent(currentEvent, pendingData);
-                  pendingData = '';
-                  currentEvent = 'token'; // reset to default
-                }
-              } else if (trimmed.startsWith('event:')) {
-                currentEvent = trimmed.slice(6).trim();
-              } else if (trimmed.startsWith('data:')) {
-                pendingData = trimmed.slice(5).trim();
-              }
-            }
-
-            // Handle case where last event in buffer doesn't end with double newline
-            if (pendingData) {
-              processEvent(currentEvent, pendingData);
-              pendingData = '';
-              currentEvent = 'token';
-            }
+            processMessages(sseDecoder.push(textDecoder.decode(value, { stream: true })));
+          }
+          processMessages(sseDecoder.push(textDecoder.decode()));
+          const final = sseDecoder.finish();
+          processMessages(final.events);
+          if (final.incomplete) {
+            reportError('Stream ended with an incomplete SSE event', { code: 'STREAM_PROTOCOL_ERROR', retryable: true });
+          } else if (!receivedTerminal && !controller.signal.aborted) {
+            reportError('Stream closed before the server sent a terminal event', { code: 'STREAM_INTERRUPTED', retryable: true });
+          }
+        } catch (error) {
+          if ((error as Error).name !== 'AbortError') {
+            reportError((error as Error).message, { code: 'STREAM_PROTOCOL_ERROR', retryable: true });
           }
         } finally {
-          // Ensure terminal state — if stream closed without done/error, emit synthetic done
           if (inactivityTimer) clearTimeout(inactivityTimer);
-          if (!receivedTerminal) {
-            if (startMessageId) {
-              // We received a start event — finalize with the known message_id
-              callbacks.onDone?.({ message_id: startMessageId, provider: '', model: '', latency_ms: 0 });
-            } else {
-              // No start event — stream closed before any message was created; signal error
-              callbacks.onError?.('Stream closed unexpectedly');
-            }
-          }
         }
       })
-      .catch((err) => {
-        if (err.name !== 'AbortError') {
-          callbacks.onError?.(err.message);
+      .catch((error) => {
+        if (error?.name !== 'AbortError') {
+          callbacks.onError?.(error.message, { code: 'STREAM_REQUEST_FAILED', retryable: true });
         }
       });
 

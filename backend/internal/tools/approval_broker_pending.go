@@ -6,12 +6,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// CreatePending records an approval request without blocking. This is used by
-// ordinary chat, where the current response stream cannot be held open while a
-// separate HTTP request resolves the decision. Durable orchestration can resume
-// the pending invocation on the next run checkpoint.
+// CreatePending records an approval request without blocking. It remains the
+// compatibility path for durable or out-of-band orchestration; ordinary Chat
+// Studio calls now use the inline approval continuation path.
 func (b *ApprovalBroker) CreatePending(req ApprovalRequest) PendingApproval {
 	now := time.Now().UTC()
+	if req.ContinuationMode == "" {
+		req.ContinuationMode = "out_of_band"
+	}
 	if req.ApprovalID == "" {
 		req.ApprovalID = uuid.NewString()
 	}

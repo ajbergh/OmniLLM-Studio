@@ -89,7 +89,19 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 				Risk:        def.Risk,
 				ReadOnly:    def.ReadOnly,
 			}
-			if handler, _ := ctx.Value(approvalContextKey{}).(ApprovalHandler); handler != nil {
+			if inlineApprovalEnabled(ctx) {
+				req.ContinuationMode = "inline"
+				approved, editedArguments, err := e.approvals.Request(ctx, req)
+				if err != nil {
+					return e.failure(ctx, call, fmt.Sprintf("tool %q approval failed: %v", call.Name, err), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "error"})
+				}
+				if !approved {
+					return e.failure(ctx, call, fmt.Sprintf("tool %q was rejected by the user", call.Name), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "rejected"})
+				}
+				if len(editedArguments) > 0 {
+					call.Arguments = editedArguments
+				}
+			} else if handler, _ := ctx.Value(approvalContextKey{}).(ApprovalHandler); handler != nil {
 				approved, err := handler(ctx, req)
 				if err != nil {
 					return e.failure(ctx, call, fmt.Sprintf("tool %q approval failed: %v", call.Name, err), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "error"})
@@ -98,6 +110,7 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 					return e.failure(ctx, call, fmt.Sprintf("tool %q was rejected by the user", call.Name), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "rejected"})
 				}
 			} else {
+				req.ContinuationMode = "out_of_band"
 				pending := e.approvals.CreatePending(req)
 				metadata := map[string]interface{}{
 					ApprovalStatusMetadataKey: "required",

@@ -66,6 +66,9 @@ func (b *ApprovalBroker) Request(ctx context.Context, req ApprovalRequest) (bool
 	if req.ApprovalID == "" {
 		req.ApprovalID = uuid.New().String()
 	}
+	if req.ContinuationMode == "" {
+		req.ContinuationMode = "inline"
+	}
 	p := &PendingApproval{
 		ID:        req.ApprovalID,
 		Request:   req,
@@ -86,30 +89,46 @@ func (b *ApprovalBroker) Request(ctx context.Context, req ApprovalRequest) (bool
 		ToolName:   req.ToolName,
 		Scope:      req.Scope,
 		Data: map[string]interface{}{
-			"approval_id": p.ID,
-			"description": req.Description,
-			"arguments":   string(req.Arguments),
-			"risk":        req.Risk,
-			"read_only":   req.ReadOnly,
+			"approval_id":       p.ID,
+			"description":       req.Description,
+			"arguments":         string(req.Arguments),
+			"risk":              req.Risk,
+			"read_only":         req.ReadOnly,
+			"continuation_mode": req.ContinuationMode,
 		},
 	})
 
-	select {
-	case resolution := <-p.result:
-		emitEvent(ctx, ToolEvent{
-			Type:       ToolEventApprovalResolved,
-			ToolCallID: req.ToolCallID,
-			ToolName:   req.ToolName,
-			Scope:      req.Scope,
-			Data: map[string]interface{}{
-				"approval_id": p.ID,
-				"approved":    resolution.approved,
-			},
-		})
-		return resolution.approved, resolution.arguments, nil
-	case <-ctx.Done():
-		b.expire(p.ID)
-		return false, nil, ctx.Err()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case resolution := <-p.result:
+			emitEvent(ctx, ToolEvent{
+				Type:       ToolEventApprovalResolved,
+				ToolCallID: req.ToolCallID,
+				ToolName:   req.ToolName,
+				Scope:      req.Scope,
+				Data: map[string]interface{}{
+					"approval_id": p.ID,
+					"approved":    resolution.approved,
+				},
+			})
+			return resolution.approved, resolution.arguments, nil
+		case <-heartbeat.C:
+			emitEvent(ctx, ToolEvent{
+				Type:       ToolEventProgress,
+				ToolCallID: req.ToolCallID,
+				ToolName:   req.ToolName,
+				Scope:      req.Scope,
+				Data: map[string]interface{}{
+					"status":      "waiting_for_approval",
+					"approval_id": p.ID,
+				},
+			})
+		case <-ctx.Done():
+			b.expire(p.ID)
+			return false, nil, ctx.Err()
+		}
 	}
 }
 
