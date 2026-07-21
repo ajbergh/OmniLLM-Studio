@@ -1,34 +1,89 @@
 package video
 
+// RendererFeatureSupport describes how completely the export renderer honors a
+// single timeline feature. It is the source of truth for export-fidelity
+// warnings shown in the frontend; keep it synchronized with the FFmpeg graph
+// and the fidelity expansion layer.
 type RendererFeatureSupport struct {
+	Feature   string `json:"feature"`
+	Label     string `json:"label"`
 	Supported bool   `json:"supported"`
 	Partial   bool   `json:"partial,omitempty"`
 	Notes     string `json:"notes,omitempty"`
 }
+
+// RendererCapabilities reports which timeline features the FFmpeg renderer
+// applies during export. Keep this stable because the frontend and assistant
+// consume the formats/features collection directly.
 type RendererCapabilities struct {
-	Renderer        string                 `json:"renderer"`
-	Version         int                    `json:"version"`
-	Clips           RendererFeatureSupport `json:"clips"`
-	TrackOrdering   RendererFeatureSupport `json:"track_ordering"`
-	TrackMute       RendererFeatureSupport `json:"track_mute"`
-	TrackVisibility RendererFeatureSupport `json:"track_visibility"`
-	TrackSolo       RendererFeatureSupport `json:"track_solo"`
-	Trimming        RendererFeatureSupport `json:"trimming"`
-	PlaybackRate    RendererFeatureSupport `json:"playback_rate"`
-	Crop            RendererFeatureSupport `json:"crop"`
-	AudioMix        RendererFeatureSupport `json:"audio_mix"`
-	ClipVolume      RendererFeatureSupport `json:"clip_volume"`
-	AudioFades      RendererFeatureSupport `json:"audio_fades"`
-	Text            RendererFeatureSupport `json:"text"`
-	Captions        RendererFeatureSupport `json:"captions"`
-	Shapes          RendererFeatureSupport `json:"shapes"`
-	Transitions     RendererFeatureSupport `json:"transitions"`
-	Effects         RendererFeatureSupport `json:"effects"`
-	Keyframes       RendererFeatureSupport `json:"keyframes"`
-	Annotations     RendererFeatureSupport `json:"annotations"`
-	CursorEffects   RendererFeatureSupport `json:"cursor_effects"`
+	Renderer string                   `json:"renderer"`
+	Formats  []string                 `json:"formats"`
+	Features []RendererFeatureSupport `json:"features"`
 }
 
+const (
+	RendererFeatureClipTrim     = "clip_trim"
+	RendererFeaturePlaybackRate = "playback_rate"
+	RendererFeatureClipOrdering = "clip_ordering"
+	RendererFeatureScaling      = "scaling"
+	RendererFeaturePositioning  = "positioning"
+	RendererFeatureCropping     = "cropping"
+	RendererFeatureRotation     = "rotation"
+	RendererFeatureOpacity      = "opacity"
+	RendererFeatureVideoFades   = "video_fades"
+	RendererFeatureText         = "text_overlays"
+	RendererFeatureTransitions  = "transitions"
+	RendererFeatureEffects      = "effects"
+	RendererFeatureKeyframes    = "keyframes"
+	RendererFeatureAudioMix     = "audio_mix"
+	RendererFeatureClipVolume   = "clip_volume"
+	RendererFeatureAudioFades   = "audio_fades"
+	RendererFeatureTrackMute    = "track_mute"
+	RendererFeatureTrackSolo    = "track_solo"
+	RendererFeatureAnnotations  = "annotations"
+	RendererFeatureCursor       = "cursor_effects"
+)
+
+// FFmpegRendererCapabilities returns the conservative feature support matrix
+// for the production renderer. A feature is upgraded only after the applicable
+// render path is implemented and covered by renderer tests.
 func FFmpegRendererCapabilities() RendererCapabilities {
-	return RendererCapabilities{Renderer: "ffmpeg", Version: 3, Clips: RendererFeatureSupport{Supported: true, Notes: "Media, image, text, caption, and annotation clips are composited."}, TrackOrdering: RendererFeatureSupport{Supported: true, Notes: "Later timeline layers render above earlier layers."}, TrackMute: RendererFeatureSupport{Supported: true}, TrackVisibility: RendererFeatureSupport{Supported: true}, TrackSolo: RendererFeatureSupport{Supported: false, Notes: "Solo remains a preview-only audition state."}, Trimming: RendererFeatureSupport{Supported: true}, PlaybackRate: RendererFeatureSupport{Supported: true, Notes: "Video and audio are retimed together."}, Crop: RendererFeatureSupport{Supported: true}, AudioMix: RendererFeatureSupport{Supported: true, Notes: "Audio mix supports optional denoise, EQ, compression, LUFS normalization, limiting, and channel conversion."}, ClipVolume: RendererFeatureSupport{Supported: true}, AudioFades: RendererFeatureSupport{Supported: true}, Text: RendererFeatureSupport{Supported: true, Partial: true, Notes: "Font, size, color, line height, stroke, shadow, background, transform, opacity, fades, and render-time alignment/letter-spacing approximation export. Rounded text-box corners remain preview-only."}, Captions: RendererFeatureSupport{Supported: true}, Shapes: RendererFeatureSupport{Supported: true, Partial: true, Notes: "Rectangle, highlight, label, blur, and pixelate render directly; other annotations normalize to deterministic exportable primitives."}, Transitions: RendererFeatureSupport{Supported: true, Partial: true, Notes: "Fade, dip, slide, sampled zoom, and directional wipe export. Crossfade remains alpha-fade approximation rather than a two-clip blend."}, Effects: RendererFeatureSupport{Supported: true, Partial: true, Notes: "Brightness, contrast, saturation, grayscale, blur, sharpen, vignette, and chroma key export; amount keyframes are sampled. Drop shadow and background blur remain skipped."}, Keyframes: RendererFeatureSupport{Supported: true, Notes: "x, y, scale, rotation, opacity, volume, and effect amount keyframes export with linear, ease-in, ease-out, ease-in-out, and step interpolation."}, Annotations: RendererFeatureSupport{Supported: true, Partial: true, Notes: "All annotation kinds produce export output; complex geometry is normalized until native FFmpeg path drawing has golden-frame coverage."}, CursorEffects: RendererFeatureSupport{Supported: true, Partial: true, Notes: "Cursor paths and click rings export through sampled overlay clips. Click audio is not synthesized."}}
+	return RendererCapabilities{
+		Renderer: "ffmpeg",
+		Formats:  []string{"mp4", "webm"},
+		Features: []RendererFeatureSupport{
+			{Feature: RendererFeatureClipTrim, Label: "Clip trim", Supported: true},
+			{Feature: RendererFeaturePlaybackRate, Label: "Constant clip speed", Supported: true, Notes: "Video and audio retime together from 0.25x to 4x; audio uses pitch-preserving atempo filters."},
+			{Feature: RendererFeatureClipOrdering, Label: "Clip ordering & timing", Supported: true, Notes: "Later layers render above earlier layers, matching the preview."},
+			{Feature: RendererFeatureScaling, Label: "Scaling", Supported: true},
+			{Feature: RendererFeaturePositioning, Label: "Position (x/y offset)", Supported: true},
+			{Feature: RendererFeatureCropping, Label: "Cropping", Supported: true, Partial: true, Notes: "Crop values are source-frame fractions. Wipe transitions are approximated by sampled crop segments."},
+			{Feature: RendererFeatureRotation, Label: "Rotation", Supported: true},
+			{Feature: RendererFeatureOpacity, Label: "Opacity", Supported: true},
+			{Feature: RendererFeatureVideoFades, Label: "Video fade in/out", Supported: true},
+			{Feature: RendererFeatureText, Label: "Text / caption / callout overlays", Supported: true, Partial: true, Notes: "Font, size, color, line height, stroke, shadow, background, transform, opacity, fades, and deterministic alignment/letter-spacing approximation export. Rounded text-box corners remain preview-only."},
+			{Feature: RendererFeatureTransitions, Label: "Transitions", Supported: true, Partial: true, Notes: "Fade, dip, slide, sampled zoom, and directional wipe export. Crossfade remains an alpha-fade approximation rather than a true two-clip blend."},
+			{Feature: RendererFeatureEffects, Label: "Effects", Supported: true, Partial: true, Notes: "Brightness, contrast, saturation, blur, grayscale, sharpen, vignette, and chroma key export; amount keyframes are sampled. Drop shadow and background blur remain unsupported."},
+			{Feature: RendererFeatureKeyframes, Label: "Keyframes", Supported: true, Notes: "Position, scale, rotation, opacity, volume, and effect-amount keyframes export with linear, ease-in, ease-out, ease-in-out, and step interpolation."},
+			{Feature: RendererFeatureAudioMix, Label: "Multi-track audio mix", Supported: true, Notes: "Audio and music mix with video soundtracks and optional denoise, EQ, compression, LUFS normalization, limiting, and channel conversion."},
+			{Feature: RendererFeatureClipVolume, Label: "Per-clip volume & mute", Supported: true},
+			{Feature: RendererFeatureAudioFades, Label: "Audio fade in/out", Supported: true},
+			{Feature: RendererFeatureTrackMute, Label: "Track mute / hide", Supported: true},
+			{Feature: RendererFeatureTrackSolo, Label: "Track solo", Supported: false, Notes: "Solo is a preview-only monitoring control; exports mix all unmuted tracks."},
+			{Feature: RendererFeatureAnnotations, Label: "Annotations", Supported: true, Partial: true, Notes: "Every annotation produces deterministic export output, but ellipse, arrow, speech-bubble, and other complex geometry currently normalize to simpler primitives."},
+			{Feature: RendererFeatureCursor, Label: "Cursor effects", Supported: true, Partial: true, Notes: "Cursor paths and click rings export through sampled overlays. Click audio is not synthesized."},
+		},
+	}
+}
+
+// UnsupportedFeatureLabels returns the labels of features that are unsupported
+// or only partially honored at export, for compact warning copy.
+func (c RendererCapabilities) UnsupportedFeatureLabels() []string {
+	labels := make([]string, 0)
+	for _, feature := range c.Features {
+		if !feature.Supported || feature.Partial {
+			labels = append(labels, feature.Label)
+		}
+	}
+	return labels
 }
