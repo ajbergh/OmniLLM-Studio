@@ -12,10 +12,10 @@ const toolResultContextTruncationSuffix = "\n\n[tool result truncated at the per
 // generic tool call completes: a sanitized user-visible result and the provider
 // tool message appended to the next model request.
 type chatToolStepResult struct {
-	ToolCallID    string
-	ToolName      string
+	ToolCallID     string
+	ToolName       string
 	MetadataResult tools.ToolResult
-	Message       llm.ChatMessage
+	Message        llm.ChatMessage
 }
 
 // processChatToolStepResults applies the existing Chat Studio result-context
@@ -50,8 +50,8 @@ func processChatToolStepResults(calls []tools.ToolCall, results []*tools.ToolRes
 		usedChars += len(toolOutput)
 
 		processed = append(processed, chatToolStepResult{
-			ToolCallID:    call.ID,
-			ToolName:      call.Name,
+			ToolCallID:     call.ID,
+			ToolName:       call.Name,
 			MetadataResult: metadataResult,
 			Message: llm.ChatMessage{
 				Role:       "tool",
