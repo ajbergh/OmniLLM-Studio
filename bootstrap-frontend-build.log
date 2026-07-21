@@ -1,0 +1,5 @@
+
+> omnillm-studio-frontend@0.2.0 build
+> tsc -b && vite build
+
+src/sse.ts(17,15): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.

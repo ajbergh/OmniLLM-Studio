@@ -5,83 +5,17 @@
 
 [1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90m/home/runner/work/OmniLLM-Studio/OmniLLM-Studio/frontend[39m
 
+ [32m✓[39m src/components/video/pro/timelineAnalysis.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 8[2mms[22m[39m
  [32m✓[39m src/components/video/pro/timelineIndex.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 8[2mms[22m[39m
- [32m✓[39m src/components/video/pro/timelineAnalysis.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 7[2mms[22m[39m
- [31m❯[39m src/stores/videoStudio.test.ts [2m([22m[2m0 test[22m[2m)[22m
- [32m✓[39m src/components/video/pro/patchHistory.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 8[2mms[22m[39m
- [31m❯[39m src/components/video/pro/mediaTools.test.ts [2m([22m[2m0 test[22m[2m)[22m
- [31m❯[39m src/sse.test.ts [2m([22m[2m0 test[22m[2m)[22m
- [31m❯[39m src/stores/messageStore.test.ts [2m([22m[2m0 test[22m[2m)[22m
- [31m❯[39m src/components/video/VideoEditStudioUltimate.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [32m✓[39m src/components/video/pro/patchHistory.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m src/components/video/pro/mediaTools.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m src/stores/videoStudio.test.ts [2m([22m[2m27 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+ [32m✓[39m src/sse.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+ [32m✓[39m src/stores/messageStore.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m src/components/video/VideoEditStudioUltimate.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
 
-[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 5 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
-
-[41m[1m FAIL [22m[49m src/sse.test.ts[2m [ src/sse.test.ts ][22m
-[31m[1mError[22m: Transform failed with 1 error:
-
-[31m[PARSE_ERROR] [0mUnterminated string
-   [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/sse.test.ts:4:17 [38;5;246m][0m
-   [38;5;246m│[0m
- [38;5;246m4 │[0m [38;5;249mc[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249m [0m[38;5;249mf[0m[38;5;249mi[0m[38;5;249mx[0m[38;5;249mt[0m[38;5;249mu[0m[38;5;249mr[0m[38;5;249me[0m[38;5;249m [0m[38;5;249m=[0m[38;5;249m [0m'event: tool_result
- [38;5;240m  │[0m                 ──────────┬─────────  
- [38;5;240m  │[0m                           ╰─────────── 
-[38;5;246m───╯[0m
-[39m
-  Plugin: [35mvite:oxc[39m
-  File: [36m/home/runner/work/OmniLLM-Studio/OmniLLM-Studio/frontend/src/sse.test.ts[39m
-[90m [2m❯[22m transformWithOxc node_modules/vite/dist/node/chunks/node.js:[2m4033:19[22m[39m
-[90m [2m❯[22m TransformPluginContext.transform node_modules/vite/dist/node/chunks/node.js:[2m4104:26[22m[39m
-[90m [2m❯[22m EnvironmentPluginContainer.transform node_modules/vite/dist/node/chunks/node.js:[2m30201:51[22m[39m
-[90m [2m❯[22m loadAndTransform node_modules/vite/dist/node/chunks/node.js:[2m20124:26[22m[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯[22m[39m
-
-[41m[1m FAIL [22m[49m src/stores/messageStore.test.ts[2m [ src/stores/messageStore.test.ts ][22m
-[41m[1m FAIL [22m[49m src/components/video/VideoEditStudioUltimate.test.ts[2m [ src/components/video/VideoEditStudioUltimate.test.ts ][22m
-[41m[1m FAIL [22m[49m src/components/video/pro/mediaTools.test.ts[2m [ src/components/video/pro/mediaTools.test.ts ][22m
-[31m[1mError[22m: Transform failed with 1 error:
-
-[31m[PARSE_ERROR] [0mExpected `)` but found `Unknown`
-    [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/sse.ts:26:23 [38;5;246m][0m
-    [38;5;246m│[0m
- [38;5;246m26 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249mi[0m[38;5;249mf[0m[38;5;249m [0m[38;5;249m([0m[38;5;249mn[0m[38;5;249me[0m[38;5;249mx[0m[38;5;249mt[0m[38;5;249m.[0m[38;5;249me[0m[38;5;249mn[0m[38;5;249md[0m[38;5;249ms[0m[38;5;249mW[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249mh[0m[38;5;249m([0m'
- [38;5;240m   │[0m                       ─┬  
- [38;5;240m   │[0m                        ╰── `)` expected
-[38;5;246m────╯[0m
-[39m
-  Plugin: [35mvite:oxc[39m
-  File: [36m/home/runner/work/OmniLLM-Studio/OmniLLM-Studio/frontend/src/sse.ts[39m
-[90m [2m❯[22m transformWithOxc node_modules/vite/dist/node/chunks/node.js:[2m4033:19[22m[39m
-[90m [2m❯[22m TransformPluginContext.transform node_modules/vite/dist/node/chunks/node.js:[2m4104:26[22m[39m
-[90m [2m❯[22m EnvironmentPluginContainer.transform node_modules/vite/dist/node/chunks/node.js:[2m30201:51[22m[39m
-[90m [2m❯[22m loadAndTransform node_modules/vite/dist/node/chunks/node.js:[2m20124:26[22m[39m
-[90m [2m❯[22m fetchModule node_modules/vite/dist/node/chunks/node.js:[2m33584:15[22m[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯[22m[39m
-
-[41m[1m FAIL [22m[49m src/stores/videoStudio.test.ts[2m [ src/stores/videoStudio.test.ts ][22m
-[31m[1mError[22m: Transform failed with 1 error:
-
-[31m[PARSE_ERROR] [0mExpected `)` but found `Unknown`
-    [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/sse.ts:26:23 [38;5;246m][0m
-    [38;5;246m│[0m
- [38;5;246m26 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249m [0m[38;5;249mi[0m[38;5;249mf[0m[38;5;249m [0m[38;5;249m([0m[38;5;249mn[0m[38;5;249me[0m[38;5;249mx[0m[38;5;249mt[0m[38;5;249m.[0m[38;5;249me[0m[38;5;249mn[0m[38;5;249md[0m[38;5;249ms[0m[38;5;249mW[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249mh[0m[38;5;249m([0m'
- [38;5;240m   │[0m                       ─┬  
- [38;5;240m   │[0m                        ╰── `)` expected
-[38;5;246m────╯[0m
-[39m
-  Plugin: [35mvite:oxc[39m
-  File: [36m/home/runner/work/OmniLLM-Studio/OmniLLM-Studio/frontend/src/sse.ts[39m
-[90m [2m❯[22m transformWithOxc node_modules/vite/dist/node/chunks/node.js:[2m4033:19[22m[39m
-[90m [2m❯[22m TransformPluginContext.transform node_modules/vite/dist/node/chunks/node.js:[2m4104:26[22m[39m
-[90m [2m❯[22m EnvironmentPluginContainer.transform node_modules/vite/dist/node/chunks/node.js:[2m30201:51[22m[39m
-[90m [2m❯[22m loadAndTransform node_modules/vite/dist/node/chunks/node.js:[2m20124:26[22m[39m
-
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯[22m[39m
-
-
-[2m Test Files [22m [1m[31m5 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[90m (8)[39m
-[2m      Tests [22m [1m[32m10 passed[39m[22m[90m (10)[39m
-[2m   Start at [22m 10:59:56
-[2m   Duration [22m 1.02s[2m (transform 396ms, setup 0ms, import 235ms, tests 22ms, environment 1ms)[22m
+[2m Test Files [22m [1m[32m8 passed[39m[22m[90m (8)[39m
+[2m      Tests [22m [1m[32m47 passed[39m[22m[90m (47)[39m
+[2m   Start at [22m 11:02:25
+[2m   Duration [22m 1.40s[2m (transform 919ms, setup 0ms, import 1.45s, tests 122ms, environment 1ms)[22m
 
