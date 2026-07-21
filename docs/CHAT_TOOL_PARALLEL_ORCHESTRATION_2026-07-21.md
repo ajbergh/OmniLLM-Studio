@@ -17,21 +17,22 @@ Tool calls remain in model order. The planner may combine calls into a parallel 
 
 Unknown, disabled, side-effecting, approval-gated (`ask`), denied, or non-parallel tools are emitted as single sequential steps.
 
-Most importantly, the planner never moves a read-only call across a side-effecting or otherwise sequential call. For example:
+Most importantly, the planner never moves a read-only call across a side-effecting or policy boundary. For example:
 
 ```text
-read A, read B, write C, read D, read E
+allowed read A, allowed read B, approval read C, denied read D, allowed read E, allowed read F
 ```
 
 becomes:
 
 ```text
-parallel(read A, read B)
-sequential(write C)
-parallel(read D, read E)
+parallel(allowed read A, allowed read B)
+sequential(approval read C)
+sequential(denied read D)
+parallel(allowed read E, allowed read F)
 ```
 
-It does not become one global read batch followed by writes, because that would alter the model's requested execution semantics.
+It does not globally regroup reads and writes, because that would alter the model's requested execution semantics and could create concurrent approval prompts.
 
 ## Implemented runtime
 
@@ -71,7 +72,7 @@ Cancelled invocations now receive a durable completion timestamp rather than rem
 The branch covers:
 
 - batching two contiguous parallel-safe reads;
-- preserving a side-effect boundary between read batches;
+- preserving side-effect and policy boundaries between read batches;
 - keeping unknown tools sequential;
 - keeping read-only tools without `SupportsParallel` sequential;
 - keeping approval-gated and denied reads sequential;
