@@ -57,7 +57,10 @@ jobs:
           python -m py_compile /tmp/remediate_chat_tools.py
 
       - name: Apply remediation
-        run: python /tmp/remediate_chat_tools.py
+        shell: bash
+        run: |
+          set -o pipefail
+          python /tmp/remediate_chat_tools.py 2>&1 | tee bootstrap-apply.log
 
       - name: Format Go sources
         shell: bash
@@ -97,7 +100,7 @@ jobs:
           set -euo pipefail
           git rm .github/workflows/chat-tool-remediation-bootstrap.yml
           git rm scripts/.remediate_chat_tools.part.*
-          git rm -f bootstrap-diagnostics.txt || true
+          git rm -f bootstrap-diagnostics.txt bootstrap-apply.log || true
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
@@ -126,5 +129,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add bootstrap-diagnostics.txt
+          if [ -f bootstrap-apply.log ]; then git add bootstrap-apply.log; fi
           git commit -m 'chore: record remediation bootstrap diagnostics' || true
           git push origin HEAD:fix/chat-tool-lifecycle-reliability-20260721
