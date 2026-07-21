@@ -25,13 +25,14 @@ type VideoTranscript struct {
 	Segments           []VideoTranscriptSegment `json:"segments,omitempty"`
 }
 
-// VideoTranscriptSegment stores segment and optional word timing data.
+// VideoTranscriptSegment stores segment and optional word timing data. Millisecond
+// fields use int64 to match the timeline schema and avoid overflow on long media.
 type VideoTranscriptSegment struct {
 	ID           string   `json:"id"`
 	TranscriptID string   `json:"transcript_id"`
 	SegmentIndex int      `json:"segment_index"`
-	StartMS      int      `json:"start_ms"`
-	EndMS        int      `json:"end_ms"`
+	StartMS      int64    `json:"start_ms"`
+	EndMS        int64    `json:"end_ms"`
 	Text         string   `json:"text"`
 	Speaker      string   `json:"speaker,omitempty"`
 	Confidence   *float64 `json:"confidence,omitempty"`
