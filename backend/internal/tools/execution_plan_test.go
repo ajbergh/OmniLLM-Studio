@@ -7,9 +7,9 @@ import (
 )
 
 type planningTool struct {
-	name            string
-	readOnly        bool
-	sideEffecting   bool
+	name             string
+	readOnly         bool
+	sideEffecting    bool
 	supportsParallel bool
 }
 
