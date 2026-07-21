@@ -81,6 +81,10 @@ func ContextWithEventSink(ctx context.Context, sink EventSink) context.Context {
 	return context.WithValue(ctx, eventSinkContextKey{}, sink)
 }
 
+// normalizeContextTerminalEvent maps a generic failed event to the terminal
+// request state when the parent context has already been cancelled or expired.
+// Normalization happens before metrics, audit persistence, and live request sinks
+// observe the event, keeping all three surfaces consistent.
 func normalizeContextTerminalEvent(ctx context.Context, event ToolEvent) ToolEvent {
 	if event.Type != ToolEventFailed || ctx == nil {
 		return event
