@@ -60,6 +60,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          sed -i 's|ROOT = Path(__file__).resolve().parents\[1\]|ROOT = Path.cwd()|' /tmp/remediate_chat_tools.py
           python /tmp/remediate_chat_tools.py 2>&1 | tee bootstrap-apply.log
 
       - name: Format Go sources
