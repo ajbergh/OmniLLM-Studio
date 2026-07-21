@@ -44,6 +44,8 @@ It does not become one global read batch followed by writes, because that would 
 - `Executor.ExecutePlan(ctx, steps)`;
 - ordered result collection across sequential and parallel steps;
 - `Executor.ExecuteBatch` use only for planner-approved parallel steps;
+- executor-side revalidation of every caller-supplied parallel step;
+- automatic sequential fallback when a step contains an unknown, disabled, side-effecting, or non-parallel tool;
 - pre-step cancellation checks that prevent pending side-effecting tools from starting after the request is cancelled;
 - one terminal result per skipped tool call ID.
 
@@ -73,7 +75,8 @@ The branch covers:
 - proving two planned reads actually begin concurrently;
 - preserving result order even when execution is concurrent;
 - preventing a side-effecting tool from starting after parent cancellation;
-- emitting `tool_cancelled` for the skipped call.
+- emitting `tool_cancelled` for the skipped call;
+- rejecting unsafe caller-supplied parallel steps at execution time.
 
 ## Deliberately deferred Chat handler migration
 
