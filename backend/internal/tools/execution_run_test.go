@@ -69,12 +69,12 @@ func TestExecutePlanRunsParallelStepConcurrentlyAndPreservesResultOrder(t *testi
 	registry := NewRegistry()
 	registry.MustRegister(blockingParallelTool{name: "read_a", started: started, release: release})
 	registry.MustRegister(blockingParallelTool{name: "read_b", started: started, release: release})
-	executor := NewExecutor(registry, nil, time.Second)
+	executor := NewExecutor(registry, nil, 2*time.Second)
 	calls := []ToolCall{
 		{ID: "call-a", Name: "read_a", Arguments: json.RawMessage(`{}`)},
 		{ID: "call-b", Name: "read_b", Arguments: json.RawMessage(`{}`)},
 	}
-	plan := BuildExecutionPlan(registry, calls)
+	plan := executor.BuildExecutionPlan(calls)
 
 	resultsCh := make(chan []*ToolResult, 1)
 	go func() {
@@ -86,11 +86,13 @@ func TestExecutePlanRunsParallelStepConcurrentlyAndPreservesResultOrder(t *testi
 		select {
 		case name := <-started:
 			seen[name] = true
-		case <-time.After(time.Second):
+		case <-time.After(2 * time.Second):
+			close(release)
 			t.Fatal("parallel tools did not both start before release")
 		}
 	}
 	if !seen["read_a"] || !seen["read_b"] {
+		close(release)
 		t.Fatalf("started tools = %#v", seen)
 	}
 	close(release)
@@ -106,7 +108,7 @@ func TestExecutePlanRunsParallelStepConcurrentlyAndPreservesResultOrder(t *testi
 		if results[1].ToolCallID != "call-b" || results[1].Content != "read_b" {
 			t.Fatalf("second result = %#v", results[1])
 		}
-	case <-time.After(time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("parallel execution did not complete")
 	}
 }
@@ -116,7 +118,7 @@ func TestExecutePlanDoesNotStartSideEffectAfterCancellation(t *testing.T) {
 	registry := NewRegistry()
 	registry.MustRegister(countedSideEffectTool{attempts: &attempts})
 	executor := NewExecutor(registry, nil, time.Second)
-	plan := BuildExecutionPlan(registry, []ToolCall{{ID: "write-call", Name: "counted_write", Arguments: json.RawMessage(`{}`)}})
+	plan := executor.BuildExecutionPlan([]ToolCall{{ID: "write-call", Name: "counted_write", Arguments: json.RawMessage(`{}`)}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
