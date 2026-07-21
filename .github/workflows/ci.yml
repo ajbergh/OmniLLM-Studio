@@ -103,7 +103,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: frontend-diagnostics
-          path: frontend-*.log
+          path: |
+            frontend-*.log
+            frontend/src/components/video/timeline/VideoTimeline.tsx
           if-no-files-found: ignore
           retention-days: 14
 
