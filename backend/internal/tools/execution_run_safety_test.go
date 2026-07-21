@@ -49,16 +49,25 @@ func TestExecutorBuildExecutionPlanKeepsAskAndDenyPoliciesSequential(t *testing.
 
 	plan := executor.BuildExecutionPlan([]ToolCall{
 		{ID: "1", Name: "allowed_read"},
-		{ID: "2", Name: "approval_read"},
-		{ID: "3", Name: "denied_read"},
-		{ID: "4", Name: "allowed_read"},
+		{ID: "2", Name: "allowed_read"},
+		{ID: "3", Name: "approval_read"},
+		{ID: "4", Name: "denied_read"},
+		{ID: "5", Name: "allowed_read"},
+		{ID: "6", Name: "allowed_read"},
 	})
 	if len(plan) != 4 {
 		t.Fatalf("plan length = %d, want 4: %#v", len(plan), plan)
 	}
-	for i, step := range plan {
-		if step.Parallel || len(step.Calls) != 1 {
-			t.Fatalf("step %d should remain sequential: %#v", i, step)
-		}
+	if !plan[0].Parallel || len(plan[0].Calls) != 2 {
+		t.Fatalf("first allowed read batch = %#v", plan[0])
+	}
+	if plan[1].Parallel || len(plan[1].Calls) != 1 || plan[1].Calls[0].Name != "approval_read" {
+		t.Fatalf("approval barrier = %#v", plan[1])
+	}
+	if plan[2].Parallel || len(plan[2].Calls) != 1 || plan[2].Calls[0].Name != "denied_read" {
+		t.Fatalf("deny barrier = %#v", plan[2])
+	}
+	if !plan[3].Parallel || len(plan[3].Calls) != 2 {
+		t.Fatalf("last allowed read batch = %#v", plan[3])
 	}
 }
