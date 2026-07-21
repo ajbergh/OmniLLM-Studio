@@ -5,18 +5,26 @@ e94e6103775eabb1b316e976de2a5912959bb11f750202ff74ce9fddf9903c9f  scripts/.remed
 388c8f46a384028b6d03cb2ceb2fdfd90a1969fc766e2515527025372ca6b3fa  scripts/.remediate_chat_tools.part.03
 
 Actual segment sizes and checksums:
+ 1100 scripts/.remediate_chat_tools.part.00.00
+ 1100 scripts/.remediate_chat_tools.part.00.01
+ 1100 scripts/.remediate_chat_tools.part.00.02
+ 1100 scripts/.remediate_chat_tools.part.00.03
+ 1100 scripts/.remediate_chat_tools.part.00.04
  5500 scripts/.remediate_chat_tools.part.01
  5500 scripts/.remediate_chat_tools.part.02
  5128 scripts/.remediate_chat_tools.part.03
-16128 total
+21628 total
+4d44187c2ee22c25698ab15aeb1b7b760d5f981dda3035a6968b34e9c14a6c8c  scripts/.remediate_chat_tools.part.00.00
+8c87ae80e05dc28d2fc46ae08572dd899bbeb1bad3b95498dceadd19074ec23e  scripts/.remediate_chat_tools.part.00.01
+4f04ebd161236e1eece696c24180afa4d5bc7b369b894ef74f4647d0ed5f78a8  scripts/.remediate_chat_tools.part.00.02
+7f516be66a788d282195b422a246b022e150753ab6bda884cd75cfb6c004f2d9  scripts/.remediate_chat_tools.part.00.03
+bc51075c5297d9ea191c63ba3543ea0852b2f22a8558a6358d9e7817f7c797ed  scripts/.remediate_chat_tools.part.00.04
 8631918c0bd2e4c33096a359ec910194236552d4f7285ddf5cbda107e2d3c11f  scripts/.remediate_chat_tools.part.01
 e94e6103775eabb1b316e976de2a5912959bb11f750202ff74ce9fddf9903c9f  scripts/.remediate_chat_tools.part.02
 388c8f46a384028b6d03cb2ceb2fdfd90a1969fc766e2515527025372ca6b3fa  scripts/.remediate_chat_tools.part.03
 
 Combined payload:
-16128 /tmp/bootstrap-diagnostic.b64
-d14c29c3acc93746bf4c3daa91930503257b913422177ea2832548f74a6fea30  /tmp/bootstrap-diagnostic.b64
+21628 /tmp/bootstrap-diagnostic.b64
+f17f478fe41bc6e6e904622c2389c9023695c394af0b6d1ac470fb34a897748c  /tmp/bootstrap-diagnostic.b64
 base64_exit=0
-
-gzip: /tmp/bootstrap-diagnostic.gz: not in gzip format
-gzip_exit=1
+gzip_exit=0
