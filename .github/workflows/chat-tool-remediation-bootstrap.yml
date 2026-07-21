@@ -47,7 +47,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat scripts/.remediate_chat_tools.part.* > /tmp/remediate_chat_tools.py.gz.b64
+          cat \
+            scripts/.remediate_chat_tools.part.00.00 \
+            scripts/.remediate_chat_tools.part.00.01 \
+            scripts/.remediate_chat_tools.part.00.02 \
+            scripts/.remediate_chat_tools.part.00.03 \
+            scripts/.remediate_chat_tools.part.00.04 \
+            scripts/.remediate_chat_tools.part.01 \
+            scripts/.remediate_chat_tools.part.02 \
+            scripts/.remediate_chat_tools.part.03 \
+            > /tmp/remediate_chat_tools.py.gz.b64
           base64 --decode /tmp/remediate_chat_tools.py.gz.b64 | gzip --decompress > /tmp/remediate_chat_tools.py
           echo '626a1a25c899427b0d72fba5157734e405360e5b65393bd89b49db38852693a7  /tmp/remediate_chat_tools.py' | sha256sum --check
           python -m py_compile /tmp/remediate_chat_tools.py
