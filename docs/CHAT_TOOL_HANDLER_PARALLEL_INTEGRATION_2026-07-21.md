@@ -32,6 +32,12 @@ Complete non-browser rounds use the ordered runtime when `genericRuntimeEligible
 
 The handler emits one `tool_result` event and appends one provider `role=tool` message for every call, preserving the model's original call order even when a read-only step executes concurrently.
 
+## Parallel SSE safety
+
+Planner-approved parallel steps execute tool workers concurrently. `http.ResponseWriter` and `http.Flusher` are not safe for concurrent writes, so `backend/internal/api/chat_tool_sse.go` provides a request-local serialized lifecycle-event sink.
+
+The sink holds one mutex across the complete `event:`/`data:` frame and flush operation. This prevents concurrent queued, started, progress, completed, failed, timed-out, or cancelled events from interleaving and corrupting the Chat Studio stream. The legacy browser-aware sequential path remains unchanged.
+
 ## Browser-managed fallback
 
 Any round containing a `browser_*` call remains on the existing sequential handler path.
@@ -88,7 +94,8 @@ Coverage now includes:
 - safe user-visible error metadata;
 - one result for missing executor output;
 - one `TOOL_RESULT_LIMIT` result per unstarted call;
-- source-level verification that `message_handler.go` invokes the ordered runtime and retains the browser fallback.
+- source-level verification that `message_handler.go` invokes the ordered runtime and retains the browser fallback;
+- concurrent lifecycle-event writes producing complete, independently decodable SSE frames.
 
 ## Validation
 
