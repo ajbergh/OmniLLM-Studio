@@ -69,9 +69,9 @@ func (e *Executor) parallelStepSafe(calls []ToolCall) bool {
 
 func (e *Executor) cancelledBeforeStart(ctx context.Context, call ToolCall) *ToolResult {
 	metadata := map[string]interface{}{
-		"cancelled":  true,
+		"cancelled": true,
 		"retryable": false,
-		"phase":      "before_start",
+		"phase":     "before_start",
 	}
 	return e.failure(ctx, call, fmt.Sprintf("tool %q was cancelled before execution", call.Name), ToolEventFailed, metadata)
 }
