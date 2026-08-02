@@ -20,7 +20,7 @@ func (t chatExecutionTestTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name:             t.name,
 		Description:      "chat execution adapter test tool",
-		Parameters:       json.RawMessage(`{"type":"object"}`),
+		Parameters:       json.RawMessage("{\"type\":\"object\"}"),
 		Category:         "test",
 		Enabled:          true,
 		ReadOnly:         t.readOnly,
@@ -47,7 +47,7 @@ func TestNewChatToolExecutionPreservesProviderOrderAndArguments(t *testing.T) {
 	registry.MustRegister(chatExecutionTestTool{name: "second", readOnly: true})
 	executor := tools.NewExecutor(registry, nil, 0)
 	calls := []llm.ToolCall{
-		llmTestToolCall("call-1", "first", `{"value":1}`),
+		llmTestToolCall("call-1", "first", "{\"value\":1}"),
 		llmTestToolCall("call-2", "second", ""),
 	}
 
@@ -55,7 +55,7 @@ func TestNewChatToolExecutionPreservesProviderOrderAndArguments(t *testing.T) {
 	if len(execution.ProviderCalls) != 2 || len(execution.RuntimeCalls) != 2 {
 		t.Fatalf("execution cardinality = provider:%d runtime:%d", len(execution.ProviderCalls), len(execution.RuntimeCalls))
 	}
-	if execution.RuntimeCalls[0].ID != "call-1" || execution.RuntimeCalls[0].Name != "first" || string(execution.RuntimeCalls[0].Arguments) != `{"value":1}` {
+	if execution.RuntimeCalls[0].ID != "call-1" || execution.RuntimeCalls[0].Name != "first" || string(execution.RuntimeCalls[0].Arguments) != "{\"value\":1}" {
 		t.Fatalf("first runtime call = %#v", execution.RuntimeCalls[0])
 	}
 	if execution.RuntimeCalls[1].ID != "call-2" || execution.RuntimeCalls[1].Name != "second" || string(execution.RuntimeCalls[1].Arguments) != `{}` {
@@ -79,7 +79,7 @@ func TestChatToolExecutionKeepsBrowserManagedRoundsSequential(t *testing.T) {
 
 	browserManaged := newChatToolExecution(executor, []llm.ToolCall{
 		llmTestToolCall("1", "calculator", `{}`),
-		llmTestToolCall("2", "browser_navigate", `{"url":"https://example.com"}`),
+		llmTestToolCall("2", "browser_navigate", "{\"url\":\"https://example.com\"}"),
 	})
 	if browserManaged.genericRuntimeEligible() {
 		t.Fatal("browser-managed round must remain on existing sequential handler path")

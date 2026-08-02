@@ -1116,33 +1116,8 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			allToolCalls = append(allToolCalls, finalToolCalls...)
 
 			resultLimitReached := false
-			for _, tc := range finalToolCalls {
-				if resultLimitReached {
-					limitMessage := "Tool was not executed because this turn reached the tool result context limit."
-					skipped := tools.ToolResult{
-						ToolCallID: tc.ID,
-						Content:    limitMessage,
-						IsError:    true,
-						Metadata: map[string]interface{}{
-							"error_code": "TOOL_RESULT_LIMIT",
-							"retryable":  false,
-							"tool_name":  tc.Function.Name,
-						},
-					}
-					toolResults = append(toolResults, skipped)
-					sendSSE(w, flusher, "tool_result", map[string]interface{}{
-						"tool_call_id": tc.ID,
-						"tool_name":    tc.Function.Name,
-						"result":       skipped,
-					})
-					llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
-						Role:       "tool",
-						Content:    limitMessage,
-						ToolCallID: tc.ID,
-						Name:       tc.Function.Name,
-					})
-					continue
-				}
+			execution := newChatToolExecution(h.toolExecutor, finalToolCalls)
+			if execution.genericRuntimeEligible() {
 				toolCtx := browser.WithProviderType(r.Context(), providerType)
 				toolCtx = browser.WithProgress(toolCtx, func(event string, payload any) {
 					sendSSE(w, flusher, event, payload)
@@ -1154,75 +1129,139 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 					MessageID:      msgID,
 				})
 				toolCtx = tools.ContextWithInlineApproval(toolCtx)
-				toolCtx = tools.ContextWithEventSink(toolCtx, func(event tools.ToolEvent) {
-					sendToolEventSSE(w, flusher, event)
-				})
+				toolCtx = tools.ContextWithEventSink(
+					toolCtx,
+					serializedToolEventSink(w, flusher),
+				)
 
-				var res *tools.ToolResult
-				toolURL := ""
-				if tc.Function.Name == "browser_navigate" {
-					toolURL = extractToolArgString([]byte(tc.Function.Arguments), "url")
-					if cached, ok := visitedURLs[normalizeVisitedURL(toolURL)]; ok {
-						res = &tools.ToolResult{
+				outcome := executeGenericChatToolRound(
+					toolCtx,
+					h.toolExecutor,
+					execution.Plan,
+					totalToolResultChars,
+					maxToolResultCharsPerTurn,
+				)
+				totalToolResultChars = outcome.UsedChars
+				resultLimitReached = outcome.LimitReached
+
+				for _, item := range outcome.Processed {
+					toolResults = append(toolResults, item.MetadataResult)
+					sendSSE(w, flusher, "tool_result", map[string]interface{}{
+						"tool_call_id": item.ToolCallID,
+						"tool_name":    item.ToolName,
+						"result":       item.MetadataResult,
+					})
+					llmReq.Messages = append(llmReq.Messages, item.Message)
+				}
+			} else {
+				for _, tc := range finalToolCalls {
+					if resultLimitReached {
+						limitMessage := "Tool was not executed because this turn reached the tool result context limit."
+						skipped := tools.ToolResult{
 							ToolCallID: tc.ID,
-							Content:    cached,
+							Content:    limitMessage,
+							IsError:    true,
 							Metadata: map[string]interface{}{
-								"url":    toolURL,
-								"cached": true,
+								"error_code": "TOOL_RESULT_LIMIT",
+								"retryable":  false,
+								"tool_name":  tc.Function.Name,
 							},
 						}
+						toolResults = append(toolResults, skipped)
+						sendSSE(w, flusher, "tool_result", map[string]interface{}{
+							"tool_call_id": tc.ID,
+							"tool_name":    tc.Function.Name,
+							"result":       skipped,
+						})
+						llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
+							Role:       "tool",
+							Content:    limitMessage,
+							ToolCallID: tc.ID,
+							Name:       tc.Function.Name,
+						})
+						continue
 					}
-				}
-				if res == nil {
-					res = h.toolExecutor.Execute(toolCtx, tools.ToolCall{
-						ID:        tc.ID,
-						Name:      tc.Function.Name,
-						Arguments: []byte(tc.Function.Arguments),
+					toolCtx := browser.WithProviderType(r.Context(), providerType)
+					toolCtx = browser.WithProgress(toolCtx, func(event string, payload any) {
+						sendSSE(w, flusher, event, payload)
 					})
-				}
+					toolCtx = tools.ContextWithInvocationScope(toolCtx, tools.InvocationScope{
+						UserID:         auth.ScopeUserIDFromContext(r.Context()),
+						WorkspaceID:    toolWorkspaceID,
+						ConversationID: convoID,
+						MessageID:      msgID,
+					})
+					toolCtx = tools.ContextWithInlineApproval(toolCtx)
+					toolCtx = tools.ContextWithEventSink(toolCtx, func(event tools.ToolEvent) {
+						sendToolEventSSE(w, flusher, event)
+					})
 
-				metadataResult := safeToolResultForMetadata(tc.Function.Name, res)
-				if res != nil && strings.HasPrefix(tc.Function.Name, "browser_") {
-					browserResult := browserToolResultForMetadata(tc.Function.Name, res)
-					metadataResult = safeToolResultForMetadata(tc.Function.Name, &browserResult)
-					browserToolResults = append(browserToolResults, browserResult)
-				}
-				toolResults = append(toolResults, metadataResult)
-				sendSSE(w, flusher, "tool_result", map[string]interface{}{
-					"tool_call_id": tc.ID,
-					"tool_name":    tc.Function.Name,
-					"result":       metadataResult,
-				})
-
-				toolOutput := ""
-				if res != nil {
-					toolOutput = res.Content
-				}
-				remaining := maxToolResultCharsPerTurn - totalToolResultChars
-				if remaining <= 0 {
-					toolOutput = "Tool result context limit reached for this turn."
-					resultLimitReached = true
-				} else if len(toolOutput) > remaining {
-					toolOutput = toolOutput[:remaining] + "\n\n[tool result truncated at the per-turn context limit]"
-					resultLimitReached = true
-				}
-				totalToolResultChars += len(toolOutput)
-
-				if tc.Function.Name == "browser_navigate" {
-					browserNavCount++
-					if toolURL != "" && (res == nil || !res.IsError) {
-						visitedURLs[normalizeVisitedURL(toolURL)] = toolOutput
-						browserNavigatedURLs = append(browserNavigatedURLs, toolURL)
+					var res *tools.ToolResult
+					toolURL := ""
+					if tc.Function.Name == "browser_navigate" {
+						toolURL = extractToolArgString([]byte(tc.Function.Arguments), "url")
+						if cached, ok := visitedURLs[normalizeVisitedURL(toolURL)]; ok {
+							res = &tools.ToolResult{
+								ToolCallID: tc.ID,
+								Content:    cached,
+								Metadata: map[string]interface{}{
+									"url":    toolURL,
+									"cached": true,
+								},
+							}
+						}
 					}
-				}
-				llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
-					Role:       "tool",
-					Content:    toolOutput,
-					ToolCallID: tc.ID,
-					Name:       tc.Function.Name,
-				})
-				if resultLimitReached {
-					continue
+					if res == nil {
+						res = h.toolExecutor.Execute(toolCtx, tools.ToolCall{
+							ID:        tc.ID,
+							Name:      tc.Function.Name,
+							Arguments: []byte(tc.Function.Arguments),
+						})
+					}
+
+					metadataResult := safeToolResultForMetadata(tc.Function.Name, res)
+					if res != nil && strings.HasPrefix(tc.Function.Name, "browser_") {
+						browserResult := browserToolResultForMetadata(tc.Function.Name, res)
+						metadataResult = safeToolResultForMetadata(tc.Function.Name, &browserResult)
+						browserToolResults = append(browserToolResults, browserResult)
+					}
+					toolResults = append(toolResults, metadataResult)
+					sendSSE(w, flusher, "tool_result", map[string]interface{}{
+						"tool_call_id": tc.ID,
+						"tool_name":    tc.Function.Name,
+						"result":       metadataResult,
+					})
+
+					toolOutput := ""
+					if res != nil {
+						toolOutput = res.Content
+					}
+					remaining := maxToolResultCharsPerTurn - totalToolResultChars
+					if remaining <= 0 {
+						toolOutput = "Tool result context limit reached for this turn."
+						resultLimitReached = true
+					} else if len(toolOutput) > remaining {
+						toolOutput = toolOutput[:remaining] + "\n\n[tool result truncated at the per-turn context limit]"
+						resultLimitReached = true
+					}
+					totalToolResultChars += len(toolOutput)
+
+					if tc.Function.Name == "browser_navigate" {
+						browserNavCount++
+						if toolURL != "" && (res == nil || !res.IsError) {
+							visitedURLs[normalizeVisitedURL(toolURL)] = toolOutput
+							browserNavigatedURLs = append(browserNavigatedURLs, toolURL)
+						}
+					}
+					llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
+						Role:       "tool",
+						Content:    toolOutput,
+						ToolCallID: tc.ID,
+						Name:       tc.Function.Name,
+					})
+					if resultLimitReached {
+						continue
+					}
 				}
 			}
 

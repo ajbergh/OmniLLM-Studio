@@ -1,10 +1,10 @@
 # Chat Tool Handler Parallel Integration — 2026-07-21
 
-## Purpose
+## Status
 
-This branch begins the focused migration of `backend/internal/api/message_handler.go` from its current per-call sequential loop to the ordered, policy-aware execution runtime merged in PR #35.
+The Chat Studio handler migration is complete as of the corrective PR created on 2026-08-02.
 
-The first change deliberately extracts and tests the integration contract before modifying the large stateful handler.
+PR #36 originally merged the provider/runtime adapter and result-processing helpers without wiring them into `backend/internal/api/message_handler.go`. The corrective implementation activates those helpers in the streaming Chat Studio tool loop and adds a regression test that fails if the callsite is removed.
 
 ## Provider-to-runtime adapter
 
@@ -18,11 +18,31 @@ The first change deliberately extracts and tests the integration contract before
 
 It builds the plan through `Executor.BuildExecutionPlan`, so effective `allow`, `ask`, and `deny` policy remains part of the parallel-safety decision.
 
+## Active handler integration
+
+`backend/internal/api/message_handler.go` now creates a `chatToolExecution` for each provider tool-call round.
+
+Complete non-browser rounds use the ordered runtime when `genericRuntimeEligible()` returns true. The handler attaches the same execution context used by the legacy path:
+
+- provider type;
+- progress callback;
+- user, workspace, conversation, and message invocation scope;
+- inline approval broker;
+- lifecycle-event SSE sink.
+
+The handler emits one `tool_result` event and appends one provider `role=tool` message for every call, preserving the model's original call order even when a read-only step executes concurrently.
+
+## Parallel SSE safety
+
+Planner-approved parallel steps execute tool workers concurrently. `http.ResponseWriter` and `http.Flusher` are not safe for concurrent writes, so `backend/internal/api/chat_tool_sse.go` provides a request-local serialized lifecycle-event sink.
+
+The sink holds one mutex across the complete `event:`/`data:` frame and flush operation. This prevents concurrent queued, started, progress, completed, failed, timed-out, or cancelled events from interleaving and corrupting the Chat Studio stream. The legacy browser-aware sequential path remains unchanged.
+
 ## Browser-managed fallback
 
 Any round containing a `browser_*` call remains on the existing sequential handler path.
 
-This is intentional because the current Chat handler owns browser-specific state that is not part of the generic executor contract:
+This is intentional because the Chat handler owns browser-specific state that is not part of the generic executor contract:
 
 - navigation-result caching;
 - visited-URL tracking;
@@ -35,7 +55,7 @@ Keeping the complete mixed round sequential avoids splitting one provider tool-c
 
 ## Stepwise execution and result budget
 
-The adapter executes one `tools.ExecutionStep` at a time rather than executing the complete plan in advance.
+`backend/internal/api/chat_tool_round.go` executes one `tools.ExecutionStep` at a time rather than executing the complete plan in advance.
 
 This preserves the existing result-context behavior:
 
@@ -45,7 +65,7 @@ This preserves the existing result-context behavior:
 4. stop before beginning the next step when the budget is exhausted;
 5. emit explicit `TOOL_RESULT_LIMIT` results and provider tool messages for every unstarted call in later steps.
 
-Parallel steps contain only effective-policy `allow`, read-only, non-side-effecting tools. Therefore, multiple calls within a single step may already be running when one result exhausts the context budget, but no later sequential or side-effecting step begins.
+Parallel steps contain only effective-policy `allow`, read-only, non-side-effecting tools. Multiple calls within one approved parallel step may already be running when one result exhausts the context budget, but no later sequential or side-effecting step begins.
 
 ## Result processing
 
@@ -60,40 +80,32 @@ Parallel steps contain only effective-policy `allow`, read-only, non-side-effect
 
 ## Test coverage
 
-The branch covers:
+Coverage now includes:
 
 - provider-to-runtime order and argument preservation;
+- valid tool-schema and argument JSON fixtures;
 - empty argument normalization;
 - browser-managed round fallback;
 - policy-aware parallel plan boundaries;
-- ordered results from one parallel step;
-- empty/nil execution handling;
-- result-order preservation;
+- ordered results from a concurrent read-only step;
 - result-context truncation;
-- later calls in a completed parallel step receiving a limit marker;
+- prevention of a later side effect after the budget is exhausted;
+- all calls skipped when the budget is already exhausted;
 - safe user-visible error metadata;
 - one result for missing executor output;
-- one `TOOL_RESULT_LIMIT` result per unstarted call.
+- one `TOOL_RESULT_LIMIT` result per unstarted call;
+- source-level verification that `message_handler.go` invokes the ordered runtime and retains the browser fallback;
+- concurrent lifecycle-event writes producing complete, independently decodable SSE frames.
 
-## Remaining call-site migration
+## Validation
 
-The final handler edit should replace only the generic non-browser execution portion of the loop:
+The corrective branch was formatted with `gofmt` and passed:
 
 ```text
-execution := newChatToolExecution(h.toolExecutor, finalToolCalls)
-if execution.genericRuntimeEligible() {
-    for each ordered step:
-        executeChatToolStep(...)
-        processChatToolStepResults(...)
-        emit tool_result SSE and append tool messages
-        if limit reached:
-            append skippedChatToolResults for all remaining steps
-            stop
-} else {
-    retain the existing browser-aware sequential loop
-}
+go test ./internal/tools ./internal/api
+go test ./...
 ```
 
-The migration must continue attaching the same provider, invocation scope, inline approval, progress, and event-sink context before each step.
+The full backend test used a temporary `cmd/desktop/frontend_dist/index.html` fixture to satisfy the Wails embed directive on the clean runner. The fixture was not committed.
 
-GitHub Actions remain temporarily non-blocking due to repository-owner budget constraints. This branch is being manually source-reviewed until automated validation can be restored.
+Normal repository Actions status gates remain non-blocking while the repository-owner budget suspension is in effect.
