@@ -59,12 +59,12 @@ func TestToolMetricsSnapshotForUserIsolatesScopes(t *testing.T) {
 	emitEvent(context.Background(), ToolEvent{
 		Type: ToolEventCompleted, ToolCallID: "user-a-call", ToolName: "calculator",
 		Scope: InvocationScope{UserID: "user-a"},
-		Data: map[string]interface{}{"duration_ms": int64(5), "is_error": false},
+		Data:  map[string]interface{}{"duration_ms": int64(5), "is_error": false},
 	})
 	emitEvent(context.Background(), ToolEvent{
 		Type: ToolEventFailed, ToolCallID: "user-b-call", ToolName: "browser_navigate",
 		Scope: InvocationScope{UserID: "user-b"},
-		Data: map[string]interface{}{"duration_ms": int64(9)},
+		Data:  map[string]interface{}{"duration_ms": int64(9)},
 	})
 
 	userA := ToolMetricsSnapshotForUser("user-a")
