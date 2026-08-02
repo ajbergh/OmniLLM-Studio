@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/tools"
 )
 
@@ -132,7 +133,7 @@ func TestExecuteGenericChatToolRoundSkipsAllWhenBudgetAlreadyExhausted(t *testin
 	registry.MustRegister(chatRoundTestTool{
 		name:       "read_once",
 		content:    "unused",
-		readOnly:  true,
+		readOnly:   true,
 		executions: &executions,
 	})
 	executor := tools.NewExecutor(registry, nil, 0)
