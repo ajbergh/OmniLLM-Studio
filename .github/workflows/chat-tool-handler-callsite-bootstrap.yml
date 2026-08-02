@@ -149,7 +149,13 @@ jobs:
         run: cd backend && go test ./internal/tools ./internal/api
 
       - name: Run full backend tests
-        run: cd backend && go test ./...
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p backend/cmd/desktop/frontend_dist
+          printf '<!doctype html><title>test fixture</title>' > backend/cmd/desktop/frontend_dist/index.html
+          cd backend
+          go test ./...
 
       - name: Commit validated callsite integration
         shell: bash
