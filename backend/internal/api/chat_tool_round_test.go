@@ -54,8 +54,8 @@ func TestExecuteGenericChatToolRoundStopsBeforeLaterSideEffectAfterLimit(t *test
 	registry := tools.NewRegistry()
 	var writeExecutions atomic.Int32
 	registry.MustRegister(chatRoundTestTool{
-		name:      "large_read",
-		content:   "123456",
+		name:     "large_read",
+		content:  "123456",
 		readOnly: true,
 	})
 	registry.MustRegister(chatRoundTestTool{
