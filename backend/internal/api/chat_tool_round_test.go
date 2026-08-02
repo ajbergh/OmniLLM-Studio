@@ -25,7 +25,7 @@ func (t chatRoundTestTool) Definition() tools.ToolDefinition {
 	return tools.ToolDefinition{
 		Name:             t.name,
 		Description:      "chat round integration test tool",
-		Parameters:       json.RawMessage(`{"type":"object"}`),
+		Parameters:       json.RawMessage("{\"type\":\"object\"}"),
 		Category:         "test",
 		Enabled:          true,
 		ReadOnly:         t.readOnly,
