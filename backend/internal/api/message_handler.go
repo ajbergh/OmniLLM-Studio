@@ -1129,9 +1129,10 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 					MessageID:      msgID,
 				})
 				toolCtx = tools.ContextWithInlineApproval(toolCtx)
-				toolCtx = tools.ContextWithEventSink(toolCtx, func(event tools.ToolEvent) {
-					sendToolEventSSE(w, flusher, event)
-				})
+				toolCtx = tools.ContextWithEventSink(
+					toolCtx,
+					serializedToolEventSink(w, flusher),
+				)
 
 				outcome := executeGenericChatToolRound(
 					toolCtx,
