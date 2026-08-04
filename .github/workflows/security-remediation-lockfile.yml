@@ -1,16 +1,20 @@
 name: One-time security dependency remediation
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/security-scan-dependencies-20260804
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
 
 jobs:
   remediate:
-    if: github.actor != 'github-actions[bot]'
+    if: github.head_ref == 'fix/security-scan-dependencies-20260804' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
