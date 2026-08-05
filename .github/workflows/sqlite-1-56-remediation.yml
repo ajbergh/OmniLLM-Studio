@@ -1,0 +1,49 @@
+name: One-time SQLite 1.56 remediation
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  update-sqlite:
+    if: github.head_ref == 'fix/sqlite-1.56.0-20260805' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out remediation branch
+        uses: actions/checkout@v7
+        with:
+          ref: fix/sqlite-1.56.0-20260805
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: 1.25.x
+          cache-dependency-path: backend/go.sum
+
+      - name: Update SQLite dependency
+        working-directory: backend
+        run: |
+          go get modernc.org/sqlite@v1.56.0
+          go mod tidy
+          go test ./...
+
+      - name: Commit regenerated Go manifests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/go.mod backend/go.sum
+          if git diff --cached --quiet; then
+            echo "No dependency changes were required."
+            exit 0
+          fi
+          git commit -m "fix(deps): update modernc.org/sqlite to 1.56.0"
+          git push origin HEAD:fix/sqlite-1.56.0-20260805
