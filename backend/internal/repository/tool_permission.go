@@ -11,7 +11,7 @@ type ToolPermissionRepo struct {
 	db *sql.DB
 }
 
-// NewToolPermissionRepo creates a new ToolPermissionRepo.
+// NewToolPermissionRepo creates a ToolPermissionRepo.
 func NewToolPermissionRepo(db *sql.DB) *ToolPermissionRepo {
 	return &ToolPermissionRepo{db: db}
 }
