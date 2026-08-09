@@ -15,8 +15,9 @@ import (
 // DefaultTimeout is the default per-tool execution timeout.
 const DefaultTimeout = 30 * time.Second
 
-// PermissionResolver looks up the policy for a given tool.
-// Return "allow", "deny", or "ask". A zero-value ("") is treated as "allow".
+// PermissionResolver looks up the persisted policy for a given tool.
+// Return "allow", "deny", or "ask". A zero-value ("") is resolved against
+// the tool definition by EffectivePolicy.
 type PermissionResolver func(toolName string) string
 
 type approvalContextKey struct{}
@@ -84,66 +85,71 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 		}
 	}
 
-	if e.permissions != nil {
-		switch e.permissions(call.Name) {
-		case "deny":
-			return e.failure(ctx, call, fmt.Sprintf("tool %q is denied by policy", call.Name), ToolEventFailed, nil)
-		case "ask":
-			req := ApprovalRequest{
-				ToolCallID:  call.ID,
-				ToolName:    call.Name,
-				Description: def.Description,
-				Arguments:   call.Arguments,
-				Scope:       scope,
-				Risk:        def.Risk,
-				ReadOnly:    def.ReadOnly,
+	switch e.Policy(call.Name) {
+	case "deny":
+		return e.failure(ctx, call, fmt.Sprintf("tool %q is denied by policy", call.Name), ToolEventFailed, nil)
+	case "ask":
+		req := ApprovalRequest{
+			ToolCallID:  call.ID,
+			ToolName:    call.Name,
+			Description: def.Description,
+			Arguments:   call.Arguments,
+			Scope:       scope,
+			Risk:        def.Risk,
+			ReadOnly:    def.ReadOnly,
+		}
+		if inlineApprovalEnabled(ctx) {
+			req.ContinuationMode = "inline"
+			approved, editedArguments, err := e.approvals.Request(ctx, req)
+			if err != nil {
+				return e.failure(ctx, call, fmt.Sprintf("tool %q approval failed: %v", call.Name, err), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "error"})
 			}
-			if inlineApprovalEnabled(ctx) {
-				req.ContinuationMode = "inline"
-				approved, editedArguments, err := e.approvals.Request(ctx, req)
-				if err != nil {
-					return e.failure(ctx, call, fmt.Sprintf("tool %q approval failed: %v", call.Name, err), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "error"})
-				}
-				if !approved {
-					return e.failure(ctx, call, fmt.Sprintf("tool %q was rejected by the user", call.Name), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "rejected"})
-				}
-				if len(editedArguments) > 0 {
-					call.Arguments = editedArguments
-				}
-			} else if handler, _ := ctx.Value(approvalContextKey{}).(ApprovalHandler); handler != nil {
-				approved, err := handler(ctx, req)
-				if err != nil {
-					return e.failure(ctx, call, fmt.Sprintf("tool %q approval failed: %v", call.Name, err), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "error"})
-				}
-				if !approved {
-					return e.failure(ctx, call, fmt.Sprintf("tool %q was rejected by the user", call.Name), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "rejected"})
-				}
-			} else {
-				req.ContinuationMode = "out_of_band"
-				pending := e.approvals.CreatePending(req)
-				metadata := map[string]interface{}{
-					ApprovalStatusMetadataKey: "required",
-					ApprovalIDMetadataKey:     pending.ID,
-					"tool_name":               call.Name,
-					"arguments":               string(call.Arguments),
-					"risk":                    def.Risk,
-					"read_only":               def.ReadOnly,
-				}
-				emitEvent(ctx, ToolEvent{
-					Type:       ToolEventApprovalRequired,
-					ToolCallID: call.ID,
-					ToolName:   call.Name,
-					Scope:      scope,
-					Data:       metadata,
-				})
-				return &ToolResult{
-					ToolCallID: call.ID,
-					Content:    fmt.Sprintf("tool %q requires user approval (approval_id: %s)", call.Name, pending.ID),
-					IsError:    true,
-					Metadata:   metadata,
-				}
+			if !approved {
+				return e.failure(ctx, call, fmt.Sprintf("tool %q was rejected by the user", call.Name), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "rejected"})
+			}
+			if len(editedArguments) > 0 {
+				call.Arguments = editedArguments
+			}
+		} else if handler, _ := ctx.Value(approvalContextKey{}).(ApprovalHandler); handler != nil {
+			approved, err := handler(ctx, req)
+			if err != nil {
+				return e.failure(ctx, call, fmt.Sprintf("tool %q approval failed: %v", call.Name, err), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "error"})
+			}
+			if !approved {
+				return e.failure(ctx, call, fmt.Sprintf("tool %q was rejected by the user", call.Name), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "rejected"})
+			}
+		} else {
+			req.ContinuationMode = "out_of_band"
+			pending := e.approvals.CreatePending(req)
+			metadata := map[string]interface{}{
+				ApprovalStatusMetadataKey: "required",
+				ApprovalIDMetadataKey:     pending.ID,
+				"tool_name":               call.Name,
+				"arguments":               string(call.Arguments),
+				"risk":                    def.Risk,
+				"read_only":               def.ReadOnly,
+			}
+			emitEvent(ctx, ToolEvent{
+				Type:       ToolEventApprovalRequired,
+				ToolCallID: call.ID,
+				ToolName:   call.Name,
+				Scope:      scope,
+				Data:       metadata,
+			})
+			return &ToolResult{
+				ToolCallID: call.ID,
+				Content:    fmt.Sprintf("tool %q requires user approval (approval_id: %s)", call.Name, pending.ID),
+				IsError:    true,
+				Metadata:   metadata,
 			}
 		}
+	}
+
+	// Permissions can change while a user is considering an approval or while
+	// another settings request is in flight. Re-check the hard deny immediately
+	// before validation/execution so turning a tool off is authoritative.
+	if e.Policy(call.Name) == "deny" {
+		return e.failure(ctx, call, fmt.Sprintf("tool %q is denied by policy", call.Name), ToolEventFailed, nil)
 	}
 
 	if err := tool.Validate(call.Arguments); err != nil {
