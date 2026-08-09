@@ -120,7 +120,10 @@ func TestExecutorDoesNotReplaySideEffectingCall(t *testing.T) {
 	attempts := 0
 	registry := NewRegistry()
 	registry.MustRegister(sideEffectTool{attempts: &attempts})
-	executor := NewExecutor(registry, nil, 0)
+	// This test exercises idempotent replay rather than permission defaults. Make
+	// the consequential tool explicitly allowed so the first invocation reaches
+	// execution and the second invocation can verify the replay guard.
+	executor := NewExecutor(registry, func(string) string { return "allow" }, 0)
 	call := ToolCall{ID: "stable-side-effect-call", Name: "side_effect_tool", Arguments: json.RawMessage(`{"value":1}`)}
 
 	first := executor.Execute(context.Background(), call)
