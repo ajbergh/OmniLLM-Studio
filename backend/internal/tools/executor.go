@@ -47,18 +47,24 @@ type Executor struct {
 }
 
 // NewExecutor creates an Executor with the given registry and permission
-// resolver. If timeout is 0 the DefaultTimeout is used.
+// resolver. If timeout is 0 the DefaultTimeout is used. The executor also binds
+// its effective policy view to the shared registry so discovery and planning do
+// not advertise hard-denied tools.
 func NewExecutor(registry *Registry, permissions PermissionResolver, timeout time.Duration) *Executor {
 	if timeout == 0 {
 		timeout = DefaultTimeout
 	}
-	return &Executor{
+	executor := &Executor{
 		registry:    registry,
 		permissions: permissions,
 		timeout:     timeout,
 		approvals:   NewApprovalBroker(15 * time.Minute),
 		idempotency: make(map[string]*ToolResult),
 	}
+	if registry != nil {
+		registry.SetPolicyResolver(executor.Policy)
+	}
+	return executor
 }
 
 // ApprovalBroker exposes the broker used by API handlers to list and resolve
