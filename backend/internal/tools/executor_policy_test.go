@@ -12,7 +12,7 @@ type policyTestTool struct {
 	executed   *bool
 }
 
-func (t policyTestTool) Definition() ToolDefinition { return t.definition }
+func (t policyTestTool) Definition() ToolDefinition     { return t.definition }
 func (t policyTestTool) Validate(json.RawMessage) error { return nil }
 func (t policyTestTool) Execute(context.Context, json.RawMessage) (*ToolResult, error) {
 	if t.executed != nil {
