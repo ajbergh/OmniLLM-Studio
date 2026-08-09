@@ -7,8 +7,9 @@ import (
 )
 
 // ExecuteApproved executes a call whose exact arguments were explicitly
-// approved by the user. It bypasses only the policy prompt; enabled-state,
-// argument validation, timeout, result limits, and lifecycle events still apply.
+// approved by the user. It bypasses only the approval prompt; current hard-deny
+// policy, enabled-state, argument validation, timeout, result limits, and
+// lifecycle events still apply.
 func (e *Executor) ExecuteApproved(ctx context.Context, call ToolCall) *ToolResult {
 	scope := InvocationScopeFromContext(ctx)
 	tool, ok := e.registry.Get(call.Name)
@@ -18,6 +19,11 @@ func (e *Executor) ExecuteApproved(ctx context.Context, call ToolCall) *ToolResu
 	definition := tool.Definition().Normalized()
 	if !definition.Enabled {
 		return e.failure(ctx, call, fmt.Sprintf("tool %q is disabled", call.Name), ToolEventFailed, nil)
+	}
+	// An approval can remain pending while the user changes Settings > Tools.
+	// A subsequent deny is authoritative and must invalidate the stale approval.
+	if e.Policy(call.Name) == "deny" {
+		return e.failure(ctx, call, fmt.Sprintf("tool %q is denied by policy", call.Name), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "invalidated"})
 	}
 	if err := tool.Validate(call.Arguments); err != nil {
 		return e.failure(ctx, call, fmt.Sprintf("invalid approved arguments for %q: %v", call.Name, err), ToolEventFailed, nil)
