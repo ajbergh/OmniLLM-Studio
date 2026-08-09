@@ -40,15 +40,10 @@ func (h *ToolHandler) ListTools(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]toolInfo, len(defs))
 	for i, definition := range defs {
-		policy := policyMap[definition.Name]
-		if policy == "" {
-			if definition.SideEffecting || definition.Risk == tools.RiskHigh || definition.Risk == tools.RiskCritical {
-				policy = "ask"
-			} else {
-				policy = "allow"
-			}
+		out[i] = toolInfo{
+			ToolDefinition: definition,
+			Policy:         tools.EffectivePolicy(definition, policyMap[definition.Name]),
 		}
-		out[i] = toolInfo{ToolDefinition: definition, Policy: policy}
 	}
 	respondJSON(w, http.StatusOK, out)
 }
