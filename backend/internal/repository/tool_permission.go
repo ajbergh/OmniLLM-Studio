@@ -11,13 +11,14 @@ type ToolPermissionRepo struct {
 	db *sql.DB
 }
 
-// NewToolPermissionRepo creates a ToolPermissionRepo.
+// NewToolPermissionRepo creates a new ToolPermissionRepo.
 func NewToolPermissionRepo(db *sql.DB) *ToolPermissionRepo {
 	return &ToolPermissionRepo{db: db}
 }
 
-// Get returns the permission for a single tool. If none exists the zero-value
-// ToolPermission is returned (which means "allow" by default).
+// Get returns the persisted permission for a single tool. A nil permission with
+// no error means no explicit row exists; callers should resolve that absence
+// against the tool definition rather than assuming a universal allow default.
 func (r *ToolPermissionRepo) Get(toolName string) (*models.ToolPermission, error) {
 	row := r.db.QueryRow(
 		"SELECT tool_name, policy, updated_at FROM tool_permissions WHERE tool_name = ?",
@@ -64,19 +65,24 @@ func (r *ToolPermissionRepo) Upsert(toolName, policy string) error {
 	return err
 }
 
-// Delete removes a tool permission, reverting to the default (allow).
+// Delete removes an explicit tool permission so the runtime falls back to the
+// definition-based effective policy.
 func (r *ToolPermissionRepo) Delete(toolName string) error {
 	_, err := r.db.Exec("DELETE FROM tool_permissions WHERE tool_name = ?", toolName)
 	return err
 }
 
-// PolicyResolver returns a PermissionResolver function suitable for the
-// tools.Executor.  It queries the DB for each tool name.
+// PolicyResolver returns a PermissionResolver suitable for tools.Executor. An
+// empty string means no explicit row exists and must be resolved by
+// tools.EffectivePolicy. Permission-store failures fail closed to deny.
 func (r *ToolPermissionRepo) PolicyResolver() func(string) string {
 	return func(toolName string) string {
 		p, err := r.Get(toolName)
-		if err != nil || p == nil {
-			return "" // default allow
+		if err != nil {
+			return "deny"
+		}
+		if p == nil {
+			return ""
 		}
 		return p.Policy
 	}
