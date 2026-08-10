@@ -48,12 +48,18 @@ func (s *Service) Blame(ctx context.Context, repositoryID, filePath, revision st
 	if startLine > endLine || startLine > len(blame.Lines) {
 		return nil, fmt.Errorf("requested line range is outside the file")
 	}
-	truncated := false
-	if endLine-startLine+1 > maxBlameLines {
-		endLine = startLine + maxBlameLines - 1
-		truncated = true
+
+	// Advance at most maxBlameLines positions instead of deriving an allocation
+	// size from caller-provided line numbers. This also avoids overflow-prone
+	// arithmetic when callers provide values near the platform integer limit.
+	boundedEnd := startLine
+	for count := 1; count < maxBlameLines && boundedEnd < endLine; count++ {
+		boundedEnd++
 	}
-	lines := make([]BlameLine, 0, endLine-startLine+1)
+	truncated := boundedEnd < endLine
+	endLine = boundedEnd
+
+	lines := make([]BlameLine, 0, maxBlameLines)
 	for i := startLine - 1; i < endLine; i++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
