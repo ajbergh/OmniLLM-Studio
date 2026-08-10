@@ -1,0 +1,191 @@
+name: Apply MCP OAuth security hotfix
+
+on:
+  push:
+    branches:
+      - agent/mcp-oauth-security-hotfix-20260810
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Apply security corrections
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}\n--- old ---\n{old}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "backend/internal/models/mcp_oauth.go",
+              '''type ConfigureMCPOAuthInput struct {\n\tClientID                string  `json:"client_id"`\n\tClientSecret            *string `json:"client_secret,omitempty"`\n\tTokenEndpointAuthMethod string  `json:"token_endpoint_auth_method"`\n\tRegistrationMethod      string  `json:"registration_method,omitempty"`\n}\n''',
+              '''type ConfigureMCPOAuthInput struct {\n\tClientID                string  `json:"client_id"`\n\tClientSecret            *string `json:"client_secret,omitempty"`\n\tClientIssuer            string  `json:"client_issuer,omitempty"`\n\tTokenEndpointAuthMethod string  `json:"token_endpoint_auth_method"`\n\tRegistrationMethod      string  `json:"registration_method,omitempty"`\n}\n''',
+          )
+
+          replace_once(
+              "backend/internal/repository/mcp_oauth.go",
+              '''\tsecretEnc := ""\n\texistingClientID, existingMethod, existingRegistration, existingIssuer := "", "", "", ""\n\tvar existingSecret sql.NullString\n\texistingErr := r.db.QueryRow(`SELECT client_id, client_secret_enc, token_endpoint_auth_method, registration_method, client_issuer FROM mcp_oauth_credentials WHERE server_id = ?`, serverID).Scan(&existingClientID, &existingSecret, &existingMethod, &existingRegistration, &existingIssuer)\n\tif existingErr != nil && existingErr != sql.ErrNoRows {\n\t\treturn fmt.Errorf("read existing MCP OAuth client: %w", existingErr)\n\t}\n\tif input.ClientSecret == nil {\n\t\tif existingSecret.Valid {\n\t\t\tsecretEnc = existingSecret.String\n\t\t}\n\t} else if *input.ClientSecret != "" {\n\t\tvar err error\n\t\tsecretEnc, err = crypto.Encrypt(*input.ClientSecret)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf("encrypt MCP OAuth client secret: %w", err)\n\t\t}\n\t}\n\n\tconfigurationChanged := existingErr == sql.ErrNoRows || existingClientID != clientID || existingMethod != method || existingRegistration != registrationMethod || input.ClientSecret != nil\n\tclientIssuer := existingIssuer\n\tif configurationChanged || registrationMethod == models.MCPOAuthRegistrationCIMD {\n\t\tclientIssuer = ""\n\t}\n''',
+              '''\tclientIssuer := strings.TrimSpace(input.ClientIssuer)\n\tswitch registrationMethod {\n\tcase models.MCPOAuthRegistrationPreregistered:\n\t\tif clientIssuer == "" {\n\t\t\treturn fmt.Errorf("client_issuer is required for preregistered OAuth clients")\n\t\t}\n\tcase models.MCPOAuthRegistrationCIMD:\n\t\tclientIssuer = ""\n\tcase models.MCPOAuthRegistrationDCR:\n\t\treturn fmt.Errorf("dynamic OAuth registration is managed automatically")\n\t}\n\n\tsecretEnc := ""\n\texistingClientID, existingMethod, existingRegistration, existingIssuer := "", "", "", ""\n\tvar existingSecret sql.NullString\n\texistingErr := r.db.QueryRow(`SELECT client_id, client_secret_enc, token_endpoint_auth_method, registration_method, client_issuer FROM mcp_oauth_credentials WHERE server_id = ?`, serverID).Scan(&existingClientID, &existingSecret, &existingMethod, &existingRegistration, &existingIssuer)\n\tif existingErr != nil && existingErr != sql.ErrNoRows {\n\t\treturn fmt.Errorf("read existing MCP OAuth client: %w", existingErr)\n\t}\n\tif input.ClientSecret == nil {\n\t\tif existingErr == nil && existingClientID == clientID && existingMethod == method && existingRegistration == registrationMethod && existingIssuer == clientIssuer && existingSecret.Valid {\n\t\t\tsecretEnc = existingSecret.String\n\t\t}\n\t} else if *input.ClientSecret != "" {\n\t\tvar err error\n\t\tsecretEnc, err = crypto.Encrypt(*input.ClientSecret)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf("encrypt MCP OAuth client secret: %w", err)\n\t\t}\n\t}\n\tif method != models.MCPOAuthAuthMethodNone && strings.TrimSpace(secretEnc) == "" {\n\t\treturn fmt.Errorf("client_secret is required for %s", method)\n\t}\n''',
+          )
+
+          replace_once(
+              "backend/internal/repository/mcp_oauth.go",
+              '''// BindClientIssuer enforces authorization-server ownership for preregistered\n// credentials. CIMD client IDs are self-hosted and portable across issuers.\nfunc (r *MCPOAuthRepo) BindClientIssuer(serverID, issuer string) error {\n\tissuer = strings.TrimSpace(issuer)\n\tcredential, err := r.GetRuntime(serverID)\n\tif err != nil {\n\t\treturn err\n\t}\n\tif credential == nil {\n\t\treturn fmt.Errorf("MCP OAuth client is not configured")\n\t}\n\tif credential.RegistrationMethod == models.MCPOAuthRegistrationCIMD {\n\t\treturn nil\n\t}\n\tif credential.ClientIssuer != "" && credential.ClientIssuer != issuer {\n\t\treturn fmt.Errorf("OAuth client credentials are bound to authorization server %q, not %q", credential.ClientIssuer, issuer)\n\t}\n\tif credential.ClientIssuer == issuer {\n\t\treturn nil\n\t}\n\tif _, err := r.db.Exec(`UPDATE mcp_oauth_credentials SET client_issuer = ?, updated_at = CURRENT_TIMESTAMP WHERE server_id = ?`, issuer, serverID); err != nil {\n\t\treturn fmt.Errorf("bind MCP OAuth client issuer: %w", err)\n\t}\n\treturn nil\n}\n''',
+              '''// BindClientIssuer verifies authorization-server ownership for preregistered\n// and DCR credentials. CIMD client IDs are self-hosted and portable across issuers.\n// The issuer is never learned on first use: preregistered credentials must carry\n// an explicit trusted issuer and DCR credentials are bound when registered.\nfunc (r *MCPOAuthRepo) BindClientIssuer(serverID, issuer string) error {\n\tissuer = strings.TrimSpace(issuer)\n\tcredential, err := r.GetRuntime(serverID)\n\tif err != nil {\n\t\treturn err\n\t}\n\tif credential == nil {\n\t\treturn fmt.Errorf("MCP OAuth client is not configured")\n\t}\n\tif credential.RegistrationMethod == models.MCPOAuthRegistrationCIMD {\n\t\treturn nil\n\t}\n\tif credential.ClientIssuer == "" {\n\t\tif credential.RegistrationMethod == models.MCPOAuthRegistrationDCR {\n\t\t\treturn fmt.Errorf("dynamic OAuth client has no authorization-server issuer binding")\n\t\t}\n\t\treturn fmt.Errorf("preregistered OAuth client must declare its authorization-server issuer")\n\t}\n\tif credential.ClientIssuer != issuer {\n\t\treturn fmt.Errorf("OAuth client credentials are bound to authorization server %q, not %q", credential.ClientIssuer, issuer)\n\t}\n\treturn nil\n}\n''',
+          )
+
+          replace_once(
+              "backend/internal/mcpclient/oauth.go",
+              '''func canonicalResourceURI(raw string) (string, error) {\n\tparsed, err := url.Parse(strings.TrimSpace(raw))\n\tif err != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {\n\t\treturn "", fmt.Errorf("invalid MCP resource URI")\n\t}\n\tparsed.Fragment = ""\n\tparsed.User = nil\n''',
+              '''func canonicalResourceURI(raw string) (string, error) {\n\tparsed, err := url.Parse(strings.TrimSpace(raw))\n\tif err != nil || parsed.Hostname() == "" || parsed.Scheme != "https" || parsed.User != nil {\n\t\treturn "", fmt.Errorf("MCP OAuth resource URI must be an HTTPS URL without embedded credentials")\n\t}\n\tparsed.Fragment = ""\n''',
+          )
+
+          replace_once(
+              "backend/internal/mcpclient/http_client.go",
+              '''\t"io"\n\t"net/http"\n\t"strings"\n''',
+              '''\t"io"\n\t"net/http"\n\t"net/url"\n\t"strings"\n''',
+          )
+
+          replace_once(
+              "backend/internal/mcpclient/http_client.go",
+              '''\tif strings.TrimSpace(token) != "" {\n\t\treq.Header.Set("Authorization", "Bearer "+token)\n\t}\n\treturn nil\n}\n''',
+              '''\tif strings.TrimSpace(token) != "" {\n\t\tif c.server.URL == nil {\n\t\t\treturn fmt.Errorf("refusing to send MCP OAuth Bearer token without a resource URL")\n\t\t}\n\t\tresourceURL, parseErr := url.Parse(strings.TrimSpace(*c.server.URL))\n\t\tif parseErr != nil || resourceURL.Scheme != "https" || resourceURL.Hostname() == "" || resourceURL.User != nil {\n\t\t\treturn fmt.Errorf("refusing to send MCP OAuth Bearer token over a non-HTTPS resource URL")\n\t\t}\n\t\treq.Header.Set("Authorization", "Bearer "+token)\n\t}\n\treturn nil\n}\n''',
+          )
+
+          replace_once(
+              "frontend/src/mcpOAuthApi.ts",
+              '''export interface ConfigureMCPOAuthInput {\n  client_id: string;\n  client_secret?: string;\n  token_endpoint_auth_method: MCPOAuthAuthMethod;\n  registration_method: MCPOAuthRegistrationMethod;\n}\n''',
+              '''export interface ConfigureMCPOAuthInput {\n  client_id: string;\n  client_secret?: string;\n  client_issuer?: string;\n  token_endpoint_auth_method: MCPOAuthAuthMethod;\n  registration_method: MCPOAuthRegistrationMethod;\n}\n''',
+          )
+
+          replace_once(
+              "frontend/src/components/MCPAuthorizationPanel.tsx",
+              '''  const [clientSecret, setClientSecret] = useState('');\n  const [authMethod, setAuthMethod] = useState<MCPOAuthAuthMethod>('none');\n''',
+              '''  const [clientSecret, setClientSecret] = useState('');\n  const [clientIssuer, setClientIssuer] = useState('');\n  const [authMethod, setAuthMethod] = useState<MCPOAuthAuthMethod>('none');\n''',
+          )
+
+          replace_once(
+              "frontend/src/components/MCPAuthorizationPanel.tsx",
+              '''      setClientId(generatedDCR ? '' : (next.client_id || ''));\n      setAuthMethod(next.token_endpoint_auth_method || 'none');\n''',
+              '''      setClientId(generatedDCR ? '' : (next.client_id || ''));\n      setClientIssuer(generatedDCR ? '' : (next.client_issuer || ''));\n      setAuthMethod(next.token_endpoint_auth_method || 'none');\n''',
+          )
+
+          replace_once(
+              "frontend/src/components/MCPAuthorizationPanel.tsx",
+              '''    const payload: Parameters<typeof mcpOAuthApi.configure>[1] = {\n      client_id: trimmedClientId,\n      token_endpoint_auth_method: registrationMethod === 'cimd' ? 'none' : authMethod,\n      registration_method: registrationMethod,\n    };\n''',
+              '''    const payload: Parameters<typeof mcpOAuthApi.configure>[1] = {\n      client_id: trimmedClientId,\n      token_endpoint_auth_method: registrationMethod === 'cimd' ? 'none' : authMethod,\n      registration_method: registrationMethod,\n    };\n    if (registrationMethod === 'preregistered') {\n      const issuer = clientIssuer.trim();\n      if (!issuer) throw new Error('Authorization server issuer is required for a preregistered client');\n      payload.client_issuer = issuer;\n    }\n''',
+          )
+
+          replace_once(
+              "frontend/src/components/MCPAuthorizationPanel.tsx",
+              '''      } else if (registrationMethod === 'cimd') {\n        throw new Error('A Client ID Metadata Document URL is required');\n      }\n''',
+              '''      } else if (registrationMethod === 'cimd') {\n        throw new Error('A Client ID Metadata Document URL is required');\n      }\n''',
+          )
+
+          replace_once(
+              "frontend/src/components/MCPAuthorizationPanel.tsx",
+              '''        registration_method: 'preregistered',\n      });\n''',
+              '''        registration_method: 'preregistered',\n        client_issuer: clientIssuer.trim(),\n      });\n''',
+          )
+
+          replace_once(
+              "frontend/src/components/MCPAuthorizationPanel.tsx",
+              '''      </div>\n\n      {registrationMethod === 'cimd' ? (\n''',
+              '''      </div>\n\n      {registrationMethod === 'preregistered' && (\n        <label className="mt-3 block">\n          <span className="mb-1 block text-[10px] font-medium text-text-muted">Authorization server issuer</span>\n          <input value={clientIssuer} onChange={(event) => setClientIssuer(event.target.value)} placeholder="https://auth.example.com" className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text" />\n          <span className="mt-1 block text-[10px] leading-relaxed text-text-muted">Use the exact HTTPS issuer that owns this preregistered client. Omni verifies discovery against this value before sending credentials.</span>\n        </label>\n      )}\n\n      {registrationMethod === 'cimd' ? (\n''',
+          )
+
+          replace_once(
+              "backend/internal/mcpclient/oauth_test.go",
+              '''func TestValidateOAuthEndpointRequiresHTTPS(t *testing.T) {\n''',
+              '''func TestCanonicalResourceURIRequiresHTTPS(t *testing.T) {\n\tif _, err := canonicalResourceURI("http://mcp.example.com/tools"); err == nil {\n\t\tt.Fatal("plaintext OAuth resource URI was accepted")\n\t}\n\tif _, err := canonicalResourceURI("https://user:secret@mcp.example.com/tools"); err == nil {\n\t\tt.Fatal("credential-bearing OAuth resource URI was accepted")\n\t}\n}\n\nfunc TestValidateOAuthEndpointRequiresHTTPS(t *testing.T) {\n''',
+          )
+
+          p = Path("backend/internal/mcpclient/http_oauth_test.go")
+          p.write_text('''package mcpclient\n\nimport (\n\t"context"\n\t"net/http"\n\t"net/http/httptest"\n\t"strings"\n\t"testing"\n\n\t"github.com/ajbergh/omnillm-studio/internal/models"\n)\n\ntype staticBearerTokenProvider struct {\n\ttoken string\n\terr   error\n}\n\nfunc (p staticBearerTokenProvider) AccessToken(_ context.Context, _ string) (string, error) {\n\treturn p.token, p.err\n}\n\nfunc TestHTTPClientInjectsOAuthBearerHeaderWithoutQueryLeak(t *testing.T) {\n\tconst accessToken = "sensitive-access-token"\n\tresourceURL := "https://mcp.example.com/tools"\n\tconfig := models.MCPServer{ID: "oauth-header-test", Name: "oauth", Transport: "http", URL: &resourceURL, Headers: map[string]string{"Authorization": "Bearer stale-manual-token"}}\n\tclient := NewHTTPClientWithTokenProvider(config, staticBearerTokenProvider{token: accessToken})\n\treq := httptest.NewRequest(http.MethodPost, resourceURL, nil)\n\tif err := client.applyAuthHeaders(context.Background(), req); err != nil {\n\t\tt.Fatalf("apply OAuth header: %v", err)\n\t}\n\tif got := req.Header.Get("Authorization"); got != "Bearer "+accessToken {\n\t\tt.Fatalf("Authorization = %q, want OAuth bearer token", got)\n\t}\n\tif strings.Contains(req.URL.RawQuery, accessToken) {\n\t\tt.Fatalf("access token leaked into query string: %q", req.URL.RawQuery)\n\t}\n}\n\nfunc TestHTTPClientRefusesOAuthBearerOverHTTP(t *testing.T) {\n\tresourceURL := "http://127.0.0.1:9999/mcp"\n\tconfig := models.MCPServer{ID: "oauth-http", Name: "oauth", Transport: "http", URL: &resourceURL, AllowPrivateNetwork: true}\n\tclient := NewHTTPClientWithTokenProvider(config, staticBearerTokenProvider{token: "access"})\n\treq := httptest.NewRequest(http.MethodPost, resourceURL, nil)\n\terr := client.applyAuthHeaders(context.Background(), req)\n\tif err == nil || !strings.Contains(err.Error(), "non-HTTPS") {\n\t\tt.Fatalf("expected non-HTTPS bearer rejection, got %v", err)\n\t}\n\tif got := req.Header.Get("Authorization"); got != "" {\n\t\tt.Fatalf("bearer header was attached to plaintext request: %q", got)\n\t}\n}\n\nfunc TestHTTPClientPropagatesOAuthRequirementBeforeNetwork(t *testing.T) {\n\tserver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\tt.Fatal("network request should not occur when OAuth provider rejects token access")\n\t}))\n\tdefer server.Close()\n\n\turl := server.URL\n\tconfig := models.MCPServer{ID: "oauth-required", Name: "oauth", Transport: "http", URL: &url, AllowPrivateNetwork: true}\n\tclient := NewHTTPClientWithTokenProvider(config, staticBearerTokenProvider{err: ErrMCPOAuthRequired})\n\terr := client.Start(context.Background())\n\tif err == nil || !strings.Contains(err.Error(), ErrMCPOAuthRequired.Error()) {\n\t\tt.Fatalf("expected OAuth requirement error, got %v", err)\n\t}\n}\n\ntype recordingBearerProvider struct {\n\ttoken  string\n\tscopes []string\n}\n\nfunc (p *recordingBearerProvider) AccessToken(_ context.Context, _ string) (string, error) {\n\treturn p.token, nil\n}\nfunc (p *recordingBearerProvider) RecordScopeChallenge(_ string, scopes []string) error {\n\tp.scopes = append([]string{}, scopes...)\n\treturn nil\n}\n\nfunc TestHTTPClientRecordsInsufficientScopeChallenge(t *testing.T) {\n\tprovider := &recordingBearerProvider{token: "access"}\n\tresourceURL := "https://mcp.example.com"\n\tclient := NewHTTPClientWithTokenProvider(models.MCPServer{ID: "scope-test", URL: &resourceURL}, provider)\n\tresponse := &http.Response{StatusCode: http.StatusForbidden, Header: make(http.Header)}\n\tresponse.Header.Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="files.write files.read"`)\n\terr := client.handleOAuthScopeChallenge(response)\n\tif err == nil || !strings.Contains(err.Error(), ErrMCPOAuthInsufficientScope.Error()) {\n\t\tt.Fatalf("expected insufficient-scope error, got %v", err)\n\t}\n\tif strings.Join(provider.scopes, " ") != "files.read files.write" {\n\t\tt.Fatalf("recorded scopes = %#v", provider.scopes)\n\t}\n}\n''')
+
+          p = Path("backend/internal/repository/mcp_oauth_test.go")
+          text = p.read_text()
+          text = text.replace('''\tif err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{\n\t\tClientID:                "client-1",\n\t\tClientSecret:            &secret,\n\t\tTokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretBasic,\n\t}); err != nil {''', '''\tif err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{\n\t\tClientID:                "client-1",\n\t\tClientSecret:            &secret,\n\t\tClientIssuer:            "https://auth.example.com",\n\t\tTokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretBasic,\n\t\tRegistrationMethod:      models.MCPOAuthRegistrationPreregistered,\n\t}); err != nil {''', 1)
+          text = text.replace('models.ConfigureMCPOAuthInput{ClientID: "client", ClientSecret: &secret, TokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretPost}', 'models.ConfigureMCPOAuthInput{ClientID: "client", ClientSecret: &secret, ClientIssuer: "https://issuer.example", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretPost, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}', 1)
+          text = text.replace('models.ConfigureMCPOAuthInput{ClientID: "client", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretPost}', 'models.ConfigureMCPOAuthInput{ClientID: "client", ClientIssuer: "https://issuer.example", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretPost, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}', 1)
+          text = text.replace('models.ConfigureMCPOAuthInput{ClientID: "client", ClientSecret: &empty, TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone}', 'models.ConfigureMCPOAuthInput{ClientID: "client", ClientSecret: &empty, ClientIssuer: "https://issuer.example", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}', 1)
+          text = text.replace('models.ConfigureMCPOAuthInput{ClientID: "client", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}', 'models.ConfigureMCPOAuthInput{ClientID: "client", ClientIssuer: "https://issuer.example", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}', 1)
+          text = text.replace('''func TestMCPOAuthRepoBindsPreregisteredClientToIssuer(t *testing.T) {''', '''func TestMCPOAuthRepoVerifiesPreregisteredClientIssuer(t *testing.T) {''', 1)
+          insert = '''\nfunc TestMCPOAuthRepoRejectsMissingPreregisteredIssuerAndSecret(t *testing.T) {\n\trepo, database := newMCPOAuthTestRepo(t)\n\tdefer database.Close()\n\tif err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "client", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}); err == nil || !strings.Contains(err.Error(), "client_issuer") {\n\t\tt.Fatalf("expected missing issuer rejection, got %v", err)\n\t}\n\tif err := repo.ConfigureClient("server-2", models.ConfigureMCPOAuthInput{ClientID: "client", ClientIssuer: "https://issuer.example", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretBasic, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}); err == nil || !strings.Contains(err.Error(), "client_secret") {\n\t\tt.Fatalf("expected missing secret rejection, got %v", err)\n\t}\n}\n'''
+          marker = '\nfunc TestMCPOAuthRepoDoesNotBindCIMDClientToIssuer'
+          if marker not in text:
+              raise SystemExit('repository OAuth test insertion marker missing')
+          text = text.replace(marker, insert + marker, 1)
+          p.write_text(text)
+
+          replace_once(
+              "docs/MCP_OAUTH_2026-08.md",
+              '''All metadata and token traffic uses the V47 hardened MCP HTTP transport: public-network-only by default, DNS-aware private-address blocking, explicit private/local opt-in, bounded response bodies, and no redirects.\n''',
+              '''All metadata and token traffic uses the V47 hardened MCP HTTP transport: public-network-only by default, DNS-aware private-address blocking, explicit private/local opt-in, bounded response bodies, and no redirects. OAuth-protected MCP resource URLs themselves must use HTTPS; Omni refuses to attach an OAuth Bearer token to plaintext HTTP even when private-network access is explicitly enabled.\n''',
+          )
+
+          replace_once(
+              "docs/MCP_OAUTH_2026-08.md",
+              '''Preregistered credentials are bound to the exact authorization-server issuer that first validates them. If Protected Resource Metadata later points to a different issuer, Omni rejects reuse instead of silently sending credentials to the new server. CIMD client IDs are HTTPS metadata-document URLs and remain issuer-portable by design.\n''',
+              '''Preregistered credentials require an explicit authorization-server issuer at configuration time. Omni compares Protected Resource Metadata discovery to that trusted issuer before using the client ID or secret; it never learns the issuer on first use. DCR credentials are bound to the issuer that minted them, while CIMD client IDs are HTTPS metadata-document URLs and remain issuer-portable by design.\n''',
+          )
+          PY
+
+          gofmt -w \
+            backend/internal/models/mcp_oauth.go \
+            backend/internal/repository/mcp_oauth.go \
+            backend/internal/repository/mcp_oauth_test.go \
+            backend/internal/mcpclient/oauth.go \
+            backend/internal/mcpclient/oauth_test.go \
+            backend/internal/mcpclient/http_client.go \
+            backend/internal/mcpclient/http_oauth_test.go
+
+      - name: Backend validation
+        working-directory: backend
+        run: |
+          go test ./internal/repository ./internal/mcpclient ./internal/api ./internal/db ./internal/config
+          go vet ./internal/repository ./internal/mcpclient ./internal/api ./internal/db ./internal/config
+
+      - name: Frontend validation
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run test:unit
+          npm run build
+
+      - name: Commit validated hotfix
+        shell: bash
+        run: |
+          rm .github/workflows/apply-mcp-oauth-security-hotfix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix(mcp): harden OAuth resource and issuer binding"
+          git push origin HEAD
