@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	maxRemoteCloneObjects      = 200_000
+	maxRemoteCloneObjects     = 200_000
 	cloneLargeObjectThreshold = 4 << 20
 )
 
