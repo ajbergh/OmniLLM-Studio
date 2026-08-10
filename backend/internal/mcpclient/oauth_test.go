@@ -8,6 +8,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/ajbergh/omnillm-studio/internal/models"
+	"github.com/ajbergh/omnillm-studio/internal/repository"
 )
 
 func TestAuthorizationMetadataCandidatesMatchMCPDiscoveryOrder(t *testing.T) {
@@ -89,6 +92,20 @@ func TestValidateOAuthEndpointRequiresHTTPS(t *testing.T) {
 		if err := validateOAuthEndpoint(raw); err == nil {
 			t.Fatalf("expected endpoint %q to be rejected", raw)
 		}
+	}
+}
+
+func TestDynamicClientNeedsReregistrationOnIssuerChange(t *testing.T) {
+	credential := &repository.MCPOAuthCredential{RegistrationMethod: models.MCPOAuthRegistrationDCR, ClientIssuer: "https://issuer-a.example"}
+	if dynamicClientNeedsReregistration(credential, "https://issuer-a.example") {
+		t.Fatal("same DCR issuer should not trigger re-registration")
+	}
+	if !dynamicClientNeedsReregistration(credential, "https://issuer-b.example") {
+		t.Fatal("changed DCR issuer should trigger re-registration")
+	}
+	credential.RegistrationMethod = models.MCPOAuthRegistrationPreregistered
+	if dynamicClientNeedsReregistration(credential, "https://issuer-b.example") {
+		t.Fatal("preregistered credentials must not be auto-re-registered")
 	}
 }
 

@@ -96,6 +96,8 @@ URL fetches must use the repository SSRF-safe transports. Validation and dialing
 
 Headless-browser sessions use isolated incognito contexts, serialized page operations, per-user quotas, destination validation, and Chromium sandboxing by default. `OMNILLM_BROWSER_NO_SANDBOX=true` is an explicit compatibility override, not a normal setting. New browser capabilities must preserve user/session storage isolation and reject private, loopback, metadata, reserved, non-HTTP, and credential-bearing destinations.
 
+Remote MCP Streamable HTTP is dual-era: prefer the stateless `2026-07-28` contract and preserve the `2025-06-18` handshake/session fallback for legacy servers. OAuth-protected MCP resource URLs must remain HTTPS; do not weaken Bearer-token transport because `allow_private_network` is enabled. Preregistered and DCR OAuth credentials are issuer-bound, CIMD remains issuer-portable, and a DCR issuer migration must register a new client instead of reusing the previous client ID.
+
 ### Streaming
 
 SSE carries chat tokens, agent steps, tool progress, file search, RAG indexing, web search, generation progress, and URL context events. The frontend parses streams with `fetch()` and `ReadableStream` in `frontend/src/api.ts`. Browser timezone and locale are attached to Omni API requests by `frontend/src/clientContextFetch.ts` and resolved through `internal/turncontext`; preserve that context through preflight, sports, native-grounding, and fallback paths. Preserve cancellation and terminal error/done events when modifying a stream.
@@ -204,5 +206,6 @@ Core variables include:
 - `OMNILLM_BROWSER_MAX_SESSIONS`
 - `OMNILLM_BROWSER_SESSION_TTL`
 - `OMNILLM_BROWSER_NO_SANDBOX`
+- `OMNILLM_MCP_OAUTH_REDIRECT_URI`
 
 Defaults and parsing live in `backend/internal/config/config.go`.

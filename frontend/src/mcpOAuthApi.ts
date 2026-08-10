@@ -69,4 +69,6 @@ export const mcpOAuthApi = {
     request<MCPOAuthAuthorizationStart>(`/v1/mcp/servers/${encodeURIComponent(serverId)}/oauth/start`, { method: 'POST' }),
   disconnect: (serverId: string) =>
     request<void>(`/v1/mcp/servers/${encodeURIComponent(serverId)}/oauth`, { method: 'DELETE' }),
+  resetDynamicRegistration: (serverId: string) =>
+    request<void>(`/v1/mcp/servers/${encodeURIComponent(serverId)}/oauth/reset-registration`, { method: 'POST' }),
 };

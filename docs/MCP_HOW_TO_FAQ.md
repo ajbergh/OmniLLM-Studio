@@ -18,13 +18,13 @@ The manager/executor test also confirmed the application path works: persisted M
 
 ## What MCP support exists right now?
 
-Current support is MCP client support for stdio servers that expose tools.
+Current support is MCP client support for stdio and remote Streamable HTTP servers that expose tools. HTTP supports OAuth 2.1 authorization and dual-era protocol interoperability.
 
 Implemented:
 
 - Stdio MCP subprocess launch.
 - Dual-era Streamable HTTP transport: stateless MCP 2026-07-28 with automatic fallback to the legacy 2025-06-18 initialization/session model.
-- MCP JSON-RPC initialization.
+- Legacy/stdIO MCP initialization plus stateless per-request metadata for modern HTTP.
 - `tools/list` discovery.
 - `tools/call` execution.
 - Dynamic registration into OmniLLM-Studio's existing tool registry.
@@ -32,7 +32,7 @@ Implemented:
 - Admin REST API under `/v1/mcp`.
 - Encrypted environment variable storage for server config.
 - Audit logging for lifecycle events, tool calls, and errors.
-- Settings UI for MCP server management.
+- Settings UI for MCP server management, remote OAuth configuration, authorization, scope step-up, and DCR recovery.
 - Admin activity view for recent MCP audit events.
 - Agent Mode approval for tools with `ask` policy.
 - TypeScript API/types for UI and integration work.
@@ -52,13 +52,14 @@ MCP server management is available in Settings -> MCP.
 
 The tab supports:
 
-- Adding and editing stdio MCP servers.
+- Adding and editing stdio and Streamable HTTP MCP servers.
 - Loading a pinned filesystem-server template.
 - Testing server connectivity.
 - Starting, stopping, restarting, and refreshing servers.
 - Viewing runtime status and startup errors.
 - Viewing redacted environment variable keys.
 - Changing discovered MCP tool policy between `allow`, `ask`, and `deny`.
+- Configuring OAuth, starting browser authorization, granting incremental scopes, disconnecting, and resetting legacy DCR registrations for HTTP servers.
 - Viewing recent MCP activity from the audit log.
 
 The REST examples below are still useful for automation, debugging, and headless setups.
@@ -87,13 +88,13 @@ On backend startup:
 
 1. Database migrations create MCP tables if needed.
 2. Enabled MCP server configs are loaded.
-3. Each enabled stdio server is started.
-4. The server is initialized using MCP JSON-RPC.
+3. Each enabled MCP server is started.
+4. Stdio uses the established initialization handshake. Streamable HTTP first probes `server/discover`; modern `2026-07-28` servers remain stateless, while identified legacy `2025-06-18` servers use the initialization/session handshake.
 5. Tools are discovered through `tools/list`.
 6. Discovered tools are registered into the existing tool registry.
 7. Newly discovered MCP tools are seeded in `tool_permissions` with policy `ask`.
 
-On backend shutdown, running MCP subprocesses are stopped and their dynamic tools are removed from the registry.
+On backend shutdown, running stdio subprocesses and legacy HTTP sessions are stopped and their dynamic tools are removed from the registry. Modern HTTP has no protocol session to terminate.
 
 ## What database tables are used?
 
@@ -101,6 +102,7 @@ MCP adds these tables:
 
 - `mcp_servers`: persisted MCP server configuration.
 - `mcp_audit_log`: lifecycle, tool execution, and error records.
+- `mcp_oauth_credentials`: encrypted OAuth client secrets/tokens plus discovery, issuer binding, registration method, and pending incremental-scope state.
 
 MCP tool execution policy reuses the existing `tool_permissions` table. There is not a separate MCP permission table.
 
@@ -216,6 +218,8 @@ Invoke-RestMethod `
 
 Like environment variables, custom headers are encrypted at rest and are not returned in plaintext by the API.
 
+For OAuth-protected HTTP servers, use **Settings → MCP → OAuth 2.1 authorization**. OAuth Bearer tokens are sent only to HTTPS MCP resource URLs. Preregistered clients require the exact authorization-server issuer, CIMD uses a stable HTTPS client metadata document, and legacy DCR is used only as an automatic fallback when no client is configured and the authorization server advertises `registration_endpoint`. If a persisted DCR resource moves to a different issuer, Omni registers a new client with that issuer instead of reusing the old client ID. **Reset dynamic registration** discards a stale DCR client so the next Connect action can register again.
+
 ## How do I test the connection?
 
 Use the server ID returned from creation:
@@ -227,7 +231,7 @@ Invoke-RestMethod `
   -Headers $headers
 ```
 
-This starts a temporary MCP client, initializes the server, runs `tools/list`, returns discovered tools, and then stops the temporary process. It does not register tools into the app-wide registry.
+This starts a temporary MCP client, negotiates the applicable transport era (including legacy initialization only when required), runs `tools/list`, returns discovered tools, and then tears down any legacy session/process. It does not register tools into the app-wide registry.
 
 ## How do I start a server and register its tools?
 
@@ -304,9 +308,7 @@ If the policy is still `ask`, manual execution returns an approval-required erro
 
 ## How do Agent Mode and normal chat use MCP tools?
 
-Agent Mode can use connected MCP tools because it builds its tool list from the shared registry. If a selected tool has `ask` policy, the agent run pauses and shows approval controls through the existing Agent Mode approval flow.
-
-Normal chat does not yet have a general-purpose tool-calling loop. MCP tools are not automatically invoked during ordinary chat streaming. This is intentional because the current chat path does not pass native tool definitions to LLM providers.
+Normal Chat Studio and Agent Mode both use the shared governed tool registry/executor. Eligible MCP tools can be selected by the normal chat tool-calling loop, subject to the same scoped policy, approval, Assistant Profile, per-turn restriction, timeout, result-size, and audit controls as native tools. If Agent Mode selects an `ask` tool, the run pauses for the existing approval flow before execution. Agent Mode retains its own planner/run loop but executes through the same governed tool layer.
 
 ## Can MCP tools be used with plugins?
 

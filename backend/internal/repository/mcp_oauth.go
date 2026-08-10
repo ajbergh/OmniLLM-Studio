@@ -322,6 +322,21 @@ func (r *MCPOAuthRepo) ClearTokens(serverID string) error {
 	return nil
 }
 
+// ClearDynamicClient removes a persisted legacy DCR registration so the next
+// authorization attempt can register a fresh public client. Preregistered and
+// CIMD configurations are never deleted through this recovery operation.
+func (r *MCPOAuthRepo) ClearDynamicClient(serverID string) (bool, error) {
+	result, err := r.db.Exec(`DELETE FROM mcp_oauth_credentials WHERE server_id = ? AND registration_method = ?`, serverID, models.MCPOAuthRegistrationDCR)
+	if err != nil {
+		return false, fmt.Errorf("clear dynamically registered MCP OAuth client: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read dynamic OAuth reset result: %w", err)
+	}
+	return rows > 0, nil
+}
+
 // SaveRequiredScope persists the complete scope set needed for the next
 // authorization-code step-up. Callers pass a normalized union.
 func (r *MCPOAuthRepo) SaveRequiredScope(serverID, scope string) error {

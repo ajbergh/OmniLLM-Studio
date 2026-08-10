@@ -24,8 +24,10 @@ func NewMCPOAuthHandler(oauth *mcpclient.OAuthService, manager *mcpclient.Manage
 	return &MCPOAuthHandler{oauth: oauth, manager: manager}
 }
 
+func mcpOAuthServerID(r *http.Request) string { return chi.URLParam(r, "serverId") }
+
 func (h *MCPOAuthHandler) Status(w http.ResponseWriter, r *http.Request) {
-	status, err := h.oauth.Status(chi.URLParam(r, "id"))
+	status, err := h.oauth.Status(mcpOAuthServerID(r))
 	if err != nil {
 		respondInternalError(w, err)
 		return
@@ -39,11 +41,11 @@ func (h *MCPOAuthHandler) Configure(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid OAuth configuration")
 		return
 	}
-	if err := h.oauth.Configure(chi.URLParam(r, "id"), input); err != nil {
+	if err := h.oauth.Configure(mcpOAuthServerID(r), input); err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	status, err := h.oauth.Status(chi.URLParam(r, "id"))
+	status, err := h.oauth.Status(mcpOAuthServerID(r))
 	if err != nil {
 		respondInternalError(w, err)
 		return
@@ -52,7 +54,7 @@ func (h *MCPOAuthHandler) Configure(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MCPOAuthHandler) Start(w http.ResponseWriter, r *http.Request) {
-	start, err := h.oauth.StartAuthorization(r.Context(), chi.URLParam(r, "id"), auth.ScopeUserIDFromContext(r.Context()))
+	start, err := h.oauth.StartAuthorization(r.Context(), mcpOAuthServerID(r), auth.ScopeUserIDFromContext(r.Context()))
 	if err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
@@ -61,9 +63,21 @@ func (h *MCPOAuthHandler) Start(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MCPOAuthHandler) Disconnect(w http.ResponseWriter, r *http.Request) {
-	serverID := chi.URLParam(r, "id")
+	serverID := mcpOAuthServerID(r)
 	if err := h.oauth.Disconnect(serverID); err != nil {
 		respondInternalError(w, err)
+		return
+	}
+	stopCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	_ = h.manager.Stop(stopCtx, serverID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *MCPOAuthHandler) ResetDynamicRegistration(w http.ResponseWriter, r *http.Request) {
+	serverID := mcpOAuthServerID(r)
+	if err := h.oauth.ResetDynamicRegistration(serverID); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	stopCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
