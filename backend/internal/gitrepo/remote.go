@@ -94,9 +94,16 @@ func (s *RemoteService) Configured() bool { return s != nil && len(s.ids) > 0 }
 // Enabled reports whether the operator allowed outbound Git network access.
 func (s *RemoteService) Enabled() bool { return s != nil && s.enabled }
 
-// PushEnabled reports the independent operator push gate. Per-remote AllowPush
-// and normal tool approval are additional gates when push is implemented.
+// PushEnabled reports the independent process-wide remote push gate. Local Git
+// write access, per-remote allow_push, default-branch policy, and tool approval
+// are additional independent gates.
 func (s *RemoteService) PushEnabled() bool { return s != nil && s.pushEnabled }
+
+// PushMutationEnabled reports whether the process has enabled all global gates
+// required for a remote push mutation. Per-remote policy is checked by Push.
+func (s *RemoteService) PushMutationEnabled() bool {
+	return s != nil && s.Enabled() && s.PushEnabled() && s.local != nil && s.local.WriteEnabled()
+}
 
 // Remotes returns safe summaries only. Endpoint paths and credential references
 // remain operator-only configuration.
@@ -114,7 +121,8 @@ func (s *RemoteService) Remotes(ctx context.Context) []RemoteSummary {
 		out = append(out, RemoteSummary{
 			ID: id, Repository: remote.Repository, Host: parsed.Hostname(),
 			AuthenticationConfigured: remote.TokenEnv != "",
-			PushAllowed:              s.pushEnabled && remote.AllowPush,
+			PushAllowed:              s.PushMutationEnabled() && remote.AllowPush,
+			DefaultBranchPushAllowed: s.PushMutationEnabled() && remote.AllowPush && remote.AllowDefaultBranchPush,
 		})
 	}
 	return out
