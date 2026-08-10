@@ -23,7 +23,7 @@ If no repositories are configured, the local Git tool family is not registered.
 | `git_diff` | Read the combined worktree diff against HEAD, or compare two committed revisions. Worktree mode also returns a `worktree_digest` over the full changed worktree state. |
 | `git_log` | Read bounded commit history from a revision. |
 | `git_show` | Read one commit's metadata, parent SHAs, and full message. |
-| `git_branches` | List local branches and the current/detached HEAD state. |
+| `git_branches` | List local branches and identify the current/detached HEAD state. |
 | `git_blame` | Read bounded line attribution for a committed repository-relative file. |
 
 These tools are registered as read-only, low-risk, non-network operations in the existing tool-policy framework. `git_diff` output is bounded; worktree binary files, symlinks, directories, and oversized files may be omitted from the rendered patch with warnings. The worktree digest is separate from the rendered patch and fingerprints all changed paths, including regular-file bytes, Git-relevant mode, final symlink targets, status codes, and deletions. It streams file content rather than buffering it, so binary and oversized files remain covered even when they are not rendered.
@@ -81,7 +81,7 @@ For a multi-file stage operation, the service tracks the index digest it most re
 
 The Git engine lives under `backend/internal/gitrepo/` and uses `github.com/go-git/go-git/v5` version `v5.19.2`. LLM-facing read adapters live in `backend/internal/tools/git_repo_tools.go`; mutation adapters live in `backend/internal/tools/git_repo_mutation_tools.go`. The service satisfies separate `gitrepo.Reader` and `gitrepo.Writer` contracts so read and write surfaces remain explicit. `github.com/cyphar/filepath-securejoin` is used directly for mutation-path containment and remains pinned at the version already present in the go-git dependency graph.
 
-No local Git tool contacts a remote. GitHub-hosted PRs, issues, reviews, Actions, and other provider operations remain API capabilities rather than go-git responsibilities.
+The tools documented on this page never contact a remote. Remote Git is a separate explicitly configured tool family with independent network, credential, fetch, and push gates; see `docs/REMOTE_GIT_TOOLS.md`. GitHub-hosted PRs, issues, reviews, Actions, and other provider operations remain API capabilities rather than local-go-git responsibilities.
 
 On a shared server, `OMNILLM_GIT_REPOSITORIES` and `OMNILLM_GIT_WRITE_ENABLED` are process-wide operator settings. Enable local writes only when every configured repository is intentionally writable by that OmniLLM-Studio deployment and the surrounding OS account has appropriately limited filesystem permissions.
 
@@ -93,7 +93,7 @@ Run the backend checks with:
 
 ```bash
 cd backend
-gofmt -w internal/gitrepo internal/tools/git_repo_tools.go internal/tools/git_repo_mutation_tools.go internal/tools/git_repo_tools_test.go internal/tools/registry.go
+gofmt -w internal/gitrepo internal/tools/git_repo_tools.go internal/tools/git_repo_mutation_tools.go internal/tools/git_remote*.go internal/tools/registry.go
 go vet ./...
 go test ./...
 go test -race ./...
@@ -101,6 +101,8 @@ go test -race ./...
 
 On Ubuntu 24.04, repository-wide commands that include the Wails desktop package require the existing `webkit2_41` build tag as documented in `CLAUDE.md`.
 
-## Future phases
+## Future work
 
-Clone/fetch/push should follow only after repository-workspace quotas, outbound transport policy, remote allowlists, and credential handling are defined. Unsupported or compatibility-sensitive operations such as merges, rebase, LFS, reset, clean, submodule updates, or destructive history rewriting should not be exposed merely because a generic Git command exists.
+Remote inspection, guarded fetch, and guarded push are documented separately in `docs/REMOTE_GIT_TOOLS.md`. Clone remains withheld until a hard quota can cover both Git object ingestion and worktree expansion.
+
+Unsupported or compatibility-sensitive operations such as merges, rebase, LFS, reset, clean, submodule updates, force push, remote ref deletion, or destructive history rewriting should not be exposed merely because a generic Git command exists.
