@@ -47,8 +47,15 @@ jobs:
           replace_all('func (h *MessageHandler) tryRouterSportsLookup(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool, *intentrouter.RouterTelemetry) {\n\tif h.routerSvc == nil || !h.sportsLookupEnabled() {', 'func (h *MessageHandler) tryRouterSportsLookup(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool, *intentrouter.RouterTelemetry) {\n\tif !h.chatPreflightAllowed("sports_lookup") || h.routerSvc == nil || !h.sportsLookupEnabled() {')
           replace_all('func (h *MessageHandler) handleSportsLookupMessageWithTelemetry(ctx context.Context, conversationID, messageID, query string, routerTelemetry *intentrouter.RouterTelemetry) (*models.Message, bool) {\n\tif !h.sportsLookupEnabled() {', 'func (h *MessageHandler) handleSportsLookupMessageWithTelemetry(ctx context.Context, conversationID, messageID, query string, routerTelemetry *intentrouter.RouterTelemetry) (*models.Message, bool) {\n\tif !h.chatPreflightAllowed("sports_lookup") || !h.sportsLookupEnabled() {')
           path.write_text(src)
+
+          test_path = Path('backend/internal/api/message_handler_test.go')
+          test_src = test_path.read_text()
+          stale = '\t\t\tif !strings.Contains(got, sportsLookupSystemDirective) {\n\t\t\t\tt.Fatalf("composed prompt missing sports lookup directive. got: %q", got)\n\t\t\t}\n'
+          if stale not in test_src:
+              raise SystemExit('expected stale sports prompt assertion')
+          test_path.write_text(test_src.replace(stale, ''))
           PY
-          gofmt -w backend/internal/api/message_handler.go backend/internal/api/chat_capability_policy.go backend/internal/api/chat_capability_policy_test.go
+          gofmt -w backend/internal/api/message_handler.go backend/internal/api/message_handler_test.go backend/internal/api/chat_capability_policy.go backend/internal/api/chat_capability_policy_test.go
       - name: Focused backend validation
         working-directory: backend
         run: |
