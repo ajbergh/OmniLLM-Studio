@@ -73,13 +73,16 @@ func TestGitRepositoryMutationToolValidation(t *testing.T) {
 	if err := mutation["git_checkout"].Validate(json.RawMessage(`{"repository":"repo","branch":"feature","expected_head":"not-a-hash"}`)); err == nil {
 		t.Fatal("git_checkout accepted invalid expected_head")
 	}
-	if err := mutation["git_stage"].Validate(json.RawMessage(`{"repository":"repo","paths":[],"expected_head":"` + head + `"}`)); err == nil {
+	if err := mutation["git_stage"].Validate(json.RawMessage(`{"repository":"repo","paths":[],"expected_branch":"main","expected_head":"` + head + `","expected_index_digest":"` + digest + `"}`)); err == nil {
 		t.Fatal("git_stage accepted empty paths")
 	}
-	if err := mutation["git_commit"].Validate(json.RawMessage(`{"repository":"repo","message":"commit","expected_head":"` + head + `","expected_index_digest":"short"}`)); err == nil {
+	if err := mutation["git_stage"].Validate(json.RawMessage(`{"repository":"repo","paths":["a.txt"],"expected_branch":"","expected_head":"` + head + `","expected_index_digest":"` + digest + `"}`)); err == nil {
+		t.Fatal("git_stage accepted empty expected_branch")
+	}
+	if err := mutation["git_commit"].Validate(json.RawMessage(`{"repository":"repo","message":"commit","expected_branch":"main","expected_head":"` + head + `","expected_index_digest":"short"}`)); err == nil {
 		t.Fatal("git_commit accepted invalid expected_index_digest")
 	}
-	if err := mutation["git_commit"].Validate(json.RawMessage(`{"repository":"repo","message":"commit","expected_head":"` + head + `","expected_index_digest":"` + digest + `"}`)); err != nil {
+	if err := mutation["git_commit"].Validate(json.RawMessage(`{"repository":"repo","message":"commit","expected_branch":"main","expected_head":"` + head + `","expected_index_digest":"` + digest + `"}`)); err != nil {
 		t.Fatalf("git_commit valid arguments error = %v", err)
 	}
 }
