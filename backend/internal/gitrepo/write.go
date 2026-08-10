@@ -155,7 +155,7 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 	if err != nil {
 		return nil, safeRepositoryError(repositoryID, "status could not be read")
 	}
-	if _, err := s.ensureExpectedWorktreeDigest(repositoryID, status, expectedWorktreeDigest); err != nil {
+	if _, err := s.ensureExpectedWorktreeDigest(ctx, repositoryID, status, expectedWorktreeDigest); err != nil {
 		return nil, err
 	}
 
@@ -176,7 +176,7 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 	if err != nil {
 		return nil, safeRepositoryError(repositoryID, "status could not be re-read before staging")
 	}
-	if _, err := s.ensureExpectedWorktreeDigest(repositoryID, freshStatus, expectedWorktreeDigest); err != nil {
+	if _, err := s.ensureExpectedWorktreeDigest(ctx, repositoryID, freshStatus, expectedWorktreeDigest); err != nil {
 		return nil, err
 	}
 
@@ -197,7 +197,7 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 			rollback()
 			return nil, err
 		}
-		beforeFingerprint, err := worktreePathFingerprint(repositoryRoot, filePath)
+		beforeFingerprint, err := worktreePathFingerprint(ctx, repositoryRoot, filePath)
 		if err != nil {
 			rollback()
 			return nil, fmt.Errorf("path %q could not be verified before staging", filePath)
@@ -211,7 +211,7 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 			rollback()
 			return nil, safeRepositoryError(repositoryID, "index state could not be verified after staging")
 		}
-		afterFingerprint, err := worktreePathFingerprint(repositoryRoot, filePath)
+		afterFingerprint, err := worktreePathFingerprint(ctx, repositoryRoot, filePath)
 		if err != nil || afterFingerprint != beforeFingerprint {
 			rollback()
 			return nil, fmt.Errorf("path %q changed while it was being staged; run git_status and git_diff again", filePath)
@@ -356,12 +356,12 @@ func ensureExpectedIndexDigest(repo *git.Repository, expected string) (string, e
 	return current, nil
 }
 
-func (s *Service) ensureExpectedWorktreeDigest(repositoryID string, status git.Status, expected string) (string, error) {
+func (s *Service) ensureExpectedWorktreeDigest(ctx context.Context, repositoryID string, status git.Status, expected string) (string, error) {
 	expected = strings.TrimSpace(expected)
 	if expected == "" {
 		return "", fmt.Errorf("expected_worktree_digest is required; run git_diff again")
 	}
-	current, err := s.worktreeStateDigest(repositoryID, status)
+	current, err := s.worktreeStateDigest(ctx, repositoryID, status)
 	if err != nil {
 		return "", fmt.Errorf("worktree state could not be verified safely")
 	}
