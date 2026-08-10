@@ -35,12 +35,12 @@ type Reader interface {
 
 // Writer is the mutation contract exposed only when the operator explicitly
 // enables local Git write access. Callers must provide state preconditions so a
-// delayed approval cannot silently act on a different HEAD or index.
+// delayed approval cannot silently act on a different branch, HEAD, or index.
 type Writer interface {
 	CreateBranch(ctx context.Context, repositoryID, branchName, fromRevision, expectedHead string) (*CreateBranchResult, error)
 	Checkout(ctx context.Context, repositoryID, branchName, expectedHead string) (*CheckoutResult, error)
-	Stage(ctx context.Context, repositoryID string, paths []string, expectedHead string) (*StageResult, error)
-	Commit(ctx context.Context, repositoryID, message, expectedHead, expectedIndexDigest string) (*CommitResult, error)
+	Stage(ctx context.Context, repositoryID string, paths []string, expectedBranch, expectedHead, expectedIndexDigest string) (*StageResult, error)
+	Commit(ctx context.Context, repositoryID, message, expectedBranch, expectedHead, expectedIndexDigest string) (*CommitResult, error)
 }
 
 // RepositorySummary describes a configured repository without exposing its local path.
@@ -160,11 +160,13 @@ type CheckoutResult struct {
 }
 
 // StageResult describes exact repository-relative paths staged into the index.
+// A new index digest is intentionally omitted so callers must obtain a fresh
+// git_status snapshot before requesting a commit.
 type StageResult struct {
-	Repository  string   `json:"repository"`
-	Head        string   `json:"head"`
-	Paths       []string `json:"paths"`
-	IndexDigest string   `json:"index_digest"`
+	Repository string   `json:"repository"`
+	Branch     string   `json:"branch"`
+	Head       string   `json:"head"`
+	Paths      []string `json:"paths"`
 }
 
 // CommitResult describes a commit created from the already-staged index only.
