@@ -83,13 +83,13 @@ func TestLegacyChatCapabilityPathsUseUnifiedPolicyGate(t *testing.T) {
 	}
 	source := string(data)
 	checks := []string{
-		`h.chatPreflightAllowed("fetch_url_context")`,
-		`h.chatPreflightAllowed("sports_lookup")`,
-		`h.chatPreflightAllowed("file_search")`,
-		`h.chatPreflightAllowed("web_search")`,
-		`h.chatPreflightAllowed("image_generate")`,
-		`h.chatPreflightAllowed("generate_word_doc")`,
-		`h.chatPreflightAllowed("artifact_generate")`,
+		`h.chatPreflightAllowedForTurn(r.Context(), "fetch_url_context")`,
+		`h.chatPreflightAllowedForTurn(ctx, "sports_lookup")`,
+		`h.chatPreflightAllowedForTurn(r.Context(), "file_search")`,
+		`h.chatPreflightAllowedForTurn(r.Context(), "web_search")`,
+		`h.chatPreflightAllowedForTurn(r.Context(), "image_generate")`,
+		`h.chatPreflightAllowedForTurn(r.Context(), "generate_word_doc")`,
+		`h.chatPreflightAllowedForTurn(r.Context(), "artifact_generate")`,
 	}
 	for _, check := range checks {
 		if !strings.Contains(source, check) {
