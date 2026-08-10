@@ -18,10 +18,10 @@ const (
 	// created during one clone so empty-tree metadata cannot exhaust inodes.
 	RemoteCloneMaxEntriesEnv = "OMNILLM_GIT_CLONE_MAX_ENTRIES"
 
-	minRemoteCloneBytes   int64 = 1 << 20
-	maxRemoteCloneBytes   int64 = 1 << 30
-	minRemoteCloneEntries int64 = 128
-	maxRemoteCloneEntries int64 = 100_000
+	minRemoteCloneBytes     int64 = 1 << 20
+	maxRemoteCloneBytes     int64 = 1 << 30
+	minRemoteCloneEntries   int64 = 128
+	maxRemoteCloneEntries   int64 = 100_000
 	maxRemoteClonePackBytes int64 = 128 << 20
 )
 
