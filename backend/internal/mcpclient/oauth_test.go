@@ -72,6 +72,15 @@ func TestCanonicalResourceURIAndAuthorizationQuery(t *testing.T) {
 	}
 }
 
+func TestCanonicalResourceURIRequiresHTTPS(t *testing.T) {
+	if _, err := canonicalResourceURI("http://mcp.example.com/tools"); err == nil {
+		t.Fatal("plaintext OAuth resource URI was accepted")
+	}
+	if _, err := canonicalResourceURI("https://user:secret@mcp.example.com/tools"); err == nil {
+		t.Fatal("credential-bearing OAuth resource URI was accepted")
+	}
+}
+
 func TestValidateOAuthEndpointRequiresHTTPS(t *testing.T) {
 	if err := validateOAuthEndpoint("https://auth.example.com/token"); err != nil {
 		t.Fatalf("HTTPS endpoint rejected: %v", err)

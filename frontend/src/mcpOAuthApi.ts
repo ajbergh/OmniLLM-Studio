@@ -26,6 +26,7 @@ export interface MCPOAuthStatus {
 export interface ConfigureMCPOAuthInput {
   client_id: string;
   client_secret?: string;
+  client_issuer?: string;
   token_endpoint_auth_method: MCPOAuthAuthMethod;
   registration_method: MCPOAuthRegistrationMethod;
 }

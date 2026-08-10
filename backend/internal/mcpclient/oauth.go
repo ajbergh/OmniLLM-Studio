@@ -122,11 +122,10 @@ func codeChallenge(verifier string) string {
 
 func canonicalResourceURI(raw string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return "", fmt.Errorf("invalid MCP resource URI")
+	if err != nil || parsed.Hostname() == "" || parsed.Scheme != "https" || parsed.User != nil {
+		return "", fmt.Errorf("MCP OAuth resource URI must be an HTTPS URL without embedded credentials")
 	}
 	parsed.Fragment = ""
-	parsed.User = nil
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	parsed.Host = strings.ToLower(parsed.Host)
 	if parsed.Path == "/" {

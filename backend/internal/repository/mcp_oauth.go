@@ -75,6 +75,18 @@ func (r *MCPOAuthRepo) ConfigureClient(serverID string, input models.ConfigureMC
 		return fmt.Errorf("unsupported OAuth registration_method %q", registrationMethod)
 	}
 
+	clientIssuer := strings.TrimSpace(input.ClientIssuer)
+	switch registrationMethod {
+	case models.MCPOAuthRegistrationPreregistered:
+		if clientIssuer == "" {
+			return fmt.Errorf("client_issuer is required for preregistered OAuth clients")
+		}
+	case models.MCPOAuthRegistrationCIMD:
+		clientIssuer = ""
+	case models.MCPOAuthRegistrationDCR:
+		return fmt.Errorf("dynamic OAuth registration is managed automatically")
+	}
+
 	secretEnc := ""
 	existingClientID, existingMethod, existingRegistration, existingIssuer := "", "", "", ""
 	var existingSecret sql.NullString
@@ -83,7 +95,7 @@ func (r *MCPOAuthRepo) ConfigureClient(serverID string, input models.ConfigureMC
 		return fmt.Errorf("read existing MCP OAuth client: %w", existingErr)
 	}
 	if input.ClientSecret == nil {
-		if existingSecret.Valid {
+		if existingErr == nil && existingClientID == clientID && existingMethod == method && existingRegistration == registrationMethod && existingIssuer == clientIssuer && existingSecret.Valid {
 			secretEnc = existingSecret.String
 		}
 	} else if *input.ClientSecret != "" {
@@ -93,11 +105,8 @@ func (r *MCPOAuthRepo) ConfigureClient(serverID string, input models.ConfigureMC
 			return fmt.Errorf("encrypt MCP OAuth client secret: %w", err)
 		}
 	}
-
-	configurationChanged := existingErr == sql.ErrNoRows || existingClientID != clientID || existingMethod != method || existingRegistration != registrationMethod || input.ClientSecret != nil
-	clientIssuer := existingIssuer
-	if configurationChanged || registrationMethod == models.MCPOAuthRegistrationCIMD {
-		clientIssuer = ""
+	if method != models.MCPOAuthAuthMethodNone && strings.TrimSpace(secretEnc) == "" {
+		return fmt.Errorf("client_secret is required for %s", method)
 	}
 
 	_, err := r.db.Exec(`
@@ -222,8 +231,10 @@ func (r *MCPOAuthRepo) Status(serverID, redirectURI string) (models.MCPOAuthStat
 	return status, nil
 }
 
-// BindClientIssuer enforces authorization-server ownership for preregistered
-// credentials. CIMD client IDs are self-hosted and portable across issuers.
+// BindClientIssuer verifies authorization-server ownership for preregistered
+// and DCR credentials. CIMD client IDs are self-hosted and portable across issuers.
+// The issuer is never learned on first use: preregistered credentials must carry
+// an explicit trusted issuer and DCR credentials are bound when registered.
 func (r *MCPOAuthRepo) BindClientIssuer(serverID, issuer string) error {
 	issuer = strings.TrimSpace(issuer)
 	credential, err := r.GetRuntime(serverID)
@@ -236,14 +247,14 @@ func (r *MCPOAuthRepo) BindClientIssuer(serverID, issuer string) error {
 	if credential.RegistrationMethod == models.MCPOAuthRegistrationCIMD {
 		return nil
 	}
-	if credential.ClientIssuer != "" && credential.ClientIssuer != issuer {
+	if credential.ClientIssuer == "" {
+		if credential.RegistrationMethod == models.MCPOAuthRegistrationDCR {
+			return fmt.Errorf("dynamic OAuth client has no authorization-server issuer binding")
+		}
+		return fmt.Errorf("preregistered OAuth client must declare its authorization-server issuer")
+	}
+	if credential.ClientIssuer != issuer {
 		return fmt.Errorf("OAuth client credentials are bound to authorization server %q, not %q", credential.ClientIssuer, issuer)
-	}
-	if credential.ClientIssuer == issuer {
-		return nil
-	}
-	if _, err := r.db.Exec(`UPDATE mcp_oauth_credentials SET client_issuer = ?, updated_at = CURRENT_TIMESTAMP WHERE server_id = ?`, issuer, serverID); err != nil {
-		return fmt.Errorf("bind MCP OAuth client issuer: %w", err)
 	}
 	return nil
 }

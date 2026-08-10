@@ -51,7 +51,9 @@ func TestMCPOAuthRepoEncryptsSecretsAndTokens(t *testing.T) {
 	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{
 		ClientID:                "client-1",
 		ClientSecret:            &secret,
+		ClientIssuer:            "https://auth.example.com",
 		TokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretBasic,
+		RegistrationMethod:      models.MCPOAuthRegistrationPreregistered,
 	}); err != nil {
 		t.Fatalf("configure client: %v", err)
 	}
@@ -93,10 +95,10 @@ func TestMCPOAuthRepoPreservesOrClearsClientSecretExplicitly(t *testing.T) {
 	repo, database := newMCPOAuthTestRepo(t)
 	defer database.Close()
 	secret := "secret"
-	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "client", ClientSecret: &secret, TokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretPost}); err != nil {
+	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "client", ClientSecret: &secret, ClientIssuer: "https://issuer.example", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretPost, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "client", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretPost}); err != nil {
+	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "client", ClientIssuer: "https://issuer.example", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretPost, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}); err != nil {
 		t.Fatal(err)
 	}
 	runtime, err := repo.GetRuntime("server-1")
@@ -104,7 +106,7 @@ func TestMCPOAuthRepoPreservesOrClearsClientSecretExplicitly(t *testing.T) {
 		t.Fatalf("nil secret update should preserve secret: %#v %v", runtime, err)
 	}
 	empty := ""
-	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "client", ClientSecret: &empty, TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone}); err != nil {
+	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "client", ClientSecret: &empty, ClientIssuer: "https://issuer.example", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}); err != nil {
 		t.Fatal(err)
 	}
 	runtime, err = repo.GetRuntime("server-1")
@@ -113,10 +115,10 @@ func TestMCPOAuthRepoPreservesOrClearsClientSecretExplicitly(t *testing.T) {
 	}
 }
 
-func TestMCPOAuthRepoBindsPreregisteredClientToIssuer(t *testing.T) {
+func TestMCPOAuthRepoVerifiesPreregisteredClientIssuer(t *testing.T) {
 	repo, database := newMCPOAuthTestRepo(t)
 	defer database.Close()
-	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "client", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}); err != nil {
+	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "client", ClientIssuer: "https://issuer.example", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.BindClientIssuer("server-1", "https://issuer.example"); err != nil {
@@ -128,6 +130,17 @@ func TestMCPOAuthRepoBindsPreregisteredClientToIssuer(t *testing.T) {
 	status, err := repo.Status("server-1", "http://127.0.0.1/callback")
 	if err != nil || status.ClientIssuer != "https://issuer.example" || status.RegistrationMethod != models.MCPOAuthRegistrationPreregistered {
 		t.Fatalf("unexpected binding status: %#v %v", status, err)
+	}
+}
+
+func TestMCPOAuthRepoRejectsMissingPreregisteredIssuerAndSecret(t *testing.T) {
+	repo, database := newMCPOAuthTestRepo(t)
+	defer database.Close()
+	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "client", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}); err == nil || !strings.Contains(err.Error(), "client_issuer") {
+		t.Fatalf("expected missing issuer rejection, got %v", err)
+	}
+	if err := repo.ConfigureClient("server-2", models.ConfigureMCPOAuthInput{ClientID: "client", ClientIssuer: "https://issuer.example", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodClientSecretBasic, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}); err == nil || !strings.Contains(err.Error(), "client_secret") {
+		t.Fatalf("expected missing secret rejection, got %v", err)
 	}
 }
 
