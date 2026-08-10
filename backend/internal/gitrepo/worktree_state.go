@@ -17,12 +17,27 @@ type changedStatusPath struct {
 	clean string
 }
 
-// worktreeStateDigest fingerprints the complete set of changed worktree paths,
-// including their staged/worktree status codes, file modes, regular-file bytes,
-// symlink targets, and deletions. Content is streamed through the repository-
-// rooted worktree filesystem so binary and oversized files remain covered
-// without exposing model-derived paths to process-wide filesystem operations.
-func (s *Service) worktreeStateDigest(ctx context.Context, repositoryID string, worktree *git.Worktree, status git.Status) (string, error) {
+// worktreeStateDigest fingerprints a status snapshot using the configured
+// repository's rooted worktree filesystem. The repository root comes only from
+// the immutable operator configuration, never from model arguments.
+func (s *Service) worktreeStateDigest(ctx context.Context, repositoryID string, status git.Status) (string, error) {
+	repo, err := s.open(repositoryID)
+	if err != nil {
+		return "", err
+	}
+	worktree, err := repo.Worktree()
+	if err != nil {
+		return "", safeRepositoryError(repositoryID, "does not expose a worktree")
+	}
+	return s.worktreeStateDigestWithWorktree(ctx, repositoryID, worktree, status)
+}
+
+// worktreeStateDigestWithWorktree fingerprints the complete set of changed
+// worktree paths, including staged/worktree status codes, file modes,
+// regular-file bytes, symlink targets, and deletions. Content is streamed
+// through the repository-rooted worktree filesystem so binary and oversized
+// files remain covered without process-wide filesystem access.
+func (s *Service) worktreeStateDigestWithWorktree(ctx context.Context, repositoryID string, worktree *git.Worktree, status git.Status) (string, error) {
 	root, ok := s.repositories[repositoryID]
 	if !ok {
 		return "", fmt.Errorf("repository %q is not configured", repositoryID)
@@ -53,7 +68,7 @@ func (s *Service) worktreeStateDigest(ctx context.Context, repositoryID string, 
 			return "", err
 		}
 		fileStatus := status[item.raw]
-		fingerprint, err := worktreePathFingerprint(ctx, worktree, root, item.clean)
+		fingerprint, err := worktreePathFingerprintWithWorktree(ctx, worktree, root, item.clean)
 		if err != nil {
 			return "", fmt.Errorf("path %q could not be fingerprinted safely", item.clean)
 		}
@@ -62,11 +77,26 @@ func (s *Service) worktreeStateDigest(ctx context.Context, repositoryID string, 
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-// worktreePathFingerprint hashes the Git-relevant current state of one path.
-// Symlinked parent directories are rejected first. Final metadata/content reads
-// then use go-git's repository-rooted billy filesystem; a final symlink is
-// hashed by target string rather than dereferenced, matching Git's object model.
-func worktreePathFingerprint(ctx context.Context, worktree *git.Worktree, repositoryRoot, cleanPath string) (string, error) {
+// worktreePathFingerprint preserves the mutation service's existing call shape
+// while ensuring final reads occur through a repository-rooted worktree
+// filesystem. repositoryRoot is trusted operator configuration.
+func worktreePathFingerprint(ctx context.Context, repositoryRoot, cleanPath string) (string, error) {
+	repo, err := git.PlainOpen(repositoryRoot)
+	if err != nil {
+		return "", fmt.Errorf("repository worktree could not be opened")
+	}
+	worktree, err := repo.Worktree()
+	if err != nil {
+		return "", fmt.Errorf("repository does not expose a worktree")
+	}
+	return worktreePathFingerprintWithWorktree(ctx, worktree, repositoryRoot, cleanPath)
+}
+
+// worktreePathFingerprintWithWorktree hashes the Git-relevant current state of
+// one path. Symlinked parent directories are rejected first. Final
+// metadata/content reads use go-git's repository-rooted billy filesystem; a
+// final symlink is hashed by target string rather than dereferenced.
+func worktreePathFingerprintWithWorktree(ctx context.Context, worktree *git.Worktree, repositoryRoot, cleanPath string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
