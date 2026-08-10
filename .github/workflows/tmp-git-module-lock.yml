@@ -6,7 +6,7 @@ on:
       - agent/git-repository-tools-gogit-5.19.2
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   generate:
@@ -17,17 +17,16 @@ jobs:
         with:
           go-version: '1.25.x'
           cache: false
-      - name: Generate module lock files
+      - name: Generate and commit module lock files
         shell: bash
         run: |
           cd backend
           go mod edit -require=github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec
           go mod tidy
-          echo 'BEGIN_GO_MOD_BASE64'
-          base64 -w0 go.mod
-          echo
-          echo 'END_GO_MOD_BASE64'
-          echo 'BEGIN_GO_SUM_BASE64'
-          base64 -w0 go.sum
-          echo
-          echo 'END_GO_SUM_BASE64'
+          cd ..
+          rm .github/workflows/tmp-git-module-lock.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/go.mod backend/go.sum .github/workflows/tmp-git-module-lock.yml
+          git commit -m 'fix(deps): tidy go-git module lock'
+          git push origin HEAD:agent/git-repository-tools-gogit-5.19.2
