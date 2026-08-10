@@ -20,10 +20,10 @@ import (
 )
 
 const (
-	githubAPIBaseURL               = "https://api.github.com"
-	maxGitHubAPIResponseBytes int64 = 1 << 20
-	maxGitHubPullRequestTitleRunes  = 256
-	maxGitHubPullRequestBodyBytes   = 32 << 10
+	githubAPIBaseURL                     = "https://api.github.com"
+	maxGitHubAPIResponseBytes      int64 = 1 << 20
+	maxGitHubPullRequestTitleRunes       = 256
+	maxGitHubPullRequestBodyBytes        = 32 << 10
 )
 
 var (
