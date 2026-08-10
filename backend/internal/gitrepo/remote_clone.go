@@ -263,7 +263,7 @@ func validateClonePackHeader(reader *bufio.Reader) error {
 		return fmt.Errorf("invalid Git pack header")
 	}
 	version := binary.BigEndian.Uint32(header[4:8])
-	if version != 2 && version != 3 {
+	if version != packfile.VersionSupported {
 		return fmt.Errorf("unsupported Git pack version %d", version)
 	}
 	objects := binary.BigEndian.Uint32(header[8:12])
