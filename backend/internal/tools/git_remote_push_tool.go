@@ -13,13 +13,25 @@ type gitRemotePushTool struct {
 	service gitrepo.RemotePusher
 }
 
+type gitRemoteBranchPublisherService interface {
+	gitrepo.RemotePusher
+	gitrepo.RemoteBranchPublisher
+	BranchCreateMutationEnabled() bool
+}
+
 // NewGitRemotePushTools returns remote-side Git mutation tools. Registration is
 // additionally gated by the process-wide remote push and local write settings.
+// A branch-publication tool is included only when its separate creation gate is
+// also enabled on a service that implements the guarded publication contract.
 func NewGitRemotePushTools(svc gitrepo.RemotePusher) []Tool {
 	if svc == nil {
 		return nil
 	}
-	return []Tool{&gitRemotePushTool{service: svc}}
+	out := []Tool{&gitRemotePushTool{service: svc}}
+	if publisher, ok := svc.(gitRemoteBranchPublisherService); ok && publisher.BranchCreateMutationEnabled() {
+		out = append(out, &gitRemotePublishBranchTool{service: publisher})
+	}
+	return out
 }
 
 func (t *gitRemotePushTool) Definition() ToolDefinition {
