@@ -3,6 +3,7 @@ package gitrepo
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 
 	git "github.com/go-git/go-git/v5"
@@ -82,7 +83,7 @@ func statusCodeName(code git.StatusCode) string {
 
 func cleanRepositoryPath(raw string) (string, error) {
 	raw = strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
-	if raw == "" || strings.HasPrefix(raw, "/") {
+	if raw == "" || strings.HasPrefix(raw, "/") || hasWindowsVolumePrefix(raw) {
 		return "", fmt.Errorf("path must be repository-relative")
 	}
 	cleaned := path.Clean(raw)
@@ -90,6 +91,24 @@ func cleanRepositoryPath(raw string) (string, error) {
 		return "", fmt.Errorf("path must stay within the repository worktree")
 	}
 	return cleaned, nil
+}
+
+func hasWindowsVolumePrefix(value string) bool {
+	if len(value) < 2 || value[1] != ':' {
+		return false
+	}
+	first := value[0]
+	return first >= 'A' && first <= 'Z' || first >= 'a' && first <= 'z'
+}
+
+func pathWithinRoot(root, candidate string) bool {
+	root = filepath.Clean(root)
+	candidate = filepath.Clean(candidate)
+	relative, err := filepath.Rel(root, candidate)
+	if err != nil || filepath.IsAbs(relative) {
+		return false
+	}
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func commitSubject(message string) string {

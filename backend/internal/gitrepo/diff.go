@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -112,6 +113,7 @@ func (s *Service) worktreeDiff(ctx context.Context, repositoryID string, repo *g
 		result.Truncated = true
 	}
 
+	repositoryRoot := s.repositories[repositoryID]
 	var output strings.Builder
 	for _, filePath := range paths {
 		if err := ctx.Err(); err != nil {
@@ -119,7 +121,11 @@ func (s *Service) worktreeDiff(ctx context.Context, repositoryID string, repo *g
 		}
 		oldPath := filePath
 		oldContent, oldExists, oldBinary, oldTooLarge := committedFileContent(headCommit, oldPath)
-		newContent, newExists, newBinary, newTooLarge := worktreeFileContent(worktree, filePath)
+		newContent, newExists, newBinary, newTooLarge, newErr := worktreeFileContent(repositoryRoot, filePath)
+		if newErr != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s omitted: %v", filePath, newErr))
+			continue
+		}
 		if oldTooLarge || newTooLarge {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("%s omitted because it exceeds %d bytes", filePath, maxDiffFileBytes))
 			continue
@@ -184,17 +190,48 @@ func committedFileContent(commit *object.Commit, filePath string) (content strin
 	return string(data), true, bytes.IndexByte(data, 0) >= 0, exceeded
 }
 
-func worktreeFileContent(worktree *git.Worktree, filePath string) (content string, exists, binary, tooLarge bool) {
-	file, err := worktree.Filesystem.Open(filePath)
+func worktreeFileContent(repositoryRoot, filePath string) (content string, exists, binary, tooLarge bool, err error) {
+	cleanPath, err := cleanRepositoryPath(filePath)
 	if err != nil {
-		return "", false, false, false
+		return "", false, false, false, fmt.Errorf("path is not repository-relative")
+	}
+	fullPath := filepath.Join(repositoryRoot, filepath.FromSlash(cleanPath))
+	if !pathWithinRoot(repositoryRoot, fullPath) {
+		return "", false, false, false, fmt.Errorf("path escapes the configured repository root")
+	}
+
+	info, err := os.Lstat(fullPath)
+	if os.IsNotExist(err) {
+		return "", false, false, false, nil
+	}
+	if err != nil {
+		return "", true, false, false, fmt.Errorf("worktree file metadata could not be read")
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", true, false, false, fmt.Errorf("symlink content is not rendered")
+	}
+	if info.IsDir() {
+		return "", true, false, false, fmt.Errorf("directory content is not rendered")
+	}
+
+	resolvedPath, err := filepath.EvalSymlinks(fullPath)
+	if err != nil {
+		return "", true, false, false, fmt.Errorf("worktree path could not be resolved safely")
+	}
+	if !pathWithinRoot(repositoryRoot, resolvedPath) {
+		return "", true, false, false, fmt.Errorf("resolved path escapes the configured repository root")
+	}
+
+	file, err := os.Open(resolvedPath)
+	if err != nil {
+		return "", true, false, false, fmt.Errorf("worktree file could not be read")
 	}
 	defer file.Close()
 	data, exceeded, err := readBounded(file, maxDiffFileBytes)
 	if err != nil {
-		return "", true, false, false
+		return "", true, false, false, fmt.Errorf("worktree file could not be read")
 	}
-	return string(data), true, bytes.IndexByte(data, 0) >= 0, exceeded
+	return string(data), true, bytes.IndexByte(data, 0) >= 0, exceeded, nil
 }
 
 func readBounded(reader io.Reader, maxBytes int) ([]byte, bool, error) {

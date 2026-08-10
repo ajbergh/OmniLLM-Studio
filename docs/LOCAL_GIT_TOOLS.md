@@ -26,7 +26,7 @@ If no repositories are configured, the local Git tool family is not registered.
 | `git_branches` | List local branches and the current/detached HEAD state. |
 | `git_blame` | Read bounded line attribution for a committed repository-relative file. |
 
-All tools are registered as read-only, low-risk, non-network operations in the existing tool-policy framework. `git_diff` output is bounded, worktree binary files are not rendered, and oversized worktree files are omitted with warnings. `git_blame` rejects absolute paths, parent traversal, and `.git` paths.
+All tools are registered as read-only, low-risk, non-network operations in the existing tool-policy framework. `git_diff` output is bounded; worktree binary files, symlinks, directories, and oversized files are omitted with warnings. Worktree file reads are resolved against the configured canonical repository root before content is opened, so repository symlinks cannot be used to read outside files. `git_blame` rejects Unix and Windows absolute paths, parent traversal, and `.git` paths.
 
 ## Implementation
 
@@ -36,7 +36,7 @@ The initial phase deliberately does **not** clone repositories, contact remotes,
 
 ## Validation
 
-Backend coverage includes repository configuration parsing, status/diff/log/show/branch/blame behavior, tool metadata and argument validation, conditional registry wiring, traversal rejection, and checks that configured local paths do not appear in model-visible results or errors.
+Backend coverage includes repository configuration parsing, status/diff/log/show/branch/blame behavior, tool metadata and argument validation, conditional registry wiring, Unix/Windows path-containment rejection, worktree symlink isolation, and checks that configured local paths do not appear in model-visible results or errors.
 
 Run the backend checks with:
 

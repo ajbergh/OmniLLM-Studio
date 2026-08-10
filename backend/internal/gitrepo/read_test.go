@@ -97,7 +97,7 @@ func TestServiceDoesNotExposeConfiguredPathInErrors(t *testing.T) {
 
 func TestBlameRejectsEscapingPaths(t *testing.T) {
 	svc := NewService(map[string]string{"repo": t.TempDir()})
-	for _, value := range []string{"../secret", "/etc/passwd", ".git/config"} {
+	for _, value := range []string{"../secret", "/etc/passwd", `C:\Windows\System32\drivers\etc\hosts`, ".git/config"} {
 		if _, err := svc.Blame(context.Background(), "repo", value, "HEAD", 0, 0); err == nil {
 			t.Fatalf("Blame(%q) error = nil, want containment error", value)
 		}

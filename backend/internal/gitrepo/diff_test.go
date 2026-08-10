@@ -2,6 +2,7 @@ package gitrepo
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,6 +38,43 @@ func TestServiceWorktreeDiffIncludesTrackedAndUntrackedFiles(t *testing.T) {
 	}
 	if diff.Mode != "worktree" || !strings.Contains(diff.Patch, "-world") || !strings.Contains(diff.Patch, "+changed") || !strings.Contains(diff.Patch, "+new file") {
 		t.Fatalf("unexpected worktree diff: %#v", diff)
+	}
+}
+
+func TestServiceWorktreeDiffDoesNotFollowSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree, err := repo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "README.md"), "base\n")
+	if _, err := worktree.Add("README.md"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.Commit("initial", &git.CommitOptions{Author: testSignature()}); err != nil {
+		t.Fatal(err)
+	}
+
+	secretDir := t.TempDir()
+	secretPath := filepath.Join(secretDir, "secret.txt")
+	writeTestFile(t, secretPath, "do-not-leak-this-content\n")
+	if err := os.Symlink(secretPath, filepath.Join(dir, "outside-link")); err != nil {
+		t.Skipf("symlinks unavailable in test environment: %v", err)
+	}
+
+	diff, err := NewService(map[string]string{"test": dir}).Diff(context.Background(), "test", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(diff.Patch, "do-not-leak-this-content") {
+		t.Fatalf("worktree diff followed symlink outside repository: %q", diff.Patch)
+	}
+	if !strings.Contains(strings.Join(diff.Warnings, "\n"), "symlink content is not rendered") {
+		t.Fatalf("expected symlink omission warning, got %#v", diff.Warnings)
 	}
 }
 
