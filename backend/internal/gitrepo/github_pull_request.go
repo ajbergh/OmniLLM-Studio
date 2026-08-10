@@ -28,8 +28,8 @@ const (
 
 var (
 	errGitHubPullRequestDisabled = errors.New("GitHub pull request creation is disabled")
-	githubOwnerPattern            = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,99}$`)
-	githubRepositoryPattern       = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
+	githubOwnerPattern           = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,99}$`)
+	githubRepositoryPattern      = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
 )
 
 // GitHubPullRequestCreator is the GitHub-specific remote collaboration contract.
