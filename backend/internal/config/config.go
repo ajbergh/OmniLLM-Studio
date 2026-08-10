@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,7 +30,8 @@ type Config struct {
 	// BrowserNoSandbox is an emergency compatibility override. The Chromium
 	// sandbox remains enabled by default and disabling it requires an explicit
 	// OMNILLM_BROWSER_NO_SANDBOX=true setting.
-	BrowserNoSandbox bool
+	BrowserNoSandbox    bool
+	MCPOAuthRedirectURI string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -90,6 +92,11 @@ func Load() *Config {
 	if value := strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_ENABLED")); value != "" {
 		browserEnabled = strings.EqualFold(value, "true")
 	}
+	mcpOAuthRedirectURI := strings.TrimSpace(os.Getenv("OMNILLM_MCP_OAUTH_REDIRECT_URI"))
+	if mcpOAuthRedirectURI == "" {
+		mcpOAuthRedirectURI = fmt.Sprintf("http://127.0.0.1:%d/v1/mcp/oauth/callback", port)
+	}
+
 	maxUploadBytes := int64(500 << 20)
 	if value := strings.TrimSpace(os.Getenv("OMNILLM_MAX_UPLOAD_BYTES")); value != "" {
 		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed > 0 {
@@ -110,20 +117,21 @@ func Load() *Config {
 	}
 
 	return &Config{
-		Port:               port,
-		BindAddress:        bindAddress,
-		DatabasePath:       dbPath,
-		AttachmentsDir:     attachmentsDir,
-		CORSOrigins:        origins,
-		AllowPublicReg:     strings.EqualFold(os.Getenv("OMNILLM_ALLOW_PUBLIC_REGISTRATION"), "true"),
-		ChromemDir:         chromemDir,
-		ChromemCompress:    strings.EqualFold(os.Getenv("OMNILLM_CHROMEM_COMPRESS"), "true"),
-		MaxUploadBytes:     maxUploadBytes,
-		BrowserEnabled:     browserEnabled,
-		BrowserExecPath:    strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_EXEC_PATH")),
-		BrowserCacheDir:    browserCacheDir,
-		BrowserMaxSessions: browserMaxSessions,
-		BrowserSessionTTL:  browserSessionTTL,
-		BrowserNoSandbox:   strings.EqualFold(os.Getenv("OMNILLM_BROWSER_NO_SANDBOX"), "true"),
+		Port:                port,
+		BindAddress:         bindAddress,
+		DatabasePath:        dbPath,
+		AttachmentsDir:      attachmentsDir,
+		CORSOrigins:         origins,
+		AllowPublicReg:      strings.EqualFold(os.Getenv("OMNILLM_ALLOW_PUBLIC_REGISTRATION"), "true"),
+		ChromemDir:          chromemDir,
+		ChromemCompress:     strings.EqualFold(os.Getenv("OMNILLM_CHROMEM_COMPRESS"), "true"),
+		MaxUploadBytes:      maxUploadBytes,
+		BrowserEnabled:      browserEnabled,
+		BrowserExecPath:     strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_EXEC_PATH")),
+		BrowserCacheDir:     browserCacheDir,
+		BrowserMaxSessions:  browserMaxSessions,
+		BrowserSessionTTL:   browserSessionTTL,
+		BrowserNoSandbox:    strings.EqualFold(os.Getenv("OMNILLM_BROWSER_NO_SANDBOX"), "true"),
+		MCPOAuthRedirectURI: mcpOAuthRedirectURI,
 	}
 }

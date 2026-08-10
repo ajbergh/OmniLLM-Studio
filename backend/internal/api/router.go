@@ -246,8 +246,14 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 
 	// Model Context Protocol
 	mcpRepo := repository.NewMCPServerRepo(database)
-	mcpManager := mcpclient.NewManager(mcpRepo, toolPermRepo, toolRegistry)
+	mcpOAuthRepo := repository.NewMCPOAuthRepo(database)
+	mcpOAuthService, err := mcpclient.NewOAuthService(mcpRepo, mcpOAuthRepo, cfg.MCPOAuthRedirectURI)
+	if err != nil {
+		log.Fatalf("init MCP OAuth: %v", err)
+	}
+	mcpManager := mcpclient.NewManager(mcpRepo, toolPermRepo, toolRegistry, mcpOAuthService)
 	mcpHandler := NewMCPHandler(mcpRepo, mcpManager)
+	mcpOAuthHandler := NewMCPOAuthHandler(mcpOAuthService, mcpManager)
 	mcpManager.StartEnabled(context.Background())
 	shutdownFns = append(shutdownFns, mcpManager.StopAll)
 
@@ -419,6 +425,9 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Post("/logout", authHandler.Logout)
 			r.Get("/status", authHandler.AuthStatus)
 		})
+
+		// OAuth authorization-server callback. One-time cryptographic state is the authorization boundary.
+		r.Get("/mcp/oauth/callback", mcpOAuthHandler.Callback)
 
 		// --- All routes below require auth (in multi-user mode) ---
 		r.Group(func(r chi.Router) {
@@ -721,6 +730,10 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 						r.Post("/stop", mcpHandler.StopServer)
 						r.Post("/restart", mcpHandler.RestartServer)
 						r.Post("/refresh", mcpHandler.RefreshTools)
+						r.Get("/oauth", mcpOAuthHandler.Status)
+						r.Put("/oauth", mcpOAuthHandler.Configure)
+						r.Post("/oauth/start", mcpOAuthHandler.Start)
+						r.Delete("/oauth", mcpOAuthHandler.Disconnect)
 						r.Get("/tools", mcpHandler.ListTools)
 						r.Patch("/tools/{toolName}", mcpHandler.UpdateToolPolicy)
 					})

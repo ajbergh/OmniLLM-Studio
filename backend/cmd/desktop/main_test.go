@@ -30,6 +30,27 @@ func TestDesktopLoopbackHandlerRejectsRequestsWithoutSecretPath(t *testing.T) {
 	}
 }
 
+func TestDesktopLoopbackHandlerAllowsOnlyOAuthCallbackWithoutSecret(t *testing.T) {
+	handler := desktopLoopbackHandler("/__desktop/launch-secret", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/mcp/oauth/callback" {
+			t.Fatalf("unexpected unprotected router path %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/mcp/oauth/callback?state=test&code=test", nil))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("OAuth callback returned %d, want %d", recorder.Code, http.StatusNoContent)
+	}
+
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/mcp/servers", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("unprotected MCP management path returned %d, want 404", recorder.Code)
+	}
+}
+
 func TestSetDesktopDefaultsEnablesBrowserRuntime(t *testing.T) {
 	t.Setenv("OMNILLM_CORS_ORIGINS", "http://wails.localhost")
 	t.Setenv("OMNILLM_DB_PATH", "test.db")
