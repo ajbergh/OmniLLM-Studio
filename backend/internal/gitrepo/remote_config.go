@@ -27,7 +27,8 @@ var credentialEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 // RemoteConfig binds a stable model-facing remote ID to one configured local
 // repository and one exact HTTPS endpoint. TokenEnv names an operator-provided
 // environment variable; the token value itself is never stored in this struct.
-// Push and default-branch push permissions are independent explicit opt-ins.
+// Push, default-branch push, and clone permissions are independent explicit
+// opt-ins layered on top of their process-wide gates.
 type RemoteConfig struct {
 	Repository             string `json:"repository"`
 	URL                    string `json:"url"`
@@ -35,10 +36,11 @@ type RemoteConfig struct {
 	TokenEnv               string `json:"token_env,omitempty"`
 	AllowPush              bool   `json:"allow_push,omitempty"`
 	AllowDefaultBranchPush bool   `json:"allow_default_branch_push,omitempty"`
+	AllowClone             bool   `json:"allow_clone,omitempty"`
 }
 
 // RemoteSummary describes a configured remote without exposing its URL,
-// credential-variable name, or credential value.
+// credential-variable name, credential value, or filesystem destination.
 type RemoteSummary struct {
 	ID                       string `json:"id"`
 	Repository               string `json:"repository"`
@@ -46,6 +48,7 @@ type RemoteSummary struct {
 	AuthenticationConfigured bool   `json:"authentication_configured"`
 	PushAllowed              bool   `json:"push_allowed"`
 	DefaultBranchPushAllowed bool   `json:"default_branch_push_allowed"`
+	CloneAllowed             bool   `json:"clone_allowed"`
 }
 
 // ParseRemoteConfig parses the operator-controlled JSON remote map. Invalid
