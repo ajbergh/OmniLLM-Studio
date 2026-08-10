@@ -1,0 +1,61 @@
+name: Replay tool diagnostics onto updated main
+
+on:
+  push:
+    branches:
+      - feat/tool-diagnostics-observability-main-20260809
+
+permissions:
+  contents: write
+
+jobs:
+  replay:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Replay validated diagnostics delta
+        run: |
+          git fetch origin feat/tool-diagnostics-observability-20260809
+          git diff be5c6413475224ed49877e07f31be245ffba63fc..origin/feat/tool-diagnostics-observability-20260809 -- \
+            backend/internal/api/router.go \
+            backend/internal/api/tool_diagnostics_handler.go \
+            backend/internal/api/tool_diagnostics_handler_test.go \
+            backend/internal/repository/tool_invocation.go \
+            backend/internal/repository/tool_invocation_test.go \
+            docs/CHAT_TOOL_ORCHESTRATION_METRICS_2026-07-21.md \
+            frontend/src/components/SettingsPanel.tsx \
+            frontend/src/components/ToolDiagnosticsPanel.tsx \
+            frontend/src/toolDiagnosticsApi.ts | git apply --index
+      - name: Validate backend
+        working-directory: backend
+        run: |
+          gofmt -w internal/repository/tool_invocation.go internal/repository/tool_invocation_test.go internal/api/tool_diagnostics_handler.go internal/api/tool_diagnostics_handler_test.go internal/api/router.go
+          go test ./internal/repository ./internal/api ./internal/tools
+          go vet ./internal/repository ./internal/api ./internal/tools
+      - name: Validate frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run test:unit
+          npm run build
+      - name: Commit clean diagnostics replay
+        run: |
+          rm .github/workflows/replay-tool-diagnostics-main.yml
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat(tools): surface privacy-safe tool diagnostics"
+          git push origin HEAD
