@@ -10,6 +10,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
@@ -70,16 +71,40 @@ func TestServiceGuardedBranchStageAndCommitFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Branch, strings.Repeat("0", 40), beforeStage.IndexDigest); err == nil {
+	beforeDiff, err := svc.Diff(ctx, "repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(beforeDiff.WorktreeDigest) != 64 {
+		t.Fatalf("worktree digest length = %d, want 64", len(beforeDiff.WorktreeDigest))
+	}
+
+	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Branch, strings.Repeat("0", 40), beforeStage.IndexDigest, beforeDiff.WorktreeDigest); err == nil {
 		t.Fatal("Stage() stale expected_head error = nil")
 	}
-	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, "wrong-branch", beforeStage.Head, beforeStage.IndexDigest); err == nil {
+	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, "wrong-branch", beforeStage.Head, beforeStage.IndexDigest, beforeDiff.WorktreeDigest); err == nil {
 		t.Fatal("Stage() stale expected_branch error = nil")
 	}
-	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Branch, beforeStage.Head, strings.Repeat("0", 64)); err == nil {
+	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Branch, beforeStage.Head, strings.Repeat("0", 64), beforeDiff.WorktreeDigest); err == nil {
 		t.Fatal("Stage() stale expected_index_digest error = nil")
 	}
-	staged, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Branch, beforeStage.Head, beforeStage.IndexDigest)
+	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Branch, beforeStage.Head, beforeStage.IndexDigest, strings.Repeat("0", 64)); err == nil {
+		t.Fatal("Stage() stale expected_worktree_digest error = nil")
+	}
+
+	// The file remains "modified" at the status-code level, but changing its
+	// bytes after review must still invalidate the stage approval.
+	writeTestFile(t, filepath.Join(dir, "hello.txt"), "changed after review\n")
+	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Branch, beforeStage.Head, beforeStage.IndexDigest, beforeDiff.WorktreeDigest); err == nil {
+		t.Fatal("Stage() accepted file content changed after git_diff review")
+	}
+	writeTestFile(t, filepath.Join(dir, "hello.txt"), "feature change\n")
+	beforeDiff, err = svc.Diff(ctx, "repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	staged, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Branch, beforeStage.Head, beforeStage.IndexDigest, beforeDiff.WorktreeDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,6 +157,69 @@ func TestServiceGuardedBranchStageAndCommitFlow(t *testing.T) {
 	}
 }
 
+func TestStageDeletedFile(t *testing.T) {
+	dir, repo, _, _ := setupWritableRepository(t)
+	svc := NewServiceWithWriteAccess(map[string]string{"repo": dir}, true)
+	ctx := context.Background()
+	if err := os.Remove(filepath.Join(dir, "hello.txt")); err != nil {
+		t.Fatal(err)
+	}
+	status, err := svc.Status(ctx, "repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff, err := svc.Diff(ctx, "repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, status.Branch, status.Head, status.IndexDigest, diff.WorktreeDigest); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := repo.Storer.Index()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range idx.Entries {
+		if entry.Name == "hello.txt" {
+			t.Fatal("deleted hello.txt remained in the staged index")
+		}
+	}
+}
+
+func TestStageFinalSymlinkWithoutDereferencing(t *testing.T) {
+	dir, repo, _, _ := setupWritableRepository(t)
+	svc := NewServiceWithWriteAccess(map[string]string{"repo": dir}, true)
+	ctx := context.Background()
+	writeTestFile(t, filepath.Join(dir, "target.txt"), "target content\n")
+	if err := os.Symlink("target.txt", filepath.Join(dir, "link.txt")); err != nil {
+		t.Skipf("symlink unavailable on this platform: %v", err)
+	}
+	status, err := svc.Status(ctx, "repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff, err := svc.Diff(ctx, "repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Stage(ctx, "repo", []string{"link.txt"}, status.Branch, status.Head, status.IndexDigest, diff.WorktreeDigest); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := repo.Storer.Index()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range idx.Entries {
+		if entry.Name == "link.txt" {
+			if entry.Mode != filemode.Symlink {
+				t.Fatalf("link.txt mode = %v, want symlink", entry.Mode)
+			}
+			return
+		}
+	}
+	t.Fatal("link.txt was not staged")
+}
+
 func TestStageRejectsUnsafeAndNonFilePaths(t *testing.T) {
 	dir, _, _, _ := setupWritableRepository(t)
 	svc := NewServiceWithWriteAccess(map[string]string{"repo": dir}, true)
@@ -145,10 +233,14 @@ func TestStageRejectsUnsafeAndNonFilePaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Stage(ctx, "repo", []string{"nested"}, status.Branch, status.Head, status.IndexDigest); err == nil {
+	diff, err := svc.Diff(ctx, "repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Stage(ctx, "repo", []string{"nested"}, status.Branch, status.Head, status.IndexDigest, diff.WorktreeDigest); err == nil {
 		t.Fatal("Stage() directory error = nil")
 	}
-	if _, err := svc.Stage(ctx, "repo", []string{"../outside"}, status.Branch, status.Head, status.IndexDigest); err == nil {
+	if _, err := svc.Stage(ctx, "repo", []string{"../outside"}, status.Branch, status.Head, status.IndexDigest, diff.WorktreeDigest); err == nil {
 		t.Fatal("Stage() traversal error = nil")
 	}
 
