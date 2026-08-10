@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-billy/v5/osfs"
+	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/format/packfile"
@@ -39,15 +39,15 @@ type RemoteCloner interface {
 // RemoteCloneResult describes a successfully promoted clone without revealing
 // its configured filesystem destination or remote URL.
 type RemoteCloneResult struct {
-	Remote             string `json:"remote"`
-	Repository         string `json:"repository"`
-	Branch             string `json:"branch"`
-	Head               string `json:"head"`
-	BytesReceived      int64  `json:"bytes_received"`
-	StorageBytesUsed   int64  `json:"storage_bytes_used"`
-	EntriesCreated     int64  `json:"entries_created"`
-	StorageByteLimit   int64  `json:"storage_byte_limit"`
-	StorageEntryLimit  int64  `json:"storage_entry_limit"`
+	Remote            string `json:"remote"`
+	Repository        string `json:"repository"`
+	Branch            string `json:"branch"`
+	Head              string `json:"head"`
+	BytesReceived     int64  `json:"bytes_received"`
+	StorageBytesUsed  int64  `json:"storage_bytes_used"`
+	EntriesCreated    int64  `json:"entries_created"`
+	StorageByteLimit  int64  `json:"storage_byte_limit"`
+	StorageEntryLimit int64  `json:"storage_entry_limit"`
 }
 
 // Clone creates one non-bare repository at the selected remote's preconfigured
@@ -111,7 +111,7 @@ func (s *RemoteService) Clone(ctx context.Context, remoteID, expectedBranch, exp
 		return nil, safeRepositoryError(remote.Repository, "temporary Git storage could not be initialized")
 	}
 	storage := filesystem.NewStorageWithOptions(dotGitFS, cache.NewObjectLRUDefault(), filesystem.Options{
-		ExclusiveAccess:       true,
+		ExclusiveAccess:      true,
 		LargeObjectThreshold: cloneLargeObjectThreshold,
 	})
 	repo, err := git.InitWithOptions(storage, worktreeFS, git.InitOptions{DefaultBranch: branchRef})
