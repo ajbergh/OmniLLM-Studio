@@ -1,9 +1,9 @@
-name: Apply scoped policy and ToolSearch onto main
+name: Apply scoped policy and ToolSearch repair
 
 on:
   push:
     branches:
-      - feat/scoped-tool-policy-toolsearch-main-20260809
+      - fix/phase8-source-repair-20260809
 
 permissions:
   contents: write
@@ -78,7 +78,7 @@ jobs:
           npm run lint
           npm run test:unit
           npm run build
-      - name: Commit final Phase 8
+      - name: Commit repaired Phase 8 source
         run: |
           rm .github/workflows/apply-scoped-policy-final-main.yml
           rm .github/scripts/apply_scoped_policy_final.py
@@ -86,5 +86,5 @@ jobs:
           git diff --cached --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "feat(tools): add scoped permissions and deferred ToolSearch"
+          git commit -m "fix(tools): land scoped permissions and deferred ToolSearch source"
           git push origin HEAD
