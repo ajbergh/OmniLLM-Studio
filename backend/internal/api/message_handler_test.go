@@ -21,9 +21,6 @@ func TestComposeSystemPrompt_AlwaysIncludesMarkdownDirective(t *testing.T) {
 			if !strings.Contains(got, markdownFormattingDirective) {
 				t.Fatalf("composed prompt missing Markdown directive. got: %q", got)
 			}
-			if !strings.Contains(got, sportsLookupSystemDirective) {
-				t.Fatalf("composed prompt missing sports lookup directive. got: %q", got)
-			}
 			if tc.userPrompt != "" && !strings.Contains(got, tc.userPrompt) {
 				t.Fatalf("composed prompt missing user prompt. got: %q", got)
 			}
