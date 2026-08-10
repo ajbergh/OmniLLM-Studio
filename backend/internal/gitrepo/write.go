@@ -347,8 +347,6 @@ func indexDigest(repo *git.Repository) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	entries := append([]*structIndexEntry(nil), nil...)
-	_ = entries
 	ordered := make([]indexDigestEntry, 0, len(idx.Entries))
 	for _, entry := range idx.Entries {
 		ordered = append(ordered, indexDigestEntry{
@@ -377,5 +375,3 @@ type indexDigestEntry struct {
 	mode  uint32
 	stage uint8
 }
-
-type structIndexEntry struct{}
