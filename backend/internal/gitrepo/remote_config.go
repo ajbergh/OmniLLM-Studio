@@ -20,6 +20,9 @@ const (
 	// RemotePushEnabledEnv is an additional operator gate reserved for push.
 	// Enabling remote reads does not implicitly enable remote writes.
 	RemotePushEnabledEnv = "OMNILLM_GIT_REMOTE_PUSH_ENABLED"
+	// RemoteBranchCreateEnabledEnv is a separate process-wide gate for creating
+	// new remote branches. Enabling ordinary push never enables ref creation.
+	RemoteBranchCreateEnabledEnv = "OMNILLM_GIT_REMOTE_BRANCH_CREATE_ENABLED"
 )
 
 var credentialEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
@@ -27,14 +30,15 @@ var credentialEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 // RemoteConfig binds a stable model-facing remote ID to one configured local
 // repository and one exact HTTPS endpoint. TokenEnv names an operator-provided
 // environment variable; the token value itself is never stored in this struct.
-// Push, default-branch push, and clone permissions are independent explicit
-// opt-ins layered on top of their process-wide gates.
+// Push, remote-branch creation, default-branch push, and clone permissions are
+// independent explicit opt-ins layered on top of their process-wide gates.
 type RemoteConfig struct {
 	Repository             string `json:"repository"`
 	URL                    string `json:"url"`
 	Username               string `json:"username,omitempty"`
 	TokenEnv               string `json:"token_env,omitempty"`
 	AllowPush              bool   `json:"allow_push,omitempty"`
+	AllowBranchCreate      bool   `json:"allow_branch_create,omitempty"`
 	AllowDefaultBranchPush bool   `json:"allow_default_branch_push,omitempty"`
 	AllowClone             bool   `json:"allow_clone,omitempty"`
 }
@@ -47,6 +51,7 @@ type RemoteSummary struct {
 	Host                     string `json:"host"`
 	AuthenticationConfigured bool   `json:"authentication_configured"`
 	PushAllowed              bool   `json:"push_allowed"`
+	BranchCreateAllowed      bool   `json:"branch_create_allowed"`
 	DefaultBranchPushAllowed bool   `json:"default_branch_push_allowed"`
 	CloneAllowed             bool   `json:"clone_allowed"`
 }
@@ -96,6 +101,9 @@ func normalizeRemoteConfig(candidate RemoteConfig) (RemoteConfig, bool) {
 	}
 	if candidate.TokenEnv != "" && candidate.Username == "" {
 		candidate.Username = "git"
+	}
+	if candidate.AllowBranchCreate && !candidate.AllowPush {
+		return RemoteConfig{}, false
 	}
 	if candidate.AllowDefaultBranchPush && !candidate.AllowPush {
 		return RemoteConfig{}, false
