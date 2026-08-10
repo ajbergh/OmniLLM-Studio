@@ -47,13 +47,16 @@ type RemoteStatusResult struct {
 // or go-git transport behavior. local is the same configured Service used by the
 // local Git tools so network mutations share its write serialization and gate.
 type RemoteService struct {
-	remotes     map[string]RemoteConfig
-	ids         []string
-	enabled     bool
-	pushEnabled bool
-	transport   transport.Transport
-	lookupEnv   func(string) (string, bool)
-	local       *Service
+	remotes         map[string]RemoteConfig
+	ids             []string
+	enabled         bool
+	pushEnabled     bool
+	cloneEnabled    bool
+	cloneMaxBytes   int64
+	cloneMaxEntries int64
+	transport       transport.Transport
+	lookupEnv       func(string) (string, bool)
+	local           *Service
 }
 
 // NewRemoteServiceFromEnvironment constructs the remote service from operator
@@ -71,6 +74,11 @@ func NewRemoteServiceFromEnvironment(local *Service) *RemoteService {
 	}
 	service := newRemoteService(filtered, boolEnvironment(RemoteEnabledEnv), boolEnvironment(RemotePushEnabledEnv), newRemoteStatusTransport(), os.LookupEnv)
 	service.local = local
+	if maxBytes, maxEntries, ok := cloneLimitsFromEnvironment(); ok {
+		service.cloneMaxBytes = maxBytes
+		service.cloneMaxEntries = maxEntries
+	}
+	service.cloneEnabled = boolEnvironment(RemoteCloneEnabledEnv)
 	return service
 }
 
@@ -88,7 +96,7 @@ func newRemoteService(configured map[string]RemoteConfig, enabled, pushEnabled b
 }
 
 // Configured reports whether at least one valid remote is bound to a configured
-// local repository.
+// local repository ID.
 func (s *RemoteService) Configured() bool { return s != nil && len(s.ids) > 0 }
 
 // Enabled reports whether the operator allowed outbound Git network access.
@@ -103,6 +111,13 @@ func (s *RemoteService) PushEnabled() bool { return s != nil && s.pushEnabled }
 // required for a remote push mutation. Per-remote policy is checked by Push.
 func (s *RemoteService) PushMutationEnabled() bool {
 	return s != nil && s.Enabled() && s.PushEnabled() && s.local != nil && s.local.WriteEnabled()
+}
+
+// CloneMutationEnabled reports whether all process-wide clone prerequisites are
+// present. Per-remote allow_clone and destination state are checked by Clone.
+func (s *RemoteService) CloneMutationEnabled() bool {
+	return s != nil && s.Enabled() && s.cloneEnabled && s.cloneMaxBytes >= minRemoteCloneBytes &&
+		s.cloneMaxEntries >= minRemoteCloneEntries && s.local != nil && s.local.WriteEnabled()
 }
 
 // Remotes returns safe summaries only. Endpoint paths and credential references
@@ -123,6 +138,7 @@ func (s *RemoteService) Remotes(ctx context.Context) []RemoteSummary {
 			AuthenticationConfigured: remote.TokenEnv != "",
 			PushAllowed:              s.PushMutationEnabled() && remote.AllowPush,
 			DefaultBranchPushAllowed: s.PushMutationEnabled() && remote.AllowPush && remote.AllowDefaultBranchPush,
+			CloneAllowed:             s.CloneMutationEnabled() && remote.AllowClone,
 		})
 	}
 	return out
