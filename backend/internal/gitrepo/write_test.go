@@ -33,8 +33,8 @@ func TestServiceGuardedBranchStageAndCommitFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(initialStatus.IndexDigest) != 64 {
-		t.Fatalf("initial index digest length = %d, want 64", len(initialStatus.IndexDigest))
+	if len(initialStatus.IndexDigest) != 64 || initialStatus.Branch == "" {
+		t.Fatalf("unexpected initial status: %#v", initialStatus)
 	}
 
 	created, err := svc.CreateBranch(ctx, "repo", "feature/test", "HEAD", initialHead)
@@ -70,14 +70,27 @@ func TestServiceGuardedBranchStageAndCommitFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, strings.Repeat("0", 40)); err == nil {
+	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Branch, strings.Repeat("0", 40), beforeStage.IndexDigest); err == nil {
 		t.Fatal("Stage() stale expected_head error = nil")
 	}
-	staged, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Head)
+	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, "wrong-branch", beforeStage.Head, beforeStage.IndexDigest); err == nil {
+		t.Fatal("Stage() stale expected_branch error = nil")
+	}
+	if _, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Branch, beforeStage.Head, strings.Repeat("0", 64)); err == nil {
+		t.Fatal("Stage() stale expected_index_digest error = nil")
+	}
+	staged, err := svc.Stage(ctx, "repo", []string{"hello.txt"}, beforeStage.Branch, beforeStage.Head, beforeStage.IndexDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if staged.IndexDigest == beforeStage.IndexDigest {
+	if staged.Branch != beforeStage.Branch || staged.Head != beforeStage.Head || len(staged.Paths) != 1 {
+		t.Fatalf("unexpected stage result: %#v", staged)
+	}
+	afterStage, err := svc.Status(ctx, "repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterStage.IndexDigest == beforeStage.IndexDigest {
 		t.Fatal("Stage() did not change index digest")
 	}
 
@@ -87,10 +100,13 @@ func TestServiceGuardedBranchStageAndCommitFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Commit(ctx, "repo", "feature commit", ready.Head, strings.Repeat("0", 64)); err == nil {
+	if _, err := svc.Commit(ctx, "repo", "feature commit", "wrong-branch", ready.Head, ready.IndexDigest); err == nil {
+		t.Fatal("Commit() stale expected_branch error = nil")
+	}
+	if _, err := svc.Commit(ctx, "repo", "feature commit", ready.Branch, ready.Head, strings.Repeat("0", 64)); err == nil {
 		t.Fatal("Commit() stale index digest error = nil")
 	}
-	committed, err := svc.Commit(ctx, "repo", "feature commit", ready.Head, ready.IndexDigest)
+	committed, err := svc.Commit(ctx, "repo", "feature commit", ready.Branch, ready.Head, ready.IndexDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +133,7 @@ func TestServiceGuardedBranchStageAndCommitFlow(t *testing.T) {
 }
 
 func TestStageRejectsUnsafeAndNonFilePaths(t *testing.T) {
-	dir, _, _, head := setupWritableRepository(t)
+	dir, _, _, _ := setupWritableRepository(t)
 	svc := NewServiceWithWriteAccess(map[string]string{"repo": dir}, true)
 	ctx := context.Background()
 
@@ -125,10 +141,14 @@ func TestStageRejectsUnsafeAndNonFilePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeTestFile(t, filepath.Join(dir, "nested", "file.txt"), "nested\n")
-	if _, err := svc.Stage(ctx, "repo", []string{"nested"}, head); err == nil {
+	status, err := svc.Status(ctx, "repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Stage(ctx, "repo", []string{"nested"}, status.Branch, status.Head, status.IndexDigest); err == nil {
 		t.Fatal("Stage() directory error = nil")
 	}
-	if _, err := svc.Stage(ctx, "repo", []string{"../outside"}, head); err == nil {
+	if _, err := svc.Stage(ctx, "repo", []string{"../outside"}, status.Branch, status.Head, status.IndexDigest); err == nil {
 		t.Fatal("Stage() traversal error = nil")
 	}
 
@@ -139,7 +159,7 @@ func TestStageRejectsUnsafeAndNonFilePaths(t *testing.T) {
 		t.Skipf("symlink unavailable on this platform: %v", err)
 	}
 	if err := validateStageFilesystemPath(dir, "escape/secret.txt"); err == nil {
-		t.Fatal("validateStageFilesystemPath() followed parent symlink outside repository")
+		t.Fatal("validateStageFilesystemPath() accepted a symlinked parent")
 	}
 }
 
