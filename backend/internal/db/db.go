@@ -145,6 +145,7 @@ func versionedMigrations() []Migration {
 		{Version: 42, Name: "agent_runtime", SQL: migrationAgentRuntime},
 		{Version: 43, Name: "video_transcriptions", SQL: migrationVideoTranscriptions},
 		{Version: 44, Name: "assistant_profiles_skills", SQL: migrationAssistantProfilesSkills},
+		{Version: 45, Name: "openapi_tool_servers", SQL: migrationOpenAPIToolServers},
 	}
 }
 
@@ -1310,4 +1311,23 @@ CREATE TABLE IF NOT EXISTS skills (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_owner_name ON skills(owner_user_id, name);
 CREATE INDEX IF NOT EXISTS idx_skills_workspace ON skills(workspace_id, name);
+`
+
+// V45: Owner-scoped OpenAPI tool-server definitions with encrypted credentials.
+const migrationOpenAPIToolServers = `
+CREATE TABLE IF NOT EXISTS openapi_servers (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    base_url TEXT NOT NULL,
+    spec_json TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    allow_private_network INTEGER NOT NULL DEFAULT 0,
+    auth_header TEXT NOT NULL DEFAULT 'Authorization',
+    auth_prefix TEXT NOT NULL DEFAULT 'Bearer',
+    api_key_encrypted TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_openapi_servers_owner ON openapi_servers(owner_user_id, name);
 `
