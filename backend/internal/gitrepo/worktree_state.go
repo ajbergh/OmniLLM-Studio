@@ -1,6 +1,7 @@
 package gitrepo
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -21,13 +22,16 @@ type changedStatusPath struct {
 // including their staged/worktree status codes, file modes, regular-file bytes,
 // symlink targets, and deletions. It streams file content instead of buffering it
 // so the digest can cover binary and oversized files that git_diff does not render.
-func (s *Service) worktreeStateDigest(repositoryID string, status git.Status) (string, error) {
+func (s *Service) worktreeStateDigest(ctx context.Context, repositoryID string, status git.Status) (string, error) {
 	root, ok := s.repositories[repositoryID]
 	if !ok {
 		return "", fmt.Errorf("repository %q is not configured", repositoryID)
 	}
 	paths := make([]changedStatusPath, 0, len(status))
 	for filePath, fileStatus := range status {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		if fileStatus.Staging == git.Unmodified && fileStatus.Worktree == git.Unmodified {
 			continue
 		}
@@ -42,8 +46,11 @@ func (s *Service) worktreeStateDigest(repositoryID string, status git.Status) (s
 	h := sha256.New()
 	_, _ = io.WriteString(h, "omnillm-worktree-state-v1\n")
 	for _, item := range paths {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		fileStatus := status[item.raw]
-		fingerprint, err := worktreePathFingerprint(root, item.clean)
+		fingerprint, err := worktreePathFingerprint(ctx, root, item.clean)
 		if err != nil {
 			return "", fmt.Errorf("path %q could not be fingerprinted safely", item.clean)
 		}
@@ -56,7 +63,10 @@ func (s *Service) worktreeStateDigest(repositoryID string, status git.Status) (s
 // The filesystem path is constructed from a securely resolved parent and a
 // single basename. A final symlink is hashed by link target rather than
 // dereferenced, matching Git's object model.
-func worktreePathFingerprint(repositoryRoot, cleanPath string) (string, error) {
+func worktreePathFingerprint(ctx context.Context, repositoryRoot, cleanPath string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	fullPath, err := containedFingerprintPath(repositoryRoot, cleanPath)
 	if err != nil {
 		return "", err
@@ -89,8 +99,23 @@ func worktreePathFingerprint(repositoryRoot, cleanPath string) (string, error) {
 	}
 	defer file.Close()
 	_, _ = io.WriteString(h, "file\x00")
-	if _, err := io.Copy(h, file); err != nil {
-		return "", fmt.Errorf("path content could not be read")
+	buffer := make([]byte, 64<<10)
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		n, readErr := file.Read(buffer)
+		if n > 0 {
+			if _, err := h.Write(buffer[:n]); err != nil {
+				return "", fmt.Errorf("path content could not be hashed")
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return "", fmt.Errorf("path content could not be read")
+		}
 	}
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
