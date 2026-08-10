@@ -1,6 +1,7 @@
 package gitrepo
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -36,8 +37,55 @@ func TestServiceWorktreeDiffIncludesTrackedAndUntrackedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff.Mode != "worktree" || !strings.Contains(diff.Patch, "-world") || !strings.Contains(diff.Patch, "+changed") || !strings.Contains(diff.Patch, "+new file") {
+	if diff.Mode != "worktree" || len(diff.WorktreeDigest) != 64 || !strings.Contains(diff.Patch, "-world") || !strings.Contains(diff.Patch, "+changed") || !strings.Contains(diff.Patch, "+new file") {
 		t.Fatalf("unexpected worktree diff: %#v", diff)
+	}
+}
+
+func TestServiceWorktreeDigestCoversOversizedOmittedContent(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree, err := repo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "README.md"), "base\n")
+	if _, err := worktree.Add("README.md"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.Commit("initial", &git.CommitOptions{Author: testSignature()}); err != nil {
+		t.Fatal(err)
+	}
+
+	large := bytes.Repeat([]byte{'x'}, maxDiffFileBytes+128)
+	if err := os.WriteFile(filepath.Join(dir, "large.bin"), large, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(map[string]string{"test": dir})
+	first, err := svc.Diff(context.Background(), "test", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(first.Warnings, "\n"), "exceeds") {
+		t.Fatalf("expected oversized omission warning, got %#v", first.Warnings)
+	}
+	if len(first.WorktreeDigest) != 64 {
+		t.Fatalf("first worktree digest length = %d, want 64", len(first.WorktreeDigest))
+	}
+
+	large[len(large)-1] = 'y'
+	if err := os.WriteFile(filepath.Join(dir, "large.bin"), large, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.Diff(context.Background(), "test", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.WorktreeDigest == first.WorktreeDigest {
+		t.Fatal("worktree digest did not change when omitted oversized content changed")
 	}
 }
 
@@ -76,6 +124,9 @@ func TestServiceWorktreeDiffDoesNotFollowSymlinks(t *testing.T) {
 	if !strings.Contains(strings.Join(diff.Warnings, "\n"), "symlink content is not rendered") {
 		t.Fatalf("expected symlink omission warning, got %#v", diff.Warnings)
 	}
+	if len(diff.WorktreeDigest) != 64 {
+		t.Fatalf("symlink worktree digest length = %d, want 64", len(diff.WorktreeDigest))
+	}
 }
 
 func TestServiceRevisionDiff(t *testing.T) {
@@ -113,7 +164,7 @@ func TestServiceRevisionDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff.Mode != "revision" || diff.From != first.String() || diff.To != second.String() {
+	if diff.Mode != "revision" || diff.From != first.String() || diff.To != second.String() || diff.WorktreeDigest != "" {
 		t.Fatalf("unexpected revision diff metadata: %#v", diff)
 	}
 	if !strings.Contains(diff.Patch, "-one") || !strings.Contains(diff.Patch, "+two") {
