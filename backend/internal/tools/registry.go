@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/ajbergh/omnillm-studio/internal/gitrepo"
 )
 
 // Registry holds all registered tools and supports thread-safe lookup. An
@@ -19,12 +21,20 @@ type Registry struct {
 }
 
 // NewRegistry creates a registry with dependency-free core utilities. Tools
-// requiring application services are still registered by api/router.go.
+// requiring application services are still registered by api/router.go. Local
+// Git tools are added only when explicit repository IDs are configured through
+// OMNILLM_GIT_REPOSITORIES.
 func NewRegistry() *Registry {
 	r := &Registry{tools: make(map[string]Tool)}
 	r.MustRegister(NewDateTimeTool())
 	r.MustRegister(NewUnitConvertTool())
 	r.MustRegister(NewPythonAnalysisTool())
+	gitService := gitrepo.NewServiceFromEnvironment()
+	if gitService.Configured() {
+		for _, tool := range NewGitRepositoryTools(gitService) {
+			r.MustRegister(tool)
+		}
+	}
 	return r
 }
 
