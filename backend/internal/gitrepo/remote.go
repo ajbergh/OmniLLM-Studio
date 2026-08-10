@@ -3,6 +3,7 @@ package gitrepo
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"sort"
@@ -44,22 +45,25 @@ type RemoteStatusResult struct {
 	Truncated         bool              `json:"truncated,omitempty"`
 }
 
-// RemoteService owns operator-configured outbound Git endpoints. The transport
-// is dedicated to this service so remote status does not alter process-wide HTTP
-// or go-git transport behavior. local is the same configured Service used by the
-// local Git tools so network mutations share its write serialization and gate.
+// RemoteService owns operator-configured outbound Git endpoints. The Git
+// transport and GitHub API client are dedicated to this service so remote
+// operations do not alter process-wide HTTP or go-git behavior. local is the
+// same configured Service used by local Git tools so reviewed local state can be
+// bound to network mutations.
 type RemoteService struct {
-	remotes             map[string]RemoteConfig
-	ids                 []string
-	enabled             bool
-	pushEnabled         bool
-	branchCreateEnabled bool
-	cloneEnabled        bool
-	cloneMaxBytes       int64
-	cloneMaxEntries     int64
-	transport           transport.Transport
-	lookupEnv           func(string) (string, bool)
-	local               *Service
+	remotes                   map[string]RemoteConfig
+	ids                       []string
+	enabled                   bool
+	pushEnabled               bool
+	branchCreateEnabled       bool
+	githubPullRequestEnabled  bool
+	cloneEnabled              bool
+	cloneMaxBytes             int64
+	cloneMaxEntries           int64
+	transport                 transport.Transport
+	githubClient              *http.Client
+	lookupEnv                 func(string) (string, bool)
+	local                     *Service
 }
 
 // NewRemoteServiceFromEnvironment constructs the remote service from operator
@@ -78,6 +82,7 @@ func NewRemoteServiceFromEnvironment(local *Service) *RemoteService {
 	service := newRemoteService(filtered, boolEnvironment(RemoteEnabledEnv), boolEnvironment(RemotePushEnabledEnv), newRemoteStatusTransport(), os.LookupEnv)
 	service.local = local
 	service.branchCreateEnabled = boolEnvironment(RemoteBranchCreateEnabledEnv)
+	service.githubPullRequestEnabled = boolEnvironment(GitHubPullRequestEnabledEnv)
 	if maxBytes, maxEntries, ok := cloneLimitsFromEnvironment(); ok {
 		service.cloneMaxBytes = maxBytes
 		service.cloneMaxEntries = maxEntries
@@ -95,7 +100,7 @@ func newRemoteService(configured map[string]RemoteConfig, enabled, pushEnabled b
 	}
 	return &RemoteService{
 		remotes: configured, ids: sortedRemoteIDs(configured), enabled: enabled,
-		pushEnabled: pushEnabled, transport: remoteTransport, lookupEnv: lookupEnv,
+		pushEnabled: pushEnabled, transport: remoteTransport, githubClient: newGitHubAPIClient(), lookupEnv: lookupEnv,
 	}
 }
 
@@ -114,6 +119,12 @@ func (s *RemoteService) PushEnabled() bool { return s != nil && s.pushEnabled }
 // BranchCreateEnabled reports the separate process-wide remote ref-creation gate.
 func (s *RemoteService) BranchCreateEnabled() bool { return s != nil && s.branchCreateEnabled }
 
+// GitHubPullRequestEnabled reports the separate process-wide gate for creating
+// GitHub draft pull requests. It does not imply Git push or branch creation.
+func (s *RemoteService) GitHubPullRequestEnabled() bool {
+	return s != nil && s.githubPullRequestEnabled
+}
+
 // PushMutationEnabled reports whether the process has enabled all global gates
 // required for a remote push mutation. Per-remote policy is checked by Push.
 func (s *RemoteService) PushMutationEnabled() bool {
@@ -125,6 +136,13 @@ func (s *RemoteService) PushMutationEnabled() bool {
 // checked by PublishBranch.
 func (s *RemoteService) BranchCreateMutationEnabled() bool {
 	return s != nil && s.PushMutationEnabled() && s.BranchCreateEnabled()
+}
+
+// GitHubPullRequestMutationEnabled reports whether the global prerequisites for
+// a GitHub draft-PR mutation are enabled. Unlike Git writes it does not require
+// local write access; the local service is used only to bind exact branch/HEAD.
+func (s *RemoteService) GitHubPullRequestMutationEnabled() bool {
+	return s != nil && s.Enabled() && s.GitHubPullRequestEnabled() && s.local != nil
 }
 
 // CloneMutationEnabled reports whether all process-wide clone prerequisites are
@@ -152,6 +170,7 @@ func (s *RemoteService) Remotes(ctx context.Context) []RemoteSummary {
 			AuthenticationConfigured: remote.TokenEnv != "",
 			PushAllowed:              s.PushMutationEnabled() && remote.AllowPush,
 			BranchCreateAllowed:      s.BranchCreateMutationEnabled() && remote.AllowPush && remote.AllowBranchCreate,
+			PullRequestCreateAllowed: s.GitHubPullRequestMutationEnabled() && remoteSupportsGitHubPullRequests(remote),
 			DefaultBranchPushAllowed: s.PushMutationEnabled() && remote.AllowPush && remote.AllowDefaultBranchPush,
 			CloneAllowed:             s.CloneMutationEnabled() && remote.AllowClone,
 		})
