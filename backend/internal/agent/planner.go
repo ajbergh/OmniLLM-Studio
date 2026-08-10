@@ -22,8 +22,9 @@ func NewPlanner(llmService *llm.Service, toolRegistry *tools.Registry) *Planner 
 	return &Planner{llmService: llmService, toolRegistry: toolRegistry}
 }
 
-// GeneratePlan asks the LLM to produce a validated plan. Only enabled tools are
-// supplied, and their complete input schemas and risk metadata are included.
+// GeneratePlan asks the LLM to produce a validated plan. Only runtime-available
+// tools are supplied, and their complete input schemas and risk metadata are
+// included.
 func (p *Planner) GeneratePlan(ctx context.Context, provider, model, goal string, conversationHistory []llm.ChatMessage) ([]PlanStep, error) {
 	toolDefs := p.selectTools(goal, conversationHistory)
 	toolDescriptions := formatToolDescriptions(toolDefs)
@@ -168,11 +169,11 @@ func (p *Planner) validatePlan(steps []PlanStep) ([]PlanStep, []string) {
 		}
 
 		if step.Type == StepTypeToolCall {
-			tool, ok := p.toolRegistry.Get(step.ToolName)
-			if !ok || !tool.Definition().Normalized().Enabled {
+			if !p.toolRegistry.IsAvailable(step.ToolName) {
 				errs = append(errs, fmt.Sprintf("step %s references unavailable tool %q", step.ID, step.ToolName))
 				continue
 			}
+			tool, _ := p.toolRegistry.Get(step.ToolName)
 			if len(step.InputJSON) == 0 {
 				step.InputJSON = json.RawMessage(`{}`)
 			}
@@ -185,7 +186,7 @@ func (p *Planner) validatePlan(steps []PlanStep) ([]PlanStep, []string) {
 				continue
 			}
 			def := tool.Definition().Normalized()
-			if def.SideEffecting || def.Risk == tools.RiskHigh || def.Risk == tools.RiskCritical {
+			if p.toolRegistry.Policy(step.ToolName) == "ask" || def.SideEffecting || def.Risk == tools.RiskHigh || def.Risk == tools.RiskCritical {
 				step.RequiresApproval = true
 			}
 			if step.MaxRetries == 0 && step.Retryable {

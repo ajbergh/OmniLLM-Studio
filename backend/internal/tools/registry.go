@@ -7,10 +7,13 @@ import (
 	"sync"
 )
 
-// Registry holds all registered tools and supports thread-safe lookup.
+// Registry holds all registered tools and supports thread-safe lookup. An
+// optional policy resolver can additionally hide hard-denied tools from runtime
+// discovery without removing them from the registry or Settings inventory.
 type Registry struct {
-	mu    sync.RWMutex
-	tools map[string]Tool
+	mu             sync.RWMutex
+	tools          map[string]Tool
+	policyResolver PermissionResolver
 }
 
 // NewRegistry creates a registry with dependency-free core utilities. Tools
@@ -62,12 +65,49 @@ func (r *Registry) Remove(name string) bool {
 }
 
 // Get returns a tool by name. The second return value indicates whether the tool
-// was found.
+// was found. Get deliberately ignores runtime policy so the executor and
+// Settings endpoints can still inspect a denied tool and report why it cannot
+// run.
 func (r *Registry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	t, ok := r.tools[name]
 	return t, ok
+}
+
+// SetPolicyResolver configures the effective runtime policy used by discovery.
+// Hard-denied tools remain registered but are excluded from ListEnabled and
+// Select. Passing nil restores definition-only discovery behavior.
+func (r *Registry) SetPolicyResolver(resolver PermissionResolver) {
+	r.mu.Lock()
+	r.policyResolver = resolver
+	r.mu.Unlock()
+}
+
+// Policy returns the current runtime policy exposed to discovery. An empty
+// string means no policy resolver is attached to the registry.
+func (r *Registry) Policy(name string) string {
+	r.mu.RLock()
+	resolver := r.policyResolver
+	r.mu.RUnlock()
+	if resolver == nil {
+		return ""
+	}
+	return resolver(name)
+}
+
+// IsAvailable reports whether a tool is statically enabled and not hard-denied
+// by the attached runtime policy.
+func (r *Registry) IsAvailable(name string) bool {
+	tool, ok := r.Get(name)
+	if !ok {
+		return false
+	}
+	definition := tool.Definition().Normalized()
+	if !definition.Enabled {
+		return false
+	}
+	return r.Policy(name) != "deny"
 }
 
 // List returns normalized definitions of all registered tools in stable order.
@@ -82,22 +122,28 @@ func (r *Registry) List() []ToolDefinition {
 	return defs
 }
 
-// ListEnabled returns normalized definitions only for tools that are enabled.
+// ListEnabled returns normalized definitions only for tools that are statically
+// enabled and not hard-denied by the attached runtime policy.
 func (r *Registry) ListEnabled() []ToolDefinition {
+	defs := r.List()
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	var defs []ToolDefinition
-	for _, t := range r.tools {
-		d := t.Definition().Normalized()
-		if d.Enabled {
-			defs = append(defs, d)
+	resolver := r.policyResolver
+	r.mu.RUnlock()
+
+	out := make([]ToolDefinition, 0, len(defs))
+	for _, definition := range defs {
+		if !definition.Enabled {
+			continue
 		}
+		if resolver != nil && resolver(definition.Name) == "deny" {
+			continue
+		}
+		out = append(out, definition)
 	}
-	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
-	return defs
+	return out
 }
 
-// Select returns enabled tools whose names, descriptions, or categories match
+// Select returns available tools whose names, descriptions, or categories match
 // one of the supplied terms. It provides a deterministic low-cost retrieval
 // fallback until semantic tool embeddings are configured.
 func (r *Registry) Select(terms []string, limit int) []ToolDefinition {
