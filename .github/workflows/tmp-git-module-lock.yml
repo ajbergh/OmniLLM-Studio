@@ -1,0 +1,33 @@
+name: Temporary Git Module Lock Generation
+
+on:
+  push:
+    branches:
+      - agent/git-repository-tools-gogit-5.19.2
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.x'
+          cache: false
+      - name: Generate module lock files
+        shell: bash
+        run: |
+          cd backend
+          go mod edit -require=github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec
+          go mod tidy
+          echo 'BEGIN_GO_MOD_BASE64'
+          base64 -w0 go.mod
+          echo
+          echo 'END_GO_MOD_BASE64'
+          echo 'BEGIN_GO_SUM_BASE64'
+          base64 -w0 go.sum
+          echo
+          echo 'END_GO_SUM_BASE64'
