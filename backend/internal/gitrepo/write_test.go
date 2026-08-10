@@ -9,6 +9,7 @@ import (
 	"time"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
@@ -96,7 +97,7 @@ func TestServiceGuardedBranchStageAndCommitFlow(t *testing.T) {
 	if committed.Previous != initialHead || committed.Hash == initialHead || committed.Author != "Configured Author" {
 		t.Fatalf("unexpected commit result: %#v", committed)
 	}
-	commit, err := repo.CommitObject(mustHash(t, committed.Hash))
+	commit, err := repo.CommitObject(plumbing.NewHash(committed.Hash))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,6 +121,9 @@ func TestStageRejectsUnsafeAndNonFilePaths(t *testing.T) {
 	svc := NewServiceWithWriteAccess(map[string]string{"repo": dir}, true)
 	ctx := context.Background()
 
+	if err := os.MkdirAll(filepath.Join(dir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeTestFile(t, filepath.Join(dir, "nested", "file.txt"), "nested\n")
 	if _, err := svc.Stage(ctx, "repo", []string{"nested"}, head); err == nil {
 		t.Fatal("Stage() directory error = nil")
@@ -170,19 +174,4 @@ func setupWritableRepository(t *testing.T) (string, *git.Repository, *git.Worktr
 		t.Fatal(err)
 	}
 	return dir, repo, worktree, hash.String()
-}
-
-func mustHash(t *testing.T, value string) [20]byte {
-	t.Helper()
-	var hash [20]byte
-	decoded := make([]byte, 20)
-	for i := 0; i < 20; i++ {
-		var b byte
-		if _, err := fmt.Sscanf(value[i*2:i*2+2], "%02x", &b); err != nil {
-			t.Fatal(err)
-		}
-		decoded[i] = b
-	}
-	copy(hash[:], decoded)
-	return hash
 }
