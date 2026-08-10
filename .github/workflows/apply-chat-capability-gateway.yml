@@ -2,28 +2,27 @@ name: Apply chat capability gateway
 
 on:
   push:
-    branches:
-      - feat/chat-unified-capability-gateway-20260809
+    branches: [feat/chat-unified-capability-gateway-20260809]
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
-          go-version-file: backend/go.mod
+          go-version: '1.25.x'
           cache-dependency-path: backend/go.sum
       - name: Apply focused source changes
         shell: bash
         run: |
           python3 - <<'PY'
+          import base64
           from pathlib import Path
 
           path = Path('backend/internal/api/message_handler.go')
@@ -38,192 +37,27 @@ jobs:
               print(f'replaced {count}: {old[:80]!r}')
 
           replace_all('\tparts = append(parts, sportsLookupSystemDirective)\n', '', 1)
-          replace_all(
-              '\tsystemPrompt := composeSystemPrompt(userSystemPrompt)\n',
-              '\tsystemPrompt := composeSystemPrompt(userSystemPrompt)\n\tif h.chatCapabilityDiscoverable("sports_lookup") {\n\t\tsystemPrompt += "\\n\\n" + sportsLookupSystemDirective\n\t}\n',
-              1,
-          )
-          replace_all(
-              'if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() {',
-              'if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() && h.chatPreflightAllowed("fetch_url_context") {',
-              2,
-          )
-          replace_all(
-              'if h.fileLibrarySvc != nil && fileIntent.RequiresFileSearch {',
-              'if h.fileLibrarySvc != nil && fileIntent.RequiresFileSearch && h.chatPreflightAllowed("file_search") {',
-              2,
-          )
-          replace_all(
-              'webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass',
-              'webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass && h.chatPreflightAllowed("web_search")',
-              2,
-          )
-          replace_all(
-              'h.wordGenEnabled() && detectWordDocIntent(req.Content)',
-              'h.wordGenEnabled() && h.chatPreflightAllowed("generate_word_doc") && detectWordDocIntent(req.Content)',
-              2,
-          )
-          replace_all(
-              'if h.artifactGen != nil {\n\t\tif f, ok := artifacts.DetectFormat(req.Content); ok {',
-              'if h.artifactGen != nil && h.chatPreflightAllowed("artifact_generate") {\n\t\tif f, ok := artifacts.DetectFormat(req.Content); ok {',
-              2,
-          )
-          replace_all(
-              'if h.artifactGen != nil && artifactFormat != "" {',
-              'if h.artifactGen != nil && artifactFormat != "" && h.chatPreflightAllowed("artifact_generate") {',
-              2,
-          )
-          replace_all(
-              'if urlCtxResult == nil || !urlCtxResult.Handled {\n\t\timgIntent := detectImageIntent(req.Content)',
-              'if h.chatPreflightAllowed("image_generate") && (urlCtxResult == nil || !urlCtxResult.Handled) {\n\t\timgIntent := detectImageIntent(req.Content)',
-              2,
-          )
-          replace_all(
-              'func (h *MessageHandler) tryRouterSportsLookup(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool, *intentrouter.RouterTelemetry) {\n\tif h.routerSvc == nil || !h.sportsLookupEnabled() {',
-              'func (h *MessageHandler) tryRouterSportsLookup(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool, *intentrouter.RouterTelemetry) {\n\tif !h.chatPreflightAllowed("sports_lookup") || h.routerSvc == nil || !h.sportsLookupEnabled() {',
-              1,
-          )
-          replace_all(
-              'func (h *MessageHandler) handleSportsLookupMessageWithTelemetry(ctx context.Context, conversationID, messageID, query string, routerTelemetry *intentrouter.RouterTelemetry) (*models.Message, bool) {\n\tif !h.sportsLookupEnabled() {',
-              'func (h *MessageHandler) handleSportsLookupMessageWithTelemetry(ctx context.Context, conversationID, messageID, query string, routerTelemetry *intentrouter.RouterTelemetry) (*models.Message, bool) {\n\tif !h.chatPreflightAllowed("sports_lookup") || !h.sportsLookupEnabled() {',
-              1,
-          )
+          replace_all('\tsystemPrompt := composeSystemPrompt(userSystemPrompt)\n', '\tsystemPrompt := composeSystemPrompt(userSystemPrompt)\n\tif h.chatCapabilityDiscoverable("sports_lookup") {\n\t\tsystemPrompt += "\\n\\n" + sportsLookupSystemDirective\n\t}\n', 1)
+          replace_all('if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() {', 'if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() && h.chatPreflightAllowed("fetch_url_context") {', 2)
+          replace_all('if h.fileLibrarySvc != nil && fileIntent.RequiresFileSearch {', 'if h.fileLibrarySvc != nil && fileIntent.RequiresFileSearch && h.chatPreflightAllowed("file_search") {', 2)
+          replace_all('webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass', 'webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass && h.chatPreflightAllowed("web_search")', 2)
+          replace_all('h.wordGenEnabled() && detectWordDocIntent(req.Content)', 'h.wordGenEnabled() && h.chatPreflightAllowed("generate_word_doc") && detectWordDocIntent(req.Content)', 2)
+          replace_all('if h.artifactGen != nil {\n\t\tif f, ok := artifacts.DetectFormat(req.Content); ok {', 'if h.artifactGen != nil && h.chatPreflightAllowed("artifact_generate") {\n\t\tif f, ok := artifacts.DetectFormat(req.Content); ok {', 2)
+          replace_all('if h.artifactGen != nil && artifactFormat != "" {', 'if h.artifactGen != nil && artifactFormat != "" && h.chatPreflightAllowed("artifact_generate") {', 2)
+          replace_all('if urlCtxResult == nil || !urlCtxResult.Handled {\n\t\timgIntent := detectImageIntent(req.Content)', 'if h.chatPreflightAllowed("image_generate") && (urlCtxResult == nil || !urlCtxResult.Handled) {\n\t\timgIntent := detectImageIntent(req.Content)', 2)
+          replace_all('func (h *MessageHandler) tryRouterSportsLookup(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool, *intentrouter.RouterTelemetry) {\n\tif h.routerSvc == nil || !h.sportsLookupEnabled() {', 'func (h *MessageHandler) tryRouterSportsLookup(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool, *intentrouter.RouterTelemetry) {\n\tif !h.chatPreflightAllowed("sports_lookup") || h.routerSvc == nil || !h.sportsLookupEnabled() {', 1)
+          replace_all('func (h *MessageHandler) handleSportsLookupMessageWithTelemetry(ctx context.Context, conversationID, messageID, query string, routerTelemetry *intentrouter.RouterTelemetry) (*models.Message, bool) {\n\tif !h.sportsLookupEnabled() {', 'func (h *MessageHandler) handleSportsLookupMessageWithTelemetry(ctx context.Context, conversationID, messageID, query string, routerTelemetry *intentrouter.RouterTelemetry) (*models.Message, bool) {\n\tif !h.chatPreflightAllowed("sports_lookup") || !h.sportsLookupEnabled() {', 1)
           path.write_text(src)
 
-          Path('backend/internal/api/chat_capability_policy.go').write_text(r'''package api
-
-// chatCapabilityPolicy returns the current effective policy for a registered
-// Chat Studio capability. Missing runtime dependencies fail closed.
-func (h *MessageHandler) chatCapabilityPolicy(toolName string) string {
-	if h == nil || h.toolExecutor == nil {
-		return "deny"
-	}
-	return h.toolExecutor.Policy(toolName)
-}
-
-// chatPreflightAllowed is the single guard for deterministic Chat Studio
-// capability shortcuts. Ask is intentionally not executable here: the request
-// falls through to the normal tool loop so the shared approval flow can run.
-func (h *MessageHandler) chatPreflightAllowed(toolName string) bool {
-	return h.chatCapabilityPolicy(toolName) == "allow"
-}
-
-// chatCapabilityDiscoverable controls capability advertising in model context.
-// Denied, disabled, or unknown tools must not be described to the model.
-func (h *MessageHandler) chatCapabilityDiscoverable(toolName string) bool {
-	if h == nil || h.toolRegistry == nil {
-		return false
-	}
-	return h.toolRegistry.IsAvailable(toolName)
-}
-''')
-
-          Path('backend/internal/api/chat_capability_policy_test.go').write_text(r'''package api
-
-import (
-	"context"
-	"encoding/json"
-	"os"
-	"strings"
-	"testing"
-
-	"github.com/ajbergh/omnillm-studio/internal/models"
-	"github.com/ajbergh/omnillm-studio/internal/tools"
-)
-
-type chatCapabilityTestTool struct{ name string }
-
-func (t chatCapabilityTestTool) Definition() tools.ToolDefinition {
-	return tools.ToolDefinition{
-		Name: t.name, Description: "capability policy test tool",
-		Parameters: json.RawMessage(`{"type":"object"}`), Enabled: true, ReadOnly: true,
-	}
-}
-func (t chatCapabilityTestTool) Validate(json.RawMessage) error { return nil }
-func (t chatCapabilityTestTool) Execute(context.Context, json.RawMessage) (*tools.ToolResult, error) {
-	return &tools.ToolResult{Content: "ok"}, nil
-}
-
-func newCapabilityPolicyHandler(policy *string) *MessageHandler {
-	registry := tools.NewRegistry()
-	registry.MustRegister(chatCapabilityTestTool{name: "sports_lookup"})
-	executor := tools.NewExecutor(registry, func(name string) string {
-		if name == "sports_lookup" {
-			return *policy
-		}
-		return "allow"
-	}, 0)
-	return &MessageHandler{toolRegistry: registry, toolExecutor: executor}
-}
-
-func TestChatPreflightOnlyExecutesAllow(t *testing.T) {
-	policy := "allow"
-	h := newCapabilityPolicyHandler(&policy)
-	if !h.chatPreflightAllowed("sports_lookup") {
-		t.Fatal("allow policy should permit deterministic preflight")
-	}
-	policy = "ask"
-	if h.chatPreflightAllowed("sports_lookup") {
-		t.Fatal("ask policy must fall through to the approval-aware tool loop")
-	}
-	policy = "deny"
-	if h.chatPreflightAllowed("sports_lookup") {
-		t.Fatal("deny policy must block deterministic preflight")
-	}
-}
-
-func TestCapabilityDirectiveTracksDiscoveryPolicy(t *testing.T) {
-	policy := "allow"
-	h := newCapabilityPolicyHandler(&policy)
-	convo := &models.Conversation{}
-
-	req := h.buildLLMRequest(convo, nil, nil)
-	if len(req.Messages) == 0 || !strings.Contains(req.Messages[0].Content, sportsLookupSystemDirective) {
-		t.Fatal("sports directive should be advertised while sports_lookup is available")
-	}
-
-	policy = "deny"
-	req = h.buildLLMRequest(convo, nil, nil)
-	if len(req.Messages) == 0 || strings.Contains(req.Messages[0].Content, sportsLookupSystemDirective) {
-		t.Fatal("sports directive must disappear when sports_lookup is denied")
-	}
-}
-
-func TestLegacyChatCapabilityPathsUseUnifiedPolicyGate(t *testing.T) {
-	data, err := os.ReadFile("message_handler.go")
-	if err != nil {
-		t.Fatalf("read message_handler.go: %v", err)
-	}
-	source := string(data)
-	checks := []string{
-		`h.chatPreflightAllowed("fetch_url_context")`,
-		`h.chatPreflightAllowed("sports_lookup")`,
-		`h.chatPreflightAllowed("file_search")`,
-		`h.chatPreflightAllowed("web_search")`,
-		`h.chatPreflightAllowed("image_generate")`,
-		`h.chatPreflightAllowed("generate_word_doc")`,
-		`h.chatPreflightAllowed("artifact_generate")`,
-	}
-	for _, check := range checks {
-		if !strings.Contains(source, check) {
-			t.Fatalf("message_handler.go missing unified capability gate %s", check)
-		}
-	}
-	if strings.Contains(composeSystemPrompt(""), sportsLookupSystemDirective) {
-		t.Fatal("composeSystemPrompt must not advertise sports independently of runtime policy")
-	}
-}
-''')
+          Path('backend/internal/api/chat_capability_policy.go').write_bytes(base64.b64decode('cGFja2FnZSBhcGkKCi8vIGNoYXRDYXBhYmlsaXR5UG9saWN5IHJldHVybnMgdGhlIGN1cnJlbnQgZWZmZWN0aXZlIHBvbGljeSBmb3IgYSByZWdpc3RlcmVkCi8vIENoYXQgU3R1ZGlvIGNhcGFiaWxpdHkuIE1pc3NpbmcgcnVudGltZSBkZXBlbmRlbmNpZXMgZmFpbCBjbG9zZWQuCmZ1bmMgKGggKk1lc3NhZ2VIYW5kbGVyKSBjaGF0Q2FwYWJpbGl0eVBvbGljeSh0b29sTmFtZSBzdHJpbmcpIHN0cmluZyB7CglpZiBoID09IG5pbCB8fCBoLnRvb2xFeGVjdXRvciA9PSBuaWwgewoJCXJldHVybiAiZGVueSIKCX0KCXJldHVybiBoLnRvb2xFeGVjdXRvci5Qb2xpY3kodG9vbE5hbWUpCn0KCi8vIGNoYXRQcmVmbGlnaHRBbGxvd2VkIGlzIHRoZSBzaW5nbGUgZ3VhcmQgZm9yIGRldGVybWluaXN0aWMgQ2hhdCBTdHVkaW8KLy8gY2FwYWJpbGl0eSBzaG9ydGN1dHMuIEFzayBpcyBpbnRlbnRpb25hbGx5IG5vdCBleGVjdXRhYmxlIGhlcmU6IHRoZSByZXF1ZXN0Ci8vIGZhbGxzIHRocm91Z2ggdG8gdGhlIG5vcm1hbCB0b29sIGxvb3Agc28gdGhlIHNoYXJlZCBhcHByb3ZhbCBmbG93IGNhbiBydW4uCmZ1bmMgKGggKk1lc3NhZ2VIYW5kbGVyKSBjaGF0UHJlZmxpZ2h0QWxsb3dlZCh0b29sTmFtZSBzdHJpbmcpIGJvb2wgewoJcmV0dXJuIGguY2hhdENhcGFiaWxpdHlQb2xpY3kodG9vbE5hbWUpID09ICJhbGxvdyIKfQoKLy8gY2hhdENhcGFiaWxpdHlEaXNjb3ZlcmFibGUgY29udHJvbHMgY2FwYWJpbGl0eSBhZHZlcnRpc2luZyBpbiBtb2RlbCBjb250ZXh0LgovLyBEZW5pZWQsIGRpc2FibGVkLCBvciB1bmtub3duIHRvb2xzIG11c3Qgbm90IGJlIGRlc2NyaWJlZCB0byB0aGUgbW9kZWwuCmZ1bmMgKGggKk1lc3NhZ2VIYW5kbGVyKSBjaGF0Q2FwYWJpbGl0eURpc2NvdmVyYWJsZSh0b29sTmFtZSBzdHJpbmcpIGJvb2wgewoJaWYgaCA9PSBuaWwgfHwgaC50b29sUmVnaXN0cnkgPT0gbmlsIHsKCQlyZXR1cm4gZmFsc2UKCX0KCXJldHVybiBoLnRvb2xSZWdpc3RyeS5Jc0F2YWlsYWJsZSh0b29sTmFtZSkKfQo='))
+          Path('backend/internal/api/chat_capability_policy_test.go').write_bytes(base64.b64decode('cGFja2FnZSBhcGkKCmltcG9ydCAoCgkiY29udGV4dCIKCSJlbmNvZGluZy9qc29uIgoJIm9zIgoJInN0cmluZ3MiCgkidGVzdGluZyIKCgkiZ2l0aHViLmNvbS9hamJlcmdoL29tbmlsbG0tc3R1ZGlvL2ludGVybmFsL21vZGVscyIKCSJnaXRodWIuY29tL2FqYmVyZ2gvb21uaWxsbS1zdHVkaW8vaW50ZXJuYWwvdG9vbHMiCikKCnR5cGUgY2hhdENhcGFiaWxpdHlUZXN0VG9vbCBzdHJ1Y3R7IG5hbWUgc3RyaW5nIH0KCmZ1bmMgKHQgY2hhdENhcGFiaWxpdHlUZXN0VG9vbCkgRGVmaW5pdGlvbigpIHRvb2xzLlRvb2xEZWZpbml0aW9uIHsKCXJldHVybiB0b29scy5Ub29sRGVmaW5pdGlvbnsKCQlOYW1lOiB0Lm5hbWUsIERlc2NyaXB0aW9uOiAiY2FwYWJpbGl0eSBwb2xpY3kgdGVzdCB0b29sIiwKCQlQYXJhbWV0ZXJzOiBqc29uLlJhd01lc3NhZ2UoYHsidHlwZSI6Im9iamVjdCJ9YCksIEVuYWJsZWQ6IHRydWUsIFJlYWRPbmx5OiB0cnVlLAoJfQp9CmZ1bmMgKHQgY2hhdENhcGFiaWxpdHlUZXN0VG9vbCkgVmFsaWRhdGUoanNvbi5SYXdNZXNzYWdlKSBlcnJvciB7IHJldHVybiBuaWwgfQpmdW5jICh0IGNoYXRDYXBhYmlsaXR5VGVzdFRvb2wpIEV4ZWN1dGUoY29udGV4dC5Db250ZXh0LCBqc29uLlJhd01lc3NhZ2UpICgqdG9vbHMuVG9vbFJlc3VsdCwgZXJyb3IpIHsKCXJldHVybiAmdG9vbHMuVG9vbFJlc3VsdHtDb250ZW50OiAib2sifSwgbmlsCn0KCmZ1bmMgbmV3Q2FwYWJpbGl0eVBvbGljeUhhbmRsZXIocG9saWN5ICpzdHJpbmcpICpNZXNzYWdlSGFuZGxlciB7CglyZWdpc3RyeSA6PSB0b29scy5OZXdSZWdpc3RyeSgpCglyZWdpc3RyeS5NdXN0UmVnaXN0ZXIoY2hhdENhcGFiaWxpdHlUZXN0VG9vbHtuYW1lOiAic3BvcnRzX2xvb2t1cCJ9KQoJZXhlY3V0b3IgOj0gdG9vbHMuTmV3RXhlY3V0b3IocmVnaXN0cnksIGZ1bmMobmFtZSBzdHJpbmcpIHN0cmluZyB7CgkJaWYgbmFtZSA9PSAic3BvcnRzX2xvb2t1cCIgewoJCQlyZXR1cm4gKnBvbGljeQoJCX0KCQlyZXR1cm4gImFsbG93IgoJfSwgMCkKCXJldHVybiAmTWVzc2FnZUhhbmRsZXJ7dG9vbFJlZ2lzdHJ5OiByZWdpc3RyeSwgdG9vbEV4ZWN1dG9yOiBleGVjdXRvcn0KfQoKZnVuYyBUZXN0Q2hhdFByZWZsaWdodE9ubHlFeGVjdXRlc0FsbG93KHQgKnRlc3RpbmcuVCkgewoJcG9saWN5IDo9ICJhbGxvdyIKCWggOj0gbmV3Q2FwYWJpbGl0eVBvbGljeUhhbmRsZXIoJnBvbGljeSkKCWlmICFoLmNoYXRQcmVmbGlnaHRBbGxvd2VkKCJzcG9ydHNfbG9va3VwIikgewoJCXQuRmF0YWwoImFsbG93IHBvbGljeSBzaG91bGQgcGVybWl0IGRldGVybWluaXN0aWMgcHJlZmxpZ2h0IikKCX0KCXBvbGljeSA9ICJhc2siCglpZiBoLmNoYXRQcmVmbGlnaHRBbGxvd2VkKCJzcG9ydHNfbG9va3VwIikgewoJCXQuRmF0YWwoImFzayBwb2xpY3kgbXVzdCBmYWxsIHRocm91Z2ggdG8gdGhlIGFwcHJvdmFsLWF3YXJlIHRvb2wgbG9vcCIpCgl9Cglwb2xpY3kgPSAiZGVueSIKCWlmIGguY2hhdFByZWZsaWdodEFsbG93ZWQoInNwb3J0c19sb29rdXAiKSB7CgkJdC5GYXRhbCgiZGVueSBwb2xpY3kgbXVzdCBibG9jayBkZXRlcm1pbmlzdGljIHByZWZsaWdodCIpCgl9Cn0KCmZ1bmMgVGVzdENhcGFiaWxpdHlEaXJlY3RpdmVUcmFja3NEaXNjb3ZlcnlQb2xpY3kodCAqdGVzdGluZy5UKSB7Cglwb2xpY3kgOj0gImFsbG93IgoJaCA6PSBuZXdDYXBhYmlsaXR5UG9saWN5SGFuZGxlcigmcG9saWN5KQoJY29udm8gOj0gJm1vZGVscy5Db252ZXJzYXRpb257fQoKCXJlcSA6PSBoLmJ1aWxkTExNUmVxdWVzdChjb252bywgbmlsLCBuaWwpCglpZiBsZW4ocmVxLk1lc3NhZ2VzKSA9PSAwIHx8ICFzdHJpbmdzLkNvbnRhaW5zKHJlcS5NZXNzYWdlc1swXS5Db250ZW50LCBzcG9ydHNMb29rdXBTeXN0ZW1EaXJlY3RpdmUpIHsKCQl0LkZhdGFsKCJzcG9ydHMgZGlyZWN0aXZlIHNob3VsZCBiZSBhZHZlcnRpc2VkIHdoaWxlIHNwb3J0c19sb29rdXAgaXMgYXZhaWxhYmxlIikKCX0KCglwb2xpY3kgPSAiZGVueSIKCXJlcSA9IGguYnVpbGRMTE1SZXF1ZXN0KGNvbnZvLCBuaWwsIG5pbCkKCWlmIGxlbihyZXEuTWVzc2FnZXMpID09IDAgfHwgc3RyaW5ncy5Db250YWlucyhyZXEuTWVzc2FnZXNbMF0uQ29udGVudCwgc3BvcnRzTG9va3VwU3lzdGVtRGlyZWN0aXZlKSB7CgkJdC5GYXRhbCgic3BvcnRzIGRpcmVjdGl2ZSBtdXN0IGRpc2FwcGVhciB3aGVuIHNwb3J0c19sb29rdXAgaXMgZGVuaWVkIikKCX0KfQoKZnVuYyBUZXN0TGVnYWN5Q2hhdENhcGFiaWxpdHlQYXRoc1VzZVVuaWZpZWRQb2xpY3lHYXRlKHQgKnRlc3RpbmcuVCkgewoJZGF0YSwgZXJyIDo9IG9zLlJlYWRGaWxlKCJtZXNzYWdlX2hhbmRsZXIuZ28iKQoJaWYgZXJyICE9IG5pbCB7CgkJdC5GYXRhbGYoInJlYWQgbWVzc2FnZV9oYW5kbGVyLmdvOiAldiIsIGVycikKCX0KCXNvdXJjZSA6PSBzdHJpbmcoZGF0YSkKCWNoZWNrcyA6PSBbXXN0cmluZ3sKCQlg aC5jaGF0UHJlZmxpZ2h0QWxsb3dlZCgiZmV0Y2hfdXJsX2NvbnRleHQiKWAsCgkJYGAgaC5jaGF0UHJlZmxpZ2h0QWxsb3dlZCgic3BvcnRzX2xvb2t1cCIpYCwKCQlg aC5jaGF0UHJlZmxpZ2h0QWxsb3dlZCgiZmlsZV9zZWFyY2giKWAsCgkJYGAgaC5jaGF0UHJlZmxpZ2h0QWxsb3dlZCgicmViX3NlYXJjaCIpYCwKCQlg aC5jaGF0UHJlZmxpZ2h0QWxsb3dlZCgiaW1hZ2VfZ2VuZXJhdGUiKWAsCgkJYGAgaC5jaGF0UHJlZmxpZ2h0QWxsb3dlZCgiZ2VuZXJhdGVfd29yZF9kb2MiKWAsCgkJYGAgaC5jaGF0UHJlZmxpZ2h0QWxsb3dlZCgiYXJ0aWZhY3RfZ2VuZXJhdGUiKWAsCgl9Cglmb3IgXywgY2hlY2sgOj0gcmFuZ2UgY2hlY2tzIHsKCQlpZiAhc3RyaW5ncy5Db250YWlucyhzb3VyY2UsIGNoZWNrKSB7CgkJCXQuRmF0YWxmKCJtZXNzYWdlX2hhbmRsZXIuZ28gbWlzc2luZyB1bmlmaWVkIGNhcGFiaWxpdHkgZ2F0ZSAlcyIsIGNoZWNrKQoJCX0KCX0KCWlmIHN0cmluZ3MuQ29udGFpbnMoY29tcG9zZVN5c3RlbVByb21wdCgiIiksIHNwb3J0c0xvb2t1cFN5c3RlbURpcmVjdGl2ZSkgewoJCXQuRmF0YWwoImNvbXBvc2VTeXN0ZW1Qcm9tcHQgbXVzdCBub3QgYWR2ZXJ0aXNlIHNwb3J0cyBpbmRlcGVuZGVudGx5IG9mIHJ1bnRpbWUgcG9saWN5IikKCX0KfQo='))
           PY
-
           gofmt -w backend/internal/api/message_handler.go backend/internal/api/chat_capability_policy.go backend/internal/api/chat_capability_policy_test.go
-
       - name: Focused backend validation
         working-directory: backend
         run: |
           go test ./internal/api ./internal/tools
           go vet ./internal/api ./internal/tools
-
       - name: Commit applied change
         shell: bash
         run: |
