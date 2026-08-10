@@ -16,6 +16,7 @@ import { BranchSwitcher } from './BranchSwitcher';
 import { RAGSourcePanel } from './RAGSourcePanel';
 import { URLContextSourcePanel } from './URLContextSourcePanel';
 import { ToolCallCard } from './ToolCallCard';
+import { ToolPicker } from './ToolPicker';
 import { AgentRunView } from './AgentRunView';
 import { AttachmentPanel } from './AttachmentPanel';
 import { toast } from 'sonner';
@@ -23,7 +24,7 @@ import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi, a
 import { useImageEditorStore } from '../stores/imageEditor';
 import { useMusicStudioStore } from '../stores/musicStudio';
 import { matchesShortcut } from '../shortcuts';
-import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult, Attachment, RouterTelemetry } from '../types';
+import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult, Attachment, RouterTelemetry, ChatTurnToolSelection } from '../types';
 import { AgentEventType } from '../types';
 import { getKnownImageModels, getModelReasoningLevels, getModelToolCallingSupport, isFreeModel, type ReasoningEffortLevel } from '../models';
 
@@ -175,6 +176,7 @@ export function ChatView() {
   const [conversationUsage, setConversationUsage] = useState<UsageSummary | null>(null);
   const [attachmentPanelOpen, setAttachmentPanelOpen] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
+  const [toolSelection, setToolSelection] = useState<ChatTurnToolSelection>({ mode: 'auto', allowed_tools: [] });
   const [thinkEnabled, setThinkEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortLevel | undefined>(undefined);
   const [activeWorkspaceName, setActiveWorkspaceName] = useState<string | null>(null);
@@ -298,6 +300,7 @@ export function ChatView() {
     setImageMode(false);
     setEditPreviousImage(false);
     setAgentMode(false);
+    setToolSelection({ mode: 'auto', allowed_tools: [] });
   }, [activeId]);
 
   // Fetch per-conversation usage
@@ -517,13 +520,14 @@ export function ChatView() {
         isOllamaProvider && thinkEnabled ? true : undefined,
         reasoningLevels ? reasoningEffort : undefined,
         openRouterOptions,
+        { tool_mode: toolSelection.mode, allowed_tools: toolSelection.allowed_tools, required_tool: toolSelection.required_tool },
       );
       setInput('');
       if (inputRef.current) {
         inputRef.current.style.height = 'auto';
       }
     }
-  }, [input, activeId, messagesReady, streaming, pendingFiles, imageMode, editPreviousImage, lastImageAttachmentId, agentMode, activeConvo, providers, webSearchEnabled, thinkEnabled, isOllamaProvider, openRouterOptions, reasoningEffort, reasoningLevels, sendMessage, generateImage, createConversation, clearMessages, selectConversation, toggleSettings]);
+  }, [input, activeId, messagesReady, streaming, pendingFiles, imageMode, editPreviousImage, lastImageAttachmentId, agentMode, activeConvo, providers, webSearchEnabled, toolSelection, thinkEnabled, isOllamaProvider, openRouterOptions, reasoningEffort, reasoningLevels, sendMessage, generateImage, createConversation, clearMessages, selectConversation, toggleSettings]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (matchesShortcut(e as unknown as KeyboardEvent, 'sendMessage')) {
@@ -1301,6 +1305,10 @@ export function ChatView() {
             >
               <Globe size={16} />
             </button>
+
+            {!imageMode && !agentMode && (
+              <ToolPicker value={toolSelection} onChange={setToolSelection} disabled={!toolsSupported || streaming} />
+            )}
 
             {/* Think toggle (Ollama only) */}
             {isOllamaProvider && (

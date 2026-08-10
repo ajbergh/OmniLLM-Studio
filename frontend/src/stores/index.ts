@@ -158,7 +158,7 @@ interface MessageState {
 
   fetchMessages: (conversationId: string) => Promise<void>;
   replaceMessages: (conversationId: string, messages: Message[]) => void;
-  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }) => void;
+  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }, toolOptions?: { tool_mode?: SendMessageRequest['tool_mode']; allowed_tools?: string[]; required_tool?: string }) => void;
   generateImage: (conversationId: string, prompt: string, override?: { provider?: string; model?: string }, options?: { size?: string; quality?: string; referenceImageId?: string }) => Promise<void>;
   regenerateLastMessage: (conversationId: string) => Promise<void>;
   editAndResend: (conversationId: string, messageId: string, newContent: string) => Promise<void>;
@@ -218,7 +218,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     });
   },
 
-  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }) => {
+  sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }, toolOptions?: { tool_mode?: SendMessageRequest['tool_mode']; allowed_tools?: string[]; required_tool?: string }) => {
     set({ loadedConversationId: conversationId, streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, ragIndexingStatus: null, ragIndexingDetail: null, imageGenerating: false, streamingTools: {}, waitingForToolApproval: false });
 
     const reqBody: SendMessageRequest = { content };
@@ -231,6 +231,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     if (openRouterOptions?.model_fallbacks && openRouterOptions.model_fallbacks.length > 0) reqBody.model_fallbacks = openRouterOptions.model_fallbacks;
     if (openRouterOptions?.route) reqBody.route = openRouterOptions.route;
     if (openRouterOptions?.plugins && openRouterOptions.plugins.length > 0) reqBody.plugins = openRouterOptions.plugins;
+    if (toolOptions?.tool_mode) reqBody.tool_mode = toolOptions.tool_mode;
+    if (toolOptions?.allowed_tools) reqBody.allowed_tools = toolOptions.allowed_tools;
+    if (toolOptions?.required_tool) reqBody.required_tool = toolOptions.required_tool;
 
     const { abort } = api.streamMessage(
       conversationId,

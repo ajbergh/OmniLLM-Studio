@@ -82,6 +82,14 @@ export interface UpdateConversationRequest {
   system_prompt?: string;
 }
 
+export type ChatToolMode = 'auto' | 'none' | 'required' | 'specific';
+
+export interface ChatTurnToolSelection {
+  mode: ChatToolMode;
+  allowed_tools: string[];
+  required_tool?: string;
+}
+
 export interface SendMessageRequest {
   content: string;
   attachment_ids?: string[];
@@ -89,6 +97,9 @@ export interface SendMessageRequest {
   think?: boolean;
   reasoning_effort?: string;
   no_reply?: boolean;
+  tool_mode?: ChatToolMode;
+  allowed_tools?: string[];
+  required_tool?: string;
   override?: {
     provider?: string;
     model?: string;

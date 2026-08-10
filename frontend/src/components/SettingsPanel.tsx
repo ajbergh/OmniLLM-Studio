@@ -2740,12 +2740,6 @@ function ToolsTab() {
       ) : (
         <>
           {tools.map((tool) => {
-            const enabled = tool.policy === 'allow' || tool.policy === 'ask';
-            
-            const toggle = () => {
-              updatePermission(tool.name, enabled ? 'deny' : 'allow');
-            };
-
             let icon = <Wrench size={18} className="text-orange-400" />;
             let gradient = "from-orange-500/20 to-amber-500/20";
             let shadow = "shadow-orange-500/10";
@@ -2797,19 +2791,18 @@ function ToolsTab() {
                       {tool.description || 'Allow the AI to use this tool during conversations.'}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={toggle}
-                    className={`shrink-0 relative w-10 h-5 rounded-full transition-colors ${
-                      enabled ? 'bg-primary' : 'bg-border'
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                        enabled ? 'translate-x-5' : ''
-                      }`}
-                    />
-                  </button>
+                  <div className="shrink-0 inline-flex items-center rounded-lg border border-border bg-surface p-0.5" role="group" aria-label={`${tool.name} permission`}>
+                    {[{ value: 'allow', label: 'Allow' }, { value: 'ask', label: 'Ask' }, { value: 'deny', label: 'Off' }].map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => updatePermission(tool.name, option.value)}
+                        className={`px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${tool.policy === option.value ? (option.value === 'allow' ? 'bg-emerald-500/20 text-emerald-300' : option.value === 'ask' ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/15 text-red-300') : 'text-text-muted hover:text-text hover:bg-surface-hover'}`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             );

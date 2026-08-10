@@ -116,14 +116,18 @@ func preferredChatToolNames(prompt string) []string {
 	return names
 }
 
-func selectChatTools(registry *tools.Registry, executor *tools.Executor, prompt string) []llm.Tool {
+func selectChatTools(registry *tools.Registry, executor *tools.Executor, prompt string, selections ...turnToolSelection) []llm.Tool {
 	if registry == nil {
 		return nil
+	}
+	selection := turnToolSelectionFromContext(nil)
+	if len(selections) > 0 {
+		selection = selections[0]
 	}
 	defs := make([]tools.ToolDefinition, 0, maxChatToolDefinitions)
 	seen := map[string]struct{}{}
 	addDefinition := func(def tools.ToolDefinition) {
-		if len(defs) >= maxChatToolDefinitions || !def.Enabled {
+		if len(defs) >= maxChatToolDefinitions || !def.Enabled || !selection.allows(def.Name) {
 			return
 		}
 		if _, exists := seen[def.Name]; exists {
