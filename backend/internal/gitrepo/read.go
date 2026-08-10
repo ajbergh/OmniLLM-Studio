@@ -40,7 +40,7 @@ func (s *Service) Repositories(ctx context.Context) []RepositorySummary {
 	return out
 }
 
-// Status returns the current local HEAD and working-tree status.
+// Status returns the current local HEAD, staged-index digest, and working-tree status.
 func (s *Service) Status(ctx context.Context, repositoryID string) (*StatusResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -56,6 +56,10 @@ func (s *Service) Status(ctx context.Context, repositoryID string) (*StatusResul
 	status, err := worktree.Status()
 	if err != nil {
 		return nil, safeRepositoryError(repositoryID, "status could not be read")
+	}
+	digest, err := indexDigest(repo)
+	if err != nil {
+		return nil, safeRepositoryError(repositoryID, "index state could not be read")
 	}
 
 	branch, head, detached := headState(repo)
@@ -78,12 +82,13 @@ func (s *Service) Status(ctx context.Context, repositoryID string) (*StatusResul
 	}
 
 	return &StatusResult{
-		Repository: repositoryID,
-		Branch:     branch,
-		Head:       head,
-		Detached:   detached,
-		Clean:      status.IsClean(),
-		Files:      files,
+		Repository:  repositoryID,
+		Branch:      branch,
+		Head:        head,
+		IndexDigest: digest,
+		Detached:    detached,
+		Clean:       status.IsClean(),
+		Files:       files,
 	}, nil
 }
 

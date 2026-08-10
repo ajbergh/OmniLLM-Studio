@@ -79,6 +79,10 @@ func (s *Service) worktreeDiff(ctx context.Context, repositoryID string, repo *g
 	if err != nil {
 		return nil, safeRepositoryError(repositoryID, "status could not be read")
 	}
+	worktreeDigest, err := s.worktreeStateDigestWithWorktree(ctx, repositoryID, worktree, status)
+	if err != nil {
+		return nil, fmt.Errorf("worktree state could not be fingerprinted safely: %w", err)
+	}
 	head, err := repo.Head()
 	if err != nil {
 		return nil, safeRepositoryError(repositoryID, "HEAD could not be resolved")
@@ -98,11 +102,12 @@ func (s *Service) worktreeDiff(ctx context.Context, repositoryID string, repo *g
 	sort.Strings(paths)
 	files := append([]string(nil), paths...)
 	result := &DiffResult{
-		Repository: repositoryID,
-		Mode:       "worktree",
-		From:       headCommit.Hash.String(),
-		To:         "WORKTREE",
-		Files:      files,
+		Repository:     repositoryID,
+		Mode:           "worktree",
+		From:           headCommit.Hash.String(),
+		To:             "WORKTREE",
+		WorktreeDigest: worktreeDigest,
+		Files:          files,
 	}
 	if len(paths) == 0 {
 		return result, nil

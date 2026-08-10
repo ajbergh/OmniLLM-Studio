@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	codeberg.org/readeck/go-readability/v2 v2.1.2
 	github.com/chinmaykhachane/espn-go v0.1.1
+	github.com/cyphar/filepath-securejoin v0.6.1
 	github.com/drumkitai/go-word v1.0.1
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-chi/cors v1.2.2
@@ -33,7 +34,6 @@ require (
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
-	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
