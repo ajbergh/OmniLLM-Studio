@@ -25,9 +25,10 @@ type Registry struct {
 // Git read tools are added when repository IDs are configured; mutation tools
 // additionally require OMNILLM_GIT_WRITE_ENABLED=true. Remote Git inspection
 // additionally requires configured remotes and OMNILLM_GIT_REMOTE_ENABLED=true;
-// fetch also requires the local write gate; push additionally requires
-// OMNILLM_GIT_REMOTE_PUSH_ENABLED=true; clone additionally requires explicit
-// clone enablement plus valid byte/entry budgets.
+// fetch also requires the local write gate; push and branch publication have
+// their own additional mutation gates; clone requires explicit enablement plus
+// valid byte/entry budgets. GitHub draft PR creation is a separate API mutation
+// gate and does not imply Git push, branch creation, or local write access.
 func NewRegistry() *Registry {
 	r := &Registry{tools: make(map[string]Tool)}
 	r.MustRegister(NewDateTimeTool())
@@ -55,6 +56,11 @@ func NewRegistry() *Registry {
 			}
 			if remoteGitService.PushMutationEnabled() {
 				for _, tool := range NewGitRemotePushTools(remoteGitService) {
+					r.MustRegister(tool)
+				}
+			}
+			if remoteGitService.GitHubPullRequestMutationEnabled() {
+				for _, tool := range NewGitHubPullRequestTools(remoteGitService) {
 					r.MustRegister(tool)
 				}
 			}
