@@ -689,6 +689,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			// Reusable Assistant Profiles and Markdown Skills.
 			r.Get("/assistant-profiles", assistantProfileHandler.ListProfiles)
 			r.Put("/assistant-profiles", assistantProfileHandler.SaveProfile)
+			r.Post("/assistant-profiles/import", assistantProfileHandler.ImportProfile)
+			r.Get("/assistant-profiles/{id}/export", assistantProfileHandler.ExportProfile)
 			r.Delete("/assistant-profiles/{id}", assistantProfileHandler.DeleteProfile)
 			r.Get("/skills", assistantProfileHandler.ListSkills)
 			r.Get("/skills/{id}", assistantProfileHandler.GetSkill)

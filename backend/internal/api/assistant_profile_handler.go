@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -62,6 +63,113 @@ func (h *AssistantProfileHandler) DeleteProfile(w http.ResponseWriter, r *http.R
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ExportProfile returns a versioned, portable profile bundle without local
+// ownership, workspace, timestamps, or provider credentials.
+func (h *AssistantProfileHandler) ExportProfile(w http.ResponseWriter, r *http.Request) {
+	ownerID := assistantOwnerID(r)
+	profile, err := h.profiles.Get(ownerID, chi.URLParam(r, "id"))
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	if profile == nil {
+		respondError(w, http.StatusNotFound, "assistant profile not found")
+		return
+	}
+
+	bundle := models.AssistantProfileBundle{
+		Schema:  models.AssistantProfileBundleSchema,
+		Version: models.AssistantProfileBundleVersion,
+		Profile: models.PortableAssistantProfile{
+			Name:         profile.Name,
+			Description:  profile.Description,
+			Provider:     profile.Provider,
+			Model:        profile.Model,
+			SystemPrompt: profile.SystemPrompt,
+			ToolNames:    append([]string(nil), profile.ToolNames...),
+		},
+		Skills: []models.PortableSkill{},
+	}
+	missingSkills := 0
+	for _, skillID := range profile.SkillIDs {
+		skill, err := h.skills.Get(ownerID, skillID)
+		if err != nil {
+			respondInternalError(w, err)
+			return
+		}
+		if skill == nil {
+			missingSkills++
+			continue
+		}
+		bundle.Skills = append(bundle.Skills, models.PortableSkill{
+			Name:         skill.Name,
+			Description:  skill.Description,
+			BodyMarkdown: skill.BodyMarkdown,
+			Enabled:      skill.Enabled,
+		})
+	}
+	if missingSkills > 0 {
+		bundle.Warnings = append(bundle.Warnings, fmt.Sprintf("%d attached Skill(s) no longer exist and were omitted", missingSkills))
+	}
+	respondJSON(w, http.StatusOK, bundle)
+}
+
+// ImportProfile validates a portable bundle and atomically creates fresh local
+// Skill/profile records under the authenticated owner.
+func (h *AssistantProfileHandler) ImportProfile(w http.ResponseWriter, r *http.Request) {
+	var bundle models.AssistantProfileBundle
+	if err := decodeJSON(r, &bundle); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid assistant profile bundle")
+		return
+	}
+	if message := validateAssistantProfileBundle(bundle); message != "" {
+		respondError(w, http.StatusBadRequest, message)
+		return
+	}
+	item, err := h.profiles.ImportBundle(assistantOwnerID(r), bundle)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, item)
+}
+
+func validateAssistantProfileBundle(bundle models.AssistantProfileBundle) string {
+	if bundle.Schema != models.AssistantProfileBundleSchema || bundle.Version != models.AssistantProfileBundleVersion {
+		return "unsupported assistant profile bundle schema or version"
+	}
+	if strings.TrimSpace(bundle.Profile.Name) == "" {
+		return "profile name is required"
+	}
+	if len(strings.TrimSpace(bundle.Profile.Name)) > 100 || len(bundle.Profile.Description) > 2000 || len(bundle.Profile.SystemPrompt) > 20000 {
+		return "profile name, description, or system prompt is too long"
+	}
+	if len(bundle.Profile.Provider) > 200 || len(bundle.Profile.Model) > 500 {
+		return "provider or model value is too long"
+	}
+	if len(bundle.Profile.ToolNames) > 256 {
+		return "assistant profile bundle contains too many tools"
+	}
+	for _, name := range bundle.Profile.ToolNames {
+		if len(strings.TrimSpace(name)) == 0 || len(name) > 200 {
+			return "assistant profile bundle contains an invalid tool name"
+		}
+	}
+	if len(bundle.Skills) > 50 {
+		return "assistant profile bundle contains too many Skills"
+	}
+	for _, skill := range bundle.Skills {
+		if strings.TrimSpace(skill.Name) == "" || len(strings.TrimSpace(skill.Name)) > 100 {
+			return "assistant profile bundle contains an invalid Skill name"
+		}
+		if len(skill.Description) > 2000 || len(skill.BodyMarkdown) > 50000 || strings.TrimSpace(skill.BodyMarkdown) == "" {
+			return "assistant profile bundle contains an invalid Skill body or description"
+		}
+	}
+	return ""
+}
+
 func (h *AssistantProfileHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	items, err := h.skills.List(assistantOwnerID(r), false)
 	if err != nil {

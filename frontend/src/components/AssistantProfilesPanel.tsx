@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Bot, BookOpen, Plus, Save, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Bot, BookOpen, Download, Plus, Save, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
-import { assistantProfilesApi, type AssistantProfile, type Skill } from '../assistantProfilesApi';
+import { assistantProfilesApi, type AssistantProfile, type AssistantProfileBundle, type Skill } from '../assistantProfilesApi';
 import { api } from '../api';
 import type { ToolDefinition } from '../types';
 
@@ -14,6 +14,7 @@ export function AssistantProfilesPanel() {
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [profile, setProfile] = useState<AssistantProfile>(emptyProfile);
   const [skill, setSkill] = useState<Skill>(emptySkill);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -43,12 +44,54 @@ export function AssistantProfilesPanel() {
     } catch (error) { toast.error(error instanceof Error ? error.message : 'Failed to save skill'); }
   };
 
+  const exportProfileBundle = async () => {
+    if (!profile.id) return;
+    try {
+      const bundle = await assistantProfilesApi.exportProfile(profile.id);
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const safeName = (profile.name || 'assistant-profile').trim().replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || 'assistant-profile';
+      anchor.href = url;
+      anchor.download = `${safeName}.omnillm-assistant.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      if (bundle.warnings?.length) toast.warning(bundle.warnings.join(' '));
+      else toast.success('Assistant profile exported');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to export profile');
+    }
+  };
+
+  const importProfileBundle = async (file?: File) => {
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) {
+      toast.error('Assistant profile bundle is too large');
+      return;
+    }
+    try {
+      const bundle = JSON.parse(await file.text()) as AssistantProfileBundle;
+      const saved = await assistantProfilesApi.importProfile(bundle);
+      await refresh();
+      setProfile(saved);
+      toast.success('Assistant profile imported');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to import assistant profile');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-border bg-surface-alt p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3"><Bot size={18} className="text-violet-300" /><div><h3 className="text-sm font-bold">Assistant Profiles</h3><p className="text-[11px] text-text-muted">Package model defaults, instructions, tools, and Skills for Agent Mode.</p></div></div>
-          <button type="button" onClick={() => setProfile(emptyProfile)} className="btn-secondary inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs"><Plus size={13}/>New</button>
+          <div className="flex items-center gap-2">
+            <input ref={importInputRef} type="file" accept=".json,application/json" className="hidden" onChange={async (event) => { const file = event.target.files?.[0]; event.target.value = ''; await importProfileBundle(file); }} />
+            <button type="button" onClick={() => importInputRef.current?.click()} className="btn-secondary inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs"><Upload size={13}/>Import</button>
+            <button type="button" onClick={() => setProfile(emptyProfile)} className="btn-secondary inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs"><Plus size={13}/>New</button>
+          </div>
         </div>
         {profiles.length > 0 && <div className="mb-4 flex flex-wrap gap-2">{profiles.map((item) => <button key={item.id} type="button" onClick={() => setProfile(item)} className={`rounded-lg px-2.5 py-1.5 text-[11px] ${profile.id === item.id ? 'bg-primary/20 text-primary' : 'bg-surface text-text-muted hover:text-text'}`}>{item.name}</button>)}</div>}
         <div className="grid gap-3 sm:grid-cols-2">
@@ -60,7 +103,8 @@ export function AssistantProfilesPanel() {
         <textarea value={profile.system_prompt || ''} onChange={(e)=>setProfile({...profile,system_prompt:e.target.value})} placeholder="System instructions" rows={5} className="mt-3 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm" />
         <div className="mt-4"><p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Allowed tools <span className="normal-case font-normal">(empty = unrestricted)</span></p><div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">{tools.map((tool)=>{const selected=profile.tool_names.includes(tool.name);return <button key={tool.name} type="button" onClick={()=>setProfile({...profile,tool_names:selected?profile.tool_names.filter((name)=>name!==tool.name):[...profile.tool_names,tool.name]})} className={`rounded-lg px-2 py-1 text-[10px] ${selected?'bg-violet-500/20 text-violet-300':'bg-surface text-text-muted hover:text-text'}`}>{tool.name}</button>})}</div></div>
         <div className="mt-4"><p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Attached Skills</p><div className="flex flex-wrap gap-1.5">{skills.map((item)=>{const selected=Boolean(item.id && profile.skill_ids.includes(item.id));return <button key={item.id} type="button" onClick={()=>item.id&&setProfile({...profile,skill_ids:selected?profile.skill_ids.filter((id)=>id!==item.id):[...profile.skill_ids,item.id]})} className={`rounded-lg px-2 py-1 text-[10px] ${selected?'bg-cyan-500/20 text-cyan-300':'bg-surface text-text-muted hover:text-text'}`}>{item.name}</button>})}</div></div>
-        <div className="mt-5 flex gap-2"><button type="button" onClick={saveProfile} className="btn-primary inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs"><Save size={13}/>Save profile</button>{profile.id&&<button type="button" onClick={async()=>{await assistantProfilesApi.deleteProfile(profile.id!);setProfile(emptyProfile);await refresh();}} className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs text-red-300 hover:bg-red-500/10"><Trash2 size={13}/>Delete</button>}</div>
+        <div className="mt-5 flex gap-2"><button type="button" onClick={saveProfile} className="btn-primary inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs"><Save size={13}/>Save profile</button>{profile.id&&<button type="button" onClick={exportProfileBundle} className="btn-secondary inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs"><Download size={13}/>Export</button>}{profile.id&&<button type="button" onClick={async()=>{await assistantProfilesApi.deleteProfile(profile.id!);setProfile(emptyProfile);await refresh();}} className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs text-red-300 hover:bg-red-500/10"><Trash2 size={13}/>Delete</button>}</div>
+        <p className="mt-3 text-[10px] text-text-muted">Exports include system instructions and attached Skill Markdown. Review the JSON bundle before sharing it.</p>
       </section>
 
       <section className="rounded-2xl border border-border bg-surface-alt p-5">
