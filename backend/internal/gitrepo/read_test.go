@@ -58,6 +58,15 @@ func TestServiceReadOnlyRepositoryOperations(t *testing.T) {
 		t.Fatalf("unexpected log: %#v", logResult)
 	}
 
+	maxInt := int(^uint(0) >> 1)
+	boundedLog, err := svc.Log(ctx, "test", "HEAD", maxInt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundedLog.Commits) != 1 {
+		t.Fatalf("extreme log limit was not safely bounded: %#v", boundedLog)
+	}
+
 	shown, err := svc.Show(ctx, "test", "HEAD")
 	if err != nil {
 		t.Fatal(err)
@@ -80,6 +89,17 @@ func TestServiceReadOnlyRepositoryOperations(t *testing.T) {
 	}
 	if len(blame.Lines) != 2 || blame.Lines[1].Text != "world" || blame.Lines[1].Hash != firstHash.String() {
 		t.Fatalf("unexpected blame: %#v", blame)
+	}
+
+	boundedBlame, err := svc.Blame(ctx, "test", "hello.txt", "HEAD", 1, maxInt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(boundedBlame.Lines) != 2 || boundedBlame.EndLine != 2 {
+		t.Fatalf("extreme blame range was not safely bounded: %#v", boundedBlame)
+	}
+	if _, err := svc.Blame(ctx, "test", "hello.txt", "HEAD", maxInt, maxInt); err == nil {
+		t.Fatal("extreme blame start line error = nil, want out-of-range error")
 	}
 }
 
