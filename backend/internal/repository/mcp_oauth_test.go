@@ -34,6 +34,7 @@ func newMCPOAuthTestRepo(t *testing.T) (*MCPOAuthRepo, *sql.DB) {
 			resource_metadata_url TEXT NOT NULL DEFAULT '',
 			registration_method TEXT NOT NULL DEFAULT 'preregistered',
 			client_issuer TEXT NOT NULL DEFAULT '',
+			required_scope TEXT NOT NULL DEFAULT '',
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)
 	`); err != nil {
@@ -141,5 +142,30 @@ func TestMCPOAuthRepoDoesNotBindCIMDClientToIssuer(t *testing.T) {
 	}
 	if err := repo.BindClientIssuer("server-1", "https://issuer-b.example"); err != nil {
 		t.Fatalf("CIMD should remain issuer-portable: %v", err)
+	}
+}
+
+func TestMCPOAuthRepoDynamicClientAndRequiredScope(t *testing.T) {
+	repo, database := newMCPOAuthTestRepo(t)
+	defer database.Close()
+	if err := repo.ConfigureDynamicClient("server-1", "https://issuer.example", "dynamic-client"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveRequiredScope("server-1", "files.read files.write"); err != nil {
+		t.Fatal(err)
+	}
+	status, err := repo.Status("server-1", "http://127.0.0.1/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.RegistrationMethod != models.MCPOAuthRegistrationDCR || status.ClientIssuer != "https://issuer.example" || status.RequiredScope != "files.read files.write" {
+		t.Fatalf("unexpected dynamic OAuth status: %#v", status)
+	}
+	if err := repo.SaveTokens("server-1", "access", "", "Bearer", "files.read files.write", nil); err != nil {
+		t.Fatal(err)
+	}
+	status, err = repo.Status("server-1", "http://127.0.0.1/callback")
+	if err != nil || status.RequiredScope != "" {
+		t.Fatalf("successful grant should clear required scope: %#v %v", status, err)
 	}
 }

@@ -150,6 +150,7 @@ func versionedMigrations() []Migration {
 		{Version: 47, Name: "mcp_http_private_network_policy", SQL: migrationMCPHTTPPrivateNetwork},
 		{Version: 48, Name: "mcp_oauth_credentials", SQL: migrationMCPOAuthCredentials},
 		{Version: 49, Name: "mcp_oauth_registration_binding", SQL: migrationMCPOAuthRegistrationBinding},
+		{Version: 50, Name: "mcp_oauth_incremental_scope", SQL: migrationMCPOAuthIncrementalScope},
 	}
 }
 
@@ -1382,4 +1383,10 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_credentials (
 const migrationMCPOAuthRegistrationBinding = `
 ALTER TABLE mcp_oauth_credentials ADD COLUMN registration_method TEXT NOT NULL DEFAULT 'preregistered';
 ALTER TABLE mcp_oauth_credentials ADD COLUMN client_issuer TEXT NOT NULL DEFAULT '';
+`
+
+// V50: persist authorization step-up requirements discovered from
+// WWW-Authenticate insufficient_scope challenges.
+const migrationMCPOAuthIncrementalScope = `
+ALTER TABLE mcp_oauth_credentials ADD COLUMN required_scope TEXT NOT NULL DEFAULT '';
 `

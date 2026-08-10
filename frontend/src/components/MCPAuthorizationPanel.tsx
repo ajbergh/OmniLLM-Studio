@@ -17,9 +17,10 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
     try {
       const next = await mcpOAuthApi.status(server.id);
       setStatus(next);
-      setClientId(next.client_id || '');
+      const generatedDCR = next.registration_method === 'dcr';
+      setClientId(generatedDCR ? '' : (next.client_id || ''));
       setAuthMethod(next.token_endpoint_auth_method || 'none');
-      setRegistrationMethod(next.registration_method || 'preregistered');
+      setRegistrationMethod(next.registration_method === 'cimd' ? 'cimd' : 'preregistered');
       return next;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to load MCP OAuth status');
@@ -56,7 +57,12 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
     if (popup) popup.opener = null;
     setBusy(true);
     try {
-      await saveConfiguration();
+      const steppingUp = Boolean(status?.required_scope);
+      if (clientId.trim()) {
+        await saveConfiguration();
+      } else if (registrationMethod === 'cimd') {
+        throw new Error('A Client ID Metadata Document URL is required');
+      }
       const start = await mcpOAuthApi.start(server.id);
       if (popup) popup.location.href = start.authorization_url;
       else window.open(start.authorization_url, '_blank', 'noopener,noreferrer');
@@ -67,11 +73,11 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
       pollTimer.current = setInterval(async () => {
         attempts += 1;
         const next = await load();
-        if (next?.connected || attempts >= 60) {
+        if ((next?.connected && (!steppingUp || !next.required_scope)) || attempts >= 60) {
           if (pollTimer.current) clearInterval(pollTimer.current);
           pollTimer.current = null;
           if (next?.connected) {
-            toast.success('MCP OAuth connected');
+            toast.success(steppingUp ? 'MCP OAuth permissions updated' : 'MCP OAuth connected');
             onChanged?.();
           }
         }
@@ -169,6 +175,12 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
         </>
       )}
 
+      {registrationMethod === 'preregistered' && !clientId.trim() && status?.registration_method !== 'dcr' && (
+        <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[10px] leading-relaxed text-text-muted">
+          No client ID entered. Connect can fall back to legacy Dynamic Client Registration only when the authorization server advertises a registration endpoint. DCR is retained for backward compatibility; preregistration or CIMD is preferred.
+        </div>
+      )}
+
       <div className="mt-3 rounded-xl border border-border bg-surface/50 p-3 text-[10px] leading-relaxed text-text-muted">
         <div><span className="font-medium text-text-secondary">Redirect URI:</span> <span className="break-all font-mono">{status?.redirect_uri || 'Loading…'}</span></div>
         <div className="mt-1">Register this redirect URI with the authorization server. For desktop, the loopback port changes per launch; native OAuth registrations should allow loopback redirect ports.</div>
@@ -177,17 +189,25 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
       {status?.authorization_server && (
         <div className="mt-3 rounded-xl border border-border bg-surface/50 p-3 text-[10px] text-text-muted">
           <div className="break-all"><span className="font-medium text-text-secondary">Authorization server:</span> {status.authorization_server}</div>
-          <div className="mt-1"><span className="font-medium text-text-secondary">Registration:</span> {status.registration_method === 'cimd' ? 'Client ID Metadata Document' : 'Preregistered client'}</div>
+          <div className="mt-1"><span className="font-medium text-text-secondary">Registration:</span> {status.registration_method === 'cimd' ? 'Client ID Metadata Document' : status.registration_method === 'dcr' ? 'Dynamic registration (legacy DCR)' : 'Preregistered client'}</div>
           {status.client_issuer && <div className="mt-1 break-all"><span className="font-medium text-text-secondary">Client issuer binding:</span> {status.client_issuer}</div>}
           {status.scope && <div className="mt-1 break-all"><span className="font-medium text-text-secondary">Granted scope:</span> {status.scope}</div>}
           {status.expires_at && <div className="mt-1"><span className="font-medium text-text-secondary">Access token expiry:</span> {new Date(status.expires_at).toLocaleString()}</div>}
         </div>
       )}
 
+      {status?.required_scope && (
+        <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-200">
+          <div className="font-semibold">Additional OAuth permission required</div>
+          <div className="mt-1 break-all font-mono text-[10px]">{status.required_scope}</div>
+          <div className="mt-1 text-[10px] text-text-muted">Granting this step-up starts a new PKCE authorization flow and unions the challenged scopes with the scopes already granted/requested.</div>
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <button type="button" disabled={busy || !clientId.trim()} onClick={() => void connect()} className="btn-primary inline-flex min-h-10 items-center gap-1.5 rounded-xl px-3 text-xs disabled:opacity-50">
+        <button type="button" disabled={busy || (registrationMethod === 'cimd' && !clientId.trim())} onClick={() => void connect()} className="btn-primary inline-flex min-h-10 items-center gap-1.5 rounded-xl px-3 text-xs disabled:opacity-50">
           {status?.connected ? <ShieldCheck size={13} /> : <ExternalLink size={13} />}
-          {status?.connected ? 'Reconnect OAuth' : 'Connect OAuth'}
+          {status?.required_scope ? 'Grant additional scopes' : status?.connected ? 'Reconnect OAuth' : status?.registration_method === 'dcr' ? 'Reconnect OAuth' : 'Connect OAuth'}
         </button>
         {status?.connected && (
           <button type="button" disabled={busy} onClick={() => void disconnect()} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-border px-3 text-xs text-text hover:bg-surface-hover disabled:opacity-50">

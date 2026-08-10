@@ -19,6 +19,7 @@ type MCPOAuthCredential struct {
 	RefreshToken            string
 	TokenType               string
 	Scope                   string
+	RequiredScope           string
 	ExpiresAt               *time.Time
 	TokenEndpointAuthMethod string
 	AuthorizationServer     string
@@ -36,7 +37,7 @@ func NewMCPOAuthRepo(db *sql.DB) *MCPOAuthRepo { return &MCPOAuthRepo{db: db} }
 
 func validMCPOAuthRegistrationMethod(value string) bool {
 	switch value {
-	case models.MCPOAuthRegistrationPreregistered, models.MCPOAuthRegistrationCIMD:
+	case models.MCPOAuthRegistrationPreregistered, models.MCPOAuthRegistrationCIMD, models.MCPOAuthRegistrationDCR:
 		return true
 	default:
 		return false
@@ -110,11 +111,41 @@ func (r *MCPOAuthRepo) ConfigureClient(serverID string, input models.ConfigureMC
 			client_secret_enc = excluded.client_secret_enc,
 			token_endpoint_auth_method = excluded.token_endpoint_auth_method,
 			registration_method = excluded.registration_method, client_issuer = excluded.client_issuer,
-			access_token_enc = '', refresh_token_enc = '', token_type = '', scope = '', expires_at = NULL,
+			access_token_enc = '', refresh_token_enc = '', token_type = '', scope = '', required_scope = '', expires_at = NULL,
 			updated_at = CURRENT_TIMESTAMP
 	`, serverID, clientID, secretEnc, method, registrationMethod, clientIssuer)
 	if err != nil {
 		return fmt.Errorf("save MCP OAuth client: %w", err)
+	}
+	return nil
+}
+
+// ConfigureDynamicClient stores an automatically registered public DCR client.
+// DCR credentials are always bound to the exact authorization-server issuer.
+func (r *MCPOAuthRepo) ConfigureDynamicClient(serverID, issuer, clientID string) error {
+	issuer = strings.TrimSpace(issuer)
+	clientID = strings.TrimSpace(clientID)
+	if issuer == "" || clientID == "" {
+		return fmt.Errorf("issuer and client_id are required for dynamic registration")
+	}
+	_, err := r.db.Exec(`
+        INSERT INTO mcp_oauth_credentials (
+            server_id, client_id, client_secret_enc, token_endpoint_auth_method,
+            access_token_enc, refresh_token_enc, token_type, scope, expires_at,
+            authorization_server, authorization_endpoint, token_endpoint, resource_metadata_url,
+            registration_method, client_issuer, required_scope, updated_at
+        ) VALUES (?, ?, '', ?, '', '', '', '', NULL, '', '', '', '', ?, ?, '', CURRENT_TIMESTAMP)
+        ON CONFLICT(server_id) DO UPDATE SET
+            client_id = excluded.client_id,
+            client_secret_enc = '',
+            token_endpoint_auth_method = excluded.token_endpoint_auth_method,
+            registration_method = excluded.registration_method,
+            client_issuer = excluded.client_issuer,
+            access_token_enc = '', refresh_token_enc = '', token_type = '', scope = '', required_scope = '', expires_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+    `, serverID, clientID, models.MCPOAuthAuthMethodNone, models.MCPOAuthRegistrationDCR, issuer)
+	if err != nil {
+		return fmt.Errorf("save dynamically registered MCP OAuth client: %w", err)
 	}
 	return nil
 }
@@ -134,12 +165,12 @@ func (r *MCPOAuthRepo) GetRuntime(serverID string) (*MCPOAuthCredential, error) 
 	err := r.db.QueryRow(`
 		SELECT server_id, client_id, client_secret_enc, access_token_enc, refresh_token_enc,
 			token_type, scope, expires_at, token_endpoint_auth_method,
-			authorization_server, authorization_endpoint, token_endpoint, resource_metadata_url, registration_method, client_issuer
+			authorization_server, authorization_endpoint, token_endpoint, resource_metadata_url, registration_method, client_issuer, required_scope
 		FROM mcp_oauth_credentials WHERE server_id = ?
 	`, serverID).Scan(
 		&item.ServerID, &item.ClientID, &clientSecretEnc, &accessTokenEnc, &refreshTokenEnc,
 		&item.TokenType, &item.Scope, &expiresAt, &item.TokenEndpointAuthMethod,
-		&item.AuthorizationServer, &item.AuthorizationEndpoint, &item.TokenEndpoint, &item.ResourceMetadataURL, &item.RegistrationMethod, &item.ClientIssuer,
+		&item.AuthorizationServer, &item.AuthorizationEndpoint, &item.TokenEndpoint, &item.ResourceMetadataURL, &item.RegistrationMethod, &item.ClientIssuer, &item.RequiredScope,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -182,6 +213,7 @@ func (r *MCPOAuthRepo) Status(serverID, redirectURI string) (models.MCPOAuthStat
 	status.HasRefreshToken = credential.RefreshToken != ""
 	status.TokenEndpointAuthMethod = credential.TokenEndpointAuthMethod
 	status.Scope = credential.Scope
+	status.RequiredScope = credential.RequiredScope
 	status.ExpiresAt = credential.ExpiresAt
 	status.AuthorizationServer = credential.AuthorizationServer
 	status.AuthorizationEndpoint = credential.AuthorizationEndpoint
@@ -251,13 +283,13 @@ func (r *MCPOAuthRepo) SaveTokens(serverID, accessToken, refreshToken, tokenType
 	if refreshToken == "" {
 		_, err = r.db.Exec(`
 			UPDATE mcp_oauth_credentials
-			SET access_token_enc = ?, token_type = ?, scope = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
+			SET access_token_enc = ?, token_type = ?, scope = ?, required_scope = '', expires_at = ?, updated_at = CURRENT_TIMESTAMP
 			WHERE server_id = ?
 		`, accessEnc, tokenType, scope, expiresAt, serverID)
 	} else {
 		_, err = r.db.Exec(`
 			UPDATE mcp_oauth_credentials
-			SET access_token_enc = ?, refresh_token_enc = ?, token_type = ?, scope = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
+			SET access_token_enc = ?, refresh_token_enc = ?, token_type = ?, scope = ?, required_scope = '', expires_at = ?, updated_at = CURRENT_TIMESTAMP
 			WHERE server_id = ?
 		`, accessEnc, refreshEnc, tokenType, scope, expiresAt, serverID)
 	}
@@ -270,11 +302,20 @@ func (r *MCPOAuthRepo) SaveTokens(serverID, accessToken, refreshToken, tokenType
 func (r *MCPOAuthRepo) ClearTokens(serverID string) error {
 	_, err := r.db.Exec(`
 		UPDATE mcp_oauth_credentials
-		SET access_token_enc = '', refresh_token_enc = '', token_type = '', scope = '', expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+		SET access_token_enc = '', refresh_token_enc = '', token_type = '', scope = '', required_scope = '', expires_at = NULL, updated_at = CURRENT_TIMESTAMP
 		WHERE server_id = ?
 	`, serverID)
 	if err != nil {
 		return fmt.Errorf("clear MCP OAuth tokens: %w", err)
+	}
+	return nil
+}
+
+// SaveRequiredScope persists the complete scope set needed for the next
+// authorization-code step-up. Callers pass a normalized union.
+func (r *MCPOAuthRepo) SaveRequiredScope(serverID, scope string) error {
+	if _, err := r.db.Exec(`UPDATE mcp_oauth_credentials SET required_scope = ?, updated_at = CURRENT_TIMESTAMP WHERE server_id = ?`, strings.TrimSpace(scope), serverID); err != nil {
+		return fmt.Errorf("save MCP OAuth required scope: %w", err)
 	}
 	return nil
 }

@@ -1,6 +1,10 @@
 package mcpclient
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -104,5 +108,37 @@ func TestAuthorizationResponseIssuerValidation(t *testing.T) {
 	pending.IssuerParameterRequired = false
 	if err := validateAuthorizationResponseIssuer(pending, ""); err != nil {
 		t.Fatalf("optional absent issuer should be accepted: %v", err)
+	}
+}
+
+func TestDynamicPublicClientRegistrationContract(t *testing.T) {
+	var received dynamicClientRegistrationRequest
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"client_id":"dynamic-123","token_endpoint_auth_method":"none"}`))
+	}))
+	defer server.Close()
+
+	result, err := registerDynamicPublicClient(context.Background(), server.Client(), server.URL, "http://127.0.0.1:54321/v1/mcp/oauth/callback")
+	if err != nil {
+		t.Fatalf("register dynamic public client: %v", err)
+	}
+	if result.ClientID != "dynamic-123" || received.TokenEndpointAuthMethod != "none" || received.ApplicationType != "native" {
+		t.Fatalf("unexpected DCR contract: result=%#v request=%#v", result, received)
+	}
+	if len(received.RedirectURIs) != 1 || received.RedirectURIs[0] != "http://127.0.0.1:54321/v1/mcp/oauth/callback" {
+		t.Fatalf("redirect URIs = %#v", received.RedirectURIs)
+	}
+}
+
+func TestOAuthApplicationTypeUsesWebForHTTPSCallback(t *testing.T) {
+	if got := oauthApplicationType("https://chat.example/v1/mcp/oauth/callback"); got != "web" {
+		t.Fatalf("application type = %q, want web", got)
 	}
 }

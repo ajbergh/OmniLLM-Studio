@@ -9,6 +9,7 @@ const (
 
 	MCPOAuthRegistrationPreregistered = "preregistered"
 	MCPOAuthRegistrationCIMD          = "cimd"
+	MCPOAuthRegistrationDCR           = "dcr"
 )
 
 // MCPOAuthStatus is the non-secret management view of one MCP OAuth connection.
@@ -23,6 +24,7 @@ type MCPOAuthStatus struct {
 	HasRefreshToken         bool       `json:"has_refresh_token"`
 	TokenEndpointAuthMethod string     `json:"token_endpoint_auth_method,omitempty"`
 	Scope                   string     `json:"scope,omitempty"`
+	RequiredScope           string     `json:"required_scope,omitempty"`
 	ExpiresAt               *time.Time `json:"expires_at,omitempty"`
 	AuthorizationServer     string     `json:"authorization_server,omitempty"`
 	AuthorizationEndpoint   string     `json:"authorization_endpoint,omitempty"`
