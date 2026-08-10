@@ -205,10 +205,11 @@ func writeJSONRPCError(w http.ResponseWriter, id int64, code int, message string
 
 func testMCPServer(url string) models.MCPServer {
 	return models.MCPServer{
-		ID:        "test-http-server",
-		Name:      "test",
-		Transport: "http",
-		URL:       &url,
+		ID:                  "test-http-server",
+		Name:                "test",
+		Transport:           "http",
+		URL:                 &url,
+		AllowPrivateNetwork: true,
 	}
 }
 

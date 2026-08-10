@@ -486,20 +486,21 @@ type ToolPermission struct {
 
 // MCPServer stores one configured Model Context Protocol server.
 type MCPServer struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Transport   string            `json:"transport"`
-	Command     *string           `json:"command,omitempty"`
-	Args        []string          `json:"args"`
-	URL         *string           `json:"url,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	EnvKeys     []string          `json:"env_keys,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
-	HeaderKeys  []string          `json:"header_keys,omitempty"`
-	Enabled     bool              `json:"enabled"`
-	WorkspaceID *string           `json:"workspace_id,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID                  string            `json:"id"`
+	Name                string            `json:"name"`
+	Transport           string            `json:"transport"`
+	Command             *string           `json:"command,omitempty"`
+	Args                []string          `json:"args"`
+	URL                 *string           `json:"url,omitempty"`
+	Env                 map[string]string `json:"env,omitempty"`
+	EnvKeys             []string          `json:"env_keys,omitempty"`
+	Headers             map[string]string `json:"headers,omitempty"`
+	HeaderKeys          []string          `json:"header_keys,omitempty"`
+	AllowPrivateNetwork bool              `json:"allow_private_network"`
+	Enabled             bool              `json:"enabled"`
+	WorkspaceID         *string           `json:"workspace_id,omitempty"`
+	CreatedAt           time.Time         `json:"created_at"`
+	UpdatedAt           time.Time         `json:"updated_at"`
 }
 
 // MCPServerStatus is the runtime connection state for an MCP server.

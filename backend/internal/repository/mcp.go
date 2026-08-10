@@ -25,28 +25,30 @@ func NewMCPServerRepo(db *sql.DB) *MCPServerRepo {
 
 // CreateMCPServerInput is the request shape for creating an MCP server.
 type CreateMCPServerInput struct {
-	Name        string            `json:"name"`
-	Transport   string            `json:"transport"`
-	Command     *string           `json:"command,omitempty"`
-	Args        []string          `json:"args,omitempty"`
-	URL         *string           `json:"url,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
-	Enabled     bool              `json:"enabled"`
-	WorkspaceID *string           `json:"workspace_id,omitempty"`
+	Name                string            `json:"name"`
+	Transport           string            `json:"transport"`
+	Command             *string           `json:"command,omitempty"`
+	Args                []string          `json:"args,omitempty"`
+	URL                 *string           `json:"url,omitempty"`
+	Env                 map[string]string `json:"env,omitempty"`
+	Headers             map[string]string `json:"headers,omitempty"`
+	AllowPrivateNetwork bool              `json:"allow_private_network"`
+	Enabled             bool              `json:"enabled"`
+	WorkspaceID         *string           `json:"workspace_id,omitempty"`
 }
 
 // UpdateMCPServerInput is the request shape for updating an MCP server.
 type UpdateMCPServerInput struct {
-	Name        *string            `json:"name,omitempty"`
-	Transport   *string            `json:"transport,omitempty"`
-	Command     *string            `json:"command,omitempty"`
-	Args        *[]string          `json:"args,omitempty"`
-	URL         *string            `json:"url,omitempty"`
-	Env         *map[string]string `json:"env,omitempty"`
-	Headers     *map[string]string `json:"headers,omitempty"`
-	Enabled     *bool              `json:"enabled,omitempty"`
-	WorkspaceID *string            `json:"workspace_id,omitempty"`
+	Name                *string            `json:"name,omitempty"`
+	Transport           *string            `json:"transport,omitempty"`
+	Command             *string            `json:"command,omitempty"`
+	Args                *[]string          `json:"args,omitempty"`
+	URL                 *string            `json:"url,omitempty"`
+	Env                 *map[string]string `json:"env,omitempty"`
+	Headers             *map[string]string `json:"headers,omitempty"`
+	AllowPrivateNetwork *bool              `json:"allow_private_network,omitempty"`
+	Enabled             *bool              `json:"enabled,omitempty"`
+	WorkspaceID         *string            `json:"workspace_id,omitempty"`
 }
 
 // MCPAuditFilter controls audit event listing.
@@ -58,7 +60,7 @@ type MCPAuditFilter struct {
 // List returns configured MCP servers with secret values redacted.
 func (r *MCPServerRepo) List() ([]models.MCPServer, error) {
 	rows, err := r.db.Query(`
-		SELECT id, name, transport, command, args_json, url, env_json, headers_json, enabled, workspace_id, created_at, updated_at
+		SELECT id, name, transport, command, args_json, url, env_json, headers_json, allow_private_network, enabled, workspace_id, created_at, updated_at
 		FROM mcp_servers
 		ORDER BY name ASC
 	`)
@@ -81,7 +83,7 @@ func (r *MCPServerRepo) List() ([]models.MCPServer, error) {
 // ListRuntime returns configured MCP servers with decrypted environment values.
 func (r *MCPServerRepo) ListRuntime() ([]models.MCPServer, error) {
 	rows, err := r.db.Query(`
-		SELECT id, name, transport, command, args_json, url, env_json, headers_json, enabled, workspace_id, created_at, updated_at
+		SELECT id, name, transport, command, args_json, url, env_json, headers_json, allow_private_network, enabled, workspace_id, created_at, updated_at
 		FROM mcp_servers
 		ORDER BY name ASC
 	`)
@@ -113,7 +115,7 @@ func (r *MCPServerRepo) GetRuntimeByID(id string) (*models.MCPServer, error) {
 
 func (r *MCPServerRepo) getByID(id string, decryptEnv bool) (*models.MCPServer, error) {
 	row := r.db.QueryRow(`
-		SELECT id, name, transport, command, args_json, url, env_json, headers_json, enabled, workspace_id, created_at, updated_at
+		SELECT id, name, transport, command, args_json, url, env_json, headers_json, allow_private_network, enabled, workspace_id, created_at, updated_at
 		FROM mcp_servers
 		WHERE id = ?
 	`, id)
@@ -150,15 +152,19 @@ func (r *MCPServerRepo) Create(input CreateMCPServerInput) (*models.MCPServer, e
 		return nil, err
 	}
 
+	allowPrivateNetwork := 0
+	if input.AllowPrivateNetwork {
+		allowPrivateNetwork = 1
+	}
 	enabled := 0
 	if input.Enabled {
 		enabled = 1
 	}
 
 	_, err = r.db.Exec(`
-		INSERT INTO mcp_servers (id, name, transport, command, args_json, url, env_json, headers_json, enabled, workspace_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, id, strings.TrimSpace(input.Name), transport, nullableString(input.Command), argsJSON, nullableString(input.URL), envJSON, headersJSON, enabled, input.WorkspaceID, now, now)
+		INSERT INTO mcp_servers (id, name, transport, command, args_json, url, env_json, headers_json, allow_private_network, enabled, workspace_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, id, strings.TrimSpace(input.Name), transport, nullableString(input.Command), argsJSON, nullableString(input.URL), envJSON, headersJSON, allowPrivateNetwork, enabled, input.WorkspaceID, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("create mcp server: %w", err)
 	}
@@ -209,6 +215,14 @@ func (r *MCPServerRepo) Update(id string, input UpdateMCPServerInput) (*models.M
 		}
 		sets = append(sets, "headers_json = ?")
 		args = append(args, headersJSON)
+	}
+	if input.AllowPrivateNetwork != nil {
+		sets = append(sets, "allow_private_network = ?")
+		if *input.AllowPrivateNetwork {
+			args = append(args, 1)
+		} else {
+			args = append(args, 0)
+		}
 	}
 	if input.Enabled != nil {
 		sets = append(sets, "enabled = ?")
@@ -326,6 +340,7 @@ func scanMCPServer(scanner mcpServerScanner, decryptEnv bool) (models.MCPServer,
 	var argsJSON string
 	var envJSON string
 	var headersJSON string
+	var allowPrivateNetwork int
 	var enabled int
 
 	if err := scanner.Scan(
@@ -337,6 +352,7 @@ func scanMCPServer(scanner mcpServerScanner, decryptEnv bool) (models.MCPServer,
 		&url,
 		&envJSON,
 		&headersJSON,
+		&allowPrivateNetwork,
 		&enabled,
 		&workspaceID,
 		&server.CreatedAt,
@@ -354,6 +370,7 @@ func scanMCPServer(scanner mcpServerScanner, decryptEnv bool) (models.MCPServer,
 	if workspaceID.Valid {
 		server.WorkspaceID = &workspaceID.String
 	}
+	server.AllowPrivateNetwork = allowPrivateNetwork != 0
 	server.Enabled = enabled != 0
 
 	args, err := unmarshalStringSlice(argsJSON)

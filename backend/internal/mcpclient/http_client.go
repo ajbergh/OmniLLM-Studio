@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/models"
 )
@@ -37,13 +36,13 @@ type HTTPClient struct {
 	nextID int64
 }
 
-// NewHTTPClient creates an HTTPClient for a configured MCP server.
+// NewHTTPClient creates an HTTPClient for a configured MCP server. Public-network
+// policy is enforced at dial time unless the server explicitly opts into private
+// network access. Redirects are never followed.
 func NewHTTPClient(server models.MCPServer) *HTTPClient {
 	return &HTTPClient{
-		server: server,
-		httpCli: &http.Client{
-			Timeout: time.Duration(defaultRequestTimeout) * time.Second,
-		},
+		server:  server,
+		httpCli: newHTTPTransportClient(server),
 	}
 }
 
@@ -51,6 +50,9 @@ func NewHTTPClient(server models.MCPServer) *HTTPClient {
 func (c *HTTPClient) Start(ctx context.Context) error {
 	if c.server.URL == nil || strings.TrimSpace(*c.server.URL) == "" {
 		return fmt.Errorf("url is required for http MCP server")
+	}
+	if err := ValidateHTTPServerURL(*c.server.URL); err != nil {
+		return err
 	}
 	return c.initialize(ctx)
 }

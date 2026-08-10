@@ -2842,6 +2842,7 @@ type MCPFormState = {
   url: string;
   envText: string;
   headersText: string;
+  allowPrivateNetwork: boolean;
   enabled: boolean;
 };
 
@@ -2853,6 +2854,7 @@ const emptyMCPForm: MCPFormState = {
   url: '',
   envText: '',
   headersText: '',
+  allowPrivateNetwork: false,
   enabled: false,
 };
 
@@ -2868,6 +2870,7 @@ const filesystemMCPTemplate: MCPFormState = {
   url: '',
   envText: '',
   headersText: '',
+  allowPrivateNetwork: false,
   enabled: false,
 };
 
@@ -2920,6 +2923,7 @@ function createMCPRequest(form: MCPFormState): CreateMCPServerRequest {
     const url = form.url.trim();
     if (!url) throw new Error('URL is required for http transport');
     request.url = url;
+    request.allow_private_network = form.allowPrivateNetwork;
     if (form.headersText.trim()) {
       request.headers = parseMCPEnv(form.headersText, 'Headers');
     }
@@ -2948,6 +2952,7 @@ function formFromMCPServer(server: MCPServer): MCPFormState {
     url: server.url || '',
     envText: '',
     headersText: '',
+    allowPrivateNetwork: server.allow_private_network ?? false,
     enabled: server.enabled,
   };
 }
@@ -3448,6 +3453,21 @@ function MCPServerForm({
               Headers are encrypted at rest. Use for authentication (e.g. Authorization, X-API-Key).
             </p>
           </div>
+
+          <label className="mb-3 flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-xs text-text">
+            <input
+              type="checkbox"
+              checked={form.allowPrivateNetwork}
+              onChange={(event) => onChange({ allowPrivateNetwork: event.target.checked })}
+              className="mt-0.5 accent-primary"
+            />
+            <span>
+              <span className="font-medium text-amber-200">Allow private / local network targets</span>
+              <span className="mt-1 block text-[10px] leading-relaxed text-text-muted">
+                Off by default. Enable only for MCP servers you trust on localhost, RFC1918, link-local, or other private networks. Redirects remain disabled.
+              </span>
+            </span>
+          </label>
         </>
       )}
 

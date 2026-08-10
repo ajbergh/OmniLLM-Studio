@@ -333,6 +333,9 @@ func validateCreateMCPServer(input repository.CreateMCPServerInput) error {
 		if input.URL == nil || strings.TrimSpace(*input.URL) == "" {
 			return errString("url is required for http transport")
 		}
+		if err := mcpclient.ValidateHTTPServerURL(*input.URL); err != nil {
+			return err
+		}
 	default:
 		return errString("transport must be stdio or http")
 	}
@@ -352,8 +355,13 @@ func validateUpdateMCPServer(input repository.UpdateMCPServerInput) error {
 	if input.Command != nil && strings.TrimSpace(*input.Command) == "" {
 		return errString("command cannot be empty")
 	}
-	if input.URL != nil && strings.TrimSpace(*input.URL) == "" {
-		return errString("url cannot be empty")
+	if input.URL != nil {
+		if strings.TrimSpace(*input.URL) == "" {
+			return errString("url cannot be empty")
+		}
+		if err := mcpclient.ValidateHTTPServerURL(*input.URL); err != nil {
+			return err
+		}
 	}
 	return nil
 }
