@@ -4,6 +4,8 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-git/go-billy/v5/osfs"
@@ -96,6 +98,51 @@ func TestCloneQuotaFilesystemBoundsEntryCreation(t *testing.T) {
 	}
 	if _, err := os.Stat(fs.Join(fs.Root(), "fourth")); !os.IsNotExist(err) {
 		t.Fatalf("fourth entry exists after rejected creation: %v", err)
+	}
+}
+
+func TestCloneQuotaFilesystemCountsImplicitCreateParents(t *testing.T) {
+	root := t.TempDir()
+	fs := newCloneQuotaFilesystem(osfs.New(root, osfs.WithBoundOS()), 1024, 2)
+	if _, err := fs.Create(filepath.Join("a", "b", "file")); !errors.Is(err, errCloneEntryQuotaExceeded) {
+		t.Fatalf("deep Create() error = %v, want entry quota error", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "a")); !os.IsNotExist(err) {
+		t.Fatalf("implicit parent was created after rejected admission: %v", err)
+	}
+}
+
+func TestCloneQuotaFilesystemCountsImplicitRenameParents(t *testing.T) {
+	root := t.TempDir()
+	fs := newCloneQuotaFilesystem(osfs.New(root, osfs.WithBoundOS()), 1024, 2)
+	file, err := fs.Create("source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	if err := fs.Rename("source", filepath.Join("a", "b", "dest")); !errors.Is(err, errCloneEntryQuotaExceeded) {
+		t.Fatalf("deep Rename() error = %v, want entry quota error", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "a")); !os.IsNotExist(err) {
+		t.Fatalf("rename parent was created after rejected admission: %v", err)
+	}
+}
+
+func TestCloneQuotaFilesystemEmptyTempDirStaysInsideRoot(t *testing.T) {
+	root := t.TempDir()
+	fs := newCloneQuotaFilesystem(osfs.New(root, osfs.WithBoundOS()), 1024, 2)
+	file, err := fs.TempFile("", "pack-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := file.Name()
+	_ = file.Close()
+	relative, err := filepath.Rel(root, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		t.Fatalf("TempFile escaped clone root: root=%q file=%q", root, name)
 	}
 }
 
