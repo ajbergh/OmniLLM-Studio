@@ -79,7 +79,7 @@ func (s *Service) worktreeDiff(ctx context.Context, repositoryID string, repo *g
 	if err != nil {
 		return nil, safeRepositoryError(repositoryID, "status could not be read")
 	}
-	worktreeDigest, err := s.worktreeStateDigest(ctx, repositoryID, worktree, status)
+	worktreeDigest, err := s.worktreeStateDigestWithWorktree(ctx, repositoryID, worktree, status)
 	if err != nil {
 		return nil, fmt.Errorf("worktree state could not be fingerprinted safely: %w", err)
 	}
