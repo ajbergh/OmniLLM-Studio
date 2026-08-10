@@ -2,8 +2,6 @@ package mcpclient
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,68 +19,34 @@ func (p staticBearerTokenProvider) AccessToken(_ context.Context, _ string) (str
 	return p.token, p.err
 }
 
-func newOAuthHeaderTestServer(t *testing.T, inspect func(*http.Request)) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if inspect != nil {
-			inspect(r)
-		}
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		var request rpcRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			http.Error(w, "bad JSON-RPC request", http.StatusBadRequest)
-			return
-		}
-		if request.ID == 0 {
-			w.WriteHeader(http.StatusAccepted)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		response := rpcResponse{JSONRPC: "2.0", ID: json.RawMessage(fmt.Sprintf("%d", request.ID))}
-		if request.Method == "initialize" {
-			response.Result, _ = json.Marshal(map[string]interface{}{
-				"protocolVersion": ProtocolVersion,
-				"serverInfo":      map[string]interface{}{"name": "oauth-test", "version": "1.0"},
-				"capabilities":    map[string]interface{}{},
-			})
-		} else {
-			response.Result = json.RawMessage(`{}`)
-		}
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-}
-
 func TestHTTPClientInjectsOAuthBearerHeaderWithoutQueryLeak(t *testing.T) {
 	const accessToken = "sensitive-access-token"
-	var receivedAuthorization string
-	var receivedRawQuery string
-	server := newOAuthHeaderTestServer(t, func(r *http.Request) {
-		receivedAuthorization = r.Header.Get("Authorization")
-		receivedRawQuery = r.URL.RawQuery
-	})
-	defer server.Close()
-
-	url := server.URL
-	config := models.MCPServer{
-		ID:                  "oauth-header-test",
-		Name:                "oauth",
-		Transport:           "http",
-		URL:                 &url,
-		AllowPrivateNetwork: true,
-		Headers:             map[string]string{"Authorization": "Bearer stale-manual-token"},
-	}
+	resourceURL := "https://mcp.example.com/tools"
+	config := models.MCPServer{ID: "oauth-header-test", Name: "oauth", Transport: "http", URL: &resourceURL, Headers: map[string]string{"Authorization": "Bearer stale-manual-token"}}
 	client := NewHTTPClientWithTokenProvider(config, staticBearerTokenProvider{token: accessToken})
-	if err := client.Start(context.Background()); err != nil {
-		t.Fatalf("start OAuth HTTP client: %v", err)
+	req := httptest.NewRequest(http.MethodPost, resourceURL, nil)
+	if err := client.applyAuthHeaders(context.Background(), req); err != nil {
+		t.Fatalf("apply OAuth header: %v", err)
 	}
-	if receivedAuthorization != "Bearer "+accessToken {
-		t.Fatalf("Authorization = %q, want OAuth bearer token", receivedAuthorization)
+	if got := req.Header.Get("Authorization"); got != "Bearer "+accessToken {
+		t.Fatalf("Authorization = %q, want OAuth bearer token", got)
 	}
-	if strings.Contains(receivedRawQuery, accessToken) {
-		t.Fatalf("access token leaked into query string: %q", receivedRawQuery)
+	if strings.Contains(req.URL.RawQuery, accessToken) {
+		t.Fatalf("access token leaked into query string: %q", req.URL.RawQuery)
+	}
+}
+
+func TestHTTPClientRefusesOAuthBearerOverHTTP(t *testing.T) {
+	resourceURL := "http://127.0.0.1:9999/mcp"
+	config := models.MCPServer{ID: "oauth-http", Name: "oauth", Transport: "http", URL: &resourceURL, AllowPrivateNetwork: true}
+	client := NewHTTPClientWithTokenProvider(config, staticBearerTokenProvider{token: "access"})
+	req := httptest.NewRequest(http.MethodPost, resourceURL, nil)
+	err := client.applyAuthHeaders(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "non-HTTPS") {
+		t.Fatalf("expected non-HTTPS bearer rejection, got %v", err)
+	}
+	if got := req.Header.Get("Authorization"); got != "" {
+		t.Fatalf("bearer header was attached to plaintext request: %q", got)
 	}
 }
 
@@ -116,39 +80,11 @@ func (p *recordingBearerProvider) RecordScopeChallenge(_ string, scopes []string
 
 func TestHTTPClientRecordsInsufficientScopeChallenge(t *testing.T) {
 	provider := &recordingBearerProvider{token: "access"}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req rpcRequest
-		if r.Method == http.MethodDelete {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatal(err)
-		}
-		if req.ID == 0 {
-			w.WriteHeader(http.StatusAccepted)
-			return
-		}
-		if req.Method == "initialize" {
-			w.Header().Set("Content-Type", "application/json")
-			writeJSONRPCResult(w, req.ID, map[string]interface{}{
-				"protocolVersion": ProtocolVersion,
-				"serverInfo":      map[string]interface{}{"name": "scope-test", "version": "1"},
-				"capabilities":    map[string]interface{}{},
-			})
-			return
-		}
-		w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="files.write files.read"`)
-		w.WriteHeader(http.StatusForbidden)
-	}))
-	defer server.Close()
-
-	config := testMCPServer(server.URL)
-	client := NewHTTPClientWithTokenProvider(config, provider)
-	if err := client.Start(context.Background()); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	_, err := client.ListTools(context.Background())
+	resourceURL := "https://mcp.example.com"
+	client := NewHTTPClientWithTokenProvider(models.MCPServer{ID: "scope-test", URL: &resourceURL}, provider)
+	response := &http.Response{StatusCode: http.StatusForbidden, Header: make(http.Header)}
+	response.Header.Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="files.write files.read"`)
+	err := client.handleOAuthScopeChallenge(response)
 	if err == nil || !strings.Contains(err.Error(), ErrMCPOAuthInsufficientScope.Error()) {
 		t.Fatalf("expected insufficient-scope error, got %v", err)
 	}

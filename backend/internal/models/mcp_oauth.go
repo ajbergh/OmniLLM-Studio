@@ -39,6 +39,7 @@ type MCPOAuthStatus struct {
 type ConfigureMCPOAuthInput struct {
 	ClientID                string  `json:"client_id"`
 	ClientSecret            *string `json:"client_secret,omitempty"`
+	ClientIssuer            string  `json:"client_issuer,omitempty"`
 	TokenEndpointAuthMethod string  `json:"token_endpoint_auth_method"`
 	RegistrationMethod      string  `json:"registration_method,omitempty"`
 }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -377,6 +378,13 @@ func (c *HTTPClient) applyAuthHeaders(ctx context.Context, req *http.Request) er
 		return err
 	}
 	if strings.TrimSpace(token) != "" {
+		if c.server.URL == nil {
+			return fmt.Errorf("refusing to send MCP OAuth Bearer token without a resource URL")
+		}
+		resourceURL, parseErr := url.Parse(strings.TrimSpace(*c.server.URL))
+		if parseErr != nil || resourceURL.Scheme != "https" || resourceURL.Hostname() == "" || resourceURL.User != nil {
+			return fmt.Errorf("refusing to send MCP OAuth Bearer token over a non-HTTPS resource URL")
+		}
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	return nil

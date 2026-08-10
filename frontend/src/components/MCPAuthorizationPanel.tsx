@@ -8,6 +8,7 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
   const [status, setStatus] = useState<MCPOAuthStatus | null>(null);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
+  const [clientIssuer, setClientIssuer] = useState('');
   const [authMethod, setAuthMethod] = useState<MCPOAuthAuthMethod>('none');
   const [registrationMethod, setRegistrationMethod] = useState<MCPOAuthRegistrationMethod>('preregistered');
   const [busy, setBusy] = useState(false);
@@ -19,6 +20,7 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
       setStatus(next);
       const generatedDCR = next.registration_method === 'dcr';
       setClientId(generatedDCR ? '' : (next.client_id || ''));
+      setClientIssuer(generatedDCR ? '' : (next.client_issuer || ''));
       setAuthMethod(next.token_endpoint_auth_method || 'none');
       setRegistrationMethod(next.registration_method === 'cimd' ? 'cimd' : 'preregistered');
       return next;
@@ -45,6 +47,11 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
       token_endpoint_auth_method: registrationMethod === 'cimd' ? 'none' : authMethod,
       registration_method: registrationMethod,
     };
+    if (registrationMethod === 'preregistered') {
+      const issuer = clientIssuer.trim();
+      if (!issuer) throw new Error('Authorization server issuer is required for a preregistered client');
+      payload.client_issuer = issuer;
+    }
     if (registrationMethod === 'preregistered' && clientSecret !== '') payload.client_secret = clientSecret;
     const next = await mcpOAuthApi.configure(server.id, payload);
     setStatus(next);
@@ -112,6 +119,7 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
         client_secret: '',
         token_endpoint_auth_method: authMethod,
         registration_method: 'preregistered',
+        client_issuer: clientIssuer.trim(),
       });
       setStatus(next);
       setClientSecret('');
@@ -153,6 +161,14 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
           <input value={clientId} onChange={(event) => setClientId(event.target.value)} placeholder={registrationMethod === 'cimd' ? 'https://client.example/oauth/metadata.json' : 'oauth-client-id'} className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text" />
         </label>
       </div>
+
+      {registrationMethod === 'preregistered' && (
+        <label className="mt-3 block">
+          <span className="mb-1 block text-[10px] font-medium text-text-muted">Authorization server issuer</span>
+          <input value={clientIssuer} onChange={(event) => setClientIssuer(event.target.value)} placeholder="https://auth.example.com" className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text" />
+          <span className="mt-1 block text-[10px] leading-relaxed text-text-muted">Use the exact HTTPS issuer that owns this preregistered client. Omni verifies discovery against this value before sending credentials.</span>
+        </label>
+      )}
 
       {registrationMethod === 'cimd' ? (
         <div className="mt-3 rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 text-[10px] leading-relaxed text-text-muted">

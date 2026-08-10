@@ -14,13 +14,13 @@ The client discovers OAuth configuration instead of accepting arbitrary token en
 6. Encrypt preregistered client secrets and access/refresh tokens at rest.
 7. Refresh expiring tokens through the discovered token endpoint with the same resource binding.
 
-All metadata and token traffic uses the V47 hardened MCP HTTP transport: public-network-only by default, DNS-aware private-address blocking, explicit private/local opt-in, bounded response bodies, and no redirects.
+All metadata and token traffic uses the V47 hardened MCP HTTP transport: public-network-only by default, DNS-aware private-address blocking, explicit private/local opt-in, bounded response bodies, and no redirects. OAuth-protected MCP resource URLs themselves must use HTTPS; Omni refuses to attach an OAuth Bearer token to plaintext HTTP even when private-network access is explicitly enabled.
 
 ## Client registration
 
 The current MCP specification prioritizes preregistered credentials when available, then Client ID Metadata Documents (CIMD). Omni also supports Dynamic Client Registration only as the deprecated fallback when no client is configured and the authorization server advertises `registration_endpoint`. Automatic DCR requests a public PKCE client (`token_endpoint_auth_method=none`) and binds the returned client ID to the exact issuer. Configure the registration method in **Settings → MCP → OAuth 2.1 authorization**.
 
-Preregistered credentials are bound to the exact authorization-server issuer that first validates them. If Protected Resource Metadata later points to a different issuer, Omni rejects reuse instead of silently sending credentials to the new server. CIMD client IDs are HTTPS metadata-document URLs and remain issuer-portable by design.
+Preregistered credentials require an explicit authorization-server issuer at configuration time. Omni compares Protected Resource Metadata discovery to that trusted issuer before using the client ID or secret; it never learns the issuer on first use. DCR credentials are bound to the issuer that minted them, while CIMD client IDs are HTTPS metadata-document URLs and remain issuer-portable by design.
 
 The current supported token endpoint authentication methods are:
 
