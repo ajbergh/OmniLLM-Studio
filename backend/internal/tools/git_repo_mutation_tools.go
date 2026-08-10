@@ -69,15 +69,16 @@ func (t *gitRepositoryMutationTool) Definition() ToolDefinition {
 			},"additionalProperties":false
 		}`)
 	case "git_stage":
-		definition.Description = "Stage exact changed repository-relative files. Globs, directories, and stage-all are not accepted. Requires branch, HEAD, and index_digest from a fresh git_status snapshot."
+		definition.Description = "Stage exact changed repository-relative files after review. Requires branch, HEAD, and index_digest from git_status plus worktree_digest from the matching worktree git_diff; any changed worktree content invalidates the request."
 		definition.Parameters = json.RawMessage(`{
-			"type":"object","required":["repository","paths","expected_branch","expected_head","expected_index_digest"],
+			"type":"object","required":["repository","paths","expected_branch","expected_head","expected_index_digest","expected_worktree_digest"],
 			"properties":{
 				"repository":{"type":"string","description":"Configured repository ID from git_repositories"},
 				"paths":{"type":"array","minItems":1,"maxItems":50,"uniqueItems":true,"items":{"type":"string","minLength":1},"description":"Exact repository-relative file paths"},
 				"expected_branch":{"type":"string","minLength":1,"maxLength":200,"description":"Local branch observed from git_status"},
 				"expected_head":{"type":"string","minLength":40,"maxLength":40,"description":"HEAD hash observed from git_status"},
-				"expected_index_digest":{"type":"string","minLength":64,"maxLength":64,"description":"index_digest observed from the same git_status snapshot"}
+				"expected_index_digest":{"type":"string","minLength":64,"maxLength":64,"description":"index_digest observed from the same git_status snapshot"},
+				"expected_worktree_digest":{"type":"string","minLength":64,"maxLength":64,"description":"worktree_digest from a worktree git_diff reviewed after that git_status"}
 			},"additionalProperties":false
 		}`)
 	case "git_commit":
@@ -127,6 +128,9 @@ func (t *gitRepositoryMutationTool) Validate(raw json.RawMessage) error {
 		if err := validateExpectedBranchAndIndex(args); err != nil {
 			return err
 		}
+		if !validHex(args.ExpectedWorktreeDigest, 64) {
+			return fmt.Errorf("expected_worktree_digest must be the 64-character digest from a worktree git_diff")
+		}
 		if len(args.Paths) == 0 || len(args.Paths) > 50 {
 			return fmt.Errorf("paths must contain between 1 and 50 files")
 		}
@@ -171,7 +175,7 @@ func (t *gitRepositoryMutationTool) Execute(ctx context.Context, raw json.RawMes
 	case "git_checkout":
 		value, err = t.service.Checkout(ctx, args.Repository, args.Branch, args.ExpectedHead)
 	case "git_stage":
-		value, err = t.service.Stage(ctx, args.Repository, args.Paths, args.ExpectedBranch, args.ExpectedHead, args.ExpectedIndexDigest)
+		value, err = t.service.Stage(ctx, args.Repository, args.Paths, args.ExpectedBranch, args.ExpectedHead, args.ExpectedIndexDigest, args.ExpectedWorktreeDigest)
 	case "git_commit":
 		value, err = t.service.Commit(ctx, args.Repository, args.Message, args.ExpectedBranch, args.ExpectedHead, args.ExpectedIndexDigest)
 	default:
@@ -184,15 +188,16 @@ func (t *gitRepositoryMutationTool) Execute(ctx context.Context, raw json.RawMes
 }
 
 type gitMutationArgs struct {
-	Repository          string   `json:"repository"`
-	Name                string   `json:"name"`
-	From                string   `json:"from"`
-	Branch              string   `json:"branch"`
-	Paths               []string `json:"paths"`
-	Message             string   `json:"message"`
-	ExpectedBranch      string   `json:"expected_branch"`
-	ExpectedHead        string   `json:"expected_head"`
-	ExpectedIndexDigest string   `json:"expected_index_digest"`
+	Repository             string   `json:"repository"`
+	Name                   string   `json:"name"`
+	From                   string   `json:"from"`
+	Branch                 string   `json:"branch"`
+	Paths                  []string `json:"paths"`
+	Message                string   `json:"message"`
+	ExpectedBranch         string   `json:"expected_branch"`
+	ExpectedHead           string   `json:"expected_head"`
+	ExpectedIndexDigest    string   `json:"expected_index_digest"`
+	ExpectedWorktreeDigest string   `json:"expected_worktree_digest"`
 }
 
 func validateExpectedBranchAndIndex(args gitMutationArgs) error {
