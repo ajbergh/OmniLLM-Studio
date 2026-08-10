@@ -23,7 +23,7 @@ Current support is MCP client support for stdio servers that expose tools.
 Implemented:
 
 - Stdio MCP subprocess launch.
-- Streamable HTTP MCP transport (2025-06-18 spec).
+- Dual-era Streamable HTTP transport: stateless MCP 2026-07-28 with automatic fallback to the legacy 2025-06-18 initialization/session model.
 - MCP JSON-RPC initialization.
 - `tools/list` discovery.
 - `tools/call` execution.
@@ -65,7 +65,7 @@ The REST examples below are still useful for automation, debugging, and headless
 
 ## What transport is supported?
 
-OmniLLM-Studio supports both **stdio** and **Streamable HTTP** transports (MCP 2025-06-18).
+OmniLLM-Studio supports **stdio** using the established handshake-era protocol and **dual-era Streamable HTTP**. HTTP first probes the stateless MCP 2026-07-28 protocol and falls back to the legacy 2025-06-18 initialization/session model when the endpoint is identified as legacy.
 
 For **stdio**, OmniLLM-Studio launches a local MCP server as a subprocess and communicates over stdin/stdout using newline-delimited JSON-RPC messages.
 

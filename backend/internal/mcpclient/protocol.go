@@ -6,8 +6,14 @@ package mcpclient
 import "encoding/json"
 
 const (
-	// ProtocolVersion is the latest MCP protocol revision supported by this client.
-	ProtocolVersion = "2025-06-18"
+	// LegacyProtocolVersion is the handshake/session-based MCP revision retained
+	// for compatibility with existing stdio and Streamable HTTP servers.
+	LegacyProtocolVersion = "2025-06-18"
+	// ModernProtocolVersion is the stateless MCP revision supported by the HTTP client.
+	ModernProtocolVersion = "2026-07-28"
+	// ProtocolVersion remains the legacy default used by the stdio client and
+	// existing compatibility tests. HTTP negotiates its era explicitly.
+	ProtocolVersion = LegacyProtocolVersion
 
 	defaultRequestTimeout = 30
 	maxRPCMessageBytes    = 4 << 20
@@ -28,6 +34,13 @@ type initializeResult struct {
 	ProtocolVersion string          `json:"protocolVersion"`
 	Capabilities    json.RawMessage `json:"capabilities,omitempty"`
 	ServerInfo      implementation  `json:"serverInfo,omitempty"`
+}
+
+type discoverResult struct {
+	ResultType        string          `json:"resultType,omitempty"`
+	SupportedVersions []string        `json:"supportedVersions"`
+	Capabilities      json.RawMessage `json:"capabilities,omitempty"`
+	Meta              json.RawMessage `json:"_meta,omitempty"`
 }
 
 type implementation struct {
