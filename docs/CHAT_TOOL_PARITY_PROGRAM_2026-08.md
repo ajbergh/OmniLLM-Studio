@@ -70,3 +70,16 @@ npx playwright test --project=chromium
 ```
 
 Focused tests should additionally cover policy intersection, approval behavior, disabled-tool discovery suppression, provider compatibility, and regression paths for deterministic shortcuts.
+
+
+## Code sandbox runtime
+
+Arbitrary code execution is never performed by the OmniLLM backend process. Configure an external sandbox implementing `POST /v1/execute` with:
+
+```bash
+OMNILLM_CODE_SANDBOX_URL=http://sandbox:8090
+```
+
+When the variable is absent, `code_execute` is not registered. The sandbox is responsible for process/container isolation, filesystem lifecycle, and network policy; network access should be disabled by default.
+
+`tool_batch` is always registered as a high-risk orchestration tool. It can execute at most eight child calls, never recurses, and every child call re-enters the shared Executor so policy, approvals, idempotency, audit, and request-scoped restrictions remain authoritative.

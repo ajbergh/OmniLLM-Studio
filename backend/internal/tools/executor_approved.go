@@ -12,6 +12,9 @@ import (
 // lifecycle events still apply.
 func (e *Executor) ExecuteApproved(ctx context.Context, call ToolCall) *ToolResult {
 	scope := InvocationScopeFromContext(ctx)
+	if !ToolAllowedByContext(ctx, call.Name) {
+		return e.failure(ctx, call, fmt.Sprintf("tool %q is excluded by the current request restriction", call.Name), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "invalidated", "error_code": "TOOL_RESTRICTED"})
+	}
 	tool, ok := e.registry.Get(call.Name)
 	if !ok {
 		return e.failure(ctx, call, fmt.Sprintf("unknown tool: %s", call.Name), ToolEventFailed, nil)

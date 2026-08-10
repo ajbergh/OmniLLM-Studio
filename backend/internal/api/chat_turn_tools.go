@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/ajbergh/omnillm-studio/internal/tools"
 )
 
 type turnToolMode string
@@ -89,7 +91,29 @@ func (s turnToolSelection) directive() string {
 }
 
 func contextWithTurnToolSelection(ctx context.Context, selection turnToolSelection) context.Context {
-	return context.WithValue(ctx, turnToolSelectionContextKey{}, selection)
+	ctx = context.WithValue(ctx, turnToolSelectionContextKey{}, selection)
+	names, restricted := selection.executionRestriction()
+	if restricted {
+		ctx = tools.ContextWithToolRestriction(ctx, names)
+	}
+	return ctx
+}
+
+func (s turnToolSelection) executionRestriction() ([]string, bool) {
+	if s.Mode == turnToolModeNone {
+		return []string{}, true
+	}
+	if s.Mode == turnToolModeSpecific || (s.Mode == turnToolModeRequired && s.RequiredTool != "") {
+		return []string{s.RequiredTool}, true
+	}
+	if len(s.AllowedTools) == 0 {
+		return nil, false
+	}
+	names := make([]string, 0, len(s.AllowedTools))
+	for name := range s.AllowedTools {
+		names = append(names, name)
+	}
+	return names, true
 }
 
 func turnToolSelectionFromContext(ctx context.Context) turnToolSelection {
