@@ -18,7 +18,7 @@ All metadata and token traffic uses the V47 hardened MCP HTTP transport: public-
 
 ## Client registration
 
-The current MCP specification prioritizes preregistered credentials when available, then Client ID Metadata Documents (CIMD). Omni also supports Dynamic Client Registration only as the deprecated fallback when no client is configured and the authorization server advertises `registration_endpoint`. Automatic DCR requests a public PKCE client (`token_endpoint_auth_method=none`) and binds the returned client ID to the exact issuer. Configure the registration method in **Settings → MCP → OAuth 2.1 authorization**.
+The current MCP specification prioritizes preregistered credentials when available, then Client ID Metadata Documents (CIMD). Omni also supports Dynamic Client Registration only as the deprecated fallback when no client is configured and the authorization server advertises `registration_endpoint`. Automatic DCR requests a public PKCE client (`token_endpoint_auth_method=none`) and binds the returned client ID to the exact issuer. If protected-resource discovery later identifies a different issuer, Omni does not reuse the old client ID: it registers a new public client with the newly validated authorization server when DCR is advertised. Configure the registration method in **Settings → MCP → OAuth 2.1 authorization**.
 
 Preregistered credentials require an explicit authorization-server issuer at configuration time. Omni compares Protected Resource Metadata discovery to that trusted issuer before using the client ID or secret; it never learns the issuer on first use. DCR credentials are bound to the issuer that minted them, while CIMD client IDs are HTTPS metadata-document URLs and remain issuer-portable by design.
 
@@ -40,6 +40,8 @@ The Wails desktop app binds a random loopback port at launch and sets its callba
 - The callback exchanges the authorization code, stores encrypted tokens, and reconnects the MCP server.
 - Access tokens refresh automatically shortly before expiry when a refresh token is available.
 - **Disconnect** clears access and refresh tokens and stops the active MCP runtime.
+- **Reset dynamic registration** is available for DCR-backed servers; it deletes the generated client registration locally and stops the runtime so the next Connect action can perform a fresh DCR flow.
+- A DCR authorization-server issuer migration automatically creates a new registration when the new issuer advertises `registration_endpoint`; the old generated client ID/tokens/scopes are discarded locally.
 - Reconfiguring the OAuth client invalidates previously issued local tokens.
 
 ## Incremental authorization step-up

@@ -111,6 +111,20 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
     }
   };
 
+  const resetDynamicRegistration = async () => {
+    setBusy(true);
+    try {
+      await mcpOAuthApi.resetDynamicRegistration(server.id);
+      await load();
+      onChanged?.();
+      toast.success('Dynamic OAuth registration reset');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to reset dynamic OAuth registration');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const clearSecret = async () => {
     setBusy(true);
     try {
@@ -228,6 +242,11 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
         {status?.connected && (
           <button type="button" disabled={busy} onClick={() => void disconnect()} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-border px-3 text-xs text-text hover:bg-surface-hover disabled:opacity-50">
             <Unplug size={13} /> Disconnect
+          </button>
+        )}
+        {status?.registration_method === 'dcr' && (
+          <button type="button" disabled={busy} onClick={() => void resetDynamicRegistration()} className="min-h-10 rounded-xl border border-border px-3 text-xs text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50">
+            Reset dynamic registration
           </button>
         )}
         {status?.has_client_secret && (

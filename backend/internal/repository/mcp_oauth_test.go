@@ -158,6 +158,31 @@ func TestMCPOAuthRepoDoesNotBindCIMDClientToIssuer(t *testing.T) {
 	}
 }
 
+func TestMCPOAuthRepoClearDynamicClientOnlyDeletesDCR(t *testing.T) {
+	repo, database := newMCPOAuthTestRepo(t)
+	defer database.Close()
+	if err := repo.ConfigureDynamicClient("dcr-server", "https://issuer.example", "dynamic-client"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ConfigureClient("preregistered-server", models.ConfigureMCPOAuthInput{ClientID: "client", ClientIssuer: "https://issuer.example", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := repo.ClearDynamicClient("dcr-server")
+	if err != nil || !cleared {
+		t.Fatalf("clear dynamic client: cleared=%v err=%v", cleared, err)
+	}
+	if runtime, err := repo.GetRuntime("dcr-server"); err != nil || runtime != nil {
+		t.Fatalf("dynamic client still present: %#v %v", runtime, err)
+	}
+	cleared, err = repo.ClearDynamicClient("preregistered-server")
+	if err != nil || cleared {
+		t.Fatalf("preregistered client must not be cleared: cleared=%v err=%v", cleared, err)
+	}
+	if runtime, err := repo.GetRuntime("preregistered-server"); err != nil || runtime == nil {
+		t.Fatalf("preregistered client was removed: %#v %v", runtime, err)
+	}
+}
+
 func TestMCPOAuthRepoDynamicClientAndRequiredScope(t *testing.T) {
 	repo, database := newMCPOAuthTestRepo(t)
 	defer database.Close()

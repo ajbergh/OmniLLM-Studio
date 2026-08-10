@@ -60,9 +60,19 @@
 | **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction — runs after file search so private documents take priority |
 | **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, IPL cricket, and broad sports headlines |
 | **Headless Browser** | Full Chromium-powered browsing via go-rod — `browser_navigate`, `browser_screenshot`, `browser_interact`, `browser_pdf`, and `browser_session` tools for JS-heavy pages, research, and stateful multi-step browsing; auto-downloads Chromium on first use; stealth mode for anti-bot bypass |
-| **MCP Servers** | Model Context Protocol support — connect to external MCP servers to securely use their tools within chat and agent workflows |
+| **MCP Servers** | Governed MCP client support for stdio and dual-era Streamable HTTP (2026-07-28 stateless with 2025-06-18 fallback), including OAuth 2.1, tool discovery/calls, approvals, scoped policy, and audit |
 | **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, and document generation |
 | **Artifact Export** | Ask the LLM for any supported format and it generates a downloadable file automatically — `.docx` (Word), `.xlsx` (Excel), `.csv`, `.pdf`, `.md` (Markdown), `.html`, `.json`, `.yaml` — no copy-pasting required |
+
+### MCP transport and authorization
+
+Remote MCP servers use the same governed tool registry and executor as native tools. Streamable HTTP probes the stateless MCP `2026-07-28` contract first and falls back to the legacy `2025-06-18` initialization/session model only when the endpoint is identified as legacy. Modern requests carry protocol/client metadata on every request and use the standard MCP routing headers; stdio remains on the established handshake-era protocol for compatibility.
+
+HTTP destinations are public-network-only by default with DNS-aware SSRF protection, no redirects, and an explicit private-network opt-in for trusted local/private servers. OAuth-protected MCP resource URLs must be HTTPS even when private-network access is enabled. OAuth supports preregistered clients with exact issuer binding, Client ID Metadata Documents, deprecated DCR fallback, PKCE S256, resource binding, encrypted access/refresh tokens, refresh, RFC 9207 response issuer validation, and explicit incremental-scope step-up. Persisted DCR clients are re-registered when protected-resource discovery moves to a new authorization-server issuer; operators can also reset a DCR registration from Settings.
+
+Management routes live under `/v1/mcp/servers/{serverId}` and are admin-only in multi-user mode. OAuth status/config/start/disconnect and DCR-reset operations use the same `serverId` route identity. The authorization callback remains outside the authenticated route group because it is protected by one-time high-entropy OAuth state.
+
+Detailed setup and recovery guidance: [MCP guide and FAQ](MCP_HOW_TO_FAQ.md) and [MCP OAuth 2.1 foundation](MCP_OAUTH_2026-08.md).
 
 ### RAG architecture and operations
 

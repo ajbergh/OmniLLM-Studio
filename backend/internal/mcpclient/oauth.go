@@ -227,6 +227,18 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, serverID, userID 
 	if err != nil {
 		return models.MCPOAuthAuthorizationStart{}, err
 	}
+	if dynamicClientNeedsReregistration(credential, authMetadata.Issuer) {
+		if strings.TrimSpace(authMetadata.RegistrationEndpoint) == "" {
+			return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("dynamic OAuth client is bound to authorization server %q, but protected-resource discovery now identifies %q and the new server does not advertise legacy DCR", credential.ClientIssuer, authMetadata.Issuer)
+		}
+		if err := s.registerDynamicClient(ctx, *server, authMetadata, serverID); err != nil {
+			return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("re-register dynamic OAuth client for authorization server %q: %w", authMetadata.Issuer, err)
+		}
+		credential, err = s.credentials.GetRuntime(serverID)
+		if err != nil || credential == nil {
+			return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("load re-registered OAuth client: %w", err)
+		}
+	}
 	if credential == nil || strings.TrimSpace(credential.ClientID) == "" {
 		if strings.TrimSpace(authMetadata.RegistrationEndpoint) == "" {
 			return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("%w: configure a preregistered/CIMD client; authorization server does not advertise legacy DCR", ErrMCPOAuthNotConfigured)
@@ -354,6 +366,12 @@ func oauthApplicationType(redirectURI string) string {
 		return "native"
 	}
 	return "web"
+}
+
+func dynamicClientNeedsReregistration(credential *repository.MCPOAuthCredential, issuer string) bool {
+	return credential != nil &&
+		credential.RegistrationMethod == models.MCPOAuthRegistrationDCR &&
+		strings.TrimSpace(credential.ClientIssuer) != strings.TrimSpace(issuer)
 }
 
 func (s *OAuthService) registerDynamicClient(ctx context.Context, server models.MCPServer, metadata authorizationServerMetadata, serverID string) error {
@@ -577,6 +595,27 @@ func (s *OAuthService) RejectAuthorization(state, issuer string) error {
 }
 
 func (s *OAuthService) Disconnect(serverID string) error { return s.credentials.ClearTokens(serverID) }
+
+// ResetDynamicRegistration forgets an automatically generated DCR client. The
+// next authorization start will register a fresh client if the discovered AS
+// still advertises a registration endpoint.
+func (s *OAuthService) ResetDynamicRegistration(serverID string) error {
+	credential, err := s.credentials.GetRuntime(serverID)
+	if err != nil {
+		return err
+	}
+	if credential == nil || credential.RegistrationMethod != models.MCPOAuthRegistrationDCR {
+		return fmt.Errorf("MCP OAuth server does not use dynamic client registration")
+	}
+	cleared, err := s.credentials.ClearDynamicClient(serverID)
+	if err != nil {
+		return err
+	}
+	if !cleared {
+		return fmt.Errorf("dynamic MCP OAuth registration was not found")
+	}
+	return nil
+}
 
 func (s *OAuthService) exchangeToken(ctx context.Context, server models.MCPServer, endpoint, method, clientSecret string, values url.Values) (oauthTokenResponse, error) {
 	if err := validateOAuthEndpoint(endpoint); err != nil {
