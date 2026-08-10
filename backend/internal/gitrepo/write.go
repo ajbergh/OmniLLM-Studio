@@ -50,6 +50,9 @@ func (s *Service) CreateBranch(ctx context.Context, repositoryID, branchName, fr
 	if err != nil {
 		return nil, fmt.Errorf("revision %q could not be resolved", fromRevision)
 	}
+	if _, err := ensureExpectedHead(repo, expectedHead); err != nil {
+		return nil, err
+	}
 	if err := repo.Storer.SetReference(plumbing.NewHashReference(branchRef, commit.Hash)); err != nil {
 		return nil, fmt.Errorf("branch %q could not be created", branchName)
 	}
@@ -95,6 +98,9 @@ func (s *Service) Checkout(ctx context.Context, repositoryID, branchName, expect
 	if !status.IsClean() {
 		return nil, fmt.Errorf("repository %q has local changes; checkout requires a clean worktree", repositoryID)
 	}
+	if _, err := ensureExpectedHead(repo, expectedHead); err != nil {
+		return nil, err
+	}
 	if err := worktree.Checkout(&git.CheckoutOptions{Branch: branchRef}); err != nil {
 		return nil, fmt.Errorf("branch %q could not be checked out", branchName)
 	}
@@ -110,7 +116,7 @@ func (s *Service) Checkout(ctx context.Context, repositoryID, branchName, expect
 
 // Stage adds exact repository-relative paths with unstaged changes to the index.
 // Directory, glob, and stage-all semantics are deliberately not exposed.
-func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []string, expectedHead string) (*StageResult, error) {
+func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []string, expectedBranch, expectedHead, expectedIndexDigest string) (*StageResult, error) {
 	if err := s.requireWriteEnabled(); err != nil {
 		return nil, err
 	}
@@ -131,6 +137,14 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 	if err != nil {
 		return nil, err
 	}
+	branch, err := ensureExpectedBranch(repo, expectedBranch)
+	if err != nil {
+		return nil, err
+	}
+	originalDigest, err := ensureExpectedIndexDigest(repo, expectedIndexDigest)
+	if err != nil {
+		return nil, err
+	}
 	worktree, err := repo.Worktree()
 	if err != nil {
 		return nil, safeRepositoryError(repositoryID, "does not expose a worktree")
@@ -147,12 +161,22 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 	if _, err := ensureExpectedHead(repo, expectedHead); err != nil {
 		return nil, err
 	}
+	if _, err := ensureExpectedBranch(repo, expectedBranch); err != nil {
+		return nil, err
+	}
+	if _, err := ensureExpectedIndexDigest(repo, expectedIndexDigest); err != nil {
+		return nil, err
+	}
 	originalIndex, err := repo.Storer.Index()
 	if err != nil {
 		return nil, safeRepositoryError(repositoryID, "index could not be read")
 	}
+	ownedDigest := originalDigest
 	rollback := func() {
-		_ = repo.Storer.SetIndex(originalIndex)
+		currentDigest, digestErr := indexDigest(repo)
+		if digestErr == nil && strings.EqualFold(currentDigest, ownedDigest) {
+			_ = repo.Storer.SetIndex(originalIndex)
+		}
 	}
 	for _, filePath := range paths {
 		if err := ctx.Err(); err != nil {
@@ -161,20 +185,20 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 		}
 		if _, err := worktree.Add(filepath.FromSlash(filePath)); err != nil {
 			rollback()
-			return nil, fmt.Errorf("path %q could not be staged", filePath)
+			return nil, fmt.Errorf("path %q could not be staged; run git_status to verify the index", filePath)
+		}
+		ownedDigest, err = indexDigest(repo)
+		if err != nil {
+			rollback()
+			return nil, safeRepositoryError(repositoryID, "index state could not be verified after staging")
 		}
 	}
-	digest, err := indexDigest(repo)
-	if err != nil {
-		rollback()
-		return nil, safeRepositoryError(repositoryID, "index state could not be verified")
-	}
-	return &StageResult{Repository: repositoryID, Head: head, Paths: paths, IndexDigest: digest}, nil
+	return &StageResult{Repository: repositoryID, Branch: branch, Head: head, Paths: paths}, nil
 }
 
 // Commit creates a commit from the existing staged index only. It never stages
 // files automatically, amends, creates empty commits, or operates on detached HEAD.
-func (s *Service) Commit(ctx context.Context, repositoryID, message, expectedHead, expectedIndexDigest string) (*CommitResult, error) {
+func (s *Service) Commit(ctx context.Context, repositoryID, message, expectedBranch, expectedHead, expectedIndexDigest string) (*CommitResult, error) {
 	if err := s.requireWriteEnabled(); err != nil {
 		return nil, err
 	}
@@ -190,9 +214,6 @@ func (s *Service) Commit(ctx context.Context, repositoryID, message, expectedHea
 	if len(message) > maxCommitMessageBytes {
 		return nil, fmt.Errorf("commit message exceeds %d bytes", maxCommitMessageBytes)
 	}
-	if strings.TrimSpace(expectedIndexDigest) == "" {
-		return nil, fmt.Errorf("expected_index_digest is required; run git_status again")
-	}
 
 	repo, err := s.open(repositoryID)
 	if err != nil {
@@ -202,16 +223,12 @@ func (s *Service) Commit(ctx context.Context, repositoryID, message, expectedHea
 	if err != nil {
 		return nil, err
 	}
-	branch, _, detached := headState(repo)
-	if detached || branch == "" {
-		return nil, fmt.Errorf("repository %q has detached HEAD; commit requires a local branch", repositoryID)
-	}
-	currentDigest, err := indexDigest(repo)
+	branch, err := ensureExpectedBranch(repo, expectedBranch)
 	if err != nil {
-		return nil, safeRepositoryError(repositoryID, "index state could not be verified")
+		return nil, err
 	}
-	if !strings.EqualFold(strings.TrimSpace(expectedIndexDigest), currentDigest) {
-		return nil, fmt.Errorf("repository %q index changed; run git_status again before committing", repositoryID)
+	if _, err := ensureExpectedIndexDigest(repo, expectedIndexDigest); err != nil {
+		return nil, err
 	}
 	worktree, err := repo.Worktree()
 	if err != nil {
@@ -237,12 +254,11 @@ func (s *Service) Commit(ctx context.Context, repositoryID, message, expectedHea
 	if _, err := ensureExpectedHead(repo, expectedHead); err != nil {
 		return nil, err
 	}
-	finalDigest, err := indexDigest(repo)
-	if err != nil {
-		return nil, safeRepositoryError(repositoryID, "index state could not be verified")
+	if _, err := ensureExpectedBranch(repo, expectedBranch); err != nil {
+		return nil, err
 	}
-	if !strings.EqualFold(strings.TrimSpace(expectedIndexDigest), finalDigest) {
-		return nil, fmt.Errorf("repository %q index changed; run git_status again before committing", repositoryID)
+	if _, err := ensureExpectedIndexDigest(repo, expectedIndexDigest); err != nil {
+		return nil, err
 	}
 	hash, err := worktree.Commit(message, &git.CommitOptions{All: false, Amend: false, AllowEmptyCommits: false})
 	if err != nil {
@@ -281,6 +297,37 @@ func ensureExpectedHead(repo *git.Repository, expected string) (string, error) {
 	current := head.Hash().String()
 	if !strings.EqualFold(expected, current) {
 		return "", fmt.Errorf("repository HEAD changed; run git_status again before mutating")
+	}
+	return current, nil
+}
+
+func ensureExpectedBranch(repo *git.Repository, expected string) (string, error) {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return "", fmt.Errorf("expected_branch is required; mutations require a local branch from git_status")
+	}
+	head, err := repo.Head()
+	if err != nil || !head.Name().IsBranch() {
+		return "", fmt.Errorf("repository is not on a local branch; run git_status again")
+	}
+	current := head.Name().Short()
+	if expected != current {
+		return "", fmt.Errorf("repository branch changed; run git_status again before mutating")
+	}
+	return current, nil
+}
+
+func ensureExpectedIndexDigest(repo *git.Repository, expected string) (string, error) {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return "", fmt.Errorf("expected_index_digest is required; run git_status again")
+	}
+	current, err := indexDigest(repo)
+	if err != nil {
+		return "", fmt.Errorf("index state could not be verified")
+	}
+	if !strings.EqualFold(expected, current) {
+		return "", fmt.Errorf("repository index changed; run git_status again before mutating")
 	}
 	return current, nil
 }
