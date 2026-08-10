@@ -105,7 +105,13 @@ func (s *RemoteService) Clone(ctx context.Context, remoteID, expectedBranch, exp
 		}
 	}()
 
-	worktreeFS := newCloneQuotaFilesystem(osfs.New(temporary), s.cloneMaxBytes, s.cloneMaxEntries)
+	// BoundOS uses secure path joining for every filesystem operation. This is
+	// stricter than Billy's legacy soft-chroot default and ensures later symlink
+	// creation cannot redirect clone writes outside the private staging root.
+	worktreeFS := newCloneQuotaFilesystem(osfs.New(temporary, osfs.WithBoundOS()), s.cloneMaxBytes, s.cloneMaxEntries)
+	if err := worktreeFS.MkdirAll(git.GitDirName, 0o700); err != nil {
+		return nil, s.safeCloneCheckoutError(remote.Repository, err)
+	}
 	dotGitFS, err := worktreeFS.Chroot(git.GitDirName)
 	if err != nil {
 		return nil, safeRepositoryError(remote.Repository, "temporary Git storage could not be initialized")
@@ -240,6 +246,10 @@ func (s *RemoteService) cloneDestination(repositoryID string) (string, error) {
 	info, err := os.Lstat(parent)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return "", safeRepositoryError(repositoryID, "clone destination parent must be an existing real directory")
+	}
+	resolvedParent, err := filepath.EvalSymlinks(parent)
+	if err != nil || filepath.Clean(resolvedParent) != filepath.Clean(parent) {
+		return "", safeRepositoryError(repositoryID, "clone destination parent cannot traverse symlinked directories")
 	}
 	return destination, nil
 }
