@@ -54,10 +54,10 @@ func (t *gitRepositoryTool) Definition() ToolDefinition {
 		definition.Description = "List explicitly configured local Git repositories by stable repository ID, including branch, HEAD, and clean/dirty status. Filesystem paths are never exposed."
 		definition.Parameters = json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 	case "git_status":
-		definition.Description = "Read local Git status for a configured repository, including branch, HEAD, staged changes, unstaged changes, and untracked files."
+		definition.Description = "Read local Git status for a configured repository, including branch, HEAD, an index_digest, staged changes, unstaged changes, and untracked files. Use branch, HEAD, and index_digest as write preconditions."
 		definition.Parameters = repositoryOnlySchema()
 	case "git_diff":
-		definition.Description = "Read a local Git diff. With only repository, compares the combined worktree against HEAD. With from/to revisions, compares committed revisions; to defaults to HEAD."
+		definition.Description = "Read a local Git diff. With only repository, compares the combined worktree against HEAD and returns a worktree_digest that binds a later git_stage approval to the exact reviewed worktree state. With from/to revisions, compares committed revisions; to defaults to HEAD."
 		definition.Parameters = json.RawMessage(`{
 			"type":"object",
 			"properties":{
