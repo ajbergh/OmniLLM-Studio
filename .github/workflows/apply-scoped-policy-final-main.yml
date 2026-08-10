@@ -27,6 +27,7 @@ jobs:
       - name: Import validated Phase 8 core and integration script
         run: |
           git fetch origin feat/scoped-tool-policy-toolsearch-core-20260809
+          mkdir -p .github/scripts
           git show 27da42182dd3a95b1279bde274528adf0dc4ad8b:.github/scripts/apply_scoped_policy_final.py > .github/scripts/apply_scoped_policy_final.py
           git checkout origin/feat/scoped-tool-policy-toolsearch-core-20260809 -- \
             backend/internal/models/tool_scope.go \
