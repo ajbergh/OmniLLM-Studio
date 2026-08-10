@@ -27,6 +27,13 @@ func NewPlanner(llmService *llm.Service, toolRegistry *tools.Registry) *Planner 
 // included.
 func (p *Planner) GeneratePlan(ctx context.Context, provider, model, goal string, conversationHistory []llm.ChatMessage) ([]PlanStep, error) {
 	toolDefs := p.selectTools(goal, conversationHistory)
+	filteredDefs := toolDefs[:0]
+	for _, def := range toolDefs {
+		if toolAllowedByContext(ctx, def.Name) {
+			filteredDefs = append(filteredDefs, def)
+		}
+	}
+	toolDefs = filteredDefs
 	toolDescriptions := formatToolDescriptions(toolDefs)
 	systemPrompt := fmt.Sprintf(`You are the planner for a local-first autonomous assistant.
 Create a concise, executable plan for the user's goal using only the tools below.
@@ -82,12 +89,12 @@ Respond only with the JSON array.`, toolDescriptions)
 		}
 	}
 
-	validated, validationErrors := p.validatePlan(steps)
+	validated, validationErrors := p.validatePlanWithContext(ctx, steps)
 	if len(validationErrors) > 0 {
 		log.Printf("[agent/planner] plan validation failed, attempting repair: %s", strings.Join(validationErrors, "; "))
 		repaired, repairErr := p.repairPlan(ctx, provider, model, goal, resp.Content, validationErrors, toolDescriptions)
 		if repairErr == nil {
-			validated, validationErrors = p.validatePlan(repaired)
+			validated, validationErrors = p.validatePlanWithContext(ctx, repaired)
 		}
 	}
 	if len(validationErrors) > 0 || len(validated) == 0 {
@@ -138,6 +145,10 @@ func parsePlanContent(content string) ([]PlanStep, error) {
 }
 
 func (p *Planner) validatePlan(steps []PlanStep) ([]PlanStep, []string) {
+	return p.validatePlanWithContext(context.Background(), steps)
+}
+
+func (p *Planner) validatePlanWithContext(ctx context.Context, steps []PlanStep) ([]PlanStep, []string) {
 	validated := make([]PlanStep, 0, len(steps)+1)
 	knownIDs := map[string]bool{}
 	var errs []string
@@ -169,6 +180,10 @@ func (p *Planner) validatePlan(steps []PlanStep) ([]PlanStep, []string) {
 		}
 
 		if step.Type == StepTypeToolCall {
+			if !toolAllowedByContext(ctx, step.ToolName) {
+				errs = append(errs, fmt.Sprintf("step %s references tool %q excluded by assistant profile", step.ID, step.ToolName))
+				continue
+			}
 			if !p.toolRegistry.IsAvailable(step.ToolName) {
 				errs = append(errs, fmt.Sprintf("step %s references unavailable tool %q", step.ID, step.ToolName))
 				continue

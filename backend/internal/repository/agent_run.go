@@ -15,13 +15,17 @@ type AgentRunRepo struct{ db *sql.DB }
 func NewAgentRunRepo(db *sql.DB) *AgentRunRepo { return &AgentRunRepo{db: db} }
 
 // Create inserts a new agent run.
-func (r *AgentRunRepo) Create(conversationID, goal string) (*models.AgentRun, error) {
+func (r *AgentRunRepo) Create(conversationID, goal string, assistantProfileIDs ...string) (*models.AgentRun, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
+	assistantProfileID := ""
+	if len(assistantProfileIDs) > 0 {
+		assistantProfileID = assistantProfileIDs[0]
+	}
 	_, err := r.db.Exec(`
-		INSERT INTO agent_runs (id, conversation_id, status, goal, plan_json, result_summary, created_at, updated_at)
-		VALUES (?, ?, 'planning', ?, '[]', '', ?, ?)
-	`, id, conversationID, goal, now, now)
+		INSERT INTO agent_runs (id, conversation_id, status, goal, plan_json, result_summary, assistant_profile_id, created_at, updated_at)
+		VALUES (?, ?, 'planning', ?, '[]', '', ?, ?, ?)
+	`, id, conversationID, goal, assistantProfileID, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("insert agent run: %w", err)
 	}
@@ -30,13 +34,13 @@ func (r *AgentRunRepo) Create(conversationID, goal string) (*models.AgentRun, er
 
 func (r *AgentRunRepo) GetByID(id string) (*models.AgentRun, error) {
 	row := r.db.QueryRow(`
-		SELECT id, conversation_id, status, goal, plan_json, result_summary, created_at, updated_at, completed_at
+		SELECT id, conversation_id, status, goal, plan_json, result_summary, assistant_profile_id, created_at, updated_at, completed_at
 		FROM agent_runs WHERE id = ?
 	`, id)
 	var run models.AgentRun
 	if err := row.Scan(
 		&run.ID, &run.ConversationID, &run.Status, &run.Goal, &run.PlanJSON,
-		&run.ResultSummary, &run.CreatedAt, &run.UpdatedAt, &run.CompletedAt,
+		&run.ResultSummary, &run.AssistantProfileID, &run.CreatedAt, &run.UpdatedAt, &run.CompletedAt,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -48,7 +52,7 @@ func (r *AgentRunRepo) GetByID(id string) (*models.AgentRun, error) {
 
 func (r *AgentRunRepo) ListByConversation(conversationID string) ([]models.AgentRun, error) {
 	rows, err := r.db.Query(`
-		SELECT id, conversation_id, status, goal, plan_json, result_summary, created_at, updated_at, completed_at
+		SELECT id, conversation_id, status, goal, plan_json, result_summary, assistant_profile_id, created_at, updated_at, completed_at
 		FROM agent_runs WHERE conversation_id = ? ORDER BY created_at DESC
 	`, conversationID)
 	if err != nil {
@@ -60,7 +64,7 @@ func (r *AgentRunRepo) ListByConversation(conversationID string) ([]models.Agent
 		var run models.AgentRun
 		if err := rows.Scan(
 			&run.ID, &run.ConversationID, &run.Status, &run.Goal, &run.PlanJSON,
-			&run.ResultSummary, &run.CreatedAt, &run.UpdatedAt, &run.CompletedAt,
+			&run.ResultSummary, &run.AssistantProfileID, &run.CreatedAt, &run.UpdatedAt, &run.CompletedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent run: %w", err)
 		}

@@ -118,11 +118,12 @@ type RunBudgets struct {
 
 // StartRunRequest is the API request body for starting an agent run.
 type StartRunRequest struct {
-	Goal     string      `json:"goal"`
-	Provider string      `json:"provider,omitempty"`
-	Model    string      `json:"model,omitempty"`
-	Profile  RunProfile  `json:"profile,omitempty"`
-	Budgets  *RunBudgets `json:"budgets,omitempty"`
+	Goal               string      `json:"goal"`
+	Provider           string      `json:"provider,omitempty"`
+	Model              string      `json:"model,omitempty"`
+	Profile            RunProfile  `json:"profile,omitempty"`
+	Budgets            *RunBudgets `json:"budgets,omitempty"`
+	AssistantProfileID string      `json:"assistant_profile_id,omitempty"`
 }
 
 // ApproveRequest is the API request body for approving/rejecting a step.

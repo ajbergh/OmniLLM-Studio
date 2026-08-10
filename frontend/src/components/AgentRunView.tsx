@@ -9,6 +9,7 @@ import {
   ShieldCheck, XCircle, Pause, RotateCcw, Search, GitBranch,
 } from 'lucide-react';
 import type { AgentRun, AgentRunWithSteps, AgentStep } from '../types';
+import { assistantProfilesApi, type AssistantProfile } from '../assistantProfilesApi';
 import { AgentRunStatus, AgentStepStatus, AgentStepType, AgentEventType } from '../types';
 
 interface AgentRunViewProps {
@@ -44,6 +45,8 @@ export function AgentRunView({ conversationId }: AgentRunViewProps) {
   const [goal, setGoal] = useState('');
   const [expanded, setExpanded] = useState(true);
   const [profile, setProfile] = useState<AgentProfile>('agent');
+  const [savedProfiles, setSavedProfiles] = useState<AssistantProfile[]>([]);
+  const [assistantProfileId, setAssistantProfileId] = useState('');
   const [activity, setActivity] = useState<string | null>(null);
   const [extendedBudget, setExtendedBudget] = useState(false);
   const abortRef = useRef<(() => void) | null>(null);
@@ -80,7 +83,10 @@ export function AgentRunView({ conversationId }: AgentRunViewProps) {
   }, [fetchRuns, loadRunDetails]);
 
   useEffect(() => {
-    if (expanded) void fetchRuns();
+    if (expanded) {
+      void fetchRuns();
+      void assistantProfilesApi.listProfiles().then((items) => setSavedProfiles(items || [])).catch(() => setSavedProfiles([]));
+    }
   }, [expanded, fetchRuns]);
 
   useEffect(() => () => {
@@ -156,6 +162,7 @@ export function AgentRunView({ conversationId }: AgentRunViewProps) {
       {
         goal: submittedGoal,
         profile,
+        assistant_profile_id: assistantProfileId || undefined,
         budgets: extendedBudget
           ? { max_steps: 20, max_duration_ms: 600000, max_model_calls: 30, max_tool_calls: 40 }
           : { max_steps: 10, max_duration_ms: 300000, max_model_calls: 16, max_tool_calls: 20 },
@@ -257,6 +264,10 @@ export function AgentRunView({ conversationId }: AgentRunViewProps) {
                   <button onClick={() => setProfile('agent')} className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] ${profile === 'agent' ? 'bg-amber-500/20 text-amber-300' : 'text-text-muted'}`}><Bot size={10} />Agent</button>
                   <button onClick={() => setProfile('research')} className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] ${profile === 'research' ? 'bg-blue-500/20 text-blue-300' : 'text-text-muted'}`}><Search size={10} />Research</button>
                 </div>
+                <select value={assistantProfileId} onChange={(event) => setAssistantProfileId(event.target.value)} className="rounded-lg border border-border bg-surface-alt px-2 py-1 text-[10px] text-text">
+                  <option value="">No saved assistant</option>
+                  {savedProfiles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
                 <label className="inline-flex items-center gap-1.5 text-[10px] text-text-muted">
                   <input type="checkbox" checked={extendedBudget} onChange={(event) => setExtendedBudget(event.target.checked)} />Extended budget
                 </label>

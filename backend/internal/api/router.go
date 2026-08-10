@@ -107,6 +107,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	embeddingRepo := repository.NewEmbeddingRepo(database) // legacy SQL embeddings, used only for lazy migration
 	libraryFileRepo := repository.NewLibraryFileRepo(database)
 	browserSessionRepo := repository.NewBrowserSessionRepo(database)
+	assistantProfileRepo := repository.NewAssistantProfileRepo(database)
+	skillRepo := repository.NewSkillRepo(database)
 
 	// Services
 	llmService := llm.NewService(providerRepo, settingsRepo)
@@ -185,6 +187,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	toolRegistry.MustRegister(tools.NewFileCompareTool(fileLibrarySvc, ""))
 	toolRegistry.MustRegister(tools.NewFileDeleteTool(fileLibrarySvc, ""))
 	toolRegistry.MustRegister(tools.NewFileReindexTool(fileLibrarySvc, ""))
+	toolRegistry.MustRegister(tools.NewSkillListTool(skillRepo))
+	toolRegistry.MustRegister(tools.NewSkillReadTool(skillRepo))
 	toolRegistry.MustRegister(tools.NewBrowserNavigateTool(browserMgr, featureFlagRepo))
 	toolRegistry.MustRegister(tools.NewBrowserScreenshotTool(browserMgr, featureFlagRepo))
 	toolRegistry.MustRegister(tools.NewBrowserInteractTool(browserMgr, featureFlagRepo))
@@ -246,7 +250,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	agent.SetGlobalEventSink(agentEventRecorder.Record)
 	agentPlanner := agent.NewPlanner(llmService, toolRegistry)
 	agentRunner := agent.NewRunner(agentPlanner, llmService, toolExecutor, agentRunRepo, agentStepRepo, msgRepo)
-	agentHandler := NewAgentHandler(agentRunner, agentRunRepo, agentStepRepo, msgRepo, convoRepo)
+	agentHandler := NewAgentHandler(agentRunner, agentRunRepo, agentStepRepo, msgRepo, convoRepo, assistantProfileRepo, skillRepo)
+	assistantProfileHandler := NewAssistantProfileHandler(assistantProfileRepo, skillRepo)
 	agentEventHandler := NewAgentEventHandler(agentEventRepo, agentRunRepo, convoRepo)
 
 	// Conversation Branching
@@ -651,6 +656,15 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 				r.Post("/connections/mcp", appHandler.ConnectMCP)
 				r.Delete("/connections/{connectionId}", appHandler.Delete)
 			})
+
+			// Reusable Assistant Profiles and Markdown Skills.
+			r.Get("/assistant-profiles", assistantProfileHandler.ListProfiles)
+			r.Put("/assistant-profiles", assistantProfileHandler.SaveProfile)
+			r.Delete("/assistant-profiles/{id}", assistantProfileHandler.DeleteProfile)
+			r.Get("/skills", assistantProfileHandler.ListSkills)
+			r.Get("/skills/{id}", assistantProfileHandler.GetSkill)
+			r.Put("/skills", assistantProfileHandler.SaveSkill)
+			r.Delete("/skills/{id}", assistantProfileHandler.DeleteSkill)
 
 			// MCP Servers (admin only)
 			r.Route("/mcp", func(r chi.Router) {

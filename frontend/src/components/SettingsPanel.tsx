@@ -11,6 +11,7 @@ import { useTheme, THEMES } from '../theme';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import { AssistantProfilesPanel } from './AssistantProfilesPanel';
 import { formatModelOptionLabel, getKnownChatModels, getKnownImageModels, isFreeModel } from '../models';
 
 const PROVIDER_TYPES = [
@@ -39,7 +40,7 @@ function FreeModelBadge() {
   );
 }
 
-type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'routing' | 'music' | 'video' | 'tools' | 'mcp' | 'pricing' | 'auth';
+type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'routing' | 'music' | 'video' | 'assistants' | 'tools' | 'mcp' | 'pricing' | 'auth';
 
 const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'providers', label: 'Providers' },
@@ -49,6 +50,7 @@ const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'routing', label: 'Routing' },
   { key: 'music', label: 'Music' },
   { key: 'video', label: 'Video' },
+  { key: 'assistants', label: 'Assistants' },
   { key: 'tools', label: 'Tools' },
   { key: 'mcp', label: 'MCP' },
   { key: 'pricing', label: 'Pricing' },
@@ -289,6 +291,10 @@ export function SettingsPanel() {
                     transition={{ duration: 0.2 }}
                   >
                     <VideoTab />
+                  </motion.div>
+                ) : tab === 'assistants' ? (
+                  <motion.div key="assistants" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
+                    <AssistantProfilesPanel />
                   </motion.div>
                 ) : tab === 'tools' ? (
                   <motion.div
