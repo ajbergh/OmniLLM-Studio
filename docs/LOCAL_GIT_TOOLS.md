@@ -12,6 +12,8 @@ OMNILLM_GIT_REPOSITORIES=omni=C:\src\OmniLLM-Studio;twynn=C:\src\Twynn
 
 Repository IDs may contain letters, numbers, `.`, `_`, and `-`, must start with a letter or number, and are limited to 64 characters. The model receives only these stable IDs; configured filesystem paths are canonicalized at startup and are never returned by the tools.
 
+For normal local inspection/mutation, the configured path must contain a Git repository when the tool executes. The guarded remote clone flow documented in `docs/REMOTE_GIT_TOOLS.md` may instead bind a repository ID to an **absent** destination path whose real parent directory already exists. After a successful atomic clone promotion, the same repository ID becomes available to the normal local Git tools; the model never supplies or dynamically registers the destination path.
+
 If no repositories are configured, the local Git tool family is not registered.
 
 ## Read-only tools
@@ -81,13 +83,13 @@ For a multi-file stage operation, the service tracks the index digest it most re
 
 The Git engine lives under `backend/internal/gitrepo/` and uses `github.com/go-git/go-git/v5` version `v5.19.2`. LLM-facing read adapters live in `backend/internal/tools/git_repo_tools.go`; mutation adapters live in `backend/internal/tools/git_repo_mutation_tools.go`. The service satisfies separate `gitrepo.Reader` and `gitrepo.Writer` contracts so read and write surfaces remain explicit. `github.com/cyphar/filepath-securejoin` is used directly for mutation-path containment and remains pinned at the version already present in the go-git dependency graph.
 
-The tools documented on this page never contact a remote. Remote Git is a separate explicitly configured tool family with independent network, credential, fetch, and push gates; see `docs/REMOTE_GIT_TOOLS.md`. GitHub-hosted PRs, issues, reviews, Actions, and other provider operations remain API capabilities rather than local-go-git responsibilities.
+The tools documented on this page never contact a remote. Remote Git is a separate explicitly configured tool family with independent network, credential, fetch, push, and quota-enforced clone gates; see `docs/REMOTE_GIT_TOOLS.md`. The clone implementation uses Billy's bounded OS filesystem plus a shared application quota across `.git` storage and worktree checkout. GitHub-hosted PRs, issues, reviews, Actions, and other provider operations remain API capabilities rather than local-go-git responsibilities.
 
 On a shared server, `OMNILLM_GIT_REPOSITORIES` and `OMNILLM_GIT_WRITE_ENABLED` are process-wide operator settings. Enable local writes only when every configured repository is intentionally writable by that OmniLLM-Studio deployment and the surrounding OS account has appropriately limited filesystem permissions.
 
 ## Validation
 
-Backend coverage includes repository configuration parsing, write-gate behavior, status/index-digest generation, reviewed-worktree digest generation, oversized omitted-content fingerprinting, branch creation, clean-only checkout, exact-path staging, stale-branch/HEAD/index/worktree rejection, deletion staging, final-symlink staging without dereference, staged-only commits, tool metadata and argument validation, conditional registry wiring, Unix/Windows path-containment rejection, worktree symlink isolation, and checks that configured local paths do not appear in model-visible results or errors.
+Backend coverage includes repository configuration parsing, write-gate behavior, status/index-digest generation, reviewed-worktree digest generation, oversized omitted-content fingerprinting, branch creation, clean-only checkout, exact-path staging, stale-branch/HEAD/index/worktree rejection, deletion staging, final-symlink staging without dereference, staged-only commits, tool metadata and argument validation, conditional registry wiring, Unix/Windows path-containment rejection, worktree symlink isolation, configured-path non-disclosure, guarded clone destination admission, clone transfer/object limits, shared clone byte/entry accounting, sparse/truncate expansion, implicit parent-directory accounting, clone-local temp-file confinement, and atomic clone promotion.
 
 Run the backend checks with:
 
@@ -103,6 +105,6 @@ On Ubuntu 24.04, repository-wide commands that include the Wails desktop package
 
 ## Future work
 
-Remote inspection, guarded fetch, and guarded push are documented separately in `docs/REMOTE_GIT_TOOLS.md`. Clone remains withheld until a hard quota can cover both Git object ingestion and worktree expansion.
+Remote inspection, guarded fetch, guarded push, and quota-enforced guarded clone are documented separately in `docs/REMOTE_GIT_TOOLS.md`. Deployments that require an exact physical block-allocation ceiling for cloned repositories should add an OS/filesystem-enforced quota around configured clone storage in addition to the application's logical-byte and entry ceilings.
 
 Unsupported or compatibility-sensitive operations such as merges, rebase, LFS, reset, clean, submodule updates, force push, remote ref deletion, or destructive history rewriting should not be exposed merely because a generic Git command exists.
