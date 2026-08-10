@@ -32,14 +32,16 @@ type RemoteReference struct {
 }
 
 // RemoteStatusResult reports advertised branch heads without exposing the
-// configured endpoint URL or credentials.
+// configured endpoint URL or credentials. BranchStateDigest fingerprints the
+// complete branch namespace, including refs omitted from the bounded display.
 type RemoteStatusResult struct {
-	Remote        string            `json:"remote"`
-	Repository    string            `json:"repository"`
-	Host          string            `json:"host"`
-	Authenticated bool              `json:"authenticated"`
-	References    []RemoteReference `json:"references"`
-	Truncated     bool              `json:"truncated,omitempty"`
+	Remote            string            `json:"remote"`
+	Repository        string            `json:"repository"`
+	Host              string            `json:"host"`
+	Authenticated     bool              `json:"authenticated"`
+	References        []RemoteReference `json:"references"`
+	BranchStateDigest string            `json:"branch_state_digest"`
+	Truncated         bool              `json:"truncated,omitempty"`
 }
 
 // RemoteService owns operator-configured outbound Git endpoints. The transport
@@ -47,16 +49,17 @@ type RemoteStatusResult struct {
 // or go-git transport behavior. local is the same configured Service used by the
 // local Git tools so network mutations share its write serialization and gate.
 type RemoteService struct {
-	remotes         map[string]RemoteConfig
-	ids             []string
-	enabled         bool
-	pushEnabled     bool
-	cloneEnabled    bool
-	cloneMaxBytes   int64
-	cloneMaxEntries int64
-	transport       transport.Transport
-	lookupEnv       func(string) (string, bool)
-	local           *Service
+	remotes             map[string]RemoteConfig
+	ids                 []string
+	enabled             bool
+	pushEnabled         bool
+	branchCreateEnabled bool
+	cloneEnabled        bool
+	cloneMaxBytes       int64
+	cloneMaxEntries     int64
+	transport           transport.Transport
+	lookupEnv           func(string) (string, bool)
+	local               *Service
 }
 
 // NewRemoteServiceFromEnvironment constructs the remote service from operator
@@ -74,6 +77,7 @@ func NewRemoteServiceFromEnvironment(local *Service) *RemoteService {
 	}
 	service := newRemoteService(filtered, boolEnvironment(RemoteEnabledEnv), boolEnvironment(RemotePushEnabledEnv), newRemoteStatusTransport(), os.LookupEnv)
 	service.local = local
+	service.branchCreateEnabled = boolEnvironment(RemoteBranchCreateEnabledEnv)
 	if maxBytes, maxEntries, ok := cloneLimitsFromEnvironment(); ok {
 		service.cloneMaxBytes = maxBytes
 		service.cloneMaxEntries = maxEntries
@@ -107,10 +111,20 @@ func (s *RemoteService) Enabled() bool { return s != nil && s.enabled }
 // are additional independent gates.
 func (s *RemoteService) PushEnabled() bool { return s != nil && s.pushEnabled }
 
+// BranchCreateEnabled reports the separate process-wide remote ref-creation gate.
+func (s *RemoteService) BranchCreateEnabled() bool { return s != nil && s.branchCreateEnabled }
+
 // PushMutationEnabled reports whether the process has enabled all global gates
 // required for a remote push mutation. Per-remote policy is checked by Push.
 func (s *RemoteService) PushMutationEnabled() bool {
 	return s != nil && s.Enabled() && s.PushEnabled() && s.local != nil && s.local.WriteEnabled()
+}
+
+// BranchCreateMutationEnabled reports whether all global prerequisites for
+// creating a new remote branch are enabled. Per-remote allow_branch_create is
+// checked by PublishBranch.
+func (s *RemoteService) BranchCreateMutationEnabled() bool {
+	return s != nil && s.PushMutationEnabled() && s.BranchCreateEnabled()
 }
 
 // CloneMutationEnabled reports whether all process-wide clone prerequisites are
@@ -137,6 +151,7 @@ func (s *RemoteService) Remotes(ctx context.Context) []RemoteSummary {
 			ID: id, Repository: remote.Repository, Host: parsed.Hostname(),
 			AuthenticationConfigured: remote.TokenEnv != "",
 			PushAllowed:              s.PushMutationEnabled() && remote.AllowPush,
+			BranchCreateAllowed:      s.BranchCreateMutationEnabled() && remote.AllowPush && remote.AllowBranchCreate,
 			DefaultBranchPushAllowed: s.PushMutationEnabled() && remote.AllowPush && remote.AllowDefaultBranchPush,
 			CloneAllowed:             s.CloneMutationEnabled() && remote.AllowClone,
 		})
@@ -184,6 +199,7 @@ func (s *RemoteService) RemoteStatus(ctx context.Context, remoteID string) (*Rem
 	if err != nil {
 		return nil, fmt.Errorf("remote %q could not be inspected", remoteID)
 	}
+	branchStateDigest := remoteBranchStateDigest(advertised)
 	allRefs, err := advertised.AllReferences()
 	if err != nil {
 		return nil, fmt.Errorf("remote %q references could not be read", remoteID)
@@ -214,6 +230,6 @@ func (s *RemoteService) RemoteStatus(ctx context.Context, remoteID string) (*Rem
 	parsed, _ := url.Parse(remote.URL)
 	return &RemoteStatusResult{
 		Remote: remoteID, Repository: remote.Repository, Host: parsed.Hostname(),
-		Authenticated: authenticated, References: refs, Truncated: truncated,
+		Authenticated: authenticated, References: refs, BranchStateDigest: branchStateDigest, Truncated: truncated,
 	}, nil
 }
