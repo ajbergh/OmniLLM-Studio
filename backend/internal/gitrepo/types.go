@@ -35,11 +35,12 @@ type Reader interface {
 
 // Writer is the mutation contract exposed only when the operator explicitly
 // enables local Git write access. Callers must provide state preconditions so a
-// delayed approval cannot silently act on a different branch, HEAD, or index.
+// delayed approval cannot silently act on a different branch, HEAD, index, or
+// reviewed worktree state.
 type Writer interface {
 	CreateBranch(ctx context.Context, repositoryID, branchName, fromRevision, expectedHead string) (*CreateBranchResult, error)
 	Checkout(ctx context.Context, repositoryID, branchName, expectedHead string) (*CheckoutResult, error)
-	Stage(ctx context.Context, repositoryID string, paths []string, expectedBranch, expectedHead, expectedIndexDigest string) (*StageResult, error)
+	Stage(ctx context.Context, repositoryID string, paths []string, expectedBranch, expectedHead, expectedIndexDigest, expectedWorktreeDigest string) (*StageResult, error)
 	Commit(ctx context.Context, repositoryID, message, expectedBranch, expectedHead, expectedIndexDigest string) (*CommitResult, error)
 }
 
@@ -75,15 +76,18 @@ type StatusResult struct {
 }
 
 // DiffResult contains either a worktree-vs-HEAD diff or a revision-to-revision diff.
+// WorktreeDigest is populated only for worktree mode and fingerprints the full
+// changed worktree, including content omitted from the rendered patch.
 type DiffResult struct {
-	Repository string   `json:"repository"`
-	Mode       string   `json:"mode"`
-	From       string   `json:"from"`
-	To         string   `json:"to"`
-	Files      []string `json:"files,omitempty"`
-	Patch      string   `json:"patch"`
-	Truncated  bool     `json:"truncated,omitempty"`
-	Warnings   []string `json:"warnings,omitempty"`
+	Repository     string   `json:"repository"`
+	Mode           string   `json:"mode"`
+	From           string   `json:"from"`
+	To             string   `json:"to"`
+	WorktreeDigest string   `json:"worktree_digest,omitempty"`
+	Files          []string `json:"files,omitempty"`
+	Patch          string   `json:"patch"`
+	Truncated      bool     `json:"truncated,omitempty"`
+	Warnings       []string `json:"warnings,omitempty"`
 }
 
 // CommitSummary is a compact log entry.
@@ -160,7 +164,7 @@ type CheckoutResult struct {
 }
 
 // StageResult describes exact repository-relative paths staged into the index.
-// A new index digest is intentionally omitted so callers must obtain a fresh
+// New state digests are intentionally omitted so callers must obtain a fresh
 // git_status snapshot before requesting a commit.
 type StageResult struct {
 	Repository string   `json:"repository"`
