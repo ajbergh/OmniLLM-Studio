@@ -25,7 +25,7 @@ func (e *Executor) ExecuteApproved(ctx context.Context, call ToolCall) *ToolResu
 	}
 	// An approval can remain pending while the user changes Settings > Tools.
 	// A subsequent deny is authoritative and must invalidate the stale approval.
-	if e.Policy(call.Name) == "deny" {
+	if e.PolicyForContext(ctx, call.Name) == "deny" {
 		return e.failure(ctx, call, fmt.Sprintf("tool %q is denied by policy", call.Name), ToolEventFailed, map[string]interface{}{ApprovalStatusMetadataKey: "invalidated"})
 	}
 	if err := tool.Validate(call.Arguments); err != nil {

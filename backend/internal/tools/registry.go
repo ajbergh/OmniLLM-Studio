@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,9 +12,10 @@ import (
 // optional policy resolver can additionally hide hard-denied tools from runtime
 // discovery without removing them from the registry or Settings inventory.
 type Registry struct {
-	mu             sync.RWMutex
-	tools          map[string]Tool
-	policyResolver PermissionResolver
+	mu                   sync.RWMutex
+	tools                map[string]Tool
+	policyResolver       PermissionResolver
+	scopedPolicyResolver func(context.Context, string) string
 }
 
 // NewRegistry creates a registry with dependency-free core utilities. Tools
@@ -108,6 +110,64 @@ func (r *Registry) IsAvailable(name string) bool {
 		return false
 	}
 	return r.Policy(name) != "deny"
+}
+
+// SetScopedPolicyResolver binds request-scoped effective policy for discovery.
+func (r *Registry) SetScopedPolicyResolver(resolver func(context.Context, string) string) {
+	r.mu.Lock()
+	r.scopedPolicyResolver = resolver
+	r.mu.Unlock()
+}
+
+// PolicyForContext returns request-scoped policy when configured.
+func (r *Registry) PolicyForContext(ctx context.Context, name string) string {
+	r.mu.RLock()
+	resolver := r.scopedPolicyResolver
+	r.mu.RUnlock()
+	if resolver != nil {
+		return resolver(ctx, name)
+	}
+	return r.Policy(name)
+}
+
+// IsAvailableForContext applies static enabled-state and request-scoped hard deny.
+func (r *Registry) IsAvailableForContext(ctx context.Context, name string) bool {
+	tool, ok := r.Get(name)
+	if !ok || !tool.Definition().Normalized().Enabled {
+		return false
+	}
+	return r.PolicyForContext(ctx, name) != "deny"
+}
+
+// ListEnabledForContext returns enabled definitions that are not request-scoped denied.
+func (r *Registry) ListEnabledForContext(ctx context.Context) []ToolDefinition {
+	defs := r.ListEnabled()
+	out := make([]ToolDefinition, 0, len(defs))
+	for _, def := range defs {
+		if r.PolicyForContext(ctx, def.Name) != "deny" {
+			out = append(out, def)
+		}
+	}
+	return out
+}
+
+// SelectForContext is Select with request-scoped deny filtering.
+func (r *Registry) SelectForContext(ctx context.Context, terms []string, limit int) []ToolDefinition {
+	if limit <= 0 {
+		return nil
+	}
+	candidates := r.Select(terms, limit*2+8)
+	out := make([]ToolDefinition, 0, limit)
+	for _, def := range candidates {
+		if r.PolicyForContext(ctx, def.Name) == "deny" {
+			continue
+		}
+		out = append(out, def)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
 
 // List returns normalized definitions of all registered tools in stable order.

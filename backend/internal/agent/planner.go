@@ -26,7 +26,7 @@ func NewPlanner(llmService *llm.Service, toolRegistry *tools.Registry) *Planner 
 // tools are supplied, and their complete input schemas and risk metadata are
 // included.
 func (p *Planner) GeneratePlan(ctx context.Context, provider, model, goal string, conversationHistory []llm.ChatMessage) ([]PlanStep, error) {
-	toolDefs := p.selectTools(goal, conversationHistory)
+	toolDefs := p.selectToolsWithContext(ctx, goal, conversationHistory)
 	filteredDefs := toolDefs[:0]
 	for _, def := range toolDefs {
 		if toolAllowedByContext(ctx, def.Name) {
@@ -105,13 +105,17 @@ Respond only with the JSON array.`, toolDescriptions)
 }
 
 func (p *Planner) selectTools(goal string, history []llm.ChatMessage) []tools.ToolDefinition {
+	return p.selectToolsWithContext(context.Background(), goal, history)
+}
+
+func (p *Planner) selectToolsWithContext(ctx context.Context, goal string, history []llm.ChatMessage) []tools.ToolDefinition {
 	terms := strings.Fields(strings.ToLower(goal))
 	if len(history) > 0 {
 		terms = append(terms, strings.Fields(strings.ToLower(history[len(history)-1].Content))...)
 	}
-	defs := p.toolRegistry.Select(terms, 12)
+	defs := p.toolRegistry.SelectForContext(ctx, terms, 12)
 	if len(defs) == 0 {
-		defs = p.toolRegistry.ListEnabled()
+		defs = p.toolRegistry.ListEnabledForContext(ctx)
 		if len(defs) > 12 {
 			defs = defs[:12]
 		}
@@ -184,7 +188,7 @@ func (p *Planner) validatePlanWithContext(ctx context.Context, steps []PlanStep)
 				errs = append(errs, fmt.Sprintf("step %s references tool %q excluded by assistant profile", step.ID, step.ToolName))
 				continue
 			}
-			if !p.toolRegistry.IsAvailable(step.ToolName) {
+			if !p.toolRegistry.IsAvailableForContext(ctx, step.ToolName) {
 				errs = append(errs, fmt.Sprintf("step %s references unavailable tool %q", step.ID, step.ToolName))
 				continue
 			}
@@ -201,7 +205,7 @@ func (p *Planner) validatePlanWithContext(ctx context.Context, steps []PlanStep)
 				continue
 			}
 			def := tool.Definition().Normalized()
-			if p.toolRegistry.Policy(step.ToolName) == "ask" || def.SideEffecting || def.Risk == tools.RiskHigh || def.Risk == tools.RiskCritical {
+			if p.toolRegistry.PolicyForContext(ctx, step.ToolName) == "ask" || def.SideEffecting || def.Risk == tools.RiskHigh || def.Risk == tools.RiskCritical {
 				step.RequiresApproval = true
 			}
 			if step.MaxRetries == 0 && step.Retryable {

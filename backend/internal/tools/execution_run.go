@@ -36,7 +36,7 @@ func (e *Executor) ExecutePlan(ctx context.Context, steps []ExecutionStep) []*To
 			}
 			continue
 		}
-		if step.Parallel && e.parallelStepSafe(step.Calls) {
+		if step.Parallel && e.parallelStepSafeForContext(ctx, step.Calls) {
 			results = append(results, e.ExecuteBatch(ctx, step.Calls)...)
 			continue
 		}
@@ -52,11 +52,15 @@ func (e *Executor) ExecutePlan(ctx context.Context, steps []ExecutionStep) []*To
 }
 
 func (e *Executor) parallelStepSafe(calls []ToolCall) bool {
+	return e.parallelStepSafeForContext(context.Background(), calls)
+}
+
+func (e *Executor) parallelStepSafeForContext(ctx context.Context, calls []ToolCall) bool {
 	if len(calls) < 2 {
 		return false
 	}
 	for _, call := range calls {
-		if e.Policy(call.Name) != "allow" {
+		if e.PolicyForContext(ctx, call.Name) != "allow" {
 			return false
 		}
 		definition, ok := e.Definition(call.Name)

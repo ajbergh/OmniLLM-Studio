@@ -1,5 +1,7 @@
 package tools
 
+import "context"
+
 // ExecutionStep describes one ordered unit of tool execution. Parallel is true
 // only when every call in the step is explicitly read-only, non-side-effecting,
 // and marked SupportsParallel by its registered definition.
@@ -27,8 +29,13 @@ func BuildExecutionPlan(registry *Registry, calls []ToolCall) []ExecutionStep {
 // denied tools always remain sequential, even when their definitions advertise
 // read-only parallel support.
 func (e *Executor) BuildExecutionPlan(calls []ToolCall) []ExecutionStep {
+	return e.BuildExecutionPlanForContext(context.Background(), calls)
+}
+
+// BuildExecutionPlanForContext preserves scoped policy barriers.
+func (e *Executor) BuildExecutionPlanForContext(ctx context.Context, calls []ToolCall) []ExecutionStep {
 	return buildExecutionPlan(calls, func(call ToolCall) bool {
-		if e.Policy(call.Name) != "allow" {
+		if e.PolicyForContext(ctx, call.Name) != "allow" {
 			return false
 		}
 		definition, ok := e.Definition(call.Name)

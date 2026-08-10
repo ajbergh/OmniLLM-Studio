@@ -38,12 +38,13 @@ func ContextWithApprovalHandler(ctx context.Context, handler ApprovalHandler) co
 // Executor orchestrates tool lookup, policy checks, approvals, validation,
 // lifecycle events, timeouts, and result limits.
 type Executor struct {
-	registry      *Registry
-	permissions   PermissionResolver
-	timeout       time.Duration
-	approvals     *ApprovalBroker
-	idempotencyMu sync.Mutex
-	idempotency   map[string]*ToolResult
+	registry          *Registry
+	permissions       PermissionResolver
+	scopedPermissions ScopedPermissionResolver
+	timeout           time.Duration
+	approvals         *ApprovalBroker
+	idempotencyMu     sync.Mutex
+	idempotency       map[string]*ToolResult
 }
 
 // NewExecutor creates an Executor with the given registry and permission
@@ -94,7 +95,7 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 		}
 	}
 
-	switch e.Policy(call.Name) {
+	switch e.PolicyForContext(ctx, call.Name) {
 	case "deny":
 		return e.failure(ctx, call, fmt.Sprintf("tool %q is denied by policy", call.Name), ToolEventFailed, nil)
 	case "ask":
@@ -157,7 +158,7 @@ func (e *Executor) Execute(ctx context.Context, call ToolCall) *ToolResult {
 	// Permissions can change while a user is considering an approval or while
 	// another settings request is in flight. Re-check the hard deny immediately
 	// before validation/execution so turning a tool off is authoritative.
-	if e.Policy(call.Name) == "deny" {
+	if e.PolicyForContext(ctx, call.Name) == "deny" {
 		return e.failure(ctx, call, fmt.Sprintf("tool %q is denied by policy", call.Name), ToolEventFailed, nil)
 	}
 

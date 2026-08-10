@@ -162,6 +162,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 
 	// Tool Calling Framework
 	toolPermRepo := repository.NewToolPermissionRepo(database)
+	scopedToolPermRepo := repository.NewScopedToolPermissionRepo(database)
 	toolRegistry := tools.NewRegistry()
 	toolRegistry.MustRegister(tools.NewWeatherLookupTool())
 	toolRegistry.MustRegister(tools.NewCurrencyConvertTool())
@@ -205,6 +206,11 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 		"browser_session",
 	})
 	toolExecutor := tools.NewExecutor(toolRegistry, toolPermRepo.PolicyResolver(), 0)
+	toolExecutor.SetScopedPermissionResolver(func(scope tools.InvocationScope, name, base string) string {
+		return scopedToolPermRepo.Resolve(scope.UserID, scope.WorkspaceID, scope.ConversationID, name, base)
+	})
+	toolRegistry.MustRegister(tools.NewToolSearch(toolRegistry))
+	toolRegistry.MustRegister(tools.NewToolInvoke(toolExecutor))
 	toolRegistry.MustRegister(tools.NewToolBatch(toolExecutor))
 	if sandboxURL := os.Getenv("OMNILLM_CODE_SANDBOX_URL"); sandboxURL != "" {
 		if sandboxClient, sandboxErr := codesandbox.New(sandboxURL); sandboxErr != nil {
@@ -214,6 +220,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 		}
 	}
 	toolHandler := NewToolHandler(toolRegistry, toolExecutor, toolPermRepo)
+	scopedToolPermHandler := NewScopedToolPermissionHandler(scopedToolPermRepo, toolRegistry)
 	openAPIManager := openapiruntime.NewManager(openAPIServerRepo, toolPermRepo, toolRegistry)
 	if err := openAPIManager.LoadEnabled(context.Background()); err != nil {
 		log.Printf("WARN: load OpenAPI tool servers: %v", err)
@@ -638,6 +645,9 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 				r.Post("/approvals/{approvalId}", toolHandler.ResolveApproval)
 				r.Group(func(r chi.Router) {
 					r.Use(auth.RequireRole("admin"))
+					r.Get("/scoped-permissions", scopedToolPermHandler.List)
+					r.Put("/scoped-permissions", scopedToolPermHandler.Upsert)
+					r.Delete("/scoped-permissions", scopedToolPermHandler.Delete)
 					r.Patch("/{toolName}/permission", toolHandler.UpdatePermission)
 				})
 			})

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -119,10 +120,17 @@ func preferredChatToolNames(prompt string) []string {
 	if containsAny(prompt, "connected app", "connect app", "mcp") {
 		add("app_catalog", "app_connections", "app_connect_mcp", "app_disconnect")
 	}
+	if containsAny(prompt, "find tool", "search tools", "available tools", "tool catalog", "which tool") {
+		add("tool_search", "tool_invoke")
+	}
 	return names
 }
 
 func selectChatTools(registry *tools.Registry, executor *tools.Executor, prompt string, selections ...turnToolSelection) []llm.Tool {
+	return selectChatToolsForContext(context.Background(), registry, executor, prompt, selections...)
+}
+
+func selectChatToolsForContext(ctx context.Context, registry *tools.Registry, executor *tools.Executor, prompt string, selections ...turnToolSelection) []llm.Tool {
 	if registry == nil {
 		return nil
 	}
@@ -139,7 +147,7 @@ func selectChatTools(registry *tools.Registry, executor *tools.Executor, prompt 
 		if _, exists := seen[def.Name]; exists {
 			return
 		}
-		if executor != nil && executor.Policy(def.Name) == "deny" {
+		if executor != nil && executor.PolicyForContext(ctx, def.Name) == "deny" {
 			return
 		}
 		seen[def.Name] = struct{}{}
@@ -156,7 +164,11 @@ func selectChatTools(registry *tools.Registry, executor *tools.Executor, prompt 
 	for _, name := range preferredChatToolNames(prompt) {
 		addName(name)
 	}
-	for _, def := range registry.Select(chatToolTerms(prompt), maxChatToolDefinitions) {
+	if len(registry.ListEnabledForContext(ctx)) > maxChatToolDefinitions {
+		addName("tool_search")
+		addName("tool_invoke")
+	}
+	for _, def := range registry.SelectForContext(ctx, chatToolTerms(prompt), maxChatToolDefinitions) {
 		addDefinition(def)
 	}
 	if len(defs) == 0 {

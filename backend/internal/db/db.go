@@ -146,6 +146,7 @@ func versionedMigrations() []Migration {
 		{Version: 43, Name: "video_transcriptions", SQL: migrationVideoTranscriptions},
 		{Version: 44, Name: "assistant_profiles_skills", SQL: migrationAssistantProfilesSkills},
 		{Version: 45, Name: "openapi_tool_servers", SQL: migrationOpenAPIToolServers},
+		{Version: 46, Name: "scoped_tool_permissions", SQL: migrationScopedToolPermissions},
 	}
 }
 
@@ -1330,4 +1331,18 @@ CREATE TABLE IF NOT EXISTS openapi_servers (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_openapi_servers_owner ON openapi_servers(owner_user_id, name);
+`
+
+// V46: Monotonic user/workspace/conversation tool restrictions.
+const migrationScopedToolPermissions = `
+CREATE TABLE IF NOT EXISTS tool_permission_scopes (
+    scope_type TEXT NOT NULL CHECK(scope_type IN ('user','workspace','conversation')),
+    scope_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    policy TEXT NOT NULL CHECK(policy IN ('allow','ask','deny')),
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(scope_type, scope_id, tool_name)
+);
+CREATE INDEX IF NOT EXISTS idx_tool_permission_scopes_tool
+ON tool_permission_scopes(tool_name, scope_type, scope_id);
 `
