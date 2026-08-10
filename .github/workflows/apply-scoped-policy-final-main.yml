@@ -45,6 +45,27 @@ jobs:
             frontend/src/scopedToolPermissionsApi.ts \
             frontend/src/components/ScopedToolPermissionsPanel.tsx
           python3 .github/scripts/apply_scoped_policy_final.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          runtime = Path('backend/internal/api/chat_tool_runtime.go')
+          source = runtime.read_text()
+          old = 'func selectChatTools(ctx context.Context, registry *tools.Registry, executor *tools.Executor, prompt string, selections ...turnToolSelection) []llm.Tool {\n'
+          new = '''func selectChatTools(registry *tools.Registry, executor *tools.Executor, prompt string, selections ...turnToolSelection) []llm.Tool {
+          	return selectChatToolsForContext(context.Background(), registry, executor, prompt, selections...)
+          }
+
+          func selectChatToolsForContext(ctx context.Context, registry *tools.Registry, executor *tools.Executor, prompt string, selections ...turnToolSelection) []llm.Tool {
+          '''
+          if old not in source:
+              raise SystemExit('selectChatTools context-aware signature marker missing')
+          runtime.write_text(source.replace(old, new, 1))
+
+          handler = Path('backend/internal/api/message_handler.go')
+          source = handler.read_text()
+          source = source.replace('selectChatTools(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, turnSelection)', 'selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, turnSelection)')
+          handler.write_text(source)
+          PY
       - name: Format Go
         run: |
           gofmt -w \
