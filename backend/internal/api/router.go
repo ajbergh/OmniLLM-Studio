@@ -27,6 +27,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/mcpclient"
 	memorysvc "github.com/ajbergh/omnillm-studio/internal/memory"
 	"github.com/ajbergh/omnillm-studio/internal/music"
+	openapiruntime "github.com/ajbergh/omnillm-studio/internal/openapi"
 	"github.com/ajbergh/omnillm-studio/internal/plugins"
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
@@ -109,6 +110,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	browserSessionRepo := repository.NewBrowserSessionRepo(database)
 	assistantProfileRepo := repository.NewAssistantProfileRepo(database)
 	skillRepo := repository.NewSkillRepo(database)
+	openAPIServerRepo := repository.NewOpenAPIServerRepo(database)
 
 	// Services
 	llmService := llm.NewService(providerRepo, settingsRepo)
@@ -203,6 +205,11 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	})
 	toolExecutor := tools.NewExecutor(toolRegistry, toolPermRepo.PolicyResolver(), 0)
 	toolHandler := NewToolHandler(toolRegistry, toolExecutor, toolPermRepo)
+	openAPIManager := openapiruntime.NewManager(openAPIServerRepo, toolPermRepo, toolRegistry)
+	if err := openAPIManager.LoadEnabled(context.Background()); err != nil {
+		log.Printf("WARN: load OpenAPI tool servers: %v", err)
+	}
+	openAPIHandler := NewOpenAPIHandler(openAPIServerRepo, openAPIManager)
 	workspaceRepo := repository.NewWorkspaceRepo(database)
 
 	// Handlers
@@ -665,6 +672,14 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Get("/skills/{id}", assistantProfileHandler.GetSkill)
 			r.Put("/skills", assistantProfileHandler.SaveSkill)
 			r.Delete("/skills/{id}", assistantProfileHandler.DeleteSkill)
+
+			// Owner-scoped OpenAPI tool servers. Generated operations still obey shared tool policy.
+			r.Route("/openapi/servers", func(r chi.Router) {
+				r.Get("/", openAPIHandler.List)
+				r.Put("/", openAPIHandler.Save)
+				r.Post("/{id}/refresh", openAPIHandler.Refresh)
+				r.Delete("/{id}", openAPIHandler.Delete)
+			})
 
 			// MCP Servers (admin only)
 			r.Route("/mcp", func(r chi.Router) {

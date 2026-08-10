@@ -12,6 +12,7 @@ import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { AssistantProfilesPanel } from './AssistantProfilesPanel';
+import { OpenAPIServersPanel } from './OpenAPIServersPanel';
 import { formatModelOptionLabel, getKnownChatModels, getKnownImageModels, isFreeModel } from '../models';
 
 const PROVIDER_TYPES = [
@@ -40,7 +41,7 @@ function FreeModelBadge() {
   );
 }
 
-type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'routing' | 'music' | 'video' | 'assistants' | 'tools' | 'mcp' | 'pricing' | 'auth';
+type SettingsTab = 'providers' | 'general' | 'appearance' | 'rag' | 'routing' | 'music' | 'video' | 'assistants' | 'tools' | 'openapi' | 'mcp' | 'pricing' | 'auth';
 
 const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'providers', label: 'Providers' },
@@ -52,6 +53,7 @@ const SETTINGS_TABS: Array<{ key: SettingsTab; label: string }> = [
   { key: 'video', label: 'Video' },
   { key: 'assistants', label: 'Assistants' },
   { key: 'tools', label: 'Tools' },
+  { key: 'openapi', label: 'OpenAPI' },
   { key: 'mcp', label: 'MCP' },
   { key: 'pricing', label: 'Pricing' },
   { key: 'auth', label: 'Auth' },
@@ -305,6 +307,10 @@ export function SettingsPanel() {
                     transition={{ duration: 0.2 }}
                   >
                     <ToolsTab />
+                  </motion.div>
+                ) : tab === 'openapi' ? (
+                  <motion.div key="openapi" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
+                    <OpenAPIServersPanel />
                   </motion.div>
                 ) : tab === 'mcp' ? (
                   <motion.div
