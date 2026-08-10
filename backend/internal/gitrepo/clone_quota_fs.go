@@ -23,9 +23,9 @@ var (
 type cloneQuota struct {
 	mu sync.Mutex
 
-	maxBytes   int64
-	maxEntries int64
-	usedBytes  int64
+	maxBytes    int64
+	maxEntries  int64
+	usedBytes   int64
 	usedEntries int64
 }
 
@@ -297,6 +297,9 @@ func (f *cloneQuotaFile) Write(p []byte) (int, error) {
 	if f.appendMode {
 		writeOffset = size
 	}
+	if writeOffset < 0 || writeOffset > (1<<63-1)-int64(len(p)) {
+		return 0, errCloneStorageQuotaExceeded
+	}
 	plannedEnd := writeOffset + int64(len(p))
 	charge := int64(len(p))
 	if plannedEnd > size && plannedEnd-size > charge {
@@ -329,17 +332,15 @@ func (f *cloneQuotaFile) Truncate(size int64) error {
 	if err != nil {
 		return err
 	}
-	charge := int64(0)
 	if size > existing {
-		charge = size - existing
-		if err := f.quota.reserveLocked(charge, 0); err != nil {
+		if err := f.quota.reserveLocked(size-existing, 0); err != nil {
 			return err
 		}
 	}
 	if err := f.File.Truncate(size); err != nil {
-		if charge > 0 {
-			f.quota.releaseBytes(charge)
-		}
+		// Deliberately keep the reservation on failure. Some filesystems may
+		// partially mutate before returning an error; conservative over-counting
+		// keeps the clone fail-closed instead of manufacturing quota credit.
 		return err
 	}
 	_, _ = f.File.Seek(current, io.SeekStart)
