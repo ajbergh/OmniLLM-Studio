@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// GitHub permits 60 unauthenticated REST requests per hour. Repository
+// inspection uses four requests before fetching selected files, so reserve
+// headroom for retries and other clients sharing the same public IP.
+const unauthenticatedGitHubMaxFiles = 40
+
 // FileCategory groups files for display in the prompt pack.
 type FileCategory string
 
@@ -82,6 +87,9 @@ func SelectFiles(tree []GitHubTreeEntry, goal AnalysisGoal, cfg *Config) []Selec
 	maxFiles := cfg.GitHubMaxFiles
 	if maxFiles <= 0 {
 		maxFiles = 80
+	}
+	if strings.TrimSpace(cfg.GitHubToken) == "" && maxFiles > unauthenticatedGitHubMaxFiles {
+		maxFiles = unauthenticatedGitHubMaxFiles
 	}
 	if len(candidates) > maxFiles {
 		candidates = candidates[:maxFiles]

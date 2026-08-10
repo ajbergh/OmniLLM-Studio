@@ -1,6 +1,9 @@
 package urlcontext
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestClassifyURL(t *testing.T) {
 	tests := []struct {
@@ -83,5 +86,25 @@ func TestParseGitHubURL(t *testing.T) {
 				t.Errorf("Kind = %q, want %q", got.Kind, tt.wantKind)
 			}
 		})
+	}
+}
+
+func TestSelectFilesCapsUnauthenticatedGitHubRequests(t *testing.T) {
+	tree := make([]GitHubTreeEntry, 0, unauthenticatedGitHubMaxFiles+10)
+	for i := 0; i < cap(tree); i++ {
+		tree = append(tree, GitHubTreeEntry{Path: fmt.Sprintf("internal/api/handler_%d.go", i), Type: "blob"})
+	}
+
+	withoutToken := DefaultConfig()
+	withoutToken.GitHubMaxFiles = 80
+	if got := len(SelectFiles(tree, GoalArchitectureReview, withoutToken)); got != unauthenticatedGitHubMaxFiles {
+		t.Fatalf("unauthenticated selected files = %d, want %d", got, unauthenticatedGitHubMaxFiles)
+	}
+
+	withToken := DefaultConfig()
+	withToken.GitHubToken = "test-token"
+	withToken.GitHubMaxFiles = 80
+	if got := len(SelectFiles(tree, GoalArchitectureReview, withToken)); got != len(tree) {
+		t.Fatalf("authenticated selected files = %d, want %d", got, len(tree))
 	}
 }

@@ -106,11 +106,30 @@ func (t *BrowserNavigateTool) Validate(args json.RawMessage) error {
 	if strings.TrimSpace(a.URL) == "" {
 		return fmt.Errorf("url is required")
 	}
+	if isGitHubHost(a.URL) {
+		return fmt.Errorf("GitHub URLs must be read with github_repo_inspect or fetch_url_context, not browser_navigate")
+	}
 	switch strings.ToLower(strings.TrimSpace(a.Extract)) {
 	case "", "text", "html", "both":
 		return nil
 	default:
 		return fmt.Errorf("extract must be text, html, or both")
+	}
+}
+
+// isGitHubHost keeps repository reads on the API-based inspection path. Apart
+// from being unnecessary, launching Chromium for these URLs can cause Rod to
+// download its browser helper on first use.
+func isGitHubHost(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "github.com", "api.github.com", "raw.githubusercontent.com":
+		return true
+	default:
+		return false
 	}
 }
 
