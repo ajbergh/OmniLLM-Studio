@@ -112,6 +112,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	assistantProfileRepo := repository.NewAssistantProfileRepo(database)
 	skillRepo := repository.NewSkillRepo(database)
 	openAPIServerRepo := repository.NewOpenAPIServerRepo(database)
+	toolInvocationRepo := repository.NewToolInvocationRepo(database)
 
 	// Services
 	llmService := llm.NewService(providerRepo, settingsRepo)
@@ -220,6 +221,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 		}
 	}
 	toolHandler := NewToolHandler(toolRegistry, toolExecutor, toolPermRepo)
+	toolDiagnosticsHandler := NewToolDiagnosticsHandler(toolInvocationRepo)
 	scopedToolPermHandler := NewScopedToolPermissionHandler(scopedToolPermRepo, toolRegistry)
 	openAPIManager := openapiruntime.NewManager(openAPIServerRepo, toolPermRepo, toolRegistry)
 	if err := openAPIManager.LoadEnabled(context.Background()); err != nil {
@@ -641,6 +643,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Route("/tools", func(r chi.Router) {
 				r.Get("/", toolHandler.ListTools)
 				r.Post("/execute", toolHandler.ExecuteTool)
+				r.Get("/diagnostics", toolDiagnosticsHandler.Get)
 				r.Get("/approvals", toolHandler.ListApprovals)
 				r.Post("/approvals/{approvalId}", toolHandler.ResolveApproval)
 				r.Group(func(r chi.Router) {

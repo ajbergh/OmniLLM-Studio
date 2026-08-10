@@ -85,3 +85,10 @@ The branch adds tests for:
 ## Follow-on work
 
 The next orchestration slice should wire explicit `tool_cancelled` terminal events into executor failure classification, add realistic parallel-tool versus ordered-side-effect orchestration fixtures, and evaluate whether live runtime metrics should also be surfaced in the Chat Studio diagnostics UI.
+## Tool diagnostics UI — 2026-08-10
+
+The live metrics and durable audit records are now surfaced in **Settings → Tools → Tool Diagnostics**. The authenticated endpoint combines the existing per-user in-process metric snapshot with a bounded newest-first view of `tool_invocations`.
+
+The diagnostics contract is deliberately privacy-safe: it exposes tool name, lifecycle status, approval status, latency, result byte count, retry count, and timestamps, but never returns stored arguments, result bodies, error text, or user identifiers. Durable queries are constrained to the authenticated user scope; solo mode uses the stable local owner ID.
+
+This closes the diagnostics-UI follow-on identified in the original orchestration metrics work. Future observability work should build on this endpoint rather than exposing the payload-bearing audit columns.
