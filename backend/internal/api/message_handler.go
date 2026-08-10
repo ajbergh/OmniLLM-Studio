@@ -263,7 +263,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Run before sports/news so user-provided URLs take precedence.
 	var urlCtxResult *urlcontext.ResolveResult
 	var urlCtxWebSearchBypass bool
-	if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() {
+	if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() && h.chatPreflightAllowed("fetch_url_context") {
 		var urlErr error
 		urlCtxResult, urlErr = h.urlContextSvc.Resolve(r.Context(), urlcontext.ResolveRequest{
 			ConversationID: convoID,
@@ -341,7 +341,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// ----- File library preflight -----
 	var fileSearchResults []filelibrary.FileSearchResult
 	fileIntent := filelibrary.DetectFileIntent(req.Content, req.AttachmentIDs)
-	if h.fileLibrarySvc != nil && fileIntent.RequiresFileSearch {
+	if h.fileLibrarySvc != nil && fileIntent.RequiresFileSearch && h.chatPreflightAllowed("file_search") {
 		searchScope := fileIntent.Scope
 		if strings.TrimSpace(searchScope) == "" {
 			searchScope = "auto"
@@ -381,13 +381,13 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Word-doc intent: layer the word-doc directive onto the base system prompt.
-	if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
+	if h.wordGenEnabled() && h.chatPreflightAllowed("generate_word_doc") && detectWordDocIntent(req.Content) {
 		appendToBaseSystemPrompt(&llmReq, wordDocSystemDirective)
 	}
 
 	// Artifact intent: layer a format-specific directive onto the system prompt.
 	var artifactFormat artifacts.ArtifactFormat
-	if h.artifactGen != nil {
+	if h.artifactGen != nil && h.chatPreflightAllowed("artifact_generate") {
 		if f, ok := artifacts.DetectFormat(req.Content); ok {
 			artifactFormat = f
 			appendToBaseSystemPrompt(&llmReq, artifacts.ArtifactSystemDirective(f))
@@ -398,7 +398,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	providerName := llmReq.Provider
 	modelName := llmReq.Model
 
-	webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass
+	webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass && h.chatPreflightAllowed("web_search")
 
 	var orchResult *websearch.OrchestratorResult
 	if webSearchEnabled {
@@ -471,7 +471,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	assistantContent := resp.Content
 
 	// Word document generation (non-streaming path)
-	if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
+	if h.wordGenEnabled() && h.chatPreflightAllowed("generate_word_doc") && detectWordDocIntent(req.Content) {
 		suggestedName := suggestWordDocFilename(req.Content)
 		if storagePath, bytes, genErr := h.wordGen.Generate(assistantContent, suggestedName); genErr == nil {
 			attachment := &models.Attachment{
@@ -493,7 +493,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Artifact generation (non-streaming path)
-	if h.artifactGen != nil && artifactFormat != "" {
+	if h.artifactGen != nil && artifactFormat != "" && h.chatPreflightAllowed("artifact_generate") {
 		suggestedName := artifacts.SuggestFilename(req.Content, artifactFormat)
 		storagePath, bytes, contentType, genErr := h.artifactGen.Generate(r.Context(), assistantContent, artifactFormat, suggestedName)
 		if genErr == nil {
@@ -683,13 +683,13 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	// Word-doc intent: layer the word-doc directive onto the base system prompt.
 	// Stacks on top of the Markdown formatting directive that's always present.
-	if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
+	if h.wordGenEnabled() && h.chatPreflightAllowed("generate_word_doc") && detectWordDocIntent(req.Content) {
 		appendToBaseSystemPrompt(&llmReq, wordDocSystemDirective)
 	}
 
 	// Artifact intent: detect and layer a format-specific directive.
 	var streamArtifactFormat artifacts.ArtifactFormat
-	if h.artifactGen != nil {
+	if h.artifactGen != nil && h.chatPreflightAllowed("artifact_generate") {
 		if f, ok := artifacts.DetectFormat(req.Content); ok {
 			streamArtifactFormat = f
 			appendToBaseSystemPrompt(&llmReq, artifacts.ArtifactSystemDirective(f))
@@ -702,7 +702,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// ----- URL context preflight (streaming) -----
 	var urlCtxResult *urlcontext.ResolveResult
 	var urlCtxWebSearchBypass bool
-	if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() {
+	if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() && h.chatPreflightAllowed("fetch_url_context") {
 		var urlErr error
 		urlCtxResult, urlErr = h.urlContextSvc.Resolve(r.Context(), urlcontext.ResolveRequest{
 			ConversationID: convoID,
@@ -835,7 +835,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Detect image generation intent before web search and LLM calls.
 	// On a positive signal, generate the image, emit SSE events, save the
 	// assistant message, then return — bypassing the normal chat path.
-	if urlCtxResult == nil || !urlCtxResult.Handled {
+	if h.chatPreflightAllowed("image_generate") && (urlCtxResult == nil || !urlCtxResult.Handled) {
 		imgIntent := detectImageIntent(req.Content)
 		if imgIntent.RequiresImageGeneration {
 			if imgMsg, generated := h.handleImageGenerationStream(
@@ -858,7 +858,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// ----- File library preflight (streaming) -----
 	var fileSearchResults []filelibrary.FileSearchResult
 	fileIntent := filelibrary.DetectFileIntent(req.Content, req.AttachmentIDs)
-	if h.fileLibrarySvc != nil && fileIntent.RequiresFileSearch {
+	if h.fileLibrarySvc != nil && fileIntent.RequiresFileSearch && h.chatPreflightAllowed("file_search") {
 		searchScope := fileIntent.Scope
 		if strings.TrimSpace(searchScope) == "" {
 			searchScope = "auto"
@@ -914,7 +914,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	modelName := llmReq.Model
 
 	// Web search: skip entirely when the client explicitly disables it.
-	webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass
+	webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass && h.chatPreflightAllowed("web_search")
 
 	var searchResp *websearch.SearchResponse
 	var wsLLMReq *llm.ChatRequest
@@ -949,7 +949,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		// top — small models (e.g. gemini-3.1-flash-lite) get derailed by the
 		// extra instructions and start describing sources instead of answering.
 		// Task-changing directives (word-doc, artifact) are safe to append.
-		if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
+		if h.wordGenEnabled() && h.chatPreflightAllowed("generate_word_doc") && detectWordDocIntent(req.Content) {
 			appendToBaseSystemPrompt(wsLLMReq, wordDocSystemDirective)
 		}
 		if streamArtifactFormat != "" {
@@ -1293,7 +1293,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Word document generation (streaming path).
-	if h.wordGenEnabled() && detectWordDocIntent(req.Content) {
+	if h.wordGenEnabled() && h.chatPreflightAllowed("generate_word_doc") && detectWordDocIntent(req.Content) {
 		suggestedName := suggestWordDocFilename(req.Content)
 		if storagePath, bytes, genErr := h.wordGen.Generate(fullContent, suggestedName); genErr == nil {
 			attachment := &models.Attachment{
@@ -1885,6 +1885,9 @@ func (h *MessageHandler) buildLLMRequest(
 	}
 
 	systemPrompt := composeSystemPrompt(userSystemPrompt)
+	if h.chatCapabilityDiscoverable("sports_lookup") {
+		systemPrompt += "\n\n" + sportsLookupSystemDirective
+	}
 	req.Messages = append(req.Messages, llm.ChatMessage{
 		Role:    "system",
 		Content: systemPrompt,
@@ -2181,7 +2184,6 @@ func composeSystemPrompt(userPrompt string) string {
 		parts = append(parts, baseAssistant)
 	}
 	parts = append(parts, markdownFormattingDirective)
-	parts = append(parts, sportsLookupSystemDirective)
 	parts = append(parts, artifacts.ArtifactCapabilityDirective)
 	return strings.Join(parts, "\n\n")
 }
@@ -2195,7 +2197,7 @@ func (h *MessageHandler) handleSportsLookupMessage(ctx context.Context, conversa
 }
 
 func (h *MessageHandler) handleSportsLookupMessageWithTelemetry(ctx context.Context, conversationID, messageID, query string, routerTelemetry *intentrouter.RouterTelemetry) (*models.Message, bool) {
-	if !h.sportsLookupEnabled() {
+	if !h.chatPreflightAllowed("sports_lookup") || !h.sportsLookupEnabled() {
 		return nil, false
 	}
 
@@ -2262,7 +2264,7 @@ func (h *MessageHandler) handleSportsLookupRequest(ctx context.Context, conversa
 }
 
 func (h *MessageHandler) tryRouterSportsLookup(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool, *intentrouter.RouterTelemetry) {
-	if h.routerSvc == nil || !h.sportsLookupEnabled() {
+	if !h.chatPreflightAllowed("sports_lookup") || h.routerSvc == nil || !h.sportsLookupEnabled() {
 		return nil, false, nil
 	}
 	resp, err := h.routerSvc.Route(ctx, intentrouter.RouteRequest{
