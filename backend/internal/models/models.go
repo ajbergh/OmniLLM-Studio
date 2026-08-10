@@ -619,15 +619,16 @@ type PromptTemplate struct {
 
 // AgentRun represents a multi-step agent execution session.
 type AgentRun struct {
-	ID             string     `json:"id"`
-	ConversationID string     `json:"conversation_id"`
-	Status         string     `json:"status"` // planning, running, paused, completed, failed, cancelled
-	Goal           string     `json:"goal"`
-	PlanJSON       string     `json:"plan_json"`
-	ResultSummary  string     `json:"result_summary"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	ID                 string     `json:"id"`
+	ConversationID     string     `json:"conversation_id"`
+	Status             string     `json:"status"` // planning, running, paused, completed, failed, cancelled
+	Goal               string     `json:"goal"`
+	PlanJSON           string     `json:"plan_json"`
+	ResultSummary      string     `json:"result_summary"`
+	AssistantProfileID string     `json:"assistant_profile_id,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
 }
 
 // AgentStep represents a single step in an agent run.

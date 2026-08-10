@@ -1296,6 +1296,7 @@ CREATE TABLE IF NOT EXISTS assistant_profiles (
 );
 CREATE INDEX IF NOT EXISTS idx_assistant_profiles_owner ON assistant_profiles(owner_user_id, name);
 CREATE INDEX IF NOT EXISTS idx_assistant_profiles_workspace ON assistant_profiles(workspace_id, name);
+ALTER TABLE agent_runs ADD COLUMN assistant_profile_id TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS skills (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL DEFAULT '',

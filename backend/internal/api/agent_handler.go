@@ -114,7 +114,7 @@ func (h *AgentHandler) StartRun(w http.ResponseWriter, r *http.Request) {
 		context.WithoutCancel(r.Context()),
 		agentInvocationScope(r, convo, conversationID, ""),
 	)
-	run, runErr := h.runner.StartRunWithOptions(ctx, conversationID, req.Goal, req.Provider, req.Model, history, agent.RunOptions{Profile: req.Profile, Budgets: req.Budgets}, onEvent)
+	run, runErr := h.runner.StartRunWithOptions(ctx, conversationID, req.Goal, req.Provider, req.Model, history, agent.RunOptions{Profile: req.Profile, Budgets: req.Budgets, AssistantProfileID: req.AssistantProfileID}, onEvent)
 	finishAgentSSE(w, flusher, run, runErr)
 }
 
@@ -247,6 +247,36 @@ func (h *AgentHandler) ResumeRun(w http.ResponseWriter, r *http.Request) {
 		if req.Model != "" {
 			model = req.Model
 		}
+	}
+	if run.AssistantProfileID != "" && h.assistantRepo != nil {
+		userID := auth.ScopeUserIDFromContext(r.Context())
+		savedProfile, profileErr := h.assistantRepo.Get(userID, run.AssistantProfileID)
+		if profileErr != nil {
+			respondInternalError(w, profileErr)
+			return
+		}
+		if savedProfile == nil {
+			respondError(w, http.StatusConflict, "saved assistant profile is no longer available")
+			return
+		}
+		if req.Provider == "" && savedProfile.Provider != "" {
+			provider = savedProfile.Provider
+		}
+		if req.Model == "" && savedProfile.Model != "" {
+			model = savedProfile.Model
+		}
+		if strings.TrimSpace(savedProfile.SystemPrompt) != "" {
+			history = append([]llm.ChatMessage{{Role: "system", Content: "ASSISTANT PROFILE INSTRUCTIONS:\n" + savedProfile.SystemPrompt}}, history...)
+		}
+		if h.skillRepo != nil {
+			for _, skillID := range savedProfile.SkillIDs {
+				skill, skillErr := h.skillRepo.Get(userID, skillID)
+				if skillErr == nil && skill != nil && skill.Enabled {
+					history = append([]llm.ChatMessage{{Role: "system", Content: "ATTACHED SKILL " + skill.Name + ":\n" + skill.BodyMarkdown}}, history...)
+				}
+			}
+		}
+		r = r.WithContext(agent.ContextWithAllowedTools(r.Context(), savedProfile.ToolNames))
 	}
 	flusher, onEvent, ok := prepareAgentSSE(w)
 	if !ok {

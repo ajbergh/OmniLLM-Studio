@@ -43,8 +43,9 @@ type Event struct {
 }
 
 type RunOptions struct {
-	Profile RunProfile
-	Budgets *RunBudgets
+	Profile            RunProfile
+	Budgets            *RunBudgets
+	AssistantProfileID string
 }
 
 type runContext struct {
@@ -116,7 +117,7 @@ func (r *Runner) StartRunWithOptions(ctx context.Context, conversationID, goal, 
 	if r.runRepo == nil || r.stepRepo == nil || r.planner == nil {
 		return nil, fmt.Errorf("agent runtime is not fully configured")
 	}
-	run, err := r.runRepo.Create(conversationID, goal)
+	run, err := r.runRepo.Create(conversationID, goal, options.AssistantProfileID)
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
