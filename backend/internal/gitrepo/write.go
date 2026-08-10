@@ -115,8 +115,10 @@ func (s *Service) Checkout(ctx context.Context, repositoryID, branchName, expect
 }
 
 // Stage adds exact repository-relative paths with unstaged changes to the index.
-// Directory, glob, and stage-all semantics are deliberately not exposed.
-func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []string, expectedBranch, expectedHead, expectedIndexDigest string) (*StageResult, error) {
+// Directory, glob, and stage-all semantics are deliberately not exposed. The
+// expected worktree digest binds execution to the full worktree state returned
+// by the reviewed git_diff call.
+func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []string, expectedBranch, expectedHead, expectedIndexDigest, expectedWorktreeDigest string) (*StageResult, error) {
 	if err := s.requireWriteEnabled(); err != nil {
 		return nil, err
 	}
@@ -153,6 +155,9 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 	if err != nil {
 		return nil, safeRepositoryError(repositoryID, "status could not be read")
 	}
+	if _, err := s.ensureExpectedWorktreeDigest(repositoryID, status, expectedWorktreeDigest); err != nil {
+		return nil, err
+	}
 
 	paths, err := s.cleanStagePaths(repositoryID, rawPaths, status)
 	if err != nil {
@@ -167,6 +172,14 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 	if _, err := ensureExpectedIndexDigest(repo, expectedIndexDigest); err != nil {
 		return nil, err
 	}
+	freshStatus, err := worktree.Status()
+	if err != nil {
+		return nil, safeRepositoryError(repositoryID, "status could not be re-read before staging")
+	}
+	if _, err := s.ensureExpectedWorktreeDigest(repositoryID, freshStatus, expectedWorktreeDigest); err != nil {
+		return nil, err
+	}
+
 	originalIndex, err := repo.Storer.Index()
 	if err != nil {
 		return nil, safeRepositoryError(repositoryID, "index could not be read")
@@ -178,10 +191,16 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 			_ = repo.Storer.SetIndex(originalIndex)
 		}
 	}
+	repositoryRoot := s.repositories[repositoryID]
 	for _, filePath := range paths {
 		if err := ctx.Err(); err != nil {
 			rollback()
 			return nil, err
+		}
+		beforeFingerprint, err := worktreePathFingerprint(repositoryRoot, filePath)
+		if err != nil {
+			rollback()
+			return nil, fmt.Errorf("path %q could not be verified before staging", filePath)
 		}
 		if _, err := worktree.Add(filepath.FromSlash(filePath)); err != nil {
 			rollback()
@@ -191,6 +210,11 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 		if err != nil {
 			rollback()
 			return nil, safeRepositoryError(repositoryID, "index state could not be verified after staging")
+		}
+		afterFingerprint, err := worktreePathFingerprint(repositoryRoot, filePath)
+		if err != nil || afterFingerprint != beforeFingerprint {
+			rollback()
+			return nil, fmt.Errorf("path %q changed while it was being staged; run git_status and git_diff again", filePath)
 		}
 	}
 	return &StageResult{Repository: repositoryID, Branch: branch, Head: head, Paths: paths}, nil
@@ -328,6 +352,21 @@ func ensureExpectedIndexDigest(repo *git.Repository, expected string) (string, e
 	}
 	if !strings.EqualFold(expected, current) {
 		return "", fmt.Errorf("repository index changed; run git_status again before mutating")
+	}
+	return current, nil
+}
+
+func (s *Service) ensureExpectedWorktreeDigest(repositoryID string, status git.Status, expected string) (string, error) {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return "", fmt.Errorf("expected_worktree_digest is required; run git_diff again")
+	}
+	current, err := s.worktreeStateDigest(repositoryID, status)
+	if err != nil {
+		return "", fmt.Errorf("worktree state could not be verified safely")
+	}
+	if !strings.EqualFold(expected, current) {
+		return "", fmt.Errorf("repository worktree changed; run git_status and git_diff again before staging")
 	}
 	return current, nil
 }
