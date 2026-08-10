@@ -1042,7 +1042,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			appendToBaseSystemPrompt(&llmReq, directive)
 		}
 		providerType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
-		llmTools := selectChatTools(h.toolRegistry, h.toolExecutor, req.Content, turnSelection)
+		llmTools := selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, turnSelection)
 		const maxToolLoops = 10
 		const maxBrowserNavsPerTurn = 3
 		const maxToolResultCharsPerTurn = 150000

@@ -21,6 +21,10 @@ type chatToolExecution struct {
 }
 
 func newChatToolExecution(executor *tools.Executor, calls []llm.ToolCall) chatToolExecution {
+	return newChatToolExecutionForContext(context.Background(), executor, calls)
+}
+
+func newChatToolExecutionForContext(ctx context.Context, executor *tools.Executor, calls []llm.ToolCall) chatToolExecution {
 	providerCalls := append([]llm.ToolCall(nil), calls...)
 	runtimeCalls := make([]tools.ToolCall, len(providerCalls))
 	for i, call := range providerCalls {
@@ -37,7 +41,7 @@ func newChatToolExecution(executor *tools.Executor, calls []llm.ToolCall) chatTo
 
 	var plan []tools.ExecutionStep
 	if executor != nil {
-		plan = executor.BuildExecutionPlan(runtimeCalls)
+		plan = executor.BuildExecutionPlanForContext(ctx, runtimeCalls)
 	}
 	return chatToolExecution{
 		ProviderCalls: providerCalls,

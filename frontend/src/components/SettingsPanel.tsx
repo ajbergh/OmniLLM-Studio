@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { AssistantProfilesPanel } from './AssistantProfilesPanel';
 import { OpenAPIServersPanel } from './OpenAPIServersPanel';
+import { ScopedToolPermissionsPanel } from './ScopedToolPermissionsPanel';
 import { formatModelOptionLabel, getKnownChatModels, getKnownImageModels, isFreeModel } from '../models';
 
 const PROVIDER_TYPES = [
@@ -2739,6 +2740,7 @@ function ToolsTab() {
   return (
     <div className="space-y-6">
       <BrowserSettingsCard toolsLoaded={!loading} browserToolsRegistered={browserToolsRegistered} />
+      <ScopedToolPermissionsPanel />
 
       {loading ? (
         <div className="flex items-center justify-center py-8">
