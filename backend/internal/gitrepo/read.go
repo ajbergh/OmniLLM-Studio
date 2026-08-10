@@ -112,7 +112,9 @@ func (s *Service) Log(ctx context.Context, repositoryID, revision string, limit 
 	}
 	defer iter.Close()
 
-	commits := make([]CommitSummary, 0, limit)
+	// Allocate against the fixed service maximum rather than the caller-provided
+	// limit so untrusted input cannot influence allocation size.
+	commits := make([]CommitSummary, 0, maxLogLimit)
 	for len(commits) < limit {
 		if err := ctx.Err(); err != nil {
 			return nil, err
