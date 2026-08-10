@@ -69,23 +69,26 @@ func (t *gitRepositoryMutationTool) Definition() ToolDefinition {
 			},"additionalProperties":false
 		}`)
 	case "git_stage":
-		definition.Description = "Stage exact changed repository-relative files. Globs, directories, and stage-all are not accepted. Requires the HEAD observed from git_status."
+		definition.Description = "Stage exact changed repository-relative files. Globs, directories, and stage-all are not accepted. Requires branch, HEAD, and index_digest from a fresh git_status snapshot."
 		definition.Parameters = json.RawMessage(`{
-			"type":"object","required":["repository","paths","expected_head"],
+			"type":"object","required":["repository","paths","expected_branch","expected_head","expected_index_digest"],
 			"properties":{
 				"repository":{"type":"string","description":"Configured repository ID from git_repositories"},
 				"paths":{"type":"array","minItems":1,"maxItems":50,"uniqueItems":true,"items":{"type":"string","minLength":1},"description":"Exact repository-relative file paths"},
-				"expected_head":{"type":"string","minLength":40,"maxLength":40,"description":"HEAD hash observed from git_status"}
+				"expected_branch":{"type":"string","minLength":1,"maxLength":200,"description":"Local branch observed from git_status"},
+				"expected_head":{"type":"string","minLength":40,"maxLength":40,"description":"HEAD hash observed from git_status"},
+				"expected_index_digest":{"type":"string","minLength":64,"maxLength":64,"description":"index_digest observed from the same git_status snapshot"}
 			},"additionalProperties":false
 		}`)
 	case "git_commit":
-		definition.Description = "Commit the already-staged index only. Does not auto-stage, amend, create empty commits, or operate on detached HEAD. Requires both HEAD and index_digest from git_status."
+		definition.Description = "Commit the already-staged index only. Does not auto-stage, amend, create empty commits, or operate on detached HEAD. Requires branch, HEAD, and index_digest from a fresh git_status after staging."
 		definition.Parameters = json.RawMessage(`{
-			"type":"object","required":["repository","message","expected_head","expected_index_digest"],
+			"type":"object","required":["repository","message","expected_branch","expected_head","expected_index_digest"],
 			"properties":{
 				"repository":{"type":"string","description":"Configured repository ID from git_repositories"},
 				"message":{"type":"string","minLength":1,"maxLength":4000,"description":"Commit message"},
-				"expected_head":{"type":"string","minLength":40,"maxLength":40,"description":"HEAD hash observed from git_status"},
+				"expected_branch":{"type":"string","minLength":1,"maxLength":200,"description":"Local branch observed from git_status after staging"},
+				"expected_head":{"type":"string","minLength":40,"maxLength":40,"description":"HEAD hash observed from git_status after staging"},
 				"expected_index_digest":{"type":"string","minLength":64,"maxLength":64,"description":"index_digest observed from git_status after staging"}
 			},"additionalProperties":false
 		}`)
@@ -121,6 +124,9 @@ func (t *gitRepositoryMutationTool) Validate(raw json.RawMessage) error {
 			return fmt.Errorf("branch must be between 1 and 200 bytes")
 		}
 	case "git_stage":
+		if err := validateExpectedBranchAndIndex(args); err != nil {
+			return err
+		}
 		if len(args.Paths) == 0 || len(args.Paths) > 50 {
 			return fmt.Errorf("paths must contain between 1 and 50 files")
 		}
@@ -136,12 +142,12 @@ func (t *gitRepositoryMutationTool) Validate(raw json.RawMessage) error {
 			seen[filePath] = struct{}{}
 		}
 	case "git_commit":
+		if err := validateExpectedBranchAndIndex(args); err != nil {
+			return err
+		}
 		message := strings.TrimSpace(args.Message)
 		if message == "" || len(message) > 4000 {
 			return fmt.Errorf("message must be between 1 and 4000 bytes")
-		}
-		if !validHex(args.ExpectedIndexDigest, 64) {
-			return fmt.Errorf("expected_index_digest must be the 64-character digest from git_status")
 		}
 	default:
 		return fmt.Errorf("unknown git mutation tool %q", t.name)
@@ -165,9 +171,9 @@ func (t *gitRepositoryMutationTool) Execute(ctx context.Context, raw json.RawMes
 	case "git_checkout":
 		value, err = t.service.Checkout(ctx, args.Repository, args.Branch, args.ExpectedHead)
 	case "git_stage":
-		value, err = t.service.Stage(ctx, args.Repository, args.Paths, args.ExpectedHead)
+		value, err = t.service.Stage(ctx, args.Repository, args.Paths, args.ExpectedBranch, args.ExpectedHead, args.ExpectedIndexDigest)
 	case "git_commit":
-		value, err = t.service.Commit(ctx, args.Repository, args.Message, args.ExpectedHead, args.ExpectedIndexDigest)
+		value, err = t.service.Commit(ctx, args.Repository, args.Message, args.ExpectedBranch, args.ExpectedHead, args.ExpectedIndexDigest)
 	default:
 		return nil, fmt.Errorf("unknown git mutation tool %q", t.name)
 	}
@@ -184,8 +190,20 @@ type gitMutationArgs struct {
 	Branch              string   `json:"branch"`
 	Paths               []string `json:"paths"`
 	Message             string   `json:"message"`
+	ExpectedBranch      string   `json:"expected_branch"`
 	ExpectedHead        string   `json:"expected_head"`
 	ExpectedIndexDigest string   `json:"expected_index_digest"`
+}
+
+func validateExpectedBranchAndIndex(args gitMutationArgs) error {
+	branch := strings.TrimSpace(args.ExpectedBranch)
+	if branch == "" || len(branch) > 200 {
+		return fmt.Errorf("expected_branch must be the local branch from git_status")
+	}
+	if !validHex(args.ExpectedIndexDigest, 64) {
+		return fmt.Errorf("expected_index_digest must be the 64-character digest from git_status")
+	}
+	return nil
 }
 
 func validHex(value string, size int) bool {
