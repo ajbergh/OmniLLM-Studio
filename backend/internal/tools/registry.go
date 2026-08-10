@@ -25,8 +25,8 @@ type Registry struct {
 // Git read tools are added when repository IDs are configured; mutation tools
 // additionally require OMNILLM_GIT_WRITE_ENABLED=true. Remote Git inspection
 // additionally requires configured remotes and OMNILLM_GIT_REMOTE_ENABLED=true;
-// remote fetch also requires the local write gate because it mutates local Git
-// object/ref state.
+// fetch also requires the local write gate, while push additionally requires
+// OMNILLM_GIT_REMOTE_PUSH_ENABLED=true.
 func NewRegistry() *Registry {
 	r := &Registry{tools: make(map[string]Tool)}
 	r.MustRegister(NewDateTimeTool())
@@ -49,6 +49,11 @@ func NewRegistry() *Registry {
 			}
 			if remoteGitService.FetchEnabled() {
 				for _, tool := range NewGitRemoteMutationTools(remoteGitService) {
+					r.MustRegister(tool)
+				}
+			}
+			if remoteGitService.PushMutationEnabled() {
+				for _, tool := range NewGitRemotePushTools(remoteGitService) {
 					r.MustRegister(tool)
 				}
 			}
