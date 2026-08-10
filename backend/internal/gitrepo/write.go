@@ -5,11 +5,11 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 )
@@ -144,6 +144,9 @@ func (s *Service) Stage(ctx context.Context, repositoryID string, rawPaths []str
 	if err != nil {
 		return nil, err
 	}
+	if _, err := ensureExpectedHead(repo, expectedHead); err != nil {
+		return nil, err
+	}
 	originalIndex, err := repo.Storer.Index()
 	if err != nil {
 		return nil, safeRepositoryError(repositoryID, "index could not be read")
@@ -231,6 +234,16 @@ func (s *Service) Commit(ctx context.Context, repositoryID, message, expectedHea
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if _, err := ensureExpectedHead(repo, expectedHead); err != nil {
+		return nil, err
+	}
+	finalDigest, err := indexDigest(repo)
+	if err != nil {
+		return nil, safeRepositoryError(repositoryID, "index state could not be verified")
+	}
+	if !strings.EqualFold(strings.TrimSpace(expectedIndexDigest), finalDigest) {
+		return nil, fmt.Errorf("repository %q index changed; run git_status again before committing", repositoryID)
+	}
 	hash, err := worktree.Commit(message, &git.CommitOptions{All: false, Amend: false, AllowEmptyCommits: false})
 	if err != nil {
 		switch {
@@ -316,28 +329,25 @@ func (s *Service) cleanStagePaths(repositoryID string, rawPaths []string, status
 	return paths, nil
 }
 
+// validateStageFilesystemPath rejects stage targets whose parent directory
+// resolves through a symlink. The final path itself may be a symlink because
+// Git stages the link object rather than following it. SecureJoin performs the
+// filesystem-sensitive resolution under the canonical configured root; the
+// equality check then enforces the stricter no-symlink-parent rule required
+// before passing the original repository-relative path to go-git.
 func validateStageFilesystemPath(repositoryRoot, cleanPath string) error {
-	fullPath := filepath.Join(repositoryRoot, filepath.FromSlash(cleanPath))
-	if !pathWithinRoot(repositoryRoot, fullPath) {
-		return fmt.Errorf("path escapes the configured repository root")
-	}
-	info, err := os.Lstat(fullPath)
-	if err != nil {
-		return fmt.Errorf("worktree path metadata could not be read")
-	}
-	if info.IsDir() {
-		return fmt.Errorf("directories are not accepted; provide explicit file paths")
-	}
-	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(fullPath))
-	if err != nil || !pathWithinRoot(repositoryRoot, resolvedParent) {
-		return fmt.Errorf("parent path could not be resolved within the repository")
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
+	parentRelative := filepath.Dir(filepath.FromSlash(cleanPath))
+	if parentRelative == "." {
 		return nil
 	}
-	resolvedPath, err := filepath.EvalSymlinks(fullPath)
-	if err != nil || !pathWithinRoot(repositoryRoot, resolvedPath) {
-		return fmt.Errorf("resolved path is outside the repository")
+	resolvedParent, err := securejoin.SecureJoin(repositoryRoot, parentRelative)
+	if err != nil {
+		return fmt.Errorf("parent path could not be resolved within the repository")
+	}
+	lexicalParent := filepath.Join(repositoryRoot, parentRelative)
+	relative, err := filepath.Rel(lexicalParent, resolvedParent)
+	if err != nil || relative != "." {
+		return fmt.Errorf("parent path contains a symlink and cannot be staged safely")
 	}
 	return nil
 }
