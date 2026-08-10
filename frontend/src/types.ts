@@ -558,6 +558,7 @@ export interface MCPServer {
   url?: string;
   env_keys?: string[];
   header_keys?: string[];
+  allow_private_network: boolean;
   enabled: boolean;
   workspace_id?: string;
   created_at: string;
@@ -589,6 +590,7 @@ export interface CreateMCPServerRequest {
   url?: string;
   env?: Record<string, string>;
   headers?: Record<string, string>;
+  allow_private_network?: boolean;
   enabled?: boolean;
 }
 
@@ -600,6 +602,7 @@ export interface UpdateMCPServerRequest {
   url?: string;
   env?: Record<string, string>;
   headers?: Record<string, string>;
+  allow_private_network?: boolean;
   enabled?: boolean;
 }
 

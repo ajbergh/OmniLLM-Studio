@@ -508,3 +508,12 @@ Tests:
 - [MCP transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
 - [MCP tools](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
 - [Filesystem MCP server package](https://www.npmjs.com/package/%40modelcontextprotocol/server-filesystem)
+
+
+## HTTP MCP network security
+
+Remote HTTP MCP servers use a public-network-only transport by default. OmniLLM-Studio resolves the configured hostname at connection time and blocks loopback, RFC1918 private, link-local/cloud-metadata, carrier-grade NAT, and IPv6 local ranges. HTTP redirects are not followed, including when custom authentication headers are configured.
+
+Use **Allow private / local network targets** only for a trusted MCP service that intentionally runs on localhost or a private network. Existing HTTP MCP server rows are preserved during the V47 upgrade by enabling this compatibility flag for those pre-existing configurations; newly-created HTTP MCP servers default to the safer public-only policy.
+
+MCP HTTP URLs must use `http` or `https`, include a hostname, and may not contain embedded URL credentials or fragments. Store authentication in encrypted custom headers instead of URL userinfo.

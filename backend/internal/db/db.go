@@ -147,6 +147,7 @@ func versionedMigrations() []Migration {
 		{Version: 44, Name: "assistant_profiles_skills", SQL: migrationAssistantProfilesSkills},
 		{Version: 45, Name: "openapi_tool_servers", SQL: migrationOpenAPIToolServers},
 		{Version: 46, Name: "scoped_tool_permissions", SQL: migrationScopedToolPermissions},
+		{Version: 47, Name: "mcp_http_private_network_policy", SQL: migrationMCPHTTPPrivateNetwork},
 	}
 }
 
@@ -1345,4 +1346,10 @@ CREATE TABLE IF NOT EXISTS tool_permission_scopes (
 );
 CREATE INDEX IF NOT EXISTS idx_tool_permission_scopes_tool
 ON tool_permission_scopes(tool_name, scope_type, scope_id);
+`
+
+// V47: Harden remote MCP HTTP networking while preserving existing configured servers.
+const migrationMCPHTTPPrivateNetwork = `
+ALTER TABLE mcp_servers ADD COLUMN allow_private_network INTEGER NOT NULL DEFAULT 0;
+UPDATE mcp_servers SET allow_private_network = 1 WHERE transport = 'http';
 `
