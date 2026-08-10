@@ -88,7 +88,7 @@ func newCloneQuotaFilesystem(base billy.Filesystem, maxBytes, maxEntries int64) 
 }
 
 func (fs *cloneQuotaFilesystem) Create(filename string) (billy.File, error) {
-	if err := fs.reserveNewFile(filename); err != nil {
+	if err := fs.reserveFileCreation(filename); err != nil {
 		return nil, err
 	}
 	file, err := fs.base.Create(filename)
@@ -108,7 +108,7 @@ func (fs *cloneQuotaFilesystem) Open(filename string) (billy.File, error) {
 
 func (fs *cloneQuotaFilesystem) OpenFile(filename string, flag int, perm os.FileMode) (billy.File, error) {
 	if flag&os.O_CREATE != 0 {
-		if err := fs.reserveNewFile(filename); err != nil {
+		if err := fs.reserveFileCreation(filename); err != nil {
 			return nil, err
 		}
 	}
@@ -124,6 +124,13 @@ func (fs *cloneQuotaFilesystem) Stat(filename string) (os.FileInfo, error) {
 }
 
 func (fs *cloneQuotaFilesystem) Rename(oldpath, newpath string) error {
+	missing, err := missingDirectoryEntries(fs.base, filepath.Dir(newpath))
+	if err != nil {
+		return err
+	}
+	if err := fs.quota.reserve(0, missing); err != nil {
+		return err
+	}
 	return fs.base.Rename(oldpath, newpath)
 }
 
@@ -136,7 +143,17 @@ func (fs *cloneQuotaFilesystem) Join(elem ...string) string {
 }
 
 func (fs *cloneQuotaFilesystem) TempFile(dir, prefix string) (billy.File, error) {
-	if err := fs.quota.reserve(0, 1); err != nil {
+	// Billy delegates an empty dir to os.CreateTemp, which uses the host's
+	// process temp directory. Force the clone-local root instead so temporary
+	// pack/index files cannot escape the guarded staging filesystem.
+	if dir == "" {
+		dir = "."
+	}
+	missing, err := missingDirectoryEntries(fs.base, dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := fs.quota.reserve(0, missing+1); err != nil {
 		return nil, err
 	}
 	file, err := fs.base.TempFile(dir, prefix)
@@ -234,15 +251,18 @@ func (fs *cloneQuotaFilesystem) Chtimes(name string, atime, mtime time.Time) err
 	return changer.Chtimes(name, atime, mtime)
 }
 
-func (fs *cloneQuotaFilesystem) reserveNewFile(filename string) error {
-	_, err := fs.base.Lstat(filename)
-	if err == nil {
-		return nil
-	}
-	if !os.IsNotExist(err) {
+func (fs *cloneQuotaFilesystem) reserveFileCreation(filename string) error {
+	missingParents, err := missingDirectoryEntries(fs.base, filepath.Dir(filename))
+	if err != nil {
 		return err
 	}
-	return fs.quota.reserve(0, 1)
+	leaf := int64(0)
+	if _, err := fs.base.Lstat(filename); os.IsNotExist(err) {
+		leaf = 1
+	} else if err != nil {
+		return err
+	}
+	return fs.quota.reserve(0, missingParents+leaf)
 }
 
 func missingDirectoryEntries(fs billy.Filesystem, filename string) (int64, error) {
