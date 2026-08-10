@@ -1,0 +1,236 @@
+name: Apply chat capability gateway
+
+on:
+  push:
+    branches:
+      - feat/chat-unified-capability-gateway-20260809
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Apply focused source changes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/internal/api/message_handler.go')
+          src = path.read_text()
+
+          def replace_all(old, new, minimum=1):
+              global src
+              count = src.count(old)
+              if count < minimum:
+                  raise SystemExit(f'expected at least {minimum} occurrences of {old!r}, found {count}')
+              src = src.replace(old, new)
+              print(f'replaced {count}: {old[:80]!r}')
+
+          replace_all('\tparts = append(parts, sportsLookupSystemDirective)\n', '', 1)
+          replace_all(
+              '\tsystemPrompt := composeSystemPrompt(userSystemPrompt)\n',
+              '\tsystemPrompt := composeSystemPrompt(userSystemPrompt)\n\tif h.chatCapabilityDiscoverable("sports_lookup") {\n\t\tsystemPrompt += "\\n\\n" + sportsLookupSystemDirective\n\t}\n',
+              1,
+          )
+          replace_all(
+              'if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() {',
+              'if h.urlContextSvc != nil && h.urlContextSvc.IsEnabled() && h.chatPreflightAllowed("fetch_url_context") {',
+              2,
+          )
+          replace_all(
+              'if h.fileLibrarySvc != nil && fileIntent.RequiresFileSearch {',
+              'if h.fileLibrarySvc != nil && fileIntent.RequiresFileSearch && h.chatPreflightAllowed("file_search") {',
+              2,
+          )
+          replace_all(
+              'webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass',
+              'webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass && h.chatPreflightAllowed("web_search")',
+              2,
+          )
+          replace_all(
+              'h.wordGenEnabled() && detectWordDocIntent(req.Content)',
+              'h.wordGenEnabled() && h.chatPreflightAllowed("generate_word_doc") && detectWordDocIntent(req.Content)',
+              2,
+          )
+          replace_all(
+              'if h.artifactGen != nil {\n\t\tif f, ok := artifacts.DetectFormat(req.Content); ok {',
+              'if h.artifactGen != nil && h.chatPreflightAllowed("artifact_generate") {\n\t\tif f, ok := artifacts.DetectFormat(req.Content); ok {',
+              2,
+          )
+          replace_all(
+              'if h.artifactGen != nil && artifactFormat != "" {',
+              'if h.artifactGen != nil && artifactFormat != "" && h.chatPreflightAllowed("artifact_generate") {',
+              2,
+          )
+          replace_all(
+              'if urlCtxResult == nil || !urlCtxResult.Handled {\n\t\timgIntent := detectImageIntent(req.Content)',
+              'if h.chatPreflightAllowed("image_generate") && (urlCtxResult == nil || !urlCtxResult.Handled) {\n\t\timgIntent := detectImageIntent(req.Content)',
+              2,
+          )
+          replace_all(
+              'func (h *MessageHandler) tryRouterSportsLookup(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool, *intentrouter.RouterTelemetry) {\n\tif h.routerSvc == nil || !h.sportsLookupEnabled() {',
+              'func (h *MessageHandler) tryRouterSportsLookup(ctx context.Context, conversationID, messageID, query string) (*models.Message, bool, *intentrouter.RouterTelemetry) {\n\tif !h.chatPreflightAllowed("sports_lookup") || h.routerSvc == nil || !h.sportsLookupEnabled() {',
+              1,
+          )
+          replace_all(
+              'func (h *MessageHandler) handleSportsLookupMessageWithTelemetry(ctx context.Context, conversationID, messageID, query string, routerTelemetry *intentrouter.RouterTelemetry) (*models.Message, bool) {\n\tif !h.sportsLookupEnabled() {',
+              'func (h *MessageHandler) handleSportsLookupMessageWithTelemetry(ctx context.Context, conversationID, messageID, query string, routerTelemetry *intentrouter.RouterTelemetry) (*models.Message, bool) {\n\tif !h.chatPreflightAllowed("sports_lookup") || !h.sportsLookupEnabled() {',
+              1,
+          )
+          path.write_text(src)
+
+          Path('backend/internal/api/chat_capability_policy.go').write_text(r'''package api
+
+// chatCapabilityPolicy returns the current effective policy for a registered
+// Chat Studio capability. Missing runtime dependencies fail closed.
+func (h *MessageHandler) chatCapabilityPolicy(toolName string) string {
+	if h == nil || h.toolExecutor == nil {
+		return "deny"
+	}
+	return h.toolExecutor.Policy(toolName)
+}
+
+// chatPreflightAllowed is the single guard for deterministic Chat Studio
+// capability shortcuts. Ask is intentionally not executable here: the request
+// falls through to the normal tool loop so the shared approval flow can run.
+func (h *MessageHandler) chatPreflightAllowed(toolName string) bool {
+	return h.chatCapabilityPolicy(toolName) == "allow"
+}
+
+// chatCapabilityDiscoverable controls capability advertising in model context.
+// Denied, disabled, or unknown tools must not be described to the model.
+func (h *MessageHandler) chatCapabilityDiscoverable(toolName string) bool {
+	if h == nil || h.toolRegistry == nil {
+		return false
+	}
+	return h.toolRegistry.IsAvailable(toolName)
+}
+''')
+
+          Path('backend/internal/api/chat_capability_policy_test.go').write_text(r'''package api
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/ajbergh/omnillm-studio/internal/models"
+	"github.com/ajbergh/omnillm-studio/internal/tools"
+)
+
+type chatCapabilityTestTool struct{ name string }
+
+func (t chatCapabilityTestTool) Definition() tools.ToolDefinition {
+	return tools.ToolDefinition{
+		Name: t.name, Description: "capability policy test tool",
+		Parameters: json.RawMessage(`{"type":"object"}`), Enabled: true, ReadOnly: true,
+	}
+}
+func (t chatCapabilityTestTool) Validate(json.RawMessage) error { return nil }
+func (t chatCapabilityTestTool) Execute(context.Context, json.RawMessage) (*tools.ToolResult, error) {
+	return &tools.ToolResult{Content: "ok"}, nil
+}
+
+func newCapabilityPolicyHandler(policy *string) *MessageHandler {
+	registry := tools.NewRegistry()
+	registry.MustRegister(chatCapabilityTestTool{name: "sports_lookup"})
+	executor := tools.NewExecutor(registry, func(name string) string {
+		if name == "sports_lookup" {
+			return *policy
+		}
+		return "allow"
+	}, 0)
+	return &MessageHandler{toolRegistry: registry, toolExecutor: executor}
+}
+
+func TestChatPreflightOnlyExecutesAllow(t *testing.T) {
+	policy := "allow"
+	h := newCapabilityPolicyHandler(&policy)
+	if !h.chatPreflightAllowed("sports_lookup") {
+		t.Fatal("allow policy should permit deterministic preflight")
+	}
+	policy = "ask"
+	if h.chatPreflightAllowed("sports_lookup") {
+		t.Fatal("ask policy must fall through to the approval-aware tool loop")
+	}
+	policy = "deny"
+	if h.chatPreflightAllowed("sports_lookup") {
+		t.Fatal("deny policy must block deterministic preflight")
+	}
+}
+
+func TestCapabilityDirectiveTracksDiscoveryPolicy(t *testing.T) {
+	policy := "allow"
+	h := newCapabilityPolicyHandler(&policy)
+	convo := &models.Conversation{}
+
+	req := h.buildLLMRequest(convo, nil, nil)
+	if len(req.Messages) == 0 || !strings.Contains(req.Messages[0].Content, sportsLookupSystemDirective) {
+		t.Fatal("sports directive should be advertised while sports_lookup is available")
+	}
+
+	policy = "deny"
+	req = h.buildLLMRequest(convo, nil, nil)
+	if len(req.Messages) == 0 || strings.Contains(req.Messages[0].Content, sportsLookupSystemDirective) {
+		t.Fatal("sports directive must disappear when sports_lookup is denied")
+	}
+}
+
+func TestLegacyChatCapabilityPathsUseUnifiedPolicyGate(t *testing.T) {
+	data, err := os.ReadFile("message_handler.go")
+	if err != nil {
+		t.Fatalf("read message_handler.go: %v", err)
+	}
+	source := string(data)
+	checks := []string{
+		`h.chatPreflightAllowed("fetch_url_context")`,
+		`h.chatPreflightAllowed("sports_lookup")`,
+		`h.chatPreflightAllowed("file_search")`,
+		`h.chatPreflightAllowed("web_search")`,
+		`h.chatPreflightAllowed("image_generate")`,
+		`h.chatPreflightAllowed("generate_word_doc")`,
+		`h.chatPreflightAllowed("artifact_generate")`,
+	}
+	for _, check := range checks {
+		if !strings.Contains(source, check) {
+			t.Fatalf("message_handler.go missing unified capability gate %s", check)
+		}
+	}
+	if strings.Contains(composeSystemPrompt(""), sportsLookupSystemDirective) {
+		t.Fatal("composeSystemPrompt must not advertise sports independently of runtime policy")
+	}
+}
+''')
+          PY
+
+          gofmt -w backend/internal/api/message_handler.go backend/internal/api/chat_capability_policy.go backend/internal/api/chat_capability_policy_test.go
+
+      - name: Focused backend validation
+        working-directory: backend
+        run: |
+          go test ./internal/api ./internal/tools
+          go vet ./internal/api ./internal/tools
+
+      - name: Commit applied change
+        shell: bash
+        run: |
+          rm .github/workflows/apply-chat-capability-gateway.yml
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat(chat): unify deterministic capability policy gates"
+          git push origin HEAD
