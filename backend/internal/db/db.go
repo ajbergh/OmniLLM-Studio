@@ -148,6 +148,7 @@ func versionedMigrations() []Migration {
 		{Version: 45, Name: "openapi_tool_servers", SQL: migrationOpenAPIToolServers},
 		{Version: 46, Name: "scoped_tool_permissions", SQL: migrationScopedToolPermissions},
 		{Version: 47, Name: "mcp_http_private_network_policy", SQL: migrationMCPHTTPPrivateNetwork},
+		{Version: 48, Name: "mcp_oauth_credentials", SQL: migrationMCPOAuthCredentials},
 	}
 }
 
@@ -1352,4 +1353,25 @@ ON tool_permission_scopes(tool_name, scope_type, scope_id);
 const migrationMCPHTTPPrivateNetwork = `
 ALTER TABLE mcp_servers ADD COLUMN allow_private_network INTEGER NOT NULL DEFAULT 0;
 UPDATE mcp_servers SET allow_private_network = 1 WHERE transport = 'http';
+`
+
+// V48: OAuth client configuration and tokens for remote MCP HTTP servers.
+// Secret-bearing values use the same application encryption boundary as other provider credentials.
+const migrationMCPOAuthCredentials = `
+CREATE TABLE IF NOT EXISTS mcp_oauth_credentials (
+    server_id TEXT PRIMARY KEY REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    client_id TEXT NOT NULL DEFAULT '',
+    client_secret_enc TEXT NOT NULL DEFAULT '',
+    token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none',
+    access_token_enc TEXT NOT NULL DEFAULT '',
+    refresh_token_enc TEXT NOT NULL DEFAULT '',
+    token_type TEXT NOT NULL DEFAULT '',
+    scope TEXT NOT NULL DEFAULT '',
+    expires_at DATETIME,
+    authorization_server TEXT NOT NULL DEFAULT '',
+    authorization_endpoint TEXT NOT NULL DEFAULT '',
+    token_endpoint TEXT NOT NULL DEFAULT '',
+    resource_metadata_url TEXT NOT NULL DEFAULT '',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `

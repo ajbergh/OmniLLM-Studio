@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { AssistantProfilesPanel } from './AssistantProfilesPanel';
 import { OpenAPIServersPanel } from './OpenAPIServersPanel';
+import { MCPAuthorizationPanel } from './MCPAuthorizationPanel';
 import { ScopedToolPermissionsPanel } from './ScopedToolPermissionsPanel';
 import { ToolDiagnosticsPanel } from './ToolDiagnosticsPanel';
 import { formatModelOptionLabel, getKnownChatModels, getKnownImageModels, isFreeModel } from '../models';
@@ -3225,20 +3226,22 @@ function MCPServersTab() {
       ) : (
         <div className="space-y-4">
           {servers.map((server) => (
-            <MCPServerCard
-              key={server.id}
-              server={server}
-              busyLabel={busyById[server.id]}
-              testTools={testTools[server.id] || []}
-              onEdit={() => startEditing(server)}
-              onDelete={() => deleteServer(server)}
-              onTest={() => handleTest(server.id)}
-              onStart={() => handleLifecycle(server.id, 'Starting', () => mcpApi.startServer(server.id), 'MCP server started')}
-              onStop={() => handleLifecycle(server.id, 'Stopping', () => mcpApi.stopServer(server.id), 'MCP server stopped')}
-              onRestart={() => handleLifecycle(server.id, 'Restarting', () => mcpApi.restartServer(server.id), 'MCP server restarted')}
-              onRefresh={() => handleRefreshTools(server)}
-              onPolicy={(toolName, policy) => handlePolicy(server.id, toolName, policy)}
-            />
+            <div key={server.id} className="space-y-3">
+              <MCPServerCard
+                server={server}
+                busyLabel={busyById[server.id]}
+                testTools={testTools[server.id] || []}
+                onEdit={() => startEditing(server)}
+                onDelete={() => deleteServer(server)}
+                onTest={() => handleTest(server.id)}
+                onStart={() => handleLifecycle(server.id, 'Starting', () => mcpApi.startServer(server.id), 'MCP server started')}
+                onStop={() => handleLifecycle(server.id, 'Stopping', () => mcpApi.stopServer(server.id), 'MCP server stopped')}
+                onRestart={() => handleLifecycle(server.id, 'Restarting', () => mcpApi.restartServer(server.id), 'MCP server restarted')}
+                onRefresh={() => handleRefreshTools(server)}
+                onPolicy={(toolName, policy) => handlePolicy(server.id, toolName, policy)}
+              />
+              {server.transport === 'http' && <MCPAuthorizationPanel server={server} onChanged={fetchServers} />}
+            </div>
           ))}
         </div>
       )}

@@ -26,8 +26,9 @@ import (
 // An optional Mcp-Session-Id returned by the server during initialization is
 // attached to all subsequent requests.
 type HTTPClient struct {
-	server  models.MCPServer
-	httpCli *http.Client
+	server        models.MCPServer
+	httpCli       *http.Client
+	tokenProvider BearerTokenProvider
 
 	mu        sync.Mutex
 	sessionID string
@@ -40,9 +41,14 @@ type HTTPClient struct {
 // policy is enforced at dial time unless the server explicitly opts into private
 // network access. Redirects are never followed.
 func NewHTTPClient(server models.MCPServer) *HTTPClient {
+	return NewHTTPClientWithTokenProvider(server, nil)
+}
+
+func NewHTTPClientWithTokenProvider(server models.MCPServer, provider BearerTokenProvider) *HTTPClient {
 	return &HTTPClient{
-		server:  server,
-		httpCli: newHTTPTransportClient(server),
+		server:        server,
+		httpCli:       newHTTPTransportClient(server),
+		tokenProvider: provider,
 	}
 }
 
@@ -74,7 +80,9 @@ func (c *HTTPClient) Stop(ctx context.Context) error {
 	}
 	req.Header.Set("Mcp-Session-Id", sessionID)
 	req.Header.Set("MCP-Protocol-Version", ProtocolVersion)
-	c.applyCustomHeaders(req)
+	if err := c.applyAuthHeaders(ctx, req); err != nil {
+		return nil
+	}
 
 	resp, err := c.httpCli.Do(req)
 	if err != nil {
@@ -164,7 +172,9 @@ func (c *HTTPClient) initialize(ctx context.Context) error {
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
-	c.applyCustomHeaders(httpReq)
+	if err := c.applyAuthHeaders(ctx, httpReq); err != nil {
+		return err
+	}
 
 	httpResp, err := c.httpCli.Do(httpReq)
 	if err != nil {
@@ -228,7 +238,9 @@ func (c *HTTPClient) request(ctx context.Context, method string, params interfac
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 	httpReq.Header.Set("MCP-Protocol-Version", ProtocolVersion)
 	c.applySessionHeader(httpReq)
-	c.applyCustomHeaders(httpReq)
+	if err := c.applyAuthHeaders(ctx, httpReq); err != nil {
+		return err
+	}
 
 	httpResp, err := c.httpCli.Do(httpReq)
 	if err != nil {
@@ -281,7 +293,9 @@ func (c *HTTPClient) notify(ctx context.Context, method string, params interface
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 	httpReq.Header.Set("MCP-Protocol-Version", ProtocolVersion)
 	c.applySessionHeader(httpReq)
-	c.applyCustomHeaders(httpReq)
+	if err := c.applyAuthHeaders(ctx, httpReq); err != nil {
+		return err
+	}
 
 	httpResp, err := c.httpCli.Do(httpReq)
 	if err != nil {
@@ -318,6 +332,21 @@ func (c *HTTPClient) applyCustomHeaders(req *http.Request) {
 	for k, v := range c.server.Headers {
 		req.Header.Set(k, v)
 	}
+}
+
+func (c *HTTPClient) applyAuthHeaders(ctx context.Context, req *http.Request) error {
+	c.applyCustomHeaders(req)
+	if c.tokenProvider == nil {
+		return nil
+	}
+	token, err := c.tokenProvider.AccessToken(ctx, c.server.ID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(token) != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return nil
 }
 
 // ── SSE / JSON helpers ────────────────────────────────────────────────────

@@ -79,8 +79,6 @@ func main() {
 		log.Fatalf("migrations: %v", err)
 	}
 
-	router, shutdownAPI := api.NewRouterWithShutdown(database, cfg, version, commit)
-
 	// Start a real HTTP server on a random local port so that SSE streaming
 	// works (the Wails AssetServer handler does not support http.Flusher).
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -88,6 +86,8 @@ func main() {
 		log.Fatalf("listen: %v", err)
 	}
 	apiPort := ln.Addr().(*net.TCPAddr).Port
+	cfg.MCPOAuthRedirectURI = fmt.Sprintf("http://127.0.0.1:%d/v1/mcp/oauth/callback", apiPort)
+	router, shutdownAPI := api.NewRouterWithShutdown(database, cfg, version, commit)
 	desktopPrefix := "/__desktop/" + desktopSecret
 	apiBase := fmt.Sprintf("http://127.0.0.1:%d%s/v1", apiPort, desktopPrefix)
 	log.Printf("[desktop] protected API server listening on 127.0.0.1:%d", apiPort)
@@ -168,7 +168,14 @@ func main() {
 // http.StripPrefix returns 404 before invoking next for unprefixed or
 // wrong-secret requests, keeping the capability path out of router logs.
 func desktopLoopbackHandler(prefix string, next http.Handler) http.Handler {
-	return http.StripPrefix(prefix, next)
+	protected := http.StripPrefix(prefix, next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/mcp/oauth/callback" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		protected.ServeHTTP(w, r)
+	})
 }
 
 // generateDesktopSecret returns a cryptographically random 256-bit secret

@@ -19,9 +19,10 @@ import (
 
 // Manager owns MCP server runtime state and dynamic tool registration.
 type Manager struct {
-	repo     *repository.MCPServerRepo
-	permRepo *repository.ToolPermissionRepo
-	registry *tools.Registry
+	repo          *repository.MCPServerRepo
+	permRepo      *repository.ToolPermissionRepo
+	registry      *tools.Registry
+	tokenProvider BearerTokenProvider
 
 	mu      sync.RWMutex
 	servers map[string]*serverState
@@ -36,12 +37,17 @@ type serverState struct {
 }
 
 // NewManager creates an MCP runtime manager.
-func NewManager(repo *repository.MCPServerRepo, permRepo *repository.ToolPermissionRepo, registry *tools.Registry) *Manager {
+func NewManager(repo *repository.MCPServerRepo, permRepo *repository.ToolPermissionRepo, registry *tools.Registry, providers ...BearerTokenProvider) *Manager {
+	var provider BearerTokenProvider
+	if len(providers) > 0 {
+		provider = providers[0]
+	}
 	return &Manager{
-		repo:     repo,
-		permRepo: permRepo,
-		registry: registry,
-		servers:  make(map[string]*serverState),
+		repo:          repo,
+		permRepo:      permRepo,
+		registry:      registry,
+		tokenProvider: provider,
+		servers:       make(map[string]*serverState),
 	}
 }
 
@@ -125,7 +131,7 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 
 	m.setStatus(id, models.MCPServerStatusConnecting, "")
 
-	client := newMCPClient(*server)
+	client := newMCPClientWithTokenProvider(*server, m.tokenProvider)
 	if err := client.Start(ctx); err != nil {
 		m.setError(id, err)
 		m.audit(models.MCPAuditEvent{ServerID: id, EventType: "error", ErrorMsg: stringPtr(err.Error())})
@@ -419,8 +425,12 @@ func validateRuntimeServer(server models.MCPServer) error {
 
 // newMCPClient selects the correct MCPClient implementation based on transport.
 func newMCPClient(server models.MCPServer) MCPClient {
+	return newMCPClientWithTokenProvider(server, nil)
+}
+
+func newMCPClientWithTokenProvider(server models.MCPServer, provider BearerTokenProvider) MCPClient {
 	if server.Transport == "http" {
-		return NewHTTPClient(server)
+		return NewHTTPClientWithTokenProvider(server, provider)
 	}
 	return NewClient(server)
 }
