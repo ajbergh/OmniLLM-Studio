@@ -24,7 +24,9 @@ type Registry struct {
 // requiring application services are still registered by api/router.go. Local
 // Git read tools are added when repository IDs are configured; mutation tools
 // additionally require OMNILLM_GIT_WRITE_ENABLED=true. Remote Git inspection
-// additionally requires configured remotes and OMNILLM_GIT_REMOTE_ENABLED=true.
+// additionally requires configured remotes and OMNILLM_GIT_REMOTE_ENABLED=true;
+// remote fetch also requires the local write gate because it mutates local Git
+// object/ref state.
 func NewRegistry() *Registry {
 	r := &Registry{tools: make(map[string]Tool)}
 	r.MustRegister(NewDateTimeTool())
@@ -44,6 +46,11 @@ func NewRegistry() *Registry {
 		if remoteGitService.Configured() && remoteGitService.Enabled() {
 			for _, tool := range NewGitRemoteTools(remoteGitService) {
 				r.MustRegister(tool)
+			}
+			if remoteGitService.FetchEnabled() {
+				for _, tool := range NewGitRemoteMutationTools(remoteGitService) {
+					r.MustRegister(tool)
+				}
 			}
 		}
 	}
