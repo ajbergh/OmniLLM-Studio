@@ -18,22 +18,21 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/models"
 )
 
-// HTTPClient implements MCPClient over the MCP 2025-06-18 Streamable HTTP transport.
-//
-// Every JSON-RPC message is a fresh HTTP POST to the server's single MCP endpoint.
-// The server MAY respond with Content-Type: application/json (single JSON-RPC object)
-// or Content-Type: text/event-stream (SSE stream) — both are handled transparently.
-// Notifications (no id) expect a 202 Accepted response with an empty body.
-// An optional Mcp-Session-Id returned by the server during initialization is
-// attached to all subsequent requests.
+// HTTPClient implements a dual-era MCP Streamable HTTP client. It prefers
+// the stateless 2026-07-28 protocol and falls back to the 2025-06-18
+// initialization/session model when the endpoint is identified as legacy.
+// Every JSON-RPC message is a fresh POST and JSON or request-scoped SSE responses
+// are handled transparently in both eras.
 type HTTPClient struct {
 	server        models.MCPServer
 	httpCli       *http.Client
 	tokenProvider BearerTokenProvider
 
-	mu        sync.Mutex
-	sessionID string
-	stopped   bool
+	mu                 sync.Mutex
+	sessionID          string
+	stopped            bool
+	era                protocolEra
+	toolHeaderBindings map[string][]mcpHeaderBinding
 
 	nextID int64
 }
@@ -47,13 +46,15 @@ func NewHTTPClient(server models.MCPServer) *HTTPClient {
 
 func NewHTTPClientWithTokenProvider(server models.MCPServer, provider BearerTokenProvider) *HTTPClient {
 	return &HTTPClient{
-		server:        server,
-		httpCli:       newHTTPTransportClient(server),
-		tokenProvider: provider,
+		server:             server,
+		httpCli:            newHTTPTransportClient(server),
+		tokenProvider:      provider,
+		toolHeaderBindings: map[string][]mcpHeaderBinding{},
 	}
 }
 
-// Start connects to the MCP HTTP endpoint and performs MCP initialization.
+// Start connects to the MCP HTTP endpoint, probes the modern stateless era,
+// and performs legacy initialization only when the endpoint requires it.
 func (c *HTTPClient) Start(ctx context.Context) error {
 	if c.server.URL == nil || strings.TrimSpace(*c.server.URL) == "" {
 		return fmt.Errorf("url is required for http MCP server")
@@ -61,17 +62,25 @@ func (c *HTTPClient) Start(ctx context.Context) error {
 	if err := ValidateHTTPServerURL(*c.server.URL); err != nil {
 		return err
 	}
+	if err := c.detectProtocolEra(ctx); err != nil {
+		return err
+	}
+	if c.era == protocolEraModern {
+		return nil
+	}
 	return c.initialize(ctx)
 }
 
-// Stop terminates the session by issuing an HTTP DELETE (best-effort).
+// Stop terminates a legacy session by issuing an HTTP DELETE (best-effort).
+// Modern 2026-07-28 HTTP is stateless and requires no transport teardown.
 func (c *HTTPClient) Stop(ctx context.Context) error {
 	c.mu.Lock()
 	sessionID := c.sessionID
+	era := c.era
 	c.stopped = true
 	c.mu.Unlock()
 
-	if sessionID == "" {
+	if era == protocolEraModern || sessionID == "" {
 		return nil
 	}
 
@@ -79,11 +88,11 @@ func (c *HTTPClient) Stop(ctx context.Context) error {
 	if err != nil {
 		return nil // best-effort
 	}
-	req.Header.Set("Mcp-Session-Id", sessionID)
-	req.Header.Set("MCP-Protocol-Version", ProtocolVersion)
 	if err := c.applyAuthHeaders(ctx, req); err != nil {
 		return nil
 	}
+	req.Header.Set("Mcp-Session-Id", sessionID)
+	req.Header.Set("MCP-Protocol-Version", LegacyProtocolVersion)
 
 	resp, err := c.httpCli.Do(req)
 	if err != nil {
@@ -115,6 +124,9 @@ func (c *HTTPClient) ListTools(ctx context.Context) ([]Tool, error) {
 		cursor = result.NextCursor
 	}
 
+	if c.era == protocolEraModern {
+		tools = c.filterModernTools(tools)
+	}
 	return tools, nil
 }
 
@@ -171,11 +183,11 @@ func (c *HTTPClient) initialize(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("build initialize request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 	if err := c.applyAuthHeaders(ctx, httpReq); err != nil {
 		return err
 	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 
 	httpResp, err := c.httpCli.Do(httpReq)
 	if err != nil {
@@ -221,12 +233,20 @@ func (c *HTTPClient) initialize(ctx context.Context) error {
 
 // request sends a JSON-RPC request and returns the decoded result into out.
 func (c *HTTPClient) request(ctx context.Context, method string, params interface{}, out interface{}) error {
+	requestParams := params
+	var err error
+	if c.era == protocolEraModern {
+		requestParams, err = withModernRequestMeta(params)
+		if err != nil {
+			return fmt.Errorf("%s: attach MCP request metadata: %w", method, err)
+		}
+	}
 	id := atomic.AddInt64(&c.nextID, 1)
 	req := rpcRequest{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  method,
-		Params:  params,
+		Params:  requestParams,
 	}
 
 	body, err := json.Marshal(req)
@@ -238,12 +258,18 @@ func (c *HTTPClient) request(ctx context.Context, method string, params interfac
 	if err != nil {
 		return fmt.Errorf("build %s request: %w", method, err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json, text/event-stream")
-	httpReq.Header.Set("MCP-Protocol-Version", ProtocolVersion)
-	c.applySessionHeader(httpReq)
 	if err := c.applyAuthHeaders(ctx, httpReq); err != nil {
 		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json, text/event-stream")
+	if c.era == protocolEraModern {
+		if err := c.applyModernHeaders(httpReq, method, requestParams); err != nil {
+			return fmt.Errorf("%s: modern MCP headers: %w", method, err)
+		}
+	} else {
+		httpReq.Header.Set("MCP-Protocol-Version", LegacyProtocolVersion)
+		c.applySessionHeader(httpReq)
 	}
 
 	httpResp, err := c.httpCli.Do(httpReq)
@@ -252,8 +278,8 @@ func (c *HTTPClient) request(ctx context.Context, method string, params interfac
 	}
 	defer httpResp.Body.Close()
 
-	if httpResp.StatusCode == http.StatusNotFound {
-		// Session expired per the spec — caller can re-initialize.
+	if c.era != protocolEraModern && httpResp.StatusCode == http.StatusNotFound {
+		// Legacy session expired per the handshake-era transport.
 		return fmt.Errorf("%s: MCP session expired (HTTP 404)", method)
 	}
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
@@ -281,10 +307,18 @@ func (c *HTTPClient) request(ctx context.Context, method string, params interfac
 
 // notify sends a JSON-RPC notification (no id) and expects 202 Accepted.
 func (c *HTTPClient) notify(ctx context.Context, method string, params interface{}) error {
+	requestParams := params
+	var err error
+	if c.era == protocolEraModern {
+		requestParams, err = withModernRequestMeta(params)
+		if err != nil {
+			return fmt.Errorf("%s: attach MCP request metadata: %w", method, err)
+		}
+	}
 	req := rpcRequest{
 		JSONRPC: "2.0",
 		Method:  method,
-		Params:  params,
+		Params:  requestParams,
 	}
 
 	body, err := json.Marshal(req)
@@ -296,12 +330,18 @@ func (c *HTTPClient) notify(ctx context.Context, method string, params interface
 	if err != nil {
 		return fmt.Errorf("build %s notification: %w", method, err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json, text/event-stream")
-	httpReq.Header.Set("MCP-Protocol-Version", ProtocolVersion)
-	c.applySessionHeader(httpReq)
 	if err := c.applyAuthHeaders(ctx, httpReq); err != nil {
 		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json, text/event-stream")
+	if c.era == protocolEraModern {
+		if err := c.applyModernHeaders(httpReq, method, requestParams); err != nil {
+			return fmt.Errorf("%s: modern MCP headers: %w", method, err)
+		}
+	} else {
+		httpReq.Header.Set("MCP-Protocol-Version", LegacyProtocolVersion)
+		c.applySessionHeader(httpReq)
 	}
 
 	httpResp, err := c.httpCli.Do(httpReq)
