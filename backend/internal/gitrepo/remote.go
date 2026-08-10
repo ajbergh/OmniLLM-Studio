@@ -34,24 +34,24 @@ type RemoteReference struct {
 // RemoteStatusResult reports advertised branch heads without exposing the
 // configured endpoint URL or credentials.
 type RemoteStatusResult struct {
-	Remote       string            `json:"remote"`
-	Repository   string            `json:"repository"`
-	Host         string            `json:"host"`
-	Authenticated bool             `json:"authenticated"`
-	References   []RemoteReference `json:"references"`
-	Truncated    bool              `json:"truncated,omitempty"`
+	Remote        string            `json:"remote"`
+	Repository    string            `json:"repository"`
+	Host          string            `json:"host"`
+	Authenticated bool              `json:"authenticated"`
+	References    []RemoteReference `json:"references"`
+	Truncated     bool              `json:"truncated,omitempty"`
 }
 
 // RemoteService owns operator-configured outbound Git endpoints. The transport
 // is dedicated to this service so remote status does not alter process-wide HTTP
 // or go-git transport behavior.
 type RemoteService struct {
-	remotes      map[string]RemoteConfig
-	ids          []string
-	enabled      bool
-	pushEnabled  bool
-	transport    transport.Transport
-	lookupEnv    func(string) (string, bool)
+	remotes     map[string]RemoteConfig
+	ids         []string
+	enabled     bool
+	pushEnabled bool
+	transport   transport.Transport
+	lookupEnv   func(string) (string, bool)
 }
 
 // NewRemoteServiceFromEnvironment constructs the remote service from operator
@@ -110,7 +110,7 @@ func (s *RemoteService) Remotes(ctx context.Context) []RemoteSummary {
 		out = append(out, RemoteSummary{
 			ID: id, Repository: remote.Repository, Host: parsed.Hostname(),
 			AuthenticationConfigured: remote.TokenEnv != "",
-			PushAllowed: s.pushEnabled && remote.AllowPush,
+			PushAllowed:              s.pushEnabled && remote.AllowPush,
 		})
 	}
 	return out
