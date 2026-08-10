@@ -97,6 +97,14 @@ func (r *FeatureFlagRepo) Delete(key string) error {
 }
 
 // AsMap returns all feature flags as a map of key -> enabled.
+//
+// The sports lookup feature predates the unified tool executor and still has a
+// deterministic Chat Studio preflight path that consults this feature flag.
+// Until that legacy path is removed, intersect the feature flag with the
+// persisted sports_lookup tool permission so Settings > Tools remains a hard
+// gate. Only an explicit "allow" may use the preflight; "ask" must fall through
+// to the normal executor so the approval flow can run, and "deny" must never
+// call ESPN.
 func (r *FeatureFlagRepo) AsMap() (map[string]bool, error) {
 	flags, err := r.List()
 	if err != nil {
@@ -106,5 +114,18 @@ func (r *FeatureFlagRepo) AsMap() (map[string]bool, error) {
 	for _, f := range flags {
 		m[f.Key] = f.Enabled
 	}
+
+	var sportsPolicy string
+	err = r.db.QueryRow(
+		"SELECT policy FROM tool_permissions WHERE tool_name = ?",
+		"sports_lookup",
+	).Scan(&sportsPolicy)
+	switch {
+	case err == nil && sportsPolicy != "allow":
+		m["sports_lookup_enabled"] = false
+	case err != nil && err != sql.ErrNoRows:
+		return nil, fmt.Errorf("resolve sports_lookup tool policy: %w", err)
+	}
+
 	return m, nil
 }
