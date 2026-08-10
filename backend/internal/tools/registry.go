@@ -22,8 +22,8 @@ type Registry struct {
 
 // NewRegistry creates a registry with dependency-free core utilities. Tools
 // requiring application services are still registered by api/router.go. Local
-// Git tools are added only when explicit repository IDs are configured through
-// OMNILLM_GIT_REPOSITORIES.
+// Git read tools are added when repository IDs are configured; mutation tools
+// additionally require OMNILLM_GIT_WRITE_ENABLED=true.
 func NewRegistry() *Registry {
 	r := &Registry{tools: make(map[string]Tool)}
 	r.MustRegister(NewDateTimeTool())
@@ -33,6 +33,11 @@ func NewRegistry() *Registry {
 	if gitService.Configured() {
 		for _, tool := range NewGitRepositoryTools(gitService) {
 			r.MustRegister(tool)
+		}
+		if gitService.WriteEnabled() {
+			for _, tool := range NewGitRepositoryMutationTools(gitService) {
+				r.MustRegister(tool)
+			}
 		}
 	}
 	return r
