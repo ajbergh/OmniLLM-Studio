@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
 	git "github.com/go-git/go-git/v5"
 )
 
@@ -20,12 +19,16 @@ type changedStatusPath struct {
 
 // worktreeStateDigest fingerprints the complete set of changed worktree paths,
 // including their staged/worktree status codes, file modes, regular-file bytes,
-// symlink targets, and deletions. It streams file content instead of buffering it
-// so the digest can cover binary and oversized files that git_diff does not render.
-func (s *Service) worktreeStateDigest(ctx context.Context, repositoryID string, status git.Status) (string, error) {
+// symlink targets, and deletions. Content is streamed through the repository-
+// rooted worktree filesystem so binary and oversized files remain covered
+// without exposing model-derived paths to process-wide filesystem operations.
+func (s *Service) worktreeStateDigest(ctx context.Context, repositoryID string, worktree *git.Worktree, status git.Status) (string, error) {
 	root, ok := s.repositories[repositoryID]
 	if !ok {
 		return "", fmt.Errorf("repository %q is not configured", repositoryID)
+	}
+	if worktree == nil || worktree.Filesystem == nil {
+		return "", fmt.Errorf("repository worktree filesystem is unavailable")
 	}
 	paths := make([]changedStatusPath, 0, len(status))
 	for filePath, fileStatus := range status {
@@ -50,7 +53,7 @@ func (s *Service) worktreeStateDigest(ctx context.Context, repositoryID string, 
 			return "", err
 		}
 		fileStatus := status[item.raw]
-		fingerprint, err := worktreePathFingerprint(ctx, root, item.clean)
+		fingerprint, err := worktreePathFingerprint(ctx, worktree, root, item.clean)
 		if err != nil {
 			return "", fmt.Errorf("path %q could not be fingerprinted safely", item.clean)
 		}
@@ -60,18 +63,21 @@ func (s *Service) worktreeStateDigest(ctx context.Context, repositoryID string, 
 }
 
 // worktreePathFingerprint hashes the Git-relevant current state of one path.
-// The filesystem path is constructed from a securely resolved parent and a
-// single basename. A final symlink is hashed by link target rather than
-// dereferenced, matching Git's object model.
-func worktreePathFingerprint(ctx context.Context, repositoryRoot, cleanPath string) (string, error) {
+// Symlinked parent directories are rejected first. Final metadata/content reads
+// then use go-git's repository-rooted billy filesystem; a final symlink is
+// hashed by target string rather than dereferenced, matching Git's object model.
+func worktreePathFingerprint(ctx context.Context, worktree *git.Worktree, repositoryRoot, cleanPath string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	fullPath, err := containedFingerprintPath(repositoryRoot, cleanPath)
-	if err != nil {
+	if worktree == nil || worktree.Filesystem == nil {
+		return "", fmt.Errorf("repository worktree filesystem is unavailable")
+	}
+	if err := validateStageFilesystemPath(repositoryRoot, cleanPath); err != nil {
 		return "", err
 	}
-	info, err := os.Lstat(fullPath)
+	localPath := filepath.FromSlash(cleanPath)
+	info, err := worktree.Filesystem.Lstat(localPath)
 	if os.IsNotExist(err) {
 		return digestText("missing"), nil
 	}
@@ -82,7 +88,7 @@ func worktreePathFingerprint(ctx context.Context, repositoryRoot, cleanPath stri
 	h := sha256.New()
 	fmt.Fprintf(h, "mode:%d\x00", uint32(info.Mode()))
 	if info.Mode()&os.ModeSymlink != 0 {
-		target, err := os.Readlink(fullPath)
+		target, err := worktree.Filesystem.Readlink(localPath)
 		if err != nil {
 			return "", fmt.Errorf("symlink target could not be read")
 		}
@@ -93,7 +99,7 @@ func worktreePathFingerprint(ctx context.Context, repositoryRoot, cleanPath stri
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("path is not a regular file or symlink")
 	}
-	file, err := os.Open(fullPath)
+	file, err := worktree.Filesystem.Open(localPath)
 	if err != nil {
 		return "", fmt.Errorf("path content could not be read")
 	}
@@ -118,32 +124,6 @@ func worktreePathFingerprint(ctx context.Context, repositoryRoot, cleanPath stri
 		}
 	}
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
-}
-
-// containedFingerprintPath returns a lexical path below a securely resolved
-// parent. Symlinked parents are rejected instead of followed, and the basename
-// cannot introduce another path component.
-func containedFingerprintPath(repositoryRoot, cleanPath string) (string, error) {
-	localPath := filepath.FromSlash(cleanPath)
-	parentRelative := filepath.Dir(localPath)
-	resolvedParent := repositoryRoot
-	if parentRelative != "." {
-		var err error
-		resolvedParent, err = securejoin.SecureJoin(repositoryRoot, parentRelative)
-		if err != nil {
-			return "", fmt.Errorf("parent path could not be resolved within the repository")
-		}
-		lexicalParent := filepath.Join(repositoryRoot, parentRelative)
-		relative, err := filepath.Rel(lexicalParent, resolvedParent)
-		if err != nil || relative != "." {
-			return "", fmt.Errorf("parent path contains a symlink and cannot be fingerprinted safely")
-		}
-	}
-	base := filepath.Base(localPath)
-	if base == "" || base == "." || base == ".." || filepath.Base(base) != base {
-		return "", fmt.Errorf("path basename is invalid")
-	}
-	return filepath.Join(resolvedParent, base), nil
 }
 
 func digestText(value string) string {
