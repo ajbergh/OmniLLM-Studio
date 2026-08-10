@@ -1,4 +1,4 @@
-// Package gitrepo provides read-only access to explicitly configured local Git repositories.
+// Package gitrepo provides controlled access to explicitly configured local Git repositories.
 package gitrepo
 
 import (
@@ -7,15 +7,18 @@ import (
 )
 
 const (
-	defaultLogLimit      = 20
-	maxLogLimit          = 100
-	maxBlameLines        = 300
-	maxBlameFileBytes    = 512 << 10
-	maxDiffFiles         = 100
-	maxDiffFileBytes     = 512 << 10
-	maxDiffOutputBytes   = 120 << 10
-	defaultDiffContext   = 3
-	maxRepositoryIDBytes = 64
+	defaultLogLimit       = 20
+	maxLogLimit           = 100
+	maxBlameLines         = 300
+	maxBlameFileBytes     = 512 << 10
+	maxDiffFiles          = 100
+	maxDiffFileBytes      = 512 << 10
+	maxDiffOutputBytes    = 120 << 10
+	defaultDiffContext    = 3
+	maxRepositoryIDBytes  = 64
+	maxBranchNameBytes    = 200
+	maxStagePaths         = 50
+	maxCommitMessageBytes = 4000
 )
 
 // Reader is the model-facing read-only repository contract. Implementations
@@ -28,6 +31,16 @@ type Reader interface {
 	Show(ctx context.Context, repositoryID, revision string) (*CommitDetail, error)
 	Branches(ctx context.Context, repositoryID string) (*BranchesResult, error)
 	Blame(ctx context.Context, repositoryID, filePath, revision string, startLine, endLine int) (*BlameResult, error)
+}
+
+// Writer is the mutation contract exposed only when the operator explicitly
+// enables local Git write access. Callers must provide state preconditions so a
+// delayed approval cannot silently act on a different HEAD or index.
+type Writer interface {
+	CreateBranch(ctx context.Context, repositoryID, branchName, fromRevision, expectedHead string) (*CreateBranchResult, error)
+	Checkout(ctx context.Context, repositoryID, branchName, expectedHead string) (*CheckoutResult, error)
+	Stage(ctx context.Context, repositoryID string, paths []string, expectedHead string) (*StageResult, error)
+	Commit(ctx context.Context, repositoryID, message, expectedHead, expectedIndexDigest string) (*CommitResult, error)
 }
 
 // RepositorySummary describes a configured repository without exposing its local path.
@@ -50,14 +63,15 @@ type FileStatus struct {
 	Previous string `json:"previous,omitempty"`
 }
 
-// StatusResult is a read-only snapshot of HEAD and working-tree state.
+// StatusResult is a read-only snapshot of HEAD, index, and working-tree state.
 type StatusResult struct {
-	Repository string       `json:"repository"`
-	Branch     string       `json:"branch,omitempty"`
-	Head       string       `json:"head,omitempty"`
-	Detached   bool         `json:"detached,omitempty"`
-	Clean      bool         `json:"clean"`
-	Files      []FileStatus `json:"files"`
+	Repository  string       `json:"repository"`
+	Branch      string       `json:"branch,omitempty"`
+	Head        string       `json:"head,omitempty"`
+	IndexDigest string       `json:"index_digest"`
+	Detached    bool         `json:"detached,omitempty"`
+	Clean       bool         `json:"clean"`
+	Files       []FileStatus `json:"files"`
 }
 
 // DiffResult contains either a worktree-vs-HEAD diff or a revision-to-revision diff.
@@ -129,4 +143,36 @@ type BlameResult struct {
 	EndLine    int         `json:"end_line"`
 	Truncated  bool        `json:"truncated,omitempty"`
 	Lines      []BlameLine `json:"lines"`
+}
+
+// CreateBranchResult describes a newly created local branch without switching HEAD.
+type CreateBranchResult struct {
+	Repository string `json:"repository"`
+	Branch     string `json:"branch"`
+	Hash       string `json:"hash"`
+}
+
+// CheckoutResult describes the branch selected by a guarded checkout.
+type CheckoutResult struct {
+	Repository string `json:"repository"`
+	Branch     string `json:"branch"`
+	Head       string `json:"head"`
+}
+
+// StageResult describes exact repository-relative paths staged into the index.
+type StageResult struct {
+	Repository  string   `json:"repository"`
+	Head        string   `json:"head"`
+	Paths       []string `json:"paths"`
+	IndexDigest string   `json:"index_digest"`
+}
+
+// CommitResult describes a commit created from the already-staged index only.
+type CommitResult struct {
+	Repository string `json:"repository"`
+	Branch     string `json:"branch"`
+	Previous   string `json:"previous_head"`
+	Hash       string `json:"hash"`
+	Author     string `json:"author"`
+	Subject    string `json:"subject"`
 }
