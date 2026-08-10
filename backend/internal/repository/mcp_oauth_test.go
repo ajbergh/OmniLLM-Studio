@@ -32,6 +32,8 @@ func newMCPOAuthTestRepo(t *testing.T) (*MCPOAuthRepo, *sql.DB) {
 			authorization_endpoint TEXT NOT NULL DEFAULT '',
 			token_endpoint TEXT NOT NULL DEFAULT '',
 			resource_metadata_url TEXT NOT NULL DEFAULT '',
+			registration_method TEXT NOT NULL DEFAULT 'preregistered',
+			client_issuer TEXT NOT NULL DEFAULT '',
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)
 	`); err != nil {
@@ -107,5 +109,37 @@ func TestMCPOAuthRepoPreservesOrClearsClientSecretExplicitly(t *testing.T) {
 	runtime, err = repo.GetRuntime("server-1")
 	if err != nil || runtime.ClientSecret != "" {
 		t.Fatalf("explicit empty secret should clear secret: %#v %v", runtime, err)
+	}
+}
+
+func TestMCPOAuthRepoBindsPreregisteredClientToIssuer(t *testing.T) {
+	repo, database := newMCPOAuthTestRepo(t)
+	defer database.Close()
+	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "client", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone, RegistrationMethod: models.MCPOAuthRegistrationPreregistered}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.BindClientIssuer("server-1", "https://issuer.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.BindClientIssuer("server-1", "https://other.example"); err == nil {
+		t.Fatal("expected issuer mismatch to be rejected")
+	}
+	status, err := repo.Status("server-1", "http://127.0.0.1/callback")
+	if err != nil || status.ClientIssuer != "https://issuer.example" || status.RegistrationMethod != models.MCPOAuthRegistrationPreregistered {
+		t.Fatalf("unexpected binding status: %#v %v", status, err)
+	}
+}
+
+func TestMCPOAuthRepoDoesNotBindCIMDClientToIssuer(t *testing.T) {
+	repo, database := newMCPOAuthTestRepo(t)
+	defer database.Close()
+	if err := repo.ConfigureClient("server-1", models.ConfigureMCPOAuthInput{ClientID: "https://client.example/metadata.json", TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone, RegistrationMethod: models.MCPOAuthRegistrationCIMD}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.BindClientIssuer("server-1", "https://issuer-a.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.BindClientIssuer("server-1", "https://issuer-b.example"); err != nil {
+		t.Fatalf("CIMD should remain issuer-portable: %v", err)
 	}
 }

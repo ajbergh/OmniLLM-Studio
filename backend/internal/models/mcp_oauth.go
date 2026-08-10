@@ -6,6 +6,9 @@ const (
 	MCPOAuthAuthMethodNone              = "none"
 	MCPOAuthAuthMethodClientSecretBasic = "client_secret_basic"
 	MCPOAuthAuthMethodClientSecretPost  = "client_secret_post"
+
+	MCPOAuthRegistrationPreregistered = "preregistered"
+	MCPOAuthRegistrationCIMD          = "cimd"
 )
 
 // MCPOAuthStatus is the non-secret management view of one MCP OAuth connection.
@@ -14,6 +17,8 @@ type MCPOAuthStatus struct {
 	Configured              bool       `json:"configured"`
 	Connected               bool       `json:"connected"`
 	ClientID                string     `json:"client_id,omitempty"`
+	RegistrationMethod      string     `json:"registration_method,omitempty"`
+	ClientIssuer            string     `json:"client_issuer,omitempty"`
 	HasClientSecret         bool       `json:"has_client_secret"`
 	HasRefreshToken         bool       `json:"has_refresh_token"`
 	TokenEndpointAuthMethod string     `json:"token_endpoint_auth_method,omitempty"`
@@ -26,20 +31,21 @@ type MCPOAuthStatus struct {
 	RedirectURI             string     `json:"redirect_uri,omitempty"`
 }
 
-// ConfigureMCPOAuthInput stores preregistered OAuth client information. A nil
-// client_secret preserves an existing encrypted secret; an explicit empty string
-// clears it. Secrets are never returned by management APIs.
+// ConfigureMCPOAuthInput stores OAuth client information. A nil client_secret
+// preserves an existing encrypted secret; an explicit empty string clears it.
+// CIMD clients use an HTTPS metadata-document URL as client_id and method none.
 type ConfigureMCPOAuthInput struct {
 	ClientID                string  `json:"client_id"`
 	ClientSecret            *string `json:"client_secret,omitempty"`
 	TokenEndpointAuthMethod string  `json:"token_endpoint_auth_method"`
+	RegistrationMethod      string  `json:"registration_method,omitempty"`
 }
 
-// MCPOAuthAuthorizationStart contains the browser URL and non-secret discovery
-// information required to explain the authorization flow in the UI.
+// MCPOAuthAuthorizationStart contains browser URL and non-secret discovery data.
 type MCPOAuthAuthorizationStart struct {
 	AuthorizationURL    string `json:"authorization_url"`
 	AuthorizationServer string `json:"authorization_server"`
+	RegistrationMethod  string `json:"registration_method"`
 	Scope               string `json:"scope,omitempty"`
 	RedirectURI         string `json:"redirect_uri"`
 }

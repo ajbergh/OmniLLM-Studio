@@ -149,6 +149,7 @@ func versionedMigrations() []Migration {
 		{Version: 46, Name: "scoped_tool_permissions", SQL: migrationScopedToolPermissions},
 		{Version: 47, Name: "mcp_http_private_network_policy", SQL: migrationMCPHTTPPrivateNetwork},
 		{Version: 48, Name: "mcp_oauth_credentials", SQL: migrationMCPOAuthCredentials},
+		{Version: 49, Name: "mcp_oauth_registration_binding", SQL: migrationMCPOAuthRegistrationBinding},
 	}
 }
 
@@ -1374,4 +1375,11 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_credentials (
     resource_metadata_url TEXT NOT NULL DEFAULT '',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+`
+
+// V49: record how the OAuth client ID is established and, for preregistered
+// clients, which authorization-server issuer owns those credentials.
+const migrationMCPOAuthRegistrationBinding = `
+ALTER TABLE mcp_oauth_credentials ADD COLUMN registration_method TEXT NOT NULL DEFAULT 'preregistered';
+ALTER TABLE mcp_oauth_credentials ADD COLUMN client_issuer TEXT NOT NULL DEFAULT '';
 `

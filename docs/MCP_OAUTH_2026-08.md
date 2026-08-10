@@ -1,6 +1,6 @@
 # MCP OAuth 2.1 foundation
 
-OmniLLM-Studio supports standards-aligned OAuth authorization for remote HTTP MCP servers using a preregistered OAuth client.
+OmniLLM-Studio supports standards-aligned OAuth authorization for remote HTTP MCP servers using preregistered OAuth clients or Client ID Metadata Documents (CIMD).
 
 ## Security and protocol contract
 
@@ -8,7 +8,7 @@ The client discovers OAuth configuration instead of accepting arbitrary token en
 
 1. Discover Protected Resource Metadata for the configured MCP resource (RFC 9728 / MCP authorization flow).
 2. Discover authorization-server metadata (RFC 8414, with OpenID Connect discovery compatibility).
-3. Verify the discovered issuer and require PKCE `S256`.
+3. Verify the discovered issuer with exact RFC 8414 comparison, require PKCE `S256`, and validate RFC 9207 `iss` on authorization responses when present/advertised.
 4. Bind both authorization and token requests to the canonical MCP resource using the `resource` parameter.
 5. Send resulting Bearer access tokens only in the HTTP `Authorization` header.
 6. Encrypt preregistered client secrets and access/refresh tokens at rest.
@@ -16,9 +16,11 @@ The client discovers OAuth configuration instead of accepting arbitrary token en
 
 All metadata and token traffic uses the V47 hardened MCP HTTP transport: public-network-only by default, DNS-aware private-address blocking, explicit private/local opt-in, bounded response bodies, and no redirects.
 
-## Preregistered clients
+## Client registration
 
-Phase A intentionally supports preregistered client IDs rather than guessing dynamic-registration behavior. Configure the client ID and token endpoint authentication method in **Settings → MCP → OAuth 2.1 authorization**. Confidential clients may store a client secret; it is encrypted and never returned by the API.
+The current MCP specification prioritizes preregistered credentials when available, then Client ID Metadata Documents (CIMD). DCR is deprecated and remains a later fallback for older authorization servers. Configure the registration method in **Settings → MCP → OAuth 2.1 authorization**.
+
+Preregistered credentials are bound to the exact authorization-server issuer that first validates them. If Protected Resource Metadata later points to a different issuer, Omni rejects reuse instead of silently sending credentials to the new server. CIMD client IDs are HTTPS metadata-document URLs and remain issuer-portable by design.
 
 The current supported token endpoint authentication methods are:
 
@@ -42,4 +44,4 @@ The Wails desktop app binds a random loopback port at launch and sets its callba
 
 ## Deliberate follow-on work
 
-Client ID Metadata Documents / dynamic client registration and incremental authorization-scope UX are separate follow-on phases. Keeping them separate makes the initial authorization boundary easier to review and test.
+Deprecated Dynamic Client Registration fallback and persistent incremental authorization-scope step-up UX remain Phase B2. They are kept separate from issuer/CIMD correctness so the registration trust boundary stays reviewable.
