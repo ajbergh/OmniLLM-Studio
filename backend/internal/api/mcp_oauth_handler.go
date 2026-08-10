@@ -77,8 +77,12 @@ func (h *MCPOAuthHandler) Disconnect(w http.ResponseWriter, r *http.Request) {
 // the response to the originating authenticated admin action.
 func (h *MCPOAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
+	issuer := strings.TrimSpace(r.URL.Query().Get("iss"))
 	if oauthError := strings.TrimSpace(r.URL.Query().Get("error")); oauthError != "" {
-		h.oauth.RejectAuthorization(state)
+		if err := h.oauth.RejectAuthorization(state, issuer); err != nil {
+			h.writeCallbackPage(w, false, "Authorization response validation failed.")
+			return
+		}
 		description := strings.TrimSpace(r.URL.Query().Get("error_description"))
 		if description == "" {
 			description = oauthError
@@ -86,7 +90,7 @@ func (h *MCPOAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		h.writeCallbackPage(w, false, "Authorization was not completed: "+description)
 		return
 	}
-	serverID, err := h.oauth.CompleteAuthorization(r.Context(), state, r.URL.Query().Get("code"))
+	serverID, err := h.oauth.CompleteAuthorization(r.Context(), state, r.URL.Query().Get("code"), issuer)
 	if err != nil {
 		h.writeCallbackPage(w, false, err.Error())
 		return

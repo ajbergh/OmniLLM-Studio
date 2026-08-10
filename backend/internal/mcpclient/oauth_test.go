@@ -78,3 +78,31 @@ func TestValidateOAuthEndpointRequiresHTTPS(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateCIMDClientID(t *testing.T) {
+	if err := validateCIMDClientID("https://client.example/oauth/metadata.json"); err != nil {
+		t.Fatalf("valid CIMD client ID rejected: %v", err)
+	}
+	for _, raw := range []string{"http://client.example/metadata.json", "https://client.example", "https://client.example/metadata.json?x=1", "https://client.example/metadata.json#fragment"} {
+		if err := validateCIMDClientID(raw); err == nil {
+			t.Fatalf("invalid CIMD client ID accepted: %q", raw)
+		}
+	}
+}
+
+func TestAuthorizationResponseIssuerValidation(t *testing.T) {
+	pending := oauthPendingState{ExpectedIssuer: "https://auth.example/tenant", IssuerParameterRequired: true}
+	if err := validateAuthorizationResponseIssuer(pending, "https://auth.example/tenant"); err != nil {
+		t.Fatalf("matching issuer rejected: %v", err)
+	}
+	if err := validateAuthorizationResponseIssuer(pending, ""); err == nil {
+		t.Fatal("required issuer omission accepted")
+	}
+	if err := validateAuthorizationResponseIssuer(pending, "https://auth.example/tenant/"); err == nil {
+		t.Fatal("RFC9207 simple-string mismatch accepted")
+	}
+	pending.IssuerParameterRequired = false
+	if err := validateAuthorizationResponseIssuer(pending, ""); err != nil {
+		t.Fatalf("optional absent issuer should be accepted: %v", err)
+	}
+}

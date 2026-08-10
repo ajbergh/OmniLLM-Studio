@@ -25,12 +25,23 @@ type MCPOAuthCredential struct {
 	AuthorizationEndpoint   string
 	TokenEndpoint           string
 	ResourceMetadataURL     string
+	RegistrationMethod      string
+	ClientIssuer            string
 }
 
 // MCPOAuthRepo persists preregistered OAuth client configuration and tokens.
 type MCPOAuthRepo struct{ db *sql.DB }
 
 func NewMCPOAuthRepo(db *sql.DB) *MCPOAuthRepo { return &MCPOAuthRepo{db: db} }
+
+func validMCPOAuthRegistrationMethod(value string) bool {
+	switch value {
+	case models.MCPOAuthRegistrationPreregistered, models.MCPOAuthRegistrationCIMD:
+		return true
+	default:
+		return false
+	}
+}
 
 func validMCPOAuthMethod(value string) bool {
 	switch value {
@@ -55,16 +66,24 @@ func (r *MCPOAuthRepo) ConfigureClient(serverID string, input models.ConfigureMC
 	if !validMCPOAuthMethod(method) {
 		return fmt.Errorf("unsupported token_endpoint_auth_method %q", method)
 	}
+	registrationMethod := strings.TrimSpace(input.RegistrationMethod)
+	if registrationMethod == "" {
+		registrationMethod = models.MCPOAuthRegistrationPreregistered
+	}
+	if !validMCPOAuthRegistrationMethod(registrationMethod) {
+		return fmt.Errorf("unsupported OAuth registration_method %q", registrationMethod)
+	}
 
 	secretEnc := ""
+	existingClientID, existingMethod, existingRegistration, existingIssuer := "", "", "", ""
+	var existingSecret sql.NullString
+	existingErr := r.db.QueryRow(`SELECT client_id, client_secret_enc, token_endpoint_auth_method, registration_method, client_issuer FROM mcp_oauth_credentials WHERE server_id = ?`, serverID).Scan(&existingClientID, &existingSecret, &existingMethod, &existingRegistration, &existingIssuer)
+	if existingErr != nil && existingErr != sql.ErrNoRows {
+		return fmt.Errorf("read existing MCP OAuth client: %w", existingErr)
+	}
 	if input.ClientSecret == nil {
-		var existing sql.NullString
-		err := r.db.QueryRow(`SELECT client_secret_enc FROM mcp_oauth_credentials WHERE server_id = ?`, serverID).Scan(&existing)
-		if err != nil && err != sql.ErrNoRows {
-			return fmt.Errorf("read existing MCP OAuth client secret: %w", err)
-		}
-		if existing.Valid {
-			secretEnc = existing.String
+		if existingSecret.Valid {
+			secretEnc = existingSecret.String
 		}
 	} else if *input.ClientSecret != "" {
 		var err error
@@ -74,19 +93,26 @@ func (r *MCPOAuthRepo) ConfigureClient(serverID string, input models.ConfigureMC
 		}
 	}
 
+	configurationChanged := existingErr == sql.ErrNoRows || existingClientID != clientID || existingMethod != method || existingRegistration != registrationMethod || input.ClientSecret != nil
+	clientIssuer := existingIssuer
+	if configurationChanged || registrationMethod == models.MCPOAuthRegistrationCIMD {
+		clientIssuer = ""
+	}
+
 	_, err := r.db.Exec(`
 		INSERT INTO mcp_oauth_credentials (
 			server_id, client_id, client_secret_enc, token_endpoint_auth_method,
 			access_token_enc, refresh_token_enc, token_type, scope, expires_at,
-			authorization_server, authorization_endpoint, token_endpoint, resource_metadata_url, updated_at
-		) VALUES (?, ?, ?, ?, '', '', '', '', NULL, '', '', '', '', CURRENT_TIMESTAMP)
+			authorization_server, authorization_endpoint, token_endpoint, resource_metadata_url, registration_method, client_issuer, updated_at
+		) VALUES (?, ?, ?, ?, '', '', '', '', NULL, '', '', '', '', ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(server_id) DO UPDATE SET
 			client_id = excluded.client_id,
 			client_secret_enc = excluded.client_secret_enc,
 			token_endpoint_auth_method = excluded.token_endpoint_auth_method,
+			registration_method = excluded.registration_method, client_issuer = excluded.client_issuer,
 			access_token_enc = '', refresh_token_enc = '', token_type = '', scope = '', expires_at = NULL,
 			updated_at = CURRENT_TIMESTAMP
-	`, serverID, clientID, secretEnc, method)
+	`, serverID, clientID, secretEnc, method, registrationMethod, clientIssuer)
 	if err != nil {
 		return fmt.Errorf("save MCP OAuth client: %w", err)
 	}
@@ -108,12 +134,12 @@ func (r *MCPOAuthRepo) GetRuntime(serverID string) (*MCPOAuthCredential, error) 
 	err := r.db.QueryRow(`
 		SELECT server_id, client_id, client_secret_enc, access_token_enc, refresh_token_enc,
 			token_type, scope, expires_at, token_endpoint_auth_method,
-			authorization_server, authorization_endpoint, token_endpoint, resource_metadata_url
+			authorization_server, authorization_endpoint, token_endpoint, resource_metadata_url, registration_method, client_issuer
 		FROM mcp_oauth_credentials WHERE server_id = ?
 	`, serverID).Scan(
 		&item.ServerID, &item.ClientID, &clientSecretEnc, &accessTokenEnc, &refreshTokenEnc,
 		&item.TokenType, &item.Scope, &expiresAt, &item.TokenEndpointAuthMethod,
-		&item.AuthorizationServer, &item.AuthorizationEndpoint, &item.TokenEndpoint, &item.ResourceMetadataURL,
+		&item.AuthorizationServer, &item.AuthorizationEndpoint, &item.TokenEndpoint, &item.ResourceMetadataURL, &item.RegistrationMethod, &item.ClientIssuer,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -150,6 +176,8 @@ func (r *MCPOAuthRepo) Status(serverID, redirectURI string) (models.MCPOAuthStat
 	status.Configured = strings.TrimSpace(credential.ClientID) != ""
 	status.Connected = strings.TrimSpace(credential.AccessToken) != "" && (credential.ExpiresAt == nil || credential.ExpiresAt.After(time.Now().UTC()))
 	status.ClientID = credential.ClientID
+	status.RegistrationMethod = credential.RegistrationMethod
+	status.ClientIssuer = credential.ClientIssuer
 	status.HasClientSecret = credential.ClientSecret != ""
 	status.HasRefreshToken = credential.RefreshToken != ""
 	status.TokenEndpointAuthMethod = credential.TokenEndpointAuthMethod
@@ -160,6 +188,32 @@ func (r *MCPOAuthRepo) Status(serverID, redirectURI string) (models.MCPOAuthStat
 	status.TokenEndpoint = credential.TokenEndpoint
 	status.ResourceMetadataURL = credential.ResourceMetadataURL
 	return status, nil
+}
+
+// BindClientIssuer enforces authorization-server ownership for preregistered
+// credentials. CIMD client IDs are self-hosted and portable across issuers.
+func (r *MCPOAuthRepo) BindClientIssuer(serverID, issuer string) error {
+	issuer = strings.TrimSpace(issuer)
+	credential, err := r.GetRuntime(serverID)
+	if err != nil {
+		return err
+	}
+	if credential == nil {
+		return fmt.Errorf("MCP OAuth client is not configured")
+	}
+	if credential.RegistrationMethod == models.MCPOAuthRegistrationCIMD {
+		return nil
+	}
+	if credential.ClientIssuer != "" && credential.ClientIssuer != issuer {
+		return fmt.Errorf("OAuth client credentials are bound to authorization server %q, not %q", credential.ClientIssuer, issuer)
+	}
+	if credential.ClientIssuer == issuer {
+		return nil
+	}
+	if _, err := r.db.Exec(`UPDATE mcp_oauth_credentials SET client_issuer = ?, updated_at = CURRENT_TIMESTAMP WHERE server_id = ?`, issuer, serverID); err != nil {
+		return fmt.Errorf("bind MCP OAuth client issuer: %w", err)
+	}
+	return nil
 }
 
 // SaveDiscovery records non-secret endpoints discovered from RFC9728 / RFC8414

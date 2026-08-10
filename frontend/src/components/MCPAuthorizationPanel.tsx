@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ExternalLink, KeyRound, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
 import { toast } from 'sonner';
-import { mcpOAuthApi, type MCPOAuthAuthMethod, type MCPOAuthStatus } from '../mcpOAuthApi';
+import { mcpOAuthApi, type MCPOAuthAuthMethod, type MCPOAuthRegistrationMethod, type MCPOAuthStatus } from '../mcpOAuthApi';
 import type { MCPServer } from '../types';
 
 export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer; onChanged?: () => void }) {
@@ -9,6 +9,7 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [authMethod, setAuthMethod] = useState<MCPOAuthAuthMethod>('none');
+  const [registrationMethod, setRegistrationMethod] = useState<MCPOAuthRegistrationMethod>('preregistered');
   const [busy, setBusy] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -18,6 +19,7 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
       setStatus(next);
       setClientId(next.client_id || '');
       setAuthMethod(next.token_endpoint_auth_method || 'none');
+      setRegistrationMethod(next.registration_method || 'preregistered');
       return next;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to load MCP OAuth status');
@@ -39,9 +41,10 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
     if (!trimmedClientId) throw new Error('Client ID is required');
     const payload: Parameters<typeof mcpOAuthApi.configure>[1] = {
       client_id: trimmedClientId,
-      token_endpoint_auth_method: authMethod,
+      token_endpoint_auth_method: registrationMethod === 'cimd' ? 'none' : authMethod,
+      registration_method: registrationMethod,
     };
-    if (clientSecret !== '') payload.client_secret = clientSecret;
+    if (registrationMethod === 'preregistered' && clientSecret !== '') payload.client_secret = clientSecret;
     const next = await mcpOAuthApi.configure(server.id, payload);
     setStatus(next);
     setClientSecret('');
@@ -102,6 +105,7 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
         client_id: clientId.trim(),
         client_secret: '',
         token_endpoint_auth_method: authMethod,
+        registration_method: 'preregistered',
       });
       setStatus(next);
       setClientSecret('');
@@ -132,23 +136,38 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
 
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label>
-          <span className="mb-1 block text-[10px] font-medium text-text-muted">Preregistered client ID</span>
-          <input value={clientId} onChange={(event) => setClientId(event.target.value)} placeholder="oauth-client-id" className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text" />
+          <span className="mb-1 block text-[10px] font-medium text-text-muted">Client registration</span>
+          <select value={registrationMethod} onChange={(event) => { const next = event.target.value as MCPOAuthRegistrationMethod; setRegistrationMethod(next); if (next === 'cimd') { setAuthMethod('none'); setClientSecret(''); } }} className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text">
+            <option value="preregistered">Preregistered client</option>
+            <option value="cimd">Client ID Metadata Document (CIMD)</option>
+          </select>
         </label>
         <label>
-          <span className="mb-1 block text-[10px] font-medium text-text-muted">Token endpoint authentication</span>
-          <select value={authMethod} onChange={(event) => setAuthMethod(event.target.value as MCPOAuthAuthMethod)} className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text">
-            <option value="none">Public client (none)</option>
-            <option value="client_secret_basic">client_secret_basic</option>
-            <option value="client_secret_post">client_secret_post</option>
-          </select>
+          <span className="mb-1 block text-[10px] font-medium text-text-muted">{registrationMethod === 'cimd' ? 'Client metadata document URL' : 'Preregistered client ID'}</span>
+          <input value={clientId} onChange={(event) => setClientId(event.target.value)} placeholder={registrationMethod === 'cimd' ? 'https://client.example/oauth/metadata.json' : 'oauth-client-id'} className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text" />
         </label>
       </div>
 
-      <label className="mt-3 block">
-        <span className="mb-1 block text-[10px] font-medium text-text-muted">Client secret {status?.has_client_secret ? '(stored encrypted; leave blank to keep)' : '(optional for public clients)'}</span>
-        <input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} autoComplete="new-password" className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text" />
-      </label>
+      {registrationMethod === 'cimd' ? (
+        <div className="mt-3 rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 text-[10px] leading-relaxed text-text-muted">
+          CIMD is the preferred MCP registration method when client and authorization server have no prior relationship. The URL must be a stable public HTTPS document with a path; its <span className="font-mono">client_id</span> must exactly match the URL and include this redirect URI in <span className="font-mono">redirect_uris</span>.
+        </div>
+      ) : (
+        <>
+          <label className="mt-3 block">
+            <span className="mb-1 block text-[10px] font-medium text-text-muted">Token endpoint authentication</span>
+            <select value={authMethod} onChange={(event) => setAuthMethod(event.target.value as MCPOAuthAuthMethod)} className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text">
+              <option value="none">Public client (none)</option>
+              <option value="client_secret_basic">client_secret_basic</option>
+              <option value="client_secret_post">client_secret_post</option>
+            </select>
+          </label>
+          <label className="mt-3 block">
+            <span className="mb-1 block text-[10px] font-medium text-text-muted">Client secret {status?.has_client_secret ? '(stored encrypted; leave blank to keep)' : '(optional for public clients)'}</span>
+            <input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} autoComplete="new-password" className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text" />
+          </label>
+        </>
+      )}
 
       <div className="mt-3 rounded-xl border border-border bg-surface/50 p-3 text-[10px] leading-relaxed text-text-muted">
         <div><span className="font-medium text-text-secondary">Redirect URI:</span> <span className="break-all font-mono">{status?.redirect_uri || 'Loading…'}</span></div>
@@ -158,6 +177,8 @@ export function MCPAuthorizationPanel({ server, onChanged }: { server: MCPServer
       {status?.authorization_server && (
         <div className="mt-3 rounded-xl border border-border bg-surface/50 p-3 text-[10px] text-text-muted">
           <div className="break-all"><span className="font-medium text-text-secondary">Authorization server:</span> {status.authorization_server}</div>
+          <div className="mt-1"><span className="font-medium text-text-secondary">Registration:</span> {status.registration_method === 'cimd' ? 'Client ID Metadata Document' : 'Preregistered client'}</div>
+          {status.client_issuer && <div className="mt-1 break-all"><span className="font-medium text-text-secondary">Client issuer binding:</span> {status.client_issuer}</div>}
           {status.scope && <div className="mt-1 break-all"><span className="font-medium text-text-secondary">Granted scope:</span> {status.scope}</div>}
           {status.expires_at && <div className="mt-1"><span className="font-medium text-text-secondary">Access token expiry:</span> {new Date(status.expires_at).toLocaleString()}</div>}
         </div>

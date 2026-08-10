@@ -38,12 +38,15 @@ type protectedResourceMetadata struct {
 }
 
 type authorizationServerMetadata struct {
-	Issuer                        string   `json:"issuer"`
-	AuthorizationEndpoint         string   `json:"authorization_endpoint"`
-	TokenEndpoint                 string   `json:"token_endpoint"`
-	ScopesSupported               []string `json:"scopes_supported"`
-	CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported"`
-	TokenEndpointAuthMethods      []string `json:"token_endpoint_auth_methods_supported"`
+	Issuer                                     string   `json:"issuer"`
+	AuthorizationEndpoint                      string   `json:"authorization_endpoint"`
+	TokenEndpoint                              string   `json:"token_endpoint"`
+	ScopesSupported                            []string `json:"scopes_supported"`
+	CodeChallengeMethodsSupported              []string `json:"code_challenge_methods_supported"`
+	TokenEndpointAuthMethods                   []string `json:"token_endpoint_auth_methods_supported"`
+	ClientIDMetadataDocumentSupported          bool     `json:"client_id_metadata_document_supported"`
+	RegistrationEndpoint                       string   `json:"registration_endpoint"`
+	AuthorizationResponseIssParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
 }
 
 type oauthTokenResponse struct {
@@ -64,6 +67,8 @@ type oauthPendingState struct {
 	ClientID                string
 	TokenEndpointAuthMethod string
 	Scope                   string
+	ExpectedIssuer          string
+	IssuerParameterRequired bool
 	ExpiresAt               time.Time
 }
 
@@ -154,7 +159,31 @@ func (s *OAuthService) Configure(serverID string, input models.ConfigureMCPOAuth
 	if method != models.MCPOAuthAuthMethodNone && input.ClientSecret != nil && strings.TrimSpace(*input.ClientSecret) == "" {
 		return fmt.Errorf("client_secret is required for %s", method)
 	}
+	registrationMethod := strings.TrimSpace(input.RegistrationMethod)
+	if registrationMethod == "" {
+		registrationMethod = models.MCPOAuthRegistrationPreregistered
+		input.RegistrationMethod = registrationMethod
+	}
+	if registrationMethod == models.MCPOAuthRegistrationCIMD {
+		if err := validateCIMDClientID(input.ClientID); err != nil {
+			return err
+		}
+		if method != models.MCPOAuthAuthMethodNone {
+			return fmt.Errorf("CIMD currently requires token_endpoint_auth_method none")
+		}
+		if input.ClientSecret != nil && strings.TrimSpace(*input.ClientSecret) != "" {
+			return fmt.Errorf("CIMD public clients do not use a stored client secret")
+		}
+	}
 	return s.credentials.ConfigureClient(serverID, input)
+}
+
+func validateCIMDClientID(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" || strings.Trim(parsed.Path, "/") == "" {
+		return fmt.Errorf("CIMD client_id must be an HTTPS metadata-document URL with a path and no query, fragment, or userinfo")
+	}
+	return nil
 }
 
 // StartAuthorization discovers OAuth metadata, creates PKCE/state material, and
@@ -186,12 +215,12 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, serverID, userID 
 	if len(resourceMetadata.AuthorizationServers) == 0 {
 		return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("protected resource metadata did not advertise an authorization server")
 	}
-	authorizationServer := normalizeIssuer(resourceMetadata.AuthorizationServers[0])
+	authorizationServer := strings.TrimSpace(resourceMetadata.AuthorizationServers[0])
 	authMetadata, err := discoverAuthorizationServer(ctx, *server, authorizationServer)
 	if err != nil {
 		return models.MCPOAuthAuthorizationStart{}, err
 	}
-	if normalizeIssuer(authMetadata.Issuer) != authorizationServer {
+	if authMetadata.Issuer != authorizationServer {
 		return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("authorization metadata issuer mismatch")
 	}
 	if !containsString(authMetadata.CodeChallengeMethodsSupported, "S256") {
@@ -199,6 +228,20 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, serverID, userID 
 	}
 	if !oauthMethodSupported(credential.TokenEndpointAuthMethod, authMetadata.TokenEndpointAuthMethods) {
 		return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("authorization server does not support token auth method %q", credential.TokenEndpointAuthMethod)
+	}
+	registrationMethod := credential.RegistrationMethod
+	if registrationMethod == "" {
+		registrationMethod = models.MCPOAuthRegistrationPreregistered
+	}
+	if registrationMethod == models.MCPOAuthRegistrationCIMD {
+		if !authMetadata.ClientIDMetadataDocumentSupported {
+			return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("authorization server does not advertise Client ID Metadata Document support")
+		}
+		if err := validateCIMDClientID(credential.ClientID); err != nil {
+			return models.MCPOAuthAuthorizationStart{}, err
+		}
+	} else if err := s.credentials.BindClientIssuer(serverID, authMetadata.Issuer); err != nil {
+		return models.MCPOAuthAuthorizationStart{}, err
 	}
 	if err := validateOAuthEndpoint(authMetadata.AuthorizationEndpoint); err != nil {
 		return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("authorization endpoint: %w", err)
@@ -255,6 +298,8 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, serverID, userID 
 		ClientID:                credential.ClientID,
 		TokenEndpointAuthMethod: credential.TokenEndpointAuthMethod,
 		Scope:                   scope,
+		ExpectedIssuer:          authMetadata.Issuer,
+		IssuerParameterRequired: authMetadata.AuthorizationResponseIssParameterSupported,
 		ExpiresAt:               time.Now().UTC().Add(mcpOAuthStateTTL),
 	}
 	s.mu.Unlock()
@@ -265,6 +310,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, serverID, userID 
 	return models.MCPOAuthAuthorizationStart{
 		AuthorizationURL:    authURL.String(),
 		AuthorizationServer: authorizationServer,
+		RegistrationMethod:  registrationMethod,
 		Scope:               scope,
 		RedirectURI:         s.redirectURI,
 	}, nil
@@ -272,7 +318,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, serverID, userID 
 
 // CompleteAuthorization validates one-time state and exchanges the authorization
 // code for resource-bound tokens.
-func (s *OAuthService) CompleteAuthorization(ctx context.Context, state, code string) (string, error) {
+func (s *OAuthService) CompleteAuthorization(ctx context.Context, state, code, issuer string) (string, error) {
 	state = strings.TrimSpace(state)
 	code = strings.TrimSpace(code)
 	if state == "" || code == "" {
@@ -285,6 +331,9 @@ func (s *OAuthService) CompleteAuthorization(ctx context.Context, state, code st
 	s.mu.Unlock()
 	if !ok || time.Now().UTC().After(pending.ExpiresAt) {
 		return "", fmt.Errorf("OAuth state is invalid or expired")
+	}
+	if err := validateAuthorizationResponseIssuer(pending, issuer); err != nil {
+		return "", err
 	}
 
 	server, err := s.servers.GetRuntimeByID(pending.ServerID)
@@ -368,15 +417,35 @@ func (s *OAuthService) AccessToken(ctx context.Context, serverID string) (string
 	return token.AccessToken, nil
 }
 
-// RejectAuthorization consumes a pending state after an authorization-server error.
-func (s *OAuthService) RejectAuthorization(state string) {
+func validateAuthorizationResponseIssuer(pending oauthPendingState, issuer string) error {
+	issuer = strings.TrimSpace(issuer)
+	if issuer == "" {
+		if pending.IssuerParameterRequired {
+			return fmt.Errorf("authorization response is missing required issuer")
+		}
+		return nil
+	}
+	if issuer != pending.ExpectedIssuer {
+		return fmt.Errorf("authorization response issuer mismatch")
+	}
+	return nil
+}
+
+// RejectAuthorization consumes a pending state after an authorization-server
+// error, validating RFC9207 issuer identity before callers display error detail.
+func (s *OAuthService) RejectAuthorization(state, issuer string) error {
 	state = strings.TrimSpace(state)
 	if state == "" {
-		return
+		return fmt.Errorf("OAuth state is invalid or expired")
 	}
 	s.mu.Lock()
+	pending, ok := s.states[state]
 	delete(s.states, state)
 	s.mu.Unlock()
+	if !ok || time.Now().UTC().After(pending.ExpiresAt) {
+		return fmt.Errorf("OAuth state is invalid or expired")
+	}
+	return validateAuthorizationResponseIssuer(pending, issuer)
 }
 
 func (s *OAuthService) Disconnect(serverID string) error { return s.credentials.ClearTokens(serverID) }
