@@ -1,7 +1,7 @@
 import { getAuthToken, resolveApiUrl } from './api';
 
 export type MCPOAuthAuthMethod = 'none' | 'client_secret_basic' | 'client_secret_post';
-export type MCPOAuthRegistrationMethod = 'preregistered' | 'cimd';
+export type MCPOAuthRegistrationMethod = 'preregistered' | 'cimd' | 'dcr';
 
 export interface MCPOAuthStatus {
   server_id: string;
@@ -14,6 +14,7 @@ export interface MCPOAuthStatus {
   has_refresh_token: boolean;
   token_endpoint_auth_method?: MCPOAuthAuthMethod;
   scope?: string;
+  required_scope?: string;
   expires_at?: string;
   authorization_server?: string;
   authorization_endpoint?: string;

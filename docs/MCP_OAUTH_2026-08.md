@@ -18,7 +18,7 @@ All metadata and token traffic uses the V47 hardened MCP HTTP transport: public-
 
 ## Client registration
 
-The current MCP specification prioritizes preregistered credentials when available, then Client ID Metadata Documents (CIMD). DCR is deprecated and remains a later fallback for older authorization servers. Configure the registration method in **Settings → MCP → OAuth 2.1 authorization**.
+The current MCP specification prioritizes preregistered credentials when available, then Client ID Metadata Documents (CIMD). Omni also supports Dynamic Client Registration only as the deprecated fallback when no client is configured and the authorization server advertises `registration_endpoint`. Automatic DCR requests a public PKCE client (`token_endpoint_auth_method=none`) and binds the returned client ID to the exact issuer. Configure the registration method in **Settings → MCP → OAuth 2.1 authorization**.
 
 Preregistered credentials are bound to the exact authorization-server issuer that first validates them. If Protected Resource Metadata later points to a different issuer, Omni rejects reuse instead of silently sending credentials to the new server. CIMD client IDs are HTTPS metadata-document URLs and remain issuer-portable by design.
 
@@ -42,6 +42,8 @@ The Wails desktop app binds a random loopback port at launch and sets its callba
 - **Disconnect** clears access and refresh tokens and stops the active MCP runtime.
 - Reconfiguring the OAuth client invalidates previously issued local tokens.
 
-## Deliberate follow-on work
+## Incremental authorization step-up
 
-Deprecated Dynamic Client Registration fallback and persistent incremental authorization-scope step-up UX remain Phase B2. They are kept separate from issuer/CIMD correctness so the registration trust boundary stays reviewable.
+When a remote MCP operation returns `403` with `WWW-Authenticate: Bearer error="insufficient_scope"`, Omni persists the normalized union of the granted/requested scopes and the newly challenged scopes. Settings shows the pending scope set and offers **Grant additional scopes**, which starts a fresh resource-bound PKCE authorization flow. A successful token grant clears the pending requirement.
+
+Omni does not silently replay a failed tool call after browser authorization; the original action remains failed and should be retried by the user/agent after authorization completes. This avoids hidden side effects and retry loops across an interactive consent boundary.

@@ -183,6 +183,9 @@ func (c *HTTPClient) initialize(ctx context.Context) error {
 	defer httpResp.Body.Close()
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		if err := c.handleOAuthScopeChallenge(httpResp); err != nil {
+			return err
+		}
 		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 1024))
 		return fmt.Errorf("initialize MCP server: HTTP %d: %s", httpResp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -253,6 +256,9 @@ func (c *HTTPClient) request(ctx context.Context, method string, params interfac
 		return fmt.Errorf("%s: MCP session expired (HTTP 404)", method)
 	}
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		if err := c.handleOAuthScopeChallenge(httpResp); err != nil {
+			return err
+		}
 		snip, _ := io.ReadAll(io.LimitReader(httpResp.Body, 512))
 		return fmt.Errorf("%s: HTTP %d: %s", method, httpResp.StatusCode, strings.TrimSpace(string(snip)))
 	}
@@ -306,7 +312,34 @@ func (c *HTTPClient) notify(ctx context.Context, method string, params interface
 	if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
 		return nil
 	}
+	if err := c.handleOAuthScopeChallenge(httpResp); err != nil {
+		return err
+	}
 	return fmt.Errorf("%s: unexpected HTTP %d", method, httpResp.StatusCode)
+}
+
+func (c *HTTPClient) handleOAuthScopeChallenge(response *http.Response) error {
+	if response.StatusCode != http.StatusForbidden || c.tokenProvider == nil {
+		return nil
+	}
+	challenge := response.Header.Get("WWW-Authenticate")
+	if !strings.EqualFold(challengeParameter(challenge, "error"), "insufficient_scope") {
+		return nil
+	}
+	_, scopes := parseBearerChallenge(challenge)
+	scopes = uniqueSortedStrings(scopes)
+	if len(scopes) == 0 {
+		return nil
+	}
+	recorder, ok := c.tokenProvider.(interface {
+		RecordScopeChallenge(serverID string, scopes []string) error
+	})
+	if ok {
+		if err := recorder.RecordScopeChallenge(c.server.ID, scopes); err != nil {
+			return fmt.Errorf("%w: persist scope challenge: %v", ErrMCPOAuthInsufficientScope, err)
+		}
+	}
+	return fmt.Errorf("%w: %s", ErrMCPOAuthInsufficientScope, strings.Join(scopes, " "))
 }
 
 // parseResponse reads the HTTP response body as either plain JSON or an SSE

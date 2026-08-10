@@ -21,8 +21,9 @@ import (
 )
 
 var (
-	ErrMCPOAuthNotConfigured = errors.New("MCP OAuth is not configured")
-	ErrMCPOAuthRequired      = errors.New("MCP OAuth authorization is required")
+	ErrMCPOAuthNotConfigured     = errors.New("MCP OAuth is not configured")
+	ErrMCPOAuthRequired          = errors.New("MCP OAuth authorization is required")
+	ErrMCPOAuthInsufficientScope = errors.New("MCP OAuth additional authorization scope is required")
 )
 
 const (
@@ -164,6 +165,9 @@ func (s *OAuthService) Configure(serverID string, input models.ConfigureMCPOAuth
 		registrationMethod = models.MCPOAuthRegistrationPreregistered
 		input.RegistrationMethod = registrationMethod
 	}
+	if registrationMethod == models.MCPOAuthRegistrationDCR {
+		return fmt.Errorf("dynamic OAuth registration is managed automatically")
+	}
 	if registrationMethod == models.MCPOAuthRegistrationCIMD {
 		if err := validateCIMDClientID(input.ClientID); err != nil {
 			return err
@@ -196,13 +200,6 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, serverID, userID 
 	if server == nil || server.Transport != "http" || server.URL == nil {
 		return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("OAuth requires an HTTP MCP server")
 	}
-	credential, err := s.credentials.GetRuntime(serverID)
-	if err != nil {
-		return models.MCPOAuthAuthorizationStart{}, err
-	}
-	if credential == nil || strings.TrimSpace(credential.ClientID) == "" {
-		return models.MCPOAuthAuthorizationStart{}, ErrMCPOAuthNotConfigured
-	}
 
 	resourceURI, err := canonicalResourceURI(*server.URL)
 	if err != nil {
@@ -226,6 +223,24 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, serverID, userID 
 	if !containsString(authMetadata.CodeChallengeMethodsSupported, "S256") {
 		return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("authorization server does not advertise PKCE S256")
 	}
+
+	credential, err := s.credentials.GetRuntime(serverID)
+	if err != nil {
+		return models.MCPOAuthAuthorizationStart{}, err
+	}
+	if credential == nil || strings.TrimSpace(credential.ClientID) == "" {
+		if strings.TrimSpace(authMetadata.RegistrationEndpoint) == "" {
+			return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("%w: configure a preregistered/CIMD client; authorization server does not advertise legacy DCR", ErrMCPOAuthNotConfigured)
+		}
+		if err := s.registerDynamicClient(ctx, *server, authMetadata, serverID); err != nil {
+			return models.MCPOAuthAuthorizationStart{}, err
+		}
+		credential, err = s.credentials.GetRuntime(serverID)
+		if err != nil || credential == nil {
+			return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("load dynamically registered OAuth client: %w", err)
+		}
+	}
+
 	if !oauthMethodSupported(credential.TokenEndpointAuthMethod, authMetadata.TokenEndpointAuthMethods) {
 		return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("authorization server does not support token auth method %q", credential.TokenEndpointAuthMethod)
 	}
@@ -250,12 +265,16 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, serverID, userID 
 		return models.MCPOAuthAuthorizationStart{}, fmt.Errorf("token endpoint: %w", err)
 	}
 
-	scopes := challengedScopes
-	if len(scopes) == 0 {
-		scopes = resourceMetadata.ScopesSupported
+	scopes := append([]string{}, challengedScopes...)
+	if credential.RequiredScope != "" {
+		scopes = append(scopes, strings.Fields(credential.Scope)...)
+		scopes = append(scopes, strings.Fields(credential.RequiredScope)...)
 	}
 	if len(scopes) == 0 {
-		scopes = authMetadata.ScopesSupported
+		scopes = append(scopes, resourceMetadata.ScopesSupported...)
+	}
+	if len(scopes) == 0 {
+		scopes = append(scopes, authMetadata.ScopesSupported...)
 	}
 	scopes = uniqueSortedStrings(scopes)
 	scope := strings.Join(scopes, " ")
@@ -316,6 +335,96 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, serverID, userID 
 	}, nil
 }
 
+type dynamicClientRegistrationRequest struct {
+	ClientName              string   `json:"client_name"`
+	RedirectURIs            []string `json:"redirect_uris"`
+	GrantTypes              []string `json:"grant_types"`
+	ResponseTypes           []string `json:"response_types"`
+	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+	ApplicationType         string   `json:"application_type"`
+}
+
+type dynamicClientRegistrationResponse struct {
+	ClientID                string `json:"client_id"`
+	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method"`
+}
+
+func oauthApplicationType(redirectURI string) string {
+	parsed, err := url.Parse(redirectURI)
+	if err == nil && isLoopbackHostname(parsed.Hostname()) {
+		return "native"
+	}
+	return "web"
+}
+
+func (s *OAuthService) registerDynamicClient(ctx context.Context, server models.MCPServer, metadata authorizationServerMetadata, serverID string) error {
+	endpoint := strings.TrimSpace(metadata.RegistrationEndpoint)
+	if endpoint == "" {
+		return fmt.Errorf("authorization server does not advertise a dynamic registration endpoint")
+	}
+	response, err := registerDynamicPublicClient(ctx, newHTTPTransportClient(server), endpoint, s.redirectURI)
+	if err != nil {
+		return err
+	}
+	return s.credentials.ConfigureDynamicClient(serverID, metadata.Issuer, response.ClientID)
+}
+
+func registerDynamicPublicClient(ctx context.Context, client *http.Client, endpoint, redirectURI string) (dynamicClientRegistrationResponse, error) {
+	if err := validateOAuthEndpoint(endpoint); err != nil {
+		return dynamicClientRegistrationResponse{}, fmt.Errorf("dynamic registration endpoint: %w", err)
+	}
+	payload := dynamicClientRegistrationRequest{
+		ClientName:              "OmniLLM Studio",
+		RedirectURIs:            []string{redirectURI},
+		GrantTypes:              []string{"authorization_code", "refresh_token"},
+		ResponseTypes:           []string{"code"},
+		TokenEndpointAuthMethod: models.MCPOAuthAuthMethodNone,
+		ApplicationType:         oauthApplicationType(redirectURI),
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return dynamicClientRegistrationResponse{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
+	if err != nil {
+		return dynamicClientRegistrationResponse{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return dynamicClientRegistrationResponse{}, fmt.Errorf("dynamic OAuth client registration: %w", err)
+	}
+	defer response.Body.Close()
+	limited, err := io.ReadAll(io.LimitReader(response.Body, mcpOAuthMetadataMaxBody+1))
+	if err != nil {
+		return dynamicClientRegistrationResponse{}, err
+	}
+	if len(limited) > mcpOAuthMetadataMaxBody {
+		return dynamicClientRegistrationResponse{}, fmt.Errorf("dynamic registration response is too large")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return dynamicClientRegistrationResponse{}, fmt.Errorf("dynamic registration endpoint returned HTTP %d", response.StatusCode)
+	}
+	var result dynamicClientRegistrationResponse
+	if err := json.Unmarshal(limited, &result); err != nil {
+		return result, fmt.Errorf("decode dynamic registration response: %w", err)
+	}
+	result.ClientID = strings.TrimSpace(result.ClientID)
+	if result.ClientID == "" {
+		return result, fmt.Errorf("dynamic registration response did not include client_id")
+	}
+	method := strings.TrimSpace(result.TokenEndpointAuthMethod)
+	if method == "" {
+		method = models.MCPOAuthAuthMethodNone
+	}
+	if method != models.MCPOAuthAuthMethodNone {
+		return result, fmt.Errorf("dynamic registration returned unsupported token auth method %q; Omni requests a public client", method)
+	}
+	result.TokenEndpointAuthMethod = method
+	return result, nil
+}
+
 // CompleteAuthorization validates one-time state and exchanges the authorization
 // code for resource-bound tokens.
 func (s *OAuthService) CompleteAuthorization(ctx context.Context, state, code, issuer string) (string, error) {
@@ -367,6 +476,26 @@ func (s *OAuthService) CompleteAuthorization(ctx context.Context, state, code, i
 		return "", err
 	}
 	return pending.ServerID, nil
+}
+
+// RecordScopeChallenge persists the union of previously granted/requested scopes
+// and the newly challenged scopes for an explicit authorization-code step-up.
+func (s *OAuthService) RecordScopeChallenge(serverID string, scopes []string) error {
+	credential, err := s.credentials.GetRuntime(serverID)
+	if err != nil {
+		return err
+	}
+	if credential == nil || credential.ClientID == "" {
+		return ErrMCPOAuthNotConfigured
+	}
+	combined := append([]string{}, strings.Fields(credential.Scope)...)
+	combined = append(combined, strings.Fields(credential.RequiredScope)...)
+	combined = append(combined, scopes...)
+	required := strings.Join(uniqueSortedStrings(combined), " ")
+	if required == "" {
+		return fmt.Errorf("insufficient_scope challenge did not include a scope")
+	}
+	return s.credentials.SaveRequiredScope(serverID, required)
 }
 
 // AccessToken returns a valid resource-bound access token, refreshing it before
