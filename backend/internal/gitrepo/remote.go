@@ -44,7 +44,8 @@ type RemoteStatusResult struct {
 
 // RemoteService owns operator-configured outbound Git endpoints. The transport
 // is dedicated to this service so remote status does not alter process-wide HTTP
-// or go-git transport behavior.
+// or go-git transport behavior. local is the same configured Service used by the
+// local Git tools so network mutations share its write serialization and gate.
 type RemoteService struct {
 	remotes     map[string]RemoteConfig
 	ids         []string
@@ -52,6 +53,7 @@ type RemoteService struct {
 	pushEnabled bool
 	transport   transport.Transport
 	lookupEnv   func(string) (string, bool)
+	local       *Service
 }
 
 // NewRemoteServiceFromEnvironment constructs the remote service from operator
@@ -67,7 +69,9 @@ func NewRemoteServiceFromEnvironment(local *Service) *RemoteService {
 			}
 		}
 	}
-	return newRemoteService(filtered, boolEnvironment(RemoteEnabledEnv), boolEnvironment(RemotePushEnabledEnv), newRemoteStatusTransport(), os.LookupEnv)
+	service := newRemoteService(filtered, boolEnvironment(RemoteEnabledEnv), boolEnvironment(RemotePushEnabledEnv), newRemoteStatusTransport(), os.LookupEnv)
+	service.local = local
+	return service
 }
 
 func newRemoteService(configured map[string]RemoteConfig, enabled, pushEnabled bool, remoteTransport transport.Transport, lookupEnv func(string) (string, bool)) *RemoteService {
