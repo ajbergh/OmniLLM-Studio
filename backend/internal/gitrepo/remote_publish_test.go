@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,6 +154,85 @@ func TestPublishBranchUsesZeroHashCreateCAS(t *testing.T) {
 	if err != nil || tracking.Hash() != head {
 		t.Fatalf("tracking ref = %#v, %v; want %s", tracking, err, head)
 	}
+}
+
+func TestPublishBranchRejectsStaleRemoteBranchState(t *testing.T) {
+	svc, _, head, transport, advertised := newPublishBranchTestService(t, "feature/stale")
+	staleDigest := strings.Repeat("a", 64)
+	if staleDigest == remoteBranchStateDigest(advertised) {
+		staleDigest = strings.Repeat("b", 64)
+	}
+	_, err := svc.PublishBranch(context.Background(), "origin", "feature/stale", head.String(), staleDigest)
+	if err == nil || !strings.Contains(err.Error(), "remote branch state changed") {
+		t.Fatalf("PublishBranch() error = %v, want stale remote-state rejection", err)
+	}
+	if transport.session.command != nil {
+		t.Fatal("receive-pack command was sent after stale remote-state rejection")
+	}
+}
+
+func TestPublishBranchRejectsExistingRemoteBranch(t *testing.T) {
+	svc, _, head, transport, advertised := newPublishBranchTestService(t, "feature/existing")
+	advertised.References[plumbing.NewBranchReferenceName("feature/existing").String()] = plumbing.NewHash("7777777777777777777777777777777777777777")
+	digest := remoteBranchStateDigest(advertised)
+	_, err := svc.PublishBranch(context.Background(), "origin", "feature/existing", head.String(), digest)
+	if err == nil || !strings.Contains(err.Error(), "already advertises branch") {
+		t.Fatalf("PublishBranch() error = %v, want existing-branch rejection", err)
+	}
+	if transport.session.command != nil {
+		t.Fatal("receive-pack command was sent for an existing remote branch")
+	}
+}
+
+func newPublishBranchTestService(t *testing.T, branch string) (*RemoteService, *git.Repository, plumbing.Hash, *publishTestTransport, *packp.AdvRefs) {
+	t.Helper()
+	repoDir := t.TempDir()
+	repo, err := git.PlainInit(repoDir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree, err := repo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.Add("base.txt"); err != nil {
+		t.Fatal(err)
+	}
+	base, err := worktree.Commit("base", &git.CommitOptions{Author: &object.Signature{
+		Name: "Publish Test", Email: "publish-test@example.invalid", When: time.Unix(1_700_000_000, 0).UTC(),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worktree.Checkout(&git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName(branch), Create: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.Add("feature.txt"); err != nil {
+		t.Fatal(err)
+	}
+	head, err := worktree.Commit("feature", &git.CommitOptions{Author: &object.Signature{
+		Name: "Publish Test", Email: "publish-test@example.invalid", When: time.Unix(1_700_000_100, 0).UTC(),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	advertised := packp.NewAdvRefs()
+	advertised.References["refs/heads/main"] = base
+	advertised.Head = &base
+	remoteTransport := &publishTestTransport{session: &publishTestReceiveSession{advertised: advertised}}
+	local := NewServiceWithWriteAccess(map[string]string{"repo": repoDir}, true)
+	svc := newRemoteService(map[string]RemoteConfig{
+		"origin": {Repository: "repo", URL: "https://example.com/repo.git", AllowPush: true, AllowBranchCreate: true},
+	}, true, true, remoteTransport, nil)
+	svc.local = local
+	svc.branchCreateEnabled = true
+	return svc, repo, head, remoteTransport, advertised
 }
 
 type publishTestTransport struct {
