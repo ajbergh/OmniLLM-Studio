@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -30,7 +31,7 @@ func insertToolInvocationForTest(t *testing.T, db *sql.DB, id, userID, toolName,
 			duration_ms, result_bytes, retry_count, created_at
 		) VALUES (?, ?, ?, ?, ?, 'approved', ?, ?, ?, ?, 25, 128, 1, datetime('now', ?))
 	`, id, "call-"+id, toolName, userID, status, "conversation-"+id, "run-"+id,
-		`{"secret":"must-not-be-returned"}`, `{"private":"result"}`, "-"+string(rune('0'+minutesAgo))+" minutes"); err != nil {
+		`{"secret":"must-not-be-returned"}`, `{"private":"result"}`, fmt.Sprintf("-%d minutes", minutesAgo)); err != nil {
 		t.Fatalf("insert invocation %s: %v", id, err)
 	}
 }
@@ -70,7 +71,7 @@ func TestToolInvocationRepoCapsLimit(t *testing.T) {
 	defer db.Close()
 
 	for i := 0; i < 205; i++ {
-		id := "invocation-" + string(rune(0x1000+i))
+		id := fmt.Sprintf("invocation-%03d", i)
 		insertToolInvocationForTest(t, db, id, "user-a", "calculator", "tool_completed", 1)
 	}
 
