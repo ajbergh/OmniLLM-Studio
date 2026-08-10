@@ -1,0 +1,40 @@
+name: Harden assistant resume v2
+
+on:
+  push:
+    branches:
+      - feat/assistant-profiles-skills-main-20260809
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: backend/go.sum
+      - name: Apply source patch
+        run: python3 .github/scripts/harden_assistant_resume.py
+      - name: Format Go
+        run: gofmt -w backend/internal/models/models.go backend/internal/repository/agent_run.go backend/internal/agent/runner.go backend/internal/api/agent_handler.go backend/internal/db/db.go
+      - name: Validate backend
+        working-directory: backend
+        run: |
+          go test ./internal/repository ./internal/agent ./internal/api ./internal/db
+          go vet ./internal/repository ./internal/agent ./internal/api ./internal/db
+      - name: Commit final source
+        run: |
+          rm .github/workflows/harden-assistant-resume-v2.yml
+          rm .github/scripts/harden_assistant_resume.py
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(agent): preserve assistant profile scope across resume"
+          git push origin HEAD
