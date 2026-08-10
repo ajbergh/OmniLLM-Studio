@@ -38,11 +38,11 @@ type RemoteConfig struct {
 // RemoteSummary describes a configured remote without exposing its URL,
 // credential-variable name, or credential value.
 type RemoteSummary struct {
-	ID                      string `json:"id"`
-	Repository              string `json:"repository"`
-	Host                    string `json:"host"`
-	AuthenticationConfigured bool  `json:"authentication_configured"`
-	PushAllowed             bool   `json:"push_allowed"`
+	ID                       string `json:"id"`
+	Repository               string `json:"repository"`
+	Host                     string `json:"host"`
+	AuthenticationConfigured bool   `json:"authentication_configured"`
+	PushAllowed              bool   `json:"push_allowed"`
 }
 
 // ParseRemoteConfig parses the operator-controlled JSON remote map. Invalid
