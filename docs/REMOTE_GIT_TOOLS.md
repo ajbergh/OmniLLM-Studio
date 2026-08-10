@@ -130,7 +130,7 @@ The caller cannot choose a URL, local path, remote refspec, credentials, transfe
 The selected remote is already bound to a repository ID in `OMNILLM_GIT_REPOSITORIES`. For clone:
 
 1. the configured destination path must be absent;
-2. its immediate parent must already exist as a real directory rather than a symlink;
+2. its parent directory must already exist, and the parent path may not itself be or traverse symlinked directories;
 3. OmniLLM-Studio creates a private `0700` sibling temporary directory;
 4. all Git object ingestion and worktree checkout happen inside that temporary directory;
 5. the repository must validate as clean with the exact reviewed branch and HEAD;
@@ -146,7 +146,7 @@ Clone uses the same dedicated SSRF-guarded upload-pack transport as fetch rather
 
 Immediately before transfer, the remote is re-advertised and the selected branch must still equal `expected_remote_head`. The request wants exactly that reviewed commit and disables thin-pack and sideband modes so the received Git pack can be bounded and validated directly.
 
-The clone pack is limited to the smaller of the configured clone byte budget or **128 MiB compressed**. Before object ingestion, the Git pack header must be valid pack version 2 or 3 and may declare at most **200,000 objects**. These limits bound compressed network/storage input and many-small-object CPU/memory amplification independently of checkout size.
+The clone pack is limited to the smaller of the configured clone byte budget or **128 MiB compressed**. Before object ingestion, the Git pack header must use the pack version supported by the pinned go-git implementation (**version 2** in go-git v5.19.2) and may declare at most **200,000 objects**. These limits bound compressed network/storage input and many-small-object CPU/memory amplification independently of checkout size.
 
 ### Shared clone storage quota
 
@@ -158,9 +158,11 @@ The temporary worktree filesystem and its `.git` chroot share one quota object. 
 - file expansion through truncate;
 - symlink target bytes.
 
-The cumulative entry budget counts files, directories, symlinks, and temporary files created through the guarded filesystem. Entry reservations are intentionally conservative and are not refunded on removal, so retries or partial failures cannot manufacture quota credit.
+The cumulative entry budget counts files, directories, symlinks, and temporary files created through the guarded filesystem. Missing parent directories that Billy would create implicitly through `Create`, `OpenFile`, `Rename`, or `TempFile` are admitted and charged before filesystem mutation. Empty-directory `TempFile` calls are forced into the clone-local root rather than the process-wide host temp directory. Entry reservations are intentionally conservative and are not refunded on removal, so retries or partial failures cannot manufacture quota credit.
 
 The byte counter is also intentionally conservative on ambiguous filesystem failures. A failed truncate expansion keeps its reservation because a filesystem may have partially mutated before returning an error.
+
+The staging filesystem uses Billy's bounded OS implementation so filesystem operations are securely joined beneath the private clone root even after symlinks are created during checkout. The `.git` directory is explicitly created through the quota wrapper before the storage filesystem is chrooted into it, so the repository metadata root itself consumes the shared entry budget.
 
 These are **hard application-level logical-content and entry ceilings** on clone writes made through the guarded Billy filesystem. They are not a promise that physical disk-block or filesystem-metadata allocation equals the logical byte count; block size, journals, inode tables, copy-on-write behavior, and filesystem implementation add overhead. Deployments requiring an exact physical disk-consumption boundary should additionally place configured clone storage inside an OS/filesystem-enforced quota. The application entry limit prevents an attacker from using an unlimited tree of zero-byte files to bypass the logical byte budget.
 
@@ -206,7 +208,7 @@ A stale local HEAD, changed local branch, changed remote head, missing fetched t
 
 ## Validation
 
-Focused backend tests cover remote configuration rejection, credential indirection, global write/network/push/clone gates, required clone budgets, remote tool metadata and strict argument contracts, fetch transfer limiting, isolated tracking refs, push default-branch policy, push transfer limiting, clone destination admission, clone pack-header/object-count validation, shared clone byte/entry quota, sparse-write and truncate expansion, symlink accounting, and registry gating.
+Focused backend tests cover remote configuration rejection, credential indirection, global write/network/push/clone gates, required clone budgets, remote tool metadata and strict argument contracts, fetch transfer limiting, isolated tracking refs, push default-branch policy, push transfer limiting, clone destination admission, clone pack-header/object-count validation, shared clone byte/entry quota, sparse-write and truncate expansion, symlink accounting, implicit parent-directory accounting, clone-local temporary-file confinement, registry gating, and an end-to-end fake-transport clone that generates a real Git pack, checks out the reviewed commit, validates a clean repository, atomically promotes it, and verifies no staging directory remains.
 
 Existing repository-wide checks exercise the new code through formatting, vet, unit/integration tests, race detection, Windows desktop compilation, frontend validation, dependency audits, CodeQL, Playwright smoke coverage, Helm validation, and container image builds.
 
