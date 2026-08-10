@@ -19,6 +19,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/auth"
 	"github.com/ajbergh/omnillm-studio/internal/browser"
 	"github.com/ajbergh/omnillm-studio/internal/bundle"
+	"github.com/ajbergh/omnillm-studio/internal/codesandbox"
 	"github.com/ajbergh/omnillm-studio/internal/config"
 	evalsvc "github.com/ajbergh/omnillm-studio/internal/eval"
 	"github.com/ajbergh/omnillm-studio/internal/filelibrary"
@@ -204,6 +205,14 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 		"browser_session",
 	})
 	toolExecutor := tools.NewExecutor(toolRegistry, toolPermRepo.PolicyResolver(), 0)
+	toolRegistry.MustRegister(tools.NewToolBatch(toolExecutor))
+	if sandboxURL := os.Getenv("OMNILLM_CODE_SANDBOX_URL"); sandboxURL != "" {
+		if sandboxClient, sandboxErr := codesandbox.New(sandboxURL); sandboxErr != nil {
+			log.Printf("WARN: code sandbox disabled: %v", sandboxErr)
+		} else {
+			toolRegistry.MustRegister(tools.NewCodeSandboxTool(sandboxClient))
+		}
+	}
 	toolHandler := NewToolHandler(toolRegistry, toolExecutor, toolPermRepo)
 	openAPIManager := openapiruntime.NewManager(openAPIServerRepo, toolPermRepo, toolRegistry)
 	if err := openAPIManager.LoadEnabled(context.Background()); err != nil {

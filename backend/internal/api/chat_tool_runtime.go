@@ -104,6 +104,12 @@ func preferredChatToolNames(prompt string) []string {
 	if containsAny(prompt, "artifact", "spreadsheet", "presentation", "document export") {
 		add("artifact_generate")
 	}
+	if containsAny(prompt, "run code", "execute code", "code sandbox", "sandbox", "run python", "run javascript", "run shell") {
+		add("code_execute")
+	}
+	if containsAny(prompt, "batch tools", "multiple tools", "tool batch") {
+		add("tool_batch")
+	}
 	if containsAny(prompt, "python", "analyze data", "dataset", "csv") {
 		add("python_analysis")
 	}

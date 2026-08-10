@@ -1,11 +1,17 @@
 package agent
 
-import "context"
+import (
+	"context"
+
+	"github.com/ajbergh/omnillm-studio/internal/tools"
+)
 
 type allowedToolsContextKey struct{}
 
 // ContextWithAllowedTools restricts an Agent run to a saved profile's tool set.
-// A nil/empty list means unrestricted for backwards compatibility.
+// A nil/empty list means unrestricted for backwards compatibility. The generic
+// tool restriction is also propagated so nested orchestration cannot escape the
+// Assistant Profile's allowed-tool boundary.
 func ContextWithAllowedTools(ctx context.Context, names []string) context.Context {
 	if len(names) == 0 {
 		return ctx
@@ -19,6 +25,7 @@ func ContextWithAllowedTools(ctx context.Context, names []string) context.Contex
 	if len(allowed) == 0 {
 		return ctx
 	}
+	ctx = tools.ContextWithToolRestriction(ctx, names)
 	return context.WithValue(ctx, allowedToolsContextKey{}, allowed)
 }
 
