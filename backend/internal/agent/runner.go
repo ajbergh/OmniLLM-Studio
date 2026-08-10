@@ -465,6 +465,9 @@ func (r *Runner) executeToolCall(ctx context.Context, rc *runContext, run *model
 	if toolName == "" {
 		return "", fmt.Errorf("tool_call step missing tool_name")
 	}
+	if !toolAllowedByContext(ctx, toolName) {
+		return "", fmt.Errorf("tool %q is excluded by the active assistant profile", toolName)
+	}
 	args := json.RawMessage(`{}`)
 	if step.InputJSON != "" && step.InputJSON != "{}" {
 		args = json.RawMessage(step.InputJSON)

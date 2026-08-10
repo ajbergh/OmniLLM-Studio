@@ -133,7 +133,7 @@ export const agentRuntimeApi = {
 
   startRun: (
     conversationId: string,
-    request: { goal: string; provider?: string; model?: string; profile?: AgentProfile; budgets?: AgentRunBudgets },
+    request: { goal: string; provider?: string; model?: string; profile?: AgentProfile; budgets?: AgentRunBudgets; assistant_profile_id?: string },
     onEvent: (event: AgentStreamEvent) => void,
   ) => streamAgent(`/v1/conversations/${encodeURIComponent(conversationId)}/agent/run`, request, onEvent),
 

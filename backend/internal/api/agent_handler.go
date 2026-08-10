@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,15 +20,17 @@ import (
 
 // AgentHandler exposes checkpointed Agent and Research mode endpoints.
 type AgentHandler struct {
-	runner    *agent.Runner
-	runRepo   *repository.AgentRunRepo
-	stepRepo  *repository.AgentStepRepo
-	msgRepo   *repository.MessageRepo
-	convoRepo *repository.ConversationRepo
+	runner        *agent.Runner
+	runRepo       *repository.AgentRunRepo
+	stepRepo      *repository.AgentStepRepo
+	msgRepo       *repository.MessageRepo
+	convoRepo     *repository.ConversationRepo
+	assistantRepo *repository.AssistantProfileRepo
+	skillRepo     *repository.SkillRepo
 }
 
-func NewAgentHandler(runner *agent.Runner, runRepo *repository.AgentRunRepo, stepRepo *repository.AgentStepRepo, msgRepo *repository.MessageRepo, convoRepo *repository.ConversationRepo) *AgentHandler {
-	return &AgentHandler{runner: runner, runRepo: runRepo, stepRepo: stepRepo, msgRepo: msgRepo, convoRepo: convoRepo}
+func NewAgentHandler(runner *agent.Runner, runRepo *repository.AgentRunRepo, stepRepo *repository.AgentStepRepo, msgRepo *repository.MessageRepo, convoRepo *repository.ConversationRepo, assistantRepo *repository.AssistantProfileRepo, skillRepo *repository.SkillRepo) *AgentHandler {
+	return &AgentHandler{runner: runner, runRepo: runRepo, stepRepo: stepRepo, msgRepo: msgRepo, convoRepo: convoRepo, assistantRepo: assistantRepo, skillRepo: skillRepo}
 }
 
 // StartRun starts a new checkpointed run and streams lifecycle events. The
@@ -63,7 +66,44 @@ func (h *AgentHandler) StartRun(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
+	userID := auth.ScopeUserIDFromContext(r.Context())
+	var savedProfile *models.AssistantProfile
+	if req.AssistantProfileID != "" {
+		if h.assistantRepo == nil {
+			respondError(w, http.StatusServiceUnavailable, "assistant profiles unavailable")
+			return
+		}
+		savedProfile, err = h.assistantRepo.Get(userID, req.AssistantProfileID)
+		if err != nil {
+			respondInternalError(w, err)
+			return
+		}
+		if savedProfile == nil {
+			respondError(w, http.StatusNotFound, "assistant profile not found")
+			return
+		}
+		if req.Provider == "" {
+			req.Provider = savedProfile.Provider
+		}
+		if req.Model == "" {
+			req.Model = savedProfile.Model
+		}
+	}
 	resolveAgentProviderModel(convo, &req.Provider, &req.Model)
+	if savedProfile != nil {
+		if strings.TrimSpace(savedProfile.SystemPrompt) != "" {
+			history = append([]llm.ChatMessage{{Role: "system", Content: "ASSISTANT PROFILE INSTRUCTIONS:\n" + savedProfile.SystemPrompt}}, history...)
+		}
+		if h.skillRepo != nil {
+			for _, skillID := range savedProfile.SkillIDs {
+				skill, skillErr := h.skillRepo.Get(userID, skillID)
+				if skillErr == nil && skill != nil && skill.Enabled {
+					history = append([]llm.ChatMessage{{Role: "system", Content: "ATTACHED SKILL " + skill.Name + ":\n" + skill.BodyMarkdown}}, history...)
+				}
+			}
+		}
+		r = r.WithContext(agent.ContextWithAllowedTools(r.Context(), savedProfile.ToolNames))
+	}
 
 	flusher, onEvent, ok := prepareAgentSSE(w)
 	if !ok {

@@ -144,6 +144,7 @@ func versionedMigrations() []Migration {
 		{Version: 41, Name: "video_render_job_metadata", SQL: migrationVideoRenderJobMetadata},
 		{Version: 42, Name: "agent_runtime", SQL: migrationAgentRuntime},
 		{Version: 43, Name: "video_transcriptions", SQL: migrationVideoTranscriptions},
+		{Version: 44, Name: "assistant_profiles_skills", SQL: migrationAssistantProfilesSkills},
 	}
 }
 
@@ -1275,4 +1276,37 @@ CREATE TABLE IF NOT EXISTS video_transcript_segments (
     words_json TEXT NOT NULL DEFAULT '[]'
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_video_transcript_segments_order ON video_transcript_segments(transcript_id, segment_index);
+`
+
+// V44: Reusable Assistant Profiles and progressively loaded Markdown Skills.
+const migrationAssistantProfilesSkills = `
+CREATE TABLE IF NOT EXISTS assistant_profiles (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL DEFAULT '',
+    workspace_id TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    system_prompt TEXT NOT NULL DEFAULT '',
+    tool_names_json TEXT NOT NULL DEFAULT '[]',
+    skill_ids_json TEXT NOT NULL DEFAULT '[]',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_assistant_profiles_owner ON assistant_profiles(owner_user_id, name);
+CREATE INDEX IF NOT EXISTS idx_assistant_profiles_workspace ON assistant_profiles(workspace_id, name);
+CREATE TABLE IF NOT EXISTS skills (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL DEFAULT '',
+    workspace_id TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    body_markdown TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_owner_name ON skills(owner_user_id, name);
+CREATE INDEX IF NOT EXISTS idx_skills_workspace ON skills(workspace_id, name);
 `
