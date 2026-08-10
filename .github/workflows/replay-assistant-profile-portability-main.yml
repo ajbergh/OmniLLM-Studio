@@ -1,0 +1,60 @@
+name: Replay Assistant Profile portability onto final main
+
+on:
+  push:
+    branches:
+      - feat/assistant-profile-portability-main-20260809
+
+permissions:
+  contents: write
+
+jobs:
+  replay:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Replay validated portability delta
+        run: |
+          git fetch origin feat/assistant-profile-portability-20260809
+          git diff 497b83de34efaeba920c9c63c61e1267617cee96..origin/feat/assistant-profile-portability-20260809 -- \
+            backend/internal/api/assistant_profile_handler.go \
+            backend/internal/api/assistant_profile_portability_test.go \
+            backend/internal/api/router.go \
+            backend/internal/models/assistant_profile_bundle.go \
+            backend/internal/repository/assistant_profile_portability.go \
+            docs/ASSISTANT_PROFILE_PORTABILITY_2026-08.md \
+            frontend/src/assistantProfilesApi.ts \
+            frontend/src/components/AssistantProfilesPanel.tsx | git apply --index
+      - name: Validate backend
+        working-directory: backend
+        run: |
+          gofmt -w internal/models/assistant_profile_bundle.go internal/repository/assistant_profile_portability.go internal/api/assistant_profile_handler.go internal/api/assistant_profile_portability_test.go internal/api/router.go
+          go test ./internal/repository ./internal/api
+          go vet ./internal/repository ./internal/api
+      - name: Validate frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run test:unit
+          npm run build
+      - name: Commit clean portability replay
+        run: |
+          rm .github/workflows/replay-assistant-profile-portability-main.yml
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat(agent): add portable Assistant Profile bundles"
+          git push origin HEAD
