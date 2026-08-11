@@ -104,6 +104,35 @@ func TestProviderRetryAppliesToolResultBoundaryBeforeTransport(t *testing.T) {
 	}
 }
 
+func TestNativeSearchTransportProtectsStreamingToolEvidenceWithoutSearchMarker(t *testing.T) {
+	body := []byte(`{"model":"test","messages":[{"role":"system","content":"base"},{"role":"tool","content":"streamed hosted text","tool_call_id":"call_1","name":"fetch"}],"stream":true}`)
+	var captured []byte
+	base := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var err error
+		captured, err = io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		return &http.Response{StatusCode: http.StatusBadRequest, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})
+	transport := &nativeSearchTransport{base: base}
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://provider.example/chat/completions", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatalf("RoundTrip() returned error: %v", err)
+	}
+	if response != nil {
+		response.Body.Close()
+	}
+	messages := decodeTrustTestMessages(t, captured)
+	if len(messages) != 3 || messages[1].Content != UntrustedToolResultSystemDirective || messages[2].Role != "tool" {
+		t.Fatalf("stream transport received unprotected messages: %#v", messages)
+	}
+}
+
 func decodeTrustTestMessages(t *testing.T, body []byte) []ChatMessage {
 	t.Helper()
 	var envelope struct {
