@@ -57,8 +57,15 @@ func TestGitHubPullRequestReviewReplyToolReturnsBoundedConfirmation(t *testing.T
 	}}
 	tool := &githubPullRequestReviewReplyTool{service: reader}
 	result, err := tool.Execute(context.Background(), json.RawMessage(`{"remote":"origin","number":7,"expected_head":"`+head+`","comment_id":91,"expected_review_id":44,"expected_updated_at":"2026-08-11T10:00:00Z","body":"Addressed."}`))
-	if err != nil || result == nil || result.IsError || len(result.Structured) == 0 || !strings.Contains(result.Content, `"reply_id":92`) {
+	if err != nil || result == nil || result.IsError || len(result.Structured) == 0 {
 		t.Fatalf("Execute() = %#v, %v", result, err)
+	}
+	var confirmation gitrepo.GitHubPullRequestReviewReplyResult
+	if err := json.Unmarshal(result.Structured, &confirmation); err != nil {
+		t.Fatalf("decode structured result: %v", err)
+	}
+	if confirmation.ReplyID != 92 || confirmation.ParentCommentID != 91 || confirmation.ReviewID != 44 || !confirmation.Posted {
+		t.Fatalf("unexpected structured confirmation: %#v", confirmation)
 	}
 }
 
