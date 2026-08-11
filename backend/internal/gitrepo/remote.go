@@ -51,20 +51,21 @@ type RemoteStatusResult struct {
 // same configured Service used by local Git tools so reviewed local state can be
 // bound to network mutations.
 type RemoteService struct {
-	remotes                      map[string]RemoteConfig
-	ids                          []string
-	enabled                      bool
-	pushEnabled                  bool
-	branchCreateEnabled          bool
-	githubPullRequestEnabled     bool
-	githubPullRequestReadEnabled bool
-	cloneEnabled                 bool
-	cloneMaxBytes                int64
-	cloneMaxEntries              int64
-	transport                    transport.Transport
-	githubClient                 *http.Client
-	lookupEnv                    func(string) (string, bool)
-	local                        *Service
+	remotes                       map[string]RemoteConfig
+	ids                           []string
+	enabled                       bool
+	pushEnabled                   bool
+	branchCreateEnabled           bool
+	githubPullRequestEnabled      bool
+	githubPullRequestReadEnabled  bool
+	githubPullRequestReplyEnabled bool
+	cloneEnabled                  bool
+	cloneMaxBytes                 int64
+	cloneMaxEntries               int64
+	transport                     transport.Transport
+	githubClient                  *http.Client
+	lookupEnv                     func(string) (string, bool)
+	local                         *Service
 }
 
 // NewRemoteServiceFromEnvironment constructs the remote service from operator
@@ -85,6 +86,7 @@ func NewRemoteServiceFromEnvironment(local *Service) *RemoteService {
 	service.branchCreateEnabled = boolEnvironment(RemoteBranchCreateEnabledEnv)
 	service.githubPullRequestEnabled = boolEnvironment(GitHubPullRequestEnabledEnv)
 	service.githubPullRequestReadEnabled = boolEnvironment(GitHubPullRequestReadEnabledEnv)
+	service.githubPullRequestReplyEnabled = boolEnvironment(GitHubPullRequestReplyEnabledEnv)
 	if maxBytes, maxEntries, ok := cloneLimitsFromEnvironment(); ok {
 		service.cloneMaxBytes = maxBytes
 		service.cloneMaxEntries = maxEntries
@@ -128,9 +130,15 @@ func (s *RemoteService) GitHubPullRequestEnabled() bool {
 }
 
 // GitHubPullRequestReadEnabled reports the independent process-wide gate for
-// read-only pull request and CI/check inspection through the GitHub API.
+// read-only pull request, CI/check, and hosted feedback inspection.
 func (s *RemoteService) GitHubPullRequestReadEnabled() bool {
 	return s != nil && s.githubPullRequestReadEnabled
+}
+
+// GitHubPullRequestReplyEnabled reports the independent process-wide gate for
+// posting replies to existing top-level inline review comments.
+func (s *RemoteService) GitHubPullRequestReplyEnabled() bool {
+	return s != nil && s.githubPullRequestReplyEnabled
 }
 
 // PushMutationEnabled reports whether the process has enabled all global gates
@@ -160,6 +168,13 @@ func (s *RemoteService) GitHubPullRequestMutationEnabled() bool {
 	return s != nil && s.Enabled() && s.GitHubPullRequestEnabled() && s.local != nil
 }
 
+// GitHubPullRequestReplyMutationEnabled reports whether the process permits the
+// hosted communication mutation. It is intentionally independent from Git push,
+// local Git writes, draft-PR creation, and read-only PR inspection.
+func (s *RemoteService) GitHubPullRequestReplyMutationEnabled() bool {
+	return s != nil && s.Enabled() && s.GitHubPullRequestReplyEnabled()
+}
+
 // CloneMutationEnabled reports whether all process-wide clone prerequisites are
 // present. Per-remote allow_clone and destination state are checked by Clone.
 func (s *RemoteService) CloneMutationEnabled() bool {
@@ -187,6 +202,7 @@ func (s *RemoteService) Remotes(ctx context.Context) []RemoteSummary {
 			BranchCreateAllowed:      s.BranchCreateMutationEnabled() && remote.AllowPush && remote.AllowBranchCreate,
 			PullRequestReadAllowed:   s.GitHubPullRequestReadAccessEnabled() && remoteSupportsGitHubPullRequestRead(remote),
 			PullRequestCreateAllowed: s.GitHubPullRequestMutationEnabled() && remoteSupportsGitHubPullRequests(remote),
+			PullRequestReplyAllowed:  s.GitHubPullRequestReplyMutationEnabled() && remoteSupportsGitHubPullRequestReply(remote),
 			DefaultBranchPushAllowed: s.PushMutationEnabled() && remote.AllowPush && remote.AllowDefaultBranchPush,
 			CloneAllowed:             s.CloneMutationEnabled() && remote.AllowClone,
 		})
