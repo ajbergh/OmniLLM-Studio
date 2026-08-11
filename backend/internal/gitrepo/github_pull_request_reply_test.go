@@ -66,6 +66,27 @@ func TestReplyToPullRequestReviewCommentRevalidatesStateAndPostsBoundedBody(t *t
 	}
 }
 
+func TestReplyToPullRequestReviewCommentRejectsClosedPullRequestBeforeCommentLookup(t *testing.T) {
+	svc := newGitHubPullRequestReplyTestService()
+	head := strings.Repeat("a", 40)
+	calls := 0
+	svc.githubClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if request.URL.Path != "/repos/example/repo/pulls/7" {
+			t.Fatalf("unexpected request after closed PR: %s", request.URL.Path)
+		}
+		return jsonHTTPResponse(http.StatusOK, `{"number":7,"html_url":"https://github.com/example/repo/pull/7","title":"Reply","state":"closed","head":{"ref":"feature/reply","sha":"`+head+`"},"base":{"ref":"main"}}`), nil
+	})}
+
+	_, err := svc.ReplyToPullRequestReviewComment(context.Background(), "origin", 7, head, 91, 44, "2026-08-11T10:00:00Z", "reply")
+	if err == nil || !strings.Contains(err.Error(), "no longer open") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("GitHub calls = %d, want 1", calls)
+	}
+}
+
 func TestReplyToPullRequestReviewCommentRejectsStaleHeadBeforeCommentLookup(t *testing.T) {
 	svc := newGitHubPullRequestReplyTestService()
 	expectedHead := strings.Repeat("a", 40)
@@ -120,6 +141,43 @@ func TestReplyToPullRequestReviewCommentRejectsEditedOrNestedCommentBeforePost(t
 			}
 			if posts != 0 {
 				t.Fatalf("reply POST attempted after failed revalidation")
+			}
+		})
+	}
+}
+
+func TestReplyToPullRequestReviewCommentRequiresInspectionAfterAmbiguousPostOutcome(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		postStatus int
+		postBody   string
+		want       string
+	}{
+		{name: "provider error", postStatus: http.StatusInternalServerError, postBody: `{"message":"secret-provider-detail"}`, want: "outcome is unknown"},
+		{name: "invalid success response", postStatus: http.StatusCreated, postBody: `{}`, want: "outcome could not be validated"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc := newGitHubPullRequestReplyTestService()
+			head := strings.Repeat("a", 40)
+			svc.githubClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				switch request.Method + " " + request.URL.Path {
+				case "GET /repos/example/repo/pulls/7":
+					return jsonHTTPResponse(http.StatusOK, `{"number":7,"html_url":"https://github.com/example/repo/pull/7","title":"Reply","state":"open","head":{"ref":"feature/reply","sha":"`+head+`"},"base":{"ref":"main"}}`), nil
+				case "GET /repos/example/repo/pulls/comments/91":
+					return jsonHTTPResponse(http.StatusOK, `{"id":91,"pull_request_review_id":44,"pull_request_url":"https://api.github.com/repos/example/repo/pulls/7","updated_at":"2026-08-11T10:00:00Z"}`), nil
+				case "POST /repos/example/repo/pulls/7/comments/91/replies":
+					return jsonHTTPResponse(test.postStatus, test.postBody), nil
+				default:
+					t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+					return nil, nil
+				}
+			})}
+			_, err := svc.ReplyToPullRequestReviewComment(context.Background(), "origin", 7, head, 91, 44, "2026-08-11T10:00:00Z", "reply")
+			if err == nil || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "inspect feedback before retrying") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if strings.Contains(err.Error(), "secret-provider-detail") {
+				t.Fatalf("provider error body leaked: %v", err)
 			}
 		})
 	}
