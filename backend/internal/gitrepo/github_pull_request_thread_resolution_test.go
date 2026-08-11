@@ -123,10 +123,10 @@ func TestSetPullRequestReviewThreadResolvedRejectsInvalidRequestBeforeNetwork(t 
 
 func TestSetPullRequestReviewThreadResolvedRejectsClosedOrStalePullRequestBeforeThreadLookup(t *testing.T) {
 	for _, test := range []struct {
-		name       string
-		state      string
+		name        string
+		state       string
 		currentHead string
-		want       string
+		want        string
 	}{
 		{name: "closed", state: "closed", currentHead: strings.Repeat("a", 40), want: "no longer open"},
 		{name: "stale head", state: "open", currentHead: strings.Repeat("b", 40), want: "head changed"},
@@ -202,10 +202,10 @@ func TestSetPullRequestReviewThreadResolvedRejectsChangedThreadStateBeforeMutati
 
 func TestSetPullRequestReviewThreadResolvedRequiresInspectionAfterAmbiguousMutation(t *testing.T) {
 	for _, test := range []struct {
-		name       string
-		status     int
+		name         string
+		status       int
 		mutationBody string
-		want       string
+		want         string
 	}{
 		{name: "provider error", status: http.StatusInternalServerError, mutationBody: `{"message":"secret-provider-detail"}`, want: "outcome is unknown"},
 		{name: "graphql error", status: http.StatusOK, mutationBody: `{"errors":[{"message":"secret-provider-detail"}]}`, want: "outcome is unknown"},
