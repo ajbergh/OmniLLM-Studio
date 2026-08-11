@@ -1,6 +1,6 @@
 # GitHub pull request tools
 
-OmniLLM-Studio provides a guarded GitHub collaboration boundary after local Git work has been committed and published. Read-only pull-request/check/feedback inspection, draft pull-request creation, and inline review-comment replies are deliberately independent operator permissions. None implies Git push, branch creation, or another hosted mutation.
+OmniLLM-Studio provides a guarded GitHub collaboration boundary after local Git work has been committed and published. Read-only pull-request/check/feedback/thread-state inspection, draft pull-request creation, and inline review-comment replies are deliberately independent operator permissions. None implies Git push, branch creation, or another hosted mutation.
 
 Local Git and remote publication are documented in `docs/LOCAL_GIT_TOOLS.md` and `docs/REMOTE_GIT_TOOLS.md`.
 
@@ -26,7 +26,7 @@ GitHub collaboration reuses an operator-configured remote from `OMNILLM_GIT_REMO
 
 The selected remote supplies repository identity and credential configuration. The model never receives or submits the GitHub API URL, owner/repository name, token value, token environment-variable name, or local filesystem path.
 
-Read-only PR/check/feedback inspection has its own process-wide gate:
+Read-only PR/check/feedback/thread-state inspection has its own process-wide gate:
 
 ```text
 OMNILLM_GITHUB_PULL_REQUEST_READ_ENABLED=true
@@ -108,7 +108,24 @@ Hosted review/comment bodies are preserved as evidence, not rewritten or interpr
 
 Reviewer prose is untrusted external content. Before any tool result is sent to a model, the LLM provider boundary documented in `docs/TOOL_RESULT_TRUST_BOUNDARY.md` inserts a runtime-owned system directive telling the model to treat tool output as reference data rather than instruction authority. A review saying “ignore prior instructions,” requesting secrets, or asking the agent to run another tool is therefore evidence to evaluate—not authorization to act. Allow / Ask / Off policy, scoped permissions, and side-effect approval remain authoritative.
 
-The REST feedback view does not claim GitHub review-thread resolved/unresolved state, which is not represented by these REST list surfaces. Thread resolution/unresolution, submitted review mutations, reviewer mutations, ready-for-review, workflow reruns, merge/close, and arbitrary PR metadata changes remain outside this read boundary.
+### `github_get_pull_request_review_threads`
+
+Reads one bounded cursor page of GitHub review-thread **state and location metadata** without copying reviewer prose. Inputs:
+
+- `remote` — configured remote ID;
+- `number` — positive pull request number;
+- `after` — optional opaque `next_cursor` returned by the previous call to this same tool, capped at 512 bytes;
+- `limit` — optional 1–20 (default 10).
+
+OmniLLM first fetches the PR through the existing REST boundary and validates its current head SHA. It then sends a **fixed application-owned GraphQL query** to `https://api.github.com/graphql`; owner, repository, PR number, page size, and opaque cursor are supplied only as GraphQL variables. The model cannot provide GraphQL query text, fields, API endpoints, or mutations.
+
+The GraphQL response must report a valid `headRefOid` equal to the REST-fetched PR head. If the PR head changes between the REST and GraphQL reads, the operation fails rather than combining thread state from one revision with PR metadata from another.
+
+Each returned thread includes only bounded state/location metadata: opaque thread node ID, `is_resolved`, `is_outdated`, `is_collapsed`, bounded file path, line/range sides when present, subject type, resolver login when present, and GitHub's `viewer_can_reply`, `viewer_can_resolve`, and `viewer_can_unresolve` capability flags. Thread node IDs are required and bounded to 256 bytes; paths reuse the 1,024-byte UTF-8-safe path limit. Review bodies remain available only through `github_get_pull_request_feedback`.
+
+Pagination is cursor-based. `has_next_page: true` is returned only with a non-empty bounded `next_cursor`; callers pass that cursor back as `after` to retrieve the next page. Cursors are opaque hosted data and must not be interpreted, modified, or reused as another tool's identifier.
+
+GitHub's viewer capability flags are **descriptive hosted state, not OmniLLM authorization**. For example, `viewer_can_resolve: true` means the configured GitHub identity may be able to resolve that thread at GitHub; it does not authorize OmniLLM to mutate thread state. Resolve/unresolve remains absent from this read-only slice and would require its own operator gate, high-risk tool policy/approval, and exact-state revalidation before any future mutation.
 
 ## Review reply tool
 
@@ -182,15 +199,16 @@ The model cannot choose another base branch. If the remote does not advertise a 
 
 The API client is dedicated to GitHub collaboration:
 
-- API host is fixed to `https://api.github.com`;
+- REST and GraphQL API hosts are fixed to `https://api.github.com`;
 - repository owner/name are parsed only from an exact operator-configured `github.com` Git remote;
 - token value is read from that remote's configured `token_env` immediately before use;
 - environment proxies are not used;
 - redirects are disabled so Authorization cannot follow a redirect;
 - DNS uses the private/local/reserved-address rejection used by guarded remote Git;
 - response bodies are capped at 1 MiB;
-- requests use the repository's pinned GitHub REST API version header;
-- API error bodies are not copied into model-visible errors.
+- REST requests use the repository's pinned GitHub REST API version header;
+- the review-thread GraphQL query is application-owned and model inputs are passed only as variables;
+- REST/GraphQL provider error bodies and GraphQL error messages are not copied into model-visible errors.
 
 ## Draft duplicate and race handling
 
@@ -211,8 +229,10 @@ git_status
   → github_get_pull_request
   → github_get_pull_request_checks
   → github_get_pull_request_feedback (reviews / review_comments / comments / review_requests as needed)
+  → github_get_pull_request_review_threads (when unresolved/outdated thread state matters)
   → approval → github_reply_to_pull_request_review_comment (only when a response is actually needed)
   → github_get_pull_request_feedback(kind="review_comments")
+  → github_get_pull_request_review_threads
 ```
 
 Later commits return to the reviewed existing-branch path:
@@ -226,14 +246,16 @@ local edit/stage/commit
   → github_get_pull_request
   → github_get_pull_request_checks
   → github_get_pull_request_feedback
+  → github_get_pull_request_review_threads
   → approval → github_reply_to_pull_request_review_comment (when needed)
   → github_get_pull_request_feedback(kind="review_comments")
+  → github_get_pull_request_review_threads
 ```
 
-Read access, draft creation, and review replies do not imply permission to mark a PR ready, request/remove reviewers, change metadata, resolve/unresolve review threads, submit/dismiss reviews, rerun workflows, merge, close arbitrary PRs, or delete the source branch. Those remain separate future capabilities only if a later audit demonstrates the need.
+Read access, draft creation, review-thread state inspection, and review replies do not imply permission to mark a PR ready, request/remove reviewers, change metadata, resolve/unresolve review threads, submit/dismiss reviews, rerun workflows, merge, close arbitrary PRs, or delete the source branch. Those remain separate future capabilities only if a later audit demonstrates the need.
 
 ## Validation expectations
 
-Focused tests cover independent read/create/reply gates, GitHub.com-only repository derivation, operator-bound authentication, strict model-facing arguments, bounded listing/pagination, same-repository head filters, exact PR-head binding for check/status/review evidence and review replies, hostile hosted-text preservation under the LLM trust boundary, UTF-8-safe feedback/reply bounds, stale/closed PR rejection, edited/nested/wrong-identity comment rejection, ambiguous POST outcome handling, provider-error-body suppression, creation state binding, duplicate reuse, race containment, response validation, and conditional registry wiring.
+Focused tests cover independent read/create/reply gates, GitHub.com-only repository derivation, operator-bound authentication, strict model-facing arguments, bounded REST/cursor pagination, fixed GraphQL query text, opaque cursor variables, same-repository head filters, exact PR-head binding for check/status/review/thread evidence and review replies, GraphQL head-race rejection, bounded thread IDs/paths, provider-error-body/GraphQL-error-message suppression, hosted viewer-capability non-authority, hostile hosted-text preservation under the LLM trust boundary, UTF-8-safe feedback/reply bounds, stale/closed PR rejection, edited/nested/wrong-identity comment rejection, ambiguous POST outcome handling, creation state binding, duplicate reuse, race containment, response validation, and conditional registry wiring.
 
 Before merging changes to this boundary, validate the exact final head with repository formatting, `go vet`, backend unit/integration tests, race detection, frontend checks, Windows desktop checks, Playwright smoke coverage, dependency audits, Go and JavaScript/TypeScript CodeQL, Helm validation, and backend/frontend container builds. Review PR and Advanced Security threads before readiness.
