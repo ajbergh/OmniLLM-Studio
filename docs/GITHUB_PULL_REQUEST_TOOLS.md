@@ -1,6 +1,6 @@
 # GitHub pull request tools
 
-OmniLLM-Studio provides a guarded GitHub collaboration boundary after local Git work has been committed and published. Read-only pull-request/check/feedback inspection and draft pull-request creation are deliberately independent operator permissions. Neither capability implies Git push, branch creation, or another hosted mutation.
+OmniLLM-Studio provides a guarded GitHub collaboration boundary after local Git work has been committed and published. Read-only pull-request/check/feedback inspection, draft pull-request creation, and inline review-comment replies are deliberately independent operator permissions. None implies Git push, branch creation, or another hosted mutation.
 
 Local Git and remote publication are documented in `docs/LOCAL_GIT_TOOLS.md` and `docs/REMOTE_GIT_TOOLS.md`.
 
@@ -18,7 +18,8 @@ GitHub collaboration reuses an operator-configured remote from `OMNILLM_GIT_REMO
     "allow_push": true,
     "allow_branch_create": true,
     "allow_pull_request_read": true,
-    "allow_pull_request_create": true
+    "allow_pull_request_create": true,
+    "allow_pull_request_reply": true
   }
 }
 ```
@@ -37,9 +38,15 @@ Draft PR creation has a separate process-wide gate:
 OMNILLM_GITHUB_PULL_REQUEST_ENABLED=true
 ```
 
-Both also require `OMNILLM_GIT_REMOTE_ENABLED=true`, a non-empty `token_env`, and an exact `https://github.com/<owner>/<repository>[.git]` remote URL. Read operations additionally require `allow_pull_request_read: true`; creation requires `allow_pull_request_create: true` and critical-risk tool approval.
+Replies to existing top-level inline review comments have another independent process-wide gate:
 
-These gates are independent from `OMNILLM_GIT_WRITE_ENABLED`, `OMNILLM_GIT_REMOTE_PUSH_ENABLED`, and `OMNILLM_GIT_REMOTE_BRANCH_CREATE_ENABLED`. GitHub Enterprise hosts and arbitrary API base URLs remain unsupported; future Enterprise support should use an explicit operator API-endpoint binding rather than a model-supplied URL.
+```text
+OMNILLM_GITHUB_PULL_REQUEST_REPLY_ENABLED=true
+```
+
+All GitHub capabilities also require `OMNILLM_GIT_REMOTE_ENABLED=true`, a non-empty `token_env`, and an exact `https://github.com/<owner>/<repository>[.git]` remote URL. Read operations additionally require `allow_pull_request_read: true`; creation requires `allow_pull_request_create: true`; review replies require `allow_pull_request_reply: true` and are exposed as a high-risk side-effecting tool subject to normal OmniLLM tool policy and approval handling.
+
+These gates are independent from one another and from `OMNILLM_GIT_WRITE_ENABLED`, `OMNILLM_GIT_REMOTE_PUSH_ENABLED`, and `OMNILLM_GIT_REMOTE_BRANCH_CREATE_ENABLED`. GitHub Enterprise hosts and arbitrary API base URLs remain unsupported; future Enterprise support should use an explicit operator API-endpoint binding rather than a model-supplied URL.
 
 ## Read-only tools
 
@@ -101,7 +108,43 @@ Hosted review/comment bodies are preserved as evidence, not rewritten or interpr
 
 Reviewer prose is untrusted external content. Before any tool result is sent to a model, the LLM provider boundary documented in `docs/TOOL_RESULT_TRUST_BOUNDARY.md` inserts a runtime-owned system directive telling the model to treat tool output as reference data rather than instruction authority. A review saying “ignore prior instructions,” requesting secrets, or asking the agent to run another tool is therefore evidence to evaluate—not authorization to act. Allow / Ask / Off policy, scoped permissions, and side-effect approval remain authoritative.
 
-This first feedback slice is REST/read-only. It does not claim GitHub review-thread resolved/unresolved state, which is not represented by these REST list surfaces. It also does not submit/dismiss reviews, reply to comments, resolve threads, request/remove reviewers, mark a PR ready, rerun workflows, merge, close, or change PR metadata.
+The REST feedback view does not claim GitHub review-thread resolved/unresolved state, which is not represented by these REST list surfaces. Thread resolution/unresolution, submitted review mutations, reviewer mutations, ready-for-review, workflow reruns, merge/close, and arbitrary PR metadata changes remain outside this read boundary.
+
+## Review reply tool
+
+### `github_reply_to_pull_request_review_comment`
+
+Posts one reply to an **existing top-level inline review comment**. It is a high-risk, networked, credentialed, side-effecting, non-parallel hosted communication mutation and therefore remains subject to normal OmniLLM policy and approval controls.
+
+The model may provide only:
+
+- `remote` — configured remote ID;
+- `number` — positive PR number;
+- `expected_head` — exact 40-character current PR head from reviewed GitHub PR/feedback output;
+- `comment_id` — exact top-level inline comment ID from `github_get_pull_request_feedback(kind="review_comments")`;
+- `expected_review_id` — exact `review_id` returned with that comment;
+- `expected_updated_at` — exact reviewed comment `updated_at` timestamp;
+- `body` — non-empty valid UTF-8 reply text, capped at 8 KiB.
+
+The tool does **not** accept repository owner/name, GitHub API URL, token, token environment variable, alternate commit ref, review state, thread ID/resolution state, reviewer list, ready/draft state, workflow controls, merge/close controls, or arbitrary comment/review creation.
+
+Immediately before posting, OmniLLM:
+
+1. resolves the exact operator-configured `github.com` remote and credentials;
+2. fetches the PR and requires it to still be open and unmerged;
+3. requires the PR's current hosted head SHA to equal `expected_head`;
+4. fetches the exact review comment by `comment_id`;
+5. requires that comment to belong to the requested PR and `expected_review_id`;
+6. requires `in_reply_to_id` to be empty/zero, preventing replies-to-replies;
+7. requires the hosted comment `updated_at` to equal `expected_updated_at`;
+8. sends only the bounded reply `body` to GitHub's review-comment reply endpoint;
+9. validates the created reply back to the same PR, review, and parent comment before returning `posted: true`.
+
+A changed PR head, closed/merged PR, edited/replaced comment, wrong PR/review identity, or nested reply target fails closed and requires fresh hosted inspection before another attempt.
+
+GitHub's review-comment reply POST is not idempotent. Once the POST begins, a transport/provider failure or an invalid success response can leave the true hosted outcome uncertain. OmniLLM therefore reports that the reply outcome is unknown or could not be validated and explicitly requires `github_get_pull_request_feedback(kind="review_comments")` to be run again **before retrying**. Callers must not blindly retry an uncertain reply, because that could create a duplicate notification/comment.
+
+The result intentionally contains only bounded confirmation metadata: remote/repository IDs, PR/head, parent comment ID, review ID, created reply ID/time, and `posted`. The posted body and provider/API response details are not copied back into result metadata.
 
 ## Draft creation tool
 
@@ -168,6 +211,8 @@ git_status
   → github_get_pull_request
   → github_get_pull_request_checks
   → github_get_pull_request_feedback (reviews / review_comments / comments / review_requests as needed)
+  → approval → github_reply_to_pull_request_review_comment (only when a response is actually needed)
+  → github_get_pull_request_feedback(kind="review_comments")
 ```
 
 Later commits return to the reviewed existing-branch path:
@@ -181,12 +226,14 @@ local edit/stage/commit
   → github_get_pull_request
   → github_get_pull_request_checks
   → github_get_pull_request_feedback
+  → approval → github_reply_to_pull_request_review_comment (when needed)
+  → github_get_pull_request_feedback(kind="review_comments")
 ```
 
-Read access and draft creation do not imply permission to mark a PR ready, request reviewers, change metadata, reply to/resolve review feedback, rerun workflows, merge, close arbitrary PRs, or delete the source branch. Those remain separate future capabilities only if a later audit demonstrates the need.
+Read access, draft creation, and review replies do not imply permission to mark a PR ready, request/remove reviewers, change metadata, resolve/unresolve review threads, submit/dismiss reviews, rerun workflows, merge, close arbitrary PRs, or delete the source branch. Those remain separate future capabilities only if a later audit demonstrates the need.
 
 ## Validation expectations
 
-Focused tests cover independent read/create gates, GitHub.com-only repository derivation, operator-bound authentication, strict model-facing arguments, bounded listing/pagination, same-repository head filters, exact PR-head binding for check/status and review evidence, hostile hosted-text preservation under the LLM trust boundary, UTF-8-safe feedback truncation, provider-error-body suppression, creation state binding, duplicate reuse, race containment, and conditional registry wiring.
+Focused tests cover independent read/create/reply gates, GitHub.com-only repository derivation, operator-bound authentication, strict model-facing arguments, bounded listing/pagination, same-repository head filters, exact PR-head binding for check/status/review evidence and review replies, hostile hosted-text preservation under the LLM trust boundary, UTF-8-safe feedback/reply bounds, stale/closed PR rejection, edited/nested/wrong-identity comment rejection, ambiguous POST outcome handling, provider-error-body suppression, creation state binding, duplicate reuse, race containment, response validation, and conditional registry wiring.
 
 Before merging changes to this boundary, validate the exact final head with repository formatting, `go vet`, backend unit/integration tests, race detection, frontend checks, Windows desktop checks, Playwright smoke coverage, dependency audits, Go and JavaScript/TypeScript CodeQL, Helm validation, and backend/frontend container builds. Review PR and Advanced Security threads before readiness.
