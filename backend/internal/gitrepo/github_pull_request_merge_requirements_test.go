@@ -2,6 +2,7 @@ package gitrepo
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -30,6 +31,7 @@ func TestGetPullRequestMergeRequirementsNormalizesRulesAndFailsClosedOnRulesetBy
                 {"type":"required_status_checks","ruleset_source_type":"Repository","ruleset_source":"example/repo","ruleset_id":10,"parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"Quality Gate","integration_id":15368}]}},
                 {"type":"required_deployments","ruleset_source_type":"Repository","ruleset_source":"example/repo","ruleset_id":10,"parameters":{"required_deployment_environments":["production"]}},
                 {"type":"required_linear_history","ruleset_source_type":"Repository","ruleset_source":"example/repo","ruleset_id":10},
+                {"type":"required_signatures","ruleset_source_type":"Repository","ruleset_source":"example/repo","ruleset_id":10},
                 {"type":"merge_queue","ruleset_source_type":"Repository","ruleset_source":"example/repo","ruleset_id":10}
             ]`), nil
 		case "/repos/example/repo/branches/main/protection":
@@ -37,8 +39,10 @@ func TestGetPullRequestMergeRequirementsNormalizesRulesAndFailsClosedOnRulesetBy
                 "required_status_checks":{"strict":true,"contexts":["legacy"],"checks":[{"context":"Quality Gate","app_id":15368}]},
                 "enforce_admins":{"enabled":false},
                 "required_pull_request_reviews":{"dismiss_stale_reviews":true,"require_code_owner_reviews":true,"required_approving_review_count":1,"require_last_push_approval":true},
+                "required_signatures":{"enabled":true},
                 "required_linear_history":{"enabled":true},
-                "required_conversation_resolution":{"enabled":true}
+                "required_conversation_resolution":{"enabled":true},
+                "lock_branch":{"enabled":true}
             }`), nil
 		default:
 			t.Fatalf("unexpected GitHub API path: %s", request.URL.Path)
@@ -56,7 +60,7 @@ func TestGetPullRequestMergeRequirementsNormalizesRulesAndFailsClosedOnRulesetBy
 	if result.MergePolicyComplete || result.RulesetBypassVisibility != "incomplete" || !result.PotentialBypass || !result.ConfiguredActorAdmin {
 		t.Fatalf("expected fail-closed ruleset bypass state: %#v", result)
 	}
-	if !result.MergeQueueRequired || !result.StrictStatusChecks || !result.CodeOwnerReviewRequired || !result.LastPushApprovalRequired || !result.ConversationResolutionRequired || !result.LinearHistoryRequired || !result.DismissStaleReviewsOnPush || result.RequiredApprovingReviewCount != 2 {
+	if !result.MergeQueueRequired || !result.StrictStatusChecks || !result.CodeOwnerReviewRequired || !result.LastPushApprovalRequired || !result.ConversationResolutionRequired || !result.LinearHistoryRequired || !result.DismissStaleReviewsOnPush || !result.RequiredSignatures || !result.BranchLocked || result.RequiredApprovingReviewCount != 2 {
 		t.Fatalf("missing normalized requirements: %#v", result)
 	}
 	if len(result.AllowedMergeMethods) != 2 || result.AllowedMergeMethods[0] != "rebase" || result.AllowedMergeMethods[1] != "squash" {
@@ -136,7 +140,7 @@ func TestGetPullRequestMergeRequirementsFlagsUnknownMaterialRule(t *testing.T) {
 		case "/repos/example/repo":
 			return jsonHTTPResponse(http.StatusOK, `{"allow_squash_merge":true,"permissions":{"admin":false}}`), nil
 		case "/repos/example/repo/rules/branches/main":
-			return jsonHTTPResponse(http.StatusOK, `[{"type":"required_signatures","ruleset_source_type":"Repository","ruleset_source":"example/repo","ruleset_id":11}]`), nil
+			return jsonHTTPResponse(http.StatusOK, `[{"type":"required_code_scanning","ruleset_source_type":"Repository","ruleset_source":"example/repo","ruleset_id":11}]`), nil
 		case "/repos/example/repo/branches/main/protection":
 			return jsonHTTPResponse(http.StatusOK, `{"enforce_admins":{"enabled":true}}`), nil
 		default:
@@ -149,7 +153,52 @@ func TestGetPullRequestMergeRequirementsFlagsUnknownMaterialRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPullRequestMergeRequirements() returned error: %v", err)
 	}
-	if result.MergePolicyComplete || len(result.UnknownPolicyRules) != 1 || result.UnknownPolicyRules[0] != "required_signatures" {
+	if result.MergePolicyComplete || len(result.UnknownPolicyRules) != 1 || result.UnknownPolicyRules[0] != "required_code_scanning" {
 		t.Fatalf("unknown material rule was not surfaced: %#v", result)
+	}
+}
+
+func TestGetPullRequestMergeRequirementsFailsClosedOnClassicRestrictionsAndBypassAllowances(t *testing.T) {
+	svc := newGitHubPullRequestReadTestService()
+	head := strings.Repeat("e", 40)
+	svc.githubClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case "/repos/example/repo/pulls/11":
+			return jsonHTTPResponse(http.StatusOK, `{"number":11,"html_url":"https://github.com/example/repo/pull/11","title":"Merge","state":"open","head":{"ref":"feature/merge","sha":"`+head+`"},"base":{"ref":"main"}}`), nil
+		case "/repos/example/repo":
+			return jsonHTTPResponse(http.StatusOK, `{"allow_squash_merge":true,"permissions":{"admin":false}}`), nil
+		case "/repos/example/repo/rules/branches/main":
+			return jsonHTTPResponse(http.StatusOK, `[]`), nil
+		case "/repos/example/repo/branches/main/protection":
+			return jsonHTTPResponse(http.StatusOK, `{
+                "enforce_admins":{"enabled":true},
+                "restrictions":{"users":[{"login":"release-user"}],"teams":[],"apps":[]},
+                "required_pull_request_reviews":{"required_approving_review_count":1,"bypass_pull_request_allowances":{"users":[{"login":"bypass-user"}],"teams":[],"apps":[]}}
+            }`), nil
+		default:
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	result, err := svc.GetPullRequestMergeRequirements(context.Background(), "origin", 11)
+	if err != nil {
+		t.Fatalf("GetPullRequestMergeRequirements() returned error: %v", err)
+	}
+	if result.MergePolicyComplete || !result.ClassicRestrictionsPresent || !result.ClassicReviewBypassAllowancesPresent || !result.PotentialBypass {
+		t.Fatalf("classic restrictions/bypass must fail closed: %#v", result)
+	}
+	if len(result.UnknownPolicyRules) != 2 || result.UnknownPolicyRules[0] != "classic.bypass_pull_request_allowances" || result.UnknownPolicyRules[1] != "classic.restrictions" {
+		t.Fatalf("classic unknown policy rules = %#v", result.UnknownPolicyRules)
+	}
+}
+
+func TestMergeRequirementsResultPreservesUnknownMergeability(t *testing.T) {
+	encoded, err := json.Marshal(GitHubPullRequestMergeRequirementsResult{MergePolicyComplete: false})
+	if err != nil {
+		t.Fatalf("json.Marshal() returned error: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"mergeable":null`) {
+		t.Fatalf("unknown mergeable state was omitted: %s", encoded)
 	}
 }
