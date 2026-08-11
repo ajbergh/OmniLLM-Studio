@@ -23,6 +23,9 @@ const (
 	// RemoteBranchCreateEnabledEnv is a separate process-wide gate for creating
 	// new remote branches. Enabling ordinary push never enables ref creation.
 	RemoteBranchCreateEnabledEnv = "OMNILLM_GIT_REMOTE_BRANCH_CREATE_ENABLED"
+	// GitHubPullRequestEnabledEnv is the independent process-wide gate for
+	// creating draft pull requests through the GitHub API.
+	GitHubPullRequestEnabledEnv = "OMNILLM_GITHUB_PULL_REQUEST_ENABLED"
 )
 
 var credentialEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
@@ -30,8 +33,9 @@ var credentialEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 // RemoteConfig binds a stable model-facing remote ID to one configured local
 // repository and one exact HTTPS endpoint. TokenEnv names an operator-provided
 // environment variable; the token value itself is never stored in this struct.
-// Push, remote-branch creation, default-branch push, and clone permissions are
-// independent explicit opt-ins layered on top of their process-wide gates.
+// Push, remote-branch creation, GitHub draft-PR creation, default-branch push,
+// and clone permissions are independent explicit opt-ins layered on top of
+// their process-wide gates.
 type RemoteConfig struct {
 	Repository             string `json:"repository"`
 	URL                    string `json:"url"`
@@ -39,6 +43,7 @@ type RemoteConfig struct {
 	TokenEnv               string `json:"token_env,omitempty"`
 	AllowPush              bool   `json:"allow_push,omitempty"`
 	AllowBranchCreate      bool   `json:"allow_branch_create,omitempty"`
+	AllowPullRequestCreate bool   `json:"allow_pull_request_create,omitempty"`
 	AllowDefaultBranchPush bool   `json:"allow_default_branch_push,omitempty"`
 	AllowClone             bool   `json:"allow_clone,omitempty"`
 }
@@ -52,6 +57,7 @@ type RemoteSummary struct {
 	AuthenticationConfigured bool   `json:"authentication_configured"`
 	PushAllowed              bool   `json:"push_allowed"`
 	BranchCreateAllowed      bool   `json:"branch_create_allowed"`
+	PullRequestCreateAllowed bool   `json:"pull_request_create_allowed"`
 	DefaultBranchPushAllowed bool   `json:"default_branch_push_allowed"`
 	CloneAllowed             bool   `json:"clone_allowed"`
 }
