@@ -11,11 +11,11 @@ import (
 )
 
 const (
-	defaultGitHubFeedbackLimit   = 10
-	maxGitHubFeedbackLimit       = 20
-	maxGitHubFeedbackPage        = 100
-	maxGitHubFeedbackBodyBytes   = 1536
-	maxGitHubFeedbackPathBytes   = 1024
+	defaultGitHubFeedbackLimit = 10
+	maxGitHubFeedbackLimit     = 20
+	maxGitHubFeedbackPage      = 100
+	maxGitHubFeedbackBodyBytes = 1536
+	maxGitHubFeedbackPathBytes = 1024
 )
 
 // GitHubPullRequestFeedbackReader is the read-only hosted review-feedback
@@ -30,16 +30,16 @@ type GitHubPullRequestFeedbackReader interface {
 // (subject only to explicit byte truncation) and is protected by the LLM tool-
 // result trust boundary before it reaches a model.
 type GitHubPullRequestFeedbackResult struct {
-	Remote       string                          `json:"remote"`
-	Repository   string                          `json:"repository"`
-	PullRequest  int                             `json:"pull_request"`
-	Head         string                          `json:"head"`
-	Kind         string                          `json:"kind"`
-	Page         int                             `json:"page"`
-	Limit        int                             `json:"limit"`
-	Order        string                          `json:"order"`
-	Items        []GitHubPullRequestFeedbackItem `json:"items"`
-	MayHaveMore  bool                            `json:"may_have_more,omitempty"`
+	Remote      string                          `json:"remote"`
+	Repository  string                          `json:"repository"`
+	PullRequest int                             `json:"pull_request"`
+	Head        string                          `json:"head"`
+	Kind        string                          `json:"kind"`
+	Page        int                             `json:"page"`
+	Limit       int                             `json:"limit"`
+	Order       string                          `json:"order"`
+	Items       []GitHubPullRequestFeedbackItem `json:"items"`
+	MayHaveMore bool                            `json:"may_have_more,omitempty"`
 }
 
 // GitHubPullRequestFeedbackItem is a union-style, model-safe representation of
@@ -131,6 +131,10 @@ func (s *RemoteService) GetPullRequestFeedback(ctx context.Context, remoteID str
 	if number <= 0 {
 		return nil, fmt.Errorf("pull request number must be positive")
 	}
+	kind, page, limit, err := normalizeGitHubFeedbackRequest(kind, page, limit)
+	if err != nil {
+		return nil, err
+	}
 	remote, owner, repository, token, err := s.githubPullRequestReadConfig(remoteID)
 	if err != nil {
 		return nil, err
@@ -143,23 +147,9 @@ func (s *RemoteService) GetPullRequestFeedback(ctx context.Context, remoteID str
 		return nil, fmt.Errorf("GitHub pull request head could not be validated")
 	}
 	head := strings.ToLower(pull.Head.SHA)
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	if page == 0 {
-		page = 1
-	}
-	if limit == 0 {
-		limit = defaultGitHubFeedbackLimit
-	}
-	if page < 1 || page > maxGitHubFeedbackPage {
-		return nil, fmt.Errorf("feedback page must be between 1 and %d", maxGitHubFeedbackPage)
-	}
-	if limit < 1 || limit > maxGitHubFeedbackLimit {
-		return nil, fmt.Errorf("feedback limit must be between 1 and %d", maxGitHubFeedbackLimit)
-	}
-
 	result := &GitHubPullRequestFeedbackResult{
 		Remote: strings.TrimSpace(remoteID), Repository: remote.Repository, PullRequest: number,
-		Head: head, Kind: kind, Page: page, Limit: limit,
+		Head: head, Kind: kind, Page: page, Limit: limit, Items: []GitHubPullRequestFeedbackItem{},
 	}
 
 	switch kind {
@@ -222,9 +212,6 @@ func (s *RemoteService) GetPullRequestFeedback(ctx context.Context, remoteID str
 		}
 		result.MayHaveMore = len(responses) == limit
 	case "review_requests":
-		if page != 1 {
-			return nil, fmt.Errorf("review_requests supports only page 1")
-		}
 		result.Order = "users_then_teams"
 		endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repository, number)
 		var response githubPullRequestReviewRequestsResponse
@@ -251,11 +238,34 @@ func (s *RemoteService) GetPullRequestFeedback(ctx context.Context, remoteID str
 				result.Items = append(result.Items, GitHubPullRequestFeedbackItem{Type: "review_request_team", Team: teamName})
 			}
 		}
-	default:
-		return nil, fmt.Errorf("feedback kind must be reviews, review_comments, comments, or review_requests")
 	}
 
 	return result, nil
+}
+
+func normalizeGitHubFeedbackRequest(kind string, page, limit int) (string, int, int, error) {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	switch kind {
+	case "reviews", "review_comments", "comments", "review_requests":
+	default:
+		return "", 0, 0, fmt.Errorf("feedback kind must be reviews, review_comments, comments, or review_requests")
+	}
+	if page == 0 {
+		page = 1
+	}
+	if limit == 0 {
+		limit = defaultGitHubFeedbackLimit
+	}
+	if page < 1 || page > maxGitHubFeedbackPage {
+		return "", 0, 0, fmt.Errorf("feedback page must be between 1 and %d", maxGitHubFeedbackPage)
+	}
+	if limit < 1 || limit > maxGitHubFeedbackLimit {
+		return "", 0, 0, fmt.Errorf("feedback limit must be between 1 and %d", maxGitHubFeedbackLimit)
+	}
+	if kind == "review_requests" && page != 1 {
+		return "", 0, 0, fmt.Errorf("review_requests supports only page 1")
+	}
+	return kind, page, limit, nil
 }
 
 func feedbackPageQuery(page, limit int) url.Values {
