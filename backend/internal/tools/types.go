@@ -25,7 +25,7 @@ type ToolExample struct {
 //
 // The additional v2 fields are optional so existing built-in and MCP tools remain
 // source-compatible while richer tools can advertise risk, output, execution,
-// provenance, and parallelism characteristics to the orchestrator.
+// and parallelism characteristics to the orchestrator.
 type ToolDefinition struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -35,7 +35,6 @@ type ToolDefinition struct {
 
 	Version             string          `json:"version,omitempty"`
 	OutputSchema        json.RawMessage `json:"output_schema,omitempty"`
-	OutputTrust         ToolOutputTrust `json:"output_trust,omitempty"`
 	Risk                RiskLevel       `json:"risk,omitempty"`
 	ReadOnly            bool            `json:"read_only,omitempty"`
 	SideEffecting       bool            `json:"side_effecting,omitempty"`
@@ -51,12 +50,6 @@ type ToolDefinition struct {
 func (d ToolDefinition) Normalized() ToolDefinition {
 	if d.Version == "" {
 		d.Version = "1"
-	}
-	if d.OutputTrust != "" && d.OutputTrust != ToolOutputTrustUntrustedExternal {
-		// Tool contracts are trusted application configuration, but invalid or
-		// future values must not silently acquire semantics this runtime does not
-		// understand.
-		d.OutputTrust = ""
 	}
 	if d.Risk == "" {
 		if d.SideEffecting {
