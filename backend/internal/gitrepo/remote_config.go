@@ -37,6 +37,9 @@ const (
 	// the resolved state of an existing pull request review thread. Viewer
 	// capability reported by GitHub does not enable this operator permission.
 	GitHubPullRequestThreadResolutionEnabledEnv = "OMNILLM_GITHUB_PULL_REQUEST_THREAD_RESOLUTION_ENABLED"
+	// GitHubPullRequestReadyEnabledEnv independently enables advancing an exact
+	// reviewed draft pull request to ready-for-review state.
+	GitHubPullRequestReadyEnabledEnv = "OMNILLM_GITHUB_PULL_REQUEST_READY_ENABLED"
 )
 
 var credentialEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
@@ -44,9 +47,9 @@ var credentialEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 // RemoteConfig binds a stable model-facing remote ID to one configured local
 // repository and one exact HTTPS endpoint. TokenEnv names an operator-provided
 // environment variable; the token value itself is never stored in this struct.
-// Push, remote-branch creation, GitHub PR read/create/reply/thread-resolution,
-// default-branch push, and clone permissions are independent explicit opt-ins
-// layered on top of their process-wide gates.
+// Push, remote-branch creation, GitHub PR read/create/reply/thread-resolution/
+// ready, default-branch push, and clone permissions are independent explicit
+// opt-ins layered on top of their process-wide gates.
 type RemoteConfig struct {
 	Repository                       string `json:"repository"`
 	URL                              string `json:"url"`
@@ -58,6 +61,7 @@ type RemoteConfig struct {
 	AllowPullRequestCreate           bool   `json:"allow_pull_request_create,omitempty"`
 	AllowPullRequestReply            bool   `json:"allow_pull_request_reply,omitempty"`
 	AllowPullRequestThreadResolution bool   `json:"allow_pull_request_thread_resolution,omitempty"`
+	AllowPullRequestReady            bool   `json:"allow_pull_request_ready,omitempty"`
 	AllowDefaultBranchPush           bool   `json:"allow_default_branch_push,omitempty"`
 	AllowClone                       bool   `json:"allow_clone,omitempty"`
 }
@@ -75,6 +79,7 @@ type RemoteSummary struct {
 	PullRequestCreateAllowed           bool   `json:"pull_request_create_allowed"`
 	PullRequestReplyAllowed            bool   `json:"pull_request_reply_allowed"`
 	PullRequestThreadResolutionAllowed bool   `json:"pull_request_thread_resolution_allowed"`
+	PullRequestReadyAllowed            bool   `json:"pull_request_ready_allowed"`
 	DefaultBranchPushAllowed           bool   `json:"default_branch_push_allowed"`
 	CloneAllowed                       bool   `json:"clone_allowed"`
 }
