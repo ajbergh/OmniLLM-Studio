@@ -144,42 +144,83 @@ Large catalogs use `tool_search` for compact request-scoped discovery and `tool_
 
 ## Post-program extensions already implemented
 
-The original parity program did not include a full coding-agent Git workflow. Subsequent work added guarded capabilities for:
+The original parity program did not include a full coding-agent Git/GitHub workflow. Subsequent work now provides a governed loop from local changes through hosted review feedback:
 
 - local Git inspection and reviewed local mutations;
 - guarded remote inspection, fetch, existing-branch push, and clone;
 - separately gated creation/publication of a new remote feature branch;
-- separately gated GitHub.com draft pull request creation bound to reviewed local and remote Git state.
+- separately gated GitHub.com draft pull request creation bound to reviewed local and remote Git state;
+- bounded read-only pull-request metadata/listing and exact-head CI/check inspection;
+- a provider-result trust boundary that treats hosted/tool text as untrusted reference data rather than instruction authority;
+- bounded hosted review, inline-comment, timeline-comment, and review-request inspection;
+- bounded cursor-based review-thread state/location inspection through fixed application-owned GraphQL;
+- separately gated replies to reviewed top-level inline review comments;
+- separately gated resolve/unresolve of an exact reviewed review thread with PR-head, ownership, state, and viewer-capability revalidation.
 
-See:
+Primary implementation/documentation anchors:
 
 - `docs/LOCAL_GIT_TOOLS.md`
 - `docs/REMOTE_GIT_TOOLS.md`
 - `docs/GITHUB_PULL_REQUEST_TOOLS.md`
+- `docs/TOOL_RESULT_TRUST_BOUNDARY.md`
+- `backend/internal/gitrepo/github_pull_request.go`
+- `backend/internal/gitrepo/github_pull_request_read.go`
+- `backend/internal/gitrepo/github_pull_request_feedback.go`
+- `backend/internal/gitrepo/github_pull_request_threads.go`
+- `backend/internal/gitrepo/github_pull_request_reply.go`
+- `backend/internal/gitrepo/github_pull_request_thread_resolution.go`
 
 ## Verified next gaps
 
-The next program should be based on concrete missing runtime capabilities rather than extending the historical phase list.
+The next program remains driven by concrete missing runtime capabilities rather than by the historical phase list. The previous roadmap item for read-only PR/CI inspection is complete and must no longer be treated as pending work.
 
-### Priority 1 — Read-only GitHub PR and CI inspection
+### Priority 1 — Guarded draft-to-ready transition
 
-After `github_create_draft_pull_request`, Chat Studio currently has no dedicated governed GitHub collaboration read path for inspecting the resulting pull request and its checks. A coding agent can publish a branch and open a draft PR, but it cannot natively close the feedback loop by reading PR metadata/review state and commit/check status through the same operator-bound GitHub boundary.
+The hosted collaboration loop can now create a draft PR, inspect its exact head/checks/feedback/thread state, reply to reviewed inline feedback, and resolve addressed review threads. It still cannot explicitly advance a reviewed draft PR to **ready for review** through OmniLLM.
 
-Recommended first slice:
+This is the recommended next implementation slice because it advances the PR lifecycle without changing Git objects, source refs, reviewer membership, workflow execution, or merge state. It should remain an independently gated hosted mutation rather than being implied by draft creation or PR-read permission.
 
-- read one PR by number in the repository derived from the selected operator-configured `github.com` remote;
-- list the current branch's/open repository PRs with bounded pagination;
-- inspect the PR head SHA and mergeability/state without accepting an arbitrary repository or API host;
-- inspect check runs / commit status for the exact PR head;
-- keep all operations read-only, low-risk, bounded, and independently gated by the configured remote/token;
-- return model-safe errors without copying GitHub API error bodies or credentials;
-- add focused fake-API tests and registry/tool-policy coverage.
+Recommended guardrails:
 
-Do **not** combine this slice with ready-for-review, reviewer requests, labels, closing, merge, source-branch deletion, workflow reruns, or other hosted mutations. Those should remain separate, approval-gated capabilities only if a later audit demonstrates the need.
+- accept only the configured remote ID, positive PR number, and exact reviewed 40-character PR head;
+- derive repository/API host/token only from the operator-configured `github.com` remote;
+- require a dedicated process-wide gate and per-remote opt-in independent from PR read/create/reply/thread-resolution permissions;
+- re-fetch the PR immediately before mutation and require it to remain open, unmerged, draft, on the exact reviewed head, and targeted at the configured repository's expected base state;
+- use one fixed application-owned GitHub mutation; do not accept arbitrary GraphQL text or API URLs;
+- validate the returned PR back to the same repository/number/head and require `draft=false` before reporting success;
+- treat transport/provider/GraphQL ambiguity after mutation as an unknown outcome requiring fresh PR inspection before retrying;
+- keep the tool high-risk, side-effecting, credentialed, non-parallel, approval-aware, and separately policy-controlled;
+- do not combine this slice with reviewer requests, review submission/dismissal, workflow reruns, merge/close, labels/assignees, or source-branch deletion.
 
-### Priority 2 — Collaboration mutations, only after the read path is proven
+### Priority 2 — Validated merge lifecycle, only after ready-state transition is proven
 
-Potential later slices include marking a draft ready, requesting reviewers, handling review-thread state, or merging a validated PR. Each mutation should have its own state-binding and approval boundary; none should be implied by draft-PR creation.
+A coding agent still cannot close the lifecycle by merging an exact validated PR. This is materially higher risk and less reversible than marking a draft ready, so it should be a later independently gated capability.
+
+Before implementing merge, require a dedicated design/review for at least:
+
+- exact current PR head and base binding with no arbitrary repository/base/ref inputs;
+- open, non-draft, unmerged hosted state;
+- current mergeability/merge-state validation;
+- explicit check/status policy for the exact head rather than trusting stale prior output;
+- review-thread/review-state policy appropriate to the repository workflow;
+- one explicitly selected operator-approved merge method or a repository-policy-derived method, never a model-supplied arbitrary strategy;
+- ambiguous-outcome handling that re-inspects the PR before any retry;
+- no implicit source-branch deletion.
+
+Do not infer merge authorization from `viewerCan*` provider flags, existing Git push permission, draft creation permission, or thread-resolution permission.
+
+### Priority 3 — Lower-priority collaboration/operations gaps
+
+These remain intentionally unsupported until a concrete workflow need justifies a separate capability and threat-model review:
+
+- request/remove reviewers or teams;
+- submit/dismiss reviews;
+- rerun/cancel GitHub Actions workflows;
+- arbitrary PR metadata changes such as labels, assignees, milestones, or base retargeting;
+- close/reopen arbitrary PRs;
+- delete hosted source branches.
+
+Repository search and current remote configuration confirm there are no corresponding core OmniLLM tool registrations or operator gates on `main` as of this reconciliation. Their absence is intentional rather than a stale implementation omission.
 
 ## Validation
 
