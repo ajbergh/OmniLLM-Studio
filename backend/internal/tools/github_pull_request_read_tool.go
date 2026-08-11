@@ -125,8 +125,11 @@ func (t *githubPullRequestReadTool) Validate(args json.RawMessage) error {
 		if len(decoded.HeadBranch) > 200 {
 			return fmt.Errorf("head_branch exceeds 200 characters")
 		}
-		if decoded.Limit < 0 || decoded.Limit > 20 {
-			return fmt.Errorf("limit must be between 1 and 20")
+		if rawLimit, ok := fields["limit"]; ok {
+			var limit int
+			if err := json.Unmarshal(rawLimit, &limit); err != nil || limit < 1 || limit > 20 {
+				return fmt.Errorf("limit must be between 1 and 20")
+			}
 		}
 		return nil
 	default:
