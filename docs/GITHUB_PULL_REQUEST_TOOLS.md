@@ -1,6 +1,6 @@
 # GitHub pull request tools
 
-OmniLLM-Studio provides a guarded GitHub collaboration boundary after local Git work has been committed and published. Read-only pull-request/check/feedback/thread-state inspection, draft pull-request creation, and inline review-comment replies are deliberately independent operator permissions. None implies Git push, branch creation, or another hosted mutation.
+OmniLLM-Studio provides a guarded GitHub collaboration boundary after local Git work has been committed and published. Read-only pull-request/check/feedback/thread-state inspection, draft pull-request creation, inline review-comment replies, and review-thread resolution are deliberately independent operator permissions. None implies Git push, branch creation, or another hosted mutation.
 
 Local Git and remote publication are documented in `docs/LOCAL_GIT_TOOLS.md` and `docs/REMOTE_GIT_TOOLS.md`.
 
@@ -19,7 +19,8 @@ GitHub collaboration reuses an operator-configured remote from `OMNILLM_GIT_REMO
     "allow_branch_create": true,
     "allow_pull_request_read": true,
     "allow_pull_request_create": true,
-    "allow_pull_request_reply": true
+    "allow_pull_request_reply": true,
+    "allow_pull_request_thread_resolution": true
   }
 }
 ```
@@ -44,7 +45,13 @@ Replies to existing top-level inline review comments have another independent pr
 OMNILLM_GITHUB_PULL_REQUEST_REPLY_ENABLED=true
 ```
 
-All GitHub capabilities also require `OMNILLM_GIT_REMOTE_ENABLED=true`, a non-empty `token_env`, and an exact `https://github.com/<owner>/<repository>[.git]` remote URL. Read operations additionally require `allow_pull_request_read: true`; creation requires `allow_pull_request_create: true`; review replies require `allow_pull_request_reply: true` and are exposed as a high-risk side-effecting tool subject to normal OmniLLM tool policy and approval handling.
+Changing the resolved state of existing review threads has another independent process-wide gate:
+
+```text
+OMNILLM_GITHUB_PULL_REQUEST_THREAD_RESOLUTION_ENABLED=true
+```
+
+All GitHub capabilities also require `OMNILLM_GIT_REMOTE_ENABLED=true`, a non-empty `token_env`, and an exact `https://github.com/<owner>/<repository>[.git]` remote URL. Read operations additionally require `allow_pull_request_read: true`; creation requires `allow_pull_request_create: true`; review replies require `allow_pull_request_reply: true`; thread resolution requires `allow_pull_request_thread_resolution: true`. Reply and thread-resolution tools are high-risk side-effecting operations subject to normal OmniLLM tool policy and approval handling.
 
 These gates are independent from one another and from `OMNILLM_GIT_WRITE_ENABLED`, `OMNILLM_GIT_REMOTE_PUSH_ENABLED`, and `OMNILLM_GIT_REMOTE_BRANCH_CREATE_ENABLED`. GitHub Enterprise hosts and arbitrary API base URLs remain unsupported; future Enterprise support should use an explicit operator API-endpoint binding rather than a model-supplied URL.
 
@@ -119,13 +126,13 @@ Reads one bounded cursor page of GitHub review-thread **state and location metad
 
 OmniLLM first fetches the PR through the existing REST boundary and validates its current head SHA. It then sends a **fixed application-owned GraphQL query** to `https://api.github.com/graphql`; owner, repository, PR number, page size, and opaque cursor are supplied only as GraphQL variables. The model cannot provide GraphQL query text, fields, API endpoints, or mutations.
 
-The GraphQL response must report a valid `headRefOid` equal to the REST-fetched PR head. If the PR head changes between the REST and GraphQL reads, the operation fails rather than combining thread state from one revision with PR metadata from another.
+The GraphQL response must report a valid `headRefOid` equal to the REST-fetched PR head. If the PR head changes between the REST and GraphQL reads, the operation fails rather than combining thread state from one revision with PR metadata from another. OmniLLM also rejects a provider response containing more thread nodes than the requested `limit` rather than relying solely on GraphQL pagination compliance.
 
 Each returned thread includes only bounded state/location metadata: opaque thread node ID, `is_resolved`, `is_outdated`, `is_collapsed`, bounded file path, line/range sides when present, subject type, resolver login when present, and GitHub's `viewer_can_reply`, `viewer_can_resolve`, and `viewer_can_unresolve` capability flags. Thread node IDs are required and bounded to 256 bytes; paths reuse the 1,024-byte UTF-8-safe path limit. Review bodies remain available only through `github_get_pull_request_feedback`.
 
 Pagination is cursor-based. `has_next_page: true` is returned only with a non-empty bounded `next_cursor`; callers pass that cursor back as `after` to retrieve the next page. Cursors are opaque hosted data and must not be interpreted, modified, or reused as another tool's identifier.
 
-GitHub's viewer capability flags are **descriptive hosted state, not OmniLLM authorization**. For example, `viewer_can_resolve: true` means the configured GitHub identity may be able to resolve that thread at GitHub; it does not authorize OmniLLM to mutate thread state. Resolve/unresolve remains absent from this read-only slice and would require its own operator gate, high-risk tool policy/approval, and exact-state revalidation before any future mutation.
+GitHub's viewer capability flags are **descriptive hosted state, not OmniLLM authorization**. For example, `viewer_can_resolve: true` means the configured GitHub identity may be able to resolve that thread at GitHub; it does not authorize OmniLLM to mutate thread state. The independent resolution gate, per-remote opt-in, high-risk tool policy, and approval remain authoritative.
 
 ## Review reply tool
 
@@ -162,6 +169,42 @@ A changed PR head, closed/merged PR, edited/replaced comment, wrong PR/review id
 GitHub's review-comment reply POST is not idempotent. Once the POST begins, a transport/provider failure or an invalid success response can leave the true hosted outcome uncertain. OmniLLM therefore reports that the reply outcome is unknown or could not be validated and explicitly requires `github_get_pull_request_feedback(kind="review_comments")` to be run again **before retrying**. Callers must not blindly retry an uncertain reply, because that could create a duplicate notification/comment.
 
 The result intentionally contains only bounded confirmation metadata: remote/repository IDs, PR/head, parent comment ID, review ID, created reply ID/time, and `posted`. The posted body and provider/API response details are not copied back into result metadata.
+
+## Review thread resolution tool
+
+### `github_set_pull_request_review_thread_resolved`
+
+Changes one existing GitHub review thread between resolved and unresolved. It is a high-risk, networked, credentialed, side-effecting, non-parallel hosted state mutation and remains subject to normal OmniLLM policy and approval controls.
+
+The model may provide only:
+
+- `remote` — configured remote ID;
+- `number` — positive PR number;
+- `expected_head` — exact 40-character current PR head from reviewed GitHub PR/thread output;
+- `thread_id` — exact opaque thread node ID from `github_get_pull_request_review_threads`;
+- `expected_is_resolved` — exact reviewed `is_resolved` value;
+- `expected_is_outdated` — exact reviewed `is_outdated` value;
+- `resolved` — desired resolved state, which must differ from `expected_is_resolved`.
+
+The tool does **not** accept repository owner/name, GitHub API URL, token, token environment variable, arbitrary GraphQL query/mutation text, reviewer prose, comment/review IDs, ready/draft state, reviewer controls, workflow controls, merge/close controls, or other PR metadata changes.
+
+Immediately before mutation, OmniLLM:
+
+1. resolves the exact operator-configured `github.com` remote and credentials;
+2. fetches the PR through the REST boundary and requires it to remain open and unmerged;
+3. requires the PR's current hosted head SHA to equal `expected_head`;
+4. reads the exact opaque thread ID through a fixed application-owned GraphQL node query;
+5. requires the returned thread ID, repository, PR number, and PR head to match the reviewed request;
+6. requires hosted `isResolved` and `isOutdated` to equal `expected_is_resolved` and `expected_is_outdated`;
+7. requires GitHub's configured identity to report `viewerCanResolve` for resolve or `viewerCanUnresolve` for unresolve; this is an additional provider capability check, not authorization;
+8. chooses exactly one fixed application-owned `resolveReviewThread` or `unresolveReviewThread` mutation based on `resolved`, passing only `threadId` as a variable;
+9. validates the mutation response back to the same thread/repository/PR/head, the same outdated state, and the requested resolved state before returning `changed: true`.
+
+A changed PR head, closed/merged PR, changed thread ownership, changed resolved/outdated state, or missing viewer capability fails closed and requires fresh thread inspection before another attempt.
+
+Once the GraphQL mutation begins, a transport/provider error, GraphQL error, or invalid success response can make the true hosted outcome uncertain. OmniLLM therefore reports that the resolution outcome is unknown or could not be validated and explicitly requires `github_get_pull_request_review_threads` to be run again **before retrying**. Callers must not blindly retry an uncertain state mutation.
+
+The result contains only bounded confirmation metadata: remote/repository IDs, PR/head, thread ID, resolved/outdated state, and `changed`. No reviewer prose or provider response detail is returned.
 
 ## Draft creation tool
 
@@ -207,7 +250,7 @@ The API client is dedicated to GitHub collaboration:
 - DNS uses the private/local/reserved-address rejection used by guarded remote Git;
 - response bodies are capped at 1 MiB;
 - REST requests use the repository's pinned GitHub REST API version header;
-- the review-thread GraphQL query is application-owned and model inputs are passed only as variables;
+- review-thread GraphQL reads and resolution mutations are application-owned and model inputs are passed only as variables;
 - REST/GraphQL provider error bodies and GraphQL error messages are not copied into model-visible errors.
 
 ## Draft duplicate and race handling
@@ -233,6 +276,8 @@ git_status
   → approval → github_reply_to_pull_request_review_comment (only when a response is actually needed)
   → github_get_pull_request_feedback(kind="review_comments")
   → github_get_pull_request_review_threads
+  → approval → github_set_pull_request_review_thread_resolved (only after the thread is actually addressed)
+  → github_get_pull_request_review_threads
 ```
 
 Later commits return to the reviewed existing-branch path:
@@ -250,12 +295,14 @@ local edit/stage/commit
   → approval → github_reply_to_pull_request_review_comment (when needed)
   → github_get_pull_request_feedback(kind="review_comments")
   → github_get_pull_request_review_threads
+  → approval → github_set_pull_request_review_thread_resolved (when appropriate)
+  → github_get_pull_request_review_threads
 ```
 
-Read access, draft creation, review-thread state inspection, and review replies do not imply permission to mark a PR ready, request/remove reviewers, change metadata, resolve/unresolve review threads, submit/dismiss reviews, rerun workflows, merge, close arbitrary PRs, or delete the source branch. Those remain separate future capabilities only if a later audit demonstrates the need.
+Read access, draft creation, review replies, and review-thread resolution do not imply permission to mark a PR ready, request/remove reviewers, change arbitrary metadata, submit/dismiss reviews, rerun workflows, merge, close arbitrary PRs, or delete the source branch. Those remain separate future capabilities only if a later audit demonstrates the need.
 
 ## Validation expectations
 
-Focused tests cover independent read/create/reply gates, GitHub.com-only repository derivation, operator-bound authentication, strict model-facing arguments, bounded REST/cursor pagination, fixed GraphQL query text, opaque cursor variables, same-repository head filters, exact PR-head binding for check/status/review/thread evidence and review replies, GraphQL head-race rejection, bounded thread IDs/paths, provider-error-body/GraphQL-error-message suppression, hosted viewer-capability non-authority, hostile hosted-text preservation under the LLM trust boundary, UTF-8-safe feedback/reply bounds, stale/closed PR rejection, edited/nested/wrong-identity comment rejection, ambiguous POST outcome handling, creation state binding, duplicate reuse, race containment, response validation, and conditional registry wiring.
+Focused tests cover independent read/create/reply/thread-resolution gates, GitHub.com-only repository derivation, operator-bound authentication, strict model-facing arguments, bounded REST/cursor pagination, fixed GraphQL query/mutation text, opaque cursor/node-ID variables, same-repository head filters, exact PR-head binding for check/status/review/thread evidence and mutations, GraphQL head-race rejection, bounded thread IDs/paths, provider-error-body/GraphQL-error-message suppression, hosted viewer-capability non-authority, stale/closed PR rejection, changed thread ownership/resolved/outdated state rejection, ambiguous mutation outcome handling, hostile hosted-text preservation under the LLM trust boundary, UTF-8-safe feedback/reply bounds, edited/nested/wrong-identity comment rejection, creation state binding, duplicate reuse, race containment, response validation, and conditional registry wiring.
 
 Before merging changes to this boundary, validate the exact final head with repository formatting, `go vet`, backend unit/integration tests, race detection, frontend checks, Windows desktop checks, Playwright smoke coverage, dependency audits, Go and JavaScript/TypeScript CodeQL, Helm validation, and backend/frontend container builds. Review PR and Advanced Security threads before readiness.
