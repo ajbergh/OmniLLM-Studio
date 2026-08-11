@@ -27,8 +27,9 @@ type Registry struct {
 // additionally requires configured remotes and OMNILLM_GIT_REMOTE_ENABLED=true;
 // fetch also requires the local write gate; push and branch publication have
 // their own additional mutation gates; clone requires explicit enablement plus
-// valid byte/entry budgets. GitHub PR reads, draft creation, and review replies
-// are independent API gates and none implies Git push or another hosted gate.
+// valid byte/entry budgets. GitHub PR reads (including review-thread state),
+// draft creation, and review replies are independent API gates and none implies
+// Git push or another hosted gate.
 func NewRegistry() *Registry {
 	r := &Registry{tools: make(map[string]Tool)}
 	r.MustRegister(NewDateTimeTool())
@@ -61,6 +62,9 @@ func NewRegistry() *Registry {
 			}
 			if remoteGitService.GitHubPullRequestReadAccessEnabled() {
 				for _, tool := range NewGitHubPullRequestReadTools(remoteGitService) {
+					r.MustRegister(tool)
+				}
+				for _, tool := range NewGitHubPullRequestReviewThreadTools(remoteGitService) {
 					r.MustRegister(tool)
 				}
 			}
