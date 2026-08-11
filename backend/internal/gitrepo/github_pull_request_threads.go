@@ -59,15 +59,15 @@ type GitHubPullRequestReviewThreadReader interface {
 // thread state. NextCursor is an opaque GitHub cursor suitable only for the next
 // call to this same read tool.
 type GitHubPullRequestReviewThreadsResult struct {
-	Remote        string                                `json:"remote"`
-	Repository    string                                `json:"repository"`
-	PullRequest   int                                   `json:"pull_request"`
-	Head          string                                `json:"head"`
-	Limit         int                                   `json:"limit"`
-	TotalCount    int                                   `json:"total_count"`
-	Threads       []GitHubPullRequestReviewThreadResult `json:"threads"`
-	HasNextPage   bool                                  `json:"has_next_page"`
-	NextCursor    string                                `json:"next_cursor,omitempty"`
+	Remote      string                                `json:"remote"`
+	Repository  string                                `json:"repository"`
+	PullRequest int                                   `json:"pull_request"`
+	Head        string                                `json:"head"`
+	Limit       int                                   `json:"limit"`
+	TotalCount  int                                   `json:"total_count"`
+	Threads     []GitHubPullRequestReviewThreadResult `json:"threads"`
+	HasNextPage bool                                  `json:"has_next_page"`
+	NextCursor  string                                `json:"next_cursor,omitempty"`
 }
 
 // GitHubPullRequestReviewThreadResult intentionally contains state/location
@@ -101,17 +101,17 @@ type githubPullRequestReviewThreadsGraphQLResponse struct {
 				ReviewThreads struct {
 					TotalCount int `json:"totalCount"`
 					Nodes      []struct {
-						ID                 string `json:"id"`
-						IsResolved         bool   `json:"isResolved"`
-						IsOutdated         bool   `json:"isOutdated"`
-						IsCollapsed        bool   `json:"isCollapsed"`
-						Path               string `json:"path"`
-						Line               *int   `json:"line"`
-						StartLine          *int   `json:"startLine"`
-						DiffSide           string `json:"diffSide"`
-						StartDiffSide      string `json:"startDiffSide"`
-						SubjectType        string `json:"subjectType"`
-						ResolvedBy         *struct {
+						ID            string `json:"id"`
+						IsResolved    bool   `json:"isResolved"`
+						IsOutdated    bool   `json:"isOutdated"`
+						IsCollapsed   bool   `json:"isCollapsed"`
+						Path          string `json:"path"`
+						Line          *int   `json:"line"`
+						StartLine     *int   `json:"startLine"`
+						DiffSide      string `json:"diffSide"`
+						StartDiffSide string `json:"startDiffSide"`
+						SubjectType   string `json:"subjectType"`
+						ResolvedBy    *struct {
 							Login string `json:"login"`
 						} `json:"resolvedBy"`
 						ViewerCanReply     bool `json:"viewerCanReply"`
