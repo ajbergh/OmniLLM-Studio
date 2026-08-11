@@ -51,22 +51,22 @@ type RemoteStatusResult struct {
 // same configured Service used by local Git tools so reviewed local state can be
 // bound to network mutations.
 type RemoteService struct {
-	remotes                                   map[string]RemoteConfig
-	ids                                       []string
-	enabled                                   bool
-	pushEnabled                               bool
-	branchCreateEnabled                       bool
-	githubPullRequestEnabled                  bool
-	githubPullRequestReadEnabled              bool
-	githubPullRequestReplyEnabled             bool
-	githubPullRequestThreadResolutionEnabled  bool
-	cloneEnabled                              bool
-	cloneMaxBytes                             int64
-	cloneMaxEntries                           int64
-	transport                                 transport.Transport
-	githubClient                              *http.Client
-	lookupEnv                                 func(string) (string, bool)
-	local                                     *Service
+	remotes                                  map[string]RemoteConfig
+	ids                                      []string
+	enabled                                  bool
+	pushEnabled                              bool
+	branchCreateEnabled                      bool
+	githubPullRequestEnabled                 bool
+	githubPullRequestReadEnabled             bool
+	githubPullRequestReplyEnabled            bool
+	githubPullRequestThreadResolutionEnabled bool
+	cloneEnabled                             bool
+	cloneMaxBytes                            int64
+	cloneMaxEntries                          int64
+	transport                                transport.Transport
+	githubClient                             *http.Client
+	lookupEnv                                func(string) (string, bool)
+	local                                    *Service
 }
 
 // NewRemoteServiceFromEnvironment constructs the remote service from operator
