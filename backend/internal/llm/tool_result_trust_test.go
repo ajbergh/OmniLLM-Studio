@@ -133,6 +133,59 @@ func TestNativeSearchTransportProtectsStreamingToolEvidenceWithoutSearchMarker(t
 	}
 }
 
+func TestNativeSearchTransportPreservesTrustDirectiveThroughGeminiGroundedSearch(t *testing.T) {
+	plugin := NativeSearchPlugin(&NativeSearchConfig{Enabled: true, ContextSize: "low"})
+	body, err := json.Marshal(map[string]interface{}{
+		"model": "gemini-test",
+		"messages": []ChatMessage{
+			{Role: "system", Content: "base"},
+			{Role: "tool", Content: "external instructions", ToolCallID: "call_1", Name: "fetch"},
+		},
+		"plugins": []Plugin{plugin},
+		"stream":  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var captured []byte
+	base := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var readErr error
+		captured, readErr = io.ReadAll(request.Body)
+		if readErr != nil {
+			t.Fatalf("read request body: %v", readErr)
+		}
+		if !strings.Contains(request.URL.Path, ":streamGenerateContent") {
+			t.Fatalf("Gemini request path was not transformed: %s", request.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusBadRequest, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})
+	transport := &nativeSearchTransport{base: base}
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatalf("RoundTrip() returned error: %v", err)
+	}
+	if response != nil {
+		response.Body.Close()
+	}
+	var payload struct {
+		SystemInstruction struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"system_instruction"`
+	}
+	if err := json.Unmarshal(captured, &payload); err != nil {
+		t.Fatalf("decode Gemini payload: %v\n%s", err, captured)
+	}
+	if len(payload.SystemInstruction.Parts) != 1 || !strings.Contains(payload.SystemInstruction.Parts[0].Text, UntrustedToolResultSystemDirective) {
+		t.Fatalf("Gemini system instruction lost trust directive: %#v", payload.SystemInstruction)
+	}
+}
+
 func decodeTrustTestMessages(t *testing.T, body []byte) []ChatMessage {
 	t.Helper()
 	var envelope struct {
