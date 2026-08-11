@@ -385,6 +385,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	userRepo := repository.NewUserRepo(database)
 	sessionRepo := repository.NewSessionRepo(database)
 	authHandler := NewAuthHandler(userRepo, sessionRepo, cfg)
+	githubAuthHandler := NewGitHubAuthHandlerFromEnvironment(database)
 	wsMemberRepo := repository.NewWorkspaceMemberRepo(database)
 	wsMemberHandler := NewWorkspaceMemberHandler(wsMemberRepo, userRepo)
 
@@ -435,6 +436,9 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 
 			// Current user
 			r.Get("/users/me", authHandler.Me)
+
+			// GitHub App connection
+			MountGitHubAuthRoutes(r, githubAuthHandler)
 
 			// Conversations
 			r.Route("/conversations", func(r chi.Router) {
