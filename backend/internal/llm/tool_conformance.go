@@ -139,8 +139,10 @@ func retryableProviderTransportError(err error) bool {
 
 // doProviderRequestWithRetry retries only failures that occur before any chat
 // response body is consumed. This makes non-streaming provider retries safe
-// while avoiding duplicate streamed tokens or tool calls.
+// while avoiding duplicate streamed tokens or tool calls. Tool-result evidence
+// is wrapped with a trusted system boundary before any attempt leaves OmniLLM.
 func doProviderRequestWithRetry(ctx context.Context, client *http.Client, request *http.Request, body []byte, provider, requestID string) (*http.Response, int, error) {
+	body = protectToolResultMessagesJSON(body)
 	const maxAttempts = 2
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		clone := request.Clone(ctx)
