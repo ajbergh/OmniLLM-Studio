@@ -113,7 +113,8 @@ func (t *nativeSearchTransport) RoundTrip(req *http.Request) (*http.Response, er
 		return nil, err
 	}
 	_ = req.Body.Close()
-	req.Body = io.NopCloser(bytes.NewReader(requestBody))
+	requestBody = protectToolResultMessagesJSON(requestBody)
+	setRequestBody(req, requestBody)
 
 	var payload map[string]interface{}
 	if json.Unmarshal(requestBody, &payload) != nil {
