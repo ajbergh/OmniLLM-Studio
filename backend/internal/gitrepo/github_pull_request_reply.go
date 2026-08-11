@@ -73,8 +73,8 @@ func (s *RemoteService) githubPullRequestReplyConfig(remoteID string) (RemoteCon
 }
 
 // ReplyToPullRequestReviewComment posts a reply only after revalidating the PR
-// current head and the exact reviewed top-level comment identity/version. This
-// prevents a stale feedback observation from authorizing a later hosted write.
+// current head/open state and the exact reviewed top-level comment identity and
+// version. This prevents stale feedback from authorizing a later hosted write.
 func (s *RemoteService) ReplyToPullRequestReviewComment(ctx context.Context, remoteID string, number int, expectedHead string, commentID, expectedReviewID int64, expectedUpdatedAt, body string) (*GitHubPullRequestReviewReplyResult, error) {
 	if number <= 0 {
 		return nil, fmt.Errorf("pull request number must be positive")
@@ -102,6 +102,9 @@ func (s *RemoteService) ReplyToPullRequestReviewComment(ctx context.Context, rem
 	if err != nil {
 		return nil, err
 	}
+	if pull.Merged || !strings.EqualFold(strings.TrimSpace(pull.State), "open") {
+		return nil, fmt.Errorf("pull request is no longer open; inspect the pull request before replying")
+	}
 	if !strings.EqualFold(pull.Head.SHA, expectedHead) {
 		return nil, fmt.Errorf("pull request head changed; inspect feedback again before replying")
 	}
@@ -125,10 +128,10 @@ func (s *RemoteService) ReplyToPullRequestReviewComment(ctx context.Context, rem
 	replyEndpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/comments/%d/replies", owner, repository, number, commentID)
 	var reply githubPullRequestReviewCommentMutationResponse
 	if err := s.doGitHubJSON(ctx, token, http.MethodPost, replyEndpoint, map[string]string{"body": body}, http.StatusCreated, &reply); err != nil {
-		return nil, fmt.Errorf("GitHub pull request review reply could not be posted")
+		return nil, fmt.Errorf("GitHub pull request review reply outcome is unknown; inspect feedback before retrying")
 	}
 	if reply.ID <= 0 || reply.PullRequestReviewID != expectedReviewID || reply.InReplyToID != commentID || reply.PullRequestURL != expectedPullURL {
-		return nil, fmt.Errorf("GitHub pull request review reply response could not be validated")
+		return nil, fmt.Errorf("GitHub pull request review reply outcome could not be validated; inspect feedback before retrying")
 	}
 
 	return &GitHubPullRequestReviewReplyResult{
