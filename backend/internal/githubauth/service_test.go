@@ -47,9 +47,11 @@ func (s *memoryCredentialStore) Clear(userID string) error {
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
-func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
-func jsonResponse(status int, body interface{}) *http.Response {
+func jsonResponse(status int, body any) *http.Response {
 	encoded, _ := json.Marshal(body)
 	return &http.Response{
 		StatusCode: status,
@@ -71,25 +73,26 @@ func newTestService(t *testing.T, store CredentialStore, transport roundTripFunc
 func TestStartDeviceAuthorizationKeepsDeviceCodeBackendOnly(t *testing.T) {
 	store := newMemoryCredentialStore()
 	service := newTestService(t, store, func(request *http.Request) (*http.Response, error) {
-		if request.URL.String() != deviceCodeEndpoint || request.Method != http.MethodPost {
-			t.Fatalf("unexpected request %s %s", request.Method, request.URL)
+		if request.Method != http.MethodPost || request.URL.String() != deviceCodeEndpoint {
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL)
 		}
-		if request.Header.Get("Accept") != "application/json" {
-			t.Fatalf("missing JSON accept header")
+		if request.Header.Get("User-Agent") != "OmniLLM-Studio" || request.Header.Get("Accept") != "application/json" {
+			t.Fatalf("missing GitHub auth headers")
 		}
 		body, _ := io.ReadAll(request.Body)
 		if !strings.Contains(string(body), "client_id=Iv1.test-client") {
-			t.Fatalf("missing client ID form value: %s", body)
+			t.Fatalf("missing client ID: %s", body)
 		}
-		return jsonResponse(http.StatusOK, map[string]interface{}{
-			"device_code": "provider-secret-device-code",
-			"user_code": "ABCD-EFGH",
+		return jsonResponse(http.StatusOK, map[string]any{
+			"device_code":      "provider-secret-device-code",
+			"user_code":        "ABCD-EFGH",
 			"verification_uri": "https://github.com/login/device",
-			"expires_in": 900,
-			"interval": 5,
+			"expires_in":       900,
+			"interval":         5,
 		}), nil
 	})
-	service.now = func() time.Time { return time.Date(2026, 8, 11, 20, 0, 0, 0, time.UTC) }
+	fixed := time.Date(2026, 8, 11, 20, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return fixed }
 
 	result, err := service.StartDeviceAuthorization(context.Background(), "local")
 	if err != nil {
@@ -99,7 +102,7 @@ func TestStartDeviceAuthorizationKeepsDeviceCodeBackendOnly(t *testing.T) {
 		t.Fatalf("unexpected result: %#v", result)
 	}
 	if strings.Contains(result.UserCode+result.VerificationURI, "provider-secret-device-code") {
-		t.Fatalf("device code escaped backend state")
+		t.Fatal("provider device code escaped backend state")
 	}
 	status, err := service.Status("local")
 	if err != nil || !status.Configured || !status.Pending || status.Connected {
@@ -107,56 +110,47 @@ func TestStartDeviceAuthorizationKeepsDeviceCodeBackendOnly(t *testing.T) {
 	}
 }
 
-func TestPollDeviceAuthorizationBindsGitHubIdentityAndStoresCredential(t *testing.T) {
+func TestPollDeviceAuthorizationBindsIdentityAndPersistsCredential(t *testing.T) {
 	store := newMemoryCredentialStore()
 	calls := 0
 	service := newTestService(t, store, func(request *http.Request) (*http.Response, error) {
 		calls++
 		switch request.URL.String() {
 		case deviceCodeEndpoint:
-			return jsonResponse(http.StatusOK, map[string]interface{}{
-				"device_code": "device-code",
-				"user_code": "ABCD-EFGH",
-				"verification_uri": "https://github.com/login/device",
-				"expires_in": 900,
-				"interval": 5,
+			return jsonResponse(http.StatusOK, map[string]any{
+				"device_code": "device-code", "user_code": "ABCD-EFGH",
+				"verification_uri": "https://github.com/login/device", "expires_in": 900, "interval": 5,
 			}), nil
 		case tokenEndpoint:
 			body, _ := io.ReadAll(request.Body)
-			text := string(body)
-			if !strings.Contains(text, "device_code=device-code") || !strings.Contains(text, "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code") {
-				t.Fatalf("unexpected token form: %s", text)
+			form := string(body)
+			if !strings.Contains(form, "device_code=device-code") || !strings.Contains(form, "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code") {
+				t.Fatalf("unexpected token form: %s", form)
 			}
-			return jsonResponse(http.StatusOK, map[string]interface{}{
-				"access_token": "ghu_access_secret",
-				"expires_in": 28800,
-				"refresh_token": "ghr_refresh_secret",
-				"refresh_token_expires_in": 15897600,
-				"token_type": "bearer",
-				"scope": "",
+			return jsonResponse(http.StatusOK, map[string]any{
+				"access_token": "ghu_access_secret", "expires_in": 28800,
+				"refresh_token": "ghr_refresh_secret", "refresh_token_expires_in": 15897600,
+				"token_type": "bearer", "scope": "",
 			}), nil
 		case userEndpoint:
-			if request.Header.Get("Authorization") != "Bearer ghu_access_secret" {
-				t.Fatalf("unexpected authorization header")
+			if request.Header.Get("Authorization") != "Bearer ghu_access_secret" || request.Header.Get("X-GitHub-Api-Version") != githubAPIVersion {
+				t.Fatalf("unexpected identity headers")
 			}
-			if request.Header.Get("X-GitHub-Api-Version") != githubAPIVersion {
-				t.Fatalf("missing pinned API version")
-			}
-			return jsonResponse(http.StatusOK, map[string]interface{}{"id": 12345, "login": "octocat"}), nil
+			return jsonResponse(http.StatusOK, map[string]any{"id": 12345, "login": "octocat"}), nil
 		default:
-			t.Fatalf("unexpected request URL %s", request.URL)
+			t.Fatalf("unexpected URL %s", request.URL)
 			return nil, nil
 		}
 	})
 	fixed := time.Date(2026, 8, 11, 20, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return fixed }
-	if _, err := service.StartDeviceAuthorization(context.Background(), "user-1"); err != nil {
-		t.Fatalf("start error = %v", err)
-	}
 
+	if _, err := service.StartDeviceAuthorization(context.Background(), "user-1"); err != nil {
+		t.Fatal(err)
+	}
 	result, err := service.PollDeviceAuthorization(context.Background(), "user-1")
 	if err != nil {
-		t.Fatalf("poll error = %v", err)
+		t.Fatalf("PollDeviceAuthorization() error = %v", err)
 	}
 	if result.Status != "connected" || result.GitHubLogin != "octocat" {
 		t.Fatalf("unexpected poll result: %#v", result)
@@ -170,29 +164,31 @@ func TestPollDeviceAuthorizationBindsGitHubIdentityAndStoresCredential(t *testin
 		t.Fatalf("unexpected connected status: %#v err=%v", status, err)
 	}
 	if calls != 3 {
-		t.Fatalf("expected three provider requests, got %d", calls)
+		t.Fatalf("expected 3 provider calls, got %d", calls)
 	}
 }
 
-func TestPollDeviceAuthorizationEnforcesProviderIntervalWithoutSleeping(t *testing.T) {
+func TestPollDeviceAuthorizationEnforcesIntervalWithoutSleeping(t *testing.T) {
 	store := newMemoryCredentialStore()
 	providerPolls := 0
 	service := newTestService(t, store, func(request *http.Request) (*http.Response, error) {
-		if request.URL.String() == deviceCodeEndpoint {
-			return jsonResponse(http.StatusOK, map[string]interface{}{
+		switch request.URL.String() {
+		case deviceCodeEndpoint:
+			return jsonResponse(http.StatusOK, map[string]any{
 				"device_code": "device-code", "user_code": "ABCD-EFGH",
 				"verification_uri": "https://github.com/login/device", "expires_in": 900, "interval": 5,
 			}), nil
-		}
-		if request.URL.String() == tokenEndpoint {
+		case tokenEndpoint:
 			providerPolls++
-			return jsonResponse(http.StatusOK, map[string]interface{}{"error": "authorization_pending"}), nil
+			return jsonResponse(http.StatusOK, map[string]any{"error": "authorization_pending"}), nil
+		default:
+			t.Fatalf("unexpected URL %s", request.URL)
+			return nil, nil
 		}
-		t.Fatalf("unexpected request URL %s", request.URL)
-		return nil, nil
 	})
 	fixed := time.Date(2026, 8, 11, 20, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return fixed }
+
 	if _, err := service.StartDeviceAuthorization(context.Background(), "local"); err != nil {
 		t.Fatal(err)
 	}
@@ -205,35 +201,38 @@ func TestPollDeviceAuthorizationEnforcesProviderIntervalWithoutSleeping(t *testi
 		t.Fatalf("unexpected second poll: %#v err=%v", second, err)
 	}
 	if providerPolls != 1 {
-		t.Fatalf("second immediate poll should stay local; provider polls=%d", providerPolls)
+		t.Fatalf("immediate retry should not hit provider; polls=%d", providerPolls)
 	}
 }
 
-func TestAccessTokenRefreshesAndRotatesDeviceFlowCredential(t *testing.T) {
+func TestAccessTokenRefreshesAndRotatesCredential(t *testing.T) {
 	store := newMemoryCredentialStore()
 	fixed := time.Date(2026, 8, 11, 20, 0, 0, 0, time.UTC)
-	oldAccessExpiry := fixed.Add(time.Minute)
-	oldRefreshExpiry := fixed.Add(30 * 24 * time.Hour)
+	accessExpiry := fixed.Add(time.Minute)
+	refreshExpiry := fixed.Add(30 * 24 * time.Hour)
 	_ = store.Save("user-1", Credential{
 		AccessToken: "ghu_old", RefreshToken: "ghr_old", TokenType: "bearer",
-		AccessExpiresAt: &oldAccessExpiry, RefreshExpiresAt: &oldRefreshExpiry,
+		AccessExpiresAt: &accessExpiry, RefreshExpiresAt: &refreshExpiry,
 		GitHubUserID: 12345, GitHubLogin: "octocat",
 	})
 	service := newTestService(t, store, func(request *http.Request) (*http.Response, error) {
 		switch request.URL.String() {
 		case tokenEndpoint:
 			body, _ := io.ReadAll(request.Body)
-			text := string(body)
-			if !strings.Contains(text, "grant_type=refresh_token") || !strings.Contains(text, "refresh_token=ghr_old") || strings.Contains(text, "client_secret") {
-				t.Fatalf("unexpected refresh form: %s", text)
+			form := string(body)
+			if !strings.Contains(form, "grant_type=refresh_token") || !strings.Contains(form, "refresh_token=ghr_old") || strings.Contains(form, "client_secret") {
+				t.Fatalf("unexpected refresh form: %s", form)
 			}
-			return jsonResponse(http.StatusOK, map[string]interface{}{
+			return jsonResponse(http.StatusOK, map[string]any{
 				"access_token": "ghu_new", "expires_in": 28800,
 				"refresh_token": "ghr_new", "refresh_token_expires_in": 15897600,
 				"token_type": "bearer", "scope": "",
 			}), nil
 		case userEndpoint:
-			return jsonResponse(http.StatusOK, map[string]interface{}{"id": 12345, "login": "octocat"}), nil
+			if request.Header.Get("Authorization") != "Bearer ghu_new" {
+				t.Fatalf("identity lookup did not use refreshed token")
+			}
+			return jsonResponse(http.StatusOK, map[string]any{"id": 12345, "login": "octocat"}), nil
 		default:
 			t.Fatalf("unexpected URL %s", request.URL)
 			return nil, nil
@@ -241,6 +240,10 @@ func TestAccessTokenRefreshesAndRotatesDeviceFlowCredential(t *testing.T) {
 	})
 	service.now = func() time.Time { return fixed }
 
+	status, err := service.Status("user-1")
+	if err != nil || !status.Connected {
+		t.Fatalf("refreshable expired token should remain connected: %#v err=%v", status, err)
+	}
 	token, err := service.AccessToken(context.Background(), "user-1")
 	if err != nil || token != "ghu_new" {
 		t.Fatalf("AccessToken() = %q, %v", token, err)
@@ -255,7 +258,7 @@ func TestDisconnectClearsCredentialAndPendingState(t *testing.T) {
 	store := newMemoryCredentialStore()
 	_ = store.Save("user-1", Credential{AccessToken: "secret", TokenType: "bearer"})
 	service := newTestService(t, store, func(request *http.Request) (*http.Response, error) {
-		return jsonResponse(http.StatusOK, map[string]interface{}{
+		return jsonResponse(http.StatusOK, map[string]any{
 			"device_code": "device-code", "user_code": "ABCD-EFGH",
 			"verification_uri": "https://github.com/login/device", "expires_in": 900, "interval": 5,
 		}), nil
