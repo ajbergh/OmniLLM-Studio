@@ -38,8 +38,9 @@ func protectToolResultMessagesJSON(body []byte) []byte {
 	for insertAt < len(messages) && messages[insertAt].Role == "system" {
 		insertAt++
 	}
-	protected := make([]ChatMessage, 0, len(messages)+1)
-	protected = append(protected, messages[:insertAt]...)
+	// Do not perform attacker-influenced capacity arithmetic here. Let append's
+	// runtime growth checks size the destination while preserving message order.
+	protected := append([]ChatMessage{}, messages[:insertAt]...)
 	protected = append(protected, ChatMessage{Role: "system", Content: UntrustedToolResultSystemDirective})
 	protected = append(protected, messages[insertAt:]...)
 	encodedMessages, err := json.Marshal(protected)
