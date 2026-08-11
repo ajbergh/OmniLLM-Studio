@@ -58,3 +58,33 @@ func TestGitHubPullRequestMergeRequirementsToolReturnsStructuredResult(t *testin
 		t.Fatalf("Execute() = %#v, %v", result, err)
 	}
 }
+
+func TestRegistryGitHubPullRequestMergeRequirementsUsesReadGateOnly(t *testing.T) {
+	repoPath := t.TempDir()
+	t.Setenv(gitrepo.RepositoriesEnv, "repo="+repoPath)
+	t.Setenv(gitrepo.RemotesEnv, `{"origin":{"repository":"repo","url":"https://github.com/example/repo.git","token_env":"GITHUB_TOKEN","allow_pull_request_read":true}}`)
+	t.Setenv(gitrepo.RemoteEnabledEnv, "true")
+	t.Setenv(gitrepo.WriteEnabledEnv, "false")
+	t.Setenv(gitrepo.RemotePushEnabledEnv, "false")
+	t.Setenv(gitrepo.GitHubPullRequestEnabledEnv, "false")
+	t.Setenv(gitrepo.GitHubPullRequestReplyEnabledEnv, "false")
+	t.Setenv(gitrepo.GitHubPullRequestThreadResolutionEnabledEnv, "false")
+	t.Setenv(gitrepo.GitHubPullRequestReadyEnabledEnv, "false")
+	t.Setenv(gitrepo.GitHubPullRequestReadEnabledEnv, "false")
+
+	withoutRead := NewRegistry()
+	if _, ok := withoutRead.Get("github_get_pull_request_merge_requirements"); ok {
+		t.Fatal("merge requirements tool registered without independent PR read gate")
+	}
+
+	t.Setenv(gitrepo.GitHubPullRequestReadEnabledEnv, "true")
+	withRead := NewRegistry()
+	if _, ok := withRead.Get("github_get_pull_request_merge_requirements"); !ok {
+		t.Fatal("merge requirements tool not registered with remote/read gates enabled")
+	}
+	for _, name := range []string{"github_create_draft_pull_request", "github_reply_to_pull_request_review_comment", "github_set_pull_request_review_thread_resolved", "github_mark_pull_request_ready_for_review", "git_push"} {
+		if _, ok := withRead.Get(name); ok {
+			t.Fatalf("%s should remain disabled by its independent mutation gate", name)
+		}
+	}
+}
