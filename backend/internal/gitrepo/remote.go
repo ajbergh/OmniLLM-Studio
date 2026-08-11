@@ -51,19 +51,20 @@ type RemoteStatusResult struct {
 // same configured Service used by local Git tools so reviewed local state can be
 // bound to network mutations.
 type RemoteService struct {
-	remotes                  map[string]RemoteConfig
-	ids                      []string
-	enabled                  bool
-	pushEnabled              bool
-	branchCreateEnabled      bool
-	githubPullRequestEnabled bool
-	cloneEnabled             bool
-	cloneMaxBytes            int64
-	cloneMaxEntries          int64
-	transport                transport.Transport
-	githubClient             *http.Client
-	lookupEnv                func(string) (string, bool)
-	local                    *Service
+	remotes                      map[string]RemoteConfig
+	ids                          []string
+	enabled                      bool
+	pushEnabled                  bool
+	branchCreateEnabled          bool
+	githubPullRequestEnabled     bool
+	githubPullRequestReadEnabled bool
+	cloneEnabled                 bool
+	cloneMaxBytes                int64
+	cloneMaxEntries              int64
+	transport                    transport.Transport
+	githubClient                 *http.Client
+	lookupEnv                    func(string) (string, bool)
+	local                        *Service
 }
 
 // NewRemoteServiceFromEnvironment constructs the remote service from operator
@@ -83,6 +84,7 @@ func NewRemoteServiceFromEnvironment(local *Service) *RemoteService {
 	service.local = local
 	service.branchCreateEnabled = boolEnvironment(RemoteBranchCreateEnabledEnv)
 	service.githubPullRequestEnabled = boolEnvironment(GitHubPullRequestEnabledEnv)
+	service.githubPullRequestReadEnabled = boolEnvironment(GitHubPullRequestReadEnabledEnv)
 	if maxBytes, maxEntries, ok := cloneLimitsFromEnvironment(); ok {
 		service.cloneMaxBytes = maxBytes
 		service.cloneMaxEntries = maxEntries
@@ -125,6 +127,12 @@ func (s *RemoteService) GitHubPullRequestEnabled() bool {
 	return s != nil && s.githubPullRequestEnabled
 }
 
+// GitHubPullRequestReadEnabled reports the independent process-wide gate for
+// read-only pull request and CI/check inspection through the GitHub API.
+func (s *RemoteService) GitHubPullRequestReadEnabled() bool {
+	return s != nil && s.githubPullRequestReadEnabled
+}
+
 // PushMutationEnabled reports whether the process has enabled all global gates
 // required for a remote push mutation. Per-remote policy is checked by Push.
 func (s *RemoteService) PushMutationEnabled() bool {
@@ -136,6 +144,13 @@ func (s *RemoteService) PushMutationEnabled() bool {
 // checked by PublishBranch.
 func (s *RemoteService) BranchCreateMutationEnabled() bool {
 	return s != nil && s.PushMutationEnabled() && s.BranchCreateEnabled()
+}
+
+// GitHubPullRequestReadAccessEnabled reports whether hosted pull request reads
+// are globally enabled. Per-remote policy, github.com identity, and credential
+// presence are checked by each read operation.
+func (s *RemoteService) GitHubPullRequestReadAccessEnabled() bool {
+	return s != nil && s.Enabled() && s.GitHubPullRequestReadEnabled()
 }
 
 // GitHubPullRequestMutationEnabled reports whether the global prerequisites for
@@ -170,6 +185,7 @@ func (s *RemoteService) Remotes(ctx context.Context) []RemoteSummary {
 			AuthenticationConfigured: remote.TokenEnv != "",
 			PushAllowed:              s.PushMutationEnabled() && remote.AllowPush,
 			BranchCreateAllowed:      s.BranchCreateMutationEnabled() && remote.AllowPush && remote.AllowBranchCreate,
+			PullRequestReadAllowed:   s.GitHubPullRequestReadAccessEnabled() && remoteSupportsGitHubPullRequestRead(remote),
 			PullRequestCreateAllowed: s.GitHubPullRequestMutationEnabled() && remoteSupportsGitHubPullRequests(remote),
 			DefaultBranchPushAllowed: s.PushMutationEnabled() && remote.AllowPush && remote.AllowDefaultBranchPush,
 			CloneAllowed:             s.CloneMutationEnabled() && remote.AllowClone,
