@@ -51,19 +51,30 @@ POST   /v1/github/auth/device/poll
 DELETE /v1/github/auth
 ```
 
-The helper must be mounted inside the existing authenticated `/v1` route group. Device poll performs at most one provider request; clients retry according to `retry_after_seconds`.
+Device poll performs at most one provider request; clients retry according to `retry_after_seconds`.
 
-## G2b: application composition — next
+## G2b: application composition — implemented
 
-The next small slice should compose `NewGitHubAuthHandlerFromEnvironment(database)` in `backend/internal/api/router.go` and call `MountGitHubAuthRoutes` only inside the current authenticated route group. Missing `OMNILLM_GITHUB_APP_CLIENT_ID` remains a supported state: `GET /v1/github/auth` reports `configured=false`, start/poll return a bounded service-unavailable response, and disconnect remains idempotent.
+`backend/internal/api/router.go` now constructs `NewGitHubAuthHandlerFromEnvironment(database)` once and mounts `MountGitHubAuthRoutes` only inside the existing authenticated `/v1` route group, immediately after the current-user route. The composition change is deliberately limited to four added router lines and does not move or rewrite any existing route.
 
-No frontend work is required for G2b. It should prove the live route surface first.
+Missing `OMNILLM_GITHUB_APP_CLIENT_ID` remains a supported runtime state: `GET /v1/github/auth` reports `configured=false`, start/poll return bounded service-unavailable responses, and disconnect remains idempotent. Solo mode continues to use the stable `local` owner through the same authenticated-route-group middleware boundary.
 
-## G3: request-scoped Git credential resolver
+No frontend behavior is added in G2b and no Git/GitHub mutation gate is changed.
 
-Only after persistence and authenticated API wiring are proven should `backend/internal/gitrepo` consume these credentials.
+## G3: request-scoped Git credential resolver — next
 
-The intended integration is a backend-only credential provider that can resolve an access token for `(userID, remoteID)` and refresh it as needed. `TokenEnv` remains a backward-compatible operator/headless fallback.
+The next slice should let existing Git/GitHub tools consume the connected user's GitHub App credential without adding user IDs or credentials to model-facing tool arguments.
+
+Tool invocation context already carries the OmniLLM owner. The Git remote layer should therefore resolve credentials internally from `context.Context`, using this precedence:
+
+1. if the invoking user has a GitHub App connection, use that user credential;
+2. if that connection requires reauthorization or token refresh fails, fail closed and do **not** fall back to a shared operator token;
+3. if the invoking user has no GitHub App connection, retain `TokenEnv` as a backward-compatible operator/headless fallback;
+4. never apply a GitHub App credential to a non-GitHub remote.
+
+The `gitrepo` GitHub capability predicates must also become credential-source agnostic: repository host plus per-remote `allow_*` policy determines whether a capability is allowed, while the actual credential is resolved at execution time.
+
+`tools.NewRegistry()` should remain the backward-compatible default, with an options/dependency path added for an injected GitHub credential provider. This preserves current deployments while allowing `NewRouterWithShutdown` to inject the user-scoped provider backed by `GitHubAppConnectionRepo` and `githubauth.Service`.
 
 Crucially, the following existing controls remain independent and authoritative:
 
@@ -80,9 +91,8 @@ Authentication is not authorization.
 
 ## Subsequent slices
 
-1. **G2b — mount the authenticated GitHub connection API in application composition.**
-2. **G3 — request-scoped GitHub credential resolver for existing Git/GitHub tools.**
-3. **G4 — repository discovery and explicit repository-to-local-worktree binding.**
-4. **G5 — Settings UI: Connect GitHub, choose repositories, status, reconnect, disconnect.**
-5. **M2 — continue merge-policy completeness work independently.**
-6. **M3 — consider guarded direct merge only after M2 can prove policy completeness.**
+1. **G3 — request-scoped GitHub credential resolver for existing Git/GitHub tools.**
+2. **G4 — repository discovery and explicit repository-to-local-worktree binding.**
+3. **G5 — Settings UI: Connect GitHub, choose repositories, status, reconnect, disconnect.**
+4. **M2 — continue merge-policy completeness work independently.**
+5. **M3 — consider guarded direct merge only after M2 can prove policy completeness.**
