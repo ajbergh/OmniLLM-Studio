@@ -88,8 +88,8 @@ func TestGetPullRequestReviewThreadsDefaultsFirstPageAndBoundsPath(t *testing.T)
 					"headRefOid": head,
 					"reviewThreads": map[string]interface{}{
 						"totalCount": 1,
-						"nodes": []map[string]interface{}{{"id": "PRRT_thread", "path": longPath, "diffSide": "RIGHT", "subjectType": "LINE"}},
-						"pageInfo": map[string]interface{}{"hasNextPage": false, "endCursor": nil},
+						"nodes":      []map[string]interface{}{{"id": "PRRT_thread", "path": longPath, "diffSide": "RIGHT", "subjectType": "LINE"}},
+						"pageInfo":   map[string]interface{}{"hasNextPage": false, "endCursor": nil},
 					},
 				}}},
 			})
