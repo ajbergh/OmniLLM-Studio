@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -17,7 +18,7 @@ func TestGetPullRequestFeedbackRejectsInvalidRequestBeforeNetwork(t *testing.T) 
 		return jsonHTTPResponse(http.StatusOK, `{}`), nil
 	})}
 	for _, test := range []struct {
-		kind       string
+		kind        string
 		page, limit int
 	}{
 		{kind: "invalid", page: 1, limit: 10},
@@ -169,12 +170,12 @@ func TestGetPullRequestFeedbackReviewRequestsUsesBoundedUserThenTeamOrder(t *tes
 
 func feedbackPullResponse(number int, head string) *http.Response {
 	payload, _ := json.Marshal(map[string]interface{}{
-		"number": number,
-		"html_url": "https://github.com/example/repo/pull/" + string(rune('0'+number)),
-		"title": "Feedback",
-		"state": "open",
-		"head": map[string]string{"ref": "feature/feedback", "sha": head},
-		"base": map[string]string{"ref": "main"},
+		"number":   number,
+		"html_url": "https://github.com/example/repo/pull/" + strconv.Itoa(number),
+		"title":    "Feedback",
+		"state":    "open",
+		"head":     map[string]string{"ref": "feature/feedback", "sha": head},
+		"base":     map[string]string{"ref": "main"},
 	})
 	return jsonHTTPResponse(http.StatusOK, string(payload))
 }
