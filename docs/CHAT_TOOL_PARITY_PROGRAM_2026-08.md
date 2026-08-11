@@ -144,7 +144,7 @@ Large catalogs use `tool_search` for compact request-scoped discovery and `tool_
 
 ## Post-program extensions already implemented
 
-The original parity program did not include a full coding-agent Git/GitHub workflow. Subsequent work now provides a governed loop from local changes through hosted review feedback:
+The original parity program did not include a full coding-agent Git/GitHub workflow. Subsequent work now provides a governed loop from local changes through hosted review and readiness:
 
 - local Git inspection and reviewed local mutations;
 - guarded remote inspection, fetch, existing-branch push, and clone;
@@ -155,13 +155,15 @@ The original parity program did not include a full coding-agent Git/GitHub workf
 - bounded hosted review, inline-comment, timeline-comment, and review-request inspection;
 - bounded cursor-based review-thread state/location inspection through fixed application-owned GraphQL;
 - separately gated replies to reviewed top-level inline review comments;
-- separately gated resolve/unresolve of an exact reviewed review thread with PR-head, ownership, state, and viewer-capability revalidation.
+- separately gated resolve/unresolve of an exact reviewed review thread with PR-head, ownership, state, and viewer-capability revalidation;
+- separately gated transition of an exact reviewed draft PR to ready-for-review state with fresh head/default-base revalidation and fixed application-owned GraphQL.
 
 Primary implementation/documentation anchors:
 
 - `docs/LOCAL_GIT_TOOLS.md`
 - `docs/REMOTE_GIT_TOOLS.md`
 - `docs/GITHUB_PULL_REQUEST_TOOLS.md`
+- `docs/GITHUB_PULL_REQUEST_READY_FOR_REVIEW.md`
 - `docs/TOOL_RESULT_TRUST_BOUNDARY.md`
 - `backend/internal/gitrepo/github_pull_request.go`
 - `backend/internal/gitrepo/github_pull_request_read.go`
@@ -169,45 +171,60 @@ Primary implementation/documentation anchors:
 - `backend/internal/gitrepo/github_pull_request_threads.go`
 - `backend/internal/gitrepo/github_pull_request_reply.go`
 - `backend/internal/gitrepo/github_pull_request_thread_resolution.go`
+- `backend/internal/gitrepo/github_pull_request_ready.go`
 
 ## Verified next gaps
 
-The next program remains driven by concrete missing runtime capabilities rather than by the historical phase list. The previous roadmap item for read-only PR/CI inspection is complete and must no longer be treated as pending work.
+The next program remains driven by concrete missing runtime capabilities rather than by historical phase numbering.
 
-### Priority 1 — Guarded draft-to-ready transition
+### Completed — Guarded draft-to-ready transition
 
-The hosted collaboration loop can now create a draft PR, inspect its exact head/checks/feedback/thread state, reply to reviewed inline feedback, and resolve addressed review threads. It still cannot explicitly advance a reviewed draft PR to **ready for review** through OmniLLM.
+The previously identified draft-to-ready gap is complete. `github_mark_pull_request_ready_for_review` is independently gated and accepts only configured remote ID, PR number, and exact reviewed head. Repository/API/token/node/base remain operator/application-derived; the service requires the PR to remain open, unmerged, draft, on the exact reviewed head, and targeted at the configured remote's advertised default branch before issuing a fixed GitHub ready-for-review mutation.
 
-This is the recommended next implementation slice because it advances the PR lifecycle without changing Git objects, source refs, reviewer membership, workflow execution, or merge state. It should remain an independently gated hosted mutation rather than being implied by draft creation or PR-read permission.
+Implementation anchors:
 
-Recommended guardrails:
+- `backend/internal/gitrepo/github_pull_request_ready.go`
+- `backend/internal/tools/github_pull_request_ready_tool.go`
+- `docs/GITHUB_PULL_REQUEST_READY_FOR_REVIEW.md`
 
-- accept only the configured remote ID, positive PR number, and exact reviewed 40-character PR head;
-- derive repository/API host/token only from the operator-configured `github.com` remote;
-- require a dedicated process-wide gate and per-remote opt-in independent from PR read/create/reply/thread-resolution permissions;
-- re-fetch the PR immediately before mutation and require it to remain open, unmerged, draft, on the exact reviewed head, and targeted at the configured repository's expected base state;
-- use one fixed application-owned GitHub mutation; do not accept arbitrary GraphQL text or API URLs;
-- validate the returned PR back to the same repository/number/head and require `draft=false` before reporting success;
-- treat transport/provider/GraphQL ambiguity after mutation as an unknown outcome requiring fresh PR inspection before retrying;
-- keep the tool high-risk, side-effecting, credentialed, non-parallel, approval-aware, and separately policy-controlled;
-- do not combine this slice with reviewer requests, review submission/dismissal, workflow reruns, merge/close, labels/assignees, or source-branch deletion.
+### Priority 1 — Read-only merge requirements — DESIGN GATE
 
-### Priority 2 — Validated merge lifecycle, only after ready-state transition is proven
+A direct merge mutation is **not** the next implementation step. The current read surface can bind observed checks/reviews/threads to the exact PR head, but it does not normalize all active merge requirements from rulesets and classic branch protection or prove that a configured GitHub actor with administrator/bypass privileges would be subject to those requirements.
 
-A coding agent still cannot close the lifecycle by merging an exact validated PR. This is materially higher risk and less reversible than marking a draft ready, so it should be a later independently gated capability.
+The next recommended slice is a bounded read-only merge-requirements capability, tentatively `github_get_pull_request_merge_requirements`, with no merge permission or mutation.
 
-Before implementing merge, require a dedicated design/review for at least:
+Required outcomes:
 
-- exact current PR head and base binding with no arbitrary repository/base/ref inputs;
-- open, non-draft, unmerged hosted state;
-- current mergeability/merge-state validation;
-- explicit check/status policy for the exact head rather than trusting stale prior output;
-- review-thread/review-state policy appropriate to the repository workflow;
-- one explicitly selected operator-approved merge method or a repository-policy-derived method, never a model-supplied arbitrary strategy;
-- ambiguous-outcome handling that re-inspects the PR before any retry;
-- no implicit source-branch deletion.
+- bind results to the freshly fetched PR number/head/base;
+- inspect active rules/rulesets for the exact base branch;
+- inspect classic branch protection where visible and report policy visibility as incomplete when it cannot be safely distinguished from an unprotected branch;
+- normalize required status checks, strict/up-to-date policy, review count, code-owner review, last-push approval, conversation resolution, deployments, linear history, allowed merge methods, and merge-queue requirements where available;
+- expose an explicit fail-closed policy-completeness state;
+- reject/flag unknown policy types that can materially affect merge eligibility;
+- remain read-only, bounded, fixed-host, credentialed, and independently usable without enabling any merge mutation.
 
-Do not infer merge authorization from `viewerCan*` provider flags, existing Git push permission, draft creation permission, or thread-resolution permission.
+Detailed design/threat model:
+
+- `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`
+
+### Priority 2 — Guarded direct merge, blocked on Priority 1
+
+Only after the read-only requirements surface is implemented, validated, and reviewed should a direct merge mutation be reconsidered.
+
+The proposed boundary is intentionally stricter than the ready-for-review mutation:
+
+- accept only configured remote ID, positive PR number, and exact reviewed 40-character head;
+- derive repository/API/token/base and merge method from operator/application configuration, never model input;
+- require open, non-draft, unmerged state and exact default-base binding;
+- recompute merge requirements immediately before mutation and require policy visibility to be complete;
+- reject merge-queue-required repositories rather than bypassing or approximating queue semantics;
+- require current mergeability and all normalized check/review/thread/deployment requirements to be satisfied;
+- use GitHub's exact-head merge precondition as a final server-side race guard;
+- treat ambiguous mutation outcomes as requiring fresh PR inspection before any retry;
+- never infer merge authorization from provider `viewerCan*` flags or Git/GitHub permissions for other capabilities;
+- never delete the source branch implicitly.
+
+Do not implement merge until the design gate in `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md` is satisfied.
 
 ### Priority 3 — Lower-priority collaboration/operations gaps
 
@@ -218,9 +235,10 @@ These remain intentionally unsupported until a concrete workflow need justifies 
 - rerun/cancel GitHub Actions workflows;
 - arbitrary PR metadata changes such as labels, assignees, milestones, or base retargeting;
 - close/reopen arbitrary PRs;
-- delete hosted source branches.
+- delete hosted source branches;
+- merge-queue enrollment/dequeue controls.
 
-Repository search and current remote configuration confirm there are no corresponding core OmniLLM tool registrations or operator gates on `main` as of this reconciliation. Their absence is intentional rather than a stale implementation omission.
+Their absence is intentional rather than a stale implementation omission.
 
 ## Validation
 

@@ -1,8 +1,8 @@
 # GitHub pull request tools
 
-OmniLLM-Studio provides a guarded GitHub collaboration boundary after local Git work has been committed and published. Read-only pull-request/check/feedback/thread-state inspection, draft pull-request creation, inline review-comment replies, and review-thread resolution are deliberately independent operator permissions. None implies Git push, branch creation, or another hosted mutation.
+OmniLLM-Studio provides a guarded GitHub collaboration boundary after local Git work has been committed and published. Read-only pull-request/check/feedback/thread-state inspection, draft pull-request creation, inline review-comment replies, review-thread resolution, and draft-to-ready transition are deliberately independent operator permissions. None implies Git push, branch creation, merge, or another hosted mutation.
 
-Local Git and remote publication are documented in `docs/LOCAL_GIT_TOOLS.md` and `docs/REMOTE_GIT_TOOLS.md`.
+Local Git and remote publication are documented in `docs/LOCAL_GIT_TOOLS.md` and `docs/REMOTE_GIT_TOOLS.md`. The ready transition has additional operator detail in `docs/GITHUB_PULL_REQUEST_READY_FOR_REVIEW.md`. The merge threat model and prerequisite read-policy design are in `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`.
 
 ## Operator configuration
 
@@ -20,7 +20,8 @@ GitHub collaboration reuses an operator-configured remote from `OMNILLM_GIT_REMO
     "allow_pull_request_read": true,
     "allow_pull_request_create": true,
     "allow_pull_request_reply": true,
-    "allow_pull_request_thread_resolution": true
+    "allow_pull_request_thread_resolution": true,
+    "allow_pull_request_ready": true
   }
 }
 ```
@@ -51,7 +52,13 @@ Changing the resolved state of existing review threads has another independent p
 OMNILLM_GITHUB_PULL_REQUEST_THREAD_RESOLUTION_ENABLED=true
 ```
 
-All GitHub capabilities also require `OMNILLM_GIT_REMOTE_ENABLED=true`, a non-empty `token_env`, and an exact `https://github.com/<owner>/<repository>[.git]` remote URL. Read operations additionally require `allow_pull_request_read: true`; creation requires `allow_pull_request_create: true`; review replies require `allow_pull_request_reply: true`; thread resolution requires `allow_pull_request_thread_resolution: true`. Reply and thread-resolution tools are high-risk side-effecting operations subject to normal OmniLLM tool policy and approval handling.
+Advancing an exact reviewed draft PR to ready for review has another independent process-wide gate:
+
+```text
+OMNILLM_GITHUB_PULL_REQUEST_READY_ENABLED=true
+```
+
+All GitHub capabilities also require `OMNILLM_GIT_REMOTE_ENABLED=true`, a non-empty `token_env`, and an exact `https://github.com/<owner>/<repository>[.git]` remote URL. Read operations additionally require `allow_pull_request_read: true`; creation requires `allow_pull_request_create: true`; review replies require `allow_pull_request_reply: true`; thread resolution requires `allow_pull_request_thread_resolution: true`; ready transition requires `allow_pull_request_ready: true`. Reply, thread-resolution, and ready tools are high-risk side-effecting operations subject to normal OmniLLM tool policy and approval handling.
 
 These gates are independent from one another and from `OMNILLM_GIT_WRITE_ENABLED`, `OMNILLM_GIT_REMOTE_PUSH_ENABLED`, and `OMNILLM_GIT_REMOTE_BRANCH_CREATE_ENABLED`. GitHub Enterprise hosts and arbitrary API base URLs remain unsupported; future Enterprise support should use an explicit operator API-endpoint binding rather than a model-supplied URL.
 
@@ -89,6 +96,8 @@ Reads check runs and legacy/combined commit-status contexts for one PR. Inputs:
 The service first fetches the PR, validates its returned Git head SHA, and then queries both GitHub check runs and combined commit status for **that exact SHA**. The model cannot choose or substitute a commit reference. Up to 50 check runs and 50 status contexts are returned with truncation flags.
 
 To reduce untrusted hosted content in model context, this view returns execution metadata only: check name/status/conclusion/app and commit-status context/state. Provider-supplied check output, annotations, descriptions, and arbitrary target/details URLs are not copied into the result.
+
+This tool reports **observed** checks/statuses. It does not currently identify which checks are required by branch protection/rulesets, so it must not be treated as a complete merge-authorization decision. See `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`.
 
 ### `github_get_pull_request_feedback`
 
@@ -206,6 +215,24 @@ Once the GraphQL mutation begins, a transport/provider error, GraphQL error, or 
 
 The result contains only bounded confirmation metadata: remote/repository IDs, PR/head, thread ID, resolved/outdated state, and `changed`. No reviewer prose or provider response detail is returned.
 
+## Ready-for-review tool
+
+### `github_mark_pull_request_ready_for_review`
+
+Advances one exact reviewed GitHub draft PR to ready-for-review state. It is a high-risk, networked, credentialed, side-effecting, non-parallel hosted mutation and remains subject to normal OmniLLM policy and approval controls.
+
+The model may provide only:
+
+- `remote` — configured GitHub remote ID;
+- `number` — positive PR number;
+- `expected_head` — exact 40-character current PR head from reviewed GitHub PR output.
+
+Repository identity, API host, token, opaque PR node ID, base branch, and GraphQL operation remain operator/application-derived. Immediately before mutation, the service requires the PR to remain open, unmerged, draft, on the exact reviewed head, and targeted at the configured remote's freshly advertised default branch. A fixed application-owned GraphQL preflight resolves the opaque PR node ID and revalidates state; a fixed `markPullRequestReadyForReview` mutation then receives only that node ID.
+
+The returned PR must validate back to the same node/repository/number/head/base and report open, unmerged, `draft=false` state. Transport/provider/GraphQL ambiguity after mutation is not retried blindly; callers must inspect the PR again before any retry.
+
+See `docs/GITHUB_PULL_REQUEST_READY_FOR_REVIEW.md` for the complete state-binding and ambiguous-outcome contract.
+
 ## Draft creation tool
 
 ### `github_create_draft_pull_request`
@@ -250,7 +277,7 @@ The API client is dedicated to GitHub collaboration:
 - DNS uses the private/local/reserved-address rejection used by guarded remote Git;
 - response bodies are capped at 1 MiB;
 - REST requests use the repository's pinned GitHub REST API version header;
-- review-thread GraphQL reads and resolution mutations are application-owned and model inputs are passed only as variables;
+- review-thread GraphQL reads and hosted GraphQL mutations are application-owned and model inputs are passed only as variables;
 - REST/GraphQL provider error bodies and GraphQL error messages are not copied into model-visible errors.
 
 ## Draft duplicate and race handling
@@ -278,6 +305,10 @@ git_status
   → github_get_pull_request_review_threads
   → approval → github_set_pull_request_review_thread_resolved (only after the thread is actually addressed)
   → github_get_pull_request_review_threads
+  → github_get_pull_request
+  → approval → github_mark_pull_request_ready_for_review
+  → github_get_pull_request
+  → github_get_pull_request_checks
 ```
 
 Later commits return to the reviewed existing-branch path:
@@ -297,12 +328,16 @@ local edit/stage/commit
   → github_get_pull_request_review_threads
   → approval → github_set_pull_request_review_thread_resolved (when appropriate)
   → github_get_pull_request_review_threads
+  → github_get_pull_request
+  → github_get_pull_request_checks
 ```
 
-Read access, draft creation, review replies, and review-thread resolution do not imply permission to mark a PR ready, request/remove reviewers, change arbitrary metadata, submit/dismiss reviews, rerun workflows, merge, close arbitrary PRs, or delete the source branch. Those remain separate future capabilities only if a later audit demonstrates the need.
+Read access, draft creation, review replies, review-thread resolution, and ready transition do not imply permission to request/remove reviewers, change arbitrary metadata, submit/dismiss reviews, rerun workflows, merge, close arbitrary PRs, enroll/dequeue merge queue, or delete the source branch. Those remain separate future capabilities only if a later audit demonstrates the need.
+
+A direct merge mutation is intentionally blocked on the read-policy design in `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`. Current check/review/thread tools provide evidence but do not yet normalize all active ruleset/classic-protection requirements or prove that a configured GitHub actor's bypass privileges cannot skip them.
 
 ## Validation expectations
 
-Focused tests cover independent read/create/reply/thread-resolution gates, GitHub.com-only repository derivation, operator-bound authentication, strict model-facing arguments, bounded REST/cursor pagination, fixed GraphQL query/mutation text, opaque cursor/node-ID variables, same-repository head filters, exact PR-head binding for check/status/review/thread evidence and mutations, GraphQL head-race rejection, bounded thread IDs/paths, provider-error-body/GraphQL-error-message suppression, hosted viewer-capability non-authority, stale/closed PR rejection, changed thread ownership/resolved/outdated state rejection, ambiguous mutation outcome handling, hostile hosted-text preservation under the LLM trust boundary, UTF-8-safe feedback/reply bounds, edited/nested/wrong-identity comment rejection, creation state binding, duplicate reuse, race containment, response validation, and conditional registry wiring.
+Focused tests cover independent read/create/reply/thread-resolution/ready gates, GitHub.com-only repository derivation, operator-bound authentication, strict model-facing arguments, bounded REST/cursor pagination, fixed GraphQL query/mutation text, opaque cursor/node-ID variables, same-repository head filters, exact PR-head binding for check/status/review/thread evidence and mutations, GraphQL head-race rejection, bounded thread IDs/paths, provider-error-body/GraphQL-error-message suppression, hosted viewer-capability non-authority, stale/closed PR rejection, changed thread ownership/resolved/outdated state rejection, ambiguous mutation outcome handling, hostile hosted-text preservation under the LLM trust boundary, UTF-8-safe feedback/reply bounds, edited/nested/wrong-identity comment rejection, creation state binding, duplicate reuse, race containment, response validation, and conditional registry wiring.
 
 Before merging changes to this boundary, validate the exact final head with repository formatting, `go vet`, backend unit/integration tests, race detection, frontend checks, Windows desktop checks, Playwright smoke coverage, dependency audits, Go and JavaScript/TypeScript CodeQL, Helm validation, and backend/frontend container builds. Review PR and Advanced Security threads before readiness.
