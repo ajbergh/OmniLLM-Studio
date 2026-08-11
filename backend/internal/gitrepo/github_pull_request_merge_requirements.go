@@ -108,7 +108,7 @@ type githubBranchProtectionResponse struct {
 			AppID   *int64 `json:"app_id"`
 		} `json:"checks"`
 	} `json:"required_status_checks"`
-	Restrictions json.RawMessage `json:"restrictions"`
+	Restrictions  json.RawMessage `json:"restrictions"`
 	EnforceAdmins *struct {
 		Enabled bool `json:"enabled"`
 	} `json:"enforce_admins"`
