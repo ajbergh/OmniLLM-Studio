@@ -62,7 +62,7 @@ func TestGetPullRequestMergeRequirementsNormalizesRulesAndFailsClosedOnRulesetBy
 	if len(result.AllowedMergeMethods) != 2 || result.AllowedMergeMethods[0] != "rebase" || result.AllowedMergeMethods[1] != "squash" {
 		t.Fatalf("allowed methods = %#v", result.AllowedMergeMethods)
 	}
-	if len(result.RequiredStatusChecks) != 3 || result.RequiredStatusChecks[0].Context != "Quality Gate" || result.RequiredStatusChecks[1].Context != "Quality Gate" || result.RequiredStatusChecks[2].Context != "legacy" {
+	if len(result.RequiredStatusChecks) != 2 || result.RequiredStatusChecks[0].Context != "Quality Gate" || result.RequiredStatusChecks[0].IntegrationID == nil || *result.RequiredStatusChecks[0].IntegrationID != 15368 || result.RequiredStatusChecks[1].Context != "legacy" || result.RequiredStatusChecks[1].IntegrationID != nil {
 		t.Fatalf("required status checks = %#v", result.RequiredStatusChecks)
 	}
 	if len(result.RequiredDeploymentEnvironments) != 1 || result.RequiredDeploymentEnvironments[0] != "production" {
