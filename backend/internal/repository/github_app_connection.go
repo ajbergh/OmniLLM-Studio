@@ -7,20 +7,42 @@ import (
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/crypto"
+	dbschema "github.com/ajbergh/omnillm-studio/internal/db"
 	"github.com/ajbergh/omnillm-studio/internal/githubauth"
 )
 
 // GitHubAppConnectionRepo persists one encrypted GitHub App user credential per
 // OmniLLM owner. The owner may be an authenticated user ID or the stable local
 // solo-mode owner ID.
-type GitHubAppConnectionRepo struct{ db *sql.DB }
+type GitHubAppConnectionRepo struct {
+	db      *sql.DB
+	initErr error
+}
 
-func NewGitHubAppConnectionRepo(db *sql.DB) *GitHubAppConnectionRepo {
-	return &GitHubAppConnectionRepo{db: db}
+// NewGitHubAppConnectionRepo creates the repository and idempotently ensures its
+// dedicated schema. Schema errors remain attached to the repository so callers
+// cannot accidentally fall back to another persistence surface.
+func NewGitHubAppConnectionRepo(database *sql.DB) *GitHubAppConnectionRepo {
+	repo := &GitHubAppConnectionRepo{db: database}
+	repo.initErr = dbschema.EnsureGitHubAppConnectionsSchema(database)
+	return repo
+}
+
+func (r *GitHubAppConnectionRepo) ready() error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("GitHub App connection repository is unavailable")
+	}
+	if r.initErr != nil {
+		return r.initErr
+	}
+	return nil
 }
 
 // Get returns the decrypted credential for backend-only execution.
 func (r *GitHubAppConnectionRepo) Get(ownerID string) (*githubauth.Credential, error) {
+	if err := r.ready(); err != nil {
+		return nil, err
+	}
 	ownerID = strings.TrimSpace(ownerID)
 	if ownerID == "" {
 		return nil, fmt.Errorf("owner ID is required")
@@ -75,6 +97,9 @@ func (r *GitHubAppConnectionRepo) Get(ownerID string) (*githubauth.Credential, e
 
 // Save encrypts token-bearing values before an owner-scoped upsert.
 func (r *GitHubAppConnectionRepo) Save(ownerID string, credential githubauth.Credential) error {
+	if err := r.ready(); err != nil {
+		return err
+	}
 	ownerID = strings.TrimSpace(ownerID)
 	credential.GitHubLogin = strings.TrimSpace(credential.GitHubLogin)
 	credential.TokenType = strings.TrimSpace(credential.TokenType)
@@ -133,6 +158,9 @@ func (r *GitHubAppConnectionRepo) Save(ownerID string, credential githubauth.Cre
 
 // Clear removes only the selected OmniLLM owner's local GitHub credential.
 func (r *GitHubAppConnectionRepo) Clear(ownerID string) error {
+	if err := r.ready(); err != nil {
+		return err
+	}
 	ownerID = strings.TrimSpace(ownerID)
 	if ownerID == "" {
 		return fmt.Errorf("owner ID is required")
