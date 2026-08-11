@@ -266,7 +266,7 @@ func threadStateGraphQLResponseWithOwnership(threadID, repository string, pullNu
 		"data": map[string]interface{}{"node": map[string]interface{}{
 			"id": threadID, "isResolved": resolved, "isOutdated": outdated,
 			"viewerCanResolve": viewerCanResolve, "viewerCanUnresolve": viewerCanUnresolve,
-			"repository": map[string]string{"nameWithOwner": repository},
+			"repository":  map[string]string{"nameWithOwner": repository},
 			"pullRequest": map[string]interface{}{"number": pullNumber, "headRefOid": head},
 		}},
 	})
@@ -277,7 +277,7 @@ func threadMutationGraphQLResponse(field, threadID, head string, resolved, outda
 	payload, _ := json.Marshal(map[string]interface{}{
 		"data": map[string]interface{}{field: map[string]interface{}{"thread": map[string]interface{}{
 			"id": threadID, "isResolved": resolved, "isOutdated": outdated,
-			"repository": map[string]string{"nameWithOwner": "example/repo"},
+			"repository":  map[string]string{"nameWithOwner": "example/repo"},
 			"pullRequest": map[string]interface{}{"number": 7, "headRefOid": head},
 		}}},
 	})
