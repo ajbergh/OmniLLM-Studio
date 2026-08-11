@@ -1,6 +1,6 @@
 # GitHub pull request tools
 
-OmniLLM-Studio provides a guarded GitHub collaboration boundary after local Git work has been committed and published. Read-only pull-request/check inspection and draft pull-request creation are deliberately independent operator permissions. Neither capability implies Git push, branch creation, or another hosted mutation.
+OmniLLM-Studio provides a guarded GitHub collaboration boundary after local Git work has been committed and published. Read-only pull-request/check/feedback inspection and draft pull-request creation are deliberately independent operator permissions. Neither capability implies Git push, branch creation, or another hosted mutation.
 
 Local Git and remote publication are documented in `docs/LOCAL_GIT_TOOLS.md` and `docs/REMOTE_GIT_TOOLS.md`.
 
@@ -25,7 +25,7 @@ GitHub collaboration reuses an operator-configured remote from `OMNILLM_GIT_REMO
 
 The selected remote supplies repository identity and credential configuration. The model never receives or submits the GitHub API URL, owner/repository name, token value, token environment-variable name, or local filesystem path.
 
-Read-only PR/check inspection has its own process-wide gate:
+Read-only PR/check/feedback inspection has its own process-wide gate:
 
 ```text
 OMNILLM_GITHUB_PULL_REQUEST_READ_ENABLED=true
@@ -52,7 +52,7 @@ Reads bounded metadata for one PR. Inputs:
 - `remote` — configured remote ID from `git_remotes`;
 - `number` — positive pull request number.
 
-The result includes number, URL, title, state/draft/merged state, mergeability when GitHub has computed it, source branch/head SHA, base branch, author, and update time. The PR body, comments, review text, API URLs, and credentials are intentionally omitted from this first read slice.
+The result includes number, URL, title, state/draft/merged state, mergeability when GitHub has computed it, source branch/head SHA, base branch, author, and update time. The PR body is intentionally omitted from this metadata view; hosted review/comment prose is exposed only through the separately bounded feedback tool below.
 
 ### `github_list_pull_requests`
 
@@ -74,7 +74,34 @@ Reads check runs and legacy/combined commit-status contexts for one PR. Inputs:
 
 The service first fetches the PR, validates its returned Git head SHA, and then queries both GitHub check runs and combined commit status for **that exact SHA**. The model cannot choose or substitute a commit reference. Up to 50 check runs and 50 status contexts are returned with truncation flags.
 
-To reduce untrusted hosted content in model context, this first slice returns execution metadata only: check name/status/conclusion/app and commit-status context/state. Provider-supplied check output, annotations, descriptions, and arbitrary target/details URLs are not copied into the result.
+To reduce untrusted hosted content in model context, this view returns execution metadata only: check name/status/conclusion/app and commit-status context/state. Provider-supplied check output, annotations, descriptions, and arbitrary target/details URLs are not copied into the result.
+
+### `github_get_pull_request_feedback`
+
+Reads one bounded page of hosted collaboration evidence for a PR. Inputs:
+
+- `remote` — configured remote ID;
+- `number` — positive pull request number;
+- `kind` — one of `reviews`, `review_comments`, `comments`, or `review_requests`;
+- `page` — optional 1–100 (default 1); `review_requests` supports only page 1;
+- `limit` — optional 1–20 (default 10).
+
+The service validates `kind`, `page`, and `limit` **before** contacting GitHub, then fetches the PR and validates its returned head SHA before reading the requested collaboration surface. Every result therefore includes the exact current PR `head`; submitted reviews and inline comments with valid commit IDs additionally report whether their commit equals that current head.
+
+The four kinds map to distinct hosted evidence:
+
+- `reviews` — submitted review summary/state/body, author, submit time, review commit, and author association. GitHub returns reviews chronologically.
+- `review_comments` — inline review comments, newest-updated first, including file path, line/side/range, review ID, reply relationship, current/original commits, author, and timestamps.
+- `comments` — general PR timeline comments from GitHub's issue-comment surface, preserving GitHub's default ordering.
+- `review_requests` — outstanding requested users followed by teams. This endpoint is not paginated by GitHub, so OmniLLM applies the local `limit` and reports `may_have_more` when additional identities were omitted.
+
+For REST-paginated feedback, OmniLLM requests exactly `limit` items. `may_have_more: true` means the page was full and another page **may** exist; this deliberately avoids requesting `limit + 1` and then creating pagination gaps. Request the next `page` when additional evidence is needed.
+
+Hosted review/comment bodies are preserved as evidence, not rewritten or interpreted by the GitHub service. Each body is capped at 1,536 UTF-8-safe bytes; inline file paths are capped at 1,024 UTF-8-safe bytes. Truncation is explicit in `body_truncated` / `path_truncated`. With at most 20 items per page, this keeps the model-facing result below the shared 64 KiB tool budget in normal metadata bounds.
+
+Reviewer prose is untrusted external content. Before any tool result is sent to a model, the LLM provider boundary documented in `docs/TOOL_RESULT_TRUST_BOUNDARY.md` inserts a runtime-owned system directive telling the model to treat tool output as reference data rather than instruction authority. A review saying “ignore prior instructions,” requesting secrets, or asking the agent to run another tool is therefore evidence to evaluate—not authorization to act. Allow / Ask / Off policy, scoped permissions, and side-effect approval remain authoritative.
+
+This first feedback slice is REST/read-only. It does not claim GitHub review-thread resolved/unresolved state, which is not represented by these REST list surfaces. It also does not submit/dismiss reviews, reply to comments, resolve threads, request/remove reviewers, mark a PR ready, rerun workflows, merge, close, or change PR metadata.
 
 ## Draft creation tool
 
@@ -140,6 +167,7 @@ git_status
   → approval → github_create_draft_pull_request
   → github_get_pull_request
   → github_get_pull_request_checks
+  → github_get_pull_request_feedback (reviews / review_comments / comments / review_requests as needed)
 ```
 
 Later commits return to the reviewed existing-branch path:
@@ -152,12 +180,13 @@ local edit/stage/commit
   → approval → git_push
   → github_get_pull_request
   → github_get_pull_request_checks
+  → github_get_pull_request_feedback
 ```
 
-Read access and draft creation do not imply permission to mark a PR ready, request reviewers, change metadata, rerun workflows, merge, close arbitrary PRs, or delete the source branch. Those remain separate future capabilities only if a later audit demonstrates the need.
+Read access and draft creation do not imply permission to mark a PR ready, request reviewers, change metadata, reply to/resolve review feedback, rerun workflows, merge, close arbitrary PRs, or delete the source branch. Those remain separate future capabilities only if a later audit demonstrates the need.
 
 ## Validation expectations
 
-Focused tests cover independent read/create gates, GitHub.com-only repository derivation, operator-bound authentication, strict model-facing arguments, bounded listing, same-repository head filters, exact PR-head binding for check/status inspection, provider-error-body suppression, creation state binding, duplicate reuse, race containment, and conditional registry wiring.
+Focused tests cover independent read/create gates, GitHub.com-only repository derivation, operator-bound authentication, strict model-facing arguments, bounded listing/pagination, same-repository head filters, exact PR-head binding for check/status and review evidence, hostile hosted-text preservation under the LLM trust boundary, UTF-8-safe feedback truncation, provider-error-body suppression, creation state binding, duplicate reuse, race containment, and conditional registry wiring.
 
 Before merging changes to this boundary, validate the exact final head with repository formatting, `go vet`, backend unit/integration tests, race detection, frontend checks, Windows desktop checks, Playwright smoke coverage, dependency audits, Go and JavaScript/TypeScript CodeQL, Helm validation, and backend/frontend container builds. Review PR and Advanced Security threads before readiness.
