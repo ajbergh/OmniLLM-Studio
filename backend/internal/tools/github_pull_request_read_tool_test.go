@@ -63,6 +63,7 @@ func TestGitHubPullRequestReadToolsRejectHostedControlArguments(t *testing.T) {
 	}
 	for _, args := range []json.RawMessage{
 		json.RawMessage(`{"remote":"origin","state":"invalid"}`),
+		json.RawMessage(`{"remote":"origin","limit":0}`),
 		json.RawMessage(`{"remote":"origin","limit":21}`),
 		json.RawMessage(`{"remote":"origin","base":"main"}`),
 	} {
@@ -75,8 +76,8 @@ func TestGitHubPullRequestReadToolsRejectHostedControlArguments(t *testing.T) {
 func TestGitHubPullRequestReadToolsReturnStructuredResults(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	reader := &fakeGitHubPullRequestReader{
-		pull: &gitrepo.GitHubPullRequestReadResult{Remote: "origin", Repository: "repo", Number: 9, Head: head, HeadBranch: "feature/read", BaseBranch: "main"},
-		list: &gitrepo.GitHubPullRequestListResult{Remote: "origin", Repository: "repo", State: "open", PullRequests: []gitrepo.GitHubPullRequestReadResult{{Number: 9, Head: head}}},
+		pull:   &gitrepo.GitHubPullRequestReadResult{Remote: "origin", Repository: "repo", Number: 9, Head: head, HeadBranch: "feature/read", BaseBranch: "main"},
+		list:   &gitrepo.GitHubPullRequestListResult{Remote: "origin", Repository: "repo", State: "open", PullRequests: []gitrepo.GitHubPullRequestReadResult{{Number: 9, Head: head}}},
 		checks: &gitrepo.GitHubPullRequestChecksResult{Remote: "origin", Repository: "repo", PullRequest: 9, Head: head, CombinedStatus: "success"},
 	}
 	cases := []struct {
