@@ -28,19 +28,19 @@ func NewGitHubPullRequestReplyTools(service gitrepo.GitHubPullRequestReviewRepli
 
 func (t *githubPullRequestReviewReplyTool) Definition() ToolDefinition {
 	return ToolDefinition{
-		Name:             "github_reply_to_pull_request_review_comment",
-		Description:      "Reply to one existing top-level inline GitHub pull request review comment after revalidating the exact reviewed PR head, review ID, comment ID, and comment updated_at timestamp. This is an external communication mutation that triggers GitHub notifications. Repository, API host, token, review state, thread resolution, and other PR controls are not accepted.",
-		Category:         "github",
-		Enabled:          true,
-		Version:          "1",
-		Risk:             RiskHigh,
-		ReadOnly:         false,
-		SideEffecting:    true,
-		RequiresNetwork:  true,
+		Name:                "github_reply_to_pull_request_review_comment",
+		Description:         "Reply to one existing top-level inline GitHub pull request review comment after revalidating the exact reviewed PR head, review ID, comment ID, and comment updated_at timestamp. This is an external communication mutation that triggers GitHub notifications. Repository, API host, token, review state, thread resolution, and other PR controls are not accepted.",
+		Category:            "github",
+		Enabled:             true,
+		Version:             "1",
+		Risk:                RiskHigh,
+		ReadOnly:            false,
+		SideEffecting:       true,
+		RequiresNetwork:     true,
 		RequiresCredentials: true,
-		SupportsParallel: false,
-		DefaultTimeoutMS: 30_000,
-		MaxResultBytes:   gitRemoteToolResultLimit,
+		SupportsParallel:    false,
+		DefaultTimeoutMS:    30_000,
+		MaxResultBytes:      gitRemoteToolResultLimit,
 		Parameters: json.RawMessage(`{
 			"type":"object",
 			"properties":{
