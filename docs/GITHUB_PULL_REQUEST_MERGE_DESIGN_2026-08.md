@@ -2,23 +2,26 @@
 
 ## Status
 
-**Design only. `github_merge_pull_request` is intentionally not implemented.**
+**Phase M1 read-only merge-requirements inspection is implemented. `github_merge_pull_request` remains intentionally not implemented. Phase M2 is the current design/evidence gate.**
 
-The hosted coding workflow now reaches draft creation, exact-head PR/check/feedback/thread inspection, review-comment replies, review-thread resolution, and guarded draft-to-ready transition. Merge is the first lifecycle step that irreversibly changes the configured default branch, so it requires a stricter policy boundary than the preceding collaboration mutations.
+The hosted coding workflow now reaches draft creation, exact-head PR/check/feedback/thread inspection, review-comment replies, review-thread resolution, guarded draft-to-ready transition, and bounded read-only merge-policy inspection. Merge is the first lifecycle step that irreversibly changes the configured default branch, so it requires a stricter policy boundary than the preceding collaboration mutations.
 
-This review concludes that OmniLLM-Studio should **not add a merge mutation yet**. The current read surface can prove the PR's current head and report observed checks/reviews/threads, but it cannot yet produce a normalized, fail-closed answer to: **which merge requirements are actually active for this base branch, and are they satisfied without relying on the configured GitHub actor's bypass privileges?**
+M1 confirms that OmniLLM-Studio can normalize a substantial portion of GitHub merge policy while failing closed on policy visibility it cannot prove. It also makes the remaining blocker explicit: active branch rules do not themselves prove whether the configured GitHub actor is constrained by ruleset bypass policy, and a non-visible classic-protection response cannot safely be equated with an unprotected branch. The project should therefore **not add a merge mutation yet**.
 
 ## Current evidence
 
-Current `main` already provides:
+Current implementation provides:
 
 - exact hosted PR head/base/draft/merged/mergeability metadata through `github_get_pull_request`;
 - exact-head check-run and commit-status inspection through `github_get_pull_request_checks`;
 - bounded submitted-review/review-request inspection through `github_get_pull_request_feedback`;
 - bounded review-thread resolution/outdated state through `github_get_pull_request_review_threads`;
-- guarded ready-for-review mutation through `github_mark_pull_request_ready_for_review`.
+- guarded ready-for-review mutation through `github_mark_pull_request_ready_for_review`;
+- bounded read-only merge-policy inspection through `github_get_pull_request_merge_requirements`.
 
-Those surfaces are necessary but not sufficient for merge authorization.
+The M1 merge-requirements reader binds every result to a freshly fetched PR head/base and normalizes repository merge methods, active base-branch rules, and visible classic branch protection. It surfaces merge queue, required status/check contexts, strict checks, review counts, code-owner review, last-push approval, stale-review dismissal, conversation resolution, deployments, linear history, administrator visibility/enforcement, unknown material rules, and explicit `merge_policy_complete` state.
+
+Those surfaces are necessary but are not yet sufficient for merge authorization when policy visibility is incomplete.
 
 GitHub can impose merge requirements through classic branch protection and rulesets, including required status checks, approving reviews/code-owner review, last-push approval, conversation resolution, deployments, linear history, and merge queue. Rulesets can also restrict allowed merge methods. Classic branch-protection restrictions may be bypassable by administrators or actors with bypass permission unless administrator enforcement/no-bypass policy applies.
 
@@ -29,6 +32,7 @@ Primary GitHub API references used for this design:
 - Merge a pull request: `PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge`, including `sha` and `merge_method`.
 - Get rules for a branch: `GET /repos/{owner}/{repo}/rules/branches/{branch}`.
 - Get branch protection: `GET /repos/{owner}/{repo}/branches/{branch}/protection`.
+- Get a repository ruleset: `GET /repos/{owner}/{repo}/rulesets/{ruleset_id}` for ruleset details, including bypass actors only when the caller has sufficient permission to view them.
 - GitHub GraphQL `BranchProtectionRule` fields for required reviews, checks, deployments, conversation resolution, linear history, strict status checks, and bypass allowances.
 
 ## Threat model
@@ -48,67 +52,87 @@ A merge tool must assume:
 
 The design must therefore prefer false negatives over a policy-bypassing false positive.
 
-## Required prerequisite: normalized merge-requirements inspection
+## Implemented prerequisite: normalized merge-requirements inspection
 
-Before implementing any merge mutation, add a bounded read-only capability tentatively named:
+M1 implements the bounded read-only capability:
 
 ```text
 github_get_pull_request_merge_requirements
 ```
 
-The exact public name may change during implementation review, but the capability must be independent from merge permission and must not itself mutate GitHub state.
+The capability is registered under the existing independent GitHub PR-read gate and does not itself mutate GitHub state or imply merge permission.
+
+Detailed operator/runtime behavior is documented in `docs/GITHUB_PULL_REQUEST_MERGE_REQUIREMENTS.md`.
 
 ### Inputs
 
-Model authority should remain limited to:
+Model authority remains limited to:
 
 - `remote` — configured GitHub remote ID;
 - `number` — positive PR number.
 
-The model must not provide repository owner/name, API URL, base branch, head SHA, token, ruleset IDs, branch-protection IDs, required-check names, reviewer requirements, bypass actors, or merge method.
+The model cannot provide repository owner/name, API URL, base branch, head SHA, token, ruleset IDs, branch-protection IDs, required-check names, reviewer requirements, bypass actors, or merge method.
 
-### Required result binding
+### Result binding
 
-The result must be bound to the freshly fetched PR and include at minimum:
+The result is bound to the freshly fetched PR and includes:
 
 - configured remote/repository ID;
 - PR number;
 - exact current hosted head SHA;
 - exact current base branch;
 - open/draft/merged state;
-- current `mergeable` and `mergeable_state`, preserving an explicit unknown/computing state;
+- current `mergeable` and `mergeable_state`, preserving GitHub's nullable/unknown mergeability;
 - policy-source completeness status;
-- whether merge queue is required;
-- allowed merge methods known from applicable policy;
-- required status checks and whether strict/up-to-date status is required;
-- required approving-review count when knowable;
-- code-owner-review requirement when knowable;
-- last-push-approval requirement when knowable;
+- merge-queue requirement;
+- allowed merge methods known from repository/applicable rule policy;
+- required status checks and strict/up-to-date policy where visible;
+- required approving-review count where visible;
+- code-owner-review requirement where visible;
+- last-push-approval requirement where visible;
+- stale-review dismissal where visible;
 - conversation-resolution requirement;
-- required deployment environments when knowable;
+- required deployment environments where visible;
 - linear-history requirement;
-- whether the policy surface indicates bypass capability/administrator non-enforcement relevant to the configured actor;
-- a machine-readable `merge_policy_complete` / fail-closed equivalent.
+- configured-actor administrator visibility and classic administrator enforcement;
+- normalized unknown material rule types;
+- machine-readable `merge_policy_complete` fail-closed state.
 
-The result should normalize policy facts, not copy arbitrary hosted descriptions or URLs into model context.
+The result normalizes policy facts rather than copying arbitrary hosted descriptions, parameter payloads, provider error bodies, or URLs into model context.
 
 ### Policy sources
 
-The implementation should inspect all applicable sources that can affect merge behavior, rather than treating one API as authoritative for every repository configuration:
+The implementation inspects:
 
-1. **Active branch rules/rulesets** for the exact PR base. GitHub's branch-rules endpoint returns active rules that apply to that branch, including higher-level rulesets.
-2. **Classic branch protection** for the exact PR base where visible. The classic protection API exposes required checks, required reviews, last-push approval, conversation resolution, linear history, and administrator enforcement, but requires repository Administration read permission.
-3. **Repository merge-method configuration** needed to determine whether merge/squash/rebase are permitted at the repository level.
-4. **Current PR/check/review/thread/deployment state** for the exact head after policy requirements are known.
-5. **Merge-queue state/policy**. If merge queue is required, direct merge must be considered ineligible; a future queue-specific capability would require its own design.
+1. **Active branch rules/rulesets** for the exact PR base through GitHub's fixed branch-rules endpoint, bounded to one 100-rule page. The endpoint returns active rules that apply to the branch, including applicable higher-level rulesets.
+2. **Classic branch protection** for the exact PR base where positively visible. A non-200 result is represented as ambiguous/unavailable rather than automatically interpreted as no protection.
+3. **Repository merge-method configuration** to determine repository-level merge/squash/rebase availability and the configured actor's reported administrator permission.
 
-If any policy source that could materially change merge authorization is inaccessible or ambiguous, the normalized result must report policy as incomplete and a later merge tool must refuse to act.
+The reader normalizes merge-relevant rules it understands and explicitly fails policy completeness for unknown material rule types or parameters. If the active-rule page reaches the bound, policy is also incomplete.
 
-A `404` or permission failure from a classic branch-protection endpoint must not automatically be interpreted as "no protection" when the configured credential cannot prove that interpretation.
+### Current fail-closed limitation: ruleset bypass visibility
+
+The active-rules endpoint exposes which rules apply to the branch but does not itself prove whether the configured actor is constrained by ruleset bypass policy. GitHub's ruleset detail surface can expose `bypass_actors`, but visibility of those actors requires stronger permission than the ordinary metadata read used for the active-rules endpoint.
+
+Accordingly, when active rulesets are present, M1 currently reports:
+
+```text
+ruleset_bypass_visibility = incomplete
+potential_bypass = true
+merge_policy_complete = false
+```
+
+This is not an error and is not evidence that a bypass actually exists. It means OmniLLM cannot yet prove the absence or applicability of bypass authority for a future merge decision.
+
+### Classic-protection ambiguity
+
+A classic branch-protection `404` or other non-visible result is not treated as proof that the base branch is unprotected. M1 reports `classic_protection_status=unavailable_or_unprotected` and leaves merge policy incomplete.
+
+This conservative ambiguity is part of the M2 evidence review.
 
 ## Proposed merge mutation boundary
 
-Only after the read-only requirements surface is implemented and validated should a separate high-risk mutation be considered:
+Only after M2 validates the M1 result against representative GitHub repository configurations and closes or accepts the remaining policy-visibility gaps should a separate high-risk mutation be considered:
 
 ```text
 github_merge_pull_request
@@ -164,15 +188,17 @@ Immediately before merge, the service should:
 13. refuse when policy indicates a condition the implementation does not understand;
 14. perform one fixed application-owned merge request with GitHub's exact-head `sha` precondition.
 
-A stale prior call to `github_get_pull_request_checks`, feedback, or review threads must never substitute for this fresh pre-mutation evaluation.
+A stale prior call to `github_get_pull_request_checks`, feedback, review threads, or merge requirements must never substitute for this fresh pre-mutation evaluation.
 
 ## Bypass safety
 
 The most important merge-specific hazard is authenticated bypass authority.
 
-GitHub documents that classic branch-protection restrictions do not necessarily apply to administrators or custom roles with bypass permission unless configured to do so. Therefore a successful GitHub merge API response cannot be treated as proof that normal repository requirements were satisfied.
+GitHub documents that classic branch-protection restrictions do not necessarily apply to administrators or custom roles with bypass permission unless configured to do so. Rulesets can also define bypass actors. Therefore a successful GitHub merge API response cannot be treated as proof that normal repository requirements were satisfied.
 
 The merge tool must enforce its normalized policy **before** the API request and refuse when the policy surface is incomplete. It must never intentionally invoke or model-select a bypass mechanism.
+
+M2 must specifically determine whether the configured actor's effective ruleset bypass status can be proven through a fixed, bounded read surface with acceptable operator credential requirements. If it cannot, direct merge should remain unsupported.
 
 ## Exact-head compare-and-swap
 
@@ -198,28 +224,38 @@ The first merge implementation must never delete the source branch automatically
 
 ## Merge queue
 
-If the active policy requires a merge queue, direct `PUT .../merge` is not the correct workflow. The merge-requirements reader should surface `merge_queue_required: true` and a direct merge tool should fail closed.
+If the active policy requires a merge queue, direct `PUT .../merge` is not the correct workflow. The M1 reader surfaces `merge_queue_required: true`; any future direct merge tool must fail closed.
 
-Queue enrollment, queue state inspection, dequeueing, and queue-specific approval semantics are separate capabilities with different asynchronous/race behavior and are out of scope for the first merge slice.
+Queue enrollment, queue state inspection, dequeueing, and queue-specific approval semantics are separate capabilities with different asynchronous/race behavior and are out of scope for the first direct-merge slice.
 
 ## Implementation sequence
 
-### Phase M1 — read-only merge requirements
+### Phase M1 — read-only merge requirements — IMPLEMENTED
 
-Implement and validate `github_get_pull_request_merge_requirements` (name tentative):
+`github_get_pull_request_merge_requirements` now provides:
 
-- fixed GitHub REST/GraphQL reads only;
+- fixed GitHub REST reads only;
 - exact PR head/base binding;
 - bounded normalized policy representation;
 - active ruleset + classic branch-protection + repository merge-method inspection;
 - explicit policy-completeness result;
-- fail closed on unknown rule types that can affect merge eligibility;
+- fail-closed handling for unknown material rule types and ambiguous policy visibility;
 - merge-queue detection;
-- focused tests for permission-denied/incomplete policy, ruleset/classic-protection overlap, strict status checks, required reviews, unresolved conversations, deployments, linear history, merge queue, and bypass visibility.
+- focused tests for classic-protection ambiguity, ruleset/classic overlap, strict status checks, required reviews, conversation resolution, deployments, linear history, merge queue, administrator/bypass visibility, strict tool arguments, and independent read gating.
 
-### Phase M2 — merge mutation review
+### Phase M2 — merge mutation review — CURRENT GATE
 
-After M1 lands, review the normalized result against real repository configurations and threat-model the remaining gaps. Do not proceed merely because GitHub itself would currently accept a merge.
+Validate the M1 normalized result against representative real repository configurations and threat-model the remaining gaps. In particular:
+
+- verify ruleset bypass-actor visibility and configured-actor applicability;
+- determine the minimum acceptable credential permission needed to prove bypass status;
+- verify truly unprotected vs permission-obscured classic protection behavior;
+- exercise repository + organization ruleset overlap;
+- verify required-check integration binding and strict policy;
+- verify merge-method intersection and merge-queue behavior;
+- inventory any material rule types not yet normalized.
+
+M2 may add narrowly scoped read-only evidence if needed. Do not proceed merely because GitHub itself would currently accept a merge.
 
 ### Phase M3 — guarded direct merge
 
@@ -250,4 +286,4 @@ This design does not authorize or combine:
 
 ## Decision
 
-**Proceed next with Phase M1 only: bounded read-only merge-requirements inspection. Do not implement merge mutation until that capability is complete, validated, and reviewed.**
+**Phase M1 is implemented. Proceed next with Phase M2 only: validate policy completeness and configured-actor bypass visibility. Do not implement merge mutation unless M2 demonstrates that the normalized policy surface is sufficient and fail-closed for the configured actor.**
