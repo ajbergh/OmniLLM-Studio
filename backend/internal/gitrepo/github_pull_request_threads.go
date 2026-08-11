@@ -180,6 +180,9 @@ func (s *RemoteService) GetPullRequestReviewThreads(ctx context.Context, remoteI
 	if !validRemoteHash(graphPull.HeadRefOID) || !strings.EqualFold(graphPull.HeadRefOID, head) {
 		return nil, fmt.Errorf("pull request head changed while review threads were inspected; inspect the pull request again")
 	}
+	if graphPull.ReviewThreads.TotalCount < 0 || graphPull.ReviewThreads.TotalCount < len(graphPull.ReviewThreads.Nodes) || len(graphPull.ReviewThreads.Nodes) > limit {
+		return nil, fmt.Errorf("GitHub pull request review thread page exceeded its validated bounds")
+	}
 
 	threads := make([]GitHubPullRequestReviewThreadResult, 0, len(graphPull.ReviewThreads.Nodes))
 	for _, node := range graphPull.ReviewThreads.Nodes {
