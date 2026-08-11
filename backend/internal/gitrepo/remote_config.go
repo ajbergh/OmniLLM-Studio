@@ -27,8 +27,12 @@ const (
 	// creating draft pull requests through the GitHub API.
 	GitHubPullRequestEnabledEnv = "OMNILLM_GITHUB_PULL_REQUEST_ENABLED"
 	// GitHubPullRequestReadEnabledEnv independently enables read-only GitHub pull
-	// request and CI/check inspection. Creation does not imply hosted read access.
+	// request, CI/check, and hosted feedback inspection.
 	GitHubPullRequestReadEnabledEnv = "OMNILLM_GITHUB_PULL_REQUEST_READ_ENABLED"
+	// GitHubPullRequestReplyEnabledEnv independently enables replies to existing
+	// top-level inline pull request review comments. Read/create access does not
+	// imply this hosted communication mutation.
+	GitHubPullRequestReplyEnabledEnv = "OMNILLM_GITHUB_PULL_REQUEST_REPLY_ENABLED"
 )
 
 var credentialEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
@@ -36,9 +40,9 @@ var credentialEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 // RemoteConfig binds a stable model-facing remote ID to one configured local
 // repository and one exact HTTPS endpoint. TokenEnv names an operator-provided
 // environment variable; the token value itself is never stored in this struct.
-// Push, remote-branch creation, GitHub PR read/create access, default-branch
-// push, and clone permissions are independent explicit opt-ins layered on top
-// of their process-wide gates.
+// Push, remote-branch creation, GitHub PR read/create/reply access, default-
+// branch push, and clone permissions are independent explicit opt-ins layered
+// on top of their process-wide gates.
 type RemoteConfig struct {
 	Repository             string `json:"repository"`
 	URL                    string `json:"url"`
@@ -48,6 +52,7 @@ type RemoteConfig struct {
 	AllowBranchCreate      bool   `json:"allow_branch_create,omitempty"`
 	AllowPullRequestRead   bool   `json:"allow_pull_request_read,omitempty"`
 	AllowPullRequestCreate bool   `json:"allow_pull_request_create,omitempty"`
+	AllowPullRequestReply  bool   `json:"allow_pull_request_reply,omitempty"`
 	AllowDefaultBranchPush bool   `json:"allow_default_branch_push,omitempty"`
 	AllowClone             bool   `json:"allow_clone,omitempty"`
 }
@@ -63,6 +68,7 @@ type RemoteSummary struct {
 	BranchCreateAllowed      bool   `json:"branch_create_allowed"`
 	PullRequestReadAllowed   bool   `json:"pull_request_read_allowed"`
 	PullRequestCreateAllowed bool   `json:"pull_request_create_allowed"`
+	PullRequestReplyAllowed  bool   `json:"pull_request_reply_allowed"`
 	DefaultBranchPushAllowed bool   `json:"default_branch_push_allowed"`
 	CloneAllowed             bool   `json:"clone_allowed"`
 }
