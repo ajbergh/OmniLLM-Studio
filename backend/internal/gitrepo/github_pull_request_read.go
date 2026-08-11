@@ -78,15 +78,15 @@ type GitHubCommitStatusResult struct {
 // GitHubPullRequestChecksResult binds check/status inspection to the head SHA
 // returned by GitHub for the requested PR. The model never supplies this SHA.
 type GitHubPullRequestChecksResult struct {
-	Remote                  string                       `json:"remote"`
-	Repository              string                       `json:"repository"`
-	PullRequest             int                          `json:"pull_request"`
-	Head                    string                       `json:"head"`
-	CheckRuns               []GitHubCheckRunResult       `json:"check_runs"`
-	CheckRunsTruncated      bool                         `json:"check_runs_truncated,omitempty"`
-	CombinedStatus          string                       `json:"combined_status"`
-	CommitStatuses          []GitHubCommitStatusResult   `json:"commit_statuses"`
-	CommitStatusesTruncated bool                         `json:"commit_statuses_truncated,omitempty"`
+	Remote                  string                     `json:"remote"`
+	Repository              string                     `json:"repository"`
+	PullRequest             int                        `json:"pull_request"`
+	Head                    string                     `json:"head"`
+	CheckRuns               []GitHubCheckRunResult     `json:"check_runs"`
+	CheckRunsTruncated      bool                       `json:"check_runs_truncated,omitempty"`
+	CombinedStatus          string                     `json:"combined_status"`
+	CommitStatuses          []GitHubCommitStatusResult `json:"commit_statuses"`
+	CommitStatusesTruncated bool                       `json:"commit_statuses_truncated,omitempty"`
 }
 
 type githubPullRequestReadResponse struct {
