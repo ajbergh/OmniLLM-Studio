@@ -32,37 +32,41 @@ type GitHubRequiredStatusCheck struct {
 // only when every policy source used by this implementation was visible and no
 // unsupported material rule or bypass ambiguity remains.
 type GitHubPullRequestMergeRequirementsResult struct {
-	Remote                         string                      `json:"remote"`
-	Repository                     string                      `json:"repository"`
-	PullRequest                    int                         `json:"pull_request"`
-	Head                           string                      `json:"head"`
-	BaseBranch                     string                      `json:"base_branch"`
-	State                          string                      `json:"state"`
-	Draft                          bool                        `json:"draft"`
-	Merged                         bool                        `json:"merged"`
-	Mergeable                      *bool                       `json:"mergeable,omitempty"`
-	MergeableState                 string                      `json:"mergeable_state,omitempty"`
-	MergePolicyComplete            bool                        `json:"merge_policy_complete"`
-	ActiveRulesStatus              string                      `json:"active_rules_status"`
-	ActiveRulesTruncated           bool                        `json:"active_rules_truncated,omitempty"`
-	ClassicProtectionStatus        string                      `json:"classic_protection_status"`
-	RepositorySettingsStatus       string                      `json:"repository_settings_status"`
-	RulesetBypassVisibility        string                      `json:"ruleset_bypass_visibility"`
-	ConfiguredActorAdmin           bool                        `json:"configured_actor_admin"`
-	ClassicAdministratorEnforced   *bool                       `json:"classic_administrator_enforced,omitempty"`
-	PotentialBypass                bool                        `json:"potential_bypass"`
-	MergeQueueRequired             bool                        `json:"merge_queue_required"`
-	AllowedMergeMethods            []string                    `json:"allowed_merge_methods"`
-	RequiredStatusChecks           []GitHubRequiredStatusCheck `json:"required_status_checks"`
-	StrictStatusChecks             bool                        `json:"strict_status_checks"`
-	RequiredApprovingReviewCount   int                         `json:"required_approving_review_count"`
-	CodeOwnerReviewRequired        bool                        `json:"code_owner_review_required"`
-	LastPushApprovalRequired       bool                        `json:"last_push_approval_required"`
-	DismissStaleReviewsOnPush      bool                        `json:"dismiss_stale_reviews_on_push"`
-	ConversationResolutionRequired bool                        `json:"conversation_resolution_required"`
-	RequiredDeploymentEnvironments []string                    `json:"required_deployment_environments"`
-	LinearHistoryRequired          bool                        `json:"linear_history_required"`
-	UnknownPolicyRules             []string                    `json:"unknown_policy_rules,omitempty"`
+	Remote                                string                      `json:"remote"`
+	Repository                            string                      `json:"repository"`
+	PullRequest                           int                         `json:"pull_request"`
+	Head                                  string                      `json:"head"`
+	BaseBranch                            string                      `json:"base_branch"`
+	State                                 string                      `json:"state"`
+	Draft                                 bool                        `json:"draft"`
+	Merged                                bool                        `json:"merged"`
+	Mergeable                             *bool                       `json:"mergeable"`
+	MergeableState                        string                      `json:"mergeable_state,omitempty"`
+	MergePolicyComplete                   bool                        `json:"merge_policy_complete"`
+	ActiveRulesStatus                     string                      `json:"active_rules_status"`
+	ActiveRulesTruncated                  bool                        `json:"active_rules_truncated,omitempty"`
+	ClassicProtectionStatus               string                      `json:"classic_protection_status"`
+	RepositorySettingsStatus              string                      `json:"repository_settings_status"`
+	RulesetBypassVisibility               string                      `json:"ruleset_bypass_visibility"`
+	ConfiguredActorAdmin                  bool                        `json:"configured_actor_admin"`
+	ClassicAdministratorEnforced          *bool                       `json:"classic_administrator_enforced,omitempty"`
+	ClassicRestrictionsPresent            bool                        `json:"classic_restrictions_present"`
+	ClassicReviewBypassAllowancesPresent  bool                        `json:"classic_review_bypass_allowances_present"`
+	PotentialBypass                       bool                        `json:"potential_bypass"`
+	MergeQueueRequired                    bool                        `json:"merge_queue_required"`
+	AllowedMergeMethods                   []string                    `json:"allowed_merge_methods"`
+	RequiredStatusChecks                  []GitHubRequiredStatusCheck `json:"required_status_checks"`
+	StrictStatusChecks                    bool                        `json:"strict_status_checks"`
+	RequiredApprovingReviewCount          int                         `json:"required_approving_review_count"`
+	CodeOwnerReviewRequired               bool                        `json:"code_owner_review_required"`
+	LastPushApprovalRequired              bool                        `json:"last_push_approval_required"`
+	DismissStaleReviewsOnPush             bool                        `json:"dismiss_stale_reviews_on_push"`
+	ConversationResolutionRequired        bool                        `json:"conversation_resolution_required"`
+	RequiredDeploymentEnvironments        []string                    `json:"required_deployment_environments"`
+	LinearHistoryRequired                 bool                        `json:"linear_history_required"`
+	RequiredSignatures                    bool                        `json:"required_signatures"`
+	BranchLocked                          bool                        `json:"branch_locked"`
+	UnknownPolicyRules                    []string                    `json:"unknown_policy_rules,omitempty"`
 }
 
 type githubActiveBranchRule struct {
@@ -104,21 +108,29 @@ type githubBranchProtectionResponse struct {
 			AppID   *int64 `json:"app_id"`
 		} `json:"checks"`
 	} `json:"required_status_checks"`
+	Restrictions json.RawMessage `json:"restrictions"`
 	EnforceAdmins *struct {
 		Enabled bool `json:"enabled"`
 	} `json:"enforce_admins"`
 	RequiredPullRequestReviews *struct {
-		DismissStaleReviews          bool `json:"dismiss_stale_reviews"`
-		RequireCodeOwnerReviews      bool `json:"require_code_owner_reviews"`
-		RequiredApprovingReviewCount int  `json:"required_approving_review_count"`
-		RequireLastPushApproval      bool `json:"require_last_push_approval"`
+		DismissStaleReviews          bool            `json:"dismiss_stale_reviews"`
+		RequireCodeOwnerReviews      bool            `json:"require_code_owner_reviews"`
+		RequiredApprovingReviewCount int             `json:"required_approving_review_count"`
+		RequireLastPushApproval      bool            `json:"require_last_push_approval"`
+		BypassPullRequestAllowances  json.RawMessage `json:"bypass_pull_request_allowances"`
 	} `json:"required_pull_request_reviews"`
+	RequiredSignatures *struct {
+		Enabled bool `json:"enabled"`
+	} `json:"required_signatures"`
 	RequiredLinearHistory *struct {
 		Enabled bool `json:"enabled"`
 	} `json:"required_linear_history"`
 	RequiredConversationResolution *struct {
 		Enabled bool `json:"enabled"`
 	} `json:"required_conversation_resolution"`
+	LockBranch *struct {
+		Enabled bool `json:"enabled"`
+	} `json:"lock_branch"`
 }
 
 type githubRepositoryMergeSettingsResponse struct {
@@ -289,6 +301,8 @@ func applyGitHubActiveBranchRules(result *GitHubPullRequestMergeRequirementsResu
 			result.RequiredDeploymentEnvironments = append(result.RequiredDeploymentEnvironments, parameters.RequiredDeploymentEnvironments...)
 		case "required_linear_history":
 			result.LinearHistoryRequired = true
+		case "required_signatures":
+			result.RequiredSignatures = true
 		case "merge_queue":
 			result.MergeQueueRequired = true
 		case "creation", "deletion", "non_fast_forward":
@@ -322,6 +336,10 @@ func applyGitHubClassicProtection(result *GitHubPullRequestMergeRequirementsResu
 			}
 		}
 	}
+	if jsonValuePresent(protection.Restrictions) {
+		result.ClassicRestrictionsPresent = true
+		result.UnknownPolicyRules = append(result.UnknownPolicyRules, "classic.restrictions")
+	}
 	if protection.RequiredPullRequestReviews != nil {
 		reviews := protection.RequiredPullRequestReviews
 		if reviews.RequiredApprovingReviewCount > result.RequiredApprovingReviewCount {
@@ -330,6 +348,14 @@ func applyGitHubClassicProtection(result *GitHubPullRequestMergeRequirementsResu
 		result.CodeOwnerReviewRequired = result.CodeOwnerReviewRequired || reviews.RequireCodeOwnerReviews
 		result.LastPushApprovalRequired = result.LastPushApprovalRequired || reviews.RequireLastPushApproval
 		result.DismissStaleReviewsOnPush = result.DismissStaleReviewsOnPush || reviews.DismissStaleReviews
+		if jsonValuePresent(reviews.BypassPullRequestAllowances) {
+			result.ClassicReviewBypassAllowancesPresent = true
+			result.PotentialBypass = true
+			result.UnknownPolicyRules = append(result.UnknownPolicyRules, "classic.bypass_pull_request_allowances")
+		}
+	}
+	if protection.RequiredSignatures != nil && protection.RequiredSignatures.Enabled {
+		result.RequiredSignatures = true
 	}
 	if protection.RequiredConversationResolution != nil && protection.RequiredConversationResolution.Enabled {
 		result.ConversationResolutionRequired = true
@@ -337,6 +363,14 @@ func applyGitHubClassicProtection(result *GitHubPullRequestMergeRequirementsResu
 	if protection.RequiredLinearHistory != nil && protection.RequiredLinearHistory.Enabled {
 		result.LinearHistoryRequired = true
 	}
+	if protection.LockBranch != nil && protection.LockBranch.Enabled {
+		result.BranchLocked = true
+	}
+}
+
+func jsonValuePresent(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed != "" && trimmed != "null"
 }
 
 func repositoryMergeMethods(settings githubRepositoryMergeSettingsResponse) []string {
