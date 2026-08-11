@@ -64,7 +64,7 @@ type GitHubPullRequestReadyResult struct {
 type githubPullRequestReadyStateGraphQLResponse struct {
 	Data struct {
 		Repository *struct {
-			NameWithOwner string `json:"nameWithOwner"`
+			NameWithOwner string                       `json:"nameWithOwner"`
 			PullRequest   *githubPullRequestReadyState `json:"pullRequest"`
 		} `json:"repository"`
 	} `json:"data"`
