@@ -1,6 +1,11 @@
 package db
 
-// V51: user-scoped GitHub App user-access credentials.
+import (
+	"database/sql"
+	"fmt"
+)
+
+// GitHub App user-access credentials live in a dedicated owner-scoped table.
 // Token-bearing values are encrypted by the repository layer before storage.
 const migrationGitHubAppConnections = `
 CREATE TABLE IF NOT EXISTS github_app_connections (
@@ -19,3 +24,16 @@ CREATE TABLE IF NOT EXISTS github_app_connections (
 CREATE INDEX IF NOT EXISTS idx_github_app_connections_user
 ON github_app_connections(github_user_id);
 `
+
+// EnsureGitHubAppConnectionsSchema creates the dedicated GitHub credential
+// persistence surface idempotently. G2 keeps this isolated from the generic
+// settings table so no settings API can enumerate credential ciphertext.
+func EnsureGitHubAppConnectionsSchema(database *sql.DB) error {
+	if database == nil {
+		return fmt.Errorf("database is required")
+	}
+	if _, err := database.Exec(migrationGitHubAppConnections); err != nil {
+		return fmt.Errorf("ensure GitHub App connection schema: %w", err)
+	}
+	return nil
+}
