@@ -8,42 +8,41 @@ The existing Git/GitHub tool chain already has separate operator gates for remot
 
 A GitHub App user access token is therefore treated only as a credential source. Connecting GitHub does **not** enable Git writes, push, branch publication, pull-request creation, review mutations, or future merge capability.
 
-## G1: device-flow service
+## G1: device-flow service — implemented
 
-`backend/internal/githubauth` provides the first backend-only authentication slice:
+`backend/internal/githubauth` provides the backend-only authentication service:
 
 - GitHub App client ID is operator-owned configuration via `OMNILLM_GITHUB_APP_CLIENT_ID`.
 - Device authorization uses GitHub's fixed `https://github.com/login/device/code` and `https://github.com/login/oauth/access_token` endpoints.
-- The provider `device_code` remains backend-only; API-facing results contain only the user code, verification URI, expiry, and minimum poll interval.
+- The provider `device_code` remains backend-only; user-facing results contain only the user code, verification URI, expiry, and minimum poll interval.
 - Polling is bounded to one provider request per service call and never starts a background polling loop.
 - Provider polling intervals are enforced in the backend, including `slow_down` handling.
 - A successful token exchange is immediately bound to the authenticated GitHub identity through `GET https://api.github.com/user` before credentials are accepted.
 - Expiring user access tokens can be refreshed with the device-flow refresh token without a GitHub App client secret.
+- Refresh-token rotation is serialized to avoid concurrent refresh races.
 - Token response bodies and provider error bodies are never copied into public errors.
-- Authentication responses are size-bounded and use fixed provider endpoints.
+- Authentication responses are size-bounded, redirects are disabled, and provider endpoints are fixed.
 
-The package defines a `CredentialStore` contract but intentionally does not select a persistence implementation in G1. Implementations must encrypt access and refresh tokens at rest and must never expose them through API responses or model/tool context.
+## G2a: encrypted persistence and secret-free HTTP boundary — implemented
 
-## Persistence boundary
+GitHub App credentials do **not** use the generic `settings` table. The general settings API enumerates that table, which is the wrong visibility boundary even for encrypted credential blobs.
 
-Do **not** store GitHub App credentials in the generic `settings` table. The general settings API enumerates that table, which is the wrong visibility boundary even for encrypted credential blobs.
-
-The next slice should add a dedicated user-scoped persistence surface (planned schema V51) with:
+G2a adds a dedicated `github_app_connections` table with:
 
 - OmniLLM owner/user ID as the primary ownership key;
-- encrypted access token;
-- encrypted refresh token;
+- GitHub numeric user ID and login;
+- AES-256-GCM encrypted access token;
+- AES-256-GCM encrypted refresh token;
 - access-token expiry;
 - refresh-token expiry;
-- GitHub numeric user ID and login;
-- token type and non-secret metadata;
+- token type and non-secret scope metadata;
 - no plaintext token columns.
 
-The repository should follow the existing `repository.MCPOAuthRepo` pattern and reuse `internal/crypto` AES-256-GCM encryption.
+`repository.GitHubAppConnectionRepo` implements the `githubauth.CredentialStore` contract and ensures this isolated schema idempotently. Reads decrypt credentials only for backend execution. Tests inspect raw SQLite columns and verify that access and refresh token plaintext never persists.
 
-## Planned authenticated API
+The HTTP boundary is implemented through `GitHubAuthHandler` and exposes only secret-free status/device-flow structures. All handlers derive ownership from `auth.ScopeUserIDFromContext`, which preserves authenticated-user isolation and the stable `local` owner in solo mode. Authentication responses are marked `Cache-Control: no-store`.
 
-After dedicated persistence is in place, wire user-authenticated routes such as:
+The route mount helper defines:
 
 ```text
 GET    /v1/github/auth
@@ -52,11 +51,15 @@ POST   /v1/github/auth/device/poll
 DELETE /v1/github/auth
 ```
 
-These routes are user-scoped through `auth.ScopeUserIDFromContext`. Device poll performs one provider request at most; clients retry according to `retry_after_seconds`.
+The helper must be mounted inside the existing authenticated `/v1` route group. Device poll performs at most one provider request; clients retry according to `retry_after_seconds`.
 
-A later web authorization flow may be added for browser/server deployments. Desktop/headless operation should continue to support device flow.
+## G2b: application composition — next
 
-## G3: Git credential resolver
+The next small slice should compose `NewGitHubAuthHandlerFromEnvironment(database)` in `backend/internal/api/router.go` and call `MountGitHubAuthRoutes` only inside the current authenticated route group. Missing `OMNILLM_GITHUB_APP_CLIENT_ID` remains a supported state: `GET /v1/github/auth` reports `configured=false`, start/poll return a bounded service-unavailable response, and disconnect remains idempotent.
+
+No frontend work is required for G2b. It should prove the live route surface first.
+
+## G3: request-scoped Git credential resolver
 
 Only after persistence and authenticated API wiring are proven should `backend/internal/gitrepo` consume these credentials.
 
@@ -77,7 +80,7 @@ Authentication is not authorization.
 
 ## Subsequent slices
 
-1. **G2 — encrypted user-scoped persistence and authenticated API routes.**
+1. **G2b — mount the authenticated GitHub connection API in application composition.**
 2. **G3 — request-scoped GitHub credential resolver for existing Git/GitHub tools.**
 3. **G4 — repository discovery and explicit repository-to-local-worktree binding.**
 4. **G5 — Settings UI: Connect GitHub, choose repositories, status, reconnect, disconnect.**
