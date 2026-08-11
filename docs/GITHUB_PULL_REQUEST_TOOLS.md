@@ -1,12 +1,12 @@
 # GitHub pull request tools
 
-OmniLLM-Studio can create a **draft** pull request after a local feature branch has been committed and published through the guarded Git workflow. GitHub collaboration is intentionally a separate security boundary from Git transport: creating a pull request mutates a hosted collaboration system even though it does not modify the local worktree or Git object database.
+OmniLLM-Studio provides a guarded GitHub collaboration boundary after local Git work has been committed and published. Read-only pull-request/check inspection and draft pull-request creation are deliberately independent operator permissions. Neither capability implies Git push, branch creation, or another hosted mutation.
 
-The Git branch must already exist on the configured remote at the exact reviewed local HEAD. Local Git and remote publication are documented in `docs/LOCAL_GIT_TOOLS.md` and `docs/REMOTE_GIT_TOOLS.md`.
+Local Git and remote publication are documented in `docs/LOCAL_GIT_TOOLS.md` and `docs/REMOTE_GIT_TOOLS.md`.
 
 ## Operator configuration
 
-Draft pull request creation reuses an operator-configured remote from `OMNILLM_GIT_REMOTES_JSON`:
+GitHub collaboration reuses an operator-configured remote from `OMNILLM_GIT_REMOTES_JSON`:
 
 ```json
 {
@@ -17,36 +17,70 @@ Draft pull request creation reuses an operator-configured remote from `OMNILLM_G
     "token_env": "OMNILLM_GIT_TOKEN_GITHUB",
     "allow_push": true,
     "allow_branch_create": true,
+    "allow_pull_request_read": true,
     "allow_pull_request_create": true
   }
 }
 ```
 
-The selected remote supplies all repository identity and credential configuration. The model never receives or submits the GitHub API URL, owner/repository name, token value, token environment-variable name, or local filesystem path.
+The selected remote supplies repository identity and credential configuration. The model never receives or submits the GitHub API URL, owner/repository name, token value, token environment-variable name, or local filesystem path.
 
-The capability has its own process-wide gate:
+Read-only PR/check inspection has its own process-wide gate:
+
+```text
+OMNILLM_GITHUB_PULL_REQUEST_READ_ENABLED=true
+```
+
+Draft PR creation has a separate process-wide gate:
 
 ```text
 OMNILLM_GITHUB_PULL_REQUEST_ENABLED=true
 ```
 
-It also requires:
+Both also require `OMNILLM_GIT_REMOTE_ENABLED=true`, a non-empty `token_env`, and an exact `https://github.com/<owner>/<repository>[.git]` remote URL. Read operations additionally require `allow_pull_request_read: true`; creation requires `allow_pull_request_create: true` and critical-risk tool approval.
 
-- `OMNILLM_GIT_REMOTE_ENABLED=true`, because the service re-inspects the exact configured Git remote before creating the PR;
-- the selected remote's `allow_pull_request_create: true`;
-- a non-empty `token_env` on that remote;
-- an exact `https://github.com/<owner>/<repository>[.git]` remote URL;
-- critical-risk tool approval under the normal OmniLLM tool policy.
+These gates are independent from `OMNILLM_GIT_WRITE_ENABLED`, `OMNILLM_GIT_REMOTE_PUSH_ENABLED`, and `OMNILLM_GIT_REMOTE_BRANCH_CREATE_ENABLED`. GitHub Enterprise hosts and arbitrary API base URLs remain unsupported; future Enterprise support should use an explicit operator API-endpoint binding rather than a model-supplied URL.
 
-The GitHub PR gate is independent from `OMNILLM_GIT_WRITE_ENABLED`, `OMNILLM_GIT_REMOTE_PUSH_ENABLED`, and `OMNILLM_GIT_REMOTE_BRANCH_CREATE_ENABLED`. Those gates control the preceding local/publish operations but do not silently grant GitHub API mutation rights.
+## Read-only tools
 
-Private GitHub Enterprise hosts and arbitrary API base URLs are deliberately unsupported in this slice. Supporting GitHub Enterprise later should use an explicit operator API endpoint binding rather than deriving or accepting a model-supplied URL.
+All read tools are low-risk, read-only, networked, credentialed, parallel-safe, bounded to a 64 KiB model result, and registered only when the global read gate is enabled. They do not accept repository names, API URLs, tokens, credential references, mutation controls, or arbitrary commit SHAs.
 
-## Available tool
+### `github_get_pull_request`
+
+Reads bounded metadata for one PR. Inputs:
+
+- `remote` — configured remote ID from `git_remotes`;
+- `number` — positive pull request number.
+
+The result includes number, URL, title, state/draft/merged state, mergeability when GitHub has computed it, source branch/head SHA, base branch, author, and update time. The PR body, comments, review text, API URLs, and credentials are intentionally omitted from this first read slice.
+
+### `github_list_pull_requests`
+
+Lists one bounded first page, sorted by most recently updated. Inputs:
+
+- `remote` — configured remote ID;
+- `state` — optional `open`, `closed`, or `all` (default `open`);
+- `head_branch` — optional same-repository branch filter; the service constructs GitHub's owner-qualified filter internally;
+- `limit` — optional 1–20 (default 10).
+
+The API request asks for `limit + 1` records solely to report a `truncated` flag without exposing unbounded pagination to the model.
+
+### `github_get_pull_request_checks`
+
+Reads check runs and legacy/combined commit-status contexts for one PR. Inputs:
+
+- `remote` — configured remote ID;
+- `number` — positive pull request number.
+
+The service first fetches the PR, validates its returned Git head SHA, and then queries both GitHub check runs and combined commit status for **that exact SHA**. The model cannot choose or substitute a commit reference. Up to 50 check runs and 50 status contexts are returned with truncation flags.
+
+To reduce untrusted hosted content in model context, this first slice returns execution metadata only: check name/status/conclusion/app and commit-status context/state. Provider-supplied check output, annotations, descriptions, and arbitrary target/details URLs are not copied into the result.
+
+## Draft creation tool
 
 ### `github_create_draft_pull_request`
 
-Creates a draft pull request from the current published feature branch to the configured remote's advertised default branch.
+Creates a draft PR from the current published feature branch to the configured remote's advertised default branch.
 
 The model may provide only:
 
@@ -57,24 +91,11 @@ The model may provide only:
 - `title` — 1–256 characters;
 - `body` — optional, bounded to 32 KiB.
 
-The tool does **not** accept:
+The tool does **not** accept repository owner/name, GitHub API URL, token, base branch, alternate head/fork owner, ready-for-review, merge method, labels, reviewers, teams, assignees, milestone, or project controls. It is critical-risk, networked, side-effecting, non-parallel, and defaults to `ask`.
 
-- repository owner/name;
-- GitHub API URL;
-- token or credential reference;
-- base branch;
-- alternate head branch or fork owner;
-- draft=false / ready-for-review;
-- merge method or merge command;
-- labels, reviewers, teams, assignees, milestone, or project controls.
+## Draft creation state binding
 
-It is critical-risk, networked, side-effecting, non-parallel, and defaults to `ask`.
-
-## State binding
-
-Draft PR creation requires a fresh reviewed remote snapshot after the branch is published.
-
-Immediately before the GitHub API mutation, OmniLLM-Studio:
+Immediately before creation, OmniLLM-Studio:
 
 1. serializes against local Git mutations made through OmniLLM;
 2. rechecks the exact current local branch and `expected_head`;
@@ -82,37 +103,30 @@ Immediately before the GitHub API mutation, OmniLLM-Studio:
 4. recomputes the complete `branch_state_digest` and requires it to equal `expected_remote_state_digest`;
 5. requires the same-named remote source branch to exist at exactly `expected_head`;
 6. reads the default branch only from the remote's advertised `HEAD` symref;
-7. rejects the operation if the source branch is itself the default branch;
+7. rejects creation when source equals the default branch;
 8. rechecks local branch/HEAD once more before the GitHub API request.
 
-The model cannot choose another base branch. If the remote does not advertise a trustworthy `HEAD` symref, PR creation fails closed rather than guessing `main` or `master`.
+The model cannot choose another base branch. If the remote does not advertise a trustworthy `HEAD` symref, creation fails closed rather than guessing `main` or `master`.
 
-## GitHub API boundary
+## Shared GitHub API boundary
 
-The API client is dedicated to this capability:
+The API client is dedicated to GitHub collaboration:
 
 - API host is fixed to `https://api.github.com`;
 - repository owner/name are parsed only from an exact operator-configured `github.com` Git remote;
 - token value is read from that remote's configured `token_env` immediately before use;
 - environment proxies are not used;
-- redirects are disabled so the Authorization header cannot follow a redirect;
-- DNS is resolved through the same private/local/reserved-address rejection used by guarded remote Git;
+- redirects are disabled so Authorization cannot follow a redirect;
+- DNS uses the private/local/reserved-address rejection used by guarded remote Git;
 - response bodies are capped at 1 MiB;
-- requests use the pinned GitHub REST API version header.
+- requests use the repository's pinned GitHub REST API version header;
+- API error bodies are not copied into model-visible errors.
 
-API error bodies are not copied into model-visible errors.
+## Draft duplicate and race handling
 
-## Duplicate and race handling
+Before creation, the service queries open PRs for the exact repository, source branch, and advertised default base. A matching PR at the exact reviewed SHA is reused; a matching PR at a different SHA fails and requires refreshed Git state.
 
-Before creating a PR, the service queries open pull requests for the exact repository, source branch, and advertised default base.
-
-- If no matching PR exists, it issues one draft PR creation request.
-- If a matching open PR already exists at the exact reviewed source SHA, no duplicate is created; the existing PR is returned with `already_exists: true`.
-- If a matching open PR exists at a different source SHA, the operation fails and requires refreshed Git state.
-
-GitHub's create-pull-request API accepts a branch name rather than an immutable source commit, so a remote branch can theoretically move after the Git advertisement and before GitHub applies the API request. OmniLLM-Studio therefore validates the returned PR after creation: it must be open, draft, use the expected head branch, report the exact `expected_head` SHA, and target the advertised default branch.
-
-If GitHub returns a newly created PR whose source/base/draft state does not match those invariants, OmniLLM-Studio immediately attempts to close it and reports the validation failure. If cleanup cannot be confirmed, the error identifies the PR number so an operator can inspect it. This containment step does not claim an atomic GitHub-side compare-and-swap that the API does not provide.
+Because GitHub's create-PR API accepts a branch name rather than an immutable commit, OmniLLM-Studio validates a newly created PR after creation. It must remain open/draft, use the expected head branch/SHA, and target the advertised default branch. An unexpected newly created PR is immediately closed when possible; if cleanup cannot be confirmed, the error identifies the PR number for operator inspection.
 
 ## Recommended end-to-end coding workflow
 
@@ -120,15 +134,15 @@ If GitHub returns a newly created PR whose source/base/draft state does not matc
 git_status
   → git_create_branch / git_checkout
   → git_diff / git_stage / git_status / git_commit
-  → git_status
   → git_remote_status
   → approval → git_publish_branch
   → git_remote_status
-  → verify published branch head and retain branch_state_digest
   → approval → github_create_draft_pull_request
+  → github_get_pull_request
+  → github_get_pull_request_checks
 ```
 
-After draft creation, later changes should return to the normal reviewed existing-branch workflow:
+Later commits return to the reviewed existing-branch path:
 
 ```text
 local edit/stage/commit
@@ -136,12 +150,14 @@ local edit/stage/commit
   → git_remote_status
   → approval → git_fetch
   → approval → git_push
+  → github_get_pull_request
+  → github_get_pull_request_checks
 ```
 
-Draft PR creation does not imply permission to mark a PR ready, request reviewers, change metadata, merge, close arbitrary PRs, or delete the source branch. Those should be separate capabilities with their own approval and state-binding rules if added later.
+Read access and draft creation do not imply permission to mark a PR ready, request reviewers, change metadata, rerun workflows, merge, close arbitrary PRs, or delete the source branch. Those remain separate future capabilities only if a later audit demonstrates the need.
 
 ## Validation expectations
 
-Focused tests cover GitHub.com-only repository derivation, independent process gating, exact published source-head binding, advertised-default-base selection, duplicate open-PR reuse, stale remote-state rejection before any API call, strict model-facing arguments, post-create source/base/draft validation, cleanup of a mismatched newly created draft, and conditional registry wiring.
+Focused tests cover independent read/create gates, GitHub.com-only repository derivation, operator-bound authentication, strict model-facing arguments, bounded listing, same-repository head filters, exact PR-head binding for check/status inspection, provider-error-body suppression, creation state binding, duplicate reuse, race containment, and conditional registry wiring.
 
 Before merging changes to this boundary, validate the exact final head with repository formatting, `go vet`, backend unit/integration tests, race detection, frontend checks, Windows desktop checks, Playwright smoke coverage, dependency audits, Go and JavaScript/TypeScript CodeQL, Helm validation, and backend/frontend container builds. Review PR and Advanced Security threads before readiness.
