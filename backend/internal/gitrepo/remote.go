@@ -60,6 +60,7 @@ type RemoteService struct {
 	githubPullRequestReadEnabled             bool
 	githubPullRequestReplyEnabled            bool
 	githubPullRequestThreadResolutionEnabled bool
+	githubPullRequestReadyEnabled            bool
 	cloneEnabled                             bool
 	cloneMaxBytes                            int64
 	cloneMaxEntries                          int64
@@ -89,6 +90,7 @@ func NewRemoteServiceFromEnvironment(local *Service) *RemoteService {
 	service.githubPullRequestReadEnabled = boolEnvironment(GitHubPullRequestReadEnabledEnv)
 	service.githubPullRequestReplyEnabled = boolEnvironment(GitHubPullRequestReplyEnabledEnv)
 	service.githubPullRequestThreadResolutionEnabled = boolEnvironment(GitHubPullRequestThreadResolutionEnabledEnv)
+	service.githubPullRequestReadyEnabled = boolEnvironment(GitHubPullRequestReadyEnabledEnv)
 	if maxBytes, maxEntries, ok := cloneLimitsFromEnvironment(); ok {
 		service.cloneMaxBytes = maxBytes
 		service.cloneMaxEntries = maxEntries
@@ -149,6 +151,12 @@ func (s *RemoteService) GitHubPullRequestThreadResolutionEnabled() bool {
 	return s != nil && s.githubPullRequestThreadResolutionEnabled
 }
 
+// GitHubPullRequestReadyEnabled reports the independent process-wide gate for
+// marking a reviewed draft pull request ready for review.
+func (s *RemoteService) GitHubPullRequestReadyEnabled() bool {
+	return s != nil && s.githubPullRequestReadyEnabled
+}
+
 // PushMutationEnabled reports whether the process has enabled all global gates
 // required for a remote push mutation. Per-remote policy is checked by Push.
 func (s *RemoteService) PushMutationEnabled() bool {
@@ -190,6 +198,13 @@ func (s *RemoteService) GitHubPullRequestThreadResolutionMutationEnabled() bool 
 	return s != nil && s.Enabled() && s.GitHubPullRequestThreadResolutionEnabled()
 }
 
+// GitHubPullRequestReadyMutationEnabled reports whether the process permits the
+// draft-to-ready hosted mutation. It is independent from PR reads, creation,
+// replies, thread resolution, local Git writes, and Git push.
+func (s *RemoteService) GitHubPullRequestReadyMutationEnabled() bool {
+	return s != nil && s.Enabled() && s.GitHubPullRequestReadyEnabled()
+}
+
 // CloneMutationEnabled reports whether all process-wide clone prerequisites are
 // present. Per-remote allow_clone and destination state are checked by Clone.
 func (s *RemoteService) CloneMutationEnabled() bool {
@@ -219,6 +234,7 @@ func (s *RemoteService) Remotes(ctx context.Context) []RemoteSummary {
 			PullRequestCreateAllowed:           s.GitHubPullRequestMutationEnabled() && remoteSupportsGitHubPullRequests(remote),
 			PullRequestReplyAllowed:            s.GitHubPullRequestReplyMutationEnabled() && remoteSupportsGitHubPullRequestReply(remote),
 			PullRequestThreadResolutionAllowed: s.GitHubPullRequestThreadResolutionMutationEnabled() && remoteSupportsGitHubPullRequestThreadResolution(remote),
+			PullRequestReadyAllowed:            s.GitHubPullRequestReadyMutationEnabled() && remoteSupportsGitHubPullRequestReady(remote),
 			DefaultBranchPushAllowed:           s.PushMutationEnabled() && remote.AllowPush && remote.AllowDefaultBranchPush,
 			CloneAllowed:                       s.CloneMutationEnabled() && remote.AllowClone,
 		})
