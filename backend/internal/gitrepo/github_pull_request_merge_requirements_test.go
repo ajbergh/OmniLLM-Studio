@@ -57,8 +57,8 @@ func TestGetPullRequestMergeRequirementsNormalizesRulesAndFailsClosedOnRulesetBy
 	if requests != 4 || result.Head != head || result.BaseBranch != "main" || result.Mergeable == nil || !*result.Mergeable {
 		t.Fatalf("unexpected result binding: %#v requests=%d", result, requests)
 	}
-	if result.MergePolicyComplete || result.RulesetBypassVisibility != "incomplete" || !result.PotentialBypass || !result.ConfiguredActorAdmin {
-		t.Fatalf("expected fail-closed ruleset bypass state: %#v", result)
+	if result.MergePolicyComplete || result.RulesetBypassVisibility != "incomplete" || result.ClassicPolicyCoverage != "rest_partial" || !result.PotentialBypass || !result.ConfiguredActorAdmin {
+		t.Fatalf("expected fail-closed ruleset/classic coverage state: %#v", result)
 	}
 	if !result.MergeQueueRequired || !result.StrictStatusChecks || !result.CodeOwnerReviewRequired || !result.LastPushApprovalRequired || !result.ConversationResolutionRequired || !result.LinearHistoryRequired || !result.DismissStaleReviewsOnPush || !result.RequiredSignatures || !result.BranchLocked || result.RequiredApprovingReviewCount != 2 {
 		t.Fatalf("missing normalized requirements: %#v", result)
@@ -74,7 +74,7 @@ func TestGetPullRequestMergeRequirementsNormalizesRulesAndFailsClosedOnRulesetBy
 	}
 }
 
-func TestGetPullRequestMergeRequirementsCanBeCompleteWithoutRulesets(t *testing.T) {
+func TestGetPullRequestMergeRequirementsRESTClassicCoverageRemainsIncomplete(t *testing.T) {
 	svc := newGitHubPullRequestReadTestService()
 	head := strings.Repeat("b", 40)
 	svc.githubClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -97,8 +97,8 @@ func TestGetPullRequestMergeRequirementsCanBeCompleteWithoutRulesets(t *testing.
 	if err != nil {
 		t.Fatalf("GetPullRequestMergeRequirements() returned error: %v", err)
 	}
-	if !result.MergePolicyComplete || result.RulesetBypassVisibility != "not_applicable" || result.ClassicProtectionStatus != "visible" || result.RepositorySettingsStatus != "complete" || result.RequiredApprovingReviewCount != 1 || !result.ConversationResolutionRequired {
-		t.Fatalf("unexpected complete policy result: %#v", result)
+	if result.MergePolicyComplete || result.RulesetBypassVisibility != "not_applicable" || result.ClassicProtectionStatus != "visible" || result.ClassicPolicyCoverage != "rest_partial" || result.RepositorySettingsStatus != "complete" || result.RequiredApprovingReviewCount != 1 || !result.ConversationResolutionRequired {
+		t.Fatalf("REST-only classic policy must remain incomplete: %#v", result)
 	}
 }
 
@@ -125,7 +125,7 @@ func TestGetPullRequestMergeRequirementsTreatsClassic404AsIncomplete(t *testing.
 	if err != nil {
 		t.Fatalf("GetPullRequestMergeRequirements() returned error: %v", err)
 	}
-	if result.MergePolicyComplete || result.ClassicProtectionStatus != "unavailable_or_unprotected" {
+	if result.MergePolicyComplete || result.ClassicProtectionStatus != "unavailable_or_unprotected" || result.ClassicPolicyCoverage != "unavailable" {
 		t.Fatalf("classic 404 should remain fail-closed: %#v", result)
 	}
 }
@@ -185,7 +185,7 @@ func TestGetPullRequestMergeRequirementsFailsClosedOnClassicRestrictionsAndBypas
 	if err != nil {
 		t.Fatalf("GetPullRequestMergeRequirements() returned error: %v", err)
 	}
-	if result.MergePolicyComplete || !result.ClassicRestrictionsPresent || !result.ClassicReviewBypassAllowancesPresent || !result.PotentialBypass {
+	if result.MergePolicyComplete || result.ClassicPolicyCoverage != "rest_partial" || !result.ClassicRestrictionsPresent || !result.ClassicReviewBypassAllowancesPresent || !result.PotentialBypass {
 		t.Fatalf("classic restrictions/bypass must fail closed: %#v", result)
 	}
 	if len(result.UnknownPolicyRules) != 2 || result.UnknownPolicyRules[0] != "classic.bypass_pull_request_allowances" || result.UnknownPolicyRules[1] != "classic.restrictions" {

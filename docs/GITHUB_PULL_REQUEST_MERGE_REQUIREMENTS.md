@@ -76,6 +76,7 @@ The current implementation reports incomplete policy when any of the following a
 - repository merge settings are unavailable;
 - active rules are unavailable or reach the bounded 100-rule page limit;
 - classic branch protection is not positively visible;
+- classic protection is visible only through the REST response and has not been corroborated through a policy surface that exposes the full classic merge-requirement set;
 - an active ruleset exists but the active-rules surface does not prove whether the configured actor is constrained by ruleset bypass policy;
 - classic push restrictions are present but their effective actor applicability is not normalized;
 - classic pull-request bypass allowances are present but their effective actor applicability is not normalized;
@@ -85,6 +86,20 @@ The current implementation reports incomplete policy when any of the following a
 A `404` from the classic protection endpoint is therefore represented as `classic_protection_status: "unavailable_or_unprotected"`, not as proof that the base branch is unprotected.
 
 Known requirements such as required signatures or a locked branch are surfaced directly instead of being silently discarded. Their presence does not by itself mean policy discovery was incomplete; a future merge eligibility evaluator would have to honor them as blocking/current-state conditions.
+
+## Classic policy coverage
+
+The REST branch-protection response is not a complete representation of every classic merge prerequisite that GitHub can enforce. In particular, GitHub can require successful deployments before merging, while those deployment requirements are exposed through the classic `BranchProtectionRule` GraphQL surface rather than the REST protection object used by the first M1 implementation.
+
+For that reason, a successful REST classic-protection read now reports:
+
+```text
+classic_protection_status = visible
+classic_policy_coverage = rest_partial
+merge_policy_complete = false
+```
+
+This is a temporary safety posture, not an assertion that the visible REST facts are incorrect. Phase M2 should add a fixed, bounded classic-policy corroboration read and move `classic_policy_coverage` to `complete` only after all merge-relevant classic facts can be reconciled safely. Until then, the reader must prefer an incomplete result over a potentially missed deployment or other classic requirement.
 
 ## Ruleset bypass limitation
 
@@ -142,6 +157,7 @@ Focused tests should continue to cover:
 - operator-bound repository/token and exact PR head/base binding;
 - explicit nullable mergeability;
 - active rules and classic branch-protection overlap;
+- REST-only classic coverage remaining incomplete until corroborated;
 - strict status checks and app-bound contexts;
 - approving-review, code-owner, last-push, stale-review, and conversation-resolution requirements;
 - deployment, linear-history, required-signature, and locked-branch requirements;

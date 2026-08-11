@@ -46,6 +46,7 @@ type GitHubPullRequestMergeRequirementsResult struct {
 	ActiveRulesStatus                    string                      `json:"active_rules_status"`
 	ActiveRulesTruncated                 bool                        `json:"active_rules_truncated,omitempty"`
 	ClassicProtectionStatus              string                      `json:"classic_protection_status"`
+	ClassicPolicyCoverage                string                      `json:"classic_policy_coverage"`
 	RepositorySettingsStatus             string                      `json:"repository_settings_status"`
 	RulesetBypassVisibility              string                      `json:"ruleset_bypass_visibility"`
 	ConfiguredActorAdmin                 bool                        `json:"configured_actor_admin"`
@@ -169,7 +170,7 @@ func (s *RemoteService) GetPullRequestMergeRequirements(ctx context.Context, rem
 		Remote: strings.TrimSpace(remoteID), Repository: remote.Repository, PullRequest: number,
 		Head: strings.ToLower(pull.Head.SHA), BaseBranch: baseBranch, State: pull.State, Draft: pull.Draft, Merged: pull.Merged,
 		Mergeable: pull.Mergeable, MergeableState: pull.MergeableState,
-		ActiveRulesStatus: "unavailable", ClassicProtectionStatus: "unavailable_or_unprotected",
+		ActiveRulesStatus: "unavailable", ClassicProtectionStatus: "unavailable_or_unprotected", ClassicPolicyCoverage: "unavailable",
 		RepositorySettingsStatus: "unavailable", RulesetBypassVisibility: "unknown",
 		AllowedMergeMethods: []string{}, RequiredStatusChecks: []GitHubRequiredStatusCheck{},
 		RequiredDeploymentEnvironments: []string{}, UnknownPolicyRules: []string{},
@@ -220,6 +221,11 @@ func (s *RemoteService) GetPullRequestMergeRequirements(ctx context.Context, rem
 	}
 	if protectionStatus == http.StatusOK {
 		result.ClassicProtectionStatus = "visible"
+		// The REST branch-protection response does not expose every classic
+		// merge prerequisite (notably required deployments). Until a fixed
+		// GraphQL BranchProtectionRule read corroborates those fields, REST-only
+		// coverage must never be treated as complete merge policy.
+		result.ClassicPolicyCoverage = "rest_partial"
 		applyGitHubClassicProtection(result, protection)
 		if protection.EnforceAdmins != nil {
 			enforced := protection.EnforceAdmins.Enabled
@@ -240,7 +246,7 @@ func (s *RemoteService) GetPullRequestMergeRequirements(ctx context.Context, rem
 
 	result.MergePolicyComplete = result.RepositorySettingsStatus == "complete" &&
 		result.ActiveRulesStatus == "complete" && !result.ActiveRulesTruncated &&
-		result.ClassicProtectionStatus == "visible" &&
+		result.ClassicProtectionStatus == "visible" && result.ClassicPolicyCoverage == "complete" &&
 		(result.RulesetBypassVisibility == "not_applicable") &&
 		len(result.UnknownPolicyRules) == 0
 	if result.ConfiguredActorAdmin && result.ClassicAdministratorEnforced != nil && !*result.ClassicAdministratorEnforced {
