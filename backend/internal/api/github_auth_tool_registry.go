@@ -80,19 +80,17 @@ func githubAuthToolCredentialOptionsWithBindings(service *githubauth.Service, bi
 	return options
 }
 
-// configureGitHubAuthToolRegistry binds the shared GitHub auth runtime and, when
-// supplied, the existing owner-scoped repository-binding store to the already-
-// created registry. The variadic form preserves the existing two-argument
-// composition while the router integration is staged independently.
-func configureGitHubAuthToolRegistry(registry *tools.Registry, service *githubauth.Service, repositories ...*GitHubRepositoryHandler) {
-	if registry == nil || service == nil {
+// configureGitHubAuthToolRegistry binds the shared GitHub auth runtime and its
+// owner-scoped repository-binding store to the already-created registry.
+func configureGitHubAuthToolRegistry(registry *tools.Registry, runtime *GitHubAuthRuntime) {
+	if registry == nil || runtime == nil || runtime.Service == nil {
 		return
 	}
 	var bindings GitHubRepositoryBindingStore
-	if len(repositories) > 0 && repositories[0] != nil {
-		bindings = repositories[0].bindings
+	if runtime.Repositories != nil {
+		bindings = runtime.Repositories.bindings
 	}
-	if !registry.ConfigureGitHubCredentials(githubAuthToolCredentialOptionsWithBindings(service, bindings)) {
+	if !registry.ConfigureGitHubCredentials(githubAuthToolCredentialOptionsWithBindings(runtime.Service, bindings)) {
 		log.Printf("WARN: GitHub App tool credential wiring unavailable")
 	}
 }
