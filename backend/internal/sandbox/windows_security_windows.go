@@ -3,6 +3,8 @@
 package sandbox
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"runtime"
 	"syscall"
@@ -15,11 +17,37 @@ const windowsDisableMaxPrivilege = 0x1
 
 var windowsCreateRestrictedTokenProc = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateRestrictedToken")
 
+// createWindowsSandboxSID returns an unregistered, random SID used only as a
+// restricting identity for one sandbox. A per-sandbox SID prevents a filesystem
+// ACE granted to one sandbox from authorizing another restricted process owned
+// by the same Windows user.
+func createWindowsSandboxSID() (*windows.SID, error) {
+	var entropy [16]byte
+	if _, err := rand.Read(entropy[:]); err != nil {
+		return nil, fmt.Errorf("generate sandbox SID entropy: %w", err)
+	}
+	sid, err := windows.StringToSid(fmt.Sprintf(
+		"S-1-5-21-%d-%d-%d-%d",
+		binary.LittleEndian.Uint32(entropy[0:4]),
+		binary.LittleEndian.Uint32(entropy[4:8]),
+		binary.LittleEndian.Uint32(entropy[8:12]),
+		binary.LittleEndian.Uint32(entropy[12:16]),
+	))
+	if err != nil {
+		return nil, fmt.Errorf("create sandbox SID: %w", err)
+	}
+	return sid, nil
+}
+
 // createWindowsRestrictedToken creates a primary token derived from the current
-// process token with privileges disabled and the Restricted Code SID added to
-// its restricting SID list. Filesystem access by this token therefore has to
-// pass both the normal token access check and the Restricted Code access check.
-func createWindowsRestrictedToken() (windows.Token, error) {
+// process token with privileges disabled and exactly one application-issued
+// restricting SID. Filesystem access by this token must pass both the user's
+// normal access check and the sandbox-specific restricting-SID access check.
+func createWindowsRestrictedToken(restrictingSID *windows.SID) (windows.Token, error) {
+	if restrictingSID == nil || !restrictingSID.IsValid() {
+		return 0, fmt.Errorf("valid sandbox restricting SID is required")
+	}
+
 	var source windows.Token
 	access := uint32(windows.TOKEN_DUPLICATE | windows.TOKEN_QUERY | windows.TOKEN_ASSIGN_PRIMARY)
 	if err := windows.OpenProcessToken(windows.CurrentProcess(), access, &source); err != nil {
@@ -27,12 +55,7 @@ func createWindowsRestrictedToken() (windows.Token, error) {
 	}
 	defer source.Close()
 
-	restrictedCodeSID, err := windows.CreateWellKnownSid(windows.WinRestrictedCodeSid)
-	if err != nil {
-		return 0, fmt.Errorf("create Restricted Code SID: %w", err)
-	}
-	restricting := []windows.SIDAndAttributes{{Sid: restrictedCodeSID}}
-
+	restricting := []windows.SIDAndAttributes{{Sid: restrictingSID}}
 	var restricted windows.Token
 	result, _, callErr := windowsCreateRestrictedTokenProc.Call(
 		uintptr(source),
@@ -45,7 +68,7 @@ func createWindowsRestrictedToken() (windows.Token, error) {
 		uintptr(unsafe.Pointer(&restricting[0])),
 		uintptr(unsafe.Pointer(&restricted)),
 	)
-	runtime.KeepAlive(restrictedCodeSID)
+	runtime.KeepAlive(restrictingSID)
 	runtime.KeepAlive(restricting)
 	if result == 0 {
 		if callErr != nil && callErr != syscall.Errno(0) {
@@ -79,14 +102,13 @@ func createWindowsKillOnCloseJob() (windows.Handle, error) {
 	return job, nil
 }
 
-// grantWindowsRestrictedCodeAccess merges an allow ACE for the Restricted Code
-// SID into path's existing DACL. It deliberately preserves the existing DACL:
-// a restricted token must satisfy both the original identity permissions and
-// the Restricted Code permissions rather than replacing the user's ACL.
-func grantWindowsRestrictedCodeAccess(path string, access windows.ACCESS_MASK, inherit bool) error {
-	restrictedCodeSID, err := windows.CreateWellKnownSid(windows.WinRestrictedCodeSid)
-	if err != nil {
-		return fmt.Errorf("create Restricted Code SID: %w", err)
+// grantWindowsSIDAccess merges an allow ACE for one sandbox-specific SID into
+// path's existing DACL. It preserves the existing identity DACL: a restricted
+// token must satisfy both the normal user access check and this sandbox-specific
+// restricting-SID check.
+func grantWindowsSIDAccess(path string, sid *windows.SID, access windows.ACCESS_MASK, inherit bool) error {
+	if sid == nil || !sid.IsValid() {
+		return fmt.Errorf("valid sandbox SID is required")
 	}
 
 	current, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
@@ -102,7 +124,7 @@ func grantWindowsRestrictedCodeAccess(path string, access windows.ACCESS_MASK, i
 	}
 
 	var pinner runtime.Pinner
-	pinner.Pin(restrictedCodeSID)
+	pinner.Pin(sid)
 	defer pinner.Unpin()
 
 	inheritance := uint32(windows.NO_INHERITANCE)
@@ -115,13 +137,13 @@ func grantWindowsRestrictedCodeAccess(path string, access windows.ACCESS_MASK, i
 		Inheritance:       inheritance,
 		Trustee: windows.TRUSTEE{
 			TrusteeForm:  windows.TRUSTEE_IS_SID,
-			TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
-			TrusteeValue: windows.TrusteeValueFromSID(restrictedCodeSID),
+			TrusteeType:  windows.TRUSTEE_IS_UNKNOWN,
+			TrusteeValue: windows.TrusteeValueFromSID(sid),
 		},
 	}
 	merged, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{entry}, existing)
 	if err != nil {
-		return fmt.Errorf("merge Restricted Code DACL for %q: %w", path, err)
+		return fmt.Errorf("merge sandbox DACL for %q: %w", path, err)
 	}
 	if err := windows.SetNamedSecurityInfo(
 		path,
@@ -132,7 +154,7 @@ func grantWindowsRestrictedCodeAccess(path string, access windows.ACCESS_MASK, i
 		merged,
 		nil,
 	); err != nil {
-		return fmt.Errorf("write Restricted Code DACL for %q: %w", path, err)
+		return fmt.Errorf("write sandbox DACL for %q: %w", path, err)
 	}
 	return nil
 }
