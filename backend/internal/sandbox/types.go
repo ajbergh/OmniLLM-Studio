@@ -14,18 +14,9 @@ type OwnerScope struct {
 	TaskID         string `json:"task_id,omitempty"`
 }
 
-// Equal reports whether two owner scopes are identical.
-func (o OwnerScope) Equal(other OwnerScope) bool {
-	return o == other
-}
+func (o OwnerScope) Equal(other OwnerScope) bool { return o == other }
+func (o OwnerScope) Empty() bool                 { return o == (OwnerScope{}) }
 
-// Empty reports whether no application ownership dimension is present.
-func (o OwnerScope) Empty() bool {
-	return o == (OwnerScope{})
-}
-
-// MountMode describes the maximum filesystem access granted to one opaque
-// application-owned workspace mount.
 type MountMode string
 
 const (
@@ -34,14 +25,20 @@ const (
 	MountReadWrite         MountMode = "read_write"
 )
 
-// WorkspaceMount grants a sandbox access to a registered workspace by opaque
-// ID. Physical host paths never appear in model-facing sandbox requests.
+// WorkspaceMount is model/application-facing and contains only an opaque ID.
 type WorkspaceMount struct {
 	WorkspaceID string    `json:"workspace_id"`
 	Mode        MountMode `json:"mode"`
 }
 
-// NetworkMode controls whether a sandbox may open outbound network connections.
+// RuntimeMount exists only across the trusted Broker/runtime boundary. SourcePath
+// is never accepted from model tool arguments and is never returned to clients.
+type RuntimeMount struct {
+	WorkspaceID string    `json:"workspace_id"`
+	SourcePath  string    `json:"source_path"`
+	Mode        MountMode `json:"mode"`
+}
+
 type NetworkMode string
 
 const (
@@ -50,18 +47,12 @@ const (
 	NetworkApprovalRequired NetworkMode = "approval_required"
 )
 
-// NetworkPolicy is application-derived. AllowedDomains and AllowedPorts are
-// meaningful only for allowlisted/approved network access; hard deployment
-// denies remain authoritative outside this structure.
 type NetworkPolicy struct {
 	Mode           NetworkMode `json:"mode"`
 	AllowedDomains []string    `json:"allowed_domains,omitempty"`
 	AllowedPorts   []int       `json:"allowed_ports,omitempty"`
 }
 
-// ResourceLimits bounds one sandbox. A zero field means the Broker/runtime
-// default applies; it never means unlimited when a hardened deployment requires
-// that resource control.
 type ResourceLimits struct {
 	WallTimeMS       int   `json:"wall_time_ms,omitempty"`
 	CPUTimeMS        int   `json:"cpu_time_ms,omitempty"`
@@ -74,8 +65,6 @@ type ResourceLimits struct {
 	MaxArtifactBytes int64 `json:"max_artifact_bytes,omitempty"`
 }
 
-// RuntimeRequirements allows a deployment/tool to fail closed when a selected
-// runtime cannot enforce security properties required for that workload.
 type RuntimeRequirements struct {
 	OSIsolation          bool `json:"os_isolation,omitempty"`
 	FilesystemIsolation  bool `json:"filesystem_isolation,omitempty"`
@@ -87,8 +76,6 @@ type RuntimeRequirements struct {
 	DiskLimit            bool `json:"disk_limit,omitempty"`
 }
 
-// RuntimeCapabilities describes controls actually enforced by a runtime, not
-// merely controls requested by configuration.
 type RuntimeCapabilities struct {
 	Name                 string `json:"name"`
 	Version              string `json:"version,omitempty"`
@@ -102,9 +89,6 @@ type RuntimeCapabilities struct {
 	DiskLimit            bool   `json:"disk_limit"`
 }
 
-// CreateRequest describes application-approved capabilities for a new sandbox.
-// Owner identity is deliberately not present; Broker.Create receives owner
-// scope separately from authenticated request context.
 type CreateRequest struct {
 	Mounts       []WorkspaceMount    `json:"mounts,omitempty"`
 	Network      NetworkPolicy       `json:"network"`
@@ -115,16 +99,15 @@ type CreateRequest struct {
 	Requirements RuntimeRequirements `json:"requirements,omitempty"`
 }
 
-// RuntimeCreateRequest is sent only across the trusted Broker/runtime boundary.
-// It includes application ownership for worker auditing but workers must still
-// treat the authenticated Broker as the authority.
+// RuntimeCreateRequest is trusted control-plane data. ResolvedMounts is derived
+// by Broker from owner-scoped workspace grants; it never comes from CreateRequest.
 type RuntimeCreateRequest struct {
-	SessionID string        `json:"session_id"`
-	Owner     OwnerScope    `json:"owner"`
-	Spec      CreateRequest `json:"spec"`
+	SessionID      string         `json:"session_id"`
+	Owner          OwnerScope     `json:"owner"`
+	Spec           CreateRequest  `json:"spec"`
+	ResolvedMounts []RuntimeMount `json:"resolved_mounts,omitempty"`
 }
 
-// Session is Broker-owned metadata for a created sandbox.
 type Session struct {
 	ID        string        `json:"id"`
 	Owner     OwnerScope    `json:"owner"`
@@ -134,9 +117,6 @@ type Session struct {
 	ExpiresAt time.Time     `json:"expires_at"`
 }
 
-// ExecRequest describes one execution inside an existing sandbox. Code tools
-// use Language+Code; terminal/process tools use Command+Args. A request must use
-// exactly one execution mode.
 type ExecRequest struct {
 	Language  string            `json:"language,omitempty"`
 	Code      string            `json:"code,omitempty"`
@@ -148,8 +128,6 @@ type ExecRequest struct {
 	TimeoutMS int               `json:"timeout_ms,omitempty"`
 }
 
-// Artifact is a sandbox-produced object referenced by application-owned ID.
-// Runtime workers do not return arbitrary URLs as the artifact trust boundary.
 type Artifact struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -158,7 +136,6 @@ type Artifact struct {
 	SHA256   string `json:"sha256,omitempty"`
 }
 
-// ExecResult is the bounded result of one sandbox execution.
 type ExecResult struct {
 	ExecutionID string         `json:"execution_id"`
 	Stdout      string         `json:"stdout,omitempty"`
@@ -169,7 +146,6 @@ type ExecResult struct {
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
-// Status reports Broker/runtime-observed sandbox state.
 type Status struct {
 	SessionID    string              `json:"session_id"`
 	State        string              `json:"state"`
