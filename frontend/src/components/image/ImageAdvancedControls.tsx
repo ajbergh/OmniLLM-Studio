@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Shuffle } from 'lucide-react';
 import { clsx } from 'clsx';
+import { useImageEditorStore } from '../../stores/imageEditor';
 
 interface ImageAdvancedControlsProps {
   size: string;
@@ -17,7 +18,13 @@ interface ImageAdvancedControlsProps {
   supportedSizes?: string[];
 }
 
-const SIZES = [
+interface SizeOption {
+  value: string;
+  label: string;
+  desc: string;
+}
+
+const SIZES: SizeOption[] = [
   { value: '1024x1024', label: '1:1', desc: '1024×1024' },
   { value: '1792x1024', label: '16:9', desc: '1792×1024' },
   { value: '1024x1792', label: '9:16', desc: '1024×1792' },
@@ -27,17 +34,47 @@ function gcd(a: number, b: number): number {
   return b === 0 ? a : gcd(b, a % b);
 }
 
-function buildSizeOptions(supportedSizes?: string[]) {
+export function buildSizeOptions(supportedSizes?: string[]): SizeOption[] {
   if (!supportedSizes || supportedSizes.length === 0) return SIZES;
-  return supportedSizes.map((s) => {
-    const known = SIZES.find((k) => k.value === s);
+
+  return supportedSizes.map((size) => {
+    const known = SIZES.find((candidate) => candidate.value === size);
     if (known) return known;
-    const [wStr, hStr] = s.split('x');
-    const w = parseInt(wStr, 10);
-    const h = parseInt(hStr, 10);
-    const d = gcd(w, h);
-    return { value: s, label: `${w / d}:${h / d}`, desc: `${w}×${h}` };
+
+    if (size === 'auto') {
+      return { value: size, label: 'Auto', desc: 'Provider-selected output size' };
+    }
+
+    const match = /^(\d+)x(\d+)$/.exec(size);
+    if (!match) {
+      // Capability data can evolve independently of the client. Unknown values
+      // must remain selectable instead of crashing while trying to derive a ratio.
+      return { value: size, label: size, desc: size };
+    }
+
+    const w = Number(match[1]);
+    const h = Number(match[2]);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+      return { value: size, label: size, desc: size };
+    }
+
+    const divisor = gcd(w, h);
+    return { value: size, label: `${w / divisor}:${h / divisor}`, desc: `${w}×${h}` };
   });
+}
+
+export function getSourcePreservingEditSize(supportedSizes?: string[]): string {
+  // OpenAI exposes `auto`; its edit endpoint rejects a blank size in the
+  // current backend adapter because the adapter otherwise falls back to 1:1.
+  // Other image providers preserve their input geometry when no explicit size
+  // is sent, so use an empty value for those providers.
+  return supportedSizes?.includes('auto') ? 'auto' : '';
+}
+
+function getGenerationFallbackSize(supportedSizes?: string[]): string {
+  const explicitSizes = supportedSizes?.filter((value) => value !== 'auto') ?? [];
+  if (explicitSizes.includes('1024x1024')) return '1024x1024';
+  return explicitSizes[0] ?? '1024x1024';
 }
 
 export function ImageAdvancedControls({
@@ -55,11 +92,67 @@ export function ImageAdvancedControls({
   supportedSizes,
 }: ImageAdvancedControlsProps) {
   const [expanded, setExpanded] = useState(false);
+  const editMode = useImageEditorStore((state) => state.editMode);
+  const previousModeRef = useRef<typeof editMode | null>(null);
 
   const showSeed = supportsSeed === true;
   const showCreativity = supportsGuidance === true;
   const variantCap = maxVariants ?? 4;
-  const filteredSizes = buildSizeOptions(supportedSizes);
+  const filteredSizes = useMemo(() => buildSizeOptions(supportedSizes), [supportedSizes]);
+  const sourcePreservingSize = useMemo(
+    () => getSourcePreservingEditSize(supportedSizes),
+    [supportedSizes],
+  );
+
+  // A generation size is not a safe default for an edit. Entering edit mode
+  // must return to provider-native source preservation unless the user then
+  // explicitly selects a new output ratio/size.
+  useEffect(() => {
+    if (previousModeRef.current === editMode) return;
+    previousModeRef.current = editMode;
+
+    if (editMode === 'edit') {
+      if (size !== sourcePreservingSize) onSizeChange(sourcePreservingSize);
+      return;
+    }
+
+    if (size === '' || size === 'auto') {
+      onSizeChange(getGenerationFallbackSize(supportedSizes));
+    }
+  }, [editMode, onSizeChange, size, sourcePreservingSize, supportedSizes]);
+
+  // Provider/model changes can invalidate a previously selected output size.
+  // Prefer the source-preserving edit behavior rather than silently sending a
+  // stale size from the previous model.
+  useEffect(() => {
+    if (!supportedSizes || supportedSizes.length === 0) return;
+
+    if (editMode === 'edit') {
+      if (size === '' || size === 'auto') {
+        if (size !== sourcePreservingSize) onSizeChange(sourcePreservingSize);
+        return;
+      }
+      if (!supportedSizes.includes(size)) onSizeChange(sourcePreservingSize);
+      return;
+    }
+
+    if (!supportedSizes.includes(size)) {
+      onSizeChange(getGenerationFallbackSize(supportedSizes));
+    }
+  }, [editMode, onSizeChange, size, sourcePreservingSize, supportedSizes]);
+
+  const displayedSizes = useMemo(() => {
+    if (editMode !== 'edit') return filteredSizes;
+
+    const sourceOption: SizeOption = {
+      value: sourcePreservingSize,
+      label: 'Source',
+      desc: sourcePreservingSize === 'auto'
+        ? 'Do not force 1:1; let the provider choose edit output geometry'
+        : 'Preserve the source image geometry unless you explicitly choose another size',
+    };
+    return [sourceOption, ...filteredSizes.filter((option) => option.value !== sourcePreservingSize)];
+  }, [editMode, filteredSizes, sourcePreservingSize]);
 
   return (
     <div className="border border-border rounded-xl overflow-hidden">
@@ -77,20 +170,20 @@ export function ImageAdvancedControls({
           {/* Size / Aspect Ratio */}
           <div className="space-y-1.5 pt-2">
             <label className="text-[10px] text-text-muted uppercase tracking-wide">Size</label>
-            <div className="flex gap-1.5">
-              {filteredSizes.map((s) => (
+            <div className="flex flex-wrap gap-1.5">
+              {displayedSizes.map((option) => (
                 <button
-                  key={s.value}
-                  onClick={() => onSizeChange(s.value)}
+                  key={option.value || 'source'}
+                  onClick={() => onSizeChange(option.value)}
                   className={clsx(
-                    'flex-1 px-2 py-1.5 rounded-lg text-[10px] transition-colors',
-                    size === s.value
+                    'min-w-12 flex-1 px-2 py-1.5 rounded-lg text-[10px] transition-colors',
+                    size === option.value
                       ? 'bg-primary/20 text-primary border border-primary/30'
                       : 'bg-surface border border-border text-text-muted hover:text-text'
                   )}
-                  title={s.desc}
+                  title={option.desc}
                 >
-                  {s.label}
+                  {option.label}
                 </button>
               ))}
             </div>
