@@ -1,0 +1,36 @@
+name: Temporary Image Studio Geometry Sync
+on:
+  push:
+    branches: [feat/image-studio-capability-completion-20260812]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[geometry-sync]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/image-studio-capability-completion-20260812
+      - name: Restore Phase 1 geometry contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('frontend/src/types.ts'); t=p.read_text()
+          old="  size?: string;\n  strength?: number;"
+          new="  size?: string;\n  geometry_mode?: 'preserve_source' | 'provider_auto' | 'explicit';\n  strength?: number;"
+          if old not in t: raise SystemExit('types anchor missing')
+          p.write_text(t.replace(old,new,1))
+          p=Path('frontend/src/components/image/ImageEditStudio.tsx'); t=p.read_text()
+          old="      mask_attachment_id: maskAttachmentId,\n      size,\n      n: variants,"
+          new="      mask_attachment_id: maskAttachmentId,\n      size,\n      geometry_mode: size === '' || size === 'auto' ? 'preserve_source' : 'explicit',\n      n: variants,"
+          if old not in t: raise SystemExit('studio anchor missing')
+          p.write_text(t.replace(old,new,1))
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/types.ts frontend/src/components/image/ImageEditStudio.tsx
+          git commit -m 'fix(image): retain semantic edit geometry contract [geometry-sync]'
+          git push origin HEAD:feat/image-studio-capability-completion-20260812
