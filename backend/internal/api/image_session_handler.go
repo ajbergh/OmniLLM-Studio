@@ -331,7 +331,9 @@ func (h *ImageSessionHandler) RenameSession(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-	var req struct{ Title string `json:"title"` }
+	var req struct {
+		Title string `json:"title"`
+	}
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -955,7 +957,9 @@ func (h *ImageSessionHandler) SelectVariant(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	var req struct{ AssetID string `json:"asset_id"` }
+	var req struct {
+		AssetID string `json:"asset_id"`
+	}
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
