@@ -87,6 +87,7 @@ type imageSessionEditRequest struct {
 	BaseImageAttachmentID string   `json:"base_image_attachment_id"`
 	MaskAttachmentID      string   `json:"mask_attachment_id,omitempty"`
 	Size                  string   `json:"size,omitempty"`
+	GeometryMode          string   `json:"geometry_mode,omitempty"`
 	Strength              *float64 `json:"strength,omitempty"`
 	N                     int      `json:"n,omitempty"`
 
@@ -263,7 +264,6 @@ func (h *ImageSessionHandler) GetSession(w http.ResponseWriter, r *http.Request)
 		nodes = []models.ImageNode{}
 	}
 
-	// Enrich nodes with their most-recent mask (if any)
 	enriched := make([]nodeWithMask, len(nodes))
 	for i, n := range nodes {
 		enriched[i] = nodeWithMask{ImageNode: n}
@@ -273,10 +273,7 @@ func (h *ImageSessionHandler) GetSession(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	respondJSON(w, http.StatusOK, sessionDetailResponse{
-		Session: *session,
-		Nodes:   enriched,
-	})
+	respondJSON(w, http.StatusOK, sessionDetailResponse{Session: *session, Nodes: enriched})
 }
 
 // ListAllSessions returns all image sessions across all conversations for the current user.
@@ -299,7 +296,6 @@ func (h *ImageSessionHandler) ListAllSessions(w http.ResponseWriter, r *http.Req
 func (h *ImageSessionHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	convoID := chi.URLParam(r, "conversationId")
 	userID := auth.UserIDFromContext(r.Context())
-
 	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -309,7 +305,6 @@ func (h *ImageSessionHandler) ListSessions(w http.ResponseWriter, r *http.Reques
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-
 	sessions, err := h.sessionRepo.ListByConversation(convoID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -327,7 +322,6 @@ func (h *ImageSessionHandler) RenameSession(w http.ResponseWriter, r *http.Reque
 	convoID := chi.URLParam(r, "conversationId")
 	sessionID := chi.URLParam(r, "sessionId")
 	userID := auth.UserIDFromContext(r.Context())
-
 	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -337,7 +331,6 @@ func (h *ImageSessionHandler) RenameSession(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-
 	var req struct {
 		Title string `json:"title"`
 	}
@@ -349,12 +342,10 @@ func (h *ImageSessionHandler) RenameSession(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusBadRequest, "title is required")
 		return
 	}
-
 	if err := h.sessionRepo.UpdateTitle(sessionID, req.Title); err != nil {
 		respondInternalError(w, err)
 		return
 	}
-
 	sess, err := h.sessionRepo.GetByID(sessionID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -369,7 +360,6 @@ func (h *ImageSessionHandler) DeleteSession(w http.ResponseWriter, r *http.Reque
 	convoID := chi.URLParam(r, "conversationId")
 	sessionID := chi.URLParam(r, "sessionId")
 	userID := auth.UserIDFromContext(r.Context())
-
 	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -379,7 +369,6 @@ func (h *ImageSessionHandler) DeleteSession(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-
 	session, err := h.sessionRepo.GetByID(sessionID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -389,8 +378,6 @@ func (h *ImageSessionHandler) DeleteSession(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
-
-	// Clean up attachment files for all assets in this session before DB cascade delete
 	nodes, _ := h.nodeRepo.ListBySession(sessionID)
 	for _, n := range nodes {
 		assets, _ := h.assetRepo.ListByNode(n.ID)
@@ -405,8 +392,6 @@ func (h *ImageSessionHandler) DeleteSession(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	}
-
-	// Clean up mask attachment files before DB cascade delete
 	masks, _ := h.maskRepo.ListBySession(sessionID)
 	for _, m := range masks {
 		att, err := h.attachRepo.GetByID(m.AttachmentID)
@@ -418,7 +403,6 @@ func (h *ImageSessionHandler) DeleteSession(w http.ResponseWriter, r *http.Reque
 			_ = h.attachRepo.Delete(m.AttachmentID)
 		}
 	}
-
 	if err := h.sessionRepo.Delete(sessionID); err != nil {
 		respondInternalError(w, err)
 		return
@@ -442,7 +426,6 @@ func (h *ImageSessionHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-
 	session, err := h.sessionRepo.GetByID(sessionID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -452,7 +435,6 @@ func (h *ImageSessionHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
-
 	var req imageSessionGenerateRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -463,30 +445,26 @@ func (h *ImageSessionHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve provider/model
 	provider, model := h.resolveProviderModel(req.Override, convo)
-
-	// Build image request
-	imgReq := llm.ImageRequest{
-		Provider: provider,
-		Model:    model,
-		Prompt:   req.Prompt,
-		Size:     req.Size,
-		Quality:  req.Quality,
-		N:        req.N,
+	imgReq := llm.ImageStudioRequest{
+		ImageRequest: llm.ImageRequest{
+			Provider: provider,
+			Model:    model,
+			Prompt:   req.Prompt,
+			Size:     req.Size,
+			Quality:  req.Quality,
+			N:        req.N,
+		},
+		Seed: req.Seed,
 	}
 
-	// Load reference images if provided
 	if len(req.ReferenceImageIDs) > 0 {
-		// First content reference goes to ReferenceImage (primary, for backward compatibility)
 		ref, err := h.loadReferenceImage(convoID, req.ReferenceImageIDs[0])
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		imgReq.ReferenceImage = ref
-
-		// Additional content references
 		for _, id := range req.ReferenceImageIDs[1:] {
 			r, err := h.loadReferenceImage(convoID, id)
 			if err != nil {
@@ -496,8 +474,6 @@ func (h *ImageSessionHandler) Generate(w http.ResponseWriter, r *http.Request) {
 			imgReq.ReferenceImages = append(imgReq.ReferenceImages, *r)
 		}
 	}
-
-	// Load style references if provided
 	for _, id := range req.StyleReferenceIDs {
 		r, err := h.loadReferenceImage(convoID, id)
 		if err != nil {
@@ -507,34 +483,22 @@ func (h *ImageSessionHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		imgReq.StyleReferenceImages = append(imgReq.StyleReferenceImages, *r)
 	}
 
-	// Call LLM service
-	imgResp, err := h.llmSvc.ImageGenerate(r.Context(), imgReq)
+	imgResp, err := h.llmSvc.ImageStudioGenerate(r.Context(), imgReq)
 	if err != nil {
 		log.Printf("ERROR: image session generate: %v", err)
 		respondError(w, http.StatusBadGateway, "image generation failed: "+err.Error())
 		return
 	}
-
-	// Build params JSON
 	paramsJSON := h.buildParamsJSON(req.Size, req.Quality, req.Seed, req.Creativity, nil)
-
-	// Create node
 	node := &models.ImageNode{
-		SessionID:     sessionID,
-		ParentNodeID:  session.ActiveNodeID,
-		OperationType: "generate",
-		Instruction:   req.Prompt,
-		Provider:      imgResp.Provider,
-		Model:         imgResp.Model,
-		Seed:          req.Seed,
-		ParamsJSON:    paramsJSON,
+		SessionID: sessionID, ParentNodeID: session.ActiveNodeID, OperationType: "generate",
+		Instruction: req.Prompt, Provider: imgResp.Provider, Model: imgResp.Model,
+		Seed: req.Seed, ParamsJSON: paramsJSON,
 	}
 	if err := h.nodeRepo.Create(node); err != nil {
 		respondInternalError(w, err)
 		return
 	}
-
-	// Save generated images as assets
 	assets, err := h.saveImageAssets(convoID, node.ID, imgResp)
 	if err != nil {
 		respondInternalError(w, err)
@@ -544,20 +508,12 @@ func (h *ImageSessionHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to save any generated images")
 		return
 	}
-
-	// Save reference records
 	h.saveReferenceRecords(node.ID, req.ReferenceImageIDs, "content")
 	h.saveReferenceRecords(node.ID, req.StyleReferenceIDs, "style")
-
-	// Update session active node
 	if err := h.sessionRepo.UpdateActiveNode(sessionID, node.ID); err != nil {
 		log.Printf("[image-session] failed to update active node: %v", err)
 	}
-
-	respondJSON(w, http.StatusCreated, generateResponse{
-		Node:   *node,
-		Assets: assets,
-	})
+	respondJSON(w, http.StatusCreated, generateResponse{Node: *node, Assets: assets})
 }
 
 // Edit applies an edit operation (with optional mask) to create a new node.
@@ -566,7 +522,6 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	convoID := chi.URLParam(r, "conversationId")
 	sessionID := chi.URLParam(r, "sessionId")
 	userID := auth.UserIDFromContext(r.Context())
-
 	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -576,7 +531,6 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-
 	session, err := h.sessionRepo.GetByID(sessionID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -586,7 +540,6 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
-
 	var req imageSessionEditRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -600,15 +553,11 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "base_image_attachment_id is required")
 		return
 	}
-
-	// Load base image
 	baseRef, err := h.loadReferenceImage(convoID, req.BaseImageAttachmentID)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	// Load mask if provided
 	var maskRef *llm.ReferenceImage
 	if req.MaskAttachmentID != "" {
 		maskRef, err = h.loadReferenceImage(convoID, req.MaskAttachmentID)
@@ -617,10 +566,7 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
 	provider, model := h.resolveProviderModel(req.Override, convo)
-
-	// Gate: verify the provider supports editing before proceeding
 	resolvedModel, providerType, err := h.llmSvc.ResolveImageModel(provider, model)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "cannot resolve provider: "+err.Error())
@@ -637,19 +583,14 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	imgReq := llm.ImageRequest{
-		Provider:       provider,
-		Model:          model,
-		Prompt:         req.Instruction,
-		Size:           req.Size,
-		N:              req.N,
-		ReferenceImage: baseRef,
-		MaskImage:      maskRef,
-		OperationType:  "edit",
-		Strength:       req.Strength,
+	geometryMode := llm.ImageGeometryMode(strings.TrimSpace(req.GeometryMode))
+	imgReq := llm.ImageStudioRequest{
+		ImageRequest: llm.ImageRequest{
+			Provider: provider, Model: model, Prompt: req.Instruction, Size: req.Size, N: req.N,
+			ReferenceImage: baseRef, MaskImage: maskRef, OperationType: "edit", Strength: req.Strength,
+		},
+		Geometry: llm.ImageGeometry{Mode: geometryMode, Size: req.Size},
 	}
-
-	// Load content references for edit
 	for _, id := range req.ReferenceImageIDs {
 		ref, err := h.loadReferenceImage(convoID, id)
 		if err != nil {
@@ -658,8 +599,6 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		}
 		imgReq.ReferenceImages = append(imgReq.ReferenceImages, *ref)
 	}
-
-	// Load style references for edit
 	for _, id := range req.StyleReferenceIDs {
 		ref, err := h.loadReferenceImage(convoID, id)
 		if err != nil {
@@ -668,30 +607,18 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		}
 		imgReq.StyleReferenceImages = append(imgReq.StyleReferenceImages, *ref)
 	}
-
-	imgResp, err := h.llmSvc.ImageGenerate(r.Context(), imgReq)
+	imgResp, err := h.llmSvc.ImageStudioGenerate(r.Context(), imgReq)
 	if err != nil {
 		log.Printf("ERROR: image session edit: %v", err)
 		respondError(w, http.StatusBadGateway, "image edit failed: "+err.Error())
 		return
 	}
-
 	paramsJSON := h.buildParamsJSON(req.Size, "", nil, nil, req.Strength)
-
-	node := &models.ImageNode{
-		SessionID:     sessionID,
-		ParentNodeID:  session.ActiveNodeID,
-		OperationType: "edit",
-		Instruction:   req.Instruction,
-		Provider:      imgResp.Provider,
-		Model:         imgResp.Model,
-		ParamsJSON:    paramsJSON,
-	}
+	node := &models.ImageNode{SessionID: sessionID, ParentNodeID: session.ActiveNodeID, OperationType: "edit", Instruction: req.Instruction, Provider: imgResp.Provider, Model: imgResp.Model, ParamsJSON: paramsJSON}
 	if err := h.nodeRepo.Create(node); err != nil {
 		respondInternalError(w, err)
 		return
 	}
-
 	assets, err := h.saveImageAssets(convoID, node.ID, imgResp)
 	if err != nil {
 		respondInternalError(w, err)
@@ -701,18 +628,12 @@ func (h *ImageSessionHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to save any edited images")
 		return
 	}
-
 	h.saveReferenceRecords(node.ID, req.ReferenceImageIDs, "content")
 	h.saveReferenceRecords(node.ID, req.StyleReferenceIDs, "style")
-
 	if err := h.sessionRepo.UpdateActiveNode(sessionID, node.ID); err != nil {
 		log.Printf("[image-session] failed to update active node: %v", err)
 	}
-
-	respondJSON(w, http.StatusCreated, generateResponse{
-		Node:   *node,
-		Assets: assets,
-	})
+	respondJSON(w, http.StatusCreated, generateResponse{Node: *node, Assets: assets})
 }
 
 // EnhancePrompt rewrites a user's Image Studio prompt or edit instruction using
@@ -722,7 +643,6 @@ func (h *ImageSessionHandler) EnhancePrompt(w http.ResponseWriter, r *http.Reque
 	convoID := chi.URLParam(r, "conversationId")
 	sessionID := chi.URLParam(r, "sessionId")
 	userID := auth.UserIDFromContext(r.Context())
-
 	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -732,7 +652,6 @@ func (h *ImageSessionHandler) EnhancePrompt(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-
 	session, err := h.sessionRepo.GetByID(sessionID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -742,7 +661,6 @@ func (h *ImageSessionHandler) EnhancePrompt(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
-
 	var req imagePromptEnhanceRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -753,39 +671,25 @@ func (h *ImageSessionHandler) EnhancePrompt(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
-
 	provider, model, err := h.resolvePromptEnhancementProvider(req.Override, convo)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "AI enhance requires an enabled chat-capable provider")
 		return
 	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), imagePromptEnhanceTimeout)
 	defer cancel()
-
-	resp, err := h.llmSvc.ChatComplete(ctx, llm.ChatRequest{
-		Provider: provider,
-		Model:    model,
-		Messages: buildImagePromptEnhancementMessages(req),
-	})
+	resp, err := h.llmSvc.ChatComplete(ctx, llm.ChatRequest{Provider: provider, Model: model, Messages: buildImagePromptEnhancementMessages(req)})
 	if err != nil {
 		log.Printf("[image-session] prompt enhance failed: %v", err)
 		respondError(w, http.StatusBadGateway, "prompt enhancement failed: "+err.Error())
 		return
 	}
-
 	enhanced := cleanEnhancedImagePrompt(resp.Content)
 	if enhanced == "" {
 		respondError(w, http.StatusBadGateway, "prompt enhancement returned an empty prompt")
 		return
 	}
-
-	respondJSON(w, http.StatusOK, imagePromptEnhanceResponse{
-		Prompt:         enhanced,
-		OriginalPrompt: req.Prompt,
-		Provider:       resp.Provider,
-		Model:          resp.Model,
-	})
+	respondJSON(w, http.StatusOK, imagePromptEnhanceResponse{Prompt: enhanced, OriginalPrompt: req.Prompt, Provider: resp.Provider, Model: resp.Model})
 }
 
 // ImportAttachment creates a new node/asset from an existing attachment.
@@ -794,7 +698,6 @@ func (h *ImageSessionHandler) ImportAttachment(w http.ResponseWriter, r *http.Re
 	convoID := chi.URLParam(r, "conversationId")
 	sessionID := chi.URLParam(r, "sessionId")
 	userID := auth.UserIDFromContext(r.Context())
-
 	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -804,7 +707,6 @@ func (h *ImageSessionHandler) ImportAttachment(w http.ResponseWriter, r *http.Re
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-
 	session, err := h.sessionRepo.GetByID(sessionID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -814,7 +716,6 @@ func (h *ImageSessionHandler) ImportAttachment(w http.ResponseWriter, r *http.Re
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
-
 	var req imageSessionImportRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -824,7 +725,6 @@ func (h *ImageSessionHandler) ImportAttachment(w http.ResponseWriter, r *http.Re
 		respondError(w, http.StatusBadRequest, "attachment_id is required")
 		return
 	}
-
 	att, err := h.attachRepo.GetByID(req.AttachmentID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -842,44 +742,24 @@ func (h *ImageSessionHandler) ImportAttachment(w http.ResponseWriter, r *http.Re
 		respondError(w, http.StatusBadRequest, "attachment is not an image")
 		return
 	}
-
 	instruction := strings.TrimSpace(req.Instruction)
 	if instruction == "" {
 		instruction = "Imported from chat"
 	}
-
-	node := &models.ImageNode{
-		SessionID:     sessionID,
-		ParentNodeID:  nil,
-		OperationType: "generate",
-		Instruction:   instruction,
-		Provider:      "import",
-		Model:         "attachment",
-	}
+	node := &models.ImageNode{SessionID: sessionID, ParentNodeID: nil, OperationType: "generate", Instruction: instruction, Provider: "import", Model: "attachment"}
 	if err := h.nodeRepo.Create(node); err != nil {
 		respondInternalError(w, err)
 		return
 	}
-
-	asset := &models.ImageNodeAsset{
-		NodeID:       node.ID,
-		AttachmentID: req.AttachmentID,
-		VariantIndex: 0,
-		IsSelected:   true,
-	}
+	asset := &models.ImageNodeAsset{NodeID: node.ID, AttachmentID: req.AttachmentID, VariantIndex: 0, IsSelected: true}
 	if err := h.assetRepo.Create(asset); err != nil {
 		respondInternalError(w, err)
 		return
 	}
-
 	if err := h.sessionRepo.UpdateActiveNode(sessionID, node.ID); err != nil {
 		log.Printf("[image-session] failed to update active node after import: %v", err)
 	}
-
-	respondJSON(w, http.StatusCreated, generateResponse{
-		Node:   *node,
-		Assets: []models.ImageNodeAsset{*asset},
-	})
+	respondJSON(w, http.StatusCreated, generateResponse{Node: *node, Assets: []models.ImageNodeAsset{*asset}})
 }
 
 // UploadMask accepts a mask image upload.
@@ -888,7 +768,6 @@ func (h *ImageSessionHandler) UploadMask(w http.ResponseWriter, r *http.Request)
 	convoID := chi.URLParam(r, "conversationId")
 	sessionID := chi.URLParam(r, "sessionId")
 	userID := auth.UserIDFromContext(r.Context())
-
 	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -898,7 +777,6 @@ func (h *ImageSessionHandler) UploadMask(w http.ResponseWriter, r *http.Request)
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-
 	session, err := h.sessionRepo.GetByID(sessionID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -908,10 +786,9 @@ func (h *ImageSessionHandler) UploadMask(w http.ResponseWriter, r *http.Request)
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
-
 	var req struct {
 		NodeID     string  `json:"node_id"`
-		MaskData   string  `json:"mask_data"` // base64-encoded PNG
+		MaskData   string  `json:"mask_data"`
 		StrokeJSON *string `json:"stroke_json,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -922,21 +799,15 @@ func (h *ImageSessionHandler) UploadMask(w http.ResponseWriter, r *http.Request)
 		respondError(w, http.StatusBadRequest, "node_id and mask_data are required")
 		return
 	}
-
-	// Verify the node belongs to this session
 	if err := h.verifyNodeInSession(req.NodeID, sessionID); err != nil {
 		respondError(w, http.StatusNotFound, "node not found in session")
 		return
 	}
-
-	// Decode mask image
 	maskBytes, err := base64.StdEncoding.DecodeString(req.MaskData)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "invalid base64 mask_data")
 		return
 	}
-
-	// Save mask to disk
 	filename := uuid.New().String() + "_mask.png"
 	filePath, pathErr := SafeJoin(h.storageDir, filename)
 	if pathErr != nil {
@@ -951,37 +822,17 @@ func (h *ImageSessionHandler) UploadMask(w http.ResponseWriter, r *http.Request)
 		respondInternalError(w, err)
 		return
 	}
-
-	// Create attachment record
-	attachment := &models.Attachment{
-		ConversationID: convoID,
-		Type:           "image",
-		MimeType:       "image/png",
-		StoragePath:    filename,
-		Bytes:          int64(len(maskBytes)),
-		CreatedAt:      time.Now().UTC(),
-		MetadataJSON:   `{"type":"mask"}`,
-	}
+	attachment := &models.Attachment{ConversationID: convoID, Type: "image", MimeType: "image/png", StoragePath: filename, Bytes: int64(len(maskBytes)), CreatedAt: time.Now().UTC(), MetadataJSON: `{"type":"mask"}`}
 	if err := h.attachRepo.Create(attachment); err != nil {
 		respondInternalError(w, err)
 		return
 	}
-
-	// Create mask record
-	mask := &models.ImageMask{
-		NodeID:       req.NodeID,
-		AttachmentID: attachment.ID,
-		StrokeJSON:   req.StrokeJSON,
-	}
+	mask := &models.ImageMask{NodeID: req.NodeID, AttachmentID: attachment.ID, StrokeJSON: req.StrokeJSON}
 	if err := h.maskRepo.Create(mask); err != nil {
 		respondInternalError(w, err)
 		return
 	}
-
-	respondJSON(w, http.StatusCreated, map[string]string{
-		"mask_id":       mask.ID,
-		"attachment_id": attachment.ID,
-	})
+	respondJSON(w, http.StatusCreated, map[string]string{"mask_id": mask.ID, "attachment_id": attachment.ID})
 }
 
 // GetAssets returns all assets for a session's active node.
@@ -990,7 +841,6 @@ func (h *ImageSessionHandler) GetAssets(w http.ResponseWriter, r *http.Request) 
 	convoID := chi.URLParam(r, "conversationId")
 	sessionID := chi.URLParam(r, "sessionId")
 	userID := auth.UserIDFromContext(r.Context())
-
 	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -1000,7 +850,6 @@ func (h *ImageSessionHandler) GetAssets(w http.ResponseWriter, r *http.Request) 
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-
 	session, err := h.sessionRepo.GetByID(sessionID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -1010,8 +859,6 @@ func (h *ImageSessionHandler) GetAssets(w http.ResponseWriter, r *http.Request) 
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
-
-	// If scope=session, return all assets for the session with optional type filter
 	if r.URL.Query().Get("scope") == "session" {
 		opTypes := r.URL.Query()["type"]
 		sortDesc := r.URL.Query().Get("sort") != "created_at_asc"
@@ -1026,8 +873,6 @@ func (h *ImageSessionHandler) GetAssets(w http.ResponseWriter, r *http.Request) 
 		respondJSON(w, http.StatusOK, assets)
 		return
 	}
-
-	// Default: get assets for a specific node
 	nodeID := r.URL.Query().Get("node_id")
 	if nodeID == "" && session.ActiveNodeID != nil {
 		nodeID = *session.ActiveNodeID
@@ -1036,13 +881,10 @@ func (h *ImageSessionHandler) GetAssets(w http.ResponseWriter, r *http.Request) 
 		respondJSON(w, http.StatusOK, []models.ImageNodeAsset{})
 		return
 	}
-
-	// Verify the node belongs to this session
 	if err := h.verifyNodeInSession(nodeID, sessionID); err != nil {
 		respondError(w, http.StatusNotFound, "node not found in session")
 		return
 	}
-
 	assets, err := h.assetRepo.ListByNode(nodeID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -1061,7 +903,6 @@ func (h *ImageSessionHandler) DeleteAsset(w http.ResponseWriter, r *http.Request
 	sessionID := chi.URLParam(r, "sessionId")
 	assetID := chi.URLParam(r, "assetId")
 	userID := auth.UserIDFromContext(r.Context())
-
 	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -1071,7 +912,6 @@ func (h *ImageSessionHandler) DeleteAsset(w http.ResponseWriter, r *http.Request
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-
 	session, err := h.sessionRepo.GetByID(sessionID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -1081,13 +921,10 @@ func (h *ImageSessionHandler) DeleteAsset(w http.ResponseWriter, r *http.Request
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
-
-	// Verify the asset belongs to this session
 	if err := h.verifyAssetInSession(assetID, sessionID); err != nil {
 		respondError(w, http.StatusNotFound, "asset not found in session")
 		return
 	}
-
 	if err := h.assetRepo.Delete(assetID); err != nil {
 		respondInternalError(w, err)
 		return
@@ -1102,7 +939,6 @@ func (h *ImageSessionHandler) SelectVariant(w http.ResponseWriter, r *http.Reque
 	sessionID := chi.URLParam(r, "sessionId")
 	nodeID := chi.URLParam(r, "nodeId")
 	userID := auth.UserIDFromContext(r.Context())
-
 	convo, err := h.convoRepo.GetByIDForUser(convoID, userID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -1112,7 +948,6 @@ func (h *ImageSessionHandler) SelectVariant(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusNotFound, "conversation not found")
 		return
 	}
-
 	session, err := h.sessionRepo.GetByID(sessionID)
 	if err != nil {
 		respondInternalError(w, err)
@@ -1122,7 +957,6 @@ func (h *ImageSessionHandler) SelectVariant(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusNotFound, "session not found")
 		return
 	}
-
 	var req struct {
 		AssetID string `json:"asset_id"`
 	}
@@ -1134,8 +968,6 @@ func (h *ImageSessionHandler) SelectVariant(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusBadRequest, "asset_id is required")
 		return
 	}
-
-	// Verify both the node and the asset belong to this session
 	if err := h.verifyNodeInSession(nodeID, sessionID); err != nil {
 		respondError(w, http.StatusNotFound, "node not found in session")
 		return
@@ -1144,7 +976,6 @@ func (h *ImageSessionHandler) SelectVariant(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusNotFound, "asset not found in session")
 		return
 	}
-
 	if err := h.assetRepo.SetSelected(nodeID, req.AssetID); err != nil {
 		respondInternalError(w, err)
 		return
@@ -1170,10 +1001,8 @@ func (h *ImageSessionHandler) resolvePromptEnhancementProvider(override *struct 
 		}
 		return resolvedProvider, resolvedModel, true
 	}
-
 	if override != nil {
-		provider := ""
-		model := ""
+		provider, model := "", ""
 		if override.Provider != nil {
 			provider = *override.Provider
 		}
@@ -1184,7 +1013,6 @@ func (h *ImageSessionHandler) resolvePromptEnhancementProvider(override *struct 
 			return resolvedProvider, resolvedModel, nil
 		}
 	}
-
 	if convo.DefaultProvider != nil {
 		model := ""
 		if convo.DefaultModel != nil {
@@ -1194,21 +1022,14 @@ func (h *ImageSessionHandler) resolvePromptEnhancementProvider(override *struct 
 			return resolvedProvider, resolvedModel, nil
 		}
 	}
-
 	return h.llmSvc.ResolveChatProviderModel("", "")
 }
 
 func buildImagePromptEnhancementMessages(req imagePromptEnhanceRequest) []llm.ChatMessage {
 	mode := normalizePromptEnhancementMode(req.Mode)
 	prompt := truncateRunes(strings.TrimSpace(req.Prompt), maxPromptEnhanceInputChars)
-
 	var contextLines []string
-	contextLines = append(contextLines,
-		"Mode: "+mode,
-		"User prompt:",
-		prompt,
-	)
-
+	contextLines = append(contextLines, "Mode: "+mode, "User prompt:", prompt)
 	var hints []string
 	if req.Size != "" {
 		hints = append(hints, "canvas size "+req.Size)
@@ -1228,11 +1049,7 @@ func buildImagePromptEnhancementMessages(req imagePromptEnhanceRequest) []llm.Ch
 	if len(hints) > 0 {
 		contextLines = append(contextLines, "", "Studio context: "+strings.Join(hints, "; "))
 	}
-
-	return []llm.ChatMessage{
-		{Role: "system", Content: imagePromptEnhanceSystemPrompt},
-		{Role: "user", Content: strings.Join(contextLines, "\n")},
-	}
+	return []llm.ChatMessage{{Role: "system", Content: imagePromptEnhanceSystemPrompt}, {Role: "user", Content: strings.Join(contextLines, "\n")}}
 }
 
 func normalizePromptEnhancementMode(mode string) string {
@@ -1248,7 +1065,6 @@ func cleanEnhancedImagePrompt(raw string) string {
 	prompt := strings.TrimSpace(raw)
 	prompt = strings.TrimPrefix(prompt, "\ufeff")
 	prompt = strings.TrimSpace(prompt)
-
 	for {
 		lower := strings.ToLower(prompt)
 		switch {
@@ -1266,7 +1082,6 @@ func cleanEnhancedImagePrompt(raw string) string {
 			goto strippedPrefixes
 		}
 	}
-
 strippedPrefixes:
 	prompt = strings.TrimSpace(prompt)
 	prompt = strings.TrimSuffix(prompt, "```")
@@ -1291,8 +1106,7 @@ func (h *ImageSessionHandler) resolveProviderModel(override *struct {
 	Provider *string `json:"provider,omitempty"`
 	Model    *string `json:"model,omitempty"`
 }, convo *models.Conversation) (string, string) {
-	provider := ""
-	model := ""
+	provider, model := "", ""
 	if override != nil {
 		if override.Provider != nil {
 			provider = *override.Provider
@@ -1307,19 +1121,14 @@ func (h *ImageSessionHandler) resolveProviderModel(override *struct {
 	return provider, model
 }
 
-// verifyNodeInSession checks that a node belongs to the given session.
 func (h *ImageSessionHandler) verifyNodeInSession(nodeID, sessionID string) error {
 	node, err := h.nodeRepo.GetByID(nodeID)
-	if err != nil {
-		return fmt.Errorf("node not found in session")
-	}
-	if node == nil || node.SessionID != sessionID {
+	if err != nil || node == nil || node.SessionID != sessionID {
 		return fmt.Errorf("node not found in session")
 	}
 	return nil
 }
 
-// verifyAssetInSession checks that an asset belongs to a node within the given session.
 func (h *ImageSessionHandler) verifyAssetInSession(assetID, sessionID string) error {
 	asset, err := h.assetRepo.GetByID(assetID)
 	if err != nil || asset == nil {
@@ -1350,22 +1159,17 @@ func (h *ImageSessionHandler) loadReferenceImage(convoID, attachmentID string) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to read image file: %w", err)
 	}
-	return &llm.ReferenceImage{
-		Data:     base64.StdEncoding.EncodeToString(imgBytes),
-		MimeType: att.MimeType,
-	}, nil
+	return &llm.ReferenceImage{Data: base64.StdEncoding.EncodeToString(imgBytes), MimeType: att.MimeType}, nil
 }
 
 func (h *ImageSessionHandler) saveImageAssets(convoID, nodeID string, imgResp *llm.ImageResponse) ([]models.ImageNodeAsset, error) {
 	var assets []models.ImageNodeAsset
-
 	for i, img := range imgResp.Images {
 		imgData, err := base64.StdEncoding.DecodeString(img.B64JSON)
 		if err != nil {
 			log.Printf("[image-session] failed to decode base64 for image %d: %v", i, err)
 			continue
 		}
-
 		filename := uuid.New().String() + ".png"
 		filePath, pathErr := SafeJoin(h.storageDir, filename)
 		if pathErr != nil {
@@ -1380,33 +1184,14 @@ func (h *ImageSessionHandler) saveImageAssets(convoID, nodeID string, imgResp *l
 			log.Printf("[image-session] failed to write image %d: %v", i, err)
 			continue
 		}
-
-		metaMap := map[string]string{
-			"revised_prompt":  img.RevisedPrompt,
-			"generator_model": imgResp.Model,
-		}
+		metaMap := map[string]string{"revised_prompt": img.RevisedPrompt, "generator_model": imgResp.Model}
 		metaBytes, _ := json.Marshal(metaMap)
-
-		attachment := &models.Attachment{
-			ConversationID: convoID,
-			Type:           "image",
-			MimeType:       "image/png",
-			StoragePath:    filename,
-			Bytes:          int64(len(imgData)),
-			CreatedAt:      time.Now().UTC(),
-			MetadataJSON:   string(metaBytes),
-		}
+		attachment := &models.Attachment{ConversationID: convoID, Type: "image", MimeType: "image/png", StoragePath: filename, Bytes: int64(len(imgData)), CreatedAt: time.Now().UTC(), MetadataJSON: string(metaBytes)}
 		if err := h.attachRepo.Create(attachment); err != nil {
 			log.Printf("[image-session] failed to create attachment: %v", err)
 			continue
 		}
-
-		asset := &models.ImageNodeAsset{
-			NodeID:       nodeID,
-			AttachmentID: attachment.ID,
-			VariantIndex: i,
-			IsSelected:   i == 0,
-		}
+		asset := &models.ImageNodeAsset{NodeID: nodeID, AttachmentID: attachment.ID, VariantIndex: i, IsSelected: i == 0}
 		if err := h.assetRepo.Create(asset); err != nil {
 			log.Printf("[image-session] failed to create asset record: %v", err)
 			continue
@@ -1418,12 +1203,7 @@ func (h *ImageSessionHandler) saveImageAssets(convoID, nodeID string, imgResp *l
 
 func (h *ImageSessionHandler) saveReferenceRecords(nodeID string, attachmentIDs []string, role string) {
 	for i, id := range attachmentIDs {
-		ref := &models.ImageReference{
-			NodeID:       nodeID,
-			AttachmentID: id,
-			RefRole:      role,
-			SortOrder:    i,
-		}
+		ref := &models.ImageReference{NodeID: nodeID, AttachmentID: id, RefRole: role, SortOrder: i}
 		if err := h.refRepo.Create(ref); err != nil {
 			log.Printf("[image-session] failed to save reference record: %v", err)
 		}

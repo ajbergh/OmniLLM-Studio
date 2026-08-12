@@ -1149,6 +1149,7 @@ export interface ImageEditEditRequest {
   base_image_attachment_id: string;
   mask_attachment_id?: string;
   size?: string;
+  geometry_mode?: 'preserve_source' | 'provider_auto' | 'explicit';
   strength?: number;
   n?: number;
   reference_image_ids?: string[];
