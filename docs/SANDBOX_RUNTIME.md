@@ -47,26 +47,43 @@ OMNILLM_SANDBOX_SCRATCH_ROOT=/absolute/path/to/scratch-parent
 OMNILLM_SANDBOX_BWRAP=/usr/bin/bwrap
 ```
 
-The current Linux runtime uses Bubblewrap. `OMNILLM_SANDBOX_ROOTFS` must point to an operator-prepared runtime filesystem containing only the interpreters/build tools intentionally available to sandbox workloads. The runtime mounts that root filesystem read-only and creates a separate ephemeral writable `/workspace` scratch directory for each sandbox session. It does **not** bind-mount the host root into the sandbox.
+The current Linux runtime uses Bubblewrap. `OMNILLM_SANDBOX_ROOTFS` must point to an operator-prepared runtime filesystem containing only the interpreters/build tools intentionally available to sandbox workloads. The runtime mounts that root filesystem read-only and creates a separate ephemeral writable `/workspace` scratch directory for sessions without a project workspace. It does **not** bind-mount the host root into the sandbox.
 
 ### Current enforced Linux controls
 
 The runtime currently advertises these controls as enforced:
 
 - OS/process namespace isolation through Bubblewrap;
-- filesystem isolation using a configured read-only root filesystem plus isolated scratch;
-- network namespace isolation with no network access in the current revision;
+- filesystem isolation using a configured read-only root filesystem plus explicit trusted workspace/scratch mounts;
+- network namespace isolation with no network access in the current first-party runtime;
 - process-tree/session confinement and teardown;
+- runtime session TTL cleanup;
 - bounded wall time;
 - bounded stdout and stderr.
 
-It intentionally does **not** advertise memory, CPU, PID-count, or physical disk quota enforcement yet. Runtime capability negotiation allows the Broker to fail closed when a workload/deployment requires a control the selected worker cannot enforce.
+It intentionally does **not** advertise destination allowlist egress, memory, CPU, PID-count, or physical disk quota enforcement yet. Runtime capability negotiation allows the Broker to fail closed when a workload/deployment requires a control the selected worker cannot enforce.
 
-Workspace mounts and network-enabled sessions are currently rejected by the first-party Linux runtime until the corresponding workspace and network-broker phases are implemented. This is intentional fail-closed behavior.
+### Workspace mounts
+
+Models never provide physical host paths to the runtime. The backend resolves an owner-scoped opaque workspace ID to a trusted runtime-only mount descriptor after validating the stored grant.
+
+The current Linux worker supports at most one project workspace per sandbox execution:
+
+- `read_only` is mounted read-only at `/workspace`;
+- `read_write_no_delete` is narrowed to read-only for arbitrary shell execution because a POSIX bind mount cannot reliably enforce write-without-delete semantics;
+- `read_write` is supported at the runtime layer, but `.git` is remounted read-only when present; a symlinked `.git` causes the whole workspace mount to narrow to read-only.
+
+The current `terminal_exec` tool deliberately requests only a read-only project mount. Source mutations remain routed through the state-bound, journaled workspace mutation tools.
+
+### Network grants
+
+The backend supports owner-bound destination grants, but authorization is distinct from enforcement. A sandbox that requests `NetworkAllowlist` must run on a runtime that advertises `network_allowlist=true`.
+
+The first-party Linux Bubblewrap runtime currently advertises `network_allowlist=false`, so it remains no-network even when a user has an approved destination grant. This is intentional fail-closed behavior until an enforceable first-party egress mechanism lands.
 
 ## Code execution
 
-`code_execute` remains a high-risk, side-effecting tool under the normal Tool Executor policy. Its public tool name remains stable, but the execution contract is now Broker-oriented:
+`code_execute` remains a high-risk, side-effecting tool under the normal Tool Executor policy. Its public tool name remains stable, but the execution contract is Broker-oriented:
 
 - a new session receives an application-issued `sbx_...` ID;
 - session ownership is bound to the authenticated user/workspace/conversation/message/agent-run invocation scope;
@@ -75,7 +92,7 @@ Workspace mounts and network-enabled sessions are currently rejected by the firs
 - network is disabled by default;
 - the runtime must advertise OS, filesystem, network, and process-tree isolation for the tool to create a session.
 
-Supported code modes remain Python, JavaScript, and shell, subject to the binaries provided by the configured sandbox root filesystem.
+Supported code modes remain Python, JavaScript, and shell, subject to the binaries provided by the configured sandbox root filesystem. Python code execution uses isolated interpreter flags (`-I -S`).
 
 ## Restricted Python analysis
 
@@ -108,13 +125,36 @@ Protocol v2 describes sandbox outputs with application-owned artifact IDs, name,
 
 ## Local plugins and stdio MCP
 
-The sandbox program first removes ambient backend environment inheritance from these subprocesses through a shared process-construction seam. Full OS-level plugin/MCP migration is tracked separately in the roadmap. Until that phase is complete, sanitized host execution must not be described as equivalent to the OS sandbox.
+Local plugins and stdio MCP servers are persistent streaming subprocesses, so they keep their existing JSON-RPC stdin/stdout lifecycle while process construction moves behind the shared extension-confinement policy.
+
+Phase 10 configuration is:
+
+```text
+OMNILLM_EXTENSION_SANDBOX_MODE=auto|required|off
+```
+
+The default is `auto`:
+
+- on Linux, `auto` uses Bubblewrap when `OMNILLM_SANDBOX_ROOTFS` is configured; otherwise it preserves the existing sanitized host-process boundary;
+- on Windows and macOS, `auto` preserves the sanitized boundary until native confinement backends are implemented;
+- `required` fails closed if native extension confinement is unavailable or not configured;
+- `off` explicitly selects the sanitized host compatibility boundary.
+
+The sanitized compatibility boundary still strips ambient backend secrets. Explicitly configured MCP/plugin environment values continue to work in compatibility mode so existing configured extension credentials are not silently broken.
+
+When native Linux extension confinement is active, the child receives a read-only rootfs, private namespaces/session, private tmp/home, no network, read-only extension/working-directory mounts, and a cleared environment. Credential-sensitive explicit environment entries are rejected by default. A deployment that knowingly requires a legacy extension credential may opt in with:
+
+```text
+OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true
+```
+
+That override should be treated as transitional. Service-specific credential broker consumers are preferred because arbitrary extension environments should not become the normal secret-delivery path.
 
 ## Platform status
 
-- **Linux:** first-party Bubblewrap runtime implementation in progress.
-- **Windows:** native confinement phase pending; unsupported first-party local runtime fails closed rather than silently using unrestricted host execution.
-- **macOS:** native confinement phase pending; unsupported first-party local runtime fails closed rather than silently using unrestricted host execution.
+- **Linux:** first-party Bubblewrap code/terminal runtime is available; persistent extension confinement is available when a sandbox rootfs is configured. Resource quotas and destination-enforced egress remain incomplete.
+- **Windows:** native confinement phase pending; `OMNILLM_EXTENSION_SANDBOX_MODE=required` fails closed while `auto` retains the sanitized extension boundary.
+- **macOS:** native confinement phase pending; `OMNILLM_EXTENSION_SANDBOX_MODE=required` fails closed while `auto` retains the sanitized extension boundary.
 - **Server/Kubernetes:** dedicated worker/deployment phase pending; arbitrary tenant execution must not be added to the primary API container as a shortcut.
 
 ## Validation
