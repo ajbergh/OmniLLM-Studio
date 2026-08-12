@@ -48,6 +48,7 @@ async function sandboxFetch<T>(path: string, init: RequestInit = {}): Promise<T>
   const token = getAuthToken();
   const response = await fetch(resolveApiUrl(path), {
     ...init,
+    credentials: 'include',
     headers: {
       ...(init.body ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -71,17 +72,17 @@ async function sandboxFetch<T>(path: string, init: RequestInit = {}): Promise<T>
 }
 
 export const sandboxApi = {
-  status: () => sandboxFetch<SandboxRuntimeStatus>('/sandbox/status'),
-  workspaces: () => sandboxFetch<SandboxWorkspace[]>('/sandbox/workspaces'),
+  status: () => sandboxFetch<SandboxRuntimeStatus>('/v1/sandbox/status'),
+  workspaces: () => sandboxFetch<SandboxWorkspace[]>('/v1/sandbox/workspaces'),
   createWorkspace: (input: { id: string; root_path: string; mode: SandboxMountMode }) =>
-    sandboxFetch<SandboxWorkspace>('/sandbox/workspaces', {
+    sandboxFetch<SandboxWorkspace>('/v1/sandbox/workspaces', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
   removeWorkspace: (id: string) =>
-    sandboxFetch<void>(`/sandbox/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    sandboxFetch<void>(`/v1/sandbox/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   workspaceChanges: (id: string, limit = 30) =>
     sandboxFetch<SandboxWorkspaceChange[]>(
-      `/sandbox/workspaces/${encodeURIComponent(id)}/changes?limit=${Math.max(1, Math.min(limit, 200))}`,
+      `/v1/sandbox/workspaces/${encodeURIComponent(id)}/changes?limit=${Math.max(1, Math.min(limit, 200))}`,
     ),
 };
