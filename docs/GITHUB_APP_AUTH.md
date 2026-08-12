@@ -109,9 +109,55 @@ The registry adapter preserves the intended credential semantics:
 
 No model-facing tool schema or permission gate changes in G3b.
 
+## G4a: repository discovery and explicit binding — implemented
+
+The authenticated GitHub surface now supports bounded repository discovery and explicit owner-scoped association with an already configured local Git repository ID.
+
+Repository discovery is implemented by `backend/internal/githubrepo` and uses only fixed GitHub API endpoints:
+
+- `GET /user/repos` lists repositories visible to the connected user with bounded page size and response size;
+- `GET /repositories/{id}` validates a selected repository using its immutable numeric GitHub repository ID;
+- redirects are disabled and provider response bodies/errors are not copied into public errors;
+- access tokens remain backend-only and are obtained from the existing user-scoped `githubauth.Service` only when a discovery request performs network access.
+
+The authenticated API adds:
+
+```text
+GET    /v1/github/repositories?page=&per_page=
+GET    /v1/github/repository-bindings
+PUT    /v1/github/repository-bindings/{localRepositoryId}
+DELETE /v1/github/repository-bindings/{localRepositoryId}
+```
+
+Binding requests accept only a numeric `github_repository_id`. The local side accepts only a stable repository ID already present in the startup `OMNILLM_GIT_REPOSITORIES` allowlist. Filesystem paths, GitHub remote URLs, hostnames, and credentials are neither accepted nor returned by this surface.
+
+`github_repository_bindings` persists only the OmniLLM owner ID, stable local repository ID, connected GitHub numeric user ID, immutable GitHub repository ID, full repository name, default branch, and non-secret repository state flags. It stores no local worktree path and no token material.
+
+Bindings deliberately retain the GitHub numeric user ID that created them. After reconnecting as a different GitHub account, an old binding is reported with `account_matches=false` instead of silently becoming active for the new identity. A binding whose local repository ID is no longer configured is similarly reported with `local_configured=false`.
+
+G4a does not add model-facing tools and does not make a binding an authorization grant.
+
+## G4b: binding-backed request-scoped remotes — next
+
+The next slice will make active G4a bindings available to the existing `UserScopedRemoteService` without mutating global operator configuration.
+
+A binding may participate only when:
+
+- its stored GitHub user ID matches the currently connected GitHub identity;
+- its local repository ID is still present in `OMNILLM_GIT_REPOSITORIES`;
+- the existing process-wide remote-access gate permits the requested network operation.
+
+The request-scoped adapter should construct the exact `https://github.com/{owner}/{repository}.git` endpoint internally from the validated stored GitHub repository identity. Model/user tool arguments must continue to supply only stable remote IDs, never URLs or filesystem paths.
+
+Binding-backed remotes must start with every mutation and hosted-PR permission disabled. In particular, a binding must not synthesize `allow_push`, `allow_branch_create`, `allow_pull_request_read`, `allow_pull_request_create`, `allow_pull_request_reply`, `allow_pull_request_thread_resolution`, `allow_pull_request_ready`, `allow_default_branch_push`, or `allow_clone`. Any future elevation must remain a separate explicit operator/user policy decision layered on the existing process gates and approval system.
+
+`git_remotes` must remain local/non-network: binding and connection-status lookup may use local persistence, but token resolution/refresh remains deferred to an actual credentialed network operation.
+
+Authentication remains distinct from authorization.
+
 ## Subsequent slices
 
-1. **G4 — repository discovery and explicit repository-to-local-worktree binding.**
+1. **G4b — consume active repository bindings in the request-scoped remote service.**
 2. **G5 — Settings UI: Connect GitHub, choose repositories, status, reconnect, disconnect.**
 3. **M2 — continue merge-policy completeness work independently.**
 4. **M3 — consider guarded direct merge only after M2 can prove policy completeness.**
