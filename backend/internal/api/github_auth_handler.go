@@ -21,7 +21,8 @@ type GitHubAuthService interface {
 // GitHubAuthHandler exposes device authorization without ever returning access
 // tokens, refresh tokens, or provider device codes.
 type GitHubAuthHandler struct {
-	service GitHubAuthService
+	service      GitHubAuthService
+	repositories *GitHubRepositoryHandler
 }
 
 func NewGitHubAuthHandler(service GitHubAuthService) *GitHubAuthHandler {
