@@ -99,19 +99,19 @@ async function githubRequest<T>(
 }
 
 export function getGitHubAuthStatus(signal?: AbortSignal): Promise<GitHubAuthStatus> {
-  return githubRequest('/github/auth', {}, signal);
+  return githubRequest('/v1/github/auth', {}, signal);
 }
 
 export function startGitHubDeviceAuthorization(signal?: AbortSignal): Promise<GitHubDeviceAuthorization> {
-  return githubRequest('/github/auth/device/start', { method: 'POST' }, signal);
+  return githubRequest('/v1/github/auth/device/start', { method: 'POST' }, signal);
 }
 
 export function pollGitHubDeviceAuthorization(signal?: AbortSignal): Promise<GitHubDevicePollResult> {
-  return githubRequest('/github/auth/device/poll', { method: 'POST' }, signal);
+  return githubRequest('/v1/github/auth/device/poll', { method: 'POST' }, signal);
 }
 
 export function disconnectGitHub(signal?: AbortSignal): Promise<void> {
-  return githubRequest('/github/auth', { method: 'DELETE' }, signal);
+  return githubRequest('/v1/github/auth', { method: 'DELETE' }, signal);
 }
 
 export function listGitHubRepositories(
@@ -120,11 +120,11 @@ export function listGitHubRepositories(
   signal?: AbortSignal,
 ): Promise<GitHubRepositoryPage> {
   const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
-  return githubRequest(`/github/repositories?${params.toString()}`, {}, signal);
+  return githubRequest(`/v1/github/repositories?${params.toString()}`, {}, signal);
 }
 
 export function getGitHubRepositoryBindings(signal?: AbortSignal): Promise<GitHubRepositoryBindingsResponse> {
-  return githubRequest('/github/repository-bindings', {}, signal);
+  return githubRequest('/v1/github/repository-bindings', {}, signal);
 }
 
 export function bindGitHubRepository(
@@ -133,7 +133,7 @@ export function bindGitHubRepository(
   signal?: AbortSignal,
 ): Promise<GitHubRepositoryBinding> {
   return githubRequest(
-    `/github/repository-bindings/${encodeURIComponent(localRepositoryId)}`,
+    `/v1/github/repository-bindings/${encodeURIComponent(localRepositoryId)}`,
     { method: 'PUT', body: JSON.stringify({ github_repository_id: githubRepositoryId }) },
     signal,
   );
@@ -141,7 +141,7 @@ export function bindGitHubRepository(
 
 export function deleteGitHubRepositoryBinding(localRepositoryId: string, signal?: AbortSignal): Promise<void> {
   return githubRequest(
-    `/github/repository-bindings/${encodeURIComponent(localRepositoryId)}`,
+    `/v1/github/repository-bindings/${encodeURIComponent(localRepositoryId)}`,
     { method: 'DELETE' },
     signal,
   );
