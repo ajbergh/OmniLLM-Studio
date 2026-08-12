@@ -284,17 +284,21 @@ func (s *RemoteService) inspectGitHubClassicPolicyEvidence(ctx context.Context, 
 	}
 
 	if rule == nil {
-		if protectionStatus == http.StatusOK {
+		switch protectionStatus {
+		case http.StatusOK:
 			return viewerLogin, "inconsistent", []string{"classic_policy_sources_inconsistent"}
+		case http.StatusNotFound:
+			result.ClassicProtectionStatus = "unprotected_confirmed"
+			result.ClassicPolicyCoverage = "complete"
+			result.ClassicAdministratorEnforced = nil
+			result.ClassicRestrictionsPresent = false
+			result.ClassicReviewBypassAllowancesPresent = false
+			result.UnknownPolicyRules = removeGitHubPolicyMarkers(result.UnknownPolicyRules,
+				"classic.restrictions", "classic.bypass_pull_request_allowances")
+			return viewerLogin, "complete", nil
+		default:
+			return viewerLogin, "incomplete", []string{"classic_rest_visibility_incomplete"}
 		}
-		result.ClassicProtectionStatus = "unprotected_confirmed"
-		result.ClassicPolicyCoverage = "complete"
-		result.ClassicAdministratorEnforced = nil
-		result.ClassicRestrictionsPresent = false
-		result.ClassicReviewBypassAllowancesPresent = false
-		result.UnknownPolicyRules = removeGitHubPolicyMarkers(result.UnknownPolicyRules,
-			"classic.restrictions", "classic.bypass_pull_request_allowances")
-		return viewerLogin, "complete", nil
 	}
 
 	// GraphQL exposes deployment prerequisites and integration-bound status
