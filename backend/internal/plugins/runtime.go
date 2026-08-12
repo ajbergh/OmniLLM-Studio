@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/models"
+	"github.com/ajbergh/omnillm-studio/internal/sandbox"
 )
 
 const (
@@ -60,6 +61,7 @@ type pluginResponse struct {
 type PluginProcess struct {
 	manifest   *models.PluginManifest
 	entrypoint string
+	runner     sandbox.CommandRunner
 
 	mu      sync.Mutex
 	writeMu sync.Mutex
@@ -76,9 +78,16 @@ type PluginProcess struct {
 // nil when the entrypoint escapes its plugin directory or cannot be safely
 // canonicalized.
 func NewPluginProcess(manifest *models.PluginManifest, pluginDir string) *PluginProcess {
+	return newPluginProcessWithRunner(manifest, pluginDir, sandbox.NewHostCommandRunner())
+}
+
+func newPluginProcessWithRunner(manifest *models.PluginManifest, pluginDir string, runner sandbox.CommandRunner) *PluginProcess {
 	if manifest == nil || strings.TrimSpace(manifest.Entrypoint) == "" {
 		log.Printf("WARN: plugin manifest or entrypoint is empty")
 		return nil
+	}
+	if runner == nil {
+		runner = sandbox.NewHostCommandRunner()
 	}
 
 	entrypoint := manifest.Entrypoint
@@ -115,6 +124,7 @@ func NewPluginProcess(manifest *models.PluginManifest, pluginDir string) *Plugin
 	return &PluginProcess{
 		manifest:   manifest,
 		entrypoint: entryEval,
+		runner:     runner,
 		nextID:     1,
 		pending:    make(map[int]chan pluginResponse),
 	}
@@ -176,7 +186,11 @@ func (p *PluginProcess) Start() error {
 		return fmt.Errorf("plugin %q already running", p.manifest.Name)
 	}
 
-	cmd := exec.Command(p.entrypoint)
+	cmd, err := p.runner.CommandContext(context.Background(), sandbox.ProcessSpec{Command: p.entrypoint})
+	if err != nil {
+		p.mu.Unlock()
+		return fmt.Errorf("prepare plugin %q: %w", p.manifest.Name, err)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		p.mu.Unlock()
