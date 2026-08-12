@@ -88,10 +88,10 @@ func TestWorkspaceToolWriteReadPatchAndRevert(t *testing.T) {
 		t.Fatal(err)
 	}
 	patchArgs, _ := json.Marshal(map[string]any{
-		"workspace_id": "repo",
-		"path": "main.go",
+		"workspace_id":    "repo",
+		"path":            "main.go",
 		"expected_sha256": readPayload.SHA256,
-		"edits": []map[string]string{{"old_text": "package main", "new_text": "package app"}},
+		"edits":           []map[string]string{{"old_text": "package main", "new_text": "package app"}},
 	})
 	patched, err := patch.Execute(ctx, patchArgs)
 	if err != nil {
