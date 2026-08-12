@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import { nextGitHubPollDelayMs, shouldContinueGitHubPolling } from './githubSettingsApi';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  getGitHubAuthStatus,
+  listGitHubRepositories,
+  nextGitHubPollDelayMs,
+  shouldContinueGitHubPolling,
+} from './githubSettingsApi';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('GitHub settings polling helpers', () => {
   it('uses provider retry guidance when present', () => {
@@ -21,5 +30,39 @@ describe('GitHub settings polling helpers', () => {
     expect(shouldContinueGitHubPolling('expired')).toBe(false);
     expect(shouldContinueGitHubPolling('denied')).toBe(false);
     expect(shouldContinueGitHubPolling('not_started')).toBe(false);
+  });
+});
+
+describe('GitHub settings API routing', () => {
+  it('keeps auth requests on the authenticated v1 API surface', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ configured: true, connected: false, pending: false }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getGitHubAuthStatus();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/v1/github/auth',
+      expect.objectContaining({ credentials: 'include' }),
+    );
+  });
+
+  it('keeps repository discovery on the authenticated v1 API surface', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ repositories: [], page: 2, per_page: 20, has_more: false }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await listGitHubRepositories(2, 20);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/v1/github/repositories?page=2&per_page=20',
+      expect.objectContaining({ credentials: 'include' }),
+    );
   });
 });
