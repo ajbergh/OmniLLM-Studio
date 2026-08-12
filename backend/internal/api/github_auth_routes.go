@@ -10,19 +10,28 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// NewGitHubAuthHandlerFromEnvironment composes the encrypted credential store
-// with the GitHub App device-flow service. Missing operator configuration is a
-// supported state: the handler remains mounted and reports configured=false.
-func NewGitHubAuthHandlerFromEnvironment(database *sql.DB) *GitHubAuthHandler {
+// NewGitHubAuthRuntimeFromEnvironment composes the encrypted credential store
+// with the GitHub App device-flow service and returns the same service used by
+// both authenticated routes and request-scoped Git/GitHub tool credentials.
+// Missing operator configuration is supported: service is nil and the handler
+// remains mounted so status reports configured=false.
+func NewGitHubAuthRuntimeFromEnvironment(database *sql.DB) (*githubauth.Service, *GitHubAuthHandler) {
 	store := repository.NewGitHubAppConnectionRepo(database)
 	service, err := githubauth.NewServiceFromEnvironment(store)
 	if err == nil {
-		return NewGitHubAuthHandler(service)
+		return service, NewGitHubAuthHandler(service)
 	}
 	if !errors.Is(err, githubauth.ErrNotConfigured) {
 		log.Printf("WARN: GitHub App authentication unavailable: %v", err)
 	}
-	return NewGitHubAuthHandler(nil)
+	return nil, NewGitHubAuthHandler(nil)
+}
+
+// NewGitHubAuthHandlerFromEnvironment preserves the existing handler-only
+// composition API for callers that do not need the shared runtime service.
+func NewGitHubAuthHandlerFromEnvironment(database *sql.DB) *GitHubAuthHandler {
+	_, handler := NewGitHubAuthRuntimeFromEnvironment(database)
+	return handler
 }
 
 // MountGitHubAuthRoutes mounts user-scoped GitHub connection routes. The caller
