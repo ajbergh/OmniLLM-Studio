@@ -10,10 +10,10 @@ import (
 )
 
 var defaultWorkspaceState struct {
-	mu       sync.Mutex
-	registry *WorkspaceRegistry
+	mu             sync.Mutex
+	registry       *WorkspaceRegistry
 	databaseCloser func() error
-	err      error
+	err            error
 }
 
 // SetDefaultWorkspaceRegistry installs an explicitly composed registry. It is
