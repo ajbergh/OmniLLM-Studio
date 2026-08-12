@@ -14,14 +14,15 @@ This file is the durable implementation tracker. Update it whenever a phase chan
 
 ## Current checkpoint — 2026-08-12
 
-The authoritative default branch used for the Phase 11 replay was `main` at **`054a235ac5269572573adb70f92a2e5dbb16a944`**. That commit includes the GitHub Settings/repository work from PR #123.
+The authoritative default branch is now `main` at **`87727495bfa51dc12b2e00a7b9317039e4fd0ca9`**, the squash merge of Phase 11 PR #125.
 
-Sandbox lineage now has two validated integration milestones:
+Sandbox lineage now has three validated integration milestones:
 
 - **PR #118**, squash-merged as `a216323e512fbecb1aa0c7c14df866f85ef76eb0`, recovered the cumulative sandbox implementation onto the then-current `main` and repaired integration defects found during manual audit.
 - **PR #119**, squash-merged as `dd91b246736451fafc498659fa582ff605e1bf16`, added persistent extension confinement policy for local plugins and stdio MCP without rewriting their streaming lifecycle.
+- **PR #125**, squash-merged as `87727495bfa51dc12b2e00a7b9317039e4fd0ca9`, added the desktop sandbox/workspace Settings experience, safe owner-scoped review APIs, native workspace selection, and direct-loopback path-grant hardening.
 
-Both #118 and #119 passed the applicable repository validation set before merge, including backend format/vet/tests/race, frontend lint/unit/build, Windows compatibility coverage, full Chromium Playwright smoke, Helm checks, Security Scan, and Linux multi-architecture container validation.
+#118, #119, and #125 each passed the applicable repository validation set before merge, including backend format/vet/tests/race, frontend lint/unit/build, Windows compatibility coverage, full Chromium Playwright smoke, Helm checks, Security Scan, and Linux multi-architecture container validation.
 
 Historical stacked PRs #101, #104, #105, #107, #108, #109, #110, and #111 were closed as superseded after #118 merged. Stale Phase 11 PR **#121** was closed after its reviewed implementation was replayed cleanly onto current `main` as **PR #125**.
 
@@ -57,17 +58,17 @@ Status values: `NOT STARTED`, `IN PROGRESS`, `COMPLETE`, `BLOCKED`.
 | 8 | Network broker + destination approvals | P1 | **IN PROGRESS** | implementation merged in #118 | Owner-bound `sng_` grants, operator domain/port policy, grant consumption, and `network_allowlist` capability fail-close are on `main`. First-party destination-enforced egress remains unimplemented. |
 | 9 | Credential broker + raw-secret environment rejection | P1 | **IN PROGRESS** | implementation merged in #118 | Host-side opaque `sch_` handles, owner/TTL checks, and arbitrary-sandbox credential/auth-agent/proxy environment rejection are on `main`. Service-specific credential consumers remain. |
 | 10 | Local plugin + stdio MCP confinement policy migration | P1 | **COMPLETE** | merged PR #119 (`dd91b246`) | Shared process-construction seam now supports `auto|required|off`; Linux can use Bubblewrap/rootfs, required mode fails closed, and Windows/macOS preserve the sanitized compatibility boundary until native backends land. Full validation passed before merge. |
-| 11 | Desktop workspace/sandbox UX + change review | P1 | **IN PROGRESS** | `agent/sandbox-settings-ux-current-main-20260812` / PR #125 | Safe status/workspace/change APIs, Wails folder picker, opaque grant management, capability truth, and review-only journal history are implemented. Exit: full CI/security/container validation and merge to `main`. |
-| 12 | Windows native confinement backend | P1 | NOT STARTED | TBD | Restricted identity/token, Job Object/process-tree confinement, ACL-scoped workspace, and Windows-native isolation evidence required. |
+| 11 | Desktop workspace/sandbox UX + change review | P1 | **COMPLETE** | merged PR #125 (`87727495`) | Safe status/workspace/change APIs, Wails folder picker, opaque grant management, capability truth, review-only journal history, direct-loopback grant hardening, `/v1` client routing, and full CI/security/container validation are on `main`. |
+| 12 | Windows native confinement backend | P1 | NOT STARTED | next | Restricted identity/token, Job Object/process-tree confinement, ACL-scoped workspace, and Windows-native isolation evidence required. |
 | 13 | macOS native confinement backend | P1 | NOT STARTED | TBD | OS-enforced file/network/process confinement and macOS-native isolation evidence required. |
 | 14 | Durable sandbox-backed agent tasks | P2 | NOT STARTED | TBD | Persist sandbox/task association and support pause/resume/cancel/checkpoint/recovery/scheduling without weakening ownership. |
 | 15 | Server/Kubernetes sandbox workers | P2 | NOT STARTED | TBD | Separate worker identity/pods, quotas, hardened security context, network policy, and no arbitrary tenant execution in the API pod. |
 | 16 | Multi-agent isolated worktrees/workspaces | P2 | NOT STARTED | TBD | Independent writable workspaces/worktrees with reviewed promotion/reconciliation. |
 | 17 | Adversarial sandbox assurance suite | Continuous | **IN PROGRESS** | #99, #118, #119, #125 onward | Expand negative coverage with every phase; native confinement cannot be declared complete from cross-compilation alone. |
 
-## Phase 11 — active implementation details
+## Phase 11 — merged implementation details
 
-PR **#125** is a clean replay from current `main`; the intervening GitHub Settings work touched none of the eight Phase 11 implementation files.
+PR **#125** was replayed from then-current `main`, validated on final head `1789fcd582be46be679ac07965002c7f4e960095`, and squash-merged as `87727495bfa51dc12b2e00a7b9317039e4fd0ca9`.
 
 Implemented surfaces:
 
@@ -75,26 +76,37 @@ Implemented surfaces:
 - owner-scoped workspace listing that returns opaque workspace ID, access mode, and timestamps only;
 - owner-scoped recent change review returning relative path, operation, before/after existence and hashes, revertability, and timestamp only;
 - an explicit safe change-history DTO that does **not** serialize internal user, conversation, agent-run, task, sandbox, or execution identifiers;
-- host-path grant creation gated by admin authorization, `OMNILLM_SANDBOX_ALLOW_PATH_GRANTS=true`, and the actual socket peer being loopback;
+- host-path grant creation gated by authenticated multi-user admin authorization (or local solo-mode ownership), `OMNILLM_SANDBOX_ALLOW_PATH_GRANTS=true`, and a direct loopback request;
+- forwarded client-address headers fail the path-grant loopback check closed so Chi `RealIP` rewriting cannot turn an untrusted forwarded address into grant authority;
 - grant revocation that removes the database authorization only and never deletes workspace files;
 - Wails-native folder selection for desktop builds;
 - desktop-only default enablement of the path-grant flow, using the existing protected per-launch loopback capability URL;
 - an Agent Sandbox panel embedded in the existing Tools diagnostics/settings surface;
 - individual capability badges so namespace isolation is not confused with destination allowlist enforcement;
 - ephemeral frontend handling of the selected physical path: after an opaque grant is created, the path is cleared from component state;
-- review-only display of reversible changes. No direct HTTP revert bypass is added; actual revert remains behind the governed workspace tool/approval path.
+- review-only display of reversible changes. No direct HTTP revert bypass is added; actual revert remains behind the governed workspace tool/approval path;
+- frontend requests pinned to `/v1/sandbox/...`, with a focused Vitest routing contract and the full Chromium suite covering the Settings→Tools flow.
 
-Server/web deployments do **not** gain a generic remote filesystem picker. Operators must explicitly enable host-path grants, and even then creation is restricted to loopback plus admin authorization.
+Server/web deployments do **not** gain a generic remote filesystem picker. Operators must explicitly enable host-path grants, and creation remains direct-loopback-only.
+
+Final #125 validation evidence:
+
+- backend canonical formatting, vet, full tests, and race detector — **PASS**;
+- frontend lint, unit tests, and production build — **PASS**;
+- Windows plugin lifecycle and Windows desktop binding/contract checks — **PASS**;
+- full Chromium Playwright smoke suite — **PASS**;
+- Helm lint/render/topology checks — **PASS**;
+- Go CodeQL, JavaScript/TypeScript CodeQL, and dependency vulnerability audit — **PASS**;
+- frontend and backend Linux amd64/arm64 container builds — **PASS**.
 
 ## Current execution order
 
-1. Validate PR #125 against the repository's full applicable gate set.
-2. Fix any code, formatting, test, desktop-binding, security, browser, Helm, or container failures on #125 itself.
-3. Merge #125 only after all required checks are green; then verify the exact `main` merge commit and mark Phase 11 complete in this tracker.
-4. Implement and natively validate Windows confinement (Phase 12) and macOS confinement (Phase 13) independently.
-5. Continue Phase 2/5/7/8/9 enforcement work rather than overclaiming completion: resource quotas, destination-enforced egress, workspace TOCTOU assurance, and service-specific credential consumers remain open.
-6. Add durable tasks, dedicated server/Kubernetes workers, and multi-agent worktree isolation as separate P2 slices.
-7. Keep the adversarial assurance suite continuous across every phase.
+1. Implement Phase 12 Windows native confinement on a fresh branch from the post-#125 `main`.
+2. Require Windows-native evidence for restricted identity/token, Job Object descendant confinement/teardown, and ACL-scoped filesystem access before Phase 12 can become complete.
+3. Implement and natively validate macOS confinement independently in Phase 13.
+4. Continue Phase 2/5/7/8/9 enforcement work rather than overclaiming completion: native runtime fixtures/packaging, resource quotas, destination-enforced egress, workspace TOCTOU assurance, and service-specific credential consumers remain open.
+5. Add durable tasks, dedicated server/Kubernetes workers, and multi-agent worktree isolation as separate P2 slices.
+6. Keep the adversarial assurance suite continuous across every phase.
 
 ## Open enforcement gaps
 
@@ -196,4 +208,4 @@ A phase is `COMPLETE` only when its stated enforcement properties are implemente
 - **2026-08-12 — #118:** recovered the cumulative sandbox stack onto current `main`, repaired runtime/Broker/tool integration defects, passed the full gate set, and merged as `a216323e`.
 - **2026-08-12 — #119:** added persistent extension confinement policy, passed the full gate set, and merged as `dd91b246`.
 - **2026-08-12 — #121:** closed without merge as stale after `main` advanced.
-- **2026-08-12 — #125:** replayed Phase 11 from `054a235a`; manual API audit additionally narrowed workspace change history to a dedicated safe DTO. Validation in progress.
+- **2026-08-12 — #125:** replayed Phase 11 from `054a235a`; manual audit fixed safe change-history serialization and forwarded-address loopback spoofing. The first Playwright run then exposed a missing `/v1` frontend route prefix; the client was corrected, a focused unit contract added, and the final head passed Quality Gate, Security Scan, Helm, Windows compatibility checks, full Chromium smoke, and both multi-architecture container builds before merge as `87727495`.
