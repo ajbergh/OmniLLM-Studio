@@ -116,10 +116,15 @@ func TestConfigureGitHubCredentialsRebindsExistingRegistry(t *testing.T) {
 	if !registry.ConfigureGitHubCredentials(options) {
 		t.Fatal("expected post-construction GitHub credential configuration to succeed")
 	}
-	if _, ok := remoteTool.service.(*gitrepo.UserScopedRemoteService); !ok {
+	remoteScoped, ok := remoteTool.service.(*gitrepo.UserScopedRemoteService)
+	if !ok {
 		t.Fatalf("remote tool was not rebound: %T", remoteTool.service)
 	}
-	if readTool.service != remoteTool.service {
+	readScoped, ok := readTool.service.(*gitrepo.UserScopedRemoteService)
+	if !ok {
+		t.Fatalf("hosted GitHub tool was not rebound: %T", readTool.service)
+	}
+	if readScoped != remoteScoped {
 		t.Fatal("hosted GitHub tools must share the exact scoped remote service")
 	}
 }
