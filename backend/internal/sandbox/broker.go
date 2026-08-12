@@ -98,22 +98,14 @@ func (b *Broker) Create(ctx context.Context, owner OwnerScope, request CreateReq
 	return &clone, nil
 }
 
-// Exec runs one command after ownership and expiry checks.
+// Exec runs one code or terminal execution after ownership and expiry checks.
 func (b *Broker) Exec(ctx context.Context, owner OwnerScope, sessionID string, request ExecRequest) (*ExecResult, error) {
 	session, err := b.authorize(owner, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(request.Command) == "" {
-		return nil, fmt.Errorf("sandbox command is required")
-	}
-	if request.TimeoutMS < 0 {
-		return nil, fmt.Errorf("sandbox timeout cannot be negative")
-	}
-	for key, value := range request.Env {
-		if err := validateEnvironmentEntry(key, value); err != nil {
-			return nil, err
-		}
+	if err := validateExecRequest(request); err != nil {
+		return nil, err
 	}
 	request.Args = append([]string(nil), request.Args...)
 	request.Stdin = append([]byte(nil), request.Stdin...)
@@ -240,6 +232,39 @@ func validateCreateRequest(request CreateRequest) error {
 	}
 	if err := validateResourceLimits(request.Resources); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateExecRequest(request ExecRequest) error {
+	hasCode := strings.TrimSpace(request.Language) != "" || strings.TrimSpace(request.Code) != ""
+	hasCommand := strings.TrimSpace(request.Command) != ""
+	if hasCode == hasCommand {
+		return fmt.Errorf("sandbox execution must specify exactly one of code or command mode")
+	}
+	if hasCode {
+		if strings.TrimSpace(request.Language) == "" {
+			return fmt.Errorf("sandbox language is required for code execution")
+		}
+		if strings.TrimSpace(request.Code) == "" {
+			return fmt.Errorf("sandbox code is required")
+		}
+	}
+	if strings.ContainsRune(request.Command, '\x00') || strings.ContainsRune(request.Language, '\x00') || strings.ContainsRune(request.Code, '\x00') {
+		return fmt.Errorf("sandbox execution input contains NUL")
+	}
+	for _, arg := range request.Args {
+		if strings.ContainsRune(arg, '\x00') {
+			return fmt.Errorf("sandbox argument contains NUL")
+		}
+	}
+	if request.TimeoutMS < 0 {
+		return fmt.Errorf("sandbox timeout cannot be negative")
+	}
+	for key, value := range request.Env {
+		if err := validateEnvironmentEntry(key, value); err != nil {
+			return err
+		}
 	}
 	return nil
 }
