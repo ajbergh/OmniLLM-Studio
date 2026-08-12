@@ -13,7 +13,7 @@ func TestGetPullRequestMergePolicyEvidenceCompletesForConfirmedUnprotectedStanda
 	svc.githubClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
 		case "/repos/example/repo/pulls/7":
-			return jsonHTTPResponse(http.StatusOK, `{"number":7,"state":"open","mergeable":true,"mergeable_state":"clean","head":{"ref":"feature/m2","sha":"`+head+`"},"base":{"ref":"main"}}`), nil
+			return jsonHTTPResponse(http.StatusOK, `{"number":7,"html_url":"https://github.com/example/repo/pull/7","state":"open","mergeable":true,"mergeable_state":"clean","head":{"ref":"feature/m2","sha":"`+head+`"},"base":{"ref":"main"}}`), nil
 		case "/repos/example/repo":
 			return jsonHTTPResponse(http.StatusOK, `{"allow_merge_commit":true,"allow_squash_merge":true,"allow_rebase_merge":true,"permissions":{"admin":false}}`), nil
 		case "/repos/example/repo/rules/branches/main":
@@ -54,7 +54,7 @@ func TestGetPullRequestMergePolicyEvidenceFailsClosedWhenRulesetBypassActorsAreH
 	svc.githubClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
 		case "/repos/example/repo/pulls/8":
-			return jsonHTTPResponse(http.StatusOK, `{"number":8,"state":"open","head":{"ref":"feature/m2","sha":"`+head+`"},"base":{"ref":"main"}}`), nil
+			return jsonHTTPResponse(http.StatusOK, `{"number":8,"html_url":"https://github.com/example/repo/pull/8","state":"open","head":{"ref":"feature/m2","sha":"`+head+`"},"base":{"ref":"main"}}`), nil
 		case "/repos/example/repo":
 			return jsonHTTPResponse(http.StatusOK, `{"allow_squash_merge":true,"permissions":{"admin":false}}`), nil
 		case "/repos/example/repo/rules/branches/main":
@@ -91,7 +91,7 @@ func TestGetPullRequestMergePolicyEvidenceSurfacesVisibleRulesetBypassActor(t *t
 	svc.githubClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
 		case "/repos/example/repo/pulls/9":
-			return jsonHTTPResponse(http.StatusOK, `{"number":9,"state":"open","head":{"ref":"feature/m2","sha":"`+head+`"},"base":{"ref":"main"}}`), nil
+			return jsonHTTPResponse(http.StatusOK, `{"number":9,"html_url":"https://github.com/example/repo/pull/9","state":"open","head":{"ref":"feature/m2","sha":"`+head+`"},"base":{"ref":"main"}}`), nil
 		case "/repos/example/repo":
 			return jsonHTTPResponse(http.StatusOK, `{"allow_squash_merge":true,"permissions":{"admin":false}}`), nil
 		case "/repos/example/repo/rules/branches/main":
@@ -135,7 +135,7 @@ func TestGetPullRequestMergePolicyEvidenceCorroboratesClassicAndAddsDeployments(
 	svc.githubClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
 		case "/repos/example/repo/pulls/10":
-			return jsonHTTPResponse(http.StatusOK, `{"number":10,"state":"open","mergeable":true,"mergeable_state":"clean","head":{"ref":"feature/m2","sha":"`+head+`"},"base":{"ref":"main"}}`), nil
+			return jsonHTTPResponse(http.StatusOK, `{"number":10,"html_url":"https://github.com/example/repo/pull/10","state":"open","mergeable":true,"mergeable_state":"clean","head":{"ref":"feature/m2","sha":"`+head+`"},"base":{"ref":"main"}}`), nil
 		case "/repos/example/repo":
 			return jsonHTTPResponse(http.StatusOK, `{"allow_merge_commit":false,"allow_squash_merge":true,"allow_rebase_merge":false,"permissions":{"admin":false}}`), nil
 		case "/repos/example/repo/rules/branches/main":
