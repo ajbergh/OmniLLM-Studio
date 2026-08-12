@@ -31,7 +31,7 @@ type ExtensionCommandRunner struct{}
 func NewExtensionCommandRunner() ExtensionCommandRunner { return ExtensionCommandRunner{} }
 
 func (ExtensionCommandRunner) CommandContext(ctx context.Context, spec ProcessSpec) (*exec.Cmd, error) {
-	mode, err := extensionSandboxModeFromEnvironment()
+	mode, err := CurrentExtensionSandboxMode()
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,10 @@ func (ExtensionCommandRunner) CommandContext(ctx context.Context, spec ProcessSp
 	return platformExtensionCommandContext(ctx, spec, mode)
 }
 
-func extensionSandboxModeFromEnvironment() (ExtensionSandboxMode, error) {
+// CurrentExtensionSandboxMode returns the validated operator-selected policy for
+// persistent local extension processes. It is safe to expose in runtime status
+// responses because it contains no filesystem path or credential material.
+func CurrentExtensionSandboxMode() (ExtensionSandboxMode, error) {
 	value := strings.ToLower(strings.TrimSpace(os.Getenv("OMNILLM_EXTENSION_SANDBOX_MODE")))
 	if value == "" {
 		return ExtensionSandboxAuto, nil
@@ -53,6 +56,12 @@ func extensionSandboxModeFromEnvironment() (ExtensionSandboxMode, error) {
 	default:
 		return "", fmt.Errorf("invalid OMNILLM_EXTENSION_SANDBOX_MODE %q", value)
 	}
+}
+
+// extensionSandboxModeFromEnvironment remains as an internal compatibility
+// alias for focused tests and callers created during the Phase 10 migration.
+func extensionSandboxModeFromEnvironment() (ExtensionSandboxMode, error) {
+	return CurrentExtensionSandboxMode()
 }
 
 // validateExtensionEnvironment applies the arbitrary-sandbox secret policy only

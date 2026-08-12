@@ -243,6 +243,10 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	ragHandler := NewRAGHandler(chunkRepo, vectorStore, attachRepo, convoRepo, settingsRepo, providerRepo, llmService, cfg.AttachmentsDir)
 	fileLibraryHandler := NewFileLibraryHandler(fileLibrarySvc, convoRepo)
 	browserHandler := NewBrowserHandler(browserMgr)
+	sandboxHandler, err := NewSandboxHandler(database)
+	if err != nil {
+		log.Fatalf("init sandbox settings handler: %v", err)
+	}
 
 	// Model Context Protocol
 	mcpRepo := repository.NewMCPServerRepo(database)
@@ -637,6 +641,9 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 				r.Get("/", browserHandler.ListSessions)
 				r.Delete("/{sessionId}", browserHandler.CloseSession)
 			})
+
+			// Sandbox runtime and filesystem workspace grants.
+			registerSandboxRoutes(r, sandboxHandler)
 
 			// Settings (read: any user; write: admin only)
 			r.Get("/settings", settingsHandler.GetAll)
