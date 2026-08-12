@@ -3,6 +3,9 @@
 package sandbox
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -12,8 +15,9 @@ func TestSandboxCommandModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if command != "python3" || len(args) != 2 || args[0] != "-c" || args[1] != "print(1)" {
-		t.Fatalf("python command = %q %#v", command, args)
+	wantPythonArgs := []string{"-I", "-S", "-c", "print(1)"}
+	if command != "python3" || !reflect.DeepEqual(args, wantPythonArgs) {
+		t.Fatalf("python command = %q %#v, want python3 %#v", command, args, wantPythonArgs)
 	}
 
 	command, args, err = sandboxCommand(ExecRequest{Command: "go", Args: []string{"test", "./..."}})
@@ -80,13 +84,85 @@ func TestBoundedOutputTruncatesWithoutShortWrite(t *testing.T) {
 	}
 }
 
-func TestLocalRuntimeCapabilitiesDoNotOverclaimResourceLimits(t *testing.T) {
+func TestLocalRuntimeCapabilitiesDoNotOverclaimResourceOrNetworkLimits(t *testing.T) {
 	runtime := &LocalRuntime{}
 	capabilities := runtime.Capabilities()
 	if !capabilities.OSIsolation || !capabilities.FilesystemIsolation || !capabilities.NetworkIsolation || !capabilities.ProcessTreeIsolation {
 		t.Fatalf("isolation capabilities = %#v", capabilities)
 	}
-	if capabilities.MemoryLimit || capabilities.CPULimit || capabilities.PIDLimit || capabilities.DiskLimit {
-		t.Fatalf("runtime overclaims resource limits: %#v", capabilities)
+	if capabilities.NetworkAllowlist || capabilities.MemoryLimit || capabilities.CPULimit || capabilities.PIDLimit || capabilities.DiskLimit {
+		t.Fatalf("runtime overclaims controls: %#v", capabilities)
+	}
+}
+
+func TestValidateRuntimeMountsRequiresTrustedResolution(t *testing.T) {
+	root := t.TempDir()
+	owner := OwnerScope{UserID: "user-1"}
+	request := RuntimeCreateRequest{
+		SessionID: "sbx-test",
+		Owner:     owner,
+		Spec: CreateRequest{Mounts: []WorkspaceMount{{
+			WorkspaceID: "workspace-1",
+			Mode:        MountReadOnly,
+		}}},
+		ResolvedMounts: []RuntimeMount{{
+			WorkspaceID: "workspace-1",
+			SourcePath:  root,
+			Mode:        MountReadOnly,
+		}},
+	}
+	mounts, err := validateRuntimeMounts(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mounts) != 1 || mounts[0].SourcePath != root {
+		t.Fatalf("resolved mounts = %#v", mounts)
+	}
+
+	request.ResolvedMounts[0].WorkspaceID = "other"
+	if _, err := validateRuntimeMounts(request); err == nil {
+		t.Fatal("expected workspace identity mismatch to be rejected")
+	}
+}
+
+func TestRuntimeWorkspaceMountArgsNarrowNoDeleteAndProtectGit(t *testing.T) {
+	scratch := t.TempDir()
+	root := t.TempDir()
+
+	args, mode, err := runtimeWorkspaceMountArgs(localRuntimeSession{scratch: scratch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(args, []string{"--bind", scratch, "/workspace"}) || mode != "ephemeral" {
+		t.Fatalf("ephemeral mount args = %#v mode=%q", args, mode)
+	}
+
+	args, mode, err = runtimeWorkspaceMountArgs(localRuntimeSession{mounts: []RuntimeMount{{
+		WorkspaceID: "workspace-1",
+		SourcePath:  root,
+		Mode:        MountReadWriteNoDelete,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(args, []string{"--ro-bind", root, "/workspace"}) || mode != string(MountReadOnly) {
+		t.Fatalf("no-delete mount args = %#v mode=%q", args, mode)
+	}
+
+	gitPath := filepath.Join(root, ".git")
+	if err := os.Mkdir(gitPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	args, mode, err = runtimeWorkspaceMountArgs(localRuntimeSession{mounts: []RuntimeMount{{
+		WorkspaceID: "workspace-1",
+		SourcePath:  root,
+		Mode:        MountReadWrite,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--bind", root, "/workspace", "--ro-bind", gitPath, "/workspace/.git"}
+	if !reflect.DeepEqual(args, want) || mode != string(MountReadWrite) {
+		t.Fatalf("read-write mount args = %#v mode=%q, want %#v", args, mode, want)
 	}
 }
