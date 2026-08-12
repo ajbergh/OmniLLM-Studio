@@ -51,7 +51,6 @@ func TestBrokerIssuesSessionAndBindsOwner(t *testing.T) {
 	}
 	owner := OwnerScope{UserID: "user-1", WorkspaceID: "workspace-1", ConversationID: "conversation-1"}
 	session, err := broker.Create(context.Background(), owner, CreateRequest{
-		Mounts: []WorkspaceMount{{WorkspaceID: "workspace-1", Mode: MountReadWriteNoDelete}},
 		Requirements: RuntimeRequirements{
 			OSIsolation:          true,
 			FilesystemIsolation:  true,
@@ -99,6 +98,88 @@ func TestBrokerFailsClosedOnMissingRuntimeCapability(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "os_isolation") || !strings.Contains(err.Error(), "network_isolation") {
 		t.Fatalf("Create() error = %v, want missing capability failure", err)
+	}
+}
+
+func TestBrokerRequiresEnforceableNetworkAllowlist(t *testing.T) {
+	runtime := &fakeRuntime{capabilities: RuntimeCapabilities{
+		Name:             "isolated-no-egress-policy",
+		NetworkIsolation: true,
+	}}
+	broker, err := NewBroker(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := OwnerScope{UserID: "user-1"}
+	request := CreateRequest{
+		Network: NetworkPolicy{
+			Mode:           NetworkAllowlist,
+			AllowedDomains: []string{"api.example.com"},
+			AllowedPorts:   []int{443},
+		},
+		Requirements: RuntimeRequirements{
+			NetworkIsolation: true,
+			NetworkAllowlist: true,
+		},
+	}
+	if _, err := broker.Create(context.Background(), owner, request); err == nil || !strings.Contains(err.Error(), "network_allowlist") {
+		t.Fatalf("Create() error = %v, want network_allowlist capability failure", err)
+	}
+	if runtime.created.SessionID != "" {
+		t.Fatal("runtime Create must not run when allowlist enforcement is unavailable")
+	}
+
+	runtime.capabilities.NetworkAllowlist = true
+	if _, err := broker.Create(context.Background(), owner, request); err != nil {
+		t.Fatalf("Create() with allowlist-capable runtime error = %v", err)
+	}
+	if runtime.created.Spec.Network.Mode != NetworkAllowlist {
+		t.Fatalf("runtime network mode = %q", runtime.created.Spec.Network.Mode)
+	}
+}
+
+func TestBrokerRejectsUnresolvedNetworkApprovalMode(t *testing.T) {
+	runtime := &fakeRuntime{capabilities: RuntimeCapabilities{Name: "fake", NetworkIsolation: true}}
+	broker, err := NewBroker(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = broker.Create(context.Background(), OwnerScope{UserID: "user-1"}, CreateRequest{
+		Network: NetworkPolicy{Mode: NetworkApprovalRequired},
+	})
+	if err == nil || !strings.Contains(err.Error(), "owner-bound grant") {
+		t.Fatalf("Create() error = %v, want unresolved approval rejection", err)
+	}
+}
+
+func TestBrokerRejectsSensitiveEnvironmentBeforeRuntime(t *testing.T) {
+	runtime := &fakeRuntime{capabilities: RuntimeCapabilities{Name: "fake"}}
+	broker, err := NewBroker(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := OwnerScope{UserID: "user-1"}
+	if _, err := broker.Create(context.Background(), owner, CreateRequest{
+		Environment: map[string]string{"GITHUB_TOKEN": "must-not-enter-sandbox"},
+	}); err == nil || !strings.Contains(err.Error(), "credential-sensitive") {
+		t.Fatalf("Create() error = %v, want credential-sensitive environment rejection", err)
+	}
+	if runtime.created.SessionID != "" {
+		t.Fatal("runtime Create must not run for secret-bearing environment")
+	}
+
+	session, err := broker.Create(context.Background(), owner, CreateRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := broker.Exec(context.Background(), owner, session.ID, ExecRequest{
+		Command: "env",
+		Env:     map[string]string{"SSH_AUTH_SOCK": "/tmp/agent.sock"},
+	}); err == nil || !strings.Contains(err.Error(), "credential-sensitive") {
+		t.Fatalf("Exec() error = %v, want credential-sensitive environment rejection", err)
+	}
+	if runtime.execCount != 0 {
+		t.Fatalf("runtime exec count = %d, want 0", runtime.execCount)
 	}
 }
 
