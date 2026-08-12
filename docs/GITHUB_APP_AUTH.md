@@ -176,8 +176,26 @@ Model-facing descriptions for `git_remotes`, `git_remote_status`, and `git_fetch
 
 Authentication remains distinct from authorization.
 
+## G5: Settings UI — implemented
+
+The existing **Tools** settings surface now includes a first-class GitHub connection and repository-binding section immediately adjacent to scoped tool authorization.
+
+The frontend adds a dedicated `githubSettingsApi` client and `GitHubSettingsSection` component with the following behavior:
+
+- status distinguishes GitHub App configuration, connected identity, token expiry metadata, and reauthorization state without exposing token material;
+- connect/reconnect uses the backend device-flow start/poll endpoints and displays only the GitHub user code, fixed verification URI, and expiry;
+- the client schedules exactly one poll request at a time, honors backend/provider `retry_after_seconds`, and cancels timers/requests on unmount, restart, or disconnect;
+- disconnect is explicitly described as removing OmniLLM-Studio's local GitHub connection rather than claiming GitHub-side revocation;
+- repository discovery loads bounded pages and supports incremental pagination;
+- users bind immutable GitHub numeric repository IDs to administrator-configured local repository IDs, replace an existing mapping, or remove it;
+- stale bindings are surfaced when the connected account no longer matches or the local repository ID is no longer configured;
+- the UI never asks for or displays filesystem paths, remote URLs, provider device codes, access tokens, or refresh tokens.
+
+The section is placed immediately above `Scoped Tool Restrictions` to reinforce that GitHub identity/repository selection and tool authorization are separate controls. The UI explicitly states that connecting or binding GitHub does **not** enable push, branch publication, pull-request mutations, clone, merge, or any other write capability. Existing process-wide gates, per-remote `allow_*` policy, scoped restrictions, tool approvals, and reviewed-state preconditions remain authoritative.
+
+Focused frontend tests cover device-flow poll scheduling, provider-directed delay changes, and terminal polling states.
+
 ## Subsequent slices
 
-1. **G5 — Settings UI: Connect GitHub, choose repositories, status, reconnect, disconnect.**
-2. **M2 — continue merge-policy completeness work independently.**
-3. **M3 — consider guarded direct merge only after M2 can prove policy completeness.**
+1. **M2 — continue merge-policy completeness work independently.**
+2. **M3 — consider guarded direct merge only after M2 can prove policy completeness.**
