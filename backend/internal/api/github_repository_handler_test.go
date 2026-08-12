@@ -104,7 +104,7 @@ func withChiParam(request *http.Request, key, value string) *http.Request {
 func TestGitHubRepositoryHandlerListsForAuthenticatedOwner(t *testing.T) {
 	discovery := &fakeGitHubRepositoryDiscovery{page: githubrepo.Page{
 		Repositories: []githubrepo.Repository{{ID: 7, Name: "repo", FullName: "octo/repo"}},
-		Page: 2, PerPage: 10,
+		Page:         2, PerPage: 10,
 	}}
 	handler := NewGitHubRepositoryHandler(discovery, nil, nil, nil)
 	recorder := httptest.NewRecorder()
