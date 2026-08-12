@@ -27,6 +27,9 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
   const autoFitPendingRef = useRef(true);
   // Use a ref for current stroke points so renderMask always sees the latest data
   const currentStrokeRef = useRef<{ x: number; y: number }[]>([]);
+  // Touch drawing uses a ref rather than React state so pointer moves that arrive
+  // before the state update is flushed still append to the correct stroke.
+  const touchDrawingPointerRef = useRef<number | null>(null);
 
   // Touch gesture state
   const touchStateRef = useRef<{
@@ -286,19 +289,44 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
     y: (a.y + b.y) / 2,
   });
 
+  const resetPinchState = () => {
+    const ts = touchStateRef.current;
+    if (ts.pointers.size < 2) {
+      ts.initialDist = null;
+      ts.initialMidpoint = null;
+    }
+  };
+
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (isInteractiveOverlayTarget(e.target)) return;
+    // Mouse/pen continue through the existing mouse path. Restricting pointer
+    // gesture state to touch avoids double-recording strokes in browsers that
+    // dispatch both pointer and mouse events for a mouse/pen device.
+    if (e.pointerType !== 'touch' || isInteractiveOverlayTarget(e.target)) return;
+    e.preventDefault();
 
     const ts = touchStateRef.current;
     ts.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 
-    if (ts.pointers.size === 2) {
-      // Start pinch — cancel any in-progress drawing
-      if (isDrawing) {
-        currentStrokeRef.current = [];
-        setIsDrawing(false);
+    if (ts.pointers.size === 1 && isMaskMode) {
+      const pt = screenToImage(e.clientX, e.clientY);
+      if (pt) {
+        touchDrawingPointerRef.current = e.pointerId;
+        currentStrokeRef.current = [pt];
+        setIsDrawing(true);
+        renderMask();
       }
+      return;
+    }
+
+    if (ts.pointers.size === 2) {
+      // A second finger changes the gesture to pinch/pan. Discard the
+      // in-progress one-finger stroke so an accidental line is never committed.
+      touchDrawingPointerRef.current = null;
+      currentStrokeRef.current = [];
+      setIsDrawing(false);
+      renderMask();
+
       const [a, b] = Array.from(ts.pointers.values());
       ts.initialDist = getTouchDist(a, b);
       ts.initialZoom = zoom;
@@ -308,8 +336,11 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'touch') return;
+
     const ts = touchStateRef.current;
     if (!ts.pointers.has(e.pointerId)) return;
+    e.preventDefault();
     ts.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     if (ts.pointers.size === 2 && ts.initialDist != null && ts.initialMidpoint != null) {
@@ -325,16 +356,58 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
         x: ts.initialPan.x + (mid.x - ts.initialMidpoint.x),
         y: ts.initialPan.y + (mid.y - ts.initialMidpoint.y),
       });
+      return;
+    }
+
+    if (
+      ts.pointers.size === 1 &&
+      touchDrawingPointerRef.current === e.pointerId &&
+      isMaskMode
+    ) {
+      const pt = screenToImage(e.clientX, e.clientY);
+      if (pt) {
+        currentStrokeRef.current = [...currentStrokeRef.current, pt];
+        renderMask();
+      }
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'touch') return;
+
+    const ts = touchStateRef.current;
+    const wasDrawingPointer = touchDrawingPointerRef.current === e.pointerId;
+    ts.pointers.delete(e.pointerId);
+
+    if (wasDrawingPointer) {
+      if (currentStrokeRef.current.length > 0) {
+        addMaskStroke({
+          points: currentStrokeRef.current,
+          brushSize,
+          tool: tool as 'brush' | 'eraser',
+          feather: brushFeather,
+        });
+      }
+      touchDrawingPointerRef.current = null;
+      currentStrokeRef.current = [];
+      setIsDrawing(false);
+    }
+
+    resetPinchState();
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'touch') return;
+
     const ts = touchStateRef.current;
     ts.pointers.delete(e.pointerId);
-    if (ts.pointers.size < 2) {
-      ts.initialDist = null;
-      ts.initialMidpoint = null;
+    if (touchDrawingPointerRef.current === e.pointerId) {
+      touchDrawingPointerRef.current = null;
+      currentStrokeRef.current = [];
+      setIsDrawing(false);
+      renderMask();
     }
+    resetPinchState();
   };
 
   const handleDownload = () => {
@@ -459,7 +532,7 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
     >
       <CanvasToolbar zoom={zoom} onZoomChange={onZoomChange} onDownload={handleDownload} onFitToViewport={fitToViewport} />
       <div
