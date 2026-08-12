@@ -7,12 +7,13 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/gitrepo"
 )
 
-// GitHubCredentialOptions supplies user-scoped GitHub App credential state to
-// the tool registry. Connected must remain local/non-network; Resolve may
+// GitHubCredentialOptions supplies user-scoped GitHub App state to the tool
+// registry. Connected and Bindings must remain local/non-network; Resolve may
 // refresh an expiring token and is invoked only by credentialed network tools.
 type GitHubCredentialOptions struct {
 	Connected func(ctx context.Context, userID string) (bool, error)
 	Resolve   func(ctx context.Context, userID string) (token string, connected bool, err error)
+	Bindings  func(ctx context.Context, userID string) ([]gitrepo.GitHubRemoteBinding, error)
 }
 
 // RegistryOptions contains optional application-service dependencies for the
@@ -31,11 +32,10 @@ func NewRegistryWithOptions(options RegistryOptions) *Registry {
 }
 
 // ConfigureGitHubCredentials rebinds the already-configured remote and GitHub
-// tool families to a request-scoped credential adapter. It returns false when
-// options are incomplete or the expected built-in remote service is unavailable.
-// The exact same RemoteService remains underneath the adapter, preserving the
-// local service used for reviewed-state binding and every existing process and
-// per-remote gate.
+// tool families to a request-scoped credential/binding adapter. It returns false
+// when credential callbacks are incomplete or the expected built-in remote
+// service is unavailable. Bindings are optional and never alter global/static
+// remote configuration or permission gates.
 func (r *Registry) ConfigureGitHubCredentials(options *GitHubCredentialOptions) bool {
 	if r == nil {
 		return false
@@ -44,6 +44,7 @@ func (r *Registry) ConfigureGitHubCredentials(options *GitHubCredentialOptions) 
 	if resolver == nil {
 		return false
 	}
+	bindingResolver := registryGitHubBindingResolver(options)
 
 	tool, ok := r.Get("git_remotes")
 	if !ok {
@@ -64,7 +65,7 @@ func (r *Registry) ConfigureGitHubCredentials(options *GitHubCredentialOptions) 
 		return false
 	}
 
-	r.rebindRemoteGitHubServices(gitrepo.NewUserScopedRemoteService(base, resolver))
+	r.rebindRemoteGitHubServices(gitrepo.NewUserScopedRemoteServiceWithBindings(base, resolver, bindingResolver))
 	return true
 }
 
@@ -72,9 +73,7 @@ func registryGitHubCredentialResolver(options *GitHubCredentialOptions) gitrepo.
 	if options == nil || options.Connected == nil || options.Resolve == nil {
 		return nil
 	}
-	userID := func(ctx context.Context) string {
-		return strings.TrimSpace(InvocationScopeFromContext(ctx).UserID)
-	}
+	userID := registryGitHubOwnerFromContext
 	return gitrepo.GitHubCredentialResolverFuncs{
 		ConnectedFunc: func(ctx context.Context) (bool, error) {
 			owner := userID(ctx)
@@ -91,6 +90,23 @@ func registryGitHubCredentialResolver(options *GitHubCredentialOptions) gitrepo.
 			return options.Resolve(ctx, owner)
 		},
 	}
+}
+
+func registryGitHubBindingResolver(options *GitHubCredentialOptions) gitrepo.GitHubRemoteBindingResolver {
+	if options == nil || options.Bindings == nil {
+		return nil
+	}
+	return gitrepo.GitHubRemoteBindingResolverFunc(func(ctx context.Context) ([]gitrepo.GitHubRemoteBinding, error) {
+		owner := registryGitHubOwnerFromContext(ctx)
+		if owner == "" {
+			return nil, nil
+		}
+		return options.Bindings(ctx, owner)
+	})
+}
+
+func registryGitHubOwnerFromContext(ctx context.Context) string {
+	return strings.TrimSpace(InvocationScopeFromContext(ctx).UserID)
 }
 
 // rebindRemoteGitHubServices updates only service interfaces already registered

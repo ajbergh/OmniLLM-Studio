@@ -10,17 +10,27 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// GitHubAuthRuntime groups the user-scoped authentication service with the
+// repository-selection surface composed from the same database/runtime state.
+// It is an API-layer composition object only; credentials remain owned by
+// githubauth.Service and repository bindings remain owned by their repository.
+type GitHubAuthRuntime struct {
+	Service      *githubauth.Service
+	Repositories *GitHubRepositoryHandler
+}
+
 // NewGitHubAuthRuntimeFromEnvironment composes the encrypted credential store
-// with the GitHub App device-flow service and returns the same service used by
+// with the GitHub App device-flow service and returns one runtime used by
 // authenticated routes, repository discovery, and request-scoped Git/GitHub
-// tool credentials. Missing operator configuration remains a supported state.
-func NewGitHubAuthRuntimeFromEnvironment(database *sql.DB) (*githubauth.Service, *GitHubAuthHandler) {
+// tools. Missing operator configuration remains a supported state.
+func NewGitHubAuthRuntimeFromEnvironment(database *sql.DB) (*GitHubAuthRuntime, *GitHubAuthHandler) {
 	store := repository.NewGitHubAppConnectionRepo(database)
 	service, err := githubauth.NewServiceFromEnvironment(store)
 	if err == nil {
+		repositories := NewGitHubRepositoryHandlerFromEnvironment(database, service)
 		handler := NewGitHubAuthHandler(service)
-		handler.repositories = NewGitHubRepositoryHandlerFromEnvironment(database, service)
-		return service, handler
+		handler.repositories = repositories
+		return &GitHubAuthRuntime{Service: service, Repositories: repositories}, handler
 	}
 	if !errors.Is(err, githubauth.ErrNotConfigured) {
 		log.Printf("WARN: GitHub App authentication unavailable: %v", err)

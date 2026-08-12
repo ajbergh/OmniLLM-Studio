@@ -46,39 +46,58 @@ func (f GitHubCredentialResolverFuncs) ResolveGitHubCredential(ctx context.Conte
 }
 
 // UserScopedRemoteService decorates the existing RemoteService with a
-// request-scoped GitHub credential. It intentionally preserves every existing
-// network, mutation, repository, state-binding, and approval gate: only the
-// credential source changes.
+// request-scoped GitHub credential and optional owner-scoped repository bindings.
+// It intentionally preserves every existing network, mutation, repository,
+// state-binding, and approval gate.
 //
 // A connected GitHub App credential takes precedence over TokenEnv for exact
 // github.com remotes. If no user connection exists, the existing TokenEnv/public
 // remote behavior is retained. Resolver/refresh failures fail closed and never
 // fall back to TokenEnv. Non-GitHub remotes never receive the GitHub credential.
+// Binding-backed remotes exist only in per-request clones and never alter static
+// operator configuration.
 type UserScopedRemoteService struct {
 	*RemoteService
 	githubCredentials GitHubCredentialResolver
+	githubBindings    GitHubRemoteBindingResolver
 }
 
 // NewUserScopedRemoteService wraps a configured remote service. A nil resolver
 // is valid and preserves the existing operator-only credential behavior.
 func NewUserScopedRemoteService(base *RemoteService, resolver GitHubCredentialResolver) *UserScopedRemoteService {
-	return &UserScopedRemoteService{RemoteService: base, githubCredentials: resolver}
+	return NewUserScopedRemoteServiceWithBindings(base, resolver, nil)
+}
+
+// NewUserScopedRemoteServiceWithBindings additionally injects a local-only
+// resolver for active GitHub repository bindings. The base service is never
+// mutated and remains authoritative for process-wide gates and static remotes.
+func NewUserScopedRemoteServiceWithBindings(base *RemoteService, resolver GitHubCredentialResolver, bindings GitHubRemoteBindingResolver) *UserScopedRemoteService {
+	return &UserScopedRemoteService{RemoteService: base, githubCredentials: resolver, githubBindings: bindings}
 }
 
 func (s *UserScopedRemoteService) scoped(ctx context.Context, remoteID string) (*RemoteService, error) {
-	if s == nil || s.RemoteService == nil || s.githubCredentials == nil {
-		if s == nil {
-			return nil, nil
-		}
-		return s.RemoteService, nil
+	if s == nil || s.RemoteService == nil {
+		return nil, nil
 	}
 	remoteID = strings.TrimSpace(remoteID)
-	remote, ok := s.remotes[remoteID]
-	if !ok {
-		return s.RemoteService, nil
+	base := s.RemoteService
+	// Static operator remotes are authoritative and never depend on the binding
+	// store. Only a missing remote ID can be resolved through owner-scoped bindings.
+	if _, static := s.remotes[remoteID]; !static && s.githubBindings != nil && s.githubCredentials != nil {
+		withBindings, err := s.serviceWithBindings(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("remote %q GitHub binding is unavailable", remoteID)
+		}
+		if withBindings != nil {
+			base = withBindings
+		}
 	}
-	if _, _, githubRemote := githubRepositoryFromRemote(remote); !githubRemote {
-		return s.RemoteService, nil
+	remote, ok := base.remotes[remoteID]
+	if !ok {
+		return base, nil
+	}
+	if _, _, githubRemote := githubRepositoryFromRemote(remote); !githubRemote || s.githubCredentials == nil {
+		return base, nil
 	}
 
 	token, connected, err := s.githubCredentials.ResolveGitHubCredential(ctx)
@@ -86,15 +105,15 @@ func (s *UserScopedRemoteService) scoped(ctx context.Context, remoteID string) (
 		return nil, fmt.Errorf("remote %q GitHub credentials are unavailable", remoteID)
 	}
 	if !connected {
-		return s.RemoteService, nil
+		return base, nil
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return nil, fmt.Errorf("remote %q GitHub credentials are unavailable", remoteID)
 	}
 
-	clone := *s.RemoteService
-	clone.remotes = cloneRemoteConfigs(s.remotes)
+	clone := *base
+	clone.remotes = cloneRemoteConfigs(base.remotes)
 	target := clone.remotes[remoteID]
 	credentialEnv := target.TokenEnv
 	if credentialEnv == "" {
@@ -105,7 +124,7 @@ func (s *UserScopedRemoteService) scoped(ctx context.Context, remoteID string) (
 		target.Username = "x-access-token"
 	}
 	clone.remotes[remoteID] = target
-	fallback := s.lookupEnv
+	fallback := base.lookupEnv
 	clone.lookupEnv = func(name string) (string, bool) {
 		if name == credentialEnv {
 			return token, true
@@ -126,9 +145,12 @@ func cloneRemoteConfigs(remotes map[string]RemoteConfig) map[string]RemoteConfig
 	return cloned
 }
 
-func (s *UserScopedRemoteService) summariesWithoutGitHubCredentials(ctx context.Context) []RemoteSummary {
-	clone := *s.RemoteService
-	clone.remotes = cloneRemoteConfigs(s.remotes)
+func (s *UserScopedRemoteService) summariesWithoutGitHubCredentials(ctx context.Context, base *RemoteService) []RemoteSummary {
+	if base == nil {
+		return nil
+	}
+	clone := *base
+	clone.remotes = cloneRemoteConfigs(base.remotes)
 	for id, remote := range clone.remotes {
 		if _, _, githubRemote := githubRepositoryFromRemote(remote); githubRemote {
 			remote.TokenEnv = ""
@@ -138,23 +160,23 @@ func (s *UserScopedRemoteService) summariesWithoutGitHubCredentials(ctx context.
 	return clone.Remotes(ctx)
 }
 
-func (s *UserScopedRemoteService) summariesWithGitHubCredential(ctx context.Context) []RemoteSummary {
-	if s == nil || s.RemoteService == nil || s.githubCredentials == nil {
-		if s == nil || s.RemoteService == nil {
-			return nil
-		}
-		return s.RemoteService.Remotes(ctx)
+func (s *UserScopedRemoteService) summariesWithGitHubCredential(ctx context.Context, base *RemoteService) []RemoteSummary {
+	if base == nil {
+		return nil
+	}
+	if s == nil || s.githubCredentials == nil {
+		return base.Remotes(ctx)
 	}
 	connected, err := s.githubCredentials.GitHubCredentialConnected(ctx)
 	if err != nil {
-		return s.summariesWithoutGitHubCredentials(ctx)
+		return s.summariesWithoutGitHubCredentials(ctx, base)
 	}
 	if !connected {
-		return s.RemoteService.Remotes(ctx)
+		return base.Remotes(ctx)
 	}
 
-	clone := *s.RemoteService
-	clone.remotes = cloneRemoteConfigs(s.remotes)
+	clone := *base
+	clone.remotes = cloneRemoteConfigs(base.remotes)
 	for id, remote := range clone.remotes {
 		if _, _, githubRemote := githubRepositoryFromRemote(remote); !githubRemote {
 			continue
@@ -170,10 +192,19 @@ func (s *UserScopedRemoteService) summariesWithGitHubCredential(ctx context.Cont
 	return clone.Remotes(ctx)
 }
 
-// Remotes returns request-scoped safe summaries using only the resolver's local
-// connection-status check. It never resolves or refreshes a GitHub token.
+// Remotes returns request-scoped safe summaries using only local binding and
+// credential-status resolvers. It never resolves or refreshes a GitHub token.
 func (s *UserScopedRemoteService) Remotes(ctx context.Context) []RemoteSummary {
-	return s.summariesWithGitHubCredential(ctx)
+	if s == nil || s.RemoteService == nil {
+		return nil
+	}
+	base := s.RemoteService
+	if s.githubBindings != nil && s.githubCredentials != nil {
+		if withBindings, err := s.serviceWithBindings(ctx); err == nil && withBindings != nil {
+			base = withBindings
+		}
+	}
+	return s.summariesWithGitHubCredential(ctx, base)
 }
 
 // RemoteStatus delegates remote inspection through the request-scoped credential.

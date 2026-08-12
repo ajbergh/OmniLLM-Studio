@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ajbergh/omnillm-studio/internal/githubauth"
+	"github.com/ajbergh/omnillm-studio/internal/gitrepo"
 	"github.com/ajbergh/omnillm-studio/internal/tools"
 )
 
@@ -15,10 +16,14 @@ import (
 // execution. Status stays local/non-network; AccessToken may refresh only when a
 // credentialed Git/GitHub operation already permits network access.
 func githubAuthToolCredentialOptions(service *githubauth.Service) *tools.GitHubCredentialOptions {
+	return githubAuthToolCredentialOptionsWithBindings(service, nil)
+}
+
+func githubAuthToolCredentialOptionsWithBindings(service *githubauth.Service, bindings GitHubRepositoryBindingStore) *tools.GitHubCredentialOptions {
 	if service == nil {
 		return nil
 	}
-	return &tools.GitHubCredentialOptions{
+	options := &tools.GitHubCredentialOptions{
 		Connected: func(_ context.Context, userID string) (bool, error) {
 			status, err := service.Status(userID)
 			if err != nil {
@@ -42,16 +47,50 @@ func githubAuthToolCredentialOptions(service *githubauth.Service) *tools.GitHubC
 			return token, true, nil
 		},
 	}
+	if bindings != nil {
+		options.Bindings = func(_ context.Context, userID string) ([]gitrepo.GitHubRemoteBinding, error) {
+			status, err := service.Status(userID)
+			if err != nil {
+				return nil, err
+			}
+			// Disconnect clears the persisted identity. A stale token retains the
+			// same identity and therefore keeps the binding visible for inventory,
+			// while actual network execution still fails closed via AccessToken.
+			if status.GitHubUserID <= 0 {
+				return nil, nil
+			}
+			stored, err := bindings.List(userID)
+			if err != nil {
+				return nil, err
+			}
+			active := make([]gitrepo.GitHubRemoteBinding, 0, len(stored))
+			for _, binding := range stored {
+				if binding.GitHubUserID != status.GitHubUserID {
+					continue
+				}
+				active = append(active, gitrepo.GitHubRemoteBinding{
+					LocalRepositoryID: binding.LocalRepositoryID,
+					GitHubFullName:    binding.GitHubFullName,
+					Disabled:          binding.Disabled,
+				})
+			}
+			return active, nil
+		}
+	}
+	return options
 }
 
-// configureGitHubAuthToolRegistry binds the shared GitHub auth runtime to the
-// already-created registry. Missing app configuration is a supported state and
-// leaves the existing operator/public remote behavior unchanged.
-func configureGitHubAuthToolRegistry(registry *tools.Registry, service *githubauth.Service) {
-	if registry == nil || service == nil {
+// configureGitHubAuthToolRegistry binds the shared GitHub auth runtime and its
+// owner-scoped repository-binding store to the already-created registry.
+func configureGitHubAuthToolRegistry(registry *tools.Registry, runtime *GitHubAuthRuntime) {
+	if registry == nil || runtime == nil || runtime.Service == nil {
 		return
 	}
-	if !registry.ConfigureGitHubCredentials(githubAuthToolCredentialOptions(service)) {
+	var bindings GitHubRepositoryBindingStore
+	if runtime.Repositories != nil {
+		bindings = runtime.Repositories.bindings
+	}
+	if !registry.ConfigureGitHubCredentials(githubAuthToolCredentialOptionsWithBindings(runtime.Service, bindings)) {
 		log.Printf("WARN: GitHub App tool credential wiring unavailable")
 	}
 }

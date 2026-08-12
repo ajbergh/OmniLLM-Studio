@@ -25,7 +25,7 @@ func NewGitRemoteMutationTools(svc gitrepo.RemoteFetcher) []Tool {
 func (t *gitRemoteFetchTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name:             "git_fetch",
-		Description:      "Fetch the exact reviewed head of the current local branch from one operator-configured remote into a bounded local object pack and isolated tracking ref. Requires branch/HEAD from git_status and the matching remote branch hash from git_remote_status; never changes HEAD, index, worktree, Git config, tags, submodules, or arbitrary refs.",
+		Description:      "Fetch the exact reviewed head of the current local branch from one remote ID returned by git_remotes into a bounded local object pack and isolated tracking ref. Requires branch/HEAD from git_status and the matching remote branch hash from git_remote_status; never changes HEAD, index, worktree, Git config, tags, submodules, or arbitrary refs.",
 		Category:         "git",
 		Enabled:          true,
 		Version:          "1",
