@@ -6,6 +6,8 @@
 >
 > **Branch:** `agent/sandbox-windows-confinement-20260812`
 >
+> **PR:** #127
+>
 > **Base:** `main` at `2a8709dba42bdd23b5a08fab1c4124a8603ae3ee`
 
 This file is the detailed durable tracker for Phase 12 of `AGENT_SANDBOX_ROADMAP_2026-08.md`. Phase 12 is not complete until both the first-party protocol-v2 Windows runtime and persistent local extension processes use native Windows confinement with Windows-native test evidence.
@@ -23,7 +25,7 @@ This file is the detailed durable tracker for Phase 12 of `AGENT_SANDBOX_ROADMAP
 
 | Slice | Scope | Status | Evidence / exit criterion |
 |---|---|---|---|
-| 12A | Native security primitives | **IN PROGRESS** | Restricted token, kill-on-close Job Object, Restricted Code ACL merge helpers, and dedicated `windows-latest` tests are implemented on the Phase 12 branch. Exit requires the native CI job to pass. |
+| 12A | Native security primitives | **IN PROGRESS** | PR #127 adds restricted token, kill-on-close Job Object, Restricted Code ACL merge helpers, and dedicated `windows-latest` tests. Exit requires the native CI job plus normal Quality/Security gates to pass. |
 | 12B | First-party protocol-v2 Windows runtime | NOT STARTED | Implement Windows `NewLocalRuntime`, session lifecycle/cancellation, scratch/workspace ACL setup, bounded exec/output, and truthful capabilities. Native worker tests required. |
 | 12C | Persistent stdio MCP/plugin confinement | NOT STARTED | Integrate restricted-token + Job Object confinement into the shared extension process seam without breaking streaming stdio. `auto` may select native Windows confinement only when genuinely available; `required` must fail closed otherwise. |
 | 12D | Adversarial Windows assurance | NOT STARTED | Descendant escape/teardown, ACL escape, symlink/junction/reparse behavior, secret inheritance, cancellation, and mode-policy tests on Windows. |
@@ -31,7 +33,7 @@ This file is the detailed durable tracker for Phase 12 of `AGENT_SANDBOX_ROADMAP
 
 ## Phase 12A implementation notes
 
-Current branch adds Windows-only primitives in `backend/internal/sandbox/windows_security_windows.go`:
+PR #127 adds Windows-only primitives in `backend/internal/sandbox/windows_security_windows.go`:
 
 - a restricted primary token derived from the current process token using `CreateRestrictedToken`, `DISABLE_MAX_PRIVILEGE`, and the well-known Restricted Code SID;
 - a Job Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`;
@@ -61,3 +63,4 @@ Phase 12 requires the normal repository Quality Gate and Security Scan plus the 
 - **2026-08-12:** Phase 12 branch created from `main` `2a8709db`.
 - **2026-08-12:** Added Windows restricted-token, Job Object, and Restricted Code ACL primitives plus native tests.
 - **2026-08-12:** Added a dedicated `windows-latest` Quality Gate job for explicit confinement evidence.
+- **2026-08-12 — PR #127:** Opened focused Phase 12A foundation PR; native validation pending.
