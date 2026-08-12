@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -173,8 +174,10 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target interface{}) erro
 		return fmt.Errorf("invalid request body: %w", err)
 	}
 	var extra interface{}
-	if err := decoder.Decode(&extra); !errors.Is(err, context.Canceled) && err == nil {
+	if err := decoder.Decode(&extra); err == nil {
 		return fmt.Errorf("request body must contain one JSON value")
+	} else if !errors.Is(err, io.EOF) {
+		return fmt.Errorf("invalid trailing request body: %w", err)
 	}
 	return nil
 }
