@@ -16,7 +16,7 @@ type Config struct {
 	DatabasePath    string
 	AttachmentsDir  string
 	CORSOrigins     []string
-	AllowPublicReg  bool // When false (default), only the first user can register.
+	AllowPublicReg  bool   // When false (default), only the first user can register.
 	ChromemDir      string // Directory for chromem-go persistent vector files.
 	ChromemCompress bool   // Enable gzip compression for chromem data files.
 
