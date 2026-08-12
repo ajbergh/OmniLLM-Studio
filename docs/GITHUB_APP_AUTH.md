@@ -91,22 +91,27 @@ The following existing controls remain independent and authoritative:
 
 Authentication is not authorization.
 
-## G3b: application credential composition — next
+## G3b: application credential composition — implemented
 
-`NewRouterWithShutdown` should next share the existing user-scoped `githubauth.Service` with the registry options path:
+`NewRouterWithShutdown` now constructs one shared GitHub auth runtime service and handler through `NewGitHubAuthRuntimeFromEnvironment(database)`. That exact service continues to back the authenticated `/v1/github/auth` routes and is also bound to the already-created tool registry through `ConfigureGitHubCredentials`.
 
-- the non-network registry status callback should use the service's secret-free/local connection status for the invocation owner;
-- the execution callback should use `AccessToken(ctx, owner)` so expiring tokens refresh only during an already-networked operation;
-- `githubauth.ErrNotConnected` should map to `connected=false` so existing `TokenEnv` fallback remains available;
-- reauthorization, refresh, persistence, or provider failures should map to `connected=true` plus an error so `gitrepo` fails closed rather than falling back;
-- the same service should continue backing the authenticated `/v1/github/auth` routes.
+The registry adapter preserves the intended credential semantics:
 
-This should remain a small composition-only change. No model-facing tool schema or permission gate needs to change.
+- the `git_remotes` status callback calls `githubauth.Service.Status`, which is local/non-network and cannot refresh a token;
+- credentialed network operations call `AccessToken(ctx, owner)`, so expiring access tokens refresh only while an operation already permits network access;
+- `githubauth.ErrNotConnected` maps to `connected=false`, preserving existing operator `TokenEnv` or public-remote fallback when the user has no GitHub connection;
+- a persisted GitHub identity retains user-credential precedence even when its token is stale, so reauthorization is required rather than silently falling back to a shared operator token;
+- reauthorization, refresh, persistence, or provider failures map to fail-closed execution and never fall back to operator credentials;
+- solo mode uses the existing stable `local` invocation owner, while multi-user mode uses the authenticated invocation user ID;
+- the same underlying `RemoteService` remains in use, so Git mutation gates, per-remote `allow_*` policy, approval policy, and exact reviewed-state preconditions are unchanged.
+
+`ConfigureGitHubCredentials` also supports post-construction binding and resolver replacement without nesting `UserScopedRemoteService` adapters. This keeps the existing registry initialization order intact and makes the router change limited to replacing the handler-only GitHub auth constructor with the shared runtime constructor plus one registry-binding call.
+
+No model-facing tool schema or permission gate changes in G3b.
 
 ## Subsequent slices
 
-1. **G3b — wire the existing GitHub auth service into `NewRegistryWithOptions`.**
-2. **G4 — repository discovery and explicit repository-to-local-worktree binding.**
-3. **G5 — Settings UI: Connect GitHub, choose repositories, status, reconnect, disconnect.**
-4. **M2 — continue merge-policy completeness work independently.**
-5. **M3 — consider guarded direct merge only after M2 can prove policy completeness.**
+1. **G4 — repository discovery and explicit repository-to-local-worktree binding.**
+2. **G5 — Settings UI: Connect GitHub, choose repositories, status, reconnect, disconnect.**
+3. **M2 — continue merge-policy completeness work independently.**
+4. **M3 — consider guarded direct merge only after M2 can prove policy completeness.**
