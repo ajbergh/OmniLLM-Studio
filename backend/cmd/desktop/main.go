@@ -22,6 +22,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // Embedded frontend build — populated by the build script which copies
@@ -36,7 +37,7 @@ var (
 	commit  = "dev"
 )
 
-// App exposes the desktop-only API capability URL to the trusted Wails frontend.
+// App exposes desktop-only capability methods to the trusted Wails frontend.
 type App struct {
 	ctx     context.Context
 	apiBase string // e.g. "http://127.0.0.1:54321/__desktop/<launch-secret>/v1"
@@ -51,6 +52,23 @@ func (a *App) startup(ctx context.Context) { a.ctx = ctx }
 // random path component is generated for each application launch and is never
 // written to logs.
 func (a *App) GetAPIBase() string { return a.apiBase }
+
+// SelectSandboxWorkspace opens the native directory picker. The selected path
+// is returned only to the trusted local Wails frontend, which sends it through
+// the protected per-launch loopback API to create an opaque sandbox workspace
+// grant. The path is not persisted in frontend state or returned by list APIs.
+func (a *App) SelectSandboxWorkspace() (string, error) {
+	if a == nil || a.ctx == nil {
+		return "", fmt.Errorf("desktop application is not ready")
+	}
+	selected, err := wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select Sandbox Workspace Folder",
+	})
+	if err != nil {
+		return "", fmt.Errorf("select sandbox workspace: %w", err)
+	}
+	return selected, nil
+}
 
 func main() {
 	setDesktopDefaults()
@@ -183,7 +201,7 @@ func desktopLoopbackHandler(prefix string, next http.Handler) http.Handler {
 func generateDesktopSecret() (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
-		return "", err
+		return "", fmt.Errorf("generate desktop secret: %w", err)
 	}
 	return hex.EncodeToString(buf), nil
 }
@@ -218,6 +236,12 @@ func setDesktopDefaults() {
 	// the runtime.
 	if os.Getenv("OMNILLM_BROWSER_ENABLED") == "" {
 		os.Setenv("OMNILLM_BROWSER_ENABLED", "true")
+	}
+	// Desktop folder grants are available only through the native folder picker
+	// and the protected per-launch loopback API. Server/web deployments remain
+	// disabled by default unless the operator explicitly enables path grants.
+	if os.Getenv("OMNILLM_SANDBOX_ALLOW_PATH_GRANTS") == "" {
+		os.Setenv("OMNILLM_SANDBOX_ALLOW_PATH_GRANTS", "true")
 	}
 }
 
