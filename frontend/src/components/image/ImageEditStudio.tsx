@@ -344,6 +344,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
       base_image_attachment_id: baseAttachmentId,
       mask_attachment_id: maskAttachmentId,
       size,
+      geometry_mode: size === '' || size === 'auto' ? 'preserve_source' : 'explicit',
       n: variants,
       reference_image_ids: contentReferenceIds.length > 0 ? contentReferenceIds : undefined,
       style_reference_ids: styleReferenceIds.length > 0 ? styleReferenceIds : undefined,
