@@ -463,7 +463,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 
 					// Message operations
 					r.Delete("/messages/{messageId}", msgHandler.DeleteMessage)
-						r.Patch("/messages/{messageId}", msgHandler.EditMessage)
+					r.Patch("/messages/{messageId}", msgHandler.EditMessage)
 
 					// Attachments (scoped to conversation)
 					r.Get("/attachments", attachHandler.List)
@@ -643,14 +643,14 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Get("/settings/router/suggestions", settingsHandler.RouterSuggestions)
 			r.Group(func(r chi.Router) {
 				r.Use(auth.RequireRole("admin"))
-				r.Patch("/settings", settingsHandler.Update)
+					r.Patch("/settings", settingsHandler.Update)
 			})
 
 			// Feature Flags (admin only)
 			r.Get("/features", featureFlagHandler.List)
 			r.Group(func(r chi.Router) {
 				r.Use(auth.RequireRole("admin"))
-				r.Patch("/features/{key}", featureFlagHandler.Update)
+					r.Patch("/features/{key}", featureFlagHandler.Update)
 			})
 
 			// Tools
