@@ -117,7 +117,6 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	// Services
 	llmService := llm.NewService(providerRepo, settingsRepo)
 	routerService := intentrouter.NewService(llmService, settingsRepo, providerRepo)
-
 	// RAG vector store (chromem-go) + retriever
 	vectorStore, err := rag.NewVectorStore(cfg.ChromemDir, cfg.ChromemCompress)
 	if err != nil {
@@ -385,7 +384,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	userRepo := repository.NewUserRepo(database)
 	sessionRepo := repository.NewSessionRepo(database)
 	authHandler := NewAuthHandler(userRepo, sessionRepo, cfg)
-	githubAuthHandler := NewGitHubAuthHandlerFromEnvironment(database)
+	githubAuthService, githubAuthHandler := NewGitHubAuthRuntimeFromEnvironment(database)
+	configureGitHubAuthToolRegistry(toolRegistry, githubAuthService)
 	wsMemberRepo := repository.NewWorkspaceMemberRepo(database)
 	wsMemberHandler := NewWorkspaceMemberHandler(wsMemberRepo, userRepo)
 
@@ -597,7 +597,6 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 				r.Get("/chunks", ragHandler.ListAttachmentChunks)
 				r.Post("/index", ragHandler.IndexAttachment)
 			})
-
 			// File Library
 			r.Route("/file-library", func(r chi.Router) {
 				r.Get("/files", fileLibraryHandler.ListFiles)
@@ -717,7 +716,6 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 				r.Post("/{id}/refresh", openAPIHandler.Refresh)
 				r.Delete("/{id}", openAPIHandler.Delete)
 			})
-
 			// MCP Servers (admin only)
 			r.Route("/mcp", func(r chi.Router) {
 				r.Use(auth.RequireRole("admin"))
