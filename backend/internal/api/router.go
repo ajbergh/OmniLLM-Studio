@@ -386,7 +386,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	sessionRepo := repository.NewSessionRepo(database)
 	authHandler := NewAuthHandler(userRepo, sessionRepo, cfg)
 	githubAuthService, githubAuthHandler := NewGitHubAuthRuntimeFromEnvironment(database)
-	configureGitHubAuthToolRegistry(toolRegistry, githubAuthService)
+	configureGitHubAuthToolRegistry(toolRegistry, githubAuthService, githubAuthHandler.repositories)
 	wsMemberRepo := repository.NewWorkspaceMemberRepo(database)
 	wsMemberHandler := NewWorkspaceMemberHandler(wsMemberRepo, userRepo)
 
@@ -673,7 +673,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Route("/jobs", func(r chi.Router) {
 				r.Get("/", jobHandler.List)
 				r.Get("/{jobId}", jobHandler.Get)
-				r.Post("/{jobId}/cancel", jobHandler.Cancel)
+				r.Post("/{jobId}/cancel", jobHandler.CancelJob)
 			})
 
 			// Explicit user-controlled memory.
