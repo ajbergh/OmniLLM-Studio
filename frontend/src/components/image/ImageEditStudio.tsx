@@ -4,6 +4,7 @@ import { useImageEditorStore } from '../../stores/imageEditor';
 import { useProviderStore, useConversationStore, useMessageStore, useSettingsStore, useCrossoverStore } from '../../stores';
 import { useMusicStudioStore } from '../../stores/musicStudio';
 import { ImageCanvas, type ImageCanvasHandle } from './ImageCanvas';
+import type { ImageMaskingMode } from './maskRaster';
 import { ImageHistoryPanel } from './ImageHistoryPanel';
 import { ImageAdvancedControls } from './ImageAdvancedControls';
 import { PromptQualityTips } from './PromptQualityTips';
@@ -58,6 +59,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     activeNodeAssets,
     tool,
     brushSize,
+    brushFeather,
     zoom,
     maskVisible,
     maskOpacity,
@@ -75,6 +77,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     selectVariant,
     setTool,
     setBrushSize,
+    setBrushFeather,
     setZoom,
     toggleMask,
     setMaskOpacity,
@@ -211,9 +214,14 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
       max_variants: overrides.max_variants ?? capabilities.max_variants,
       supports_editing: overrides.supports_editing ?? capabilities.supports_editing,
       supports_masking: overrides.supports_masking ?? capabilities.supports_masking,
+      masking_mode: overrides.masking_mode ?? capabilities.masking_mode,
       supports_content_reference: overrides.supports_content_reference ?? capabilities.supports_content_reference,
     };
   }, [capabilities, selectedImageModel]);
+
+  const maskingMode = (effectiveCaps?.masking_mode ?? (effectiveCaps?.supports_masking ? 'pixel' : 'none')) as ImageMaskingMode;
+  const maskToolsActive = editMode === 'edit' && effectiveCaps?.supports_masking === true && maskingMode !== 'none';
+  const maskSelectionInactive = editMode === 'edit' && maskStrokes.length > 0 && !maskToolsActive;
 
   const selectedProviderProfile = useMemo(
     () => providers.find((provider) => provider.id === selectedProvider || provider.name === selectedProvider),
@@ -314,9 +322,9 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     let maskAttachmentId: string | undefined;
 
     // If there are mask strokes, export and upload the mask as base64
-    if (maskStrokes.length > 0) {
+    if (maskStrokes.length > 0 && maskToolsActive) {
       try {
-        const blob = canvasRef.current?.exportMaskBlob?.();
+        const blob = canvasRef.current?.exportMaskBlob?.(maskingMode);
         if (blob) {
           // Convert blob to base64
           const buffer = await blob.arrayBuffer();
@@ -940,13 +948,19 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                 </div>
                 )}
 
-                {/* Mask tools (shown in edit mode) */}
+                {/* Selection tools (shown in edit mode) */}
                 {editMode === 'edit' && (
-                  <div className={clsx('space-y-2', effectiveCaps != null && !effectiveCaps.supports_masking && 'opacity-40 pointer-events-none')}>
+                  <>
+                  {maskSelectionInactive && (
+                    <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-[10px] text-amber-300">
+                      Selection retained but inactive for this model. This edit will apply to the full image unless you switch back to a selection-capable model.
+                    </div>
+                  )}
+                  <div className={clsx('space-y-2', !maskToolsActive && 'opacity-40 pointer-events-none')}>
                     <label className="text-xs font-medium text-text-muted uppercase tracking-wide">
-                      Mask Tools
-                      {effectiveCaps != null && !effectiveCaps.supports_masking && (
-                        <span className="ml-1 text-[9px] text-amber-400 normal-case">(not supported by provider)</span>
+                      {maskingMode === 'pixel' ? 'Pixel Selection' : maskingMode === 'semantic' ? 'Edit Area Guidance' : 'Selection Tools'}
+                      {!maskToolsActive && (
+                        <span className="ml-1 text-[9px] text-amber-400 normal-case">(not supported by model)</span>
                       )}
                     </label>
                     <div className="flex items-center gap-1.5">
@@ -1007,6 +1021,21 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                       />
                     </div>
 
+                    {/* Brush feather */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-text-muted w-12">Feather</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={brushFeather}
+                        onChange={(e) => setBrushFeather(Number(e.target.value))}
+                        className="flex-1 accent-primary"
+                        aria-label="Selection feather"
+                      />
+                      <span className="text-[10px] text-text-muted w-7 text-right">{brushFeather}%</span>
+                    </div>
+
                     {/* Mask opacity */}
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-text-muted w-12">Opacity</span>
@@ -1052,6 +1081,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                       </button>
                     </div>
                   </div>
+                  </>
                 )}
 
                 {/* Generate / Edit button */}
@@ -1147,6 +1177,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
               attachmentId={canvasAttachmentId}
               zoom={zoom}
               onZoomChange={setZoom}
+              maskingMode={maskToolsActive ? maskingMode : 'none'}
             />
           ) : activeSessionId && loadingAssets ? (
             <div className="text-center text-text-muted/50 space-y-3">

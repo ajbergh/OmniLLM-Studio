@@ -2,19 +2,21 @@ import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHand
 import { useImageEditorStore, type MaskStroke } from '../../stores/imageEditor';
 import { CanvasToolbar } from './CanvasToolbar';
 import { attachmentUrl } from '../../api';
+import { drawMaskStroke, type ImageMaskingMode } from './maskRaster';
 
 interface ImageCanvasProps {
   attachmentId: string;
   zoom: number;
   onZoomChange: (zoom: number) => void;
+  maskingMode?: ImageMaskingMode;
 }
 
 export interface ImageCanvasHandle {
-  exportMaskBlob: () => Blob | null;
+  exportMaskBlob: (mode?: ImageMaskingMode) => Blob | null;
   fitToViewport: () => void;
 }
 
-export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(function ImageCanvas({ attachmentId, zoom, onZoomChange }, ref) {
+export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(function ImageCanvas({ attachmentId, zoom, onZoomChange, maskingMode = 'none' }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -58,7 +60,7 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
   } = useImageEditorStore();
 
   const imageUrl = attachmentUrl(attachmentId);
-  const isMaskMode = editMode === 'edit' && (tool === 'brush' || tool === 'eraser');
+  const isMaskMode = editMode === 'edit' && maskingMode !== 'none' && (tool === 'brush' || tool === 'eraser');
 
   // rAF mask rendering guard — prevents >60fps mask redraws
   const maskRafRef = useRef(0);
@@ -88,7 +90,7 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
   useEffect(() => {
     cancelAnimationFrame(maskRafRef.current);
     maskRafRef.current = requestAnimationFrame(() => renderMask());
-  }, [maskStrokes, maskVisible, maskOpacity]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [maskStrokes, maskVisible, maskOpacity, maskingMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function renderMask() {
     const canvas = maskCanvasRef.current;
@@ -105,50 +107,17 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
 
     // Draw all completed strokes
     for (const stroke of maskStrokes) {
-      drawStroke(ctx, stroke);
+      drawMaskStroke(ctx, stroke, { mode: 'preview', opacity: maskOpacity });
     }
     // Also draw current in-progress stroke
     if (hasInProgress) {
-      drawStroke(ctx, {
+      drawMaskStroke(ctx, {
         points: currentStrokeRef.current,
         brushSize,
         tool,
         feather: brushFeather,
-      } as MaskStroke);
+      } as MaskStroke, { mode: 'preview', opacity: maskOpacity });
     }
-  }
-
-  function drawStroke(ctx: CanvasRenderingContext2D, stroke: MaskStroke) {
-    ctx.save();
-    ctx.globalAlpha = maskOpacity;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = stroke.brushSize;
-
-    if (stroke.tool === 'eraser') {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.globalAlpha = 1;
-    } else {
-      ctx.globalCompositeOperation = 'source-over';
-      // Semi-transparent red for mask visualization
-      ctx.strokeStyle = 'rgba(239, 68, 68, 0.6)';
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.6)';
-    }
-
-    if (stroke.points.length === 1) {
-      // Single dot
-      ctx.beginPath();
-      ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.brushSize / 2, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.beginPath();
-      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-      for (let i = 1; i < stroke.points.length; i++) {
-        ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
-      }
-      ctx.stroke();
-    }
-    ctx.restore();
   }
 
   // Convert screen coordinates to image coordinates
@@ -417,8 +386,8 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
     a.click();
   };
 
-  /** Export mask as a PNG blob (white = masked, black = unmasked) for upload */
-  const exportMaskBlob = useCallback((): Blob | null => {
+  /** Export a provider-appropriate PNG selection guide. */
+  const exportMaskBlob = useCallback((mode: ImageMaskingMode = maskingMode): Blob | null => {
     const canvas = maskCanvasRef.current;
     const img = imgRef.current;
     if (!canvas || !img || maskStrokes.length === 0) return null;
@@ -434,37 +403,10 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
 
-    // Punch transparent holes where the user painted (masked = edit).
-    // OpenAI expects transparent pixels = edit area.
+    // Pixel masks use transparent edit regions; semantic masks use visible
+    // white-on-black guidance while sharing the same feather rasterization.
     for (const stroke of maskStrokes) {
-      ctx.save();
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = stroke.brushSize;
-
-      if (stroke.tool === 'eraser') {
-        // Eraser restores opacity (un-masks): paint opaque black back
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.strokeStyle = '#000000';
-        ctx.fillStyle = '#000000';
-      } else {
-        // Brush removes opacity (masks): punch transparent holes
-        ctx.globalCompositeOperation = 'destination-out';
-      }
-
-      if (stroke.points.length === 1) {
-        ctx.beginPath();
-        ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.brushSize / 2, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        ctx.beginPath();
-        ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-        for (let i = 1; i < stroke.points.length; i++) {
-          ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
-        }
-        ctx.stroke();
-      }
-      ctx.restore();
+      drawMaskStroke(ctx, stroke, { mode: mode === 'semantic' ? 'semantic' : 'pixel' });
     }
 
     // Convert to blob synchronously by converting to data URL
@@ -475,7 +417,7 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
       array[i] = binary.charCodeAt(i);
     }
     return new Blob([array], { type: 'image/png' });
-  }, [maskStrokes]);
+  }, [maskStrokes, maskingMode]);
 
   const fitToViewport = useCallback(() => {
     const img = imgRef.current;
@@ -573,7 +515,7 @@ export const ImageCanvas = forwardRef<ImageCanvasHandle, ImageCanvasProps>(funct
               data-testid="image-mask-canvas"
               ref={maskCanvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none"
-              style={{ opacity: maskVisible ? 1 : 0 }}
+              style={{ opacity: maskVisible ? (maskingMode === 'none' ? 0.35 : 1) : 0 }}
             />
           )}
           {!imageLoaded && (
