@@ -31,7 +31,7 @@ func (t *SandboxNetworkGrantTool) Definition() ToolDefinition {
 		SupportsParallel: false,
 		DefaultTimeoutMS: 5000,
 		MaxResultBytes:   16 << 10,
-		Parameters: json.RawMessage(`{"type":"object","properties":{"domains":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"string"}},"ports":{"type":"array","maxItems":16,"items":{"type":"integer","minimum":1,"maximum":65535}},"ttl_seconds":{"type":"integer","minimum":60,"maximum":1800}},"required":["domains"],"additionalProperties":false}`),
+		Parameters:       json.RawMessage(`{"type":"object","properties":{"domains":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"string"}},"ports":{"type":"array","maxItems":16,"items":{"type":"integer","minimum":1,"maximum":65535}},"ttl_seconds":{"type":"integer","minimum":60,"maximum":1800}},"required":["domains"],"additionalProperties":false}`),
 	}
 }
 
