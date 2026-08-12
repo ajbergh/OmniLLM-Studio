@@ -49,7 +49,7 @@ type githubMergePolicyGraphQLResponse struct {
 		} `json:"viewer"`
 		Repository *struct {
 			Ref *struct {
-				Name                 string                              `json:"name"`
+				Name                 string                             `json:"name"`
 				BranchProtectionRule *githubGraphQLBranchProtectionRule `json:"branchProtectionRule"`
 			} `json:"ref"`
 		} `json:"repository"`
@@ -60,21 +60,21 @@ type githubMergePolicyGraphQLResponse struct {
 }
 
 type githubGraphQLBranchProtectionRule struct {
-	DismissesStaleReviews           bool     `json:"dismissesStaleReviews"`
-	IsAdminEnforced                 bool     `json:"isAdminEnforced"`
-	LockBranch                      bool     `json:"lockBranch"`
-	RequiredApprovingReviewCount    int      `json:"requiredApprovingReviewCount"`
+	DismissesStaleReviews          bool     `json:"dismissesStaleReviews"`
+	IsAdminEnforced                bool     `json:"isAdminEnforced"`
+	LockBranch                     bool     `json:"lockBranch"`
+	RequiredApprovingReviewCount   int      `json:"requiredApprovingReviewCount"`
 	RequiredDeploymentEnvironments []string `json:"requiredDeploymentEnvironments"`
-	RequiresApprovingReviews        bool     `json:"requiresApprovingReviews"`
-	RequiresCodeOwnerReviews        bool     `json:"requiresCodeOwnerReviews"`
-	RequiresCommitSignatures        bool     `json:"requiresCommitSignatures"`
+	RequiresApprovingReviews       bool     `json:"requiresApprovingReviews"`
+	RequiresCodeOwnerReviews       bool     `json:"requiresCodeOwnerReviews"`
+	RequiresCommitSignatures       bool     `json:"requiresCommitSignatures"`
 	RequiresConversationResolution bool     `json:"requiresConversationResolution"`
-	RequiresDeployments             bool     `json:"requiresDeployments"`
-	RequiresLinearHistory           bool     `json:"requiresLinearHistory"`
-	RequiresStatusChecks            bool     `json:"requiresStatusChecks"`
-	RequiresStrictStatusChecks      bool     `json:"requiresStrictStatusChecks"`
-	RestrictsPushes                 bool     `json:"restrictsPushes"`
-	BypassPullRequestAllowances     struct {
+	RequiresDeployments            bool     `json:"requiresDeployments"`
+	RequiresLinearHistory          bool     `json:"requiresLinearHistory"`
+	RequiresStatusChecks           bool     `json:"requiresStatusChecks"`
+	RequiresStrictStatusChecks     bool     `json:"requiresStrictStatusChecks"`
+	RestrictsPushes                bool     `json:"restrictsPushes"`
+	BypassPullRequestAllowances    struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"bypassPullRequestAllowances"`
 	RequiredStatusChecks []struct {
@@ -501,7 +501,7 @@ func githubClassicRESTRestrictionsPresent(raw json.RawMessage) (bool, bool) {
 	if json.Unmarshal(raw, &value) != nil {
 		return false, false
 	}
-	return len(value.Users) + len(value.Teams) + len(value.Apps) > 0, true
+	return len(value.Users)+len(value.Teams)+len(value.Apps) > 0, true
 }
 
 func removeGitHubPolicyMarkers(values []string, remove ...string) []string {
