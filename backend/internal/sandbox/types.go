@@ -63,14 +63,14 @@ type NetworkPolicy struct {
 // default applies; it never means unlimited when a hardened deployment requires
 // that resource control.
 type ResourceLimits struct {
-	WallTimeMS      int   `json:"wall_time_ms,omitempty"`
-	CPUTimeMS       int   `json:"cpu_time_ms,omitempty"`
-	MemoryBytes     int64 `json:"memory_bytes,omitempty"`
-	DiskBytes       int64 `json:"disk_bytes,omitempty"`
-	MaxProcesses    int   `json:"max_processes,omitempty"`
-	MaxFiles        int   `json:"max_files,omitempty"`
-	MaxStdoutBytes  int64 `json:"max_stdout_bytes,omitempty"`
-	MaxStderrBytes  int64 `json:"max_stderr_bytes,omitempty"`
+	WallTimeMS       int   `json:"wall_time_ms,omitempty"`
+	CPUTimeMS        int   `json:"cpu_time_ms,omitempty"`
+	MemoryBytes      int64 `json:"memory_bytes,omitempty"`
+	DiskBytes        int64 `json:"disk_bytes,omitempty"`
+	MaxProcesses     int   `json:"max_processes,omitempty"`
+	MaxFiles         int   `json:"max_files,omitempty"`
+	MaxStdoutBytes   int64 `json:"max_stdout_bytes,omitempty"`
+	MaxStderrBytes   int64 `json:"max_stderr_bytes,omitempty"`
 	MaxArtifactBytes int64 `json:"max_artifact_bytes,omitempty"`
 }
 
@@ -106,12 +106,12 @@ type RuntimeCapabilities struct {
 // Owner identity is deliberately not present; Broker.Create receives owner
 // scope separately from authenticated request context.
 type CreateRequest struct {
-	Mounts       []WorkspaceMount   `json:"mounts,omitempty"`
-	Network      NetworkPolicy      `json:"network"`
-	Resources    ResourceLimits     `json:"resources,omitempty"`
-	Environment  map[string]string  `json:"environment,omitempty"`
-	Profile      string             `json:"profile,omitempty"`
-	TTLSeconds   int                `json:"ttl_seconds,omitempty"`
+	Mounts       []WorkspaceMount    `json:"mounts,omitempty"`
+	Network      NetworkPolicy       `json:"network"`
+	Resources    ResourceLimits      `json:"resources,omitempty"`
+	Environment  map[string]string   `json:"environment,omitempty"`
+	Profile      string              `json:"profile,omitempty"`
+	TTLSeconds   int                 `json:"ttl_seconds,omitempty"`
 	Requirements RuntimeRequirements `json:"requirements,omitempty"`
 }
 
@@ -134,9 +134,13 @@ type Session struct {
 	ExpiresAt time.Time     `json:"expires_at"`
 }
 
-// ExecRequest describes one process execution inside an existing sandbox.
+// ExecRequest describes one execution inside an existing sandbox. Code tools
+// use Language+Code; terminal/process tools use Command+Args. A request must use
+// exactly one execution mode.
 type ExecRequest struct {
-	Command   string            `json:"command"`
+	Language  string            `json:"language,omitempty"`
+	Code      string            `json:"code,omitempty"`
+	Command   string            `json:"command,omitempty"`
 	Args      []string          `json:"args,omitempty"`
 	Directory string            `json:"directory,omitempty"`
 	Stdin     []byte            `json:"stdin,omitempty"`
@@ -156,13 +160,13 @@ type Artifact struct {
 
 // ExecResult is the bounded result of one sandbox execution.
 type ExecResult struct {
-	ExecutionID string            `json:"execution_id"`
-	Stdout      string            `json:"stdout,omitempty"`
-	Stderr      string            `json:"stderr,omitempty"`
-	ExitCode    int               `json:"exit_code"`
-	DurationMS  int64             `json:"duration_ms,omitempty"`
-	Artifacts   []Artifact        `json:"artifacts,omitempty"`
-	Metadata    map[string]any    `json:"metadata,omitempty"`
+	ExecutionID string         `json:"execution_id"`
+	Stdout      string         `json:"stdout,omitempty"`
+	Stderr      string         `json:"stderr,omitempty"`
+	ExitCode    int            `json:"exit_code"`
+	DurationMS  int64          `json:"duration_ms,omitempty"`
+	Artifacts   []Artifact     `json:"artifacts,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 // Status reports Broker/runtime-observed sandbox state.
