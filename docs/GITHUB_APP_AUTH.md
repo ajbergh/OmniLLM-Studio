@@ -137,27 +137,47 @@ Bindings deliberately retain the GitHub numeric user ID that created them. After
 
 G4a does not add model-facing tools and does not make a binding an authorization grant.
 
-## G4b: binding-backed request-scoped remotes — next
+## G4b: binding-backed request-scoped remotes — implemented
 
-The next slice will make active G4a bindings available to the existing `UserScopedRemoteService` without mutating global operator configuration.
+Active G4a bindings now participate in the existing `UserScopedRemoteService` as request-scoped GitHub remotes without mutating global operator configuration.
 
-A binding may participate only when:
+A binding is eligible only when:
 
-- its stored GitHub user ID matches the currently connected GitHub identity;
+- its stored GitHub user ID matches the currently persisted GitHub identity for the invocation owner;
 - its local repository ID is still present in `OMNILLM_GIT_REPOSITORIES`;
-- the existing process-wide remote-access gate permits the requested network operation.
+- it is not marked disabled;
+- its stored GitHub `owner/repository` name passes the existing bounded GitHub owner/repository validation.
 
-The request-scoped adapter should construct the exact `https://github.com/{owner}/{repository}.git` endpoint internally from the validated stored GitHub repository identity. Model/user tool arguments must continue to supply only stable remote IDs, never URLs or filesystem paths.
+Eligible bindings receive a deterministic model-facing remote ID derived from the local repository ID (`github-<localRepositoryId>`, with bounded hashing for unusually long IDs). The exact `https://github.com/{owner}/{repository}.git` URL is constructed internally from validated stored identity. Tool arguments continue to accept only stable remote IDs; raw URLs, hostnames, worktree paths, and credentials never become model-facing arguments.
 
-Binding-backed remotes must start with every mutation and hosted-PR permission disabled. In particular, a binding must not synthesize `allow_push`, `allow_branch_create`, `allow_pull_request_read`, `allow_pull_request_create`, `allow_pull_request_reply`, `allow_pull_request_thread_resolution`, `allow_pull_request_ready`, `allow_default_branch_push`, or `allow_clone`. Any future elevation must remain a separate explicit operator/user policy decision layered on the existing process gates and approval system.
+Static `OMNILLM_GIT_REMOTES_JSON` entries remain authoritative. If a synthesized binding would collide with a static remote ID, the static operator remote wins and the binding does not override it.
 
-`git_remotes` must remain local/non-network: binding and connection-status lookup may use local persistence, but token resolution/refresh remains deferred to an actual credentialed network operation.
+Binding lookup and GitHub connection-status lookup are local-only. `git_remotes` can inventory active bindings and report authentication presence without resolving or refreshing a token. Credential resolution remains deferred until a credentialed network operation executes, where the connected user's token is injected only into a per-request cloned `RemoteService`. The base remote map is never modified.
+
+Bindings whose stored GitHub user ID belongs to a previously connected account are excluded. Disconnect removes the persisted GitHub identity, so bindings disappear from runtime inventory. If the same persisted identity instead requires reauthorization, the binding may remain visible for local inventory while actual network execution fails closed through `AccessToken` rather than falling back to operator credentials.
+
+Synthesized binding remotes deliberately set **none** of the per-remote authorization flags. They do not grant:
+
+- `allow_push`
+- `allow_branch_create`
+- `allow_pull_request_read`
+- `allow_pull_request_create`
+- `allow_pull_request_reply`
+- `allow_pull_request_thread_resolution`
+- `allow_pull_request_ready`
+- `allow_default_branch_push`
+- `allow_clone`
+
+Consequently, connecting/binding GitHub does not enable push, branch publication, hosted PR operations, default-branch push, or clone. Existing process-wide gates, per-remote policy, scoped/tool approvals, and exact reviewed-state preconditions remain authoritative. `git_fetch` remains governed by its existing global remote gate, local Git write gate, approval policy, and reviewed local/remote state preconditions.
+
+The API-layer runtime now carries the GitHub auth service and repository handler together, allowing the existing router composition call to supply both credential and binding state to the registry without changing `router.go` for G4b.
+
+Model-facing descriptions for `git_remotes`, `git_remote_status`, and `git_fetch` now refer to remote IDs available to the invocation rather than incorrectly implying that every readable/fetchable remote is a static operator entry.
 
 Authentication remains distinct from authorization.
 
 ## Subsequent slices
 
-1. **G4b — consume active repository bindings in the request-scoped remote service.**
-2. **G5 — Settings UI: Connect GitHub, choose repositories, status, reconnect, disconnect.**
-3. **M2 — continue merge-policy completeness work independently.**
-4. **M3 — consider guarded direct merge only after M2 can prove policy completeness.**
+1. **G5 — Settings UI: Connect GitHub, choose repositories, status, reconnect, disconnect.**
+2. **M2 — continue merge-policy completeness work independently.**
+3. **M3 — consider guarded direct merge only after M2 can prove policy completeness.**
