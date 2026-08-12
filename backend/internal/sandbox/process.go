@@ -1,8 +1,8 @@
 // Package sandbox defines the execution boundary used by local untrusted or
-// model-directed subprocesses. The initial host runner in this file provides a
-// single, sanitized process-construction seam; platform sandbox runtimes replace
-// the host runner behind the same higher-level boundary as the sandbox program
-// advances.
+// model-directed subprocesses. HostCommandRunner remains the concrete sanitized
+// host implementation; the historical NewHostCommandRunner constructor now
+// returns the persistent extension policy runner so existing MCP/plugin call
+// sites gain platform confinement without lifecycle rewrites.
 package sandbox
 
 import (
@@ -26,23 +26,25 @@ type ProcessSpec struct {
 	Env     map[string]string
 }
 
-// CommandRunner constructs a process command for a ProcessSpec. The current
-// HostCommandRunner is a compatibility implementation with environment
-// sanitization; future OS/container sandbox runners plug in at this seam.
+// CommandRunner constructs a process command for a ProcessSpec.
 type CommandRunner interface {
 	CommandContext(context.Context, ProcessSpec) (*exec.Cmd, error)
 }
 
 // HostCommandRunner creates host child processes with a deliberately small
-// ambient environment. It is not itself an OS sandbox and must not be treated
-// as one; its purpose is to remove ambient-secret inheritance while providing a
-// common construction boundary for migration to platform sandbox runtimes.
+// ambient environment. It is not itself an OS sandbox. Use the constructor for
+// extension workloads so platform policy can select confinement first; direct
+// zero-value HostCommandRunner use is reserved for explicit compatibility paths
+// and tests.
 type HostCommandRunner struct{}
 
-// NewHostCommandRunner returns the compatibility host runner.
-func NewHostCommandRunner() HostCommandRunner { return HostCommandRunner{} }
+// NewHostCommandRunner preserves the historical constructor name used by MCP
+// and plugins, but returns the extension policy runner. In auto mode Linux uses
+// Bubblewrap whenever OMNILLM_SANDBOX_ROOTFS is configured; other platforms stay
+// on the sanitized boundary until their native confinement phases land.
+func NewHostCommandRunner() CommandRunner { return NewExtensionCommandRunner() }
 
-// CommandContext constructs a sanitized child process command.
+// CommandContext constructs a sanitized host child process command.
 func (HostCommandRunner) CommandContext(ctx context.Context, spec ProcessSpec) (*exec.Cmd, error) {
 	command := strings.TrimSpace(spec.Command)
 	if command == "" {
