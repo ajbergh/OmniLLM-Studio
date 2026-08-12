@@ -1135,7 +1135,8 @@ export interface ImageEditGenerateRequest {
   quality?: string;
   n?: number;
   seed?: number;
-  creativity?: number;
+  creativity?: number; // deprecated
+  guidance?: number;
   reference_image_ids?: string[];
   style_reference_ids?: string[];
   override?: {
@@ -1149,7 +1150,6 @@ export interface ImageEditEditRequest {
   base_image_attachment_id: string;
   mask_attachment_id?: string;
   size?: string;
-  geometry_mode?: 'preserve_source' | 'provider_auto' | 'explicit';
   strength?: number;
   n?: number;
   reference_image_ids?: string[];
@@ -1191,6 +1191,10 @@ export interface ModelImageCapabilities {
   supports_masking?: boolean;
   masking_mode?: 'none' | 'semantic' | 'pixel';
   supports_content_reference?: boolean;
+  supports_style_reference?: boolean;
+  supports_seed?: boolean;
+  supports_guidance?: boolean;
+  max_reference_images?: number;
   max_variants?: number;
   supported_sizes?: string[];
 }

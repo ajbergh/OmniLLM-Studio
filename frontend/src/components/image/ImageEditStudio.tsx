@@ -28,6 +28,8 @@ interface ImageEditStudioProps {
 
 type MobileImagePanel = 'prompt' | 'canvas' | 'history';
 
+const IMAGE_STUDIO_PROVIDER_TYPES = new Set(['openai', 'gemini', 'openrouter', 'together']);
+
 const CHAT_CAPABLE_PROVIDER_TYPES = new Set([
   'openai',
   'anthropic',
@@ -106,7 +108,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const [selectedProvider, setSelectedProvider] = useState(activeConvo?.default_provider || '');
   const [selectedImageModel, setSelectedImageModel] = useState('');
   const [seed, setSeed] = useState<number | null>(null);
-  const [creativity, setCreativity] = useState(0.5);
+  const [guidance, setGuidance] = useState(3.5);
   const [variants, setVariants] = useState(1);
   const [compareOpen, setCompareOpen] = useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
@@ -124,7 +126,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
   const autoGenerateNonceRef = useRef<string | null>(null);
   const [capabilities, setCapabilities] = useState<ImageCapabilities | null>(null);
   const imageCapableProviders = useMemo(
-    () => providers.filter((provider) => provider.enabled && (
+    () => providers.filter((provider) => provider.enabled && IMAGE_STUDIO_PROVIDER_TYPES.has(provider.type.toLowerCase()) && (
       provider.image_capable === true ||
       Boolean(provider.default_image_model) ||
       getKnownImageModels(provider.type).length > 0
@@ -216,12 +218,20 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
       supports_masking: overrides.supports_masking ?? capabilities.supports_masking,
       masking_mode: overrides.masking_mode ?? capabilities.masking_mode,
       supports_content_reference: overrides.supports_content_reference ?? capabilities.supports_content_reference,
+      supports_style_reference: overrides.supports_style_reference ?? capabilities.supports_style_reference,
+      supports_seed: overrides.supports_seed ?? capabilities.supports_seed,
+      supports_guidance: overrides.supports_guidance ?? capabilities.supports_guidance,
+      max_reference_images: overrides.max_reference_images ?? capabilities.max_reference_images,
     };
   }, [capabilities, selectedImageModel]);
 
   const maskingMode = (effectiveCaps?.masking_mode ?? (effectiveCaps?.supports_masking ? 'pixel' : 'none')) as ImageMaskingMode;
   const maskToolsActive = editMode === 'edit' && effectiveCaps?.supports_masking === true && maskingMode !== 'none';
   const maskSelectionInactive = editMode === 'edit' && maskStrokes.length > 0 && !maskToolsActive;
+
+  const referenceLimit = effectiveCaps?.max_reference_images ?? 0;
+  const referenceCount = contentReferenceIds.length + styleReferenceIds.length;
+  const canAddReference = referenceLimit > 0 && referenceCount < referenceLimit;
 
   const selectedProviderProfile = useMemo(
     () => providers.find((provider) => provider.id === selectedProvider || provider.name === selectedProvider),
@@ -294,11 +304,11 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
     await generate(conversationId!, {
       prompt: prompt.trim(),
       size,
-      seed: seed ?? undefined,
-      creativity,
+      seed: effectiveCaps?.supports_seed ? seed ?? undefined : undefined,
+      guidance: effectiveCaps?.supports_guidance ? guidance : undefined,
       n: variants,
-      reference_image_ids: contentReferenceIds.length > 0 ? contentReferenceIds : undefined,
-      style_reference_ids: styleReferenceIds.length > 0 ? styleReferenceIds : undefined,
+      reference_image_ids: effectiveCaps?.supports_content_reference && contentReferenceIds.length > 0 ? contentReferenceIds : undefined,
+      style_reference_ids: effectiveCaps?.supports_style_reference && styleReferenceIds.length > 0 ? styleReferenceIds : undefined,
       override: selectedProvider ? { provider: selectedProvider, model: selectedImageModel || undefined } : undefined,
     });
     setPrompt('');
@@ -352,10 +362,9 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
       base_image_attachment_id: baseAttachmentId,
       mask_attachment_id: maskAttachmentId,
       size,
-      geometry_mode: size === '' || size === 'auto' ? 'preserve_source' : 'explicit',
       n: variants,
-      reference_image_ids: contentReferenceIds.length > 0 ? contentReferenceIds : undefined,
-      style_reference_ids: styleReferenceIds.length > 0 ? styleReferenceIds : undefined,
+      reference_image_ids: effectiveCaps?.supports_content_reference && contentReferenceIds.length > 0 ? contentReferenceIds : undefined,
+      style_reference_ids: effectiveCaps?.supports_style_reference && styleReferenceIds.length > 0 ? styleReferenceIds : undefined,
       override: selectedProvider ? { provider: selectedProvider, model: selectedImageModel || undefined } : undefined,
     });
     setPrompt('');
@@ -768,8 +777,8 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                   onSizeChange={setSize}
                   seed={seed}
                   onSeedChange={setSeed}
-                  creativity={creativity}
-                  onCreativityChange={setCreativity}
+                  guidance={guidance}
+                  onGuidanceChange={setGuidance}
                   variants={variants}
                   onVariantsChange={setVariants}
                   supportsSeed={effectiveCaps?.supports_seed}
@@ -846,10 +855,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                 </div>
 
                 {/* Reference images */}
-                {(effectiveCaps == null || effectiveCaps.supports_content_reference) && (
+                {effectiveCaps?.supports_content_reference === true && (
                 <div className="space-y-2">
                   <label className="text-xs font-medium text-text-muted uppercase tracking-wide">
-                    Content References {contentReferenceIds.length > 0 && `(${contentReferenceIds.length}/2)`}
+                    Content References {referenceLimit > 0 && `(${referenceCount}/${referenceLimit} total)`}
                   </label>
                   <div className="flex items-center gap-2 flex-wrap">
                     {contentReferenceIds.map((id) => (
@@ -869,7 +878,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                         </button>
                       </div>
                     ))}
-                    {contentReferenceIds.length < 2 && (
+                    {canAddReference && (
                       <button
                         onClick={() => { pendingRefType.current = 'content'; refInputRef.current?.click(); }}
                         className="w-12 h-12 rounded-lg border border-dashed border-border
@@ -883,10 +892,10 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                     )}
                   </div>
 
-                  {editMode === 'edit' && (
+                  {editMode === 'edit' && effectiveCaps?.supports_style_reference === true && (
                     <>
                       <label className="text-xs font-medium text-text-muted uppercase tracking-wide">
-                        Style References {styleReferenceIds.length > 0 && `(${styleReferenceIds.length}/2)`}
+                        Style References {referenceLimit > 0 && `(${referenceCount}/${referenceLimit} total)`}
                       </label>
                       <div className="flex items-center gap-2 flex-wrap">
                         {styleReferenceIds.map((id) => (
@@ -906,7 +915,7 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                             </button>
                           </div>
                         ))}
-                        {styleReferenceIds.length < 2 && (
+                        {canAddReference && (
                           <button
                             onClick={() => { pendingRefType.current = 'style'; refInputRef.current?.click(); }}
                             className="w-12 h-12 rounded-lg border border-dashed border-accent/30
@@ -931,6 +940,11 @@ export function ImageEditStudio({ conversationId: propConversationId, onClose }:
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
+                      if (!canAddReference) {
+                        toast.error(`This model accepts at most ${referenceLimit} reference image${referenceLimit === 1 ? '' : 's'}`);
+                        e.target.value = '';
+                        return;
+                      }
                       try {
                         const data = await uploadAttachment(conversationId!, file);
                         const attachmentId = data.id as string;

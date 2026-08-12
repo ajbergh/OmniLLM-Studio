@@ -186,6 +186,7 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 						"512x2048", "2048x512", "384x3072", "3072x384",
 					},
 				},
+				"gemini-2.5-flash-image":        {MaxReferenceImages: intPtr(3)},
 				"imagen-4.0-generate-001":       imagenGenerationOnly,
 				"imagen-4.0-ultra-generate-001": imagenGenerationOnly,
 				"imagen-4.0-fast-generate-001":  imagenGenerationOnly,
@@ -228,7 +229,7 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 		return ImageCapabilities{
 			SupportsGeneration: true,
 			MaskingMode:        ImageMaskingNone,
-			MaxReferenceImages: 14,
+			MaxReferenceImages: 1,
 			MaxVariants:        1,
 			SupportedSizes: []string{
 				"1024x1024", "832x1248", "1248x832", "864x1184", "1184x864",
