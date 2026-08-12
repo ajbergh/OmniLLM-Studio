@@ -137,6 +137,15 @@ func (r *LocalRuntime) Create(_ context.Context, request RuntimeCreateRequest) (
 		mounts:  mounts,
 	}
 	r.mu.Unlock()
+
+	ttl := defaultSessionTTL
+	if request.Spec.TTLSeconds > 0 {
+		ttl = time.Duration(request.Spec.TTLSeconds) * time.Second
+	}
+	time.AfterFunc(ttl, func() {
+		_ = r.Destroy(context.Background(), runtimeID)
+	})
+
 	return runtimeID, nil
 }
 
@@ -356,12 +365,13 @@ func (r *LocalRuntime) Status(_ context.Context, runtimeID string) (*Status, err
 	return &Status{State: "ready", Capabilities: r.Capabilities()}, nil
 }
 
+// Destroy is idempotent so explicit cleanup and TTL expiry may race safely.
 func (r *LocalRuntime) Destroy(_ context.Context, runtimeID string) error {
 	r.mu.Lock()
 	session, ok := r.sessions[runtimeID]
 	if !ok {
 		r.mu.Unlock()
-		return fmt.Errorf("sandbox runtime session not found")
+		return nil
 	}
 	for key, cancel := range r.active {
 		if strings.HasPrefix(key, runtimeID+"\x00") {
