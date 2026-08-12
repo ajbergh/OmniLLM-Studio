@@ -501,7 +501,7 @@ func githubClassicRESTRestrictionsPresent(raw json.RawMessage) (bool, bool) {
 	if json.Unmarshal(raw, &value) != nil {
 		return false, false
 	}
-	return len(value.Users)+len(value.Teams)+len(value.Apps) > 0, true
+	return len(value.Users) + len(value.Teams) + len(value.Apps) > 0, true
 }
 
 func removeGitHubPolicyMarkers(values []string, remove ...string) []string {
