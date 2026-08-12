@@ -99,3 +99,69 @@ func TestRegistryRebindUsesScopedServiceForRemoteAndHostedTools(t *testing.T) {
 		t.Fatal("GitHub PR reader was not rebound to request-scoped service")
 	}
 }
+
+func TestConfigureGitHubCredentialsRebindsExistingRegistry(t *testing.T) {
+	base := gitrepo.NewRemoteServiceFromEnvironment(nil)
+	remoteTool := &gitRemoteTool{service: base, name: "git_remotes"}
+	readTool := &githubPullRequestReadTool{service: base, name: "github_get_pull_request"}
+	registry := &Registry{tools: map[string]Tool{
+		"git_remotes":             remoteTool,
+		"github_get_pull_request": readTool,
+	}}
+	options := &GitHubCredentialOptions{
+		Connected: func(context.Context, string) (bool, error) { return true, nil },
+		Resolve:   func(context.Context, string) (string, bool, error) { return "token", true, nil },
+	}
+
+	if !registry.ConfigureGitHubCredentials(options) {
+		t.Fatal("expected post-construction GitHub credential configuration to succeed")
+	}
+	if _, ok := remoteTool.service.(*gitrepo.UserScopedRemoteService); !ok {
+		t.Fatalf("remote tool was not rebound: %T", remoteTool.service)
+	}
+	if readTool.service != remoteTool.service {
+		t.Fatal("hosted GitHub tools must share the exact scoped remote service")
+	}
+}
+
+func TestConfigureGitHubCredentialsCanReplaceResolverWithoutNesting(t *testing.T) {
+	base := gitrepo.NewRemoteServiceFromEnvironment(nil)
+	remoteTool := &gitRemoteTool{service: base, name: "git_remotes"}
+	registry := &Registry{tools: map[string]Tool{"git_remotes": remoteTool}}
+	options := func(token string) *GitHubCredentialOptions {
+		return &GitHubCredentialOptions{
+			Connected: func(context.Context, string) (bool, error) { return true, nil },
+			Resolve:   func(context.Context, string) (string, bool, error) { return token, true, nil },
+		}
+	}
+
+	if !registry.ConfigureGitHubCredentials(options("first")) {
+		t.Fatal("first configuration failed")
+	}
+	first, ok := remoteTool.service.(*gitrepo.UserScopedRemoteService)
+	if !ok || first.RemoteService != base {
+		t.Fatalf("first configuration lost base service: %T", remoteTool.service)
+	}
+	if !registry.ConfigureGitHubCredentials(options("second")) {
+		t.Fatal("second configuration failed")
+	}
+	second, ok := remoteTool.service.(*gitrepo.UserScopedRemoteService)
+	if !ok || second.RemoteService != base {
+		t.Fatalf("second configuration nested or lost base service: %T", remoteTool.service)
+	}
+	if second == first {
+		t.Fatal("expected resolver replacement to create a fresh scoped adapter")
+	}
+}
+
+func TestConfigureGitHubCredentialsRejectsIncompleteOptions(t *testing.T) {
+	registry := &Registry{tools: map[string]Tool{}}
+	if registry.ConfigureGitHubCredentials(nil) {
+		t.Fatal("nil options must not modify the registry")
+	}
+	if registry.ConfigureGitHubCredentials(&GitHubCredentialOptions{
+		Connected: func(context.Context, string) (bool, error) { return true, nil },
+	}) {
+		t.Fatal("incomplete options must not modify the registry")
+	}
+}
