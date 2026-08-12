@@ -48,6 +48,19 @@ type sandboxWorkspaceResponse struct {
 	UpdatedAt time.Time         `json:"updated_at"`
 }
 
+type sandboxWorkspaceChangeResponse struct {
+	ID           string    `json:"id"`
+	WorkspaceID  string    `json:"workspace_id"`
+	RelativePath string    `json:"relative_path"`
+	Operation    string    `json:"operation"`
+	BeforeExists bool      `json:"before_exists"`
+	BeforeSHA256 string    `json:"before_sha256,omitempty"`
+	AfterExists  bool      `json:"after_exists"`
+	AfterSHA256  string    `json:"after_sha256,omitempty"`
+	Revertable   bool      `json:"revertable"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 type createSandboxWorkspaceRequest struct {
 	ID       string            `json:"id"`
 	RootPath string            `json:"root_path"`
@@ -148,7 +161,7 @@ func (h *SandboxHandler) DeleteWorkspace(w http.ResponseWriter, r *http.Request)
 
 func (h *SandboxHandler) ListWorkspaceChanges(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.registry == nil {
-		respondJSON(w, http.StatusOK, []sandbox.WorkspaceChange{})
+		respondJSON(w, http.StatusOK, []sandboxWorkspaceChangeResponse{})
 		return
 	}
 	workspaceID := strings.TrimSpace(chi.URLParam(r, "workspaceId"))
@@ -173,7 +186,11 @@ func (h *SandboxHandler) ListWorkspaceChanges(w http.ResponseWriter, r *http.Req
 		respondInternalError(w, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, items)
+	out := make([]sandboxWorkspaceChangeResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, safeSandboxWorkspaceChange(item))
+	}
+	respondJSON(w, http.StatusOK, out)
 }
 
 func safeSandboxWorkspace(workspace sandbox.FileWorkspace) sandboxWorkspaceResponse {
@@ -182,6 +199,21 @@ func safeSandboxWorkspace(workspace sandbox.FileWorkspace) sandboxWorkspaceRespo
 		Mode:      workspace.Mode,
 		CreatedAt: workspace.CreatedAt,
 		UpdatedAt: workspace.UpdatedAt,
+	}
+}
+
+func safeSandboxWorkspaceChange(change sandbox.WorkspaceChange) sandboxWorkspaceChangeResponse {
+	return sandboxWorkspaceChangeResponse{
+		ID:           change.ID,
+		WorkspaceID:  change.WorkspaceID,
+		RelativePath: change.RelativePath,
+		Operation:    change.Operation,
+		BeforeExists: change.BeforeExists,
+		BeforeSHA256: change.BeforeSHA256,
+		AfterExists:  change.AfterExists,
+		AfterSHA256:  change.AfterSHA256,
+		Revertable:   change.Revertable,
+		CreatedAt:    change.CreatedAt,
 	}
 }
 
