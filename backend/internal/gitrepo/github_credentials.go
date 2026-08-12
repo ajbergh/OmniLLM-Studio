@@ -8,23 +8,41 @@ import (
 
 const githubAppSyntheticTokenEnv = "__OMNILLM_GITHUB_APP_TOKEN__"
 
-// GitHubCredentialResolver returns one request-scoped GitHub user credential.
+// GitHubCredentialResolver provides request-scoped GitHub App credential state.
+// GitHubCredentialConnected must be a local/non-network status check suitable for
+// git_remotes. ResolveGitHubCredential may refresh an expiring credential and is
+// called only by operations that already permit network access.
+//
 // connected=false with nil error means no user connection exists and preserves
 // the operator TokenEnv fallback. Any resolver error fails closed and must not
 // fall back to an operator credential for that request.
 type GitHubCredentialResolver interface {
+	GitHubCredentialConnected(ctx context.Context) (connected bool, err error)
 	ResolveGitHubCredential(ctx context.Context) (token string, connected bool, err error)
 }
 
-// GitHubCredentialResolverFunc adapts a function to GitHubCredentialResolver.
-type GitHubCredentialResolverFunc func(context.Context) (string, bool, error)
+// GitHubCredentialResolverFuncs adapts local-status and token-resolution
+// functions to GitHubCredentialResolver.
+type GitHubCredentialResolverFuncs struct {
+	ConnectedFunc func(context.Context) (bool, error)
+	ResolveFunc   func(context.Context) (string, bool, error)
+}
+
+// GitHubCredentialConnected implements GitHubCredentialResolver without
+// performing token resolution or refresh.
+func (f GitHubCredentialResolverFuncs) GitHubCredentialConnected(ctx context.Context) (bool, error) {
+	if f.ConnectedFunc == nil {
+		return false, nil
+	}
+	return f.ConnectedFunc(ctx)
+}
 
 // ResolveGitHubCredential implements GitHubCredentialResolver.
-func (f GitHubCredentialResolverFunc) ResolveGitHubCredential(ctx context.Context) (string, bool, error) {
-	if f == nil {
+func (f GitHubCredentialResolverFuncs) ResolveGitHubCredential(ctx context.Context) (string, bool, error) {
+	if f.ResolveFunc == nil {
 		return "", false, nil
 	}
-	return f(ctx)
+	return f.ResolveFunc(ctx)
 }
 
 // UserScopedRemoteService decorates the existing RemoteService with a
@@ -108,6 +126,18 @@ func cloneRemoteConfigs(remotes map[string]RemoteConfig) map[string]RemoteConfig
 	return cloned
 }
 
+func (s *UserScopedRemoteService) summariesWithoutGitHubCredentials(ctx context.Context) []RemoteSummary {
+	clone := *s.RemoteService
+	clone.remotes = cloneRemoteConfigs(s.remotes)
+	for id, remote := range clone.remotes {
+		if _, _, githubRemote := githubRepositoryFromRemote(remote); githubRemote {
+			remote.TokenEnv = ""
+			clone.remotes[id] = remote
+		}
+	}
+	return clone.Remotes(ctx)
+}
+
 func (s *UserScopedRemoteService) summariesWithGitHubCredential(ctx context.Context) []RemoteSummary {
 	if s == nil || s.RemoteService == nil || s.githubCredentials == nil {
 		if s == nil || s.RemoteService == nil {
@@ -115,37 +145,16 @@ func (s *UserScopedRemoteService) summariesWithGitHubCredential(ctx context.Cont
 		}
 		return s.RemoteService.Remotes(ctx)
 	}
-	token, connected, err := s.githubCredentials.ResolveGitHubCredential(ctx)
+	connected, err := s.githubCredentials.GitHubCredentialConnected(ctx)
 	if err != nil {
-		clone := *s.RemoteService
-		clone.remotes = cloneRemoteConfigs(s.remotes)
-		for id, remote := range clone.remotes {
-			if _, _, githubRemote := githubRepositoryFromRemote(remote); githubRemote {
-				remote.TokenEnv = ""
-				clone.remotes[id] = remote
-			}
-		}
-		return clone.Remotes(ctx)
+		return s.summariesWithoutGitHubCredentials(ctx)
 	}
 	if !connected {
 		return s.RemoteService.Remotes(ctx)
 	}
-	token = strings.TrimSpace(token)
-	if token == "" {
-		clone := *s.RemoteService
-		clone.remotes = cloneRemoteConfigs(s.remotes)
-		for id, remote := range clone.remotes {
-			if _, _, githubRemote := githubRepositoryFromRemote(remote); githubRemote {
-				remote.TokenEnv = ""
-				clone.remotes[id] = remote
-			}
-		}
-		return clone.Remotes(ctx)
-	}
 
 	clone := *s.RemoteService
 	clone.remotes = cloneRemoteConfigs(s.remotes)
-	credentialEnvs := map[string]struct{}{}
 	for id, remote := range clone.remotes {
 		if _, _, githubRemote := githubRepositoryFromRemote(remote); !githubRemote {
 			continue
@@ -156,24 +165,13 @@ func (s *UserScopedRemoteService) summariesWithGitHubCredential(ctx context.Cont
 		if strings.TrimSpace(remote.Username) == "" {
 			remote.Username = "x-access-token"
 		}
-		credentialEnvs[remote.TokenEnv] = struct{}{}
 		clone.remotes[id] = remote
-	}
-	fallback := s.lookupEnv
-	clone.lookupEnv = func(name string) (string, bool) {
-		if _, ok := credentialEnvs[name]; ok {
-			return token, true
-		}
-		if fallback == nil {
-			return "", false
-		}
-		return fallback(name)
 	}
 	return clone.Remotes(ctx)
 }
 
-// Remotes returns request-scoped safe summaries. A usable connected GitHub App
-// credential makes GitHub capabilities visible even when no TokenEnv is set.
+// Remotes returns request-scoped safe summaries using only the resolver's local
+// connection-status check. It never resolves or refreshes a GitHub token.
 func (s *UserScopedRemoteService) Remotes(ctx context.Context) []RemoteSummary {
 	return s.summariesWithGitHubCredential(ctx)
 }
