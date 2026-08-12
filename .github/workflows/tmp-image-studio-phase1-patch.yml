@@ -1,0 +1,49 @@
+name: Temporary Image Studio Phase 1 Patch
+
+on:
+  push:
+    branches:
+      - feat/image-studio-edit-contract-20260812
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[phase1-patch]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/image-studio-edit-contract-20260812
+      - name: Apply geometry-mode frontend integration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          types = Path('frontend/src/types.ts')
+          text = types.read_text()
+          old = "  size?: string;\n  strength?: number;"
+          new = "  size?: string;\n  geometry_mode?: 'preserve_source' | 'provider_auto' | 'explicit';\n  strength?: number;"
+          if old not in text:
+              raise SystemExit('ImageEditEditRequest size anchor not found')
+          types.write_text(text.replace(old, new, 1))
+
+          studio = Path('frontend/src/components/image/ImageEditStudio.tsx')
+          text = studio.read_text()
+          old = "      mask_attachment_id: maskAttachmentId,\n      size,\n      n: variants,"
+          new = "      mask_attachment_id: maskAttachmentId,\n      size,\n      geometry_mode: size === '' || size === 'auto' ? 'preserve_source' : 'explicit',\n      n: variants,"
+          if old not in text:
+              raise SystemExit('ImageEditStudio edit payload anchor not found')
+          studio.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit integration
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/types.ts frontend/src/components/image/ImageEditStudio.tsx
+          git commit -m 'feat(image): send explicit edit geometry intent [phase1-patch]'
+          git push origin HEAD:feat/image-studio-edit-contract-20260812
