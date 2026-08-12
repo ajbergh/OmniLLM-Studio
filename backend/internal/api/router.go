@@ -463,7 +463,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 
 					// Message operations
 					r.Delete("/messages/{messageId}", msgHandler.DeleteMessage)
-					r.Patch("/messages/{messageId}", msgHandler.EditMessage)
+						r.Patch("/messages/{messageId}", msgHandler.EditMessage)
 
 					// Attachments (scoped to conversation)
 					r.Get("/attachments", attachHandler.List)
@@ -673,7 +673,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Route("/jobs", func(r chi.Router) {
 				r.Get("/", jobHandler.List)
 				r.Get("/{jobId}", jobHandler.Get)
-				r.Post("/{jobId}/cancel", jobHandler.CancelJob)
+				r.Post("/{jobId}/cancel", jobHandler.Cancel)
 			})
 
 			// Explicit user-controlled memory.
