@@ -14,6 +14,7 @@ import (
 )
 
 func TestPluginProcessLifecycleAndCancellation(t *testing.T) {
+	t.Setenv("OMNILLM_MASTER_KEY", "parent-secret-must-not-leak")
 	helper := buildPluginHelper(t)
 	manifest := &models.PluginManifest{Name: "test-plugin", Entrypoint: "./" + filepath.Base(helper)}
 	process := NewPluginProcess(manifest, filepath.Dir(helper))
@@ -40,6 +41,18 @@ func TestPluginProcessLifecycleAndCancellation(t *testing.T) {
 	}
 	if got["value"] != "ok" {
 		t.Fatalf("echo value = %q, want ok", got["value"])
+	}
+
+	envResult, err := process.Call(ctx, "env", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("Call(env) error = %v", err)
+	}
+	var envGot map[string]string
+	if err := json.Unmarshal(envResult, &envGot); err != nil {
+		t.Fatalf("decode env result: %v", err)
+	}
+	if envGot["value"] != "" {
+		t.Fatalf("plugin inherited OMNILLM_MASTER_KEY = %q", envGot["value"])
 	}
 
 	hangCtx, hangCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -113,6 +126,9 @@ func main() {
             _ = encoder.Encode(response{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(` + "`{\"ok\":true}`" + `)})
         case "echo":
             _ = encoder.Encode(response{JSONRPC: "2.0", ID: req.ID, Result: req.Params})
+        case "env":
+            payload, _ := json.Marshal(map[string]string{"value": os.Getenv("OMNILLM_MASTER_KEY")})
+            _ = encoder.Encode(response{JSONRPC: "2.0", ID: req.ID, Result: payload})
         case "hang":
             continue
         case "shutdown":
