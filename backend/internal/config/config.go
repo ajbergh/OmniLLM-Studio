@@ -124,6 +124,18 @@ func Load() *Config {
 		origins = cleaned
 	}
 
+	sandboxURL := strings.TrimSpace(os.Getenv("OMNILLM_SANDBOX_URL"))
+	legacySandboxURL := strings.TrimSpace(os.Getenv("OMNILLM_CODE_SANDBOX_URL"))
+	if sandboxURL == "" {
+		sandboxURL = legacySandboxURL
+	} else if legacySandboxURL == "" {
+		// api/router.go still reads the historical environment name while the
+		// sandbox program is being decomposed into small reviewable PRs. Publish
+		// the new name as a compatibility alias before router composition; the
+		// compatibility constructor itself now speaks only authenticated v2.
+		_ = os.Setenv("OMNILLM_CODE_SANDBOX_URL", sandboxURL)
+	}
+
 	return &Config{
 		Port:                port,
 		BindAddress:         bindAddress,
@@ -140,7 +152,7 @@ func Load() *Config {
 		BrowserMaxSessions:  browserMaxSessions,
 		BrowserSessionTTL:   browserSessionTTL,
 		BrowserNoSandbox:    strings.EqualFold(os.Getenv("OMNILLM_BROWSER_NO_SANDBOX"), "true"),
-		SandboxURL:          strings.TrimSpace(os.Getenv("OMNILLM_SANDBOX_URL")),
+		SandboxURL:          sandboxURL,
 		SandboxToken:        strings.TrimSpace(os.Getenv("OMNILLM_SANDBOX_TOKEN")),
 		MCPOAuthRedirectURI: mcpOAuthRedirectURI,
 	}
