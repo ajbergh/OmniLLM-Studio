@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,22 +19,22 @@ const maxRevertSnapshotBytes = 2 << 20
 
 // WorkspaceChange records one filesystem mutation without exposing a host path.
 type WorkspaceChange struct {
-	ID             string     `json:"id"`
-	WorkspaceID    string     `json:"workspace_id"`
-	UserID         string     `json:"user_id"`
-	ConversationID string     `json:"conversation_id,omitempty"`
-	AgentRunID     string     `json:"agent_run_id,omitempty"`
-	TaskID         string     `json:"task_id,omitempty"`
-	SandboxID      string     `json:"sandbox_id,omitempty"`
-	ExecutionID    string     `json:"execution_id,omitempty"`
-	RelativePath   string     `json:"relative_path"`
-	Operation      string     `json:"operation"`
-	BeforeExists   bool       `json:"before_exists"`
-	BeforeSHA256   string     `json:"before_sha256,omitempty"`
-	AfterExists    bool       `json:"after_exists"`
-	AfterSHA256    string     `json:"after_sha256,omitempty"`
-	Revertable     bool       `json:"revertable"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID             string    `json:"id"`
+	WorkspaceID    string    `json:"workspace_id"`
+	UserID         string    `json:"user_id"`
+	ConversationID string    `json:"conversation_id,omitempty"`
+	AgentRunID     string    `json:"agent_run_id,omitempty"`
+	TaskID         string    `json:"task_id,omitempty"`
+	SandboxID      string    `json:"sandbox_id,omitempty"`
+	ExecutionID    string    `json:"execution_id,omitempty"`
+	RelativePath   string    `json:"relative_path"`
+	Operation      string    `json:"operation"`
+	BeforeExists   bool      `json:"before_exists"`
+	BeforeSHA256   string    `json:"before_sha256,omitempty"`
+	AfterExists    bool      `json:"after_exists"`
+	AfterSHA256    string    `json:"after_sha256,omitempty"`
+	Revertable     bool      `json:"revertable"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // FileState is a bounded snapshot used for journaling and stale-state checks.
@@ -84,7 +85,7 @@ func CaptureFileState(path string) (FileState, error) {
 			total += int64(n)
 		}
 		if readErr != nil {
-			if readErr.Error() == "EOF" {
+			if readErr == io.EOF {
 				break
 			}
 			return FileState{}, readErr
