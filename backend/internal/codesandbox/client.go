@@ -37,5 +37,10 @@ func New(baseURL string) (*sandbox.Broker, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sandbox.NewBroker(runtime)
+	broker, err := sandbox.NewBroker(runtime)
+	if err != nil {
+		return nil, err
+	}
+	sandbox.SetDefaultBroker(broker)
+	return broker, nil
 }
