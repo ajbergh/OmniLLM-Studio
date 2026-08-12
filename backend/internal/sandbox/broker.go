@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ const (
 
 type Broker struct {
 	runtime Runtime
+
 	mu       sync.RWMutex
 	sessions map[string]Session
 	now      func() time.Time
@@ -26,7 +28,11 @@ func NewBroker(runtime Runtime) (*Broker, error) {
 	if runtime == nil {
 		return nil, fmt.Errorf("sandbox runtime is required")
 	}
-	return &Broker{runtime: runtime, sessions: make(map[string]Session), now: time.Now}, nil
+	return &Broker{
+		runtime:  runtime,
+		sessions: make(map[string]Session),
+		now:      time.Now,
+	}, nil
 }
 
 func (b *Broker) Capabilities() RuntimeCapabilities {
@@ -43,8 +49,15 @@ func (b *Broker) Create(ctx context.Context, owner OwnerScope, request CreateReq
 	if err := validateCreateRequest(request); err != nil {
 		return nil, err
 	}
-	if err := requireCapabilities(b.runtime.Capabilities(), request.Requirements); err != nil {
+	capabilities := b.runtime.Capabilities()
+	if err := requireCapabilities(capabilities, request.Requirements); err != nil {
 		return nil, err
+	}
+	if request.Network.Mode == NetworkApprovalRequired {
+		return nil, fmt.Errorf("sandbox network approval must be resolved to an owner-bound grant before runtime creation")
+	}
+	if request.Network.Mode == NetworkAllowlist && !capabilities.NetworkAllowlist {
+		return nil, fmt.Errorf("sandbox runtime %q cannot enforce destination network allowlists", capabilities.Name)
 	}
 	resolvedMounts, err := resolveRuntimeMounts(owner, request.Mounts)
 	if err != nil {
@@ -63,14 +76,27 @@ func (b *Broker) Create(ctx context.Context, owner OwnerScope, request CreateReq
 	request.TTLSeconds = int(ttl / time.Second)
 
 	sessionID := "sbx_" + uuid.NewString()
-	runtimeID, err := b.runtime.Create(ctx, RuntimeCreateRequest{SessionID: sessionID, Owner: owner, Spec: request, ResolvedMounts: resolvedMounts})
+	runtimeID, err := b.runtime.Create(ctx, RuntimeCreateRequest{
+		SessionID:      sessionID,
+		Owner:          owner,
+		Spec:           request,
+		ResolvedMounts: resolvedMounts,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create sandbox runtime session: %w", err)
 	}
 	if strings.TrimSpace(runtimeID) == "" {
 		return nil, fmt.Errorf("sandbox runtime returned an empty session id")
 	}
-	session := Session{ID: sessionID, Owner: owner, Spec: request, RuntimeID: runtimeID, CreatedAt: now, ExpiresAt: now.Add(ttl)}
+
+	session := Session{
+		ID:        sessionID,
+		Owner:     owner,
+		Spec:      request,
+		RuntimeID: runtimeID,
+		CreatedAt: now,
+		ExpiresAt: now.Add(ttl),
+	}
 	b.mu.Lock()
 	b.sessions[session.ID] = session
 	b.mu.Unlock()
@@ -100,7 +126,11 @@ func resolveRuntimeMounts(owner OwnerScope, mounts []WorkspaceMount) ([]RuntimeM
 		if err != nil {
 			return nil, err
 		}
-		resolved = append(resolved, RuntimeMount{WorkspaceID: workspace.ID, SourcePath: workspace.RootPath, Mode: effective})
+		resolved = append(resolved, RuntimeMount{
+			WorkspaceID: workspace.ID,
+			SourcePath:  workspace.RootPath,
+			Mode:        effective,
+		})
 	}
 	return resolved, nil
 }
@@ -167,7 +197,9 @@ func (b *Broker) Status(ctx context.Context, owner OwnerScope, sessionID string)
 	if status == nil {
 		status = &Status{}
 	}
-	status.SessionID, status.CreatedAt, status.ExpiresAt = session.ID, session.CreatedAt, session.ExpiresAt
+	status.SessionID = session.ID
+	status.CreatedAt = session.CreatedAt
+	status.ExpiresAt = session.ExpiresAt
 	status.Capabilities = b.runtime.Capabilities()
 	return status, nil
 }
@@ -224,14 +256,15 @@ func validateCreateRequest(request CreateRequest) error {
 			return err
 		}
 	}
+
 	switch request.Network.Mode {
 	case "", NetworkNone, NetworkAllowlist, NetworkApprovalRequired:
 	default:
 		return fmt.Errorf("unsupported sandbox network mode %q", request.Network.Mode)
 	}
 	for _, domain := range request.Network.AllowedDomains {
-		domain = strings.TrimSpace(domain)
-		if domain == "" || strings.ContainsAny(domain, "/\\@") {
+		domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
+		if domain == "" || domain == "localhost" || net.ParseIP(domain) != nil || strings.ContainsAny(domain, "/\\@") {
 			return fmt.Errorf("invalid sandbox network domain %q", domain)
 		}
 	}
@@ -241,7 +274,7 @@ func validateCreateRequest(request CreateRequest) error {
 		}
 	}
 	for key, value := range request.Environment {
-		if err := validateEnvironmentEntry(key, value); err != nil {
+		if err := validateSandboxEnvironmentEntry(key, value); err != nil {
 			return err
 		}
 	}
@@ -272,7 +305,7 @@ func validateExecRequest(request ExecRequest) error {
 		return fmt.Errorf("sandbox timeout cannot be negative")
 	}
 	for key, value := range request.Env {
-		if err := validateEnvironmentEntry(key, value); err != nil {
+		if err := validateSandboxEnvironmentEntry(key, value); err != nil {
 			return err
 		}
 	}
@@ -280,22 +313,43 @@ func validateExecRequest(request ExecRequest) error {
 }
 
 func validateResourceLimits(limits ResourceLimits) error {
-	if limits.WallTimeMS < 0 || limits.CPUTimeMS < 0 || limits.MemoryBytes < 0 || limits.DiskBytes < 0 || limits.MaxProcesses < 0 || limits.MaxFiles < 0 || limits.MaxStdoutBytes < 0 || limits.MaxStderrBytes < 0 || limits.MaxArtifactBytes < 0 {
+	if limits.WallTimeMS < 0 || limits.CPUTimeMS < 0 || limits.MemoryBytes < 0 || limits.DiskBytes < 0 ||
+		limits.MaxProcesses < 0 || limits.MaxFiles < 0 || limits.MaxStdoutBytes < 0 || limits.MaxStderrBytes < 0 ||
+		limits.MaxArtifactBytes < 0 {
 		return fmt.Errorf("sandbox resource limits cannot be negative")
 	}
 	return nil
 }
 
 func requireCapabilities(cap RuntimeCapabilities, required RuntimeRequirements) error {
-	missing := make([]string, 0, 8)
-	if required.OSIsolation && !cap.OSIsolation { missing = append(missing, "os_isolation") }
-	if required.FilesystemIsolation && !cap.FilesystemIsolation { missing = append(missing, "filesystem_isolation") }
-	if required.NetworkIsolation && !cap.NetworkIsolation { missing = append(missing, "network_isolation") }
-	if required.ProcessTreeIsolation && !cap.ProcessTreeIsolation { missing = append(missing, "process_tree_isolation") }
-	if required.MemoryLimit && !cap.MemoryLimit { missing = append(missing, "memory_limit") }
-	if required.CPULimit && !cap.CPULimit { missing = append(missing, "cpu_limit") }
-	if required.PIDLimit && !cap.PIDLimit { missing = append(missing, "pid_limit") }
-	if required.DiskLimit && !cap.DiskLimit { missing = append(missing, "disk_limit") }
+	missing := make([]string, 0, 9)
+	if required.OSIsolation && !cap.OSIsolation {
+		missing = append(missing, "os_isolation")
+	}
+	if required.FilesystemIsolation && !cap.FilesystemIsolation {
+		missing = append(missing, "filesystem_isolation")
+	}
+	if required.NetworkIsolation && !cap.NetworkIsolation {
+		missing = append(missing, "network_isolation")
+	}
+	if required.NetworkAllowlist && !cap.NetworkAllowlist {
+		missing = append(missing, "network_allowlist")
+	}
+	if required.ProcessTreeIsolation && !cap.ProcessTreeIsolation {
+		missing = append(missing, "process_tree_isolation")
+	}
+	if required.MemoryLimit && !cap.MemoryLimit {
+		missing = append(missing, "memory_limit")
+	}
+	if required.CPULimit && !cap.CPULimit {
+		missing = append(missing, "cpu_limit")
+	}
+	if required.PIDLimit && !cap.PIDLimit {
+		missing = append(missing, "pid_limit")
+	}
+	if required.DiskLimit && !cap.DiskLimit {
+		missing = append(missing, "disk_limit")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("sandbox runtime %q cannot satisfy required controls: %s", cap.Name, strings.Join(missing, ", "))
 	}
@@ -307,12 +361,24 @@ func cloneCreateRequest(request CreateRequest) CreateRequest {
 	request.Network.AllowedDomains = append([]string(nil), request.Network.AllowedDomains...)
 	request.Network.AllowedPorts = append([]int(nil), request.Network.AllowedPorts...)
 	request.Environment = cloneStringMap(request.Environment)
-	if request.Network.Mode == "" { request.Network.Mode = NetworkNone }
+	if request.Network.Mode == "" {
+		request.Network.Mode = NetworkNone
+	}
 	return request
 }
 
-func cloneSession(session Session) Session { session.Spec = cloneCreateRequest(session.Spec); return session }
+func cloneSession(session Session) Session {
+	session.Spec = cloneCreateRequest(session.Spec)
+	return session
+}
+
 func cloneStringMap(input map[string]string) map[string]string {
-	if len(input) == 0 { return nil }
-	out := make(map[string]string, len(input)); for key, value := range input { out[key] = value }; return out
+	if len(input) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
