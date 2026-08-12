@@ -69,6 +69,7 @@ type RuntimeRequirements struct {
 	OSIsolation          bool `json:"os_isolation,omitempty"`
 	FilesystemIsolation  bool `json:"filesystem_isolation,omitempty"`
 	NetworkIsolation     bool `json:"network_isolation,omitempty"`
+	NetworkAllowlist     bool `json:"network_allowlist,omitempty"`
 	ProcessTreeIsolation bool `json:"process_tree_isolation,omitempty"`
 	MemoryLimit          bool `json:"memory_limit,omitempty"`
 	CPULimit             bool `json:"cpu_limit,omitempty"`
@@ -82,6 +83,7 @@ type RuntimeCapabilities struct {
 	OSIsolation          bool   `json:"os_isolation"`
 	FilesystemIsolation  bool   `json:"filesystem_isolation"`
 	NetworkIsolation     bool   `json:"network_isolation"`
+	NetworkAllowlist     bool   `json:"network_allowlist"`
 	ProcessTreeIsolation bool   `json:"process_tree_isolation"`
 	MemoryLimit          bool   `json:"memory_limit"`
 	CPULimit             bool   `json:"cpu_limit"`
