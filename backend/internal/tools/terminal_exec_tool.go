@@ -33,7 +33,7 @@ func (t *TerminalExecTool) Definition() ToolDefinition {
 		SupportsParallel: false,
 		DefaultTimeoutMS: 60000,
 		MaxResultBytes:   1 << 20,
-		Parameters: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","minLength":1},"args":{"type":"array","maxItems":128,"items":{"type":"string","maxLength":8192}},"workspace_id":{"type":"string"},"directory":{"type":"string"},"stdin":{"type":"string","maxLength":1048576},"timeout_ms":{"type":"integer","minimum":100,"maximum":60000},"network_grant_id":{"type":"string","maxLength":128,"description":"Optional owner-bound grant returned by sandbox_network_grant"}},"required":["command"],"additionalProperties":false}`),
+		Parameters:       json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","minLength":1},"args":{"type":"array","maxItems":128,"items":{"type":"string","maxLength":8192}},"workspace_id":{"type":"string"},"directory":{"type":"string"},"stdin":{"type":"string","maxLength":1048576},"timeout_ms":{"type":"integer","minimum":100,"maximum":60000},"network_grant_id":{"type":"string","maxLength":128,"description":"Optional owner-bound grant returned by sandbox_network_grant"}},"required":["command"],"additionalProperties":false}`),
 	}
 }
 
