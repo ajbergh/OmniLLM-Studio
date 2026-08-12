@@ -22,19 +22,27 @@ type PythonAnalysisTool struct {
 }
 
 // NewPythonAnalysisTool accepts an optional Broker so bare registries remain
-// source-compatible. Without a Broker the tool is disabled even when the legacy
-// code-exec feature flag is set.
+// source-compatible. The process-default Broker is resolved lazily because the
+// Registry is created before service-backed tools are composed in api/router.go.
 func NewPythonAnalysisTool(brokers ...*sandbox.Broker) *PythonAnalysisTool {
 	var broker *sandbox.Broker
 	if len(brokers) > 0 {
 		broker = brokers[0]
 	}
 	return &PythonAnalysisTool{
-		broker: broker,
-		enabled: broker != nil && strings.EqualFold(
-			strings.TrimSpace(os.Getenv("OMNILLM_CODE_EXEC_ENABLED")), "true",
-		),
+		broker:  broker,
+		enabled: strings.EqualFold(strings.TrimSpace(os.Getenv("OMNILLM_CODE_EXEC_ENABLED")), "true"),
 	}
+}
+
+func (t *PythonAnalysisTool) runtimeBroker() *sandbox.Broker {
+	if t == nil {
+		return nil
+	}
+	if t.broker != nil {
+		return t.broker
+	}
+	return sandbox.DefaultBroker()
 }
 
 func (t *PythonAnalysisTool) Definition() ToolDefinition {
@@ -42,7 +50,7 @@ func (t *PythonAnalysisTool) Definition() ToolDefinition {
 		Name:             "python_analysis",
 		Description:      "Run restricted Python calculations and small in-memory data analysis inside the configured OS sandbox. Imports, file access, subprocesses, networking, and dynamic evaluation are blocked. Disabled unless explicitly enabled by the administrator and a sandbox Broker is available.",
 		Category:         "compute",
-		Enabled:          t != nil && t.enabled && t.broker != nil,
+		Enabled:          t != nil && t.enabled && t.runtimeBroker() != nil,
 		Version:          "2",
 		Risk:             RiskHigh,
 		ReadOnly:         false,
@@ -79,7 +87,7 @@ type pythonAnalysisArgs struct {
 }
 
 func (t *PythonAnalysisTool) Validate(raw json.RawMessage) error {
-	if t == nil || !t.enabled || t.broker == nil {
+	if t == nil || !t.enabled || t.runtimeBroker() == nil {
 		return fmt.Errorf("python analysis is disabled or sandbox unavailable")
 	}
 	var args pythonAnalysisArgs
@@ -102,7 +110,8 @@ func (t *PythonAnalysisTool) Validate(raw json.RawMessage) error {
 }
 
 func (t *PythonAnalysisTool) Execute(ctx context.Context, raw json.RawMessage) (*ToolResult, error) {
-	if t == nil || t.broker == nil || !t.enabled {
+	broker := t.runtimeBroker()
+	if t == nil || broker == nil || !t.enabled {
 		return nil, fmt.Errorf("python analysis is disabled or sandbox unavailable")
 	}
 	var args pythonAnalysisArgs
@@ -122,19 +131,19 @@ func (t *PythonAnalysisTool) Execute(ctx context.Context, raw json.RawMessage) (
 	spec.Resources.MaxStderrBytes = 65536
 	spec.Resources.MaxArtifactBytes = 0
 	spec.TTLSeconds = 120
-	session, err := t.broker.Create(ctx, owner, spec)
+	session, err := broker.Create(ctx, owner, spec)
 	if err != nil {
 		return nil, err
 	}
 
 	program := restrictedPythonProgram(args.Code, args.Data)
-	out, execErr := t.broker.Exec(ctx, owner, session.ID, sandbox.ExecRequest{
+	out, execErr := broker.Exec(ctx, owner, session.ID, sandbox.ExecRequest{
 		Language:  "python",
 		Code:      program,
 		TimeoutMS: 10000,
 	})
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	cleanupErr := t.broker.Destroy(cleanupCtx, owner, session.ID)
+	cleanupErr := broker.Destroy(cleanupCtx, owner, session.ID)
 	cancel()
 	if execErr != nil {
 		return nil, execErr
@@ -182,7 +191,7 @@ func (t *PythonAnalysisTool) Execute(ctx context.Context, raw json.RawMessage) (
 		Content:    content,
 		Structured: structured,
 		Metadata: map[string]interface{}{
-			"runtime":        t.broker.Capabilities().Name,
+			"runtime":        broker.Capabilities().Name,
 			"network":        "none",
 			"workspace_mode": "ephemeral",
 			"execution_id":   out.ExecutionID,
