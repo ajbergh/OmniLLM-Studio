@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestBrowserRuntimeEnabledByDefault(t *testing.T) {
 	t.Setenv("OMNILLM_BROWSER_ENABLED", "")
@@ -27,5 +30,33 @@ func TestBrowserRuntimeHonorsExplicitSetting(t *testing.T) {
 				t.Fatalf("BrowserEnabled = %t, want %t", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSandboxRuntimeUsesNewURLAndPublishesLegacyCompositionAlias(t *testing.T) {
+	t.Setenv("OMNILLM_SANDBOX_URL", "http://127.0.0.1:8090")
+	t.Setenv("OMNILLM_CODE_SANDBOX_URL", "")
+	t.Setenv("OMNILLM_SANDBOX_TOKEN", "runtime-token")
+
+	cfg := Load()
+	if cfg.SandboxURL != "http://127.0.0.1:8090" {
+		t.Fatalf("SandboxURL = %q", cfg.SandboxURL)
+	}
+	if cfg.SandboxToken != "runtime-token" {
+		t.Fatalf("SandboxToken = %q", cfg.SandboxToken)
+	}
+	if legacy := os.Getenv("OMNILLM_CODE_SANDBOX_URL"); legacy != cfg.SandboxURL {
+		t.Fatalf("legacy composition alias = %q, want %q", legacy, cfg.SandboxURL)
+	}
+}
+
+func TestSandboxRuntimeFallsBackToLegacyURL(t *testing.T) {
+	t.Setenv("OMNILLM_SANDBOX_URL", "")
+	t.Setenv("OMNILLM_CODE_SANDBOX_URL", "http://127.0.0.1:8091")
+	t.Setenv("OMNILLM_SANDBOX_TOKEN", "runtime-token")
+
+	cfg := Load()
+	if cfg.SandboxURL != "http://127.0.0.1:8091" {
+		t.Fatalf("SandboxURL = %q", cfg.SandboxURL)
 	}
 }
