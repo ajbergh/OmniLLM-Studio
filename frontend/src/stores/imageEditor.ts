@@ -19,6 +19,27 @@ export interface MaskStroke {
   feather: number;
 }
 
+function parseNodeMaskStrokes(nodes: ImageNode[], nodeId: string | null): MaskStroke[] {
+  if (!nodeId) return [];
+  const node = nodes.find((candidate) => candidate.id === nodeId) as ImageNodeWithMask | undefined;
+  if (!node?.mask?.stroke_json) return [];
+
+  try {
+    const parsed = JSON.parse(node.mask.stroke_json);
+    return Array.isArray(parsed) ? parsed as MaskStroke[] : [];
+  } catch {
+    return [];
+  }
+}
+
+function maskStateForNode(nodes: ImageNode[], nodeId: string | null) {
+  return {
+    maskStrokes: parseNodeMaskStrokes(nodes, nodeId),
+    maskUndoStack: [] as MaskStroke[][],
+    maskRedoStack: [] as MaskStroke[][],
+  };
+}
+
 // ── Store interface ──────────────────────────────────────────────────────
 
 interface ImageEditorState {
@@ -152,6 +173,11 @@ export const useImageEditorStore = create<ImageEditorState>((set, get) => ({
         nodes: [],
         activeNodeId: null,
         activeNodeAssets: [],
+        nodeUndoStack: [],
+        nodeRedoStack: [],
+        maskStrokes: [],
+        maskUndoStack: [],
+        maskRedoStack: [],
       }));
       return session;
     } catch (err) {
@@ -163,32 +189,19 @@ export const useImageEditorStore = create<ImageEditorState>((set, get) => ({
   loadSession: async (conversationId, sessionId) => {
     try {
       const detail = await imageSessionApi.get(conversationId, sessionId);
-      // Restore mask strokes from active node if available
-      let restoredStrokes: MaskStroke[] = [];
-      const activeNode = detail.nodes.find(
-        (n: ImageNodeWithMask) => n.id === detail.session.active_node_id
-      );
-      if (activeNode?.mask?.stroke_json) {
-        try {
-          restoredStrokes = JSON.parse(activeNode.mask.stroke_json);
-        } catch {
-          // Ignore malformed stroke_json
-        }
-      }
+      const activeNodeId = detail.session.active_node_id || null;
       set({
         activeSessionId: detail.session.id,
         activeConversationId: detail.session.conversation_id,
         nodes: detail.nodes,
-        activeNodeId: detail.session.active_node_id || null,
+        activeNodeId,
         nodeUndoStack: [],
         nodeRedoStack: [],
-        maskStrokes: restoredStrokes,
-        maskUndoStack: [],
-        maskRedoStack: [],
+        ...maskStateForNode(detail.nodes, activeNodeId),
       });
       // Load assets for active node
-      if (detail.session.active_node_id) {
-        get().loadNodeAssets(conversationId, detail.session.active_node_id);
+      if (activeNodeId) {
+        get().loadNodeAssets(conversationId, activeNodeId);
       }
     } catch (err) {
       toast.error(`Failed to load session: ${(err as Error).message}`);
@@ -220,7 +233,18 @@ export const useImageEditorStore = create<ImageEditorState>((set, get) => ({
         sessions: s.sessions.filter((ss) => ss.id !== sessionId),
         allSessions: s.allSessions.filter((ss) => ss.id !== sessionId),
         ...(s.activeSessionId === sessionId
-          ? { activeSessionId: null, activeConversationId: null, nodes: [], activeNodeId: null, activeNodeAssets: [] }
+          ? {
+              activeSessionId: null,
+              activeConversationId: null,
+              nodes: [],
+              activeNodeId: null,
+              activeNodeAssets: [],
+              nodeUndoStack: [],
+              nodeRedoStack: [],
+              maskStrokes: [],
+              maskUndoStack: [],
+              maskRedoStack: [],
+            }
           : {}),
       }));
       toast.success('Session deleted');
@@ -307,9 +331,7 @@ export const useImageEditorStore = create<ImageEditorState>((set, get) => ({
       activeNodeAssets: [],
       nodeUndoStack: s.activeNodeId ? [...s.nodeUndoStack, s.activeNodeId] : s.nodeUndoStack,
       nodeRedoStack: [],
-      maskStrokes: [],
-      maskUndoStack: [],
-      maskRedoStack: [],
+      ...maskStateForNode(s.nodes, nodeId),
     }));
   },
 
@@ -395,8 +417,10 @@ export const useImageEditorStore = create<ImageEditorState>((set, get) => ({
       const prev = s.nodeUndoStack[s.nodeUndoStack.length - 1];
       return {
         activeNodeId: prev,
+        activeNodeAssets: [],
         nodeUndoStack: s.nodeUndoStack.slice(0, -1),
         nodeRedoStack: s.activeNodeId ? [...s.nodeRedoStack, s.activeNodeId] : s.nodeRedoStack,
+        ...maskStateForNode(s.nodes, prev),
       };
     }),
 
@@ -406,16 +430,20 @@ export const useImageEditorStore = create<ImageEditorState>((set, get) => ({
       const next = s.nodeRedoStack[s.nodeRedoStack.length - 1];
       return {
         activeNodeId: next,
+        activeNodeAssets: [],
         nodeUndoStack: s.activeNodeId ? [...s.nodeUndoStack, s.activeNodeId] : s.nodeUndoStack,
         nodeRedoStack: s.nodeRedoStack.slice(0, -1),
+        ...maskStateForNode(s.nodes, next),
       };
     }),
 
   branchFromNode: (nodeId) =>
     set((s) => ({
       activeNodeId: nodeId,
+      activeNodeAssets: [],
       nodeUndoStack: s.activeNodeId ? [...s.nodeUndoStack, s.activeNodeId] : s.nodeUndoStack,
       nodeRedoStack: [],
+      ...maskStateForNode(s.nodes, nodeId),
     })),
 
   // Reference image actions
