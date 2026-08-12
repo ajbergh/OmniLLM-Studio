@@ -7,46 +7,43 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
+	"time"
+
+	"github.com/ajbergh/omnillm-studio/internal/sandbox"
 )
 
-// PythonAnalysisTool executes a deliberately restricted Python subset in an
-// isolated temporary working directory. It is disabled unless
-// OMNILLM_CODE_EXEC_ENABLED=true and should retain an "ask" policy.
-//
-// This is not a replacement for an OS/container sandbox. It intentionally
-// excludes imports, filesystem APIs, process APIs, network modules, dunder
-// access, and dynamic evaluation. A future sandbox package can replace the
-// runner without changing the tool contract.
+// PythonAnalysisTool executes the existing restricted Python subset inside the
+// shared OS sandbox Broker. The AST/builtin restrictions remain defense in
+// depth; there is no host-Python fallback.
 type PythonAnalysisTool struct {
-	pythonPath string
-	enabled    bool
+	broker  *sandbox.Broker
+	enabled bool
 }
 
-func NewPythonAnalysisTool() *PythonAnalysisTool {
-	pythonPath := strings.TrimSpace(os.Getenv("OMNILLM_PYTHON_EXEC"))
-	if pythonPath == "" {
-		pythonPath = "python3"
-		if runtime.GOOS == "windows" {
-			pythonPath = "python"
-		}
+// NewPythonAnalysisTool accepts an optional Broker so bare registries remain
+// source-compatible. Without a Broker the tool is disabled even when the legacy
+// code-exec feature flag is set.
+func NewPythonAnalysisTool(brokers ...*sandbox.Broker) *PythonAnalysisTool {
+	var broker *sandbox.Broker
+	if len(brokers) > 0 {
+		broker = brokers[0]
 	}
 	return &PythonAnalysisTool{
-		pythonPath: pythonPath,
-		enabled:    strings.EqualFold(strings.TrimSpace(os.Getenv("OMNILLM_CODE_EXEC_ENABLED")), "true"),
+		broker: broker,
+		enabled: broker != nil && strings.EqualFold(
+			strings.TrimSpace(os.Getenv("OMNILLM_CODE_EXEC_ENABLED")), "true",
+		),
 	}
 }
 
 func (t *PythonAnalysisTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name:             "python_analysis",
-		Description:      "Run restricted Python calculations and small in-memory data analysis. Imports, file access, subprocesses, networking, and dynamic evaluation are blocked. Disabled unless explicitly enabled by the administrator.",
+		Description:      "Run restricted Python calculations and small in-memory data analysis inside the configured OS sandbox. Imports, file access, subprocesses, networking, and dynamic evaluation are blocked. Disabled unless explicitly enabled by the administrator and a sandbox Broker is available.",
 		Category:         "compute",
-		Enabled:          t.enabled,
-		Version:          "1",
+		Enabled:          t != nil && t.enabled && t.broker != nil,
+		Version:          "2",
 		Risk:             RiskHigh,
 		ReadOnly:         false,
 		SideEffecting:    true,
@@ -59,7 +56,8 @@ func (t *PythonAnalysisTool) Definition() ToolDefinition {
 			"properties":{
 				"code":{"type":"string","maxLength":20000,"description":"Restricted Python source. Assign the final serializable value to result or print output."},
 				"data":{"description":"Optional JSON-serializable input exposed as variable data"}
-			}
+			},
+			"additionalProperties":false
 		}`),
 		OutputSchema: json.RawMessage(`{
 			"type":"object",
@@ -81,8 +79,8 @@ type pythonAnalysisArgs struct {
 }
 
 func (t *PythonAnalysisTool) Validate(raw json.RawMessage) error {
-	if !t.enabled {
-		return fmt.Errorf("python analysis is disabled")
+	if t == nil || !t.enabled || t.broker == nil {
+		return fmt.Errorf("python analysis is disabled or sandbox unavailable")
 	}
 	var args pythonAnalysisArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
@@ -104,6 +102,9 @@ func (t *PythonAnalysisTool) Validate(raw json.RawMessage) error {
 }
 
 func (t *PythonAnalysisTool) Execute(ctx context.Context, raw json.RawMessage) (*ToolResult, error) {
+	if t == nil || t.broker == nil || !t.enabled {
+		return nil, fmt.Errorf("python analysis is disabled or sandbox unavailable")
+	}
 	var args pythonAnalysisArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return nil, err
@@ -111,39 +112,48 @@ func (t *PythonAnalysisTool) Execute(ctx context.Context, raw json.RawMessage) (
 	if len(args.Data) == 0 {
 		args.Data = json.RawMessage(`null`)
 	}
-
-	workDir, err := os.MkdirTemp("", "omnillm-python-analysis-*")
+	owner, err := sandboxOwnerFromContext(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("create analysis workspace: %w", err)
-	}
-	defer os.RemoveAll(workDir)
-
-	wrapperPath := filepath.Join(workDir, "runner.py")
-	if err := os.WriteFile(wrapperPath, []byte(restrictedPythonWrapper), 0o600); err != nil {
-		return nil, fmt.Errorf("write analysis runner: %w", err)
+		return nil, err
 	}
 
-	encodedCode := base64.StdEncoding.EncodeToString([]byte(args.Code))
-	encodedData := base64.StdEncoding.EncodeToString(args.Data)
-	cmd := exec.CommandContext(ctx, t.pythonPath, "-I", "-S", wrapperPath)
-	cmd.Dir = workDir
-	cmd.Env = []string{
-		"PYTHONIOENCODING=utf-8",
-		"OMNILLM_ANALYSIS_CODE=" + encodedCode,
-		"OMNILLM_ANALYSIS_DATA=" + encodedData,
+	spec := defaultCodeSandboxSpec(10000)
+	spec.Resources.MaxStdoutBytes = 65536
+	spec.Resources.MaxStderrBytes = 65536
+	spec.Resources.MaxArtifactBytes = 0
+	spec.TTLSeconds = 120
+	session, err := t.broker.Create(ctx, owner, spec)
+	if err != nil {
+		return nil, err
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		message := strings.TrimSpace(stderr.String())
+
+	program := restrictedPythonProgram(args.Code, args.Data)
+	out, execErr := t.broker.Exec(ctx, owner, session.ID, sandbox.ExecRequest{
+		Language:  "python",
+		Code:      program,
+		TimeoutMS: 10000,
+	})
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	cleanupErr := t.broker.Destroy(cleanupCtx, owner, session.ID)
+	cancel()
+	if execErr != nil {
+		return nil, execErr
+	}
+	if cleanupErr != nil {
+		return nil, fmt.Errorf("restricted python sandbox cleanup failed: %w", cleanupErr)
+	}
+	if out == nil {
+		return nil, fmt.Errorf("analysis returned no sandbox result")
+	}
+	if out.ExitCode != 0 {
+		message := strings.TrimSpace(out.Stderr)
 		if message == "" {
-			message = err.Error()
+			message = fmt.Sprintf("sandbox exited with code %d", out.ExitCode)
 		}
 		return nil, fmt.Errorf("restricted python execution failed: %s", message)
 	}
 
-	output := bytes.TrimSpace(stdout.Bytes())
+	output := bytes.TrimSpace([]byte(out.Stdout))
 	if len(output) == 0 {
 		return nil, fmt.Errorf("analysis returned no output")
 	}
@@ -172,11 +182,18 @@ func (t *PythonAnalysisTool) Execute(ctx context.Context, raw json.RawMessage) (
 		Content:    content,
 		Structured: structured,
 		Metadata: map[string]interface{}{
-			"runtime":        "restricted-python",
-			"network":        "not exposed by contract",
-			"workspace_mode": "temporary",
+			"runtime":        t.broker.Capabilities().Name,
+			"network":        "none",
+			"workspace_mode": "ephemeral",
+			"execution_id":   out.ExecutionID,
 		},
 	}, nil
+}
+
+func restrictedPythonProgram(code string, data json.RawMessage) string {
+	encodedCode := base64.StdEncoding.EncodeToString([]byte(code))
+	encodedData := base64.StdEncoding.EncodeToString(data)
+	return fmt.Sprintf(restrictedPythonWrapper, encodedCode, encodedData)
 }
 
 const restrictedPythonWrapper = `
@@ -184,11 +201,11 @@ import ast
 import base64
 import json
 import math
-import os
 import statistics
+from io import StringIO
 
-code = base64.b64decode(os.environ["OMNILLM_ANALYSIS_CODE"]).decode("utf-8")
-data = json.loads(base64.b64decode(os.environ["OMNILLM_ANALYSIS_DATA"]).decode("utf-8"))
+code = base64.b64decode(%q).decode("utf-8")
+data = json.loads(base64.b64decode(%q).decode("utf-8"))
 
 blocked_calls = {
     "eval", "exec", "compile", "open", "input", "globals", "locals", "vars",
@@ -225,7 +242,6 @@ namespace = {
     "result": None,
 }
 
-from io import StringIO
 capture = StringIO()
 safe_builtins["print"] = lambda *args, **kwargs: print(*args, file=capture, **kwargs)
 exec(compile(tree, "<analysis>", "exec"), namespace, namespace)
