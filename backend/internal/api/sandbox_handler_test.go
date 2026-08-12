@@ -153,6 +153,48 @@ func TestSandboxWorkspaceChangesRequireOwnedWorkspace(t *testing.T) {
 	}
 }
 
+func TestSafeSandboxWorkspaceChangeOmitsInternalScopeIdentifiers(t *testing.T) {
+	response := safeSandboxWorkspaceChange(sandbox.WorkspaceChange{
+		ID:             "wch_test",
+		WorkspaceID:    "project",
+		UserID:         "must-not-appear-user",
+		ConversationID: "must-not-appear-conversation",
+		AgentRunID:     "must-not-appear-run",
+		TaskID:         "must-not-appear-task",
+		SandboxID:      "must-not-appear-sandbox",
+		ExecutionID:    "must-not-appear-execution",
+		RelativePath:   "file.txt",
+		Operation:      "write",
+		BeforeExists:   true,
+		BeforeSHA256:   "before",
+		AfterExists:    true,
+		AfterSHA256:    "after",
+		Revertable:     true,
+	})
+	body, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(body)
+	for _, forbidden := range []string{
+		"must-not-appear-user",
+		"must-not-appear-conversation",
+		"must-not-appear-run",
+		"must-not-appear-task",
+		"must-not-appear-sandbox",
+		"must-not-appear-execution",
+	} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("safe change response exposed internal scope value %q: %s", forbidden, encoded)
+		}
+	}
+	for _, required := range []string{"wch_test", "project", "file.txt", "before", "after"} {
+		if !strings.Contains(encoded, required) {
+			t.Fatalf("safe change response omitted required review value %q: %s", required, encoded)
+		}
+	}
+}
+
 func withSandboxWorkspaceRouteParam(request *http.Request, id string) *http.Request {
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("workspaceId", id)
