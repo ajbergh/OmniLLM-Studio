@@ -40,14 +40,14 @@ func (t *gitRemoteTool) Definition() ToolDefinition {
 	}
 	switch t.name {
 	case "git_remotes":
-		definition.Description = "List operator-configured Git remotes by stable remote ID, repository ID, host, authentication presence, and push eligibility. Remote URLs and credential references are never exposed."
+		definition.Description = "List Git remotes available to this invocation by stable remote ID, repository ID, host, authentication presence, and permitted capabilities. This includes static operator remotes and active user-scoped GitHub repository bindings; remote URLs, filesystem paths, and credential references are never exposed."
 		definition.Risk = RiskLow
 		definition.RequiresNetwork = false
 		definition.SupportsParallel = true
 		definition.DefaultTimeoutMS = 5_000
 		definition.Parameters = json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 	case "git_remote_status":
-		definition.Description = "Inspect advertised branch heads for one operator-configured Git remote. This performs approval-gated outbound HTTPS access and returns bounded remote branch hashes for later fetch/push preconditions."
+		definition.Description = "Inspect advertised branch heads for one remote ID returned by git_remotes. This performs approval-gated outbound HTTPS access and returns bounded remote branch hashes for later fetch/push preconditions."
 		definition.Risk = RiskHigh
 		definition.RequiresNetwork = true
 		definition.DefaultTimeoutMS = 30_000
