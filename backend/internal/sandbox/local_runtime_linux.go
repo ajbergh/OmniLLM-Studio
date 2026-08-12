@@ -25,6 +25,7 @@ type localRuntimeSession struct {
 	id      string
 	spec    CreateRequest
 	scratch string
+	mounts  []RuntimeMount
 }
 
 // LocalRuntime is the first-party Linux Bubblewrap execution runtime. It uses a
@@ -41,9 +42,8 @@ type LocalRuntime struct {
 }
 
 // NewLocalRuntime constructs the Linux Bubblewrap runtime. RootFS and the bwrap
-// executable are resolved/canonicalized at startup. The runtime refuses
-// workspace mounts and network-enabled sessions until those policies have
-// dedicated Broker/runtime implementations.
+// executable are resolved/canonicalized at startup. Destination-allowlisted
+// network access remains disabled until an enforceable egress layer is present.
 func NewLocalRuntime(config LocalRuntimeConfig) (Runtime, error) {
 	rootFS, err := canonicalDirectory(config.RootFS)
 	if err != nil {
@@ -92,6 +92,7 @@ func (r *LocalRuntime) Capabilities() RuntimeCapabilities {
 		OSIsolation:          true,
 		FilesystemIsolation:  true,
 		NetworkIsolation:     true,
+		NetworkAllowlist:     false,
 		ProcessTreeIsolation: true,
 		MemoryLimit:          false,
 		CPULimit:             false,
@@ -110,11 +111,12 @@ func (r *LocalRuntime) Create(_ context.Context, request RuntimeCreateRequest) (
 	if err := requireCapabilities(r.Capabilities(), request.Spec.Requirements); err != nil {
 		return "", err
 	}
-	if len(request.Spec.Mounts) != 0 {
-		return "", fmt.Errorf("linux sandbox workspace mounts are not enabled in this runtime revision")
-	}
 	if request.Spec.Network.Mode != "" && request.Spec.Network.Mode != NetworkNone {
 		return "", fmt.Errorf("linux sandbox network access is not enabled in this runtime revision")
+	}
+	mounts, err := validateRuntimeMounts(request)
+	if err != nil {
+		return "", err
 	}
 
 	scratch, err := os.MkdirTemp(r.scratchRoot, "omnillm-sandbox-*")
@@ -128,9 +130,46 @@ func (r *LocalRuntime) Create(_ context.Context, request RuntimeCreateRequest) (
 
 	runtimeID := "rt_" + uuid.NewString()
 	r.mu.Lock()
-	r.sessions[runtimeID] = localRuntimeSession{id: runtimeID, spec: cloneCreateRequest(request.Spec), scratch: scratch}
+	r.sessions[runtimeID] = localRuntimeSession{
+		id:      runtimeID,
+		spec:    cloneCreateRequest(request.Spec),
+		scratch: scratch,
+		mounts:  mounts,
+	}
 	r.mu.Unlock()
 	return runtimeID, nil
+}
+
+func validateRuntimeMounts(request RuntimeCreateRequest) ([]RuntimeMount, error) {
+	if len(request.Spec.Mounts) != len(request.ResolvedMounts) {
+		return nil, fmt.Errorf("runtime workspace mount resolution mismatch")
+	}
+	// The current tool contract exposes at most one project workspace per
+	// execution. Reject additional mounts instead of inventing ambiguous target
+	// paths or widening the model-facing filesystem surface.
+	if len(request.ResolvedMounts) > 1 {
+		return nil, fmt.Errorf("linux sandbox currently supports at most one workspace mount")
+	}
+	out := make([]RuntimeMount, 0, len(request.ResolvedMounts))
+	for i, resolved := range request.ResolvedMounts {
+		requested := request.Spec.Mounts[i]
+		if strings.TrimSpace(resolved.WorkspaceID) == "" || resolved.WorkspaceID != requested.WorkspaceID {
+			return nil, fmt.Errorf("runtime workspace mount identity mismatch")
+		}
+		if resolved.Mode != requested.Mode {
+			return nil, fmt.Errorf("runtime workspace mount mode mismatch")
+		}
+		if err := validateMountMode(resolved.Mode); err != nil {
+			return nil, err
+		}
+		source, err := canonicalDirectory(resolved.SourcePath)
+		if err != nil {
+			return nil, fmt.Errorf("runtime workspace %q: %w", resolved.WorkspaceID, err)
+		}
+		resolved.SourcePath = source
+		out = append(out, resolved)
+	}
+	return out, nil
 }
 
 func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecRequest) (*ExecResult, error) {
@@ -147,9 +186,10 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		return nil, err
 	}
 	for key, value := range request.Env {
-		if err := validateEnvironmentEntry(key, value); err != nil {
+		if err := validateSandboxEnvironmentEntry(key, value); err != nil {
 			return nil, err
 		}
+	}
 
 	timeout := defaultLocalExecTimeout
 	if session.spec.Resources.WallTimeMS > 0 {
@@ -182,14 +222,22 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		"--proc", "/proc",
 		"--dev", "/dev",
 		"--tmpfs", "/tmp",
+		"--dir", "/tmp/home",
 		"--dir", "/workspace",
-		"--bind", session.scratch, "/workspace",
+	}
+	mountArgs, workspaceMode, err := runtimeWorkspaceMountArgs(session)
+	if err != nil {
+		return nil, err
+	}
+	bwrapArgs = append(bwrapArgs, mountArgs...)
+	bwrapArgs = append(bwrapArgs,
 		"--chdir", directory,
 		"--clearenv",
 		"--setenv", "PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"--setenv", "HOME", "/workspace",
+		"--setenv", "HOME", "/tmp/home",
 		"--setenv", "TMPDIR", "/tmp",
-	}
+	)
+
 	environment := cloneStringMap(session.spec.Environment)
 	if environment == nil {
 		environment = make(map[string]string)
@@ -198,6 +246,9 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		environment[key] = value
 	}
 	for key, value := range environment {
+		if err := validateSandboxEnvironmentEntry(key, value); err != nil {
+			return nil, err
+		}
 		bwrapArgs = append(bwrapArgs, "--setenv", key, value)
 	}
 	bwrapArgs = append(bwrapArgs, "--", command)
@@ -240,6 +291,7 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		"stdout_truncated": stdout.Truncated(),
 		"stderr_truncated": stderr.Truncated(),
 		"network":          "none",
+		"workspace_mode":   workspaceMode,
 	}
 	return &ExecResult{
 		ExecutionID: executionID,
@@ -249,6 +301,40 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		DurationMS:  duration,
 		Metadata:    metadata,
 	}, nil
+}
+
+func runtimeWorkspaceMountArgs(session localRuntimeSession) ([]string, string, error) {
+	if len(session.mounts) == 0 {
+		return []string{"--bind", session.scratch, "/workspace"}, "ephemeral", nil
+	}
+	if len(session.mounts) != 1 {
+		return nil, "", fmt.Errorf("linux sandbox currently supports at most one workspace mount")
+	}
+	mount := session.mounts[0]
+	switch mount.Mode {
+	case MountReadOnly:
+		return []string{"--ro-bind", mount.SourcePath, "/workspace"}, string(MountReadOnly), nil
+	case MountReadWriteNoDelete:
+		// POSIX bind mounts cannot enforce write-without-delete semantics. Narrow
+		// the grant to read-only rather than silently weakening it.
+		return []string{"--ro-bind", mount.SourcePath, "/workspace"}, string(MountReadOnly), nil
+	case MountReadWrite:
+		args := []string{"--bind", mount.SourcePath, "/workspace"}
+		gitPath := filepath.Join(mount.SourcePath, ".git")
+		if info, err := os.Lstat(gitPath); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				// A symlinked Git control path is difficult to protect without
+				// widening traversal authority. Narrow the entire mount instead.
+				return []string{"--ro-bind", mount.SourcePath, "/workspace"}, string(MountReadOnly), nil
+			}
+			args = append(args, "--ro-bind", gitPath, "/workspace/.git")
+		} else if !os.IsNotExist(err) {
+			return nil, "", fmt.Errorf("inspect workspace Git metadata: %w", err)
+		}
+		return args, string(MountReadWrite), nil
+	default:
+		return nil, "", fmt.Errorf("unsupported runtime workspace mode %q", mount.Mode)
+	}
 }
 
 func (r *LocalRuntime) Cancel(_ context.Context, runtimeID, executionID string) error {
@@ -324,7 +410,7 @@ func sandboxCommand(request ExecRequest) (string, []string, error) {
 	}
 	switch strings.ToLower(strings.TrimSpace(request.Language)) {
 	case "python":
-		return "python3", []string{"-c", request.Code}, nil
+		return "python3", []string{"-I", "-S", "-c", request.Code}, nil
 	case "javascript":
 		return "node", []string{"-e", request.Code}, nil
 	case "shell":
