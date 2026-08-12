@@ -16,7 +16,7 @@ type Config struct {
 	DatabasePath    string
 	AttachmentsDir  string
 	CORSOrigins     []string
-	AllowPublicReg  bool   // When false (default), only the first user can register.
+	AllowPublicReg  bool // When false (default), only the first user can register.
 	ChromemDir      string // Directory for chromem-go persistent vector files.
 	ChromemCompress bool   // Enable gzip compression for chromem data files.
 
@@ -30,7 +30,15 @@ type Config struct {
 	// BrowserNoSandbox is an emergency compatibility override. The Chromium
 	// sandbox remains enabled by default and disabling it requires an explicit
 	// OMNILLM_BROWSER_NO_SANDBOX=true setting.
-	BrowserNoSandbox    bool
+	BrowserNoSandbox bool
+
+	// SandboxURL and SandboxToken configure the authenticated protocol-v2
+	// execution runtime used by code/terminal/extension workloads. The token is
+	// application-owned and must never be exposed to model tool arguments or the
+	// frontend.
+	SandboxURL   string
+	SandboxToken string
+
 	MCPOAuthRedirectURI string
 }
 
@@ -132,6 +140,8 @@ func Load() *Config {
 		BrowserMaxSessions:  browserMaxSessions,
 		BrowserSessionTTL:   browserSessionTTL,
 		BrowserNoSandbox:    strings.EqualFold(os.Getenv("OMNILLM_BROWSER_NO_SANDBOX"), "true"),
+		SandboxURL:          strings.TrimSpace(os.Getenv("OMNILLM_SANDBOX_URL")),
+		SandboxToken:        strings.TrimSpace(os.Getenv("OMNILLM_SANDBOX_TOKEN")),
 		MCPOAuthRedirectURI: mcpOAuthRedirectURI,
 	}
 }
