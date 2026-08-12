@@ -107,9 +107,8 @@ export function ToolDiagnosticsPanel() {
   }, [metrics]);
 
   return (
-    <div className="space-y-4">
+    <>
       <SandboxSettingsPanel />
-
       <div className="rounded-2xl border border-border bg-surface-alt p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -190,6 +189,6 @@ export function ToolDiagnosticsPanel() {
           )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
