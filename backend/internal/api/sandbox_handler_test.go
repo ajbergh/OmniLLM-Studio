@@ -141,8 +141,10 @@ func TestSandboxWorkspaceGrantRequiresOperatorEnablement(t *testing.T) {
 }
 
 func TestSandboxPathGrantLoopbackRejectsForwardedAddressHeaders(t *testing.T) {
-	if !requestIsLoopback(httptest.NewRequest(http.MethodGet, "/", nil)) {
-		t.Fatal("httptest direct loopback request should be accepted")
+	direct := httptest.NewRequest(http.MethodGet, "/", nil)
+	direct.RemoteAddr = "127.0.0.1:4242"
+	if !requestIsLoopback(direct) {
+		t.Fatal("direct loopback request should be accepted")
 	}
 	for _, header := range []string{
 		"Forwarded",
