@@ -21,20 +21,20 @@ This document is the durable implementation tracker for the August 2026 Image St
 | 0A | Edit-size state, Source default, safe `auto` handling | Complete | PR #100, squash merged as `e50431a` |
 | 0B | Mask state scoped to active image node | Complete | PR #102, squash merged as `b2d75ff` |
 | 0C | One-finger touch masking + two-finger gesture coexistence | Complete | PR #103, squash merged as `84e7e84` |
-| 1 | Provider-neutral edit geometry contract and dedicated Image Studio provider transport | In progress | `feat/image-studio-edit-contract-20260812` |
-| 2 | Provider-aware mask semantics and source/mask validation | Planned | — |
-| 3 | Selection UX completion: feathering and capability transitions | Planned | — |
-| 4 | Capability completion: references, variants, seed/guidance, honest provider matrix | Planned | — |
-| 5 | Regression matrix and documentation closeout | Planned | — |
+| 1 | Provider-neutral edit geometry contract and dedicated Image Studio provider transport | Complete | PR #106 |
+| 2 | Provider-aware mask semantics and source/mask validation | In progress | `feat/image-studio-mask-contract-20260812` |
+| 3 | Selection UX completion: feathering and capability transitions | Planned | `feat/image-studio-selection-ux-20260812` |
+| 4 | Capability completion: references, variants, seed/guidance, honest provider matrix | Planned | `feat/image-studio-capability-completion-20260812` |
+| 5 | Regression matrix and documentation closeout | Planned | `test/image-studio-regression-matrix-20260812` |
 
 ## Confirmed defects from the review
 
 ### Geometry
 
-- The editor historically defaulted edit output to `1024x1024`, which could change a non-square source without user intent. Phase 0A fixed the frontend state, but provider transport still needs an explicit semantic contract.
-- The legacy OpenAI edit transport substitutes `1024x1024` when edit size is omitted.
-- Gemini's legacy size mapper maps unknown values to `1:1`, creating an unsafe fallback.
-- OpenRouter's repository transport still uses the older chat-completions image-generation path even though OpenRouter now exposes a dedicated Images API.
+- The editor historically defaulted edit output to `1024x1024`, which could change a non-square source without user intent. Phase 0A fixed the frontend state, and Phase 1 added the semantic provider transport that keeps source-preserving edits distinct from explicit output geometry.
+- The legacy OpenAI edit transport substituted `1024x1024` when edit size was omitted; Image Studio now maps source-preserving OpenAI edits to provider `auto` rather than the square fallback.
+- Gemini's legacy size mapper mapped unknown values to `1:1`; Image Studio now leaves geometry unset for source-preserving Gemini edits.
+- Image Studio OpenRouter generation/editing now uses the dedicated Images API instead of the older chat-completions image shim.
 
 ### Selection and masks
 
