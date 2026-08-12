@@ -21,11 +21,11 @@ This document is the durable implementation tracker for the August 2026 Image St
 | 0A | Edit-size state, Source default, safe `auto` handling | Complete | PR #100, squash merged as `e50431a` |
 | 0B | Mask state scoped to active image node | Complete | PR #102, squash merged as `b2d75ff` |
 | 0C | One-finger touch masking + two-finger gesture coexistence | Complete | PR #103, squash merged as `84e7e84` |
-| 1 | Provider-neutral edit geometry contract and dedicated Image Studio provider transport | Complete | PR #106 |
-| 2 | Provider-aware mask semantics and source/mask validation | In progress | `feat/image-studio-mask-contract-20260812` |
-| 3 | Selection UX completion: feathering and capability transitions | Planned | `feat/image-studio-selection-ux-20260812` |
-| 4 | Capability completion: references, variants, seed/guidance, honest provider matrix | Planned | `feat/image-studio-capability-completion-20260812` |
-| 5 | Regression matrix and documentation closeout | Planned | `test/image-studio-regression-matrix-20260812` |
+| 1 | Provider-neutral edit geometry contract and dedicated Image Studio provider transport | Complete | PR #106, squash merged as `890fb997` |
+| 2 | Provider-aware mask semantics and source/mask validation | Complete | PR #113 |
+| 3 | Selection UX completion: feathering and capability transitions | In progress | PR #114 |
+| 4 | Capability completion: references, variants, seed/guidance, honest provider matrix | Planned | PR #115 |
+| 5 | Regression matrix and documentation closeout | Planned | PR #116 |
 
 ## Confirmed defects from the review
 
@@ -40,15 +40,17 @@ This document is the durable implementation tracker for the August 2026 Image St
 
 - Mask strokes were previously restored only at initial session load; Phase 0B fixed node navigation leakage.
 - Touch masking was documented but one-finger drawing was not implemented; Phase 0C completed it.
-- Brush feather is stored in stroke state but is not applied to preview or exported masks.
-- A previously painted selection can remain in memory when switching to a model that cannot consume masks; submission must never forward that stale selection.
-- Pixel-mask providers and semantic image-edit providers are represented by the same `supports_masking` boolean.
+- Phase 2 distinguishes exact pixel masks from semantic edit-area guidance with `masking_mode` and validates exact alpha masks before provider dispatch.
+- OpenRouter no longer advertises pixel masking because the dedicated Images transport does not expose a compatible mask parameter.
+- Imagen 4 no longer inherits Gemini editing/masking/reference capabilities; it is treated as generation-only in this integration.
+- Brush feather is stored in stroke state but is not applied to preview or exported masks; Phase 3 completes that path.
+- A previously painted selection can remain in memory when switching to a model that cannot consume masks; Phase 3 makes that retained selection inactive and prevents submission.
 
 ### Capability completion
 
 - `seed` and `creativity` are persisted for generation nodes but are not transported through the legacy `llm.ImageRequest`, so controls can appear meaningful without affecting generation.
 - The frontend image-editor store hard-caps content/style reference arrays at two while provider capabilities advertise larger limits for some models.
-- The capability matrix advertises image capabilities for provider types that `ImageGenerate` does not route, including a permissive unknown-provider default.
+- The capability matrix advertised image capabilities for provider types that the service did not route, including a permissive unknown-provider default; Phase 2 makes unknown/unimplemented transports image-incapable.
 - Backend request validation does not consistently enforce reference-role support, combined reference limits, or model variant limits.
 
 ## Phase 1 — Edit geometry and provider transport
@@ -66,7 +68,7 @@ This document is the durable implementation tracker for the August 2026 Image St
 
 - Unit tests for geometry normalization and provider mapping.
 - OpenRouter request-body tests for references, explicit aspect, provider-auto behavior, seed, and `n`.
-- Existing backend/front-end quality gates and production builds.
+- Repository Quality Gate, Security Scan, and container builds passed before merge.
 
 ## Phase 2 — Provider-aware masks
 
@@ -77,7 +79,14 @@ This document is the durable implementation tracker for the August 2026 Image St
 - Treat Gemini mask images as semantic edit guidance, not exact alpha-mask transport.
 - Do not advertise pixel masking for OpenRouter models unless its dedicated Images API exposes an actual mask parameter.
 - Validate base/mask dimensions before pixel-mask dispatch.
-- Normalize supported raster inputs as needed for deterministic OpenAI multipart edits; reject unsupported/corrupt mask combinations with a user-actionable error instead of relying on provider failures.
+- Validate PNG alpha-mask structure and DALL-E 2 source-format requirements before provider dispatch.
+- Read WebP dimensions without adding a CGO/native decoder dependency.
+- Make Imagen 4 generation-only in the current integration, including a zero reference-image limit.
+
+### Validation
+
+- Unit tests cover matching masks, dimension mismatch, masks with no transparent selection, and WebP dimension parsing.
+- Repository CI is the merge gate for PR #113.
 
 ## Phase 3 — Selection UX completion
 
