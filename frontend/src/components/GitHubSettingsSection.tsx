@@ -149,7 +149,7 @@ export function GitHubSettingsSection() {
     };
   }, [clearPolling, refresh]);
 
-  const schedulePoll = useCallback((authorization: GitHubDeviceAuthorization, delayMs: number) => {
+  function schedulePoll(authorization: GitHubDeviceAuthorization, delayMs: number) {
     if (!mountedRef.current) return;
     timeoutRef.current = window.setTimeout(() => {
       timeoutRef.current = null;
@@ -189,9 +189,9 @@ export function GitHubSettingsSection() {
           if (requestRef.current === controller) requestRef.current = null;
         });
     }, delayMs);
-  }, [refresh]);
+  }
 
-  const startConnection = useCallback(async () => {
+  async function startConnection() {
     clearPolling();
     setBusy('connect');
     setError(null);
@@ -212,7 +212,7 @@ export function GitHubSettingsSection() {
         setBusy(null);
       }
     }
-  }, [clearPolling, schedulePoll]);
+  }
 
   const disconnect = useCallback(async () => {
     clearPolling();
