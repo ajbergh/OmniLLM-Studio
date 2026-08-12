@@ -36,6 +36,9 @@ func NewRegistry() *Registry {
 	r.MustRegister(NewDateTimeTool())
 	r.MustRegister(NewUnitConvertTool())
 	r.MustRegister(NewPythonAnalysisTool())
+	for _, tool := range NewWorkspaceTools() {
+		r.MustRegister(tool)
+	}
 	gitService := gitrepo.NewServiceFromEnvironment()
 	if gitService.Configured() {
 		for _, tool := range NewGitRepositoryTools(gitService) {
