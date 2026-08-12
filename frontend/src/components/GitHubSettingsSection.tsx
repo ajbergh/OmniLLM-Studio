@@ -49,6 +49,11 @@ function formatExpiry(value?: string): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleString();
 }
 
+function deviceAuthorizationIsActive(authorization: GitHubDeviceAuthorization): boolean {
+  const expiresAt = new Date(authorization.expires_at).getTime();
+  return !Number.isNaN(expiresAt) && Date.now() < expiresAt;
+}
+
 export function GitHubSettingsSection() {
   const [status, setStatus] = useState<GitHubAuthStatus | null>(null);
   const [device, setDevice] = useState<GitHubDeviceAuthorization | null>(null);
@@ -172,7 +177,13 @@ export function GitHubSettingsSection() {
           }
         })
         .catch((nextError) => {
-          if (!controller.signal.aborted) setError(errorMessage(nextError));
+          if (controller.signal.aborted || !mountedRef.current) return;
+          setError(errorMessage(nextError));
+          if (deviceAuthorizationIsActive(authorization)) {
+            schedulePoll(authorization, Math.max(1000, authorization.interval_seconds * 1000));
+          } else {
+            setDevice(null);
+          }
         })
         .finally(() => {
           if (requestRef.current === controller) requestRef.current = null;
@@ -281,7 +292,7 @@ export function GitHubSettingsSection() {
 
   if (busy === 'loading' && !status) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+      <div className="flex items-center gap-2 text-sm text-text-muted">
         <Loader2 size={16} className="animate-spin" /> Loading GitHub connection…
       </div>
     );
@@ -289,17 +300,17 @@ export function GitHubSettingsSection() {
 
   if (!status?.configured) {
     return (
-      <div className="space-y-3">
-        <div className="flex items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-4">
+      <div className="space-y-3 rounded-2xl border border-border bg-surface-alt p-5">
+        <div className="flex items-start gap-3">
           <Github size={20} className="mt-0.5 shrink-0" />
           <div>
             <div className="font-medium">GitHub App connection is not configured</div>
-            <div className="mt-1 text-sm text-[var(--color-text-muted)]">
+            <div className="mt-1 text-sm text-text-muted">
               An administrator must configure the OmniLLM-Studio GitHub App client ID before users can connect accounts.
             </div>
           </div>
         </div>
-        {error && <div className="text-sm text-[var(--color-error)]">{error}</div>}
+        {error && <div className="text-sm text-danger">{error}</div>}
       </div>
     );
   }
@@ -310,11 +321,11 @@ export function GitHubSettingsSection() {
 
   return (
     <div className="space-y-6">
-      <section className="space-y-3">
+      <section className="space-y-3 rounded-2xl border border-border bg-surface-alt p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 font-medium"><Github size={18} /> GitHub connection</div>
-            <div className="mt-1 text-sm text-[var(--color-text-muted)]">
+            <div className="mt-1 text-sm text-text-muted">
               Connect a personal GitHub identity for repository discovery and request-scoped Git credentials.
             </div>
           </div>
@@ -323,7 +334,7 @@ export function GitHubSettingsSection() {
               type="button"
               onClick={() => void startConnection()}
               disabled={busy !== null}
-              className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm hover:bg-surface-hover disabled:opacity-50"
             >
               {busy === 'connect' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
               {status.connected ? 'Reconnect' : 'Connect GitHub'}
@@ -333,7 +344,7 @@ export function GitHubSettingsSection() {
                 type="button"
                 onClick={() => void disconnect()}
                 disabled={busy !== null}
-                className="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm hover:bg-surface-hover disabled:opacity-50"
               >
                 {busy === 'disconnect' ? <Loader2 size={14} className="animate-spin" /> : <Unplug size={14} />}
                 Disconnect
@@ -343,41 +354,41 @@ export function GitHubSettingsSection() {
         </div>
 
         {connectedIdentity && (
-          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-3 text-sm">
+          <div className="rounded-xl border border-border bg-surface p-3 text-sm">
             <span className="font-medium">{status.connected ? 'Connected' : 'Reauthorization required'}:</span>{' '}
             {connectedIdentity}{expires ? ` · token expires ${expires}` : ''}
           </div>
         )}
 
         {device && (
-          <div className="rounded-lg border border-[var(--color-accent)] bg-[var(--color-bg-tertiary)] p-4">
+          <div className="rounded-xl border border-primary/40 bg-primary-glow p-4">
             <div className="text-sm font-medium">Complete authorization at GitHub</div>
             <div className="mt-3 flex flex-wrap items-center gap-3">
-              <code className="rounded bg-[var(--color-bg-primary)] px-3 py-2 text-lg font-semibold tracking-widest">{device.user_code}</code>
+              <code className="rounded-lg bg-surface px-3 py-2 text-lg font-semibold tracking-widest">{device.user_code}</code>
               <a
                 href={device.verification_uri}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-sm text-[var(--color-accent)] hover:underline"
+                className="flex items-center gap-1.5 text-sm text-primary hover:underline"
               >
                 Open GitHub <ExternalLink size={14} />
               </a>
             </div>
-            <div className="mt-2 text-xs text-[var(--color-text-muted)]">
+            <div className="mt-2 text-xs text-text-muted">
               This code expires {formatExpiry(device.expires_at) ?? 'soon'}. OmniLLM-Studio checks GitHub only at the provider-required interval.
             </div>
           </div>
         )}
 
-        {error && <div className="rounded-md bg-[var(--color-error)]/10 p-3 text-sm text-[var(--color-error)]">{error}</div>}
-        {notice && <div className="rounded-md bg-[var(--color-success)]/10 p-3 text-sm text-[var(--color-success)]">{notice}</div>}
+        {error && <div className="rounded-xl bg-danger-soft p-3 text-sm text-danger">{error}</div>}
+        {notice && <div className="rounded-xl bg-success-soft p-3 text-sm text-success">{notice}</div>}
       </section>
 
       {(status.connected || status.github_user_id) && (
-        <section className="space-y-4 border-t border-[var(--color-border)] pt-5">
+        <section className="space-y-4 rounded-2xl border border-border bg-surface-alt p-5">
           <div>
             <div className="flex items-center gap-2 font-medium"><Link2 size={18} /> Repository bindings</div>
-            <div className="mt-1 text-sm text-[var(--color-text-muted)]">
+            <div className="mt-1 text-sm text-text-muted">
               Map a GitHub repository to an administrator-configured local repository ID. Local filesystem paths are never shown here.
             </div>
           </div>
@@ -388,12 +399,12 @@ export function GitHubSettingsSection() {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Filter loaded GitHub repositories…"
-              className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+              className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
             />
           )}
 
           {(bindings?.local_repositories ?? []).length === 0 ? (
-            <div className="rounded-lg border border-[var(--color-border)] p-4 text-sm text-[var(--color-text-muted)]">
+            <div className="rounded-xl border border-border bg-surface p-4 text-sm text-text-muted">
               No local Git repositories are configured for binding. An administrator can add stable repository IDs through the existing Git repository configuration.
             </div>
           ) : (
@@ -402,12 +413,12 @@ export function GitHubSettingsSection() {
                 const binding = bindingByLocalRepository.get(localRepositoryId);
                 const bindingBusy = busy === `bind:${localRepositoryId}` || busy === `delete:${localRepositoryId}`;
                 return (
-                  <div key={localRepositoryId} className="rounded-lg border border-[var(--color-border)] p-4">
+                  <div key={localRepositoryId} className="rounded-xl border border-border bg-surface p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="font-medium">{localRepositoryId}</div>
                         {binding ? (
-                          <div className="mt-1 text-sm text-[var(--color-text-muted)]">
+                          <div className="mt-1 text-sm text-text-muted">
                             {binding.github_full_name}
                             {binding.private ? ' · private' : ' · public'}
                             {binding.fork ? ' · fork' : ''}
@@ -415,7 +426,7 @@ export function GitHubSettingsSection() {
                             {binding.disabled ? ' · disabled' : ''}
                           </div>
                         ) : (
-                          <div className="mt-1 text-sm text-[var(--color-text-muted)]">Not bound</div>
+                          <div className="mt-1 text-sm text-text-muted">Not bound</div>
                         )}
                       </div>
                       {binding && (
@@ -423,7 +434,7 @@ export function GitHubSettingsSection() {
                           type="button"
                           onClick={() => void removeBinding(localRepositoryId)}
                           disabled={bindingBusy}
-                          className="flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-error)] disabled:opacity-50"
+                          className="flex items-center gap-1.5 text-sm text-text-muted hover:text-danger disabled:opacity-50"
                         >
                           {busy === `delete:${localRepositoryId}` ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                           Unbind
@@ -436,7 +447,7 @@ export function GitHubSettingsSection() {
                         <select
                           value={selectedRepositories[localRepositoryId] ?? ''}
                           onChange={(event) => setSelectedRepositories((current) => ({ ...current, [localRepositoryId]: event.target.value }))}
-                          className="min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+                          className="min-w-0 flex-1 rounded-xl border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
                         >
                           <option value="">Choose a GitHub repository…</option>
                           {filteredRepositories.map((repository) => (
@@ -449,7 +460,7 @@ export function GitHubSettingsSection() {
                           type="button"
                           disabled={bindingBusy || !selectedRepositories[localRepositoryId]}
                           onClick={() => void bindRepository(localRepositoryId)}
-                          className="rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm text-white hover:opacity-90 disabled:opacity-50"
+                          className="btn-primary rounded-xl px-3 py-2 text-sm disabled:opacity-50"
                         >
                           {busy === `bind:${localRepositoryId}` ? 'Binding…' : binding ? 'Replace binding' : 'Bind'}
                         </button>
@@ -466,16 +477,16 @@ export function GitHubSettingsSection() {
               type="button"
               onClick={() => void loadMoreRepositories()}
               disabled={busy !== null}
-              className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
+              className="rounded-xl border border-border px-3 py-2 text-sm hover:bg-surface-hover disabled:opacity-50"
             >
               {busy === 'load-more' ? 'Loading…' : 'Load more GitHub repositories'}
             </button>
           )}
 
           {staleBindings.length > 0 && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+            <div className="rounded-xl border border-warning/40 bg-warning-soft p-4">
               <div className="flex items-center gap-2 text-sm font-medium"><AlertTriangle size={16} /> Inactive bindings</div>
-              <div className="mt-2 space-y-1 text-sm text-[var(--color-text-muted)]">
+              <div className="mt-2 space-y-1 text-sm text-text-muted">
                 {staleBindings.map((binding) => (
                   <div key={`${binding.local_repository_id}:${binding.github_repository_id}`}>
                     {binding.local_repository_id} → {binding.github_full_name}: {!binding.account_matches ? 'belongs to a different GitHub identity' : 'local repository is no longer configured'}
@@ -487,8 +498,8 @@ export function GitHubSettingsSection() {
         </section>
       )}
 
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-3 text-xs text-[var(--color-text-muted)]">
-        Connecting or binding GitHub supplies identity and repository selection only. It does not enable Git pushes, branch publication, pull-request mutations, cloning, or other write capabilities; existing operator gates and tool approvals still apply.
+      <div className="rounded-xl border border-border bg-surface-alt p-3 text-xs text-text-muted">
+        Connecting or binding GitHub supplies identity and repository selection only. It does not enable Git pushes, branch publication, pull-request mutations, cloning, merging, or other write capabilities; existing operator gates and tool approvals still apply.
       </div>
     </div>
   );
