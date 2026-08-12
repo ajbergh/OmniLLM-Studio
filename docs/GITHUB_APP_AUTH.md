@@ -61,22 +61,24 @@ Missing `OMNILLM_GITHUB_APP_CLIENT_ID` remains a supported runtime state: `GET /
 
 No frontend behavior is added in G2b and no Git/GitHub mutation gate is changed.
 
-## G3: request-scoped Git credential resolver — next
+## G3a: request-scoped Git credential adapter and registry seam — implemented
 
-The next slice should let existing Git/GitHub tools consume the connected user's GitHub App credential without adding user IDs or credentials to model-facing tool arguments.
+`backend/internal/gitrepo.UserScopedRemoteService` now decorates the existing `RemoteService` without changing its Git transport, GitHub API implementations, local repository service, mutation gates, state-binding checks, or per-remote policy.
 
-Tool invocation context already carries the OmniLLM owner. The Git remote layer should therefore resolve credentials internally from `context.Context`, using this precedence:
+Credential precedence is explicit:
 
-1. if the invoking user has a GitHub App connection, use that user credential;
-2. if that connection requires reauthorization or token refresh fails, fail closed and do **not** fall back to a shared operator token;
-3. if the invoking user has no GitHub App connection, retain `TokenEnv` as a backward-compatible operator/headless fallback;
-4. never apply a GitHub App credential to a non-GitHub remote.
+1. if the invoking user has a GitHub App connection, the connected user credential is substituted for exact `github.com` remotes;
+2. if that connection requires reauthorization or token refresh/resolution fails, execution fails closed and does **not** fall back to a shared operator token;
+3. if the invoking user has no GitHub App connection, existing `TokenEnv` and public-remote behavior remain the backward-compatible operator/headless fallback;
+4. a connected GitHub App credential is never applied to a non-GitHub remote.
 
-The `gitrepo` GitHub capability predicates must also become credential-source agnostic: repository host plus per-remote `allow_*` policy determines whether a capability is allowed, while the actual credential is resolved at execution time.
+The adapter intentionally separates credential **status** from credential **resolution**. `git_remotes` uses only the local/non-network connection-status callback, so the existing low-risk/no-network inventory tool cannot trigger a provider token refresh. Actual token resolution and refresh are deferred until a credentialed Git/GitHub network operation executes.
 
-`tools.NewRegistry()` should remain the backward-compatible default, with an options/dependency path added for an injected GitHub credential provider. This preserves current deployments while allowing `NewRouterWithShutdown` to inject the user-scoped provider backed by `GitHubAppConnectionRepo` and `githubauth.Service`.
+For app-only GitHub remotes, the adapter adds a backend-only synthetic credential reference to its per-request cloned remote configuration. This lets the existing capability predicates and credential-loading paths remain unchanged while making them credential-source agnostic. The base operator configuration is never mutated, and no token or credential reference is exposed in tool arguments or results.
 
-Crucially, the following existing controls remain independent and authoritative:
+`tools.NewRegistry()` remains the backward-compatible zero-dependency constructor. `tools.NewRegistryWithOptions(...)` adds an injected GitHub credential status/resolution path, derives the stable owner from the existing invocation scope (`local` in solo mode), recovers the exact already-constructed `RemoteService`, and rebinds the currently registered Git remote/GitHub collaboration tool service interfaces to the request-scoped adapter. It does not add tools or bypass registration gates.
+
+The following existing controls remain independent and authoritative:
 
 - `OMNILLM_GIT_WRITE_ENABLED`
 - `OMNILLM_GIT_REMOTE_ENABLED`
@@ -89,9 +91,21 @@ Crucially, the following existing controls remain independent and authoritative:
 
 Authentication is not authorization.
 
+## G3b: application credential composition — next
+
+`NewRouterWithShutdown` should next share the existing user-scoped `githubauth.Service` with the registry options path:
+
+- the non-network registry status callback should use the service's secret-free/local connection status for the invocation owner;
+- the execution callback should use `AccessToken(ctx, owner)` so expiring tokens refresh only during an already-networked operation;
+- `githubauth.ErrNotConnected` should map to `connected=false` so existing `TokenEnv` fallback remains available;
+- reauthorization, refresh, persistence, or provider failures should map to `connected=true` plus an error so `gitrepo` fails closed rather than falling back;
+- the same service should continue backing the authenticated `/v1/github/auth` routes.
+
+This should remain a small composition-only change. No model-facing tool schema or permission gate needs to change.
+
 ## Subsequent slices
 
-1. **G3 — request-scoped GitHub credential resolver for existing Git/GitHub tools.**
+1. **G3b — wire the existing GitHub auth service into `NewRegistryWithOptions`.**
 2. **G4 — repository discovery and explicit repository-to-local-worktree binding.**
 3. **G5 — Settings UI: Connect GitHub, choose repositories, status, reconnect, disconnect.**
 4. **M2 — continue merge-policy completeness work independently.**
