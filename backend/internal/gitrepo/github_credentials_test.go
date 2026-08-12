@@ -8,10 +8,17 @@ import (
 )
 
 type testGitHubCredentialResolver struct {
-	token     string
-	connected bool
-	err       error
-	calls     int
+	token       string
+	connected   bool
+	err         error
+	statusErr   error
+	calls       int
+	statusCalls int
+}
+
+func (r *testGitHubCredentialResolver) GitHubCredentialConnected(context.Context) (bool, error) {
+	r.statusCalls++
+	return r.connected, r.statusErr
 }
 
 func (r *testGitHubCredentialResolver) ResolveGitHubCredential(context.Context) (string, bool, error) {
@@ -54,6 +61,9 @@ func TestUserScopedRemoteServiceConnectedGitHubCredentialOverridesTokenEnv(t *te
 	}
 	if resolver.calls != 1 {
 		t.Fatalf("expected one credential resolution, got %d", resolver.calls)
+	}
+	if resolver.statusCalls != 0 {
+		t.Fatalf("network operation unexpectedly used status path %d times", resolver.statusCalls)
 	}
 }
 
@@ -160,15 +170,15 @@ func TestUserScopedRemoteServiceNeverAppliesGitHubCredentialToNonGitHubRemote(t 
 	if service != base {
 		t.Fatal("expected non-GitHub remote to use the base service")
 	}
-	if resolver.calls != 0 {
-		t.Fatalf("GitHub credential resolver was called for non-GitHub remote %d times", resolver.calls)
+	if resolver.calls != 0 || resolver.statusCalls != 0 {
+		t.Fatalf("GitHub credential resolver was used for non-GitHub remote: resolve=%d status=%d", resolver.calls, resolver.statusCalls)
 	}
 	if token, ok := service.lookupEnv("OTHER_TOKEN"); !ok || token != "operator-token" {
 		t.Fatalf("non-GitHub credential changed: %q, %v", token, ok)
 	}
 }
 
-func TestUserScopedRemoteServiceSummariesExposeAppOnlyGitHubCapabilities(t *testing.T) {
+func TestUserScopedRemoteServiceSummariesExposeAppOnlyGitHubCapabilitiesWithoutResolvingToken(t *testing.T) {
 	base := testCredentialRemoteService(t, RemoteConfig{
 		Repository:           "repo",
 		URL:                  "https://github.com/acme/project.git",
@@ -188,9 +198,15 @@ func TestUserScopedRemoteServiceSummariesExposeAppOnlyGitHubCapabilities(t *test
 	if !summaries[0].PullRequestReadAllowed {
 		t.Fatal("expected app-only GitHub PR read capability to remain visible")
 	}
+	if resolver.calls != 0 {
+		t.Fatalf("git_remotes must not resolve or refresh a token; got %d resolve calls", resolver.calls)
+	}
+	if resolver.statusCalls != 1 {
+		t.Fatalf("expected one local status check, got %d", resolver.statusCalls)
+	}
 }
 
-func TestUserScopedRemoteServiceSummaryHidesEnvFallbackWhenConnectedCredentialFails(t *testing.T) {
+func TestUserScopedRemoteServiceSummaryHidesEnvFallbackWhenConnectionStatusFails(t *testing.T) {
 	base := testCredentialRemoteService(t, RemoteConfig{
 		Repository:           "repo",
 		URL:                  "https://github.com/acme/project.git",
@@ -199,7 +215,7 @@ func TestUserScopedRemoteServiceSummaryHidesEnvFallbackWhenConnectedCredentialFa
 		AllowPullRequestRead: true,
 	}, map[string]string{"GITHUB_TOKEN": "operator-token"})
 	base.githubPullRequestReadEnabled = true
-	resolver := &testGitHubCredentialResolver{connected: true, err: errors.New("refresh failed")}
+	resolver := &testGitHubCredentialResolver{connected: true, statusErr: errors.New("credential store failed")}
 	scoped := NewUserScopedRemoteService(base, resolver)
 
 	summaries := scoped.Remotes(context.Background())
@@ -207,6 +223,9 @@ func TestUserScopedRemoteServiceSummaryHidesEnvFallbackWhenConnectedCredentialFa
 		t.Fatalf("expected one remote summary, got %d", len(summaries))
 	}
 	if summaries[0].AuthenticationConfigured || summaries[0].PullRequestReadAllowed {
-		t.Fatalf("failed connected credential must not advertise TokenEnv fallback: %+v", summaries[0])
+		t.Fatalf("failed connected credential status must not advertise TokenEnv fallback: %+v", summaries[0])
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("summary status failure must not resolve a token; got %d resolve calls", resolver.calls)
 	}
 }
