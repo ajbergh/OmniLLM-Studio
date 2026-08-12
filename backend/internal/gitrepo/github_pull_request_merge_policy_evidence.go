@@ -19,62 +19,64 @@ type GitHubPullRequestMergePolicyEvidenceReader interface {
 	GetPullRequestMergePolicyEvidence(ctx context.Context, remoteID string, number int) (*GitHubPullRequestMergePolicyEvidenceResult, error)
 }
 
-// GitHubPullRequestMergePolicyEvidenceResult records whether the policy sources
-// and configured actor boundary are sufficiently visible for a future M3 merge
-// implementation. Direct merge is not implemented by M2.
+// GitHubPullRequestMergePolicyEvidenceResult records whether policy sources and
+// the configured actor boundary are sufficiently visible for a future M3 merge
+// implementation. Direct merge is deliberately not implemented by M2.
 type GitHubPullRequestMergePolicyEvidenceResult struct {
-	Remote                         string                                     `json:"remote"`
-	Repository                     string                                     `json:"repository"`
-	PullRequest                    int                                        `json:"pull_request"`
-	Head                           string                                     `json:"head"`
-	BaseBranch                     string                                     `json:"base_branch"`
-	Requirements                   GitHubPullRequestMergeRequirementsResult    `json:"requirements"`
-	ClassicGraphQLStatus           string                                     `json:"classic_graphql_status"`
-	RulesetDetailStatus            string                                     `json:"ruleset_detail_status"`
-	RulesetsInspected              int                                        `json:"rulesets_inspected"`
-	RulesetBypassActorsPresent     bool                                       `json:"ruleset_bypass_actors_present"`
-	ConfiguredActorLogin           string                                     `json:"configured_actor_login,omitempty"`
-	ConfiguredActorRepositoryRole  string                                     `json:"configured_actor_repository_role,omitempty"`
-	ConfiguredActorRoleStatus      string                                     `json:"configured_actor_role_status"`
-	ConfiguredActorBypassStatus    string                                     `json:"configured_actor_bypass_status"`
-	EvidenceComplete               bool                                       `json:"evidence_complete"`
-	DirectMergeSupported           bool                                       `json:"direct_merge_supported"`
-	BlockingReasons                []string                                   `json:"blocking_reasons,omitempty"`
+	Remote                        string                                   `json:"remote"`
+	Repository                    string                                   `json:"repository"`
+	PullRequest                   int                                      `json:"pull_request"`
+	Head                          string                                   `json:"head"`
+	BaseBranch                    string                                   `json:"base_branch"`
+	Requirements                  GitHubPullRequestMergeRequirementsResult `json:"requirements"`
+	ClassicGraphQLStatus          string                                   `json:"classic_graphql_status"`
+	RulesetDetailStatus           string                                   `json:"ruleset_detail_status"`
+	RulesetsInspected             int                                      `json:"rulesets_inspected"`
+	RulesetBypassActorsPresent    bool                                     `json:"ruleset_bypass_actors_present"`
+	ConfiguredActorLogin          string                                   `json:"configured_actor_login,omitempty"`
+	ConfiguredActorRepositoryRole string                                   `json:"configured_actor_repository_role,omitempty"`
+	ConfiguredActorRoleStatus     string                                   `json:"configured_actor_role_status"`
+	ConfiguredActorBypassStatus   string                                   `json:"configured_actor_bypass_status"`
+	EvidenceComplete              bool                                     `json:"evidence_complete"`
+	DirectMergeSupported          bool                                     `json:"direct_merge_supported"`
+	BlockingReasons               []string                                 `json:"blocking_reasons,omitempty"`
 }
 
 type githubMergePolicyGraphQLResponse struct {
-	Viewer struct {
-		Login string `json:"login"`
-	} `json:"viewer"`
-	Repository *struct {
-		Ref *struct {
-			Name                 string                             `json:"name"`
-			BranchProtectionRule *githubGraphQLBranchProtectionRule `json:"branchProtectionRule"`
-		} `json:"ref"`
-	} `json:"repository"`
+	Data struct {
+		Viewer struct {
+			Login string `json:"login"`
+		} `json:"viewer"`
+		Repository *struct {
+			Ref *struct {
+				Name                 string                              `json:"name"`
+				BranchProtectionRule *githubGraphQLBranchProtectionRule `json:"branchProtectionRule"`
+			} `json:"ref"`
+		} `json:"repository"`
+	} `json:"data"`
+	Errors []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
 }
 
 type githubGraphQLBranchProtectionRule struct {
-	DismissesStaleReviews          bool `json:"dismissesStaleReviews"`
-	IsAdminEnforced                bool `json:"isAdminEnforced"`
-	LockBranch                     bool `json:"lockBranch"`
-	RequiredApprovingReviewCount   int  `json:"requiredApprovingReviewCount"`
+	DismissesStaleReviews           bool     `json:"dismissesStaleReviews"`
+	IsAdminEnforced                 bool     `json:"isAdminEnforced"`
+	LockBranch                      bool     `json:"lockBranch"`
+	RequiredApprovingReviewCount    int      `json:"requiredApprovingReviewCount"`
 	RequiredDeploymentEnvironments []string `json:"requiredDeploymentEnvironments"`
-	RequiresApprovingReviews       bool `json:"requiresApprovingReviews"`
-	RequiresCodeOwnerReviews       bool `json:"requiresCodeOwnerReviews"`
-	RequiresCommitSignatures       bool `json:"requiresCommitSignatures"`
-	RequiresConversationResolution bool `json:"requiresConversationResolution"`
-	RequiresDeployments            bool `json:"requiresDeployments"`
-	RequiresLinearHistory          bool `json:"requiresLinearHistory"`
-	RequiresStatusChecks           bool `json:"requiresStatusChecks"`
-	RequiresStrictStatusChecks     bool `json:"requiresStrictStatusChecks"`
-	RestrictsPushes                bool `json:"restrictsPushes"`
-	BypassPullRequestAllowances    struct {
+	RequiresApprovingReviews        bool     `json:"requiresApprovingReviews"`
+	RequiresCodeOwnerReviews        bool     `json:"requiresCodeOwnerReviews"`
+	RequiresCommitSignatures        bool     `json:"requiresCommitSignatures"`
+	RequiresConversationResolution bool     `json:"requiresConversationResolution"`
+	RequiresDeployments             bool     `json:"requiresDeployments"`
+	RequiresLinearHistory           bool     `json:"requiresLinearHistory"`
+	RequiresStatusChecks            bool     `json:"requiresStatusChecks"`
+	RequiresStrictStatusChecks      bool     `json:"requiresStrictStatusChecks"`
+	RestrictsPushes                 bool     `json:"restrictsPushes"`
+	BypassPullRequestAllowances     struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"bypassPullRequestAllowances"`
-	PushAllowances struct {
-		TotalCount int `json:"totalCount"`
-	} `json:"pushAllowances"`
 	RequiredStatusChecks []struct {
 		Context string `json:"context"`
 		App     *struct {
@@ -128,7 +130,6 @@ const githubMergePolicyEvidenceQuery = `query OmniLLMMergePolicyEvidence($owner:
         restrictsPushes
         requiredStatusChecks { context app { databaseId } }
         bypassPullRequestAllowances(first: 1) { totalCount }
-        pushAllowances(first: 1) { totalCount }
       }
     }
   }
@@ -136,9 +137,9 @@ const githubMergePolicyEvidenceQuery = `query OmniLLMMergePolicyEvidence($owner:
 
 // GetPullRequestMergePolicyEvidence performs M2's bounded read-only evidence
 // pass. It starts from a fresh M1 result, corroborates classic protection via
-// exact-ref GraphQL, inspects each bounded active ruleset detail for bypass
-// visibility, verifies the configured actor's repository role, then re-fetches
-// the PR to ensure the evidence remained bound to the same head/base.
+// REST plus exact-ref GraphQL, inspects every bounded active ruleset detail for
+// bypass visibility, verifies the configured actor's repository role, then
+// re-fetches the PR to ensure evidence remained bound to the same head/base.
 func (s *RemoteService) GetPullRequestMergePolicyEvidence(ctx context.Context, remoteID string, number int) (*GitHubPullRequestMergePolicyEvidenceResult, error) {
 	if number <= 0 {
 		return nil, fmt.Errorf("pull request number must be positive")
@@ -152,45 +153,31 @@ func (s *RemoteService) GetPullRequestMergePolicyEvidence(ctx context.Context, r
 		return nil, err
 	}
 
-	effective := cloneGitHubMergeRequirements(base)
 	result := &GitHubPullRequestMergePolicyEvidenceResult{
 		Remote: strings.TrimSpace(remoteID), Repository: remote.Repository, PullRequest: number,
-		Head: base.Head, BaseBranch: base.BaseBranch, Requirements: effective,
+		Head: base.Head, BaseBranch: base.BaseBranch, Requirements: cloneGitHubMergeRequirements(base),
 		ClassicGraphQLStatus: "unavailable", RulesetDetailStatus: "unavailable",
 		ConfiguredActorRoleStatus: "unavailable", ConfiguredActorBypassStatus: "unproven",
 		DirectMergeSupported: false, BlockingReasons: []string{},
 	}
 
-	var graph githubMergePolicyGraphQLResponse
-	graphErr := s.doGitHubGraphQL(ctx, token, githubMergePolicyEvidenceQuery, map[string]interface{}{
-		"owner": owner, "repository": repository, "qualifiedRef": "refs/heads/" + base.BaseBranch,
-	}, &graph)
-	if graphErr != nil || graph.Repository == nil || graph.Repository.Ref == nil || strings.TrimSpace(graph.Repository.Ref.Name) != base.BaseBranch {
-		result.BlockingReasons = append(result.BlockingReasons, "classic_graphql_visibility_incomplete")
-	} else {
-		result.ConfiguredActorLogin = strings.TrimSpace(graph.Viewer.Login)
-		if err := applyGitHubGraphQLClassicEvidence(&result.Requirements, graph.Repository.Ref.BranchProtectionRule); err != nil {
-			result.ClassicGraphQLStatus = "inconsistent"
-			result.BlockingReasons = append(result.BlockingReasons, "classic_policy_sources_inconsistent")
-		} else {
-			result.ClassicGraphQLStatus = "complete"
-		}
-	}
+	viewerLogin, classicStatus, classicReasons := s.inspectGitHubClassicPolicyEvidence(ctx, token, owner, repository, base.BaseBranch, &result.Requirements)
+	result.ConfiguredActorLogin = viewerLogin
+	result.ClassicGraphQLStatus = classicStatus
+	result.BlockingReasons = append(result.BlockingReasons, classicReasons...)
 
 	rulesetStatus, rulesetsInspected, bypassActorsPresent, rulesetReasons := s.inspectGitHubRulesetBypassEvidence(ctx, token, owner, repository, base.BaseBranch)
 	result.RulesetDetailStatus = rulesetStatus
 	result.RulesetsInspected = rulesetsInspected
 	result.RulesetBypassActorsPresent = bypassActorsPresent
 	result.BlockingReasons = append(result.BlockingReasons, rulesetReasons...)
-	if rulesetStatus == "not_applicable" {
+	switch rulesetStatus {
+	case "not_applicable":
 		result.Requirements.RulesetBypassVisibility = "not_applicable"
-	} else if rulesetStatus == "complete" {
+	case "complete":
 		result.Requirements.RulesetBypassVisibility = "complete"
-	} else {
+	default:
 		result.Requirements.RulesetBypassVisibility = "incomplete"
-	}
-	if bypassActorsPresent {
-		result.Requirements.PotentialBypass = true
 	}
 
 	if result.ConfiguredActorLogin != "" {
@@ -202,11 +189,15 @@ func (s *RemoteService) GetPullRequestMergePolicyEvidence(ctx context.Context, r
 			result.ConfiguredActorRepositoryRole = roleName
 			if standardGitHubRepositoryRole(roleName) {
 				result.ConfiguredActorRoleStatus = "standard"
+				actorAdmin := roleName == "admin"
+				if result.Requirements.ConfiguredActorAdmin != actorAdmin {
+					result.ConfiguredActorRoleStatus = "inconsistent"
+					result.BlockingReasons = append(result.BlockingReasons, "configured_actor_permission_sources_inconsistent")
+				}
 			} else if roleName != "" {
 				result.ConfiguredActorRoleStatus = "custom_role_unverified"
 				result.BlockingReasons = append(result.BlockingReasons, "configured_actor_custom_role_permissions_unverified")
 			} else {
-				result.ConfiguredActorRoleStatus = "unavailable"
 				result.BlockingReasons = append(result.BlockingReasons, "configured_actor_repository_role_unavailable")
 			}
 		} else {
@@ -214,6 +205,18 @@ func (s *RemoteService) GetPullRequestMergePolicyEvidence(ctx context.Context, r
 		}
 	} else {
 		result.BlockingReasons = append(result.BlockingReasons, "configured_actor_identity_unavailable")
+	}
+
+	// M1 conservatively marks any active ruleset as a possible bypass because
+	// the active-rules endpoint omits bypass actors. M2 may clear only that
+	// placeholder after every ruleset detail exposed its bypass_actors field.
+	if classicStatus == "complete" && (rulesetStatus == "complete" || rulesetStatus == "not_applicable") {
+		result.Requirements.PotentialBypass = bypassActorsPresent || result.Requirements.ClassicReviewBypassAllowancesPresent
+		if result.Requirements.ConfiguredActorAdmin && result.Requirements.ClassicProtectionStatus == "visible" {
+			if result.Requirements.ClassicAdministratorEnforced == nil || !*result.Requirements.ClassicAdministratorEnforced {
+				result.Requirements.PotentialBypass = true
+			}
+		}
 	}
 
 	result.ConfiguredActorBypassStatus = configuredGitHubActorBypassStatus(&result.Requirements, result.ConfiguredActorRoleStatus, result.ConfiguredActorRepositoryRole, bypassActorsPresent)
@@ -232,9 +235,8 @@ func (s *RemoteService) GetPullRequestMergePolicyEvidence(ctx context.Context, r
 		result.Requirements.ClassicPolicyCoverage == "complete" &&
 		(result.Requirements.RulesetBypassVisibility == "complete" || result.Requirements.RulesetBypassVisibility == "not_applicable") &&
 		len(result.Requirements.UnknownPolicyRules) == 0 && !result.Requirements.PotentialBypass
-
-	result.EvidenceComplete = result.ClassicGraphQLStatus == "complete" &&
-		(result.RulesetDetailStatus == "complete" || result.RulesetDetailStatus == "not_applicable") &&
+	result.EvidenceComplete = classicStatus == "complete" &&
+		(rulesetStatus == "complete" || rulesetStatus == "not_applicable") &&
 		result.ConfiguredActorRoleStatus == "standard" && result.ConfiguredActorBypassStatus == "constrained" &&
 		result.Requirements.MergePolicyComplete && len(result.BlockingReasons) == 0
 
@@ -245,8 +247,8 @@ func (s *RemoteService) GetPullRequestMergePolicyEvidence(ctx context.Context, r
 		result.BlockingReasons = sortedUniqueStrings(append(result.BlockingReasons, "pull_request_changed_during_policy_inspection"))
 	}
 
-	// M2 is an evidence gate only. Even complete evidence does not register or
-	// authorize a merge mutation; M3 requires an independent implementation.
+	// M2 is an evidence gate only. Complete evidence never registers or
+	// authorizes a merge mutation; M3 requires an independent implementation.
 	result.DirectMergeSupported = false
 	return result, nil
 }
@@ -263,24 +265,60 @@ func cloneGitHubMergeRequirements(input *GitHubPullRequestMergeRequirementsResul
 	return out
 }
 
-func applyGitHubGraphQLClassicEvidence(result *GitHubPullRequestMergeRequirementsResult, rule *githubGraphQLBranchProtectionRule) error {
-	if result == nil {
-		return fmt.Errorf("merge requirements are unavailable")
+func (s *RemoteService) inspectGitHubClassicPolicyEvidence(ctx context.Context, token, owner, repository, baseBranch string, result *GitHubPullRequestMergeRequirementsResult) (string, string, []string) {
+	var graph githubMergePolicyGraphQLResponse
+	graphErr := s.doGitHubGraphQL(ctx, token, githubMergePolicyEvidenceQuery, map[string]interface{}{
+		"owner": owner, "repository": repository, "qualifiedRef": "refs/heads/" + baseBranch,
+	}, &graph)
+	if graphErr != nil || len(graph.Errors) > 0 || graph.Data.Repository == nil || graph.Data.Repository.Ref == nil || strings.TrimSpace(graph.Data.Repository.Ref.Name) != baseBranch {
+		return "", "unavailable", []string{"classic_graphql_visibility_incomplete"}
 	}
+	viewerLogin := strings.TrimSpace(graph.Data.Viewer.Login)
+	rule := graph.Data.Repository.Ref.BranchProtectionRule
+
+	protectionEndpoint := fmt.Sprintf("/repos/%s/%s/branches/%s/protection", owner, repository, url.PathEscape(baseBranch))
+	var protection githubBranchProtectionResponse
+	protectionStatus, protectionErr := s.doGitHubReadJSONStatus(ctx, token, protectionEndpoint, &protection)
+	if protectionErr != nil {
+		return viewerLogin, "unavailable", []string{"classic_rest_visibility_incomplete"}
+	}
+
 	if rule == nil {
-		if result.ClassicProtectionStatus == "visible" {
-			return fmt.Errorf("classic protection sources disagree")
+		if protectionStatus == http.StatusOK {
+			return viewerLogin, "inconsistent", []string{"classic_policy_sources_inconsistent"}
 		}
 		result.ClassicProtectionStatus = "unprotected_confirmed"
 		result.ClassicPolicyCoverage = "complete"
 		result.ClassicAdministratorEnforced = nil
 		result.ClassicRestrictionsPresent = false
 		result.ClassicReviewBypassAllowancesPresent = false
-		return nil
+		result.UnknownPolicyRules = removeGitHubPolicyMarkers(result.UnknownPolicyRules,
+			"classic.restrictions", "classic.bypass_pull_request_allowances")
+		return viewerLogin, "complete", nil
 	}
 
+	// GraphQL exposes deployment prerequisites and integration-bound status
+	// checks, but REST still carries material classic fields such as last-push
+	// approval. A visible GraphQL rule therefore cannot replace inaccessible
+	// REST branch protection; the two sources must corroborate each other.
+	if protectionStatus != http.StatusOK {
+		return viewerLogin, "incomplete", []string{"classic_rest_visibility_incomplete"}
+	}
+	if !githubClassicRESTGraphQLConsistent(protection, rule) {
+		return viewerLogin, "inconsistent", []string{"classic_policy_sources_inconsistent"}
+	}
+
+	applyGitHubClassicProtection(result, protection)
+	applyGitHubGraphQLClassicEvidence(result, rule)
 	result.ClassicProtectionStatus = "visible"
 	result.ClassicPolicyCoverage = "complete"
+	return viewerLogin, "complete", nil
+}
+
+func applyGitHubGraphQLClassicEvidence(result *GitHubPullRequestMergeRequirementsResult, rule *githubGraphQLBranchProtectionRule) {
+	if result == nil || rule == nil {
+		return
+	}
 	adminEnforced := rule.IsAdminEnforced
 	result.ClassicAdministratorEnforced = &adminEnforced
 	result.DismissStaleReviewsOnPush = result.DismissStaleReviewsOnPush || rule.DismissesStaleReviews
@@ -294,19 +332,7 @@ func applyGitHubGraphQLClassicEvidence(result *GitHubPullRequestMergeRequirement
 	result.BranchLocked = result.BranchLocked || rule.LockBranch
 	if rule.RequiresStatusChecks {
 		result.StrictStatusChecks = result.StrictStatusChecks || rule.RequiresStrictStatusChecks
-		for _, check := range rule.RequiredStatusChecks {
-			contextName := strings.TrimSpace(check.Context)
-			if contextName == "" {
-				result.UnknownPolicyRules = append(result.UnknownPolicyRules, "classic.required_status_checks.context")
-				continue
-			}
-			var integrationID *int64
-			if check.App != nil && check.App.DatabaseID != nil {
-				value := *check.App.DatabaseID
-				integrationID = &value
-			}
-			result.RequiredStatusChecks = append(result.RequiredStatusChecks, GitHubRequiredStatusCheck{Context: contextName, IntegrationID: integrationID})
-		}
+		result.RequiredStatusChecks = append(result.RequiredStatusChecks, graphQLRequiredStatusChecks(rule)...)
 	}
 	if rule.RequiresDeployments {
 		if len(rule.RequiredDeploymentEnvironments) == 0 {
@@ -318,16 +344,178 @@ func applyGitHubGraphQLClassicEvidence(result *GitHubPullRequestMergeRequirement
 	if rule.RestrictsPushes {
 		result.ClassicRestrictionsPresent = true
 		result.UnknownPolicyRules = append(result.UnknownPolicyRules, "classic.restrictions")
+	} else {
+		result.ClassicRestrictionsPresent = false
+		result.UnknownPolicyRules = removeGitHubPolicyMarkers(result.UnknownPolicyRules, "classic.restrictions")
 	}
 	if rule.BypassPullRequestAllowances.TotalCount > 0 {
 		result.ClassicReviewBypassAllowancesPresent = true
 		result.PotentialBypass = true
 		result.UnknownPolicyRules = append(result.UnknownPolicyRules, "classic.bypass_pull_request_allowances")
+	} else {
+		result.ClassicReviewBypassAllowancesPresent = false
+		result.UnknownPolicyRules = removeGitHubPolicyMarkers(result.UnknownPolicyRules, "classic.bypass_pull_request_allowances")
 	}
-	if result.ConfiguredActorAdmin && !rule.IsAdminEnforced {
-		result.PotentialBypass = true
+}
+
+func githubClassicRESTGraphQLConsistent(protection githubBranchProtectionResponse, rule *githubGraphQLBranchProtectionRule) bool {
+	if rule == nil {
+		return false
 	}
-	return nil
+	if protection.EnforceAdmins != nil && protection.EnforceAdmins.Enabled != rule.IsAdminEnforced {
+		return false
+	}
+	if protection.RequiredPullRequestReviews == nil {
+		if rule.RequiresApprovingReviews || rule.RequiredApprovingReviewCount > 0 || rule.RequiresCodeOwnerReviews || rule.DismissesStaleReviews || rule.BypassPullRequestAllowances.TotalCount > 0 {
+			return false
+		}
+	} else {
+		reviews := protection.RequiredPullRequestReviews
+		if !rule.RequiresApprovingReviews || reviews.RequiredApprovingReviewCount != rule.RequiredApprovingReviewCount || reviews.RequireCodeOwnerReviews != rule.RequiresCodeOwnerReviews || reviews.DismissStaleReviews != rule.DismissesStaleReviews {
+			return false
+		}
+		count, ok := githubClassicRESTBypassActorCount(reviews.BypassPullRequestAllowances)
+		if !ok || count != rule.BypassPullRequestAllowances.TotalCount {
+			return false
+		}
+	}
+	if (protection.RequiredSignatures != nil && protection.RequiredSignatures.Enabled) != rule.RequiresCommitSignatures {
+		return false
+	}
+	if (protection.RequiredLinearHistory != nil && protection.RequiredLinearHistory.Enabled) != rule.RequiresLinearHistory {
+		return false
+	}
+	if (protection.RequiredConversationResolution != nil && protection.RequiredConversationResolution.Enabled) != rule.RequiresConversationResolution {
+		return false
+	}
+	if (protection.LockBranch != nil && protection.LockBranch.Enabled) != rule.LockBranch {
+		return false
+	}
+	restRestrictions, ok := githubClassicRESTRestrictionsPresent(protection.Restrictions)
+	if !ok || restRestrictions != rule.RestrictsPushes {
+		return false
+	}
+	if protection.RequiredStatusChecks == nil {
+		return !rule.RequiresStatusChecks && len(rule.RequiredStatusChecks) == 0
+	}
+	if !rule.RequiresStatusChecks || protection.RequiredStatusChecks.Strict != rule.RequiresStrictStatusChecks {
+		return false
+	}
+	return equalGitHubStatusChecks(classicRESTRequiredStatusChecks(protection.RequiredStatusChecks), graphQLRequiredStatusChecks(rule))
+}
+
+func classicRESTRequiredStatusChecks(checks *struct {
+	Strict   bool     `json:"strict"`
+	Contexts []string `json:"contexts"`
+	Checks   []struct {
+		Context string `json:"context"`
+		AppID   *int64 `json:"app_id"`
+	} `json:"checks"`
+}) []GitHubRequiredStatusCheck {
+	if checks == nil {
+		return nil
+	}
+	out := make([]GitHubRequiredStatusCheck, 0, len(checks.Checks)+len(checks.Contexts))
+	if len(checks.Checks) > 0 {
+		for _, check := range checks.Checks {
+			out = append(out, GitHubRequiredStatusCheck{Context: check.Context, IntegrationID: check.AppID})
+		}
+		return normalizeGitHubRequiredStatusChecks(out)
+	}
+	for _, contextName := range checks.Contexts {
+		out = append(out, GitHubRequiredStatusCheck{Context: contextName})
+	}
+	return normalizeGitHubRequiredStatusChecks(out)
+}
+
+func graphQLRequiredStatusChecks(rule *githubGraphQLBranchProtectionRule) []GitHubRequiredStatusCheck {
+	if rule == nil {
+		return nil
+	}
+	out := make([]GitHubRequiredStatusCheck, 0, len(rule.RequiredStatusChecks))
+	for _, check := range rule.RequiredStatusChecks {
+		contextName := strings.TrimSpace(check.Context)
+		if contextName == "" {
+			continue
+		}
+		var integrationID *int64
+		if check.App != nil && check.App.DatabaseID != nil {
+			value := *check.App.DatabaseID
+			integrationID = &value
+		}
+		out = append(out, GitHubRequiredStatusCheck{Context: contextName, IntegrationID: integrationID})
+	}
+	return normalizeGitHubRequiredStatusChecks(out)
+}
+
+func equalGitHubStatusChecks(left, right []GitHubRequiredStatusCheck) bool {
+	left = normalizeGitHubRequiredStatusChecks(left)
+	right = normalizeGitHubRequiredStatusChecks(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i].Context != right[i].Context {
+			return false
+		}
+		var leftID, rightID int64
+		if left[i].IntegrationID != nil {
+			leftID = *left[i].IntegrationID
+		}
+		if right[i].IntegrationID != nil {
+			rightID = *right[i].IntegrationID
+		}
+		if leftID != rightID {
+			return false
+		}
+	}
+	return true
+}
+
+func githubClassicRESTBypassActorCount(raw json.RawMessage) (int, bool) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return 0, true
+	}
+	var value struct {
+		Users []json.RawMessage `json:"users"`
+		Teams []json.RawMessage `json:"teams"`
+		Apps  []json.RawMessage `json:"apps"`
+	}
+	if json.Unmarshal(raw, &value) != nil {
+		return 0, false
+	}
+	return len(value.Users) + len(value.Teams) + len(value.Apps), true
+}
+
+func githubClassicRESTRestrictionsPresent(raw json.RawMessage) (bool, bool) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return false, true
+	}
+	var value struct {
+		Users []json.RawMessage `json:"users"`
+		Teams []json.RawMessage `json:"teams"`
+		Apps  []json.RawMessage `json:"apps"`
+	}
+	if json.Unmarshal(raw, &value) != nil {
+		return false, false
+	}
+	return len(value.Users)+len(value.Teams)+len(value.Apps) > 0, true
+}
+
+func removeGitHubPolicyMarkers(values []string, remove ...string) []string {
+	removeSet := map[string]bool{}
+	for _, value := range remove {
+		removeSet[value] = true
+	}
+	out := values[:0]
+	for _, value := range values {
+		if !removeSet[value] {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func (s *RemoteService) inspectGitHubRulesetBypassEvidence(ctx context.Context, token, owner, repository, baseBranch string) (string, int, bool, []string) {
@@ -353,7 +541,7 @@ func (s *RemoteService) inspectGitHubRulesetBypassEvidence(ctx context.Context, 
 			return "incomplete", 0, false, []string{"active_rule_missing_ruleset_id"}
 		}
 		info := sourceInfo{sourceType: strings.TrimSpace(rule.RulesetSourceType), source: strings.TrimSpace(rule.RulesetSource)}
-		if existing, ok := rulesets[rule.RulesetID]; ok && (existing != info) {
+		if existing, ok := rulesets[rule.RulesetID]; ok && existing != info {
 			return "incomplete", 0, false, []string{"active_ruleset_source_inconsistent"}
 		}
 		rulesets[rule.RulesetID] = info
@@ -363,7 +551,9 @@ func (s *RemoteService) inspectGitHubRulesetBypassEvidence(ctx context.Context, 
 	}
 
 	ids := make([]int64, 0, len(rulesets))
-	for id := range rulesets { ids = append(ids, id) }
+	for id := range rulesets {
+		ids = append(ids, id)
+	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	bypassPresent := false
 	for index, id := range ids {
