@@ -386,7 +386,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	sessionRepo := repository.NewSessionRepo(database)
 	authHandler := NewAuthHandler(userRepo, sessionRepo, cfg)
 	githubAuthService, githubAuthHandler := NewGitHubAuthRuntimeFromEnvironment(database)
-	configureGitHubAuthToolRegistry(toolRegistry, githubAuthService, githubAuthHandler.repositories)
+	configureGitHubAuthToolRegistry(toolRegistry, githubAuthService)
 	wsMemberRepo := repository.NewWorkspaceMemberRepo(database)
 	wsMemberHandler := NewWorkspaceMemberHandler(wsMemberRepo, userRepo)
 
@@ -702,14 +702,14 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 
 			// Reusable Assistant Profiles and Markdown Skills.
 			r.Get("/assistant-profiles", assistantProfileHandler.ListProfiles)
-				r.Put("/assistant-profiles", assistantProfileHandler.SaveProfile)
-				r.Post("/assistant-profiles/import", assistantProfileHandler.ImportProfile)
-				r.Get("/assistant-profiles/{id}/export", assistantProfileHandler.ExportProfile)
-				r.Delete("/assistant-profiles/{id}", assistantProfileHandler.DeleteProfile)
-				r.Get("/skills", assistantProfileHandler.ListSkills)
-				r.Get("/skills/{id}", assistantProfileHandler.GetSkill)
-				r.Put("/skills", assistantProfileHandler.SaveSkill)
-				r.Delete("/skills/{id}", assistantProfileHandler.DeleteSkill)
+			r.Put("/assistant-profiles", assistantProfileHandler.SaveProfile)
+			r.Post("/assistant-profiles/import", assistantProfileHandler.ImportProfile)
+			r.Get("/assistant-profiles/{id}/export", assistantProfileHandler.ExportProfile)
+			r.Delete("/assistant-profiles/{id}", assistantProfileHandler.DeleteProfile)
+			r.Get("/skills", assistantProfileHandler.ListSkills)
+			r.Get("/skills/{id}", assistantProfileHandler.GetSkill)
+			r.Put("/skills", assistantProfileHandler.SaveSkill)
+			r.Delete("/skills/{id}", assistantProfileHandler.DeleteSkill)
 
 			// Owner-scoped OpenAPI tool servers. Generated operations still obey shared tool policy.
 			r.Route("/openapi/servers", func(r chi.Router) {
@@ -784,79 +784,79 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			})
 
 			// Import/Export (admin only)
-				r.Group(func(r chi.Router) {
-					r.Use(auth.RequireRole("admin"))
-					r.Post("/export", bundleHandler.Export)
-					r.Post("/import", bundleHandler.Import)
-					r.Post("/import/validate", bundleHandler.ValidateImport)
-				})
+			r.Group(func(r chi.Router) {
+				r.Use(auth.RequireRole("admin"))
+				r.Post("/export", bundleHandler.Export)
+				r.Post("/import", bundleHandler.Import)
+				r.Post("/import/validate", bundleHandler.ValidateImport)
+			})
 
 			// Agent Runs (by run ID)
-				r.Route("/agent/runs/{runId}", func(r chi.Router) {
-					r.Get("/", agentHandler.GetRun)
-					r.Get("/events", agentEventHandler.List)
-					r.Post("/approve/{stepId}", agentHandler.ApproveStep)
-					r.Post("/cancel", agentHandler.CancelRun)
-					r.Post("/resume", agentHandler.ResumeRun)
-				})
+			r.Route("/agent/runs/{runId}", func(r chi.Router) {
+				r.Get("/", agentHandler.GetRun)
+				r.Get("/events", agentEventHandler.List)
+				r.Post("/approve/{stepId}", agentHandler.ApproveStep)
+				r.Post("/cancel", agentHandler.CancelRun)
+				r.Post("/resume", agentHandler.ResumeRun)
+			})
 
 			// RAG (global / admin)
-				r.Group(func(r chi.Router) {
-					r.Use(auth.RequireRole("admin"))
-					r.Get("/rag/health", ragHandler.Health)
-					r.Post("/rag/repair", ragHandler.Repair)
-					r.Post("/rag/reindex-all", ragHandler.ReindexAll)
-				})
+			r.Group(func(r chi.Router) {
+				r.Use(auth.RequireRole("admin"))
+				r.Get("/rag/health", ragHandler.Health)
+				r.Post("/rag/repair", ragHandler.Repair)
+				r.Post("/rag/reindex-all", ragHandler.ReindexAll)
+			})
 
 			// Search
-				r.Get("/search", searchHandler.Search)
-				r.Group(func(r chi.Router) {
-					r.Use(auth.RequireRole("admin"))
-					r.Post("/search/reindex", searchHandler.Reindex)
-				})
+			r.Get("/search", searchHandler.Search)
+			r.Group(func(r chi.Router) {
+				r.Use(auth.RequireRole("admin"))
+				r.Post("/search/reindex", searchHandler.Reindex)
+			})
 
 			// Workspaces (admin only)
-				r.Route("/workspaces", func(r chi.Router) {
-					r.Use(auth.RequireRole("admin"))
-					r.Get("/", workspaceHandler.List)
-					r.Post("/", workspaceHandler.Create)
-					r.Route("/{id}", func(r chi.Router) {
-						r.Get("/", workspaceHandler.Get)
-						r.Get("/stats", workspaceHandler.GetStats)
-						r.Patch("/", workspaceHandler.Update)
-						r.Delete("/", workspaceHandler.Delete)
+			r.Route("/workspaces", func(r chi.Router) {
+				r.Use(auth.RequireRole("admin"))
+				r.Get("/", workspaceHandler.List)
+				r.Post("/", workspaceHandler.Create)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", workspaceHandler.Get)
+					r.Get("/stats", workspaceHandler.GetStats)
+					r.Patch("/", workspaceHandler.Update)
+					r.Delete("/", workspaceHandler.Delete)
 
-						// Workspace members
-						r.Get("/members", wsMemberHandler.ListMembers)
-						r.Post("/members", wsMemberHandler.AddMember)
-						r.Patch("/members/{userId}", wsMemberHandler.UpdateMemberRole)
-						r.Delete("/members/{userId}", wsMemberHandler.RemoveMember)
-					})
+					// Workspace members
+					r.Get("/members", wsMemberHandler.ListMembers)
+					r.Post("/members", wsMemberHandler.AddMember)
+					r.Patch("/members/{userId}", wsMemberHandler.UpdateMemberRole)
+					r.Delete("/members/{userId}", wsMemberHandler.RemoveMember)
 				})
+			})
 
 			// Plugins (admin only)
-				r.Route("/plugins", func(r chi.Router) {
-					r.Use(auth.RequireRole("admin"))
-					r.Get("/", pluginHandler.ListPlugins)
-					r.Post("/", pluginHandler.InstallPlugin)
-					r.Route("/{name}", func(r chi.Router) {
-						r.Patch("/", pluginHandler.UpdatePlugin)
-						r.Delete("/", pluginHandler.UninstallPlugin)
-					})
+			r.Route("/plugins", func(r chi.Router) {
+				r.Use(auth.RequireRole("admin"))
+				r.Get("/", pluginHandler.ListPlugins)
+				r.Post("/", pluginHandler.InstallPlugin)
+				r.Route("/{name}", func(r chi.Router) {
+					r.Patch("/", pluginHandler.UpdatePlugin)
+					r.Delete("/", pluginHandler.UninstallPlugin)
 				})
+			})
 
 			// Evaluation Harness (admin only)
-				r.Route("/eval", func(r chi.Router) {
-					r.Use(auth.RequireRole("admin"))
-					r.Post("/run", evalHandler.RunEval)
-					r.Get("/runs", evalHandler.ListRuns)
-					r.Get("/agent/scenarios", agentEvalHandler.Scenarios)
-					r.Post("/agent/run", agentEvalHandler.Run)
-					r.Route("/runs/{id}", func(r chi.Router) {
-						r.Get("/", evalHandler.GetRun)
-						r.Delete("/", evalHandler.DeleteRun)
-					})
+			r.Route("/eval", func(r chi.Router) {
+				r.Use(auth.RequireRole("admin"))
+				r.Post("/run", evalHandler.RunEval)
+				r.Get("/runs", evalHandler.ListRuns)
+				r.Get("/agent/scenarios", agentEvalHandler.Scenarios)
+				r.Post("/agent/run", agentEvalHandler.Run)
+				r.Route("/runs/{id}", func(r chi.Router) {
+					r.Get("/", evalHandler.GetRun)
+					r.Delete("/", evalHandler.DeleteRun)
 				})
+			})
 
 		}) // end auth group
 	})
