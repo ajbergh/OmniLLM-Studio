@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strings"
 
 	"github.com/ajbergh/omnillm-studio/internal/githubauth"
 	"github.com/ajbergh/omnillm-studio/internal/tools"
@@ -23,7 +24,10 @@ func githubAuthToolCredentialOptions(service *githubauth.Service) *tools.GitHubC
 			if err != nil {
 				return false, err
 			}
-			return status.Connected, nil
+			// A persisted identity still owns credential precedence when its token
+			// is stale. The execution path will surface reauthorization/refresh
+			// failure and fail closed instead of falling back to TokenEnv.
+			return status.Connected || status.GitHubUserID > 0 || strings.TrimSpace(status.GitHubLogin) != "", nil
 		},
 		Resolve: func(ctx context.Context, userID string) (string, bool, error) {
 			token, err := service.AccessToken(ctx, userID)
