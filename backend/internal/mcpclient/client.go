@@ -10,20 +10,20 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
-	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ajbergh/omnillm-studio/internal/models"
+	"github.com/ajbergh/omnillm-studio/internal/sandbox"
 )
 
 // Client is one stdio MCP client session.
 type Client struct {
 	server models.MCPServer
+	runner sandbox.CommandRunner
 
-	cmd    *exec.Cmd
+	cmd    commandProcess
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 	stderr io.ReadCloser
@@ -41,10 +41,30 @@ type Client struct {
 	stopping  atomic.Bool
 }
 
+// commandProcess is the minimal process surface the MCP lifecycle needs. The
+// concrete host runner currently returns *exec.Cmd; keeping lifecycle logic
+// behind this interface makes later sandbox-backed process implementations less
+// invasive.
+type commandProcess interface {
+	StdinPipe() (io.WriteCloser, error)
+	StdoutPipe() (io.ReadCloser, error)
+	StderrPipe() (io.ReadCloser, error)
+	Start() error
+	Wait() error
+}
+
 // NewClient creates a client for a configured MCP server.
 func NewClient(server models.MCPServer) *Client {
+	return newClientWithRunner(server, sandbox.NewHostCommandRunner())
+}
+
+func newClientWithRunner(server models.MCPServer, runner sandbox.CommandRunner) *Client {
+	if runner == nil {
+		runner = sandbox.NewHostCommandRunner()
+	}
 	return &Client{
 		server:  server,
+		runner:  runner,
 		done:    make(chan struct{}),
 		pending: make(map[string]chan pendingResponse),
 	}
@@ -62,12 +82,15 @@ func (c *Client) Start(ctx context.Context) error {
 	procCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 
-	cmd := exec.CommandContext(procCtx, *c.server.Command, c.server.Args...)
-	cmd.Env = os.Environ()
-	for key, value := range c.server.Env {
-		cmd.Env = append(cmd.Env, key+"="+value)
+	cmd, err := c.runner.CommandContext(procCtx, sandbox.ProcessSpec{
+		Command: *c.server.Command,
+		Args:    append([]string(nil), c.server.Args...),
+		Env:     cloneStringMap(c.server.Env),
+	})
+	if err != nil {
+		cancel()
+		return fmt.Errorf("prepare MCP server %q: %w", c.server.Name, err)
 	}
-
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -108,6 +131,17 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 // Stop terminates the server subprocess and fails any pending requests.
@@ -299,7 +333,6 @@ func (c *Client) readLoop() {
 		if len(line) == 0 {
 			continue
 		}
-
 		var resp rpcResponse
 		if err := json.Unmarshal(line, &resp); err != nil {
 			log.Printf("[mcp] %s sent invalid JSON-RPC on stdout: %v", c.server.Name, err)
@@ -367,23 +400,21 @@ func (c *Client) completePending(key string, resp rpcResponse) {
 	ch <- pendingResponse{result: resp.Result}
 }
 
-func (c *Client) removePending(key string) {
+func (c *Client) removePending(id string) {
 	c.mu.Lock()
-	delete(c.pending, key)
+	delete(c.pending, id)
 	c.mu.Unlock()
 }
 
 func (c *Client) closeWithError(err error) {
 	c.closeOnce.Do(func() {
 		c.doneErr = err
-
 		c.mu.Lock()
 		for key, ch := range c.pending {
 			ch <- pendingResponse{err: err}
 			delete(c.pending, key)
 		}
 		c.mu.Unlock()
-
 		close(c.done)
 	})
 }
