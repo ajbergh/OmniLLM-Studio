@@ -12,19 +12,22 @@ import (
 
 // NewGitHubAuthRuntimeFromEnvironment composes the encrypted credential store
 // with the GitHub App device-flow service and returns the same service used by
-// both authenticated routes and request-scoped Git/GitHub tool credentials.
-// Missing operator configuration is supported: service is nil and the handler
-// remains mounted so status reports configured=false.
+// authenticated routes, repository discovery, and request-scoped Git/GitHub
+// tool credentials. Missing operator configuration remains a supported state.
 func NewGitHubAuthRuntimeFromEnvironment(database *sql.DB) (*githubauth.Service, *GitHubAuthHandler) {
 	store := repository.NewGitHubAppConnectionRepo(database)
 	service, err := githubauth.NewServiceFromEnvironment(store)
 	if err == nil {
-		return service, NewGitHubAuthHandler(service)
+		handler := NewGitHubAuthHandler(service)
+		handler.repositories = NewGitHubRepositoryHandlerFromEnvironment(database, service)
+		return service, handler
 	}
 	if !errors.Is(err, githubauth.ErrNotConfigured) {
 		log.Printf("WARN: GitHub App authentication unavailable: %v", err)
 	}
-	return nil, NewGitHubAuthHandler(nil)
+	handler := NewGitHubAuthHandler(nil)
+	handler.repositories = NewGitHubRepositoryHandlerFromEnvironment(database, nil)
+	return nil, handler
 }
 
 // NewGitHubAuthHandlerFromEnvironment preserves the existing handler-only
@@ -34,8 +37,9 @@ func NewGitHubAuthHandlerFromEnvironment(database *sql.DB) *GitHubAuthHandler {
 	return handler
 }
 
-// MountGitHubAuthRoutes mounts user-scoped GitHub connection routes. The caller
-// must mount this inside the existing authenticated /v1 route group.
+// MountGitHubAuthRoutes mounts user-scoped GitHub connection and repository
+// selection routes. The caller must mount this inside the existing authenticated
+// /v1 route group.
 func MountGitHubAuthRoutes(r chi.Router, handler *GitHubAuthHandler) {
 	if r == nil {
 		return
@@ -47,4 +51,5 @@ func MountGitHubAuthRoutes(r chi.Router, handler *GitHubAuthHandler) {
 	r.Post("/github/auth/device/start", handler.StartDeviceAuthorization)
 	r.Post("/github/auth/device/poll", handler.PollDeviceAuthorization)
 	r.Delete("/github/auth", handler.Disconnect)
+	MountGitHubRepositoryRoutes(r, handler.repositories)
 }
