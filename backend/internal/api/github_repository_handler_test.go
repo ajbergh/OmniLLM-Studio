@@ -18,11 +18,11 @@ import (
 )
 
 type fakeGitHubRepositoryDiscovery struct {
-	page      githubrepo.Page
+	page       githubrepo.Page
 	repository githubrepo.Repository
-	err       error
-	users     []string
-	getIDs    []int64
+	err        error
+	users      []string
+	getIDs     []int64
 }
 
 func (f *fakeGitHubRepositoryDiscovery) List(_ context.Context, userID string, page, perPage int) (githubrepo.Page, error) {
