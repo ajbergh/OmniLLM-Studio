@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ExternalLink,
-  Github,
+  GitBranch as Github,
   Link2,
   Loader2,
   RefreshCw,
