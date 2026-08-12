@@ -117,7 +117,7 @@ func (h *SandboxHandler) CreateWorkspace(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if !requestIsLoopback(r) {
-		respondError(w, http.StatusForbidden, "sandbox path grants are restricted to loopback/desktop requests")
+		respondError(w, http.StatusForbidden, "sandbox path grants are restricted to direct loopback/desktop requests")
 		return
 	}
 
@@ -221,9 +221,23 @@ func sandboxPathGrantsConfigured() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("OMNILLM_SANDBOX_ALLOW_PATH_GRANTS")), "true")
 }
 
+// requestIsLoopback accepts only direct loopback requests. The router's RealIP
+// middleware may rewrite RemoteAddr from forwarding headers, so any forwarded
+// client-address header makes this high-risk path-grant check fail closed.
 func requestIsLoopback(r *http.Request) bool {
 	if r == nil {
 		return false
+	}
+	for _, header := range []string{
+		"Forwarded",
+		"X-Forwarded-For",
+		"X-Real-IP",
+		"True-Client-IP",
+		"CF-Connecting-IP",
+	} {
+		if strings.TrimSpace(r.Header.Get(header)) != "" {
+			return false
+		}
 	}
 	host := strings.TrimSpace(r.RemoteAddr)
 	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
