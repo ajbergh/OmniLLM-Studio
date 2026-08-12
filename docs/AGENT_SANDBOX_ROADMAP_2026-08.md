@@ -8,8 +8,9 @@ Detailed design and security constraints live in:
 
 - `docs/AGENT_SANDBOX_ARCHITECTURE.md`
 - `docs/AGENT_SANDBOX_THREAT_MODEL.md`
+- `docs/SANDBOX_RUNTIME.md` (introduced in the code-runtime convergence stack)
 
-This file is the durable implementation tracker. It must be updated as phases move, PRs merge, or an implementation constraint is discovered.
+This file is the durable implementation tracker. Update it whenever a phase changes status, a PR opens/merges, an enforcement limitation changes, or CI evidence changes.
 
 ## Non-negotiable invariants
 
@@ -18,12 +19,12 @@ This file is the durable implementation tracker. It must be updated as phases mo
 3. Models never supply physical host paths for sandbox mounts; application-owned workspace IDs are used instead.
 4. Sandbox IDs are application-issued references and every operation revalidates user/workspace/conversation/run ownership.
 5. Filesystem access is explicit: `read_only`, `read_write_no_delete`, or `read_write`.
-6. Network is denied by default and may be widened only within operator policy.
+6. Network is denied by default and may be widened only within operator policy and an enforceable runtime.
 7. Descendants inherit sandbox restrictions and cancellation destroys the execution process tree.
 8. Runtimes report controls they actually enforce; required-but-unavailable controls fail closed.
 9. Raw provider/GitHub/master/session/browser/SSH/cloud credentials are not injected into arbitrary sandboxes.
 10. Existing reviewed Git state/digest protections remain authoritative for stage/commit/remote publication.
-11. Local plugins and stdio MCP ultimately use the same sandbox boundary as arbitrary code/terminal execution.
+11. Local plugins and stdio MCP ultimately use the same OS-confinement principles as arbitrary code/terminal execution.
 12. Multi-user deployments never run arbitrary tenant code in the primary API process/container.
 
 ## Roadmap status
@@ -32,91 +33,94 @@ Status values: `NOT STARTED`, `IN PROGRESS`, `COMPLETE`, `BLOCKED`.
 
 | Phase | Scope | Priority | Status | Branch / PR | Current evidence / next exit criterion |
 |---|---|---:|---|---|---|
-| 0 | Architecture, threat model, durable roadmap | P0 | **COMPLETE** | PR #98 — `agent/sandbox-foundation-roadmap-20260812` | Architecture + threat model + tracker implemented. PR #98 Quality Gate and Security Scan passed. |
-| 1 | Sandbox Protocol v2 + backend-issued ownership-bound sessions | P0 | **IN PROGRESS** | PR #101 — `agent/sandbox-protocol-v2-20260812` | Broker issues `sbx_` IDs, revalidates owner/TTL, negotiates runtime capabilities, authenticated HTTP runtime contract added. Merge after CI. |
-| 2 | First-party runtime abstraction + Linux execution plane | P1 | **IN PROGRESS** | `agent/sandboxd-linux-runtime-20260812` | Linux Bubblewrap runtime and authenticated `sandboxd` worker implemented; focused tests being completed before PR. |
-| 3 | Immediate subprocess hardening for stdio MCP/plugins | P0 | **IN PROGRESS** | PR #99 — `agent/sandbox-subprocess-boundary-20260812` | `os.Environ()` inheritance removed, common sanitized runner seam added, ambient-secret regression tests added. Merge after CI. |
-| 4 | Route `code_execute` + `python_analysis` through Broker | P1 | NOT STARTED | TBD | Existing public tool contracts should remain stable while execution becomes ownership-bound and OS-sandboxed. |
-| 5 | Workspace registry + RO/RW-no-delete/RW mounts + change journal | P1 | NOT STARTED | TBD | Opaque workspace IDs, canonical containment, durable before/after hashes, bounded revert. |
-| 6 | Workspace tools: list/search/read/write/apply-patch/delete | P1 | NOT STARTED | TBD | Generic workspace operations use the existing Executor/policy/approval/audit boundary. |
-| 7 | `terminal_exec` + cancellation + resource controls | P1 | NOT STARTED | TBD | Arbitrary terminal/build/test commands run only inside sandbox; wall/output/process/resource limits enforced and reported. |
-| 8 | Network broker + allowlist/Ask approvals | P1 | NOT STARTED | TBD | Default-deny egress, private/loopback/metadata protections, destination-scoped approvals. |
-| 9 | Credential broker + guarded Git/service integration | P1 | NOT STARTED | TBD | Authenticated operations work without raw host credentials entering arbitrary shell environments. |
-| 10 | Full local plugin + stdio MCP sandbox migration | P1 | NOT STARTED | TBD | Extension subprocesses cannot exceed declared/effective filesystem/network/env capabilities. |
-| 11 | Desktop workspace/sandbox UX + change review | P1 | NOT STARTED | TBD | UI shows grants, network state, running executions, approvals, resource state, and reversible changes. |
-| 12 | Windows native confinement backend | P1 | NOT STARTED | TBD | Restricted identity/token, Job Object/process-tree confinement, ACL-scoped workspace, platform CI evidence. |
-| 13 | macOS native confinement backend | P1 | NOT STARTED | TBD | OS-enforced file/network/process confinement and platform CI evidence. |
-| 14 | Durable sandbox-backed agent tasks | P2 | NOT STARTED | TBD | Existing AgentRun/job model supports pause/resume/cancel/checkpoint/recovery/scheduling with sandbox state. |
-| 15 | Server/Kubernetes sandbox workers | P2 | NOT STARTED | TBD | Arbitrary tenant execution isolated from API pod/container with worker identity, quotas, network policy, hardened security context. |
-| 16 | Multi-agent isolated worktrees/workspaces | P2 | NOT STARTED | TBD | Independent writable agent workspaces with reviewed promotion/reconciliation. |
-| 17 | Adversarial sandbox assurance suite | Continuous | **IN PROGRESS** | begins in #99/#101/Linux runtime | Expand continuously across filesystem, process, resource, network, credential, artifact, tenant and trust-boundary attacks. |
+| 0 | Architecture, threat model, durable roadmap | P0 | **COMPLETE** | merged PR #98 | Architecture, threat model, and tracker are on `main`; #98 passed Quality Gate and Security Scan before merge. |
+| 1 | Sandbox Protocol v2 + backend-issued ownership-bound sessions | P0 | **IN PROGRESS** | PR #101 | Broker-issued `sbx_` IDs, exact owner/TTL checks, capability negotiation, authenticated HTTP runtime, bounded protocol, artifact-ID trust model. Merge/CI stack collapse remains. |
+| 2 | First-party runtime abstraction + Linux execution plane | P1 | **IN PROGRESS** | PR #104 | Bubblewrap/rootfs runtime and authenticated `sandboxd` worker implemented. Native isolation fixture, packaging, and later quota/egress controls remain. |
+| 3 | Immediate subprocess hardening for stdio MCP/plugins | P0 | **IN PROGRESS** | PR #99 | Ambient `os.Environ()` inheritance removed; shared sanitized runner and secret-leak regression tests implemented. Implementation head previously passed Quality/Security/Container; merge-stack collapse remains. |
+| 4 | Route `code_execute` + `python_analysis` through Broker | P1 | **IN PROGRESS** | PR #105 | Legacy unauthenticated `/v1/execute` path retired in stack; `code_execute` uses owner-bound Broker sessions; restricted Python has no host-Python fallback. |
+| 5 | Workspace registry + RO/RW-no-delete/RW grants + durable journal | P1 | **IN PROGRESS** | PR #107 | Owner-scoped opaque filesystem grants, canonical roots, before/after hashes, bounded revert snapshots, state-checked revert primitives implemented. |
+| 6 | Workspace list/search/read/write/apply-patch/delete/revert tools | P1 | **IN PROGRESS** | PR #108 | Model-facing tools use only opaque workspace IDs/relative paths; mutation tools are high-risk, atomic, state-bound, and journaled. |
+| 7 | `terminal_exec` + cancellation + runtime resource controls | P1 | **IN PROGRESS** | PR #109 | High-risk explicit argv terminal tool uses Broker with no network and optional read-only workspace mount. Wall/output limits implemented; memory/CPU/PID/disk flags remain false until enforced. |
+| 8 | Network broker + destination approvals | P1 | **IN PROGRESS** | PR #110 | Owner-bound `sng_` grants, operator domain/port policy, runtime `network_allowlist` capability, fail-closed terminal consumption. First-party Linux egress allowlist enforcement remains. |
+| 9 | Credential broker + raw-secret environment rejection | P1 | **IN PROGRESS** | PR #111 | Host-side opaque `sch_` credential handles and owner/TTL checks implemented; arbitrary sandbox env rejects credential/auth-agent/proxy escape keys. Service-specific broker consumers remain. |
+| 10 | Full local plugin + stdio MCP OS sandbox migration | P1 | **IN PROGRESS** | next branch | Sanitized host execution exists from Phase 3; persistent streaming subprocess confinement is the next implementation slice. |
+| 11 | Desktop workspace/sandbox UX + change review | P1 | NOT STARTED | TBD | UI must expose workspace grants, runtime state, network grants, approvals, execution state, and reversible changes. |
+| 12 | Windows native confinement backend | P1 | NOT STARTED | TBD | Restricted identity/token, Job Object/process-tree confinement, ACL-scoped workspace, and Windows-native CI evidence required. |
+| 13 | macOS native confinement backend | P1 | NOT STARTED | TBD | OS-enforced file/network/process confinement and macOS-native CI evidence required. |
+| 14 | Durable sandbox-backed agent tasks | P2 | NOT STARTED | TBD | Persist sandbox/task association and support pause/resume/cancel/checkpoint/recovery/scheduling without weakening ownership. |
+| 15 | Server/Kubernetes sandbox workers | P2 | NOT STARTED | TBD | Separate worker identity/pods, quotas, hardened security context, network policy, no arbitrary tenant execution in API pod. |
+| 16 | Multi-agent isolated worktrees/workspaces | P2 | NOT STARTED | TBD | Independent writable workspaces/worktrees with reviewed promotion/reconciliation. |
+| 17 | Adversarial sandbox assurance suite | Continuous | **IN PROGRESS** | #99 onward | Coverage already includes environment-secret leakage, owner/session replay, path traversal/symlink checks, stale mutations/reverts, destination grants, and capability fail-close; expand on every phase. |
 
-## Active PR stack and merge order
+## Active implementation stack
 
-1. **#98** `docs(sandbox): establish agent sandbox parity program` → `main`
-2. **#99** `security(sandbox): harden local subprocess environment boundary` → currently stacked on #98; retarget to `main` after #98 merges
-3. **#101** `feat(sandbox): add ownership-bound protocol v2 control plane` → currently stacked on #99; retarget after #99 merges
-4. Linux first-party runtime PR → stack on #101, then retarget after #101 merges
-5. `code_execute` / `python_analysis` Broker convergence
-6. workspace registry/journal
-7. workspace tools
-8. terminal + resource controls
-9. network + credential brokers
-10. extension migration and desktop UX
-11. platform runtimes, durable/remote workers, multi-agent isolation
+The program is intentionally decomposed into small security-reviewable PRs. Current logical order:
 
-## Completed implementation evidence
+1. #98 — architecture/threat model/tracker — **merged**
+2. #99 — local subprocess environment hardening
+3. #101 — protocol-v2 Broker/control plane
+4. #104 — first-party Linux Bubblewrap worker
+5. #105 — code/restricted-Python Broker convergence
+6. #107 — filesystem workspace registry/journal
+7. #108 — governed coding workspace tools
+8. #109 — isolated terminal with read-only project mounts
+9. #110 — owner-bound destination network grants
+10. #111 — host-side credential broker and secret-environment rejection
+11. persistent plugin/MCP OS confinement
+12. desktop UX and platform-specific native runtimes
+13. durable/remote workers and multi-agent isolation
 
-### Phase 0
+Retarget each child PR to `main` after its parent squash-merges. When retargeting, synchronize this tracker from current `main` so a child branch never reverts newer progress documentation.
 
-- durable program tracker;
-- target Broker/runtime architecture;
-- threat model covering filesystem, process, network, credentials, resources, tenant isolation, artifacts, Git and prompt/tool-result trust;
-- clarification that historical Chat Tool Parity Phase 7 completed an external sandbox integration contract, not first-party cross-platform workspace confinement.
+## Implemented enforcement notes
 
-### Phase 3 — work implemented in PR #99, pending merge
+### Control plane
 
-- `backend/internal/sandbox/process.go` introduces a shared process-construction seam;
-- stdio MCP no longer starts with `os.Environ()`;
-- plugins use the same sanitized runner seam;
-- allowlisted compatibility environment preserves only platform execution essentials plus explicit configured values;
-- regression tests prove ambient `OMNILLM_MASTER_KEY`, `GITHUB_TOKEN` and `SSH_AUTH_SOCK` do not leak to generic child environments, and explicit MCP-configured values still work;
-- compatibility `HostCommandRunner` is explicitly **not** represented as an OS sandbox.
+- Tool Executor Allow/Ask/Deny remains distinct from sandbox technical confinement.
+- Broker session IDs and network/credential handles are references, not authorization.
+- Every reusable handle is scoped to the exact application owner context and has a TTL.
+- Runtime capability negotiation is fail-closed; a worker cannot satisfy a requirement merely by accepting a field.
 
-### Phase 1 — work implemented in PR #101, pending merge
+### Filesystem
 
-- protocol-v2 owner/mount/network/resource/runtime/session/execution/artifact types;
-- `sandbox.Broker` with backend-issued opaque session IDs;
-- exact owner-scope checks on exec/cancel/status/destroy;
-- session TTL enforcement;
-- runtime capability requirements fail closed;
-- authenticated HTTP runtime transport requires a bearer token and HTTPS for non-loopback endpoints;
-- redirects and oversized runtime responses are rejected;
-- arbitrary worker artifact URLs are not part of the v2 artifact trust contract;
-- tests cover cross-owner access, expiry, missing runtime controls, service authentication and code/terminal request validation.
+- Model tools never receive configured host roots.
+- Workspace relative paths reject absolute/traversal, symlink components, and direct `.git` access.
+- Small-file mutations are atomic and journaled with before/after hashes.
+- Patch/delete/revert flows are stale-state bound.
+- `read_write_no_delete` is not approximated inside an arbitrary POSIX shell; terminal access narrows that grant to read-only.
+- `terminal_exec` currently requests read-only project mounts even for broader stored grants, keeping source writes in the journaled workspace tool path.
 
-### Phase 2 — current Linux branch
+### Network
 
-Implemented so far:
+- Default is no network.
+- Network authorization requires an operator destination policy plus a high-risk owner-bound grant.
+- IP literals and localhost are rejected from the grant surface.
+- A runtime must separately advertise true destination allowlist enforcement; generic namespace isolation is not considered equivalent.
+- The first-party Bubblewrap runtime therefore remains no-network until a real egress enforcement mechanism lands.
 
-- `Runtime` abstraction consumed by Broker;
-- Linux `LocalRuntime` using Bubblewrap with an operator-configured immutable rootfs;
-- network namespace isolation/default no-network execution;
-- isolated writable scratch workspace;
-- cleared child environment with controlled PATH/HOME/TMPDIR;
-- bounded stdout/stderr;
-- timeout/context cancellation and tracked execution cancellation;
-- runtime capabilities intentionally report memory/CPU/PID/disk limits as **false** until those controls are actually enforced;
-- non-Linux local runtime currently fails closed rather than silently using unrestricted host execution;
-- authenticated `backend/cmd/sandboxd` protocol-v2 worker;
-- focused tests for command/code modes, workspace-relative directory containment, output truncation, capability non-overclaiming, worker authentication and strict JSON request handling.
+### Credentials
 
-Still required before Phase 2 can be marked complete:
+- Arbitrary sandbox environments reject credential-bearing keys, SSH/Git auth delegation, cloud credential file pointers, and proxy variables.
+- Credential handles carry no secret values and cannot be redeemed by a generic model tool.
+- Existing guarded Git/GitHub operations remain host-side, aligning with the credential-broker model.
 
-- CI/build confirmation;
-- Linux integration fixture proving Bubblewrap/rootfs isolation on a capable runner;
-- application routing/configuration that selects the first-party worker/runtime in normal supported deployments;
-- explicit packaging/deployment instructions for the runtime rootfs and Bubblewrap dependency.
+### Linux runtime
+
+Currently advertised as enforced:
+
+- OS/process namespace isolation;
+- filesystem isolation through an operator-provided read-only rootfs and explicit workspace/scratch mounts;
+- network namespace isolation/no-network mode;
+- process-tree/session confinement;
+- wall-time and stdout/stderr limits.
+
+Still intentionally **not advertised** until implemented and validated:
+
+- memory quota;
+- CPU quota;
+- PID/process-count quota;
+- physical disk quota;
+- destination allowlist egress.
 
 ## Security acceptance categories
 
@@ -127,7 +131,7 @@ Every relevant phase expands negative tests for:
 - CPU/memory/disk/file-count/output exhaustion;
 - localhost/private/link-local/metadata/DNS-rebinding/proxy/network bypass;
 - backend/provider/GitHub/master/session/browser/SSH/cloud credential access;
-- cross-user/workspace/conversation/run/sandbox/artifact references;
+- cross-user/workspace/conversation/run/sandbox/artifact/grant references;
 - artifact path/MIME/size/hash attacks;
 - Git publication bypass around reviewed state preconditions;
 - prompt/tool-result instructions attempting to alter policy.
@@ -152,8 +156,8 @@ cd ..
 npx playwright test --project=chromium
 ```
 
-Security-sensitive runtime/deployment work additionally requires Security Scan and applicable container/deployment checks. Platform confinement is not marked complete from cross-compilation alone; platform-native tests are required.
+Security-sensitive runtime/deployment work additionally requires Security Scan and applicable container/deployment checks. Platform confinement is not considered complete from cross-compilation alone; native isolation tests are required for each supported OS.
 
 ## Progress-update rule
 
-Update this file whenever a phase changes status, a PR/branch is opened or merged, an exit criterion is satisfied, or an implementation limitation changes. A phase is `COMPLETE` only when its stated enforcement properties are implemented and validated; partial or compatibility behavior remains `IN PROGRESS` or `BLOCKED` rather than being overstated.
+A phase is `COMPLETE` only when its stated enforcement properties are implemented and validated. Partial, feature-gated, compatibility, or platform-limited behavior remains `IN PROGRESS` or `BLOCKED` rather than being overstated.
