@@ -28,9 +28,9 @@ func defaultCodeSandboxSpec(timeoutMS int) sandbox.CreateRequest {
 	return sandbox.CreateRequest{
 		Network: sandbox.NetworkPolicy{Mode: sandbox.NetworkNone},
 		Resources: sandbox.ResourceLimits{
-			WallTimeMS:      timeoutMS,
-			MaxStdoutBytes:  1 << 20,
-			MaxStderrBytes:  1 << 20,
+			WallTimeMS:       timeoutMS,
+			MaxStdoutBytes:   1 << 20,
+			MaxStderrBytes:   1 << 20,
 			MaxArtifactBytes: 8 << 20,
 		},
 		Requirements: sandbox.RuntimeRequirements{
