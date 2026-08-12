@@ -191,6 +191,9 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		"--setenv", "TMPDIR", "/tmp",
 	}
 	environment := cloneStringMap(session.spec.Environment)
+	if environment == nil {
+		environment = make(map[string]string)
+	}
 	for key, value := range request.Env {
 		environment[key] = value
 	}
@@ -313,6 +316,7 @@ func sandboxCommand(request ExecRequest) (string, []string, error) {
 			if strings.ContainsRune(arg, '\x00') {
 				return "", nil, fmt.Errorf("sandbox argument contains NUL")
 			}
+		}
 		return request.Command, args, nil
 	}
 	if strings.TrimSpace(request.Code) == "" {
