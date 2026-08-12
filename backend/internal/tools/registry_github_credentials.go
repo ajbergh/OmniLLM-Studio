@@ -21,34 +21,51 @@ type RegistryOptions struct {
 	GitHubCredentials *GitHubCredentialOptions
 }
 
-// NewRegistryWithOptions creates the normal registry and, when both GitHub App
-// credential callbacks are supplied, rebinds the already-configured remote and
-// GitHub tool families to a request-scoped credential adapter. The exact same
-// RemoteService instance remains underneath the adapter, preserving the local
-// service used for reviewed-state binding and every existing process/per-remote
-// gate.
+// NewRegistryWithOptions creates the normal registry and applies optional
+// request-scoped credential dependencies without changing tool registration or
+// permission policy.
 func NewRegistryWithOptions(options RegistryOptions) *Registry {
 	registry := NewRegistry()
-	resolver := registryGitHubCredentialResolver(options.GitHubCredentials)
+	registry.ConfigureGitHubCredentials(options.GitHubCredentials)
+	return registry
+}
+
+// ConfigureGitHubCredentials rebinds the already-configured remote and GitHub
+// tool families to a request-scoped credential adapter. It returns false when
+// options are incomplete or the expected built-in remote service is unavailable.
+// The exact same RemoteService remains underneath the adapter, preserving the
+// local service used for reviewed-state binding and every existing process and
+// per-remote gate.
+func (r *Registry) ConfigureGitHubCredentials(options *GitHubCredentialOptions) bool {
+	if r == nil {
+		return false
+	}
+	resolver := registryGitHubCredentialResolver(options)
 	if resolver == nil {
-		return registry
+		return false
 	}
 
-	tool, ok := registry.Get("git_remotes")
+	tool, ok := r.Get("git_remotes")
 	if !ok {
-		return registry
+		return false
 	}
 	remoteTool, ok := tool.(*gitRemoteTool)
 	if !ok {
-		return registry
+		return false
 	}
-	base, ok := remoteTool.service.(*gitrepo.RemoteService)
-	if !ok || base == nil {
-		return registry
+	var base *gitrepo.RemoteService
+	switch service := remoteTool.service.(type) {
+	case *gitrepo.RemoteService:
+		base = service
+	case *gitrepo.UserScopedRemoteService:
+		base = service.RemoteService
+	}
+	if base == nil {
+		return false
 	}
 
-	registry.rebindRemoteGitHubServices(gitrepo.NewUserScopedRemoteService(base, resolver))
-	return registry
+	r.rebindRemoteGitHubServices(gitrepo.NewUserScopedRemoteService(base, resolver))
+	return true
 }
 
 func registryGitHubCredentialResolver(options *GitHubCredentialOptions) gitrepo.GitHubCredentialResolver {

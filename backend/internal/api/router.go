@@ -385,7 +385,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	userRepo := repository.NewUserRepo(database)
 	sessionRepo := repository.NewSessionRepo(database)
 	authHandler := NewAuthHandler(userRepo, sessionRepo, cfg)
-	githubAuthHandler := NewGitHubAuthHandlerFromEnvironment(database)
+	githubAuthService, githubAuthHandler := NewGitHubAuthRuntimeFromEnvironment(database)
+	configureGitHubAuthToolRegistry(toolRegistry, githubAuthService)
 	wsMemberRepo := repository.NewWorkspaceMemberRepo(database)
 	wsMemberHandler := NewWorkspaceMemberHandler(wsMemberRepo, userRepo)
 
