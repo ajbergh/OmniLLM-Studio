@@ -21,21 +21,28 @@ type Registry struct {
 }
 
 // NewRegistry creates a registry with dependency-free core utilities. Tools
-// requiring application services are still registered by api/router.go. Local
-// Git read tools are added when repository IDs are configured; mutation tools
-// additionally require OMNILLM_GIT_WRITE_ENABLED=true. Remote Git inspection
-// additionally requires configured remotes and OMNILLM_GIT_REMOTE_ENABLED=true;
-// fetch also requires the local write gate; push and branch publication have
-// their own additional mutation gates; clone requires explicit enablement plus
-// valid byte/entry budgets. GitHub PR reads (including review-thread state),
-// draft creation, review replies, review-thread resolution, and draft-to-ready
-// transition are independent API gates and none implies Git push or another
-// hosted gate.
+// requiring application services are still registered by api/router.go. Sandbox
+// tools whose definitions resolve the process-default Broker lazily are safe to
+// register here before router composition installs the authenticated runtime.
+// Local Git read tools are added when repository IDs are configured; mutation
+// tools additionally require OMNILLM_GIT_WRITE_ENABLED=true. Remote Git
+// inspection additionally requires configured remotes and
+// OMNILLM_GIT_REMOTE_ENABLED=true; fetch also requires the local write gate;
+// push and branch publication have their own additional mutation gates; clone
+// requires explicit enablement plus valid byte/entry budgets. GitHub PR reads
+// (including review-thread state), draft creation, review replies, review-thread
+// resolution, and draft-to-ready transition are independent API gates and none
+// implies Git push or another hosted gate.
 func NewRegistry() *Registry {
 	r := &Registry{tools: make(map[string]Tool)}
 	r.MustRegister(NewDateTimeTool())
 	r.MustRegister(NewUnitConvertTool())
 	r.MustRegister(NewPythonAnalysisTool())
+	r.MustRegister(NewTerminalExecTool())
+	r.MustRegister(NewSandboxNetworkGrantTool())
+	for _, tool := range NewWorkspaceTools() {
+		r.MustRegister(tool)
+	}
 	gitService := gitrepo.NewServiceFromEnvironment()
 	if gitService.Configured() {
 		for _, tool := range NewGitRepositoryTools(gitService) {

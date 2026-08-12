@@ -6,39 +6,51 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ajbergh/omnillm-studio/internal/codesandbox"
+	"github.com/ajbergh/omnillm-studio/internal/sandbox"
 )
 
-// CodeSandboxTool executes code only through the configured external sandbox service.
-type CodeSandboxTool struct{ client *codesandbox.Client }
+type codeSandboxArgs struct {
+	Language  string `json:"language"`
+	Code      string `json:"code"`
+	SessionID string `json:"session_id,omitempty"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
+}
 
-func NewCodeSandboxTool(client *codesandbox.Client) *CodeSandboxTool {
-	return &CodeSandboxTool{client: client}
+// CodeSandboxTool executes code only through the application-owned sandbox
+// Broker. Session IDs are issued by Broker and ownership is revalidated against
+// the current tool invocation scope on every reuse.
+type CodeSandboxTool struct{ broker *sandbox.Broker }
+
+func NewCodeSandboxTool(broker *sandbox.Broker) *CodeSandboxTool {
+	return &CodeSandboxTool{broker: broker}
 }
 
 func (t *CodeSandboxTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name:             "code_execute",
-		Description:      "Execute Python, JavaScript, or shell code inside the configured isolated code sandbox. Never runs code in the OmniLLM backend process.",
+		Description:      "Execute Python, JavaScript, or shell code inside the configured OS-isolated sandbox. Sessions are application-issued, ownership-bound, and have network access disabled by default.",
 		Category:         "compute",
-		Enabled:          t != nil && t.client != nil,
+		Enabled:          t != nil && t.broker != nil,
 		Risk:             RiskHigh,
 		SideEffecting:    true,
 		ReadOnly:         false,
-		RequiresNetwork:  true,
+		RequiresNetwork:  false,
 		SupportsParallel: false,
 		DefaultTimeoutMS: 60000,
 		MaxResultBytes:   1 << 20,
-		Parameters:       json.RawMessage(`{"type":"object","properties":{"language":{"type":"string","enum":["python","javascript","shell"]},"code":{"type":"string","minLength":1,"maxLength":100000},"session_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":60000}},"required":["language","code"],"additionalProperties":false}`),
+		Parameters:       json.RawMessage(`{"type":"object","properties":{"language":{"type":"string","enum":["python","javascript","shell"]},"code":{"type":"string","minLength":1,"maxLength":100000},"session_id":{"type":"string","description":"Optional application-issued sandbox session ID returned by an earlier code_execute call in the same ownership scope."},"timeout_ms":{"type":"integer","minimum":100,"maximum":60000}},"required":["language","code"],"additionalProperties":false}`),
 	}
 }
 
 func (t *CodeSandboxTool) Validate(args json.RawMessage) error {
-	var in codesandbox.ExecuteRequest
+	if t == nil || t.broker == nil {
+		return fmt.Errorf("code sandbox is not configured")
+	}
+	var in codeSandboxArgs
 	if err := json.Unmarshal(args, &in); err != nil {
 		return err
 	}
-	switch in.Language {
+	switch strings.ToLower(strings.TrimSpace(in.Language)) {
 	case "python", "javascript", "shell":
 	default:
 		return fmt.Errorf("unsupported language")
@@ -49,24 +61,45 @@ func (t *CodeSandboxTool) Validate(args json.RawMessage) error {
 	if len(in.Code) > 100000 {
 		return fmt.Errorf("code is too large")
 	}
-	if in.TimeoutMS < 0 || in.TimeoutMS > 60000 {
+	if in.TimeoutMS != 0 && (in.TimeoutMS < 100 || in.TimeoutMS > 60000) {
 		return fmt.Errorf("timeout_ms must be between 100 and 60000")
+	}
+	if in.SessionID != "" && !strings.HasPrefix(in.SessionID, "sbx_") {
+		return fmt.Errorf("session_id must be an application-issued sandbox session")
 	}
 	return nil
 }
 
 func (t *CodeSandboxTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error) {
-	if t == nil || t.client == nil {
+	if t == nil || t.broker == nil {
 		return nil, fmt.Errorf("code sandbox is not configured")
 	}
-	var in codesandbox.ExecuteRequest
+	var in codeSandboxArgs
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, err
 	}
 	if in.TimeoutMS == 0 {
 		in.TimeoutMS = 30000
 	}
-	out, err := t.client.Execute(ctx, in)
+	owner, err := sandboxOwnerFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	sessionID := strings.TrimSpace(in.SessionID)
+	if sessionID == "" {
+		session, createErr := t.broker.Create(ctx, owner, defaultCodeSandboxSpec(in.TimeoutMS))
+		if createErr != nil {
+			return nil, createErr
+		}
+		sessionID = session.ID
+	}
+
+	out, err := t.broker.Exec(ctx, owner, sessionID, sandbox.ExecRequest{
+		Language:  strings.ToLower(strings.TrimSpace(in.Language)),
+		Code:      in.Code,
+		TimeoutMS: in.TimeoutMS,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -82,8 +115,23 @@ func (t *CodeSandboxTool) Execute(ctx context.Context, args json.RawMessage) (*T
 		content = fmt.Sprintf("Sandbox process exited with code %d", out.ExitCode)
 	}
 	artifacts := make([]ToolArtifact, 0, len(out.Artifacts))
-	for _, a := range out.Artifacts {
-		artifacts = append(artifacts, ToolArtifact{Name: a.Name, MimeType: a.MimeType, URL: a.URL, Bytes: a.Bytes})
+	for _, artifact := range out.Artifacts {
+		artifacts = append(artifacts, ToolArtifact{ID: artifact.ID, Name: artifact.Name, MimeType: artifact.MimeType, Bytes: artifact.Bytes})
 	}
-	return &ToolResult{Content: content, Structured: structured, Artifacts: artifacts, IsError: out.ExitCode != 0, Metadata: map[string]interface{}{"session_id": out.SessionID, "exit_code": out.ExitCode}}, nil
+	metadata := map[string]interface{}{
+		"session_id":   sessionID,
+		"execution_id": out.ExecutionID,
+		"exit_code":    out.ExitCode,
+		"network":      "none",
+	}
+	for key, value := range out.Metadata {
+		metadata[key] = value
+	}
+	return &ToolResult{
+		Content:    content,
+		Structured: structured,
+		Artifacts:  artifacts,
+		IsError:    out.ExitCode != 0,
+		Metadata:   metadata,
+	}, nil
 }
