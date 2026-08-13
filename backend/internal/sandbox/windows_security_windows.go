@@ -47,7 +47,19 @@ func createWindowsRestrictedToken(restrictingSID *windows.SID) (windows.Token, e
 	if restrictingSID == nil || !restrictingSID.IsValid() {
 		return 0, fmt.Errorf("valid sandbox restricting SID is required")
 	}
+	return createWindowsFilteredToken(restrictingSID)
+}
 
+// createWindowsPrivilegeStrippedToken derives a primary token with maximum
+// privileges disabled but without a process-wide restricting-SID access check.
+// The Windows AppContainer runtime uses this as its base token: AppContainer's
+// package SID provides the unique filesystem/network boundary, while avoiding a
+// restricting SID that would also need execute/read ACEs on every system DLL.
+func createWindowsPrivilegeStrippedToken() (windows.Token, error) {
+	return createWindowsFilteredToken(nil)
+}
+
+func createWindowsFilteredToken(restrictingSID *windows.SID) (windows.Token, error) {
 	var source windows.Token
 	access := uint32(windows.TOKEN_DUPLICATE | windows.TOKEN_QUERY | windows.TOKEN_ASSIGN_PRIMARY)
 	if err := windows.OpenProcessToken(windows.CurrentProcess(), access, &source); err != nil {
@@ -55,7 +67,15 @@ func createWindowsRestrictedToken(restrictingSID *windows.SID) (windows.Token, e
 	}
 	defer source.Close()
 
-	restricting := []windows.SIDAndAttributes{{Sid: restrictingSID}}
+	var restrictedCount uintptr
+	var restrictedPointer uintptr
+	var restricting []windows.SIDAndAttributes
+	if restrictingSID != nil {
+		restricting = []windows.SIDAndAttributes{{Sid: restrictingSID}}
+		restrictedCount = uintptr(len(restricting))
+		restrictedPointer = uintptr(unsafe.Pointer(&restricting[0]))
+	}
+
 	var restricted windows.Token
 	result, _, callErr := windowsCreateRestrictedTokenProc.Call(
 		uintptr(source),
@@ -64,8 +84,8 @@ func createWindowsRestrictedToken(restrictingSID *windows.SID) (windows.Token, e
 		0,
 		0,
 		0,
-		uintptr(len(restricting)),
-		uintptr(unsafe.Pointer(&restricting[0])),
+		restrictedCount,
+		restrictedPointer,
 		uintptr(unsafe.Pointer(&restricted)),
 	)
 	runtime.KeepAlive(restrictingSID)
