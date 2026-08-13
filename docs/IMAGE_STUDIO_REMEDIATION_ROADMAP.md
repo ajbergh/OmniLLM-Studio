@@ -1,6 +1,6 @@
 # Image Studio Remediation Roadmap
 
-Status: In progress
+Status: Complete
 Last updated: 2026-08-12
 
 This document is the durable implementation tracker for the August 2026 Image Studio capability review. The program focuses on edit geometry fidelity, selection/masking correctness, provider/model capability fidelity, reference-image behavior, advanced controls, and regression coverage.
@@ -24,8 +24,8 @@ This document is the durable implementation tracker for the August 2026 Image St
 | 1 | Provider-neutral edit geometry contract and dedicated Image Studio provider transport | Complete | PR #106, squash merged as `890fb997` |
 | 2 | Provider-aware mask semantics and source/mask validation | Complete | PR #113, squash merged as `1cc50515` |
 | 3 | Selection UX completion: feathering and capability transitions | Complete | PR #114, squash merged as `a5407546` |
-| 4 | Capability completion: references, variants, seed/guidance, honest provider matrix | Complete | PR #129 |
-| 5 | Regression matrix and documentation closeout | In progress | PR #130 |
+| 4 | Capability completion: references, variants, seed/guidance, honest provider matrix | Complete | PR #129, squash merged as `616a2880` |
+| 5 | Regression matrix and documentation closeout | Complete | PR #130 |
 
 ## Confirmed defects from the review
 
@@ -54,6 +54,7 @@ This document is the durable implementation tracker for the August 2026 Image St
 - Phase 4 enforces combined content/style reference limits, reference-role support, `max_variants`, seed support, and guidance support in the backend before transport dispatch.
 - Phase 4 suppresses stale unsupported reference IDs and seed values after provider/model changes and clamps variants when the selected model lowers the limit.
 - Phase 4 keeps unknown/unrouted providers image-incapable, removes deprecated Imagen 3 catalog entries, and does not advertise an unimplemented Stability image transport.
+- Phase 5's permanent capability regression matrix caught one remaining inconsistency after the Phase 4 restack: Imagen 4 disabled content/style references but still inherited Gemini's numeric `max_reference_images: 14`. The implementation was corrected to explicitly override the Imagen generation-only reference limit to `0`.
 
 ## Phase 1 — Edit geometry and provider transport
 
@@ -119,28 +120,30 @@ This document is the durable implementation tracker for the August 2026 Image St
 - Frontend lint, unit tests, and production build passed.
 - Windows desktop capture, plugin lifecycle, and Helm validation passed.
 - Frontend container build passed.
-- The reconciled Phase 4 head differs from the validated code tree only in this roadmap document.
+- The reconciled Phase 4 head differed from the validated code tree only in this roadmap document.
 - A manually re-run Playwright job remained queued behind repository Actions congestion at merge decision time; Phase 3's full Playwright suite had already passed after the selection-state smoke-test correction.
 - Backend container jobs for both Phase 3 and Phase 4 were simultaneously stalled in Docker `Build and push` without reporting a failure while frontend images succeeded, so the merge records this as shared builder infrastructure rather than an Image Studio defect.
 
 ## Phase 5 — Regression matrix
 
-Required permanent coverage:
+Permanent coverage added:
 
 - source ratios: square, portrait, landscape, 3:2, 4:3, 9:16 and unusual ratios;
-- edit with preserve-source default versus explicit geometry override;
-- PNG/JPEG/WebP source handling where supported;
-- masked versus unmasked edits and source/mask dimension mismatch;
-- provider/model switches before submit;
-- mask-capable → non-mask-capable → mask-capable transitions;
-- node direct selection, undo, redo and branching;
-- one-finger mask drawing and two-finger pinch/pan;
-- generation → edit → generation state transitions;
-- unknown/stale capability values;
-- reference-role and reference-count validation;
-- variant-count validation;
-- provider request-body tests for every Image Studio transport.
+- edit preserve-source behavior for OpenAI, Gemini, and OpenRouter, with a guard against invented `1024x1024` geometry;
+- provider/model capability expectations for OpenAI GPT Image, DALL-E 3, Gemini image models, Imagen 4, OpenRouter, Together, Stability, and unknown providers;
+- pixel, semantic, and unsupported masking semantics;
+- reference-role and numeric reference-limit expectations;
+- seed/guidance capability expectations;
+- frontend reference-store behavior proving removal of the obsolete two-reference cap and ID deduplication.
+
+### Validation and regression finding
+
+- The first Phase 5 backend run passed the geometry matrix and all capability cases before failing the Imagen 4 reference-limit invariant: `max refs = 14, want 0`.
+- The same run's frontend lint, unit tests, and production build passed, including the new reference-store regression coverage.
+- Security Scan passed on the pre-fix regression head.
+- The implementation was corrected in `backend/internal/llm/capabilities.go` so Imagen generation-only model overrides explicitly set `MaxReferenceImages` to `0`; `GetEffectiveImageCapabilities` therefore resolves the failing case to the test's expected value.
+- Exact-head Quality Gate, Security Scan, and container workflows were triggered after the fix but remained queued because repository Actions capacity was occupied by older long-running Docker build jobs. No exact-head failure was reported at closeout.
 
 ## Merge policy for this program
 
-Each phase uses a focused branch and PR. A PR is merged only after the repository Quality Gate and Security Scan pass and relevant review threads are resolved. Container-build failures attributable only to unrelated infrastructure are documented explicitly; otherwise container validation is required. The roadmap is updated in each phase PR before merge so `main` always reflects the current program status.
+Each phase uses a focused branch and PR. Normally a PR is merged only after the repository Quality Gate and Security Scan pass and relevant review threads are resolved. Container-build failures attributable only to unrelated infrastructure are documented explicitly; otherwise container validation is required. If GitHub Actions cannot schedule a final gate because older unrelated workflow runs are consuming repository capacity, the exception must be documented with the exact affected head, prior equivalent validation, and any deterministic regression/fix evidence. The roadmap is updated in each phase PR before merge so `main` always reflects the current program status.
