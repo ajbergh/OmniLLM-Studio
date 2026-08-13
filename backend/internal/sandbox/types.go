@@ -134,7 +134,7 @@ type Artifact struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	MimeType string `json:"mime_type,omitempty"`
-	Bytes    int64 `json:"bytes,omitempty"`
+	Bytes    int64  `json:"bytes,omitempty"`
 	SHA256   string `json:"sha256,omitempty"`
 }
 
