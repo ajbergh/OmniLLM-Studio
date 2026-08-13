@@ -62,6 +62,7 @@ type RemoteService struct {
 	githubPullRequestThreadResolutionEnabled bool
 	githubPullRequestReadyEnabled            bool
 	githubPullRequestMergeEnabled            bool
+	githubBindingCapabilities                map[string]GitHubBindingCapabilities
 	cloneEnabled                             bool
 	cloneMaxBytes                            int64
 	cloneMaxEntries                          int64
@@ -93,6 +94,7 @@ func NewRemoteServiceFromEnvironment(local *Service) *RemoteService {
 	service.githubPullRequestThreadResolutionEnabled = boolEnvironment(GitHubPullRequestThreadResolutionEnabledEnv)
 	service.githubPullRequestReadyEnabled = boolEnvironment(GitHubPullRequestReadyEnabledEnv)
 	service.githubPullRequestMergeEnabled = boolEnvironment(GitHubPullRequestMergeEnabledEnv)
+	service.githubBindingCapabilities = ParseGitHubBindingCapabilities(os.Getenv(GitHubBindingCapabilitiesEnv))
 	if maxBytes, maxEntries, ok := cloneLimitsFromEnvironment(); ok {
 		service.cloneMaxBytes = maxBytes
 		service.cloneMaxEntries = maxEntries
@@ -110,7 +112,8 @@ func newRemoteService(configured map[string]RemoteConfig, enabled, pushEnabled b
 	}
 	return &RemoteService{
 		remotes: configured, ids: sortedRemoteIDs(configured), enabled: enabled,
-		pushEnabled: pushEnabled, transport: remoteTransport, githubClient: newGitHubAPIClient(), lookupEnv: lookupEnv,
+		pushEnabled: pushEnabled, githubBindingCapabilities: map[string]GitHubBindingCapabilities{},
+		transport: remoteTransport, githubClient: newGitHubAPIClient(), lookupEnv: lookupEnv,
 	}
 }
 
