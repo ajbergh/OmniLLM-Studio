@@ -19,8 +19,12 @@ func enableMergeForTest(svc *RemoteService, method string) {
 	svc.githubPullRequestMergeEnabled = true
 }
 
+func satisfiedMergeEligibilityFixture() mergeEligibilityFixture {
+	return mergeEligibilityFixture{checkAppID: 15368}
+}
+
 func TestMergePullRequestRunsFreshEligibilityThenOneExactHeadPut(t *testing.T) {
-	svc, head := newMergeEligibilityTestService(t, mergeEligibilityFixture{})
+	svc, head := newMergeEligibilityTestService(t, satisfiedMergeEligibilityFixture())
 	enableMergeForTest(svc, "squash")
 	base := svc.githubClient.Transport
 	mergeCalls := 0
@@ -53,7 +57,7 @@ func TestMergePullRequestRunsFreshEligibilityThenOneExactHeadPut(t *testing.T) {
 }
 
 func TestMergePullRequestRejectsStaleExpectedHeadBeforePut(t *testing.T) {
-	svc, _ := newMergeEligibilityTestService(t, mergeEligibilityFixture{})
+	svc, _ := newMergeEligibilityTestService(t, satisfiedMergeEligibilityFixture())
 	enableMergeForTest(svc, "squash")
 	base := svc.githubClient.Transport
 	mergeCalls := 0
@@ -74,7 +78,7 @@ func TestMergePullRequestRejectsStaleExpectedHeadBeforePut(t *testing.T) {
 }
 
 func TestMergePullRequestRejectsIncompleteEligibilityBeforePut(t *testing.T) {
-	svc, head := newMergeEligibilityTestService(t, mergeEligibilityFixture{requireLastPushApproval: true})
+	svc, head := newMergeEligibilityTestService(t, mergeEligibilityFixture{checkAppID: 15368, requireLastPushApproval: true})
 	enableMergeForTest(svc, "squash")
 	base := svc.githubClient.Transport
 	mergeCalls := 0
@@ -95,7 +99,7 @@ func TestMergePullRequestRejectsIncompleteEligibilityBeforePut(t *testing.T) {
 }
 
 func TestMergePullRequestRejectsConfiguredMethodOutsideFreshPolicy(t *testing.T) {
-	svc, head := newMergeEligibilityTestService(t, mergeEligibilityFixture{})
+	svc, head := newMergeEligibilityTestService(t, satisfiedMergeEligibilityFixture())
 	enableMergeForTest(svc, "merge")
 	base := svc.githubClient.Transport
 	mergeCalls := 0
@@ -116,7 +120,7 @@ func TestMergePullRequestRejectsConfiguredMethodOutsideFreshPolicy(t *testing.T)
 }
 
 func TestMergePullRequestConflictNeverRetriesMutation(t *testing.T) {
-	svc, head := newMergeEligibilityTestService(t, mergeEligibilityFixture{})
+	svc, head := newMergeEligibilityTestService(t, satisfiedMergeEligibilityFixture())
 	enableMergeForTest(svc, "squash")
 	base := svc.githubClient.Transport
 	mergeCalls := 0
@@ -141,7 +145,7 @@ func TestMergePullRequestConflictNeverRetriesMutation(t *testing.T) {
 }
 
 func TestMergePullRequestAmbiguousTransportReinspectsWithoutRetry(t *testing.T) {
-	svc, head := newMergeEligibilityTestService(t, mergeEligibilityFixture{})
+	svc, head := newMergeEligibilityTestService(t, satisfiedMergeEligibilityFixture())
 	enableMergeForTest(svc, "squash")
 	base := svc.githubClient.Transport
 	mergeCalls := 0
@@ -168,7 +172,7 @@ func TestMergePullRequestAmbiguousTransportReinspectsWithoutRetry(t *testing.T) 
 }
 
 func TestMergePullRequestAmbiguousUnconfirmedOutcomeDoesNotRetry(t *testing.T) {
-	svc, head := newMergeEligibilityTestService(t, mergeEligibilityFixture{})
+	svc, head := newMergeEligibilityTestService(t, satisfiedMergeEligibilityFixture())
 	enableMergeForTest(svc, "squash")
 	base := svc.githubClient.Transport
 	mergeCalls := 0
