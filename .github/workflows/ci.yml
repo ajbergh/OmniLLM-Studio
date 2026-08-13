@@ -89,6 +89,30 @@ jobs:
         working-directory: backend
         run: go test ./internal/plugins -count=1
 
+  sandbox-windows:
+    name: Sandbox confinement primitives (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - name: Prove restricted token Job Object and ACL confinement primitives
+        working-directory: backend
+        shell: pwsh
+        run: |
+          go test ./internal/sandbox -run '^TestWindows' -count=1 -v 2>&1 | Tee-Object ../sandbox-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload Windows sandbox diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sandbox-windows-diagnostics
+          path: sandbox-windows.log
+          if-no-files-found: ignore
+          retention-days: 14
+
   desktop-windows:
     name: Desktop capture contract (Windows)
     runs-on: windows-latest
