@@ -85,9 +85,9 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
-      - name: Verify plugin lifecycle and containment
+      - name: Verify persistent extension lifecycle and containment
         working-directory: backend
-        run: go test ./internal/plugins -count=1
+        run: go test ./internal/plugins ./internal/mcpclient -count=1
 
   sandbox-windows:
     name: Sandbox confinement primitives (Windows)
@@ -181,7 +181,31 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  smoke:
+  helm:
+    name: Helm lint and render
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+      - run: helm lint deploy/helm/omnillm-studio --set secrets.encryptionKey=$(printf '0%.0s' {1..64})
+      - run: |
+          helm template test deploy/helm/omnillm-studio \
+            --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
+            --set persistence.enabled=false \
+            > /tmp/rendered.yaml
+      - name: Enforce single-writer topology
+        run: |
+          if helm template invalid deploy/helm/omnillm-studio \
+            --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
+            --set persistence.enabled=false \
+            --set replicaCount=2 >/tmp/invalid-rendered.yaml 2>/tmp/invalid-rendered.err; then
+            echo 'replicaCount=2 unexpectedly rendered successfully'
+            cat /tmp/invalid-rendered.yaml
+            exit 1
+          fi
+          grep -q 'replicaCount must be 1' /tmp/invalid-rendered.err
+
+  playwright:
     name: Playwright smoke suite
     runs-on: ubuntu-24.04
     needs: [backend, frontend]
@@ -195,9 +219,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            frontend/package-lock.json
+          cache-dependency-path: package-lock.json
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
@@ -213,10 +235,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Run all browser specifications
         env:
-          GOFLAGS: -tags=webkit2_41
-        run: |
-          export OMNILLM_MASTER_KEY="$(printf '0%.0s' {1..64})"
-          npx playwright test --project=chromium
+          OMNILLM_MASTER_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+        run: npx playwright test --project=chromium
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v7
@@ -225,25 +245,3 @@ jobs:
           path: playwright-report
           if-no-files-found: ignore
           retention-days: 14
-
-  helm:
-    name: Helm lint and render
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: azure/setup-helm@v5
-        with:
-          version: v3.16.2
-      - run: helm lint deploy/helm/omnillm-studio --set secrets.encryptionKey=$(printf '0%.0s' {1..64})
-      - run: |
-          helm template test deploy/helm/omnillm-studio \
-            --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
-            > /tmp/rendered.yaml
-      - name: Enforce single-writer topology
-        run: |
-          if helm template test deploy/helm/omnillm-studio \
-            --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
-            --set replicaCount=2 >/dev/null 2>&1; then
-            echo "replicaCount=2 must be rejected" >&2
-            exit 1
-          fi
