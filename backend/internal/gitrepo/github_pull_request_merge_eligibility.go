@@ -43,6 +43,7 @@ type GitHubPullRequestMergeEligibilityResult struct {
 	RequiredChecksSatisfied      bool                                  `json:"required_checks_satisfied"`
 	RequiredChecks               []GitHubRequiredCheckEligibility      `json:"required_checks,omitempty"`
 	ReviewDecision               string                                `json:"review_decision,omitempty"`
+	ApprovingReviewsObserved     int                                   `json:"approving_reviews_observed"`
 	OutstandingCodeOwnerRequests int                                   `json:"outstanding_code_owner_requests"`
 	ReviewsSatisfied             bool                                  `json:"reviews_satisfied"`
 	ThreadsSatisfied             bool                                  `json:"threads_satisfied"`
@@ -87,6 +88,15 @@ type githubMergeEligibilityGraphQLResponse struct {
 						AsCodeOwner bool `json:"asCodeOwner"`
 					} `json:"nodes"`
 				} `json:"reviewRequests"`
+				LatestOpinionatedReviews struct {
+					TotalCount int `json:"totalCount"`
+					Nodes      []struct {
+						State  string `json:"state"`
+						Commit *struct {
+							OID string `json:"oid"`
+						} `json:"commit"`
+					} `json:"nodes"`
+				} `json:"latestOpinionatedReviews"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
 	} `json:"data"`
@@ -150,6 +160,10 @@ const githubMergeEligibilityQuery = `query OmniLLMMergeEligibility($owner: Strin
       reviewRequests(first: $reviewRequestLimit) {
         totalCount
         nodes { asCodeOwner }
+      }
+      latestOpinionatedReviews(first: $reviewRequestLimit, writersOnly: true) {
+        totalCount
+        nodes { state commit { oid } }
       }
     }
   }
@@ -258,24 +272,27 @@ func (s *RemoteService) GetPullRequestMergeEligibility(ctx context.Context, remo
 		block("required_status_checks_unsatisfied")
 	}
 
-	reviewDecision, codeOwnerRequests, reviewsSatisfied, reviewsComplete := s.inspectGitHubReviewEligibility(ctx, token, owner, repository, number, policy.Head, policy.BaseBranch, &policy.Requirements)
-	result.ReviewDecision = reviewDecision
-	result.OutstandingCodeOwnerRequests = codeOwnerRequests
-	result.ReviewsSatisfied = reviewsSatisfied
-	if !reviewsComplete {
-		incomplete("review_evidence_incomplete")
-	}
-	// GitHub's reviewDecision is an aggregate code-review status, but the
-	// documented last-push rule additionally depends on the identity of the
-	// actor who made the most recent reviewable push. M3A does not have a
-	// bounded provider field that proves that actor relationship, so this
-	// requirement remains explicitly incomplete rather than inferred from an
-	// APPROVED reviewDecision.
-	if policy.Requirements.LastPushApprovalRequired {
-		result.ReviewsSatisfied = false
-		incomplete("last_push_approval_evidence_unavailable")
-	} else if reviewsComplete && !reviewsSatisfied {
-		block("required_reviews_unsatisfied")
+	if gitHubMergeReviewsRequired(&policy.Requirements) {
+		reviewDecision, codeOwnerRequests, approvingReviews, reviewsSatisfied, reviewsComplete := s.inspectGitHubReviewEligibility(ctx, token, owner, repository, number, policy.Head, policy.BaseBranch, &policy.Requirements)
+		result.ReviewDecision = reviewDecision
+		result.ApprovingReviewsObserved = approvingReviews
+		result.OutstandingCodeOwnerRequests = codeOwnerRequests
+		result.ReviewsSatisfied = reviewsSatisfied
+		if !reviewsComplete {
+			incomplete("review_evidence_incomplete")
+		}
+		// GitHub's reviewDecision is an aggregate code-review status, but the
+		// documented last-push rule additionally depends on the identity of the
+		// actor who made the most recent reviewable push. M3A does not have a
+		// bounded provider field that proves that actor relationship, so this
+		// requirement remains explicitly incomplete rather than inferred from an
+		// APPROVED reviewDecision.
+		if policy.Requirements.LastPushApprovalRequired {
+			result.ReviewsSatisfied = false
+			incomplete("last_push_approval_evidence_unavailable")
+		} else if reviewsComplete && !reviewsSatisfied {
+			block("required_reviews_unsatisfied")
+		}
 	}
 
 	if policy.Requirements.ConversationResolutionRequired {
@@ -470,24 +487,25 @@ func gitHubRequiredCheckRunPassed(status, conclusion string) bool {
 	}
 }
 
-func (s *RemoteService) inspectGitHubReviewEligibility(ctx context.Context, token, owner, repository string, number int, head, base string, requirements *GitHubPullRequestMergeRequirementsResult) (string, int, bool, bool) {
+func (s *RemoteService) inspectGitHubReviewEligibility(ctx context.Context, token, owner, repository string, number int, head, base string, requirements *GitHubPullRequestMergeRequirementsResult) (string, int, int, bool, bool) {
 	variables := map[string]interface{}{
 		"owner": owner, "repository": repository, "number": number,
 		"reviewRequestLimit": maxGitHubMergeEligibilityReviewRequests,
 	}
 	var response githubMergeEligibilityGraphQLResponse
 	if err := s.doGitHubGraphQL(ctx, token, githubMergeEligibilityQuery, variables, &response); err != nil || len(response.Errors) > 0 || response.Data.Repository == nil || response.Data.Repository.PullRequest == nil {
-		return "", 0, false, false
+		return "", 0, 0, false, false
 	}
 	pull := response.Data.Repository.PullRequest
 	if !validRemoteHash(pull.HeadRefOID) || !strings.EqualFold(pull.HeadRefOID, head) || strings.TrimSpace(pull.BaseRefName) != base {
-		return "", 0, false, false
+		return "", 0, 0, false, false
 	}
-	if pull.ReviewRequests.TotalCount < 0 || pull.ReviewRequests.TotalCount < len(pull.ReviewRequests.Nodes) || len(pull.ReviewRequests.Nodes) > maxGitHubMergeEligibilityReviewRequests {
-		return "", 0, false, false
+	if pull.ReviewRequests.TotalCount < 0 || pull.ReviewRequests.TotalCount < len(pull.ReviewRequests.Nodes) || len(pull.ReviewRequests.Nodes) > maxGitHubMergeEligibilityReviewRequests || pull.ReviewRequests.TotalCount > maxGitHubMergeEligibilityReviewRequests {
+		return "", 0, 0, false, false
 	}
-	if pull.ReviewRequests.TotalCount > maxGitHubMergeEligibilityReviewRequests {
-		return "", 0, false, false
+	latestReviews := pull.LatestOpinionatedReviews
+	if latestReviews.TotalCount < 0 || latestReviews.TotalCount < len(latestReviews.Nodes) || len(latestReviews.Nodes) > maxGitHubMergeEligibilityReviewRequests || latestReviews.TotalCount > maxGitHubMergeEligibilityReviewRequests {
+		return "", 0, 0, false, false
 	}
 	codeOwnerRequests := 0
 	for _, request := range pull.ReviewRequests.Nodes {
@@ -495,21 +513,48 @@ func (s *RemoteService) inspectGitHubReviewEligibility(ctx context.Context, toke
 			codeOwnerRequests++
 		}
 	}
+	approvingReviews := 0
+	for _, review := range latestReviews.Nodes {
+		state := strings.ToUpper(strings.TrimSpace(review.State))
+		switch state {
+		case "APPROVED":
+			if requirements != nil && requirements.DismissStaleReviewsOnPush {
+				if review.Commit == nil || !validRemoteHash(review.Commit.OID) {
+					return "", 0, 0, false, false
+				}
+				if !strings.EqualFold(review.Commit.OID, head) {
+					continue
+				}
+			}
+			approvingReviews++
+		case "CHANGES_REQUESTED", "DISMISSED", "COMMENTED", "PENDING":
+			// Known non-approving review states do not satisfy the count.
+		default:
+			return "", 0, 0, false, false
+		}
+	}
 	decision := strings.ToUpper(strings.TrimSpace(pull.ReviewDecision))
 	if !gitHubMergeReviewsRequired(requirements) {
-		return decision, codeOwnerRequests, true, true
+		return decision, codeOwnerRequests, approvingReviews, true, true
 	}
-	switch decision {
-	case "APPROVED":
-		if requirements != nil && requirements.CodeOwnerReviewRequired && codeOwnerRequests > 0 {
-			return decision, codeOwnerRequests, false, true
+	if decision != "APPROVED" {
+		switch decision {
+		case "REVIEW_REQUIRED", "CHANGES_REQUESTED", "":
+			return decision, codeOwnerRequests, approvingReviews, false, true
+		default:
+			return decision, codeOwnerRequests, approvingReviews, false, false
 		}
-		return decision, codeOwnerRequests, true, true
-	case "REVIEW_REQUIRED", "CHANGES_REQUESTED", "":
-		return decision, codeOwnerRequests, false, true
-	default:
-		return decision, codeOwnerRequests, false, false
 	}
+	satisfied := true
+	if requirements != nil {
+		if requirements.RequiredApprovingReviewCount > approvingReviews {
+			satisfied = false
+		}
+		if requirements.CodeOwnerReviewRequired && codeOwnerRequests > 0 {
+			satisfied = false
+		}
+	}
+	return decision, codeOwnerRequests, approvingReviews, satisfied, true
 }
 
 func (s *RemoteService) inspectGitHubRequiredDeployments(ctx context.Context, token, owner, repository, head string, environments []string) ([]GitHubRequiredDeploymentEligibility, bool, bool) {
