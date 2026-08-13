@@ -54,9 +54,9 @@ func TestOpenRouterEffectiveImageCapabilities(t *testing.T) {
 	}
 
 	knownEditModels := []string{
+		"google/gemini-3.1-flash-image",
+		"google/gemini-3-pro-image",
 		"google/gemini-2.5-flash-image",
-		"google/gemini-3.1-flash-image-preview",
-		"google/gemini-3-pro-image-preview",
 		"openai/gpt-5.4-image-2",
 		"openai/gpt-5-image",
 		"openai/gpt-5-image-mini",

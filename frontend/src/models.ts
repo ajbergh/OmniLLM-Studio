@@ -67,9 +67,6 @@ const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
       'gemini-3.1-flash-lite-image',
       'gemini-3-pro-image',
       'gemini-2.5-flash-image',
-      'imagen-4.0-generate-001',
-      'imagen-4.0-ultra-generate-001',
-      'imagen-4.0-fast-generate-001',
     ],
   },
   ollama: { chat: [] },
@@ -183,9 +180,9 @@ const PROVIDER_MODEL_CATALOG: ProviderModelCatalog = {
     ],
     image: [
       // Google / Gemini (text+image output)
+      'google/gemini-3.1-flash-image',
+      'google/gemini-3-pro-image',
       'google/gemini-2.5-flash-image',
-      'google/gemini-3.1-flash-image-preview',
-      'google/gemini-3-pro-image-preview',
       // OpenAI (text+image output)
       'openai/gpt-5.4-image-2',
       'openai/gpt-5-image',

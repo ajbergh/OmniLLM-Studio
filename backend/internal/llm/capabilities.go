@@ -147,15 +147,6 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 			},
 		}
 	case "gemini", "imagen":
-		imagenGenerationOnly := ModelImageCapabilities{
-			SupportsEditing:          boolPtr(false),
-			SupportsMasking:          boolPtr(false),
-			MaskingMode:              maskingModePtr(ImageMaskingNone),
-			SupportsContentReference: boolPtr(false),
-			SupportsStyleReference:   boolPtr(false),
-			SupportsSeed:             boolPtr(false),
-			MaxReferenceImages:       intPtr(0),
-		}
 		return ImageCapabilities{
 			SupportsGeneration:       true,
 			SupportsEditing:          true,
@@ -174,9 +165,6 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 				"gemini-3.1-flash-lite-image",
 				"gemini-3-pro-image",
 				"gemini-2.5-flash-image",
-				"imagen-4.0-generate-001",
-				"imagen-4.0-ultra-generate-001",
-				"imagen-4.0-fast-generate-001",
 			},
 			DefaultImageModel: "gemini-3.1-flash-image",
 			ModelOverrides: map[string]ModelImageCapabilities{
@@ -187,10 +175,7 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 						"512x2048", "2048x512", "384x3072", "3072x384",
 					},
 				},
-				"gemini-2.5-flash-image":        {MaxReferenceImages: intPtr(3)},
-				"imagen-4.0-generate-001":       imagenGenerationOnly,
-				"imagen-4.0-ultra-generate-001": imagenGenerationOnly,
-				"imagen-4.0-fast-generate-001":  imagenGenerationOnly,
+				"gemini-2.5-flash-image": {MaxReferenceImages: intPtr(3)},
 			},
 		}
 	case "stable-diffusion", "stability":
@@ -237,18 +222,18 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 				"896x1152", "1152x896", "768x1344", "1344x768", "1536x672",
 			},
 			ImageModels: []string{
-				"google/gemini-2.5-flash-image", "google/gemini-3.1-flash-image-preview", "google/gemini-3-pro-image-preview",
+				"google/gemini-3.1-flash-image", "google/gemini-3-pro-image", "google/gemini-2.5-flash-image",
 				"openai/gpt-5.4-image-2", "openai/gpt-5-image", "openai/gpt-5-image-mini",
 				"black-forest-labs/flux.2-pro", "black-forest-labs/flux.2-max", "black-forest-labs/flux.2-flex", "black-forest-labs/flux.2-klein-4b",
 				"recraft/recraft-v3", "recraft/recraft-v4", "recraft/recraft-v4-pro",
 				"sourceful/riverflow-v2-fast", "sourceful/riverflow-v2-fast-preview", "sourceful/riverflow-v2-pro", "sourceful/riverflow-v2-max-preview", "sourceful/riverflow-v2-standard-preview",
 				"bytedance-seed/seedream-4.5",
 			},
-			DefaultImageModel: "google/gemini-2.5-flash-image",
+			DefaultImageModel: "google/gemini-3.1-flash-image",
 			ModelOverrides: map[string]ModelImageCapabilities{
+				"google/gemini-3.1-flash-image":           openRouterEditModel,
+				"google/gemini-3-pro-image":               openRouterEditModel,
 				"google/gemini-2.5-flash-image":           openRouterEditModel,
-				"google/gemini-3.1-flash-image-preview":   openRouterEditModel,
-				"google/gemini-3-pro-image-preview":       openRouterEditModel,
 				"openai/gpt-5.4-image-2":                  openRouterEditModel,
 				"openai/gpt-5-image":                      openRouterEditModel,
 				"openai/gpt-5-image-mini":                 openRouterEditModel,

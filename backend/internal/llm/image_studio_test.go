@@ -43,7 +43,29 @@ func TestResolveImageStudioGeometryRejectsInvalidExplicitSize(t *testing.T) {
 	}
 }
 
-func TestBuildOpenRouterStudioImageBody(t *testing.T) {
+func TestNormalizeImageStudioModelMigratesRetiredImageModels(t *testing.T) {
+	tests := []struct {
+		provider string
+		model    string
+		want     string
+	}{
+		{"gemini", "gemini-3.1-flash-image-preview", "gemini-3.1-flash-image"},
+		{"gemini", "gemini-3-pro-image-preview", "gemini-3-pro-image"},
+		{"gemini", "imagen-4.0-generate-001", "gemini-3.1-flash-image"},
+		{"gemini", "imagen-4.0-ultra-generate-001", "gemini-3.1-flash-image"},
+		{"gemini", "imagen-4.0-fast-generate-001", "gemini-3.1-flash-image"},
+		{"openrouter", "google/gemini-3.1-flash-image-preview", "google/gemini-3.1-flash-image"},
+		{"openrouter", "google/gemini-3-pro-image-preview", "google/gemini-3-pro-image"},
+		{"openrouter", "openai/gpt-5-image", "openai/gpt-5-image"},
+	}
+	for _, tt := range tests {
+		if got := normalizeImageStudioModel(tt.provider, tt.model); got != tt.want {
+			t.Fatalf("normalizeImageStudioModel(%q, %q) = %q, want %q", tt.provider, tt.model, got, tt.want)
+		}
+	}
+}
+
+func TestBuildOpenRouterStudioImageBodyUsesPortableGeometry(t *testing.T) {
 	seed := 42
 	req := ImageStudioRequest{
 		ImageRequest: ImageRequest{
@@ -63,7 +85,10 @@ func TestBuildOpenRouterStudioImageBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := buildOpenRouterStudioImageBody("openai/gpt-image-1", req, geometry)
-	if body["size"] != "1536x1024" || body["aspect_ratio"] != "3:2" {
+	if _, exists := body["size"]; exists {
+		t.Fatalf("OpenRouter body must not send explicit pixel size with aspect ratio: %#v", body)
+	}
+	if body["aspect_ratio"] != "3:2" {
 		t.Fatalf("unexpected geometry body: %#v", body)
 	}
 	if body["seed"] != 42 || body["n"] != 2 || body["quality"] != "high" {
@@ -72,6 +97,23 @@ func TestBuildOpenRouterStudioImageBody(t *testing.T) {
 	refs, ok := body["input_references"].([]map[string]interface{})
 	if !ok || len(refs) != 1 {
 		t.Fatalf("input_references = %#v", body["input_references"])
+	}
+}
+
+func TestBuildOpenRouterStudioMinimalBodyDropsOptionalControls(t *testing.T) {
+	seed := 42
+	req := ImageStudioRequest{
+		ImageRequest: ImageRequest{Prompt: "watercolor cabin", N: 2, Quality: "high"},
+		Seed:         &seed,
+	}
+	body := buildOpenRouterStudioMinimalBody("google/gemini-2.5-flash-image", req)
+	if body["model"] != "google/gemini-2.5-flash-image" || body["prompt"] != req.Prompt {
+		t.Fatalf("required fields missing: %#v", body)
+	}
+	for _, key := range []string{"n", "quality", "seed", "size", "aspect_ratio"} {
+		if _, exists := body[key]; exists {
+			t.Fatalf("minimal body unexpectedly contains %s: %#v", key, body)
+		}
 	}
 }
 
