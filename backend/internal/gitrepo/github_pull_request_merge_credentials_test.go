@@ -8,7 +8,7 @@ import (
 )
 
 func TestUserScopedRemoteServiceMergeUsesConnectedActorForPreflightAndMutation(t *testing.T) {
-	base, head := newMergeEligibilityTestService(t, mergeEligibilityFixture{})
+	base, head := newMergeEligibilityTestService(t, satisfiedMergeEligibilityFixture())
 	enableMergeForTest(base, "squash")
 	original := base.githubClient.Transport
 	mergeCommit := strings.Repeat("f", 40)
