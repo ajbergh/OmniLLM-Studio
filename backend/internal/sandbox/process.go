@@ -8,6 +8,7 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -26,9 +27,44 @@ type ProcessSpec struct {
 	Env     map[string]string
 }
 
-// CommandRunner constructs a process command for a ProcessSpec.
+// CommandProcess is the lifecycle surface required by persistent stdio
+// extensions. Keeping callers on this small interface lets platform runners
+// supply native process-tree confinement without forcing MCP/plugins to depend
+// on os/exec internals.
+type CommandProcess interface {
+	StdinPipe() (io.WriteCloser, error)
+	StdoutPipe() (io.ReadCloser, error)
+	StderrPipe() (io.ReadCloser, error)
+	Start() error
+	Wait() error
+	Kill() error
+}
+
+// CommandRunner constructs a process for a ProcessSpec.
 type CommandRunner interface {
-	CommandContext(context.Context, ProcessSpec) (*exec.Cmd, error)
+	CommandContext(context.Context, ProcessSpec) (CommandProcess, error)
+}
+
+// execCommandProcess adapts the ordinary os/exec lifecycle to CommandProcess.
+// Platform confinement runners may return their own implementation instead.
+type execCommandProcess struct {
+	cmd *exec.Cmd
+}
+
+func wrapExecCommand(cmd *exec.Cmd) CommandProcess {
+	return &execCommandProcess{cmd: cmd}
+}
+
+func (p *execCommandProcess) StdinPipe() (io.WriteCloser, error) { return p.cmd.StdinPipe() }
+func (p *execCommandProcess) StdoutPipe() (io.ReadCloser, error) { return p.cmd.StdoutPipe() }
+func (p *execCommandProcess) StderrPipe() (io.ReadCloser, error) { return p.cmd.StderrPipe() }
+func (p *execCommandProcess) Start() error                       { return p.cmd.Start() }
+func (p *execCommandProcess) Wait() error                        { return p.cmd.Wait() }
+func (p *execCommandProcess) Kill() error {
+	if p.cmd.Process == nil {
+		return fmt.Errorf("process has not started")
+	}
+	return p.cmd.Process.Kill()
 }
 
 // HostCommandRunner creates host child processes with a deliberately small
@@ -39,13 +75,13 @@ type CommandRunner interface {
 type HostCommandRunner struct{}
 
 // NewHostCommandRunner preserves the historical constructor name used by MCP
-// and plugins, but returns the extension policy runner. In auto mode Linux uses
-// Bubblewrap whenever OMNILLM_SANDBOX_ROOTFS is configured; other platforms stay
-// on the sanitized boundary until their native confinement phases land.
+// and plugins, but returns the extension policy runner. In auto mode supported
+// platforms use native confinement when it is available; explicit off mode
+// retains the sanitized host compatibility boundary.
 func NewHostCommandRunner() CommandRunner { return NewExtensionCommandRunner() }
 
 // CommandContext constructs a sanitized host child process command.
-func (HostCommandRunner) CommandContext(ctx context.Context, spec ProcessSpec) (*exec.Cmd, error) {
+func (HostCommandRunner) CommandContext(ctx context.Context, spec ProcessSpec) (CommandProcess, error) {
 	command := strings.TrimSpace(spec.Command)
 	if command == "" {
 		return nil, fmt.Errorf("process command is required")
@@ -59,7 +95,7 @@ func (HostCommandRunner) CommandContext(ctx context.Context, spec ProcessSpec) (
 	cmd := exec.CommandContext(ctx, command, spec.Args...)
 	cmd.Dir = spec.Dir
 	cmd.Env = SanitizedEnvironment(spec.Env)
-	return cmd, nil
+	return wrapExecCommand(cmd), nil
 }
 
 // SanitizedEnvironment returns the minimal ambient environment required for

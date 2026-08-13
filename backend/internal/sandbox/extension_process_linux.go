@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-func platformExtensionCommandContext(ctx context.Context, spec ProcessSpec, mode ExtensionSandboxMode) (*exec.Cmd, error) {
+func platformExtensionCommandContext(ctx context.Context, spec ProcessSpec, mode ExtensionSandboxMode) (CommandProcess, error) {
 	rootFS := strings.TrimSpace(os.Getenv("OMNILLM_SANDBOX_ROOTFS"))
 	if rootFS == "" {
 		if mode == ExtensionSandboxRequired {
@@ -112,5 +112,5 @@ func platformExtensionCommandContext(ctx context.Context, spec ProcessSpec, mode
 
 	cmd := exec.CommandContext(ctx, bwrap, args...)
 	cmd.Env = SanitizedEnvironment(nil)
-	return cmd, nil
+	return wrapExecCommand(cmd), nil
 }

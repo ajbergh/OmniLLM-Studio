@@ -65,7 +65,7 @@ type PluginProcess struct {
 
 	mu      sync.Mutex
 	writeMu sync.Mutex
-	cmd     *exec.Cmd
+	cmd     sandbox.CommandProcess
 	stdin   io.WriteCloser
 	pending map[int]chan pluginResponse
 	nextID  int
@@ -269,8 +269,8 @@ func (p *PluginProcess) StopContext(ctx context.Context) error {
 		p.mu.Unlock()
 		return normalizePluginStopError(err)
 	case <-ctx.Done():
-		if cmd != nil && cmd.Process != nil {
-			_ = cmd.Process.Kill()
+		if cmd != nil {
+			_ = cmd.Kill()
 		}
 		select {
 		case <-done:
@@ -360,7 +360,7 @@ func (p *PluginProcess) stderrLoop(stderr io.Reader) {
 	}
 }
 
-func (p *PluginProcess) waitLoop(cmd *exec.Cmd) {
+func (p *PluginProcess) waitLoop(cmd sandbox.CommandProcess) {
 	err := cmd.Wait()
 	p.mu.Lock()
 	if p.cmd != cmd {
