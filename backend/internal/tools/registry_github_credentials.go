@@ -23,19 +23,22 @@ type RegistryOptions struct {
 }
 
 // NewRegistryWithOptions creates the normal registry and applies optional
-// request-scoped credential dependencies without changing tool registration or
-// permission policy.
+// request-scoped credential dependencies without changing permission policy.
+// When complete GitHub credential + binding callbacks are supplied, configuration
+// may additionally bootstrap the read-only remote inventory tools needed to make
+// binding-only repositories visible even when no static remote exists.
 func NewRegistryWithOptions(options RegistryOptions) *Registry {
 	registry := NewRegistry()
 	registry.ConfigureGitHubCredentials(options.GitHubCredentials)
 	return registry
 }
 
-// ConfigureGitHubCredentials rebinds the already-configured remote and GitHub
-// tool families to a request-scoped credential/binding adapter. It returns false
-// when credential callbacks are incomplete or the expected built-in remote
-// service is unavailable. Bindings are optional and never alter global/static
-// remote configuration or permission gates.
+// ConfigureGitHubCredentials rebinds configured remote and GitHub tool families
+// to a request-scoped credential/binding adapter. When no static remote caused
+// remote inspection tools to be registered, a complete binding-aware setup may
+// bootstrap only the read-only remote inventory/status tools. This bootstrap
+// never registers a mutation or hosted GitHub capability and never widens any
+// global or per-remote permission.
 func (r *Registry) ConfigureGitHubCredentials(options *GitHubCredentialOptions) bool {
 	if r == nil {
 		return false
@@ -45,6 +48,9 @@ func (r *Registry) ConfigureGitHubCredentials(options *GitHubCredentialOptions) 
 		return false
 	}
 	bindingResolver := registryGitHubBindingResolver(options)
+	if bindingResolver != nil {
+		r.bootstrapGitHubBindingRemoteTools()
+	}
 
 	tool, ok := r.Get("git_remotes")
 	if !ok {
@@ -66,6 +72,34 @@ func (r *Registry) ConfigureGitHubCredentials(options *GitHubCredentialOptions) 
 	}
 
 	r.rebindRemoteGitHubServices(gitrepo.NewUserScopedRemoteServiceWithBindings(base, resolver, bindingResolver))
+	return true
+}
+
+// bootstrapGitHubBindingRemoteTools creates only the remote read/inventory tool
+// shells required for owner-scoped GitHub bindings when static remote
+// configuration is absent. Binding lookup itself remains request-scoped and
+// local-only; this function never calls the binding resolver or token resolver.
+func (r *Registry) bootstrapGitHubBindingRemoteTools() bool {
+	if r == nil {
+		return false
+	}
+	if _, ok := r.Get("git_remotes"); ok {
+		return true
+	}
+	if _, ok := r.Get("git_remote_status"); ok {
+		return false
+	}
+	local := gitrepo.NewServiceFromEnvironment()
+	if !local.Configured() {
+		return false
+	}
+	base := gitrepo.NewRemoteServiceFromEnvironment(local)
+	if !base.Enabled() {
+		return false
+	}
+	for _, tool := range NewGitRemoteTools(base) {
+		r.MustRegister(tool)
+	}
 	return true
 }
 
@@ -110,8 +144,9 @@ func registryGitHubOwnerFromContext(ctx context.Context) string {
 }
 
 // rebindRemoteGitHubServices updates only service interfaces already registered
-// by NewRegistry. It does not add a tool, bypass a global gate, or alter a tool
-// definition/permission policy.
+// by NewRegistry or the binding-only remote inspection bootstrap. It does not
+// add mutation authority, bypass a global gate, or alter a tool definition or
+// permission policy.
 func (r *Registry) rebindRemoteGitHubServices(service *gitrepo.UserScopedRemoteService) {
 	if r == nil || service == nil {
 		return
