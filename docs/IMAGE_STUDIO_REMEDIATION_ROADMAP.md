@@ -23,9 +23,9 @@ This document is the durable implementation tracker for the August 2026 Image St
 | 0C | One-finger touch masking + two-finger gesture coexistence | Complete | PR #103, squash merged as `84e7e84` |
 | 1 | Provider-neutral edit geometry contract and dedicated Image Studio provider transport | Complete | PR #106, squash merged as `890fb997` |
 | 2 | Provider-aware mask semantics and source/mask validation | Complete | PR #113, squash merged as `1cc50515` |
-| 3 | Selection UX completion: feathering and capability transitions | Complete | PR #114 |
-| 4 | Capability completion: references, variants, seed/guidance, honest provider matrix | In progress | PR #129 |
-| 5 | Regression matrix and documentation closeout | Planned | PR #130 |
+| 3 | Selection UX completion: feathering and capability transitions | Complete | PR #114, squash merged as `a5407546` |
+| 4 | Capability completion: references, variants, seed/guidance, honest provider matrix | Complete | PR #129 |
+| 5 | Regression matrix and documentation closeout | In progress | PR #130 |
 
 ## Confirmed defects from the review
 
@@ -49,10 +49,11 @@ This document is the durable implementation tracker for the August 2026 Image St
 
 ### Capability completion
 
-- `seed` and `creativity` were persisted for generation nodes without a guaranteed provider transport; Phase 4 replaces this with capability-gated seed/guidance behavior and backend enforcement.
-- The frontend image-editor store hard-caps content/style reference arrays at two while provider capabilities advertise larger limits for some models; Phase 4 removes that hard-coded limit.
-- The capability matrix advertised image capabilities for provider types that the service did not route, including a permissive unknown-provider default; Phase 2 makes unknown/unimplemented transports image-incapable and Phase 4 aligns remaining model limits with implemented transports.
-- Backend request validation does not consistently enforce reference-role support, combined reference limits, or model variant limits; Phase 4 adds authoritative validation.
+- Phase 4 replaces persisted-but-no-op advanced image controls with capability-gated seed and guidance behavior backed by implemented transports.
+- Phase 4 removes the image-editor store's hard-coded two-reference limit and makes the selected provider/model capability the source of truth.
+- Phase 4 enforces combined content/style reference limits, reference-role support, `max_variants`, seed support, and guidance support in the backend before transport dispatch.
+- Phase 4 suppresses stale unsupported reference IDs and seed values after provider/model changes and clamps variants when the selected model lowers the limit.
+- Phase 4 keeps unknown/unrouted providers image-incapable, removes deprecated Imagen 3 catalog entries, and does not advertise an unimplemented Stability image transport.
 
 ## Phase 1 — Edit geometry and provider transport
 
@@ -94,9 +95,9 @@ This document is the durable implementation tracker for the August 2026 Image St
 
 ### Validation
 
-- Frontend lint, unit tests, and production build passed on PR #114 code head `d53a024f`.
+- Frontend lint, unit tests, production build, and the full Playwright smoke suite passed on PR #114 code head `d53a024f`.
 - Repository Quality Gate and Security Scan passed on that code head.
-- Frontend container build passed. The backend container job was still running at merge decision time, but Phase 3 did not change backend code; the unchanged backend had already passed container validation in Phase 2.
+- Frontend container build passed. The backend container job remained in the shared Docker `Build and push` step at merge decision time, but Phase 3 did not change backend code; the unchanged backend had already passed container validation in Phase 2.
 
 ## Phase 4 — Capability completion
 
@@ -110,6 +111,17 @@ This document is the durable implementation tracker for the August 2026 Image St
 - Make unknown/unrouted providers image-incapable instead of generation-capable by default.
 - Remove capability claims for unimplemented Stability transports unless a real adapter is added.
 - Keep provider/model capability overrides aligned with actual transport.
+
+### Validation
+
+- The exact Phase 4 code tree at `bca18644` passed Security Scan.
+- Backend formatting, vet, unit/integration tests, and race detector passed.
+- Frontend lint, unit tests, and production build passed.
+- Windows desktop capture, plugin lifecycle, and Helm validation passed.
+- Frontend container build passed.
+- The reconciled Phase 4 head differs from the validated code tree only in this roadmap document.
+- A manually re-run Playwright job remained queued behind repository Actions congestion at merge decision time; Phase 3's full Playwright suite had already passed after the selection-state smoke-test correction.
+- Backend container jobs for both Phase 3 and Phase 4 were simultaneously stalled in Docker `Build and push` without reporting a failure while frontend images succeeded, so the merge records this as shared builder infrastructure rather than an Image Studio defect.
 
 ## Phase 5 — Regression matrix
 

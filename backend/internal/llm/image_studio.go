@@ -77,6 +77,9 @@ func (s *Service) ImageStudioGenerate(ctx context.Context, req ImageStudioReques
 	if req.OperationType == "edit" && !caps.SupportsEditing {
 		return nil, fmt.Errorf("selected provider/model does not support image editing")
 	}
+	if err := validateImageStudioRequestCapabilities(caps, req); err != nil {
+		return nil, err
+	}
 	if req.MaskImage != nil && strings.TrimSpace(req.MaskImage.Data) != "" {
 		if !caps.SupportsMasking || caps.MaskingMode == ImageMaskingNone {
 			return nil, fmt.Errorf("selected provider/model does not support area-mask editing")

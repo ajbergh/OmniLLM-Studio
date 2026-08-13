@@ -8,8 +8,8 @@ interface ImageAdvancedControlsProps {
   onSizeChange: (size: string) => void;
   seed: number | null;
   onSeedChange: (seed: number | null) => void;
-  creativity: number;
-  onCreativityChange: (value: number) => void;
+  guidance: number;
+  onGuidanceChange: (value: number) => void;
   variants: number;
   onVariantsChange: (n: number) => void;
   supportsSeed?: boolean;
@@ -82,8 +82,8 @@ export function ImageAdvancedControls({
   onSizeChange,
   seed,
   onSeedChange,
-  creativity,
-  onCreativityChange,
+  guidance,
+  onGuidanceChange,
   variants,
   onVariantsChange,
   supportsSeed,
@@ -96,13 +96,17 @@ export function ImageAdvancedControls({
   const previousModeRef = useRef<typeof editMode | null>(null);
 
   const showSeed = supportsSeed === true;
-  const showCreativity = supportsGuidance === true;
+  const showGuidance = supportsGuidance === true;
   const variantCap = maxVariants ?? 4;
   const filteredSizes = useMemo(() => buildSizeOptions(supportedSizes), [supportedSizes]);
   const sourcePreservingSize = useMemo(
     () => getSourcePreservingEditSize(supportedSizes),
     [supportedSizes],
   );
+
+  useEffect(() => {
+    if (variants > variantCap) onVariantsChange(Math.max(1, variantCap));
+  }, [onVariantsChange, variantCap, variants]);
 
   // A generation size is not a safe default for an edit. Entering edit mode
   // must return to provider-native source preservation unless the user then
@@ -217,24 +221,25 @@ export function ImageAdvancedControls({
           </div>
           )}
 
-          {/* Creativity */}
-          {showCreativity && (
+          {/* Guidance */}
+          {showGuidance && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-[10px] text-text-muted uppercase tracking-wide">Creativity</label>
-              <span className="text-[10px] text-text-muted font-mono">{Math.round(creativity * 100)}%</span>
+              <label className="text-[10px] text-text-muted uppercase tracking-wide">Guidance</label>
+              <span className="text-[10px] text-text-muted font-mono">{guidance.toFixed(1)}</span>
             </div>
             <input
               type="range"
-              min={0}
-              max={100}
-              value={Math.round(creativity * 100)}
-              onChange={(e) => onCreativityChange(Number(e.target.value) / 100)}
+              min={1}
+              max={20}
+              step={0.5}
+              value={guidance}
+              onChange={(e) => onGuidanceChange(Number(e.target.value))}
               className="w-full accent-primary"
             />
             <div className="flex justify-between text-[9px] text-text-muted/50">
-              <span>Precise</span>
-              <span>Creative</span>
+              <span>Lower</span>
+              <span>Stronger</span>
             </div>
           </div>
           )}
