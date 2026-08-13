@@ -11,12 +11,13 @@ import (
 )
 
 type mergeEligibilityFixture struct {
-	checkAppID       int64
-	checkConclusion  string
-	statusState      string
-	reviewDecision   string
-	codeOwnerRequest bool
-	deploymentState  string
+	checkAppID              int64
+	checkConclusion         string
+	statusState             string
+	reviewDecision          string
+	codeOwnerRequest        bool
+	requireLastPushApproval bool
+	deploymentState         string
 }
 
 func TestGetPullRequestMergeEligibilityCompletesForSatisfiedPolicy(t *testing.T) {
@@ -88,6 +89,24 @@ func TestGetPullRequestMergeEligibilityRequiresApprovedReviewDecision(t *testing
 	}
 }
 
+func TestGetPullRequestMergeEligibilityFailsClosedWhenLastPushApprovalCannotBeProven(t *testing.T) {
+	svc, _ := newMergeEligibilityTestService(t, mergeEligibilityFixture{
+		checkAppID: 15368, checkConclusion: "success", statusState: "success",
+		reviewDecision: "APPROVED", requireLastPushApproval: true, deploymentState: "success",
+	})
+
+	result, err := svc.GetPullRequestMergeEligibility(context.Background(), "origin", 21)
+	if err != nil {
+		t.Fatalf("GetPullRequestMergeEligibility() returned error: %v", err)
+	}
+	if result.EligibilityComplete || result.Eligible || result.ReviewsSatisfied {
+		t.Fatalf("last-push approval must remain unproven: %#v", result)
+	}
+	if !containsString(result.BlockingReasons, "last_push_approval_evidence_unavailable") {
+		t.Fatalf("blocking reasons = %#v", result.BlockingReasons)
+	}
+}
+
 func TestGetPullRequestMergeEligibilityRequiresSuccessfulDeployment(t *testing.T) {
 	svc, _ := newMergeEligibilityTestService(t, mergeEligibilityFixture{
 		checkAppID: 15368, checkConclusion: "success", statusState: "success",
@@ -126,7 +145,7 @@ func newMergeEligibilityTestService(t *testing.T, fixture mergeEligibilityFixtur
 	pull := `{"number":21,"html_url":"https://github.com/example/repo/pull/21","title":"M3A","draft":false,"state":"open","merged":false,"mergeable":true,"mergeable_state":"clean","head":{"ref":"feature/m3a","sha":"` + head + `"},"base":{"ref":"main"}}`
 	repository := `{"default_branch":"main","allow_merge_commit":true,"allow_squash_merge":true,"allow_rebase_merge":true,"permissions":{"admin":false}}`
 	activeRules := `[
-		{"type":"pull_request","ruleset_source_type":"Repository","ruleset_source":"example/repo","ruleset_id":11,"parameters":{"allowed_merge_methods":["squash"],"dismiss_stale_reviews_on_push":true,"require_code_owner_review":true,"require_last_push_approval":true,"required_approving_review_count":1,"required_review_thread_resolution":false,"required_reviewers":[]}},
+		{"type":"pull_request","ruleset_source_type":"Repository","ruleset_source":"example/repo","ruleset_id":11,"parameters":{"allowed_merge_methods":["squash"],"dismiss_stale_reviews_on_push":true,"require_code_owner_review":true,"require_last_push_approval":` + strconv.FormatBool(fixture.requireLastPushApproval) + `,"required_approving_review_count":1,"required_review_thread_resolution":false,"required_reviewers":[]}},
 		{"type":"required_status_checks","ruleset_source_type":"Repository","ruleset_source":"example/repo","ruleset_id":11,"parameters":{"strict_required_status_checks_policy":false,"required_status_checks":[{"context":"Quality Gate","integration_id":15368}]}},
 		{"type":"required_deployments","ruleset_source_type":"Repository","ruleset_source":"example/repo","ruleset_id":11,"parameters":{"required_deployment_environments":["production"]}}
 	]`
