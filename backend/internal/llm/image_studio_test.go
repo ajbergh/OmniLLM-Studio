@@ -43,6 +43,28 @@ func TestResolveImageStudioGeometryRejectsInvalidExplicitSize(t *testing.T) {
 	}
 }
 
+func TestNormalizeImageStudioModelMigratesRetiredImageModels(t *testing.T) {
+	tests := []struct {
+		provider string
+		model    string
+		want     string
+	}{
+		{"gemini", "gemini-3.1-flash-image-preview", "gemini-3.1-flash-image"},
+		{"gemini", "gemini-3-pro-image-preview", "gemini-3-pro-image"},
+		{"gemini", "imagen-4.0-generate-001", "gemini-3.1-flash-image"},
+		{"gemini", "imagen-4.0-ultra-generate-001", "gemini-3.1-flash-image"},
+		{"gemini", "imagen-4.0-fast-generate-001", "gemini-3.1-flash-image"},
+		{"openrouter", "google/gemini-3.1-flash-image-preview", "google/gemini-3.1-flash-image"},
+		{"openrouter", "google/gemini-3-pro-image-preview", "google/gemini-3-pro-image"},
+		{"openrouter", "openai/gpt-5-image", "openai/gpt-5-image"},
+	}
+	for _, tt := range tests {
+		if got := normalizeImageStudioModel(tt.provider, tt.model); got != tt.want {
+			t.Fatalf("normalizeImageStudioModel(%q, %q) = %q, want %q", tt.provider, tt.model, got, tt.want)
+		}
+	}
+}
+
 func TestBuildOpenRouterStudioImageBodyUsesPortableGeometry(t *testing.T) {
 	seed := 42
 	req := ImageStudioRequest{
@@ -92,71 +114,6 @@ func TestBuildOpenRouterStudioMinimalBodyDropsOptionalControls(t *testing.T) {
 		if _, exists := body[key]; exists {
 			t.Fatalf("minimal body unexpectedly contains %s: %#v", key, body)
 		}
-	}
-}
-
-func TestBuildGeminiStudioImageBodyUsesCurrentResponseFormat(t *testing.T) {
-	req := ImageStudioRequest{ImageRequest: ImageRequest{Prompt: "watercolor cabin", Size: "1536x1024", N: 1}}
-	geometry, err := resolveImageStudioGeometry("gemini", "generate", req.Size, ImageGeometry{Mode: ImageGeometryExplicit})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := buildGeminiStudioImageBody(req, geometry)
-	generationConfig, ok := body["generationConfig"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("generationConfig = %#v", body["generationConfig"])
-	}
-	if _, exists := generationConfig["imageConfig"]; exists {
-		t.Fatalf("legacy imageConfig must not be sent: %#v", generationConfig)
-	}
-	responseFormat, ok := generationConfig["responseFormat"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("responseFormat = %#v", generationConfig["responseFormat"])
-	}
-	imageFormat, ok := responseFormat["image"].(map[string]interface{})
-	if !ok || imageFormat["aspectRatio"] != "3:2" {
-		t.Fatalf("image response format = %#v", responseFormat["image"])
-	}
-}
-
-func TestBuildGeminiStudioImageBodyProviderAutoOmitsGeometry(t *testing.T) {
-	req := ImageStudioRequest{ImageRequest: ImageRequest{Prompt: "watercolor cabin"}}
-	geometry, err := resolveImageStudioGeometry("gemini", "generate", "", ImageGeometry{Mode: ImageGeometryProviderAuto})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := buildGeminiStudioImageBody(req, geometry)
-	generationConfig := body["generationConfig"].(map[string]interface{})
-	if _, exists := generationConfig["responseFormat"]; exists {
-		t.Fatalf("provider_auto must not force image geometry: %#v", generationConfig)
-	}
-}
-
-func TestBuildImagenStudioImageBodyUsesPredictParameters(t *testing.T) {
-	req := ImageStudioRequest{ImageRequest: ImageRequest{Prompt: "product scene", Size: "1024x768", N: 3}}
-	geometry, err := resolveImageStudioGeometry("gemini", "generate", req.Size, ImageGeometry{Mode: ImageGeometryExplicit})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := buildImagenStudioImageBody(req, geometry)
-	instances, ok := body["instances"].([]map[string]interface{})
-	if !ok || len(instances) != 1 || instances[0]["prompt"] != req.Prompt {
-		t.Fatalf("instances = %#v", body["instances"])
-	}
-	parameters, ok := body["parameters"].(map[string]interface{})
-	if !ok || parameters["sampleCount"] != 3 || parameters["aspectRatio"] != "4:3" {
-		t.Fatalf("parameters = %#v", body["parameters"])
-	}
-}
-
-func TestImagenSupportsOnlyDocumentedAspectRatios(t *testing.T) {
-	for _, ratio := range []string{"1:1", "3:4", "4:3", "9:16", "16:9"} {
-		if !imagenSupportsAspectRatio(ratio) {
-			t.Fatalf("expected %s to be supported", ratio)
-		}
-	}
-	if imagenSupportsAspectRatio("3:2") {
-		t.Fatal("Imagen 4 must not receive unsupported 3:2 aspect ratio")
 	}
 }
 
