@@ -4,9 +4,9 @@
 >
 > **Started:** 2026-08-12
 >
-> **Active branch:** `agent/sandbox-windows-extensions-12c-20260812`
+> **Active branch:** `agent/sandbox-windows-extensions-12c-clean-20260813`
 >
-> **Active PR:** #134
+> **Active PR:** #137
 >
 > **Latest merged Phase 12 checkpoint:** 12B PR #128 squash-merged as `43c1c42bebf245ded6722d742fcb3ea0a71b4502` after exact-final-head validation on `282fbc0fc366c3791f31b7e1d841250971b0b980`.
 
@@ -29,7 +29,7 @@ This file is the detailed durable tracker for Phase 12 of `AGENT_SANDBOX_ROADMAP
 |---|---|---|---|
 | 12A | Native security primitives | **COMPLETE** | PR #127 passed hardened Windows-native restricted-token, per-sandbox SID, cross-sandbox ACL denial, Job Object, full Quality/Security, and multi-architecture container validation; squash-merged as `c68ba013d3ad41ff2044646733d38ab981b3dc87`. |
 | 12B | First-party protocol-v2 Windows runtime | **COMPLETE** | PR #128 final head `282fbc0f` passed the native Windows confinement suite, backend format/vet/tests/race, Chromium, frontend, Helm, Security, Windows plugin/desktop compatibility, and applicable container builds; squash-merged as `43c1c42b`. |
-| 12C | Persistent stdio MCP/plugin confinement | **IN PROGRESS** | Draft PR #134 introduces a managed persistent-process seam plus a Windows AppContainer/Job-backed stdio runner. Initial draft CI has already passed the real Windows plugin lifecycle and existing native Windows sandbox suite; exact-final-head full validation is still required after integration refresh and documentation. |
+| 12C | Persistent stdio MCP/plugin confinement | **IN PROGRESS** | Clean PR #137 is replayed directly on current `main` and introduces a managed persistent-process seam plus a Windows AppContainer/Job-backed stdio runner. Earlier draft #134 passed the real Windows plugin lifecycle and existing native Windows sandbox suite; #137 exact-final-head full validation is required before merge. |
 | 12D | Adversarial Windows assurance | NOT STARTED | Expand direct extension/runtime evidence for descendant escape/teardown, cross-sandbox authority reuse, reparse/hard-link/rename behavior, network escape, secret inheritance, cancellation, staging edge cases, and mode-policy behavior. |
 | 12E | Documentation and completion | NOT STARTED | Finalize operator/runtime docs and mark Phase 12 complete only after 12C is merged and 12D evidence closes the remaining Windows assurance gaps. |
 
@@ -93,7 +93,7 @@ PR #128 then squash-merged as `43c1c42bebf245ded6722d742fcb3ea0a71b4502`.
 
 ## Phase 12C — active persistent extension confinement
 
-Draft PR #134 moves persistent stdio MCP/plugin processes from the sanitized Windows compatibility boundary to native AppContainer confinement while preserving their existing streaming JSON-RPC lifecycle.
+PR #137 moves persistent stdio MCP/plugin processes from the sanitized Windows compatibility boundary to native AppContainer confinement while preserving their existing streaming JSON-RPC lifecycle. It is the clean successor to development draft #134 and was replayed directly onto `main` `54a9a1849340f2f9c3ca1a393b979c5e739fc2fe` before final validation.
 
 ### Managed process seam
 
@@ -127,14 +127,14 @@ The staging limits currently reuse the 12B admission bounds. Complex command lin
 
 ### Current 12C validation evidence
 
-The first draft CI run on #134 provided useful behavior evidence even though the Linux backend job stopped at formatting:
+Development draft #134 provided useful behavior evidence even though its first Linux backend job stopped at formatting:
 
 - the Windows plugin lifecycle job passed end-to-end through `NewHostCommandRunner()`, which now selects the native Windows extension backend in `auto` mode;
 - the existing dedicated Windows sandbox package compiled the new Windows files and passed its native suite;
 - frontend and Helm checks passed;
 - the Linux failure was limited to non-canonical `gofmt` output in `process.go` and `extension_process_windows_lifecycle.go`.
 
-Those formatting deltas were subsequently corrected with canonical `gofmt`. This diagnostic pass does not replace the required exact-final-head Quality, Security, Windows, Chromium/race, Helm, and applicable container validation.
+Those formatting deltas were corrected with canonical `gofmt`, and the intended 11-file 12C state was replayed onto current `main` as clean commit `6480498052eca8036607b13021f5baf1d8e01a64` before PR #137 was opened. Diagnostic evidence from #134 does not replace #137 exact-final-head Quality, Security, Windows, Chromium/race, Helm, and applicable container validation.
 
 ## Integration constraints / remaining design work
 
@@ -158,5 +158,5 @@ Phase 12 requires the normal repository Quality Gate and Security Scan plus Wind
 - **2026-08-12 — PR #128:** opened first-party Windows AppContainer runtime implementation.
 - **2026-08-12 — #128 audit:** closed the staging handle/rename escape and made failed profile cleanup retryable rather than unreachable.
 - **2026-08-13 — #128 final validation:** exact head `282fbc0f` passed the full Quality, Security, Windows-native, Chromium/race, Helm, and applicable container gates; squash-merged as `43c1c42b`.
-- **2026-08-13 — 12C:** branch `agent/sandbox-windows-extensions-12c-20260812` created from post-#128 `main`; draft PR #134 opened for native persistent Windows extension confinement.
-- **2026-08-13 — #134 initial native evidence:** Windows plugin lifecycle and the existing native Windows sandbox job passed on the draft implementation; the first Linux backend gate found only `gofmt` differences, which were corrected before final integration validation.
+- **2026-08-13 — #134:** opened development draft for native persistent Windows extension confinement; initial Windows plugin/native jobs passed and Linux formatting differences were corrected.
+- **2026-08-13 — #137:** clean-replayed the intended 12C state onto current `main` and opened the authoritative validation PR. Exact-final-head full validation remains pending.
