@@ -46,6 +46,31 @@ type imageStudioGeometryResolution struct {
 	AspectRatio string
 }
 
+// normalizeImageStudioModel migrates retired provider model IDs at the Image
+// Studio boundary so saved provider defaults and old sessions remain usable.
+func normalizeImageStudioModel(providerType, model string) string {
+	model = strings.TrimSpace(model)
+	switch strings.ToLower(strings.TrimSpace(providerType)) {
+	case "gemini", "imagen":
+		switch model {
+		case "gemini-3.1-flash-image-preview":
+			return "gemini-3.1-flash-image"
+		case "gemini-3-pro-image-preview":
+			return "gemini-3-pro-image"
+		case "imagen-4.0-generate-001", "imagen-4.0-ultra-generate-001", "imagen-4.0-fast-generate-001":
+			return "gemini-3.1-flash-image"
+		}
+	case "openrouter":
+		switch model {
+		case "google/gemini-3.1-flash-image-preview":
+			return "google/gemini-3.1-flash-image"
+		case "google/gemini-3-pro-image-preview":
+			return "google/gemini-3-pro-image"
+		}
+	}
+	return model
+}
+
 // ImageStudioGenerate dispatches an Image Studio request using the provider's
 // documented image transport. It is deliberately separate from ImageGenerate
 // while the older generic image API remains backward compatible.
@@ -69,6 +94,7 @@ func (s *Service) ImageStudioGenerate(ctx context.Context, req ImageStudioReques
 	if model == "" {
 		model = getDefaultImageModel(providerType)
 	}
+	model = normalizeImageStudioModel(providerType, model)
 
 	caps := GetEffectiveImageCapabilities(strings.ToLower(providerType), model)
 	if !caps.SupportsGeneration {
@@ -100,8 +126,6 @@ func (s *Service) ImageStudioGenerate(ctx context.Context, req ImageStudioReques
 	}
 
 	switch strings.ToLower(providerType) {
-	case "gemini":
-		return s.geminiStudioImageGenerate(ctx, baseURL, apiKey, model, req, geometry)
 	case "openrouter":
 		return s.openRouterStudioImageGenerate(ctx, baseURL, apiKey, model, req, geometry)
 	case "together":
@@ -110,6 +134,13 @@ func (s *Service) ImageStudioGenerate(ctx context.Context, req ImageStudioReques
 		legacy := req.ImageRequest
 		legacy.Model = model
 		legacy.Size = geometry.LegacySize
+		if strings.EqualFold(providerType, "gemini") || strings.EqualFold(providerType, "imagen") {
+			// The generic Gemini transport still serializes explicit geometry using
+			// the retired generationConfig.imageConfig field. Suppress only that
+			// field here so Image Studio reuses the established authenticated
+			// transport until explicit geometry moves to responseFormat.image.
+			legacy.Size = ""
+		}
 		return s.ImageGenerate(ctx, legacy)
 	}
 }
@@ -249,9 +280,6 @@ func buildOpenRouterStudioImageBody(model string, req ImageStudioRequest, geomet
 		body["seed"] = *req.Seed
 	}
 	if geometry.Mode == ImageGeometryExplicit && geometry.AspectRatio != "" {
-		// OpenRouter's Image API normalizes dimensions per endpoint. Sending both
-		// explicit pixel size and aspect_ratio can conflict with endpoint-specific
-		// capabilities, so Image Studio sends the portable aspect ratio only.
 		body["aspect_ratio"] = geometry.AspectRatio
 	}
 	if refs := collectStudioInputReferences(req); len(refs) > 0 {
