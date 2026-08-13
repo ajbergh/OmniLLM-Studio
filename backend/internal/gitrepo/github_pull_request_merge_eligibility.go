@@ -11,8 +11,8 @@ import (
 
 const (
 	maxGitHubMergeEligibilityReviewRequests = 20
-	maxGitHubRequiredDeployments             = 20
-	maxGitHubSignatureEvidenceCommits        = 100
+	maxGitHubRequiredDeployments            = 20
+	maxGitHubSignatureEvidenceCommits       = 100
 )
 
 // GitHubPullRequestMergeEligibilityReader adds M3A current-state evidence to
@@ -25,32 +25,32 @@ type GitHubPullRequestMergeEligibilityReader interface {
 // state satisfies every merge prerequisite this implementation can prove. M3A
 // never authorizes or performs a merge; DirectMergeSupported is always false.
 type GitHubPullRequestMergeEligibilityResult struct {
-	Remote                       string                                    `json:"remote"`
-	Repository                   string                                    `json:"repository"`
-	PullRequest                  int                                       `json:"pull_request"`
-	Head                         string                                    `json:"head"`
-	BaseBranch                   string                                    `json:"base_branch"`
-	PolicyEvidenceComplete       bool                                      `json:"policy_evidence_complete"`
-	DefaultBaseVerified          bool                                      `json:"default_base_verified"`
-	PullRequestStateEligible     bool                                      `json:"pull_request_state_eligible"`
-	MergeableKnown               bool                                      `json:"mergeable_known"`
-	Mergeable                    bool                                      `json:"mergeable"`
-	MergeableState               string                                    `json:"mergeable_state,omitempty"`
-	StrictBaseCurrent            bool                                      `json:"strict_base_current"`
-	RequiredChecksSatisfied      bool                                      `json:"required_checks_satisfied"`
-	RequiredChecks               []GitHubRequiredCheckEligibility          `json:"required_checks,omitempty"`
-	ReviewDecision               string                                    `json:"review_decision,omitempty"`
-	OutstandingCodeOwnerRequests int                                       `json:"outstanding_code_owner_requests"`
-	ReviewsSatisfied             bool                                      `json:"reviews_satisfied"`
-	ThreadsSatisfied             bool                                      `json:"threads_satisfied"`
-	ThreadsInspected             int                                       `json:"threads_inspected"`
-	DeploymentsSatisfied         bool                                      `json:"deployments_satisfied"`
-	RequiredDeployments          []GitHubRequiredDeploymentEligibility     `json:"required_deployments,omitempty"`
-	SignaturesSatisfied          bool                                      `json:"signatures_satisfied"`
-	EligibilityComplete          bool                                      `json:"eligibility_complete"`
-	Eligible                     bool                                      `json:"eligible"`
-	DirectMergeSupported         bool                                      `json:"direct_merge_supported"`
-	BlockingReasons              []string                                  `json:"blocking_reasons,omitempty"`
+	Remote                       string                                `json:"remote"`
+	Repository                   string                                `json:"repository"`
+	PullRequest                  int                                   `json:"pull_request"`
+	Head                         string                                `json:"head"`
+	BaseBranch                   string                                `json:"base_branch"`
+	PolicyEvidenceComplete       bool                                  `json:"policy_evidence_complete"`
+	DefaultBaseVerified          bool                                  `json:"default_base_verified"`
+	PullRequestStateEligible     bool                                  `json:"pull_request_state_eligible"`
+	MergeableKnown               bool                                  `json:"mergeable_known"`
+	Mergeable                    bool                                  `json:"mergeable"`
+	MergeableState               string                                `json:"mergeable_state,omitempty"`
+	StrictBaseCurrent            bool                                  `json:"strict_base_current"`
+	RequiredChecksSatisfied      bool                                  `json:"required_checks_satisfied"`
+	RequiredChecks               []GitHubRequiredCheckEligibility      `json:"required_checks,omitempty"`
+	ReviewDecision               string                                `json:"review_decision,omitempty"`
+	OutstandingCodeOwnerRequests int                                   `json:"outstanding_code_owner_requests"`
+	ReviewsSatisfied             bool                                  `json:"reviews_satisfied"`
+	ThreadsSatisfied             bool                                  `json:"threads_satisfied"`
+	ThreadsInspected             int                                   `json:"threads_inspected"`
+	DeploymentsSatisfied         bool                                  `json:"deployments_satisfied"`
+	RequiredDeployments          []GitHubRequiredDeploymentEligibility `json:"required_deployments,omitempty"`
+	SignaturesSatisfied          bool                                  `json:"signatures_satisfied"`
+	EligibilityComplete          bool                                  `json:"eligibility_complete"`
+	Eligible                     bool                                  `json:"eligible"`
+	DirectMergeSupported         bool                                  `json:"direct_merge_supported"`
+	BlockingReasons              []string                              `json:"blocking_reasons,omitempty"`
 }
 
 // GitHubRequiredCheckEligibility records bounded state for one normalized M1/M2
@@ -171,13 +171,13 @@ func (s *RemoteService) GetPullRequestMergeEligibility(ctx context.Context, remo
 	result := &GitHubPullRequestMergeEligibilityResult{
 		Remote: strings.TrimSpace(remoteID), Repository: remote.Repository, PullRequest: number,
 		Head: policy.Head, BaseBranch: policy.BaseBranch, PolicyEvidenceComplete: policy.EvidenceComplete,
-		StrictBaseCurrent: !policy.Requirements.StrictStatusChecks,
+		StrictBaseCurrent:       !policy.Requirements.StrictStatusChecks,
 		RequiredChecksSatisfied: len(policy.Requirements.RequiredStatusChecks) == 0,
-		ReviewsSatisfied: !gitHubMergeReviewsRequired(&policy.Requirements),
-		ThreadsSatisfied: !policy.Requirements.ConversationResolutionRequired,
-		DeploymentsSatisfied: len(policy.Requirements.RequiredDeploymentEnvironments) == 0,
-		SignaturesSatisfied: !policy.Requirements.RequiredSignatures,
-		DirectMergeSupported: false,
+		ReviewsSatisfied:        !gitHubMergeReviewsRequired(&policy.Requirements),
+		ThreadsSatisfied:        !policy.Requirements.ConversationResolutionRequired,
+		DeploymentsSatisfied:    len(policy.Requirements.RequiredDeploymentEnvironments) == 0,
+		SignaturesSatisfied:     !policy.Requirements.RequiredSignatures,
+		DirectMergeSupported:    false,
 	}
 	complete := true
 	block := func(reason string) {
