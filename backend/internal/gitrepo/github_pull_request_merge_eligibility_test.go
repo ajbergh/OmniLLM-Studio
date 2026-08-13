@@ -16,6 +16,7 @@ type mergeEligibilityFixture struct {
 	statusState             string
 	reviewDecision          string
 	codeOwnerRequest        bool
+	noApprovingReview       bool
 	requireLastPushApproval bool
 	deploymentState         string
 }
@@ -42,7 +43,7 @@ func TestGetPullRequestMergeEligibilityCompletesForSatisfiedPolicy(t *testing.T)
 	if len(result.RequiredDeployments) != 1 || result.RequiredDeployments[0].Environment != "production" || !result.RequiredDeployments[0].Satisfied {
 		t.Fatalf("required deployments = %#v", result.RequiredDeployments)
 	}
-	if result.ReviewDecision != "APPROVED" || result.OutstandingCodeOwnerRequests != 0 {
+	if result.ReviewDecision != "APPROVED" || result.ApprovingReviewsObserved != 1 || result.OutstandingCodeOwnerRequests != 0 {
 		t.Fatalf("review evidence = %#v", result)
 	}
 	if !result.EligibilityComplete || !result.Eligible || len(result.BlockingReasons) != 0 {
@@ -83,6 +84,24 @@ func TestGetPullRequestMergeEligibilityRequiresApprovedReviewDecision(t *testing
 	}
 	if !result.EligibilityComplete || result.Eligible || result.ReviewsSatisfied || result.OutstandingCodeOwnerRequests != 1 {
 		t.Fatalf("review requirements must be known-unsatisfied: %#v", result)
+	}
+	if !containsString(result.BlockingReasons, "required_reviews_unsatisfied") {
+		t.Fatalf("blocking reasons = %#v", result.BlockingReasons)
+	}
+}
+
+func TestGetPullRequestMergeEligibilityRequiresQualifyingApprovalCount(t *testing.T) {
+	svc, _ := newMergeEligibilityTestService(t, mergeEligibilityFixture{
+		checkAppID: 15368, checkConclusion: "success", statusState: "success",
+		reviewDecision: "APPROVED", noApprovingReview: true, deploymentState: "success",
+	})
+
+	result, err := svc.GetPullRequestMergeEligibility(context.Background(), "origin", 21)
+	if err != nil {
+		t.Fatalf("GetPullRequestMergeEligibility() returned error: %v", err)
+	}
+	if !result.EligibilityComplete || result.Eligible || result.ReviewsSatisfied || result.ApprovingReviewsObserved != 0 {
+		t.Fatalf("approval count must be independently enforced: %#v", result)
 	}
 	if !containsString(result.BlockingReasons, "required_reviews_unsatisfied") {
 		t.Fatalf("blocking reasons = %#v", result.BlockingReasons)
@@ -197,12 +216,18 @@ func newMergeEligibilityTestService(t *testing.T, fixture mergeEligibilityFixtur
 				return jsonHTTPResponse(http.StatusOK, `{"data":{"viewer":{"login":"developer"},"repository":{"ref":{"name":"main","branchProtectionRule":null}}}}`), nil
 			case githubMergeEligibilityQuery:
 				codeOwnerNodes := `[]`
-				totalCount := 0
+				codeOwnerTotal := 0
 				if fixture.codeOwnerRequest {
 					codeOwnerNodes = `[{"asCodeOwner":true}]`
-					totalCount = 1
+					codeOwnerTotal = 1
 				}
-				return jsonHTTPResponse(http.StatusOK, `{"data":{"repository":{"pullRequest":{"headRefOid":"`+head+`","baseRefName":"main","reviewDecision":"`+fixture.reviewDecision+`","reviewRequests":{"totalCount":`+strconvItoa(totalCount)+`,"nodes":`+codeOwnerNodes+`}}}}}`), nil
+				approvalNodes := `[{"state":"APPROVED","commit":{"oid":"` + head + `"}}]`
+				approvalTotal := 1
+				if fixture.noApprovingReview {
+					approvalNodes = `[]`
+					approvalTotal = 0
+				}
+				return jsonHTTPResponse(http.StatusOK, `{"data":{"repository":{"pullRequest":{"headRefOid":"`+head+`","baseRefName":"main","reviewDecision":"`+fixture.reviewDecision+`","reviewRequests":{"totalCount":`+strconvItoa(codeOwnerTotal)+`,"nodes":`+codeOwnerNodes+`},"latestOpinionatedReviews":{"totalCount":`+strconvItoa(approvalTotal)+`,"nodes":`+approvalNodes+`}}}}}`), nil
 			default:
 				t.Fatalf("unexpected GraphQL query: %s", decoded.Query)
 				return nil, nil
