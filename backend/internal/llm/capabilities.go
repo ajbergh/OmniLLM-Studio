@@ -154,6 +154,7 @@ func GetImageCapabilities(providerType string) ImageCapabilities {
 			SupportsContentReference: boolPtr(false),
 			SupportsStyleReference:   boolPtr(false),
 			SupportsSeed:             boolPtr(false),
+			MaxReferenceImages:       intPtr(0),
 		}
 		return ImageCapabilities{
 			SupportsGeneration:       true,
