@@ -7,11 +7,14 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
 	maxGitHubMergeEligibilityReviewRequests = 20
 	maxGitHubRequiredDeployments            = 20
+	maxGitHubDeploymentsPerEnvironment      = 20
+	maxGitHubDeploymentStatusEvidence       = 100
 	maxGitHubSignatureEvidenceCommits       = 100
 )
 
@@ -121,10 +124,12 @@ type githubMergeEligibilityDeployment struct {
 	ID          int64  `json:"id"`
 	SHA         string `json:"sha"`
 	Environment string `json:"environment"`
+	CreatedAt   string `json:"created_at"`
 }
 
 type githubMergeEligibilityDeploymentStatus struct {
-	State string `json:"state"`
+	State     string `json:"state"`
+	CreatedAt string `json:"created_at"`
 }
 
 type githubMergeEligibilityCommit struct {
@@ -511,7 +516,7 @@ func (s *RemoteService) inspectGitHubRequiredDeployments(ctx context.Context, to
 		query := url.Values{}
 		query.Set("sha", head)
 		query.Set("environment", environment)
-		query.Set("per_page", "1")
+		query.Set("per_page", strconv.Itoa(maxGitHubDeploymentsPerEnvironment+1))
 		endpoint := fmt.Sprintf("/repos/%s/%s/deployments?%s", owner, repository, query.Encode())
 		var deployments []githubMergeEligibilityDeployment
 		if err := s.doGitHubJSON(ctx, token, http.MethodGet, endpoint, nil, http.StatusOK, &deployments); err != nil {
@@ -523,17 +528,30 @@ func (s *RemoteService) inspectGitHubRequiredDeployments(ctx context.Context, to
 			states = append(states, state)
 			continue
 		}
-		deployment := deployments[0]
-		if deployment.ID <= 0 || !validRemoteHash(deployment.SHA) || !strings.EqualFold(deployment.SHA, head) || deployment.Environment != environment {
+		if len(deployments) > maxGitHubDeploymentsPerEnvironment {
 			return states, false, false
 		}
-		statusEndpoint := fmt.Sprintf("/repos/%s/%s/deployments/%d/statuses?per_page=1", owner, repository, deployment.ID)
+		deployment, ok := latestGitHubDeploymentForEnvironment(deployments, head, environment)
+		if !ok {
+			return states, false, false
+		}
+		statusEndpoint := fmt.Sprintf("/repos/%s/%s/deployments/%d/statuses?per_page=%d", owner, repository, deployment.ID, maxGitHubDeploymentStatusEvidence)
 		var statuses []githubMergeEligibilityDeploymentStatus
 		if err := s.doGitHubJSON(ctx, token, http.MethodGet, statusEndpoint, nil, http.StatusOK, &statuses); err != nil {
 			return states, false, false
 		}
+		if len(statuses) >= maxGitHubDeploymentStatusEvidence {
+			return states, false, false
+		}
 		if len(statuses) > 0 {
-			state.State = strings.ToLower(strings.TrimSpace(statuses[0].State))
+			latestStatus, ok := latestGitHubDeploymentStatus(statuses)
+			if !ok {
+				return states, false, false
+			}
+			state.State = strings.ToLower(strings.TrimSpace(latestStatus.State))
+			if !knownGitHubDeploymentState(state.State) {
+				return states, false, false
+			}
 		}
 		state.Satisfied = state.State == "success"
 		if !state.Satisfied {
@@ -542,6 +560,62 @@ func (s *RemoteService) inspectGitHubRequiredDeployments(ctx context.Context, to
 		states = append(states, state)
 	}
 	return states, allSatisfied, true
+}
+
+func latestGitHubDeploymentForEnvironment(deployments []githubMergeEligibilityDeployment, head, environment string) (githubMergeEligibilityDeployment, bool) {
+	var latest githubMergeEligibilityDeployment
+	var latestCreated time.Time
+	seen := false
+	for _, deployment := range deployments {
+		if deployment.ID <= 0 || !validRemoteHash(deployment.SHA) || !strings.EqualFold(deployment.SHA, head) || deployment.Environment != environment {
+			return githubMergeEligibilityDeployment{}, false
+		}
+		created, err := time.Parse(time.RFC3339, strings.TrimSpace(deployment.CreatedAt))
+		if err != nil {
+			return githubMergeEligibilityDeployment{}, false
+		}
+		if !seen || created.After(latestCreated) {
+			latest = deployment
+			latestCreated = created
+			seen = true
+			continue
+		}
+		if created.Equal(latestCreated) && deployment.ID != latest.ID {
+			return githubMergeEligibilityDeployment{}, false
+		}
+	}
+	return latest, seen
+}
+
+func latestGitHubDeploymentStatus(statuses []githubMergeEligibilityDeploymentStatus) (githubMergeEligibilityDeploymentStatus, bool) {
+	var latest githubMergeEligibilityDeploymentStatus
+	var latestCreated time.Time
+	seen := false
+	for _, status := range statuses {
+		created, err := time.Parse(time.RFC3339, strings.TrimSpace(status.CreatedAt))
+		if err != nil {
+			return githubMergeEligibilityDeploymentStatus{}, false
+		}
+		if !seen || created.After(latestCreated) {
+			latest = status
+			latestCreated = created
+			seen = true
+			continue
+		}
+		if created.Equal(latestCreated) && strings.TrimSpace(status.State) != strings.TrimSpace(latest.State) {
+			return githubMergeEligibilityDeploymentStatus{}, false
+		}
+	}
+	return latest, seen
+}
+
+func knownGitHubDeploymentState(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "error", "failure", "inactive", "in_progress", "queued", "pending", "success":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *RemoteService) inspectGitHubRequiredSignatures(ctx context.Context, token, owner, repository string, number int) (bool, bool) {
