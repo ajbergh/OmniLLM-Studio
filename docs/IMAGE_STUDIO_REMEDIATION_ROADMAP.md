@@ -68,7 +68,7 @@ This document is the durable implementation tracker for the August 2026 Image St
 
 - Unit tests for geometry normalization and provider mapping.
 - OpenRouter request-body tests for references, explicit aspect, provider-auto behavior, seed, and `n`.
-- Repository Quality Gate, Security Scan, and container builds passed before merge.
+- Existing backend/front-end quality gates and production builds.
 
 ## Phase 2 — Provider-aware masks
 
@@ -79,14 +79,7 @@ This document is the durable implementation tracker for the August 2026 Image St
 - Treat Gemini mask images as semantic edit guidance, not exact alpha-mask transport.
 - Do not advertise pixel masking for OpenRouter models unless its dedicated Images API exposes an actual mask parameter.
 - Validate base/mask dimensions before pixel-mask dispatch.
-- Validate PNG alpha-mask structure and DALL-E 2 source-format requirements before provider dispatch.
-- Read WebP dimensions without adding a CGO/native decoder dependency.
-- Make Imagen 4 generation-only in the current integration, including a zero reference-image limit.
-
-### Validation
-
-- Unit tests cover matching masks, dimension mismatch, masks with no transparent selection, and WebP dimension parsing.
-- Repository CI is the merge gate for PR #113.
+- Normalize supported raster inputs as needed for deterministic OpenAI multipart edits; reject unsupported/corrupt mask combinations with a user-actionable error instead of relying on provider failures.
 
 ## Phase 3 — Selection UX completion
 
