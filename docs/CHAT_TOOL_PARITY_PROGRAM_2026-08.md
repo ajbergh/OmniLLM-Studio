@@ -144,7 +144,7 @@ Large catalogs use `tool_search` for compact request-scoped discovery and `tool_
 
 ## Post-program extensions already implemented
 
-The original parity program did not include a full coding-agent Git/GitHub workflow. Subsequent work now provides a governed loop from local changes through hosted review, readiness, and read-only merge-policy inspection:
+The original parity program did not include a full coding-agent Git/GitHub workflow. Subsequent work now provides a governed loop from local changes through hosted review, readiness, and fail-closed merge-policy evidence:
 
 - local Git inspection and reviewed local mutations;
 - guarded remote inspection, fetch, existing-branch push, and clone;
@@ -157,7 +157,8 @@ The original parity program did not include a full coding-agent Git/GitHub workf
 - separately gated replies to reviewed top-level inline review comments;
 - separately gated resolve/unresolve of an exact reviewed review thread with PR-head, ownership, state, and viewer-capability revalidation;
 - separately gated transition of an exact reviewed draft PR to ready-for-review state with fresh head/default-base revalidation and fixed application-owned GraphQL;
-- bounded read-only merge-requirements inspection that binds policy to the current PR head/base and fails closed when policy visibility is incomplete or ambiguous.
+- bounded M1 merge-requirements inspection that binds normalized policy to the current PR head/base;
+- bounded M2 merge-policy evidence that corroborates classic REST/GraphQL policy, active ruleset bypass visibility, configured-actor repository role, and exact PR state while remaining strictly read-only.
 
 Primary implementation/documentation anchors:
 
@@ -176,6 +177,8 @@ Primary implementation/documentation anchors:
 - `backend/internal/gitrepo/github_pull_request_thread_resolution.go`
 - `backend/internal/gitrepo/github_pull_request_ready.go`
 - `backend/internal/gitrepo/github_pull_request_merge_requirements.go`
+- `backend/internal/gitrepo/github_pull_request_merge_policy_evidence.go`
+- `backend/internal/tools/github_pull_request_merge_policy_evidence_tool.go`
 
 ## Verified next gaps
 
@@ -183,7 +186,7 @@ The next program remains driven by concrete missing runtime capabilities rather 
 
 ### Completed — Guarded draft-to-ready transition
 
-The previously identified draft-to-ready gap is complete. `github_mark_pull_request_ready_for_review` is independently gated and accepts only configured remote ID, PR number, and exact reviewed head. Repository/API/token/node/base remain operator/application-derived; the service requires the PR to remain open, unmerged, draft, on the exact reviewed head, and targeted at the configured remote's advertised default branch before issuing a fixed GitHub ready-for-review mutation.
+`github_mark_pull_request_ready_for_review` is independently gated and accepts only configured remote ID, PR number, and exact reviewed head. Repository/API/token/node/base remain operator/application-derived; the service requires the PR to remain open, unmerged, draft, on the exact reviewed head, and targeted at the configured remote's advertised default branch before issuing a fixed GitHub ready-for-review mutation.
 
 Implementation anchors:
 
@@ -191,67 +194,66 @@ Implementation anchors:
 - `backend/internal/tools/github_pull_request_ready_tool.go`
 - `docs/GITHUB_PULL_REQUEST_READY_FOR_REVIEW.md`
 
-### Completed — Read-only merge requirements
+### Completed — Phase M1 normalized merge requirements
 
-The Phase M1 design gate is implemented as `github_get_pull_request_merge_requirements` under the existing independent GitHub PR-read permission. The model supplies only configured remote ID and PR number; repository/API/token/head/base, active rules, classic protection, and repository merge-method settings are application/GitHub derived.
+`github_get_pull_request_merge_requirements` is registered under the independent GitHub PR-read permission. The model supplies only configured remote ID and PR number; repository/API/token/head/base, active rules, classic protection, and repository merge-method settings are application/GitHub derived.
+
+Implemented outcomes include exact head/base binding, bounded active-rule inspection, classic branch-protection inspection, merge-method normalization, merge queue, required status checks, strict policy, review/code-owner/last-push/stale-review requirements, conversation resolution, deployments, linear history, signatures, lock state, unknown material-rule handling, and explicit fail-closed `merge_policy_complete`.
+
+M1 intentionally leaves policy incomplete where classic coverage or actor/ruleset bypass visibility cannot be proven.
+
+### Completed — Phase M2 merge policy evidence
+
+`github_get_pull_request_merge_policy_evidence` is also registered only under the GitHub PR-read gate. It adds bounded read-only evidence rather than mutation authority.
 
 Implemented outcomes:
 
-- results bind to a freshly fetched PR number, exact current hosted head SHA, and exact base branch;
-- active base-branch rules are read through GitHub's fixed branch-rules endpoint with a bounded 100-rule page;
-- classic branch protection is inspected separately and a non-visible/ambiguous result is never treated as proof of an unprotected branch;
-- repository merge methods, merge queue, required status checks, strict/up-to-date policy, required review count, code-owner review, last-push approval, stale-review dismissal, conversation resolution, deployments, and linear history are normalized where visible;
-- unsupported material rule types are returned only as bounded normalized type names and force policy incomplete;
-- `merge_policy_complete` is explicitly fail-closed;
-- active rulesets currently report `ruleset_bypass_visibility=incomplete` because the active-rules surface does not itself prove that the configured actor is constrained by ruleset bypass policy;
-- no merge permission, merge method input, arbitrary repository/base/head, policy mutation, or other hosted mutation is introduced.
+- starts from a fresh M1 result for the exact configured PR;
+- corroborates classic branch protection across REST and exact-ref GraphQL;
+- supplements required deployment environments and app-bound required checks;
+- distinguishes a positively confirmed unprotected branch from permission-obscured protection;
+- re-reads active branch rules and inspects at most 20 deduplicated ruleset details;
+- requires `bypass_actors` to be visibly present in every active ruleset detail before bypass evidence can be complete;
+- verifies the connected viewer's repository role and treats custom roles as unverified;
+- fails closed on source disagreement, hidden bypass data, permission-obscured classic protection, custom roles, unknown material policy, or PR head/base movement;
+- always reports `direct_merge_supported=false`.
+
+A real validation against OmniLLM-Studio showed why this distinction matters: active rules for `main` were visible and empty while classic protection returned a permission-obscured response. M2 correctly treats that combination as incomplete rather than guessing that the branch is unprotected.
 
 Implementation anchors:
 
-- `backend/internal/gitrepo/github_pull_request_merge_requirements.go`
-- `backend/internal/tools/github_pull_request_merge_requirements_tool.go`
+- `backend/internal/gitrepo/github_pull_request_merge_policy_evidence.go`
+- `backend/internal/gitrepo/github_pull_request_merge_policy_evidence_test.go`
+- `backend/internal/gitrepo/github_pull_request_merge_policy_visibility_test.go`
+- `backend/internal/tools/github_pull_request_merge_policy_evidence_tool.go`
 - `docs/GITHUB_PULL_REQUEST_MERGE_REQUIREMENTS.md`
 - `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`
 
-### Priority 1 — Phase M2 merge mutation review — DESIGN/EVIDENCE GATE
+### Priority 1 — Phase M3 guarded direct merge — CONDITIONAL NEXT SLICE
 
-A direct merge mutation is still **not** the next automatic implementation step. M1 deliberately exposes places where GitHub's policy surface is insufficient to prove non-bypass behavior, most notably ruleset bypass actors and ambiguous classic-protection visibility.
+M2 now provides a fail-closed evidence primitive, so guarded direct merge can be implemented as the next isolated engineering slice **only if the mutation refuses whenever a fresh M2 pass is incomplete**. M2 does not guarantee that every repository/token can satisfy its evidence requirements.
 
-The next recommended slice is an M2 evidence review, with bounded read-only implementation only where needed to close a demonstrated policy-visibility gap. Required outcomes:
+Required M3 boundary:
 
-- exercise the M1 reader against representative repositories using rulesets, classic protection, organization-level rules, administrator identities, and non-administrator identities;
-- determine whether effective ruleset bypass status for the configured actor can be proven through a fixed, bounded API surface without broadening model authority;
-- decide whether the credential/permission requirements needed to inspect bypass actors are acceptable for a future merge-capable configuration;
-- verify how M1 should distinguish truly absent classic protection from permission-obscured protection without guessing;
-- confirm all material rule types that can affect direct merge eligibility are normalized or explicitly fail closed;
-- validate required-check integration binding, merge-method intersection, merge queue behavior, and administrator enforcement against real GitHub responses;
-- keep all evidence gathering read-only and preserve the independent merge design gate.
-
-Detailed design/threat model:
-
-- `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`
-- `docs/GITHUB_PULL_REQUEST_MERGE_REQUIREMENTS.md`
-
-### Priority 2 — Guarded direct merge, blocked on M2
-
-Only if M2 concludes that policy visibility is sufficiently complete should a direct merge mutation be reconsidered.
-
-The proposed boundary remains intentionally stricter than the ready-for-review mutation:
-
-- accept only configured remote ID, positive PR number, and exact reviewed 40-character head;
-- derive repository/API/token/base and merge method from operator/application configuration, never model input;
-- require open, non-draft, unmerged state and exact default-base binding;
-- recompute merge requirements immediately before mutation and require policy visibility to be complete;
-- reject merge-queue-required repositories rather than bypassing or approximating queue semantics;
-- require current mergeability and all normalized check/review/thread/deployment requirements to be satisfied;
-- use GitHub's exact-head merge precondition as a final server-side race guard;
-- treat ambiguous mutation outcomes as requiring fresh PR inspection before any retry;
-- never infer merge authorization from provider `viewerCan*` flags or Git/GitHub permissions for other capabilities;
+- independent process and per-remote merge gates;
+- model inputs limited to configured remote ID, positive PR number, and exact reviewed head SHA;
+- repository/API/token/base and merge method derived from operator/application configuration;
+- require open, non-draft, unmerged state and exact advertised default-base binding;
+- run a fresh M2 evidence pass immediately before mutation and require `evidence_complete=true` plus complete normalized policy;
+- reject merge queue rather than bypassing or approximating it;
+- freshly validate exact-head required checks/statuses with integration binding;
+- freshly validate review/code-owner/last-push/stale-review requirements;
+- freshly validate conversation-resolution and deployment prerequisites;
+- refuse unknown/unverifiable material requirements;
+- intersect the operator merge method with current repository/ruleset policy;
+- issue exactly one GitHub merge request with the exact-head server-side precondition;
+- treat an ambiguous provider/network outcome as requiring reinspection rather than automatic retry;
+- never infer authorization from provider `viewerCan*`, administrator status, other Git/GitHub mutation gates, or stale M1/M2 reads;
 - never delete the source branch implicitly.
 
-Do not implement merge until the M2 evidence gate in `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md` is satisfied.
+Repositories/credentials that hide classic protection, ruleset bypass actors, actor-role semantics, or other material policy remain unsupported for direct merge. Detailed threat model and validation requirements are maintained in `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`.
 
-### Priority 3 — Lower-priority collaboration/operations gaps
+### Priority 2 — Lower-priority collaboration/operations gaps
 
 These remain intentionally unsupported until a concrete workflow need justifies a separate capability and threat-model review:
 
