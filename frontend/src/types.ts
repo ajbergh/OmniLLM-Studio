@@ -1189,6 +1189,7 @@ export interface ImagePromptEnhanceResponse {
 export interface ModelImageCapabilities {
   supports_editing?: boolean;
   supports_masking?: boolean;
+  masking_mode?: 'none' | 'semantic' | 'pixel';
   supports_content_reference?: boolean;
   max_variants?: number;
   supported_sizes?: string[];
@@ -1198,6 +1199,7 @@ export interface ImageCapabilities {
   supports_generation: boolean;
   supports_editing: boolean;
   supports_masking: boolean;
+  masking_mode: 'none' | 'semantic' | 'pixel';
   supports_variations: boolean;
   supports_seed: boolean;
   supports_guidance: boolean;
