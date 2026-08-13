@@ -83,12 +83,12 @@ func TestWindowsExtensionNativeIsolationAndCrossProfileAuthority(t *testing.T) {
 		Command: helper,
 		Args:    []string{"-test.run=^TestWindowsExtensionNativeIsolationAndCrossProfileAuthority$"},
 		Env: map[string]string{
-			windowsExtensionHelperEnv:                    "isolation",
-			"OMNILLM_WINDOWS_EXTENSION_LOOPBACK":        listener.Addr().String(),
-			"OMNILLM_WINDOWS_EXTENSION_OUTSIDE_READ":    outsideRead,
-			"OMNILLM_WINDOWS_EXTENSION_OUTSIDE_WRITE":   outsideWrite,
-			"OMNILLM_WINDOWS_EXTENSION_PEER_READ":       peerRead,
-			"OMNILLM_WINDOWS_EXTENSION_PEER_WRITE":      peerWrite,
+			windowsExtensionHelperEnv:                 "isolation",
+			"OMNILLM_WINDOWS_EXTENSION_LOOPBACK":      listener.Addr().String(),
+			"OMNILLM_WINDOWS_EXTENSION_OUTSIDE_READ":  outsideRead,
+			"OMNILLM_WINDOWS_EXTENSION_OUTSIDE_WRITE": outsideWrite,
+			"OMNILLM_WINDOWS_EXTENSION_PEER_READ":     peerRead,
+			"OMNILLM_WINDOWS_EXTENSION_PEER_WRITE":    peerWrite,
 		},
 	})
 	if err != nil {
