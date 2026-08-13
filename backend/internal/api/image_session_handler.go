@@ -71,7 +71,8 @@ type imageSessionGenerateRequest struct {
 	N       int    `json:"n,omitempty"`
 
 	Seed       *int     `json:"seed,omitempty"`
-	Creativity *float64 `json:"creativity,omitempty"`
+	Guidance   *float64 `json:"guidance,omitempty"`
+	Creativity *float64 `json:"creativity,omitempty"` // Deprecated compatibility field; not sent to providers.
 
 	ReferenceImageIDs []string `json:"reference_image_ids,omitempty"`
 	StyleReferenceIDs []string `json:"style_reference_ids,omitempty"`
@@ -455,7 +456,8 @@ func (h *ImageSessionHandler) Generate(w http.ResponseWriter, r *http.Request) {
 			Quality:  req.Quality,
 			N:        req.N,
 		},
-		Seed: req.Seed,
+		Seed:     req.Seed,
+		Guidance: req.Guidance,
 	}
 
 	if len(req.ReferenceImageIDs) > 0 {
@@ -489,7 +491,7 @@ func (h *ImageSessionHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadGateway, "image generation failed: "+err.Error())
 		return
 	}
-	paramsJSON := h.buildParamsJSON(req.Size, req.Quality, req.Seed, req.Creativity, nil)
+	paramsJSON := h.buildParamsJSON(req.Size, req.Quality, req.Seed, req.Guidance, nil)
 	node := &models.ImageNode{
 		SessionID: sessionID, ParentNodeID: session.ActiveNodeID, OperationType: "generate",
 		Instruction: req.Prompt, Provider: imgResp.Provider, Model: imgResp.Model,
@@ -1210,7 +1212,7 @@ func (h *ImageSessionHandler) saveReferenceRecords(nodeID string, attachmentIDs 
 	}
 }
 
-func (h *ImageSessionHandler) buildParamsJSON(size, quality string, seed *int, creativity *float64, strength *float64) *string {
+func (h *ImageSessionHandler) buildParamsJSON(size, quality string, seed *int, guidance *float64, strength *float64) *string {
 	params := map[string]interface{}{}
 	if size != "" {
 		params["size"] = size
@@ -1221,8 +1223,8 @@ func (h *ImageSessionHandler) buildParamsJSON(size, quality string, seed *int, c
 	if seed != nil {
 		params["seed"] = *seed
 	}
-	if creativity != nil {
-		params["creativity"] = *creativity
+	if guidance != nil {
+		params["guidance"] = *guidance
 	}
 	if strength != nil {
 		params["strength"] = *strength

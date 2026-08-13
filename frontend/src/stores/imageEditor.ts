@@ -449,9 +449,9 @@ export const useImageEditorStore = create<ImageEditorState>((set, get) => ({
   // Reference image actions
   addContentReference: (attachmentId) =>
     set((s) => ({
-      contentReferenceIds: s.contentReferenceIds.length < 2
-        ? [...s.contentReferenceIds, attachmentId]
-        : s.contentReferenceIds,
+      contentReferenceIds: s.contentReferenceIds.includes(attachmentId)
+        ? s.contentReferenceIds
+        : [...s.contentReferenceIds, attachmentId],
     })),
 
   removeContentReference: (attachmentId) =>
@@ -461,9 +461,9 @@ export const useImageEditorStore = create<ImageEditorState>((set, get) => ({
 
   addStyleReference: (attachmentId) =>
     set((s) => ({
-      styleReferenceIds: s.styleReferenceIds.length < 2
-        ? [...s.styleReferenceIds, attachmentId]
-        : s.styleReferenceIds,
+      styleReferenceIds: s.styleReferenceIds.includes(attachmentId)
+        ? s.styleReferenceIds
+        : [...s.styleReferenceIds, attachmentId],
     })),
 
   removeStyleReference: (attachmentId) =>
