@@ -31,19 +31,19 @@ func bindingCapabilityBootstrapOptions(connectedCalls, resolveCalls, bindingCall
 	return &GitHubCredentialOptions{
 		Connected: func(context.Context, string) (bool, error) {
 			if connectedCalls != nil {
-				*connectedCalls++
+				(*connectedCalls)++
 			}
 			return true, nil
 		},
 		Resolve: func(context.Context, string) (string, bool, error) {
 			if resolveCalls != nil {
-				*resolveCalls++
+				(*resolveCalls)++
 			}
 			return "token", true, nil
 		},
 		Bindings: func(context.Context, string) ([]gitrepo.GitHubRemoteBinding, error) {
 			if bindingCalls != nil {
-				*bindingCalls++
+				(*bindingCalls)++
 			}
 			return []gitrepo.GitHubRemoteBinding{{LocalRepositoryID: "omni", GitHubFullName: "octo/studio"}}, nil
 		},
