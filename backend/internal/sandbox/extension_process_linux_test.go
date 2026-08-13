@@ -22,7 +22,7 @@ func TestLinuxExtensionRunnerBuildsNoNetworkBubblewrapCommand(t *testing.T) {
 	t.Setenv("OMNILLM_SANDBOX_ROOTFS", rootFS)
 	t.Setenv("OMNILLM_SANDBOX_BWRAP", "/bin/echo")
 
-	cmd, err := NewHostCommandRunner().CommandContext(context.Background(), ProcessSpec{
+	process, err := NewHostCommandRunner().CommandContext(context.Background(), ProcessSpec{
 		Command: commandPath,
 		Args:    []string{"--stdio"},
 		Env:     map[string]string{"EXPLICIT_VALUE": "ok"},
@@ -30,6 +30,7 @@ func TestLinuxExtensionRunnerBuildsNoNetworkBubblewrapCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cmd := requireExecCommand(t, process)
 	joined := strings.Join(cmd.Args, " ")
 	for _, expected := range []string{
 		"--die-with-parent",
@@ -72,13 +73,14 @@ func TestLinuxExtensionConfinementAllowsExplicitSecretOverride(t *testing.T) {
 	t.Setenv("OMNILLM_SANDBOX_BWRAP", "/bin/echo")
 	t.Setenv("OMNILLM_EXTENSION_ALLOW_SECRET_ENV", "true")
 
-	cmd, err := NewHostCommandRunner().CommandContext(context.Background(), ProcessSpec{
+	process, err := NewHostCommandRunner().CommandContext(context.Background(), ProcessSpec{
 		Command: "echo",
 		Env:     map[string]string{"GITHUB_TOKEN": "operator-approved"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	cmd := requireExecCommand(t, process)
 	if joined := strings.Join(cmd.Args, " "); !strings.Contains(joined, "--setenv GITHUB_TOKEN operator-approved") {
 		t.Fatalf("approved secret not forwarded to confined extension: %q", joined)
 	}
