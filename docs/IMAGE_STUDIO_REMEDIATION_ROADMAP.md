@@ -22,10 +22,10 @@ This document is the durable implementation tracker for the August 2026 Image St
 | 0B | Mask state scoped to active image node | Complete | PR #102, squash merged as `b2d75ff` |
 | 0C | One-finger touch masking + two-finger gesture coexistence | Complete | PR #103, squash merged as `84e7e84` |
 | 1 | Provider-neutral edit geometry contract and dedicated Image Studio provider transport | Complete | PR #106, squash merged as `890fb997` |
-| 2 | Provider-aware mask semantics and source/mask validation | Complete | PR #113 |
-| 3 | Selection UX completion: feathering and capability transitions | In progress | PR #114 |
-| 4 | Capability completion: references, variants, seed/guidance, honest provider matrix | Planned | PR #115 |
-| 5 | Regression matrix and documentation closeout | Planned | PR #116 |
+| 2 | Provider-aware mask semantics and source/mask validation | Complete | PR #113, squash merged as `1cc50515` |
+| 3 | Selection UX completion: feathering and capability transitions | Complete | PR #114 |
+| 4 | Capability completion: references, variants, seed/guidance, honest provider matrix | In progress | PR #129 |
+| 5 | Regression matrix and documentation closeout | Planned | PR #130 |
 
 ## Confirmed defects from the review
 
@@ -43,15 +43,16 @@ This document is the durable implementation tracker for the August 2026 Image St
 - Phase 2 distinguishes exact pixel masks from semantic edit-area guidance with `masking_mode` and validates exact alpha masks before provider dispatch.
 - OpenRouter no longer advertises pixel masking because the dedicated Images transport does not expose a compatible mask parameter.
 - Imagen 4 no longer inherits Gemini editing/masking/reference capabilities; it is treated as generation-only in this integration.
-- Brush feather is stored in stroke state but is not applied to preview or exported masks; Phase 3 completes that path.
-- A previously painted selection can remain in memory when switching to a model that cannot consume masks; Phase 3 makes that retained selection inactive and prevents submission.
+- Phase 3 applies stored feather values to both preview and exported selection rasterization.
+- Phase 3 retains painted selections across temporary provider/model incompatibility, renders them inactive, prevents submission, and restores them when a compatible model is selected again.
+- Phase 3 labels exact pixel selections and semantic edit-area guidance distinctly in the UI.
 
 ### Capability completion
 
-- `seed` and `creativity` are persisted for generation nodes but are not transported through the legacy `llm.ImageRequest`, so controls can appear meaningful without affecting generation.
-- The frontend image-editor store hard-caps content/style reference arrays at two while provider capabilities advertise larger limits for some models.
-- The capability matrix advertised image capabilities for provider types that the service did not route, including a permissive unknown-provider default; Phase 2 makes unknown/unimplemented transports image-incapable.
-- Backend request validation does not consistently enforce reference-role support, combined reference limits, or model variant limits.
+- `seed` and `creativity` were persisted for generation nodes without a guaranteed provider transport; Phase 4 replaces this with capability-gated seed/guidance behavior and backend enforcement.
+- The frontend image-editor store hard-caps content/style reference arrays at two while provider capabilities advertise larger limits for some models; Phase 4 removes that hard-coded limit.
+- The capability matrix advertised image capabilities for provider types that the service did not route, including a permissive unknown-provider default; Phase 2 makes unknown/unimplemented transports image-incapable and Phase 4 aligns remaining model limits with implemented transports.
+- Backend request validation does not consistently enforce reference-role support, combined reference limits, or model variant limits; Phase 4 adds authoritative validation.
 
 ## Phase 1 — Edit geometry and provider transport
 
@@ -90,6 +91,12 @@ This document is the durable implementation tracker for the August 2026 Image St
 - Restore the selection if the user returns to a compatible model.
 - Label semantic area guidance separately from exact pixel masks.
 - Add regression coverage for brush, eraser, feather, touch, zoom/pan and model transitions.
+
+### Validation
+
+- Frontend lint, unit tests, and production build passed on PR #114 code head `d53a024f`.
+- Repository Quality Gate and Security Scan passed on that code head.
+- Frontend container build passed. The backend container job was still running at merge decision time, but Phase 3 did not change backend code; the unchanged backend had already passed container validation in Phase 2.
 
 ## Phase 4 — Capability completion
 
