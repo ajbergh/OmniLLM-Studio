@@ -120,26 +120,21 @@ type Session struct {
 }
 
 type ExecRequest struct {
-	// ExecutionID is an optional caller-issued opaque execution reference. A
-	// caller that needs out-of-band cancellation must allocate this ID before
-	// starting Exec so the same reference can be supplied to Cancel while Exec
-	// is still running. Broker/runtime code generates one when it is omitted.
-	ExecutionID string            `json:"execution_id,omitempty"`
-	Language    string            `json:"language,omitempty"`
-	Code        string            `json:"code,omitempty"`
-	Command     string            `json:"command,omitempty"`
-	Args        []string          `json:"args,omitempty"`
-	Directory   string            `json:"directory,omitempty"`
-	Stdin       []byte            `json:"stdin,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	TimeoutMS   int               `json:"timeout_ms,omitempty"`
+	Language  string            `json:"language,omitempty"`
+	Code      string            `json:"code,omitempty"`
+	Command   string            `json:"command,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Directory string            `json:"directory,omitempty"`
+	Stdin     []byte            `json:"stdin,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	TimeoutMS int               `json:"timeout_ms,omitempty"`
 }
 
 type Artifact struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	MimeType string `json:"mime_type,omitempty"`
-	Bytes    int64  `json:"bytes,omitempty"`
+	Bytes    int64 `json:"bytes,omitempty"`
 	SHA256   string `json:"sha256,omitempty"`
 }
 
