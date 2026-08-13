@@ -1,12 +1,15 @@
 # GitHub pull request merge requirements
 
-OmniLLM-Studio exposes a bounded read-only merge-policy inspection capability for a configured GitHub pull request. It exists to answer which merge requirements are visible for the pull request's **current GitHub head and base branch** without granting merge permission.
+OmniLLM-Studio exposes two bounded, read-only GitHub merge-policy inspection capabilities for a configured pull request:
 
-This capability is the Phase M1 prerequisite defined in `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`. It does **not** implement `github_merge_pull_request` and must not be treated as merge authorization by itself.
+- `github_get_pull_request_merge_requirements` — Phase M1 policy normalization;
+- `github_get_pull_request_merge_policy_evidence` — Phase M2 policy/actor corroboration.
+
+Neither capability merges a pull request, grants merge permission, changes repository policy, or authorizes a later merge by itself. Phase M2 deliberately returns `direct_merge_supported=false` even when its evidence is complete.
 
 ## Operator configuration
 
-The tool uses the existing GitHub pull-request read boundary. The selected remote must be an operator-configured `https://github.com/<owner>/<repository>.git` remote with a token reference and:
+Both tools use the existing GitHub pull-request read boundary. The selected remote must be an operator-configured `https://github.com/<owner>/<repository>.git` remote with a token reference and:
 
 ```text
 OMNILLM_GIT_REMOTE_ENABLED=true
@@ -21,153 +24,198 @@ and:
 }
 ```
 
-No merge-specific process or per-remote permission is introduced by this read-only slice.
+No merge-specific process flag, per-remote merge permission, merge method, or side-effecting GitHub capability is introduced by M1 or M2.
 
-## Tool
+## M1 — normalized merge requirements
 
 ### `github_get_pull_request_merge_requirements`
 
-Inputs are intentionally limited to:
+Model inputs are intentionally limited to:
 
-- `remote` — configured GitHub remote ID from `git_remotes`;
+- `remote` — configured GitHub remote ID;
 - `number` — positive pull request number.
 
-The model cannot supply repository owner/name, API URL, token, head SHA, base branch, ruleset/rule IDs, required-check names, reviewer requirements, bypass actors, or merge method.
+Repository owner/name, API URL, token, head SHA, base branch, ruleset/rule IDs, required-check names, reviewer requirements, bypass actors, and merge method are application/provider-derived.
 
-The service first fetches the pull request through the existing fixed GitHub REST boundary and binds every result to its current hosted head SHA and base branch. GitHub's nullable mergeability is preserved explicitly as `mergeable: null` while GitHub is still computing or cannot provide that state.
+The service fetches the PR through the fixed GitHub boundary and binds the result to its current hosted head SHA and base branch. Nullable GitHub mergeability is preserved as unknown rather than converted to a positive result.
 
-## Normalized policy sources
+M1 reads and normalizes bounded facts from:
 
-The reader combines bounded facts from three fixed GitHub REST surfaces:
+1. repository merge settings;
+2. active rules applying to the exact PR base branch;
+3. classic branch protection when that REST surface is visible.
 
-1. repository settings, for enabled merge methods and whether the configured actor is reported as an administrator;
-2. active rules applying to the exact PR base branch, including applicable higher-level rules exposed by GitHub's branch-rules endpoint;
-3. classic branch protection for the exact PR base when that surface is visible to the configured credential.
+Where visible, M1 normalizes:
 
-The result normalizes, where visible:
-
-- current PR open/draft/merged and mergeability state;
+- open/draft/merged and mergeability state;
 - exact head SHA and base branch;
-- repository/ruleset-allowed merge methods;
+- allowed merge methods;
 - required status/check contexts and integration IDs;
 - strict/up-to-date status-check policy;
-- required approving-review count;
+- approving-review count;
 - code-owner review;
 - last-push approval;
 - stale-review dismissal;
-- review-thread/conversation resolution;
+- conversation-resolution requirement;
 - required deployment environments;
 - linear history;
 - required commit signatures;
-- locked/read-only base-branch state;
+- locked/read-only base state;
 - merge queue;
 - configured-actor administrator visibility and classic administrator enforcement;
-- presence of classic push restrictions or pull-request bypass allowances that are not yet actor-resolved;
-- unsupported material policy rule types.
+- classic restrictions / pull-request bypass-allowance presence;
+- unsupported material policy-rule types.
 
-Provider descriptions, arbitrary hosted URLs, policy prose, restriction identities, bypass identities, and error bodies are not copied into the model-facing result.
+Unknown material rules are returned only by normalized rule type. Arbitrary provider descriptions, policy prose, hosted URLs, restriction identities, bypass identities, and provider error bodies are not copied into model context.
 
-## `merge_policy_complete`
+### M1 fail-closed state
 
-`merge_policy_complete` is deliberately fail-closed. `false` means the reader cannot prove that its normalized policy view is sufficient for a later merge decision. It does **not** mean GitHub would reject a merge, and it must never be converted into a permissive assumption.
+`merge_policy_complete=false` means the normalized view is not proven sufficient for a future merge decision. It does **not** mean GitHub would reject a merge, and it must never be interpreted permissively.
 
-The current implementation reports incomplete policy when any of the following applies:
+M1 remains incomplete when, among other cases:
 
 - repository merge settings are unavailable;
-- active rules are unavailable or reach the bounded 100-rule page limit;
-- classic branch protection is not positively visible;
-- classic protection is visible only through the REST response and has not been corroborated through a policy surface that exposes the full classic merge-requirement set;
-- an active ruleset exists but the active-rules surface does not prove whether the configured actor is constrained by ruleset bypass policy;
-- classic push restrictions are present but their effective actor applicability is not normalized;
-- classic pull-request bypass allowances are present but their effective actor applicability is not normalized;
-- a material rule type or rule parameter is not normalized by this implementation;
-- the configured actor is an administrator while visible classic protection does not enforce administrators.
+- active rules are unavailable or reach the bounded page limit;
+- classic branch protection cannot be positively characterized;
+- classic REST coverage has not been corroborated with merge-relevant GraphQL fields;
+- active rulesets exist but actor bypass visibility is not proven;
+- classic restrictions or bypass allowances are not actor-resolved;
+- an unsupported material rule exists;
+- administrator enforcement is insufficient for the configured actor.
 
-A `404` from the classic protection endpoint is therefore represented as `classic_protection_status: "unavailable_or_unprotected"`, not as proof that the base branch is unprotected.
+A classic protection `404` or `403` is not, by itself, proof that a branch is unprotected.
 
-Known requirements such as required signatures or a locked branch are surfaced directly instead of being silently discarded. Their presence does not by itself mean policy discovery was incomplete; a future merge eligibility evaluator would have to honor them as blocking/current-state conditions.
+## M2 — merge policy evidence
 
-## Classic policy coverage
+### `github_get_pull_request_merge_policy_evidence`
 
-The REST branch-protection response is not a complete representation of every classic merge prerequisite that GitHub can enforce. In particular, GitHub can require successful deployments before merging, while those deployment requirements are exposed through the classic `BranchProtectionRule` GraphQL surface rather than the REST protection object used by the first M1 implementation.
+M2 starts from a fresh M1 result for the same configured `remote` + PR `number`, then adds bounded corroboration needed to reason about policy completeness and authenticated-actor bypass risk.
 
-For that reason, a successful REST classic-protection read now reports:
+The model still supplies only:
+
+- configured `remote` ID;
+- positive PR `number`.
+
+The service derives repository identity, current head/base, authenticated viewer identity, ruleset IDs, policy selectors, API paths, and credentials internally.
+
+M2 performs the following read-only checks:
+
+1. **Classic REST + GraphQL corroboration**
+   - queries the exact base ref through a fixed GraphQL `BranchProtectionRule` selection;
+   - re-reads the classic REST branch-protection object;
+   - reconciles review settings, admin enforcement, restrictions, signatures, linear history, conversation resolution, lock state, strict status checks, and app-bound required checks;
+   - supplements required deployment environments from GraphQL;
+   - reports inconsistent/incomplete evidence instead of choosing one source when the sources disagree.
+
+2. **Ruleset bypass visibility**
+   - re-reads the bounded active rules for the exact base branch;
+   - deduplicates active ruleset IDs;
+   - inspects at most 20 ruleset details;
+   - requires each active ruleset to expose a valid `bypass_actors` field before bypass evidence can be complete;
+   - never assumes omitted or permission-hidden bypass actors mean "none".
+
+3. **Configured actor role**
+   - obtains the connected viewer login from the fixed GraphQL read;
+   - checks that actor through the fixed collaborator-permission endpoint;
+   - treats only standard GitHub repository roles (`read`, `triage`, `write`, `maintain`, `admin`) as role-complete;
+   - treats custom roles as unverified because their additional permissions are not proven by this metadata read;
+   - fails closed when repository permission sources disagree.
+
+4. **Exact-state revalidation**
+   - re-fetches the pull request after evidence collection;
+   - clears completeness if the PR head or base changed during inspection.
+
+### `evidence_complete`
+
+`evidence_complete=true` is intentionally narrow. It requires all of the following:
+
+- classic policy evidence is complete and internally consistent;
+- active-rules/ruleset-detail evidence is complete or not applicable;
+- every active ruleset's bypass list was positively visible;
+- the configured actor has a standard, consistent repository role;
+- actor bypass is proven constrained for the visible policy;
+- the resulting normalized merge policy is complete;
+- no M2 blocking reason remains;
+- the PR head/base remained stable for the evidence pass.
+
+Even then:
 
 ```text
-classic_protection_status = visible
-classic_policy_coverage = rest_partial
-merge_policy_complete = false
+direct_merge_supported = false
 ```
 
-This is a temporary safety posture, not an assertion that the visible REST facts are incorrect. Phase M2 should add a fixed, bounded classic-policy corroboration read and move `classic_policy_coverage` to `complete` only after all merge-relevant classic facts can be reconciled safely. Until then, the reader must prefer an incomplete result over a potentially missed deployment or other classic requirement.
+M2 is an evidence gate, not merge authorization.
 
-## Ruleset bypass limitation
+### Important classic-protection distinction
 
-GitHub's active branch-rules endpoint tells OmniLLM which rules apply to the base branch, but it does not by itself establish the configured actor's effective ruleset bypass position. When active rules are present, this M1 implementation reports:
+M2 only marks an unprotected classic branch as confirmed when the exact-ref GraphQL read reports no `BranchProtectionRule` **and** the REST protection endpoint returns `404`.
 
-```text
-ruleset_bypass_visibility = incomplete
-merge_policy_complete = false
-```
+Permission-obscured REST results such as `403` remain incomplete even when GraphQL returns no classic rule. This prevents a credential-visibility failure from being misclassified as an unprotected branch.
 
-and `potential_bypass = true`.
+This distinction is exercised by regression tests and was also observed against the OmniLLM-Studio repository during M2 validation: the active-rules endpoint for `main` was visible and empty while the classic protection endpoint was permission-obscured. The correct runtime behavior is therefore to remain fail-closed, not to infer "unprotected".
 
-That conservative result is intentional. Phase M2 must review whether a separately bounded actor/ruleset-detail read can close this gap safely before any merge mutation is considered.
+## Ruleset and classic bypass behavior
 
-## Classic restrictions and bypass allowances
+M2 does not copy bypass identities into model context. It only uses bounded provider responses to determine whether bypass lists are visible and whether any bypass actors are present.
 
-Classic branch protection can expose push restrictions and pull-request bypass allowances in addition to the review/check settings already normalized by M1. Those objects may identify users, teams, or apps. M1 intentionally does not copy those hosted identities into model context or infer whether the configured credential matches them.
+Evidence remains incomplete or blocking when:
 
-Instead it reports presence flags and fails closed:
+- an active ruleset detail cannot be read;
+- `bypass_actors` is omitted or null;
+- a ruleset detail's source/enforcement does not match the active rule;
+- one or more bypass actors are present;
+- classic pull-request bypass allowances are present;
+- an administrator actor is not covered by classic administrator enforcement;
+- actor role metadata is custom, absent, or inconsistent.
 
-```text
-classic_restrictions_present = true
-classic_review_bypass_allowances_present = true
-potential_bypass = true
-merge_policy_complete = false
-```
-
-as applicable. M2 must determine whether effective actor applicability can be proven with a bounded, operator-owned identity/policy read before direct merge can be considered.
-
-## Unknown rules
-
-Unknown or unsupported material rule types are returned only by normalized type name in `unknown_policy_rules`; their arbitrary parameter payload is not copied into model context. Any such rule keeps policy incomplete.
-
-The implementation recognizes the merge-relevant active rule types currently normalized by M1, including pull-request requirements, required status checks, required deployments, required linear history, required signatures, and merge queue. Ref-creation/deletion/non-fast-forward rules are not treated as direct prerequisites for merging an already-existing PR into its existing base ref. Other material rule types, such as a rule whose eligibility semantics are not yet modeled, remain explicitly unknown and fail closed.
+The implementation never intentionally invokes a bypass mechanism.
 
 ## Security boundary
 
-`github_get_pull_request_merge_requirements` is low-risk, read-only, networked, credentialed, and parallel-safe. It uses the same dedicated GitHub client as the other PR read tools:
+Both merge-policy tools are low-risk, read-only, networked, credentialed, and parallel-safe. They use the existing dedicated GitHub transport:
 
 - API host fixed to `https://api.github.com`;
-- repository derived only from the selected operator-configured `github.com` Git remote;
-- token read from the configured environment-variable reference immediately before use;
+- repository derived only from the operator-configured `github.com` Git remote;
+- token loaded from the configured environment-variable reference immediately before use;
 - redirects disabled;
-- private/local/reserved target protection inherited from the dedicated GitHub transport;
+- private/local/reserved target protections inherited from the dedicated GitHub client;
 - bounded response bodies;
-- fixed REST paths and pinned GitHub REST API version;
+- fixed REST/GraphQL operations;
 - provider error bodies suppressed from model-visible errors.
 
-This capability does not add or imply permission to merge, mark ready, create a PR, reply, resolve a thread, push Git refs, alter branch protection/rulesets, rerun workflows, request reviewers, close a PR, or delete a branch.
+These tools do not add or imply permission to merge, mark ready, create/close/retarget a PR, reply, resolve a thread, push Git refs, rerun workflows, request reviewers, alter rulesets/branch protection, or delete a branch.
 
-## Validation
+## Implication for Phase M3
 
-Focused tests should continue to cover:
+M2 establishes a fail-closed evidence primitive that a future direct-merge implementation may call immediately before mutation. It does **not** establish that every configured token or repository will produce complete evidence.
+
+A future `github_merge_pull_request` implementation must therefore refuse before mutation unless a fresh M2 pass for the exact PR/head/base returns `evidence_complete=true`. Repositories or credentials that hide classic protection, ruleset bypass actors, actor role semantics, or other material policy must remain unsupported for direct merge.
+
+M3 must also independently validate current check/review/thread/deployment satisfaction and mergeability; M2 proves policy visibility, not fulfillment of every current-state prerequisite.
+
+## Validation coverage
+
+Focused M1/M2 tests cover or should continue to cover:
 
 - operator-bound repository/token and exact PR head/base binding;
-- explicit nullable mergeability;
-- active rules and classic branch-protection overlap;
-- REST-only classic coverage remaining incomplete until corroborated;
-- strict status checks and app-bound contexts;
-- approving-review, code-owner, last-push, stale-review, and conversation-resolution requirements;
-- deployment, linear-history, required-signature, and locked-branch requirements;
+- nullable mergeability;
+- active rules and classic protection overlap;
+- REST + GraphQL classic corroboration;
+- required deployments and app-bound status checks;
+- strict status checks;
+- approving/code-owner/last-push/stale-review requirements;
+- conversation resolution, signatures, linear history, and lock state;
 - merge queue detection;
-- bounded active-rule handling;
-- classic-protection `404` ambiguity;
-- classic push restrictions and pull-request bypass allowances;
-- administrator/ruleset-bypass visibility;
+- bounded active rules and ruleset-detail inspection;
+- positively confirmed unprotected branches;
+- permission-obscured classic protection, including `403` fail-closed behavior;
+- hidden and visible ruleset bypass actors;
+- standard vs custom configured-actor repository roles;
+- PR head/base change during evidence collection;
 - unknown material rules;
 - strict `remote + number` model-facing arguments;
-- independence from every hosted mutation gate.
+- read-only registration under the GitHub PR-read gate;
+- independence from every GitHub mutation gate;
+- `direct_merge_supported=false` for all M2 results.
 
-Before merge, the exact final PR head should pass repository formatting, vet, backend tests/race, frontend checks, Windows/Helm/Playwright coverage, Security Scan, and backend/frontend container validation.
+Before merging M2 or any future M3 work, the exact final PR head should pass repository formatting, vet, backend tests/race, frontend lint/unit/build, Windows/Helm/Playwright coverage, Security Scan, and backend/frontend container validation.
