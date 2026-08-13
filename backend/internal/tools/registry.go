@@ -31,8 +31,8 @@ type Registry struct {
 // push and branch publication have their own additional mutation gates; clone
 // requires explicit enablement plus valid byte/entry budgets. GitHub PR reads
 // (including review-thread state), draft creation, review replies, review-thread
-// resolution, and draft-to-ready transition are independent API gates and none
-// implies Git push or another hosted gate.
+// resolution, draft-to-ready transition, and guarded direct merge are independent
+// API gates and none implies Git push or another hosted gate.
 func NewRegistry() *Registry {
 	r := &Registry{tools: make(map[string]Tool)}
 	r.MustRegister(NewDateTimeTool())
@@ -93,6 +93,11 @@ func NewRegistry() *Registry {
 			}
 			if remoteGitService.GitHubPullRequestReadyMutationEnabled() {
 				for _, tool := range NewGitHubPullRequestReadyTools(remoteGitService) {
+					r.MustRegister(tool)
+				}
+			}
+			if remoteGitService.GitHubPullRequestMergeMutationEnabled() {
+				for _, tool := range NewGitHubPullRequestMergeTools(remoteGitService) {
 					r.MustRegister(tool)
 				}
 			}
