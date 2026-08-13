@@ -264,7 +264,17 @@ func (s *RemoteService) GetPullRequestMergeEligibility(ctx context.Context, remo
 	result.ReviewsSatisfied = reviewsSatisfied
 	if !reviewsComplete {
 		incomplete("review_evidence_incomplete")
-	} else if !reviewsSatisfied {
+	}
+	// GitHub's reviewDecision is an aggregate code-review status, but the
+	// documented last-push rule additionally depends on the identity of the
+	// actor who made the most recent reviewable push. M3A does not have a
+	// bounded provider field that proves that actor relationship, so this
+	// requirement remains explicitly incomplete rather than inferred from an
+	// APPROVED reviewDecision.
+	if policy.Requirements.LastPushApprovalRequired {
+		result.ReviewsSatisfied = false
+		incomplete("last_push_approval_evidence_unavailable")
+	} else if reviewsComplete && !reviewsSatisfied {
 		block("required_reviews_unsatisfied")
 	}
 
