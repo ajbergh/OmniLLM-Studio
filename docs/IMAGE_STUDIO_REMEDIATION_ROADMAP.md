@@ -25,7 +25,7 @@ This document is the durable implementation tracker for the August 2026 Image St
 | 2 | Provider-aware mask semantics and source/mask validation | Complete | PR #113, squash merged as `1cc50515` |
 | 3 | Selection UX completion: feathering and capability transitions | Complete | PR #114, squash merged as `a5407546` |
 | 4 | Capability completion: references, variants, seed/guidance, honest provider matrix | Complete | PR #129, squash merged as `616a2880` |
-| 5 | Regression matrix and documentation closeout | Complete | PR #130 |
+| 5 | Regression matrix and documentation closeout | Complete | PR #130, squash merged as `58ccb0aa` |
 
 ## Confirmed defects from the review
 
