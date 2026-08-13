@@ -1,0 +1,36 @@
+name: Phase 12D gofmt once
+
+on:
+  push:
+    branches:
+      - agent/sandbox-windows-assurance-12d-20260813
+
+permissions:
+  contents: write
+
+jobs:
+  gofmt:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/sandbox-windows-assurance-12d-20260813
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: backend/go.sum
+      - name: Canonicalize Phase 12D Windows test
+        working-directory: backend
+        run: gofmt -w internal/sandbox/extension_process_windows_test.go
+      - name: Commit formatting if needed
+        shell: bash
+        run: |
+          if git diff --quiet -- backend/internal/sandbox/extension_process_windows_test.go; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/internal/sandbox/extension_process_windows_test.go
+          git commit -m 'style(sandbox): gofmt Phase 12D Windows assurance'
+          git push origin HEAD:agent/sandbox-windows-assurance-12d-20260813
