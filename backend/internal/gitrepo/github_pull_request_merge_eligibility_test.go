@@ -153,12 +153,15 @@ func newMergeEligibilityTestService(t *testing.T, fixture mergeEligibilityFixtur
 		case "/repos/example/repo/commits/" + head + "/status":
 			return jsonHTTPResponse(http.StatusOK, `{"state":"`+fixture.statusState+`","total_count":0,"statuses":[]}`), nil
 		case "/repos/example/repo/deployments":
-			if request.URL.Query().Get("sha") != head || request.URL.Query().Get("environment") != "production" || request.URL.Query().Get("per_page") != "1" {
+			if request.URL.Query().Get("sha") != head || request.URL.Query().Get("environment") != "production" || request.URL.Query().Get("per_page") != "21" {
 				t.Fatalf("unexpected deployment query: %s", request.URL.RawQuery)
 			}
-			return jsonHTTPResponse(http.StatusOK, `[{"id":101,"sha":"`+head+`","environment":"production"}]`), nil
+			return jsonHTTPResponse(http.StatusOK, `[{"id":101,"sha":"`+head+`","environment":"production","created_at":"2026-08-13T01:00:00Z"}]`), nil
 		case "/repos/example/repo/deployments/101/statuses":
-			return jsonHTTPResponse(http.StatusOK, `[{"state":"`+fixture.deploymentState+`"}]`), nil
+			if request.URL.Query().Get("per_page") != "100" {
+				t.Fatalf("unexpected deployment status query: %s", request.URL.RawQuery)
+			}
+			return jsonHTTPResponse(http.StatusOK, `[{"state":"`+fixture.deploymentState+`","created_at":"2026-08-13T01:01:00Z"}]`), nil
 		case "/graphql":
 			payload, err := io.ReadAll(request.Body)
 			if err != nil {
