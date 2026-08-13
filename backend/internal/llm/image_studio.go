@@ -100,6 +100,8 @@ func (s *Service) ImageStudioGenerate(ctx context.Context, req ImageStudioReques
 	}
 
 	switch strings.ToLower(providerType) {
+	case "gemini":
+		return s.geminiStudioImageGenerate(ctx, baseURL, apiKey, model, req, geometry)
 	case "openrouter":
 		return s.openRouterStudioImageGenerate(ctx, baseURL, apiKey, model, req, geometry)
 	case "together":
@@ -246,12 +248,20 @@ func buildOpenRouterStudioImageBody(model string, req ImageStudioRequest, geomet
 	if req.Seed != nil {
 		body["seed"] = *req.Seed
 	}
-	if geometry.Mode == ImageGeometryExplicit {
-		body["size"] = geometry.Size
-		if geometry.AspectRatio != "" {
-			body["aspect_ratio"] = geometry.AspectRatio
-		}
+	if geometry.Mode == ImageGeometryExplicit && geometry.AspectRatio != "" {
+		// OpenRouter's Image API normalizes dimensions per endpoint. Sending both
+		// explicit pixel size and aspect_ratio can conflict with endpoint-specific
+		// capabilities, so Image Studio sends the portable aspect ratio only.
+		body["aspect_ratio"] = geometry.AspectRatio
 	}
+	if refs := collectStudioInputReferences(req); len(refs) > 0 {
+		body["input_references"] = refs
+	}
+	return body
+}
+
+func buildOpenRouterStudioMinimalBody(model string, req ImageStudioRequest) map[string]interface{} {
+	body := map[string]interface{}{"model": model, "prompt": req.Prompt}
 	if refs := collectStudioInputReferences(req); len(refs) > 0 {
 		body["input_references"] = refs
 	}
@@ -264,33 +274,32 @@ func (s *Service) openRouterStudioImageGenerate(ctx context.Context, baseURL, ap
 	}
 	endpoint := strings.TrimRight(baseURL, "/") + "/images"
 	body := buildOpenRouterStudioImageBody(model, req, geometry)
-	jsonBody, err := json.Marshal(body)
+	respBody, status, err := s.doOpenRouterStudioImageRequest(ctx, endpoint, apiKey, body)
 	if err != nil {
-		return nil, fmt.Errorf("marshal OpenRouter image request: %w", err)
+		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("create OpenRouter image request: %w", err)
+
+	// OpenRouter image endpoints expose model-specific optional parameters. If a
+	// provider rejects a portable option such as aspect_ratio/quality/seed, retry
+	// one time with only the required fields (plus references when requested).
+	// Authentication and authorization errors are never retried.
+	if (status == http.StatusBadRequest || status == http.StatusUnprocessableEntity) && len(body) > 2 {
+		minimalBody := buildOpenRouterStudioMinimalBody(model, req)
+		if len(minimalBody) < len(body) {
+			fallbackBody, fallbackStatus, fallbackErr := s.doOpenRouterStudioImageRequest(ctx, endpoint, apiKey, minimalBody)
+			if fallbackErr == nil && fallbackStatus >= 200 && fallbackStatus < 300 {
+				respBody, status = fallbackBody, fallbackStatus
+			} else if fallbackErr != nil {
+				return nil, fmt.Errorf("OpenRouter image retry: %w", fallbackErr)
+			} else {
+				return nil, fmt.Errorf("OpenRouter image API returned status %d: %s; minimal retry returned status %d: %s", status, strings.TrimSpace(string(respBody)), fallbackStatus, strings.TrimSpace(string(fallbackBody)))
+			}
+		}
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("HTTP-Referer", "https://github.com/ajbergh/OmniLLM-Studio")
-	httpReq.Header.Set("X-Title", "OmniLLM-Studio")
-	if apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("OpenRouter image API returned status %d: %s", status, strings.TrimSpace(string(respBody)))
 	}
-	client := &http.Client{Timeout: 180 * time.Second, Transport: s.httpClient.Transport}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("OpenRouter image request: %w", err)
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read OpenRouter image response: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("OpenRouter image API returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-	}
+
 	var result struct {
 		Data []struct {
 			B64JSON string `json:"b64_json"`
@@ -309,6 +318,34 @@ func (s *Service) openRouterStudioImageGenerate(ctx context.Context, baseURL, ap
 		return nil, fmt.Errorf("no images returned by OpenRouter")
 	}
 	return &ImageResponse{Images: images, Provider: "openrouter", Model: model}, nil
+}
+
+func (s *Service) doOpenRouterStudioImageRequest(ctx context.Context, endpoint, apiKey string, body map[string]interface{}) ([]byte, int, error) {
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("marshal OpenRouter image request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, 0, fmt.Errorf("create OpenRouter image request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("HTTP-Referer", "https://github.com/ajbergh/OmniLLM-Studio")
+	httpReq.Header.Set("X-Title", "OmniLLM-Studio")
+	if apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	client := &http.Client{Timeout: 180 * time.Second, Transport: s.httpClient.Transport}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("OpenRouter image request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read OpenRouter image response: %w", err)
+	}
+	return respBody, resp.StatusCode, nil
 }
 
 func togetherModelUsesAspectRatio(model string) bool {
