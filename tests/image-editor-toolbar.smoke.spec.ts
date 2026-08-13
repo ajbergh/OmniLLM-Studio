@@ -74,7 +74,11 @@ test('floating canvas toolbar responds in image edit mode', async ({ page, brows
   await expect(zoomValue).toHaveText(/^\d+%$/);
   const initialZoom = Number.parseInt((await zoomValue.textContent() ?? '').replace('%', ''), 10);
   expect(initialZoom).toBeGreaterThan(0);
-  await expect(maskCanvas).toHaveCSS('opacity', '1');
+
+  // The fixture has no configured mask-capable provider, so Phase 3 deliberately
+  // retains the selection layer in an inactive state instead of presenting it as
+  // an exact editable mask. Inactive selections stay visible at reduced opacity.
+  await expect(maskCanvas).toHaveCSS('opacity', '0.35');
 
   await page.getByTestId('canvas-zoom-in').click();
   await expect.poll(async () => {
