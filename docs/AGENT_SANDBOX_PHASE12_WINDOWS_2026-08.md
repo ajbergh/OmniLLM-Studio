@@ -1,163 +1,159 @@
 # Agent Sandbox Phase 12 — Windows Native Confinement
 
-> **Status:** IN PROGRESS
+> **Status:** COMPLETE
 >
 > **Started:** 2026-08-12
 >
-> **Active branch:** `agent/sandbox-windows-extensions-12c-20260812`
+> **Completed through:** Phase 12D PR #149, squash-merged as `65bf1cd807b9cd94a2e7b62e653c9057366c6e8b`
 >
-> **Active PR:** none — #134 and #137 are closed without merge; the corrected branch is awaiting a fresh validation PR.
->
-> **Latest merged Phase 12 checkpoint:** 12B PR #128 squash-merged as `43c1c42bebf245ded6722d742fcb3ea0a71b4502` after exact-final-head validation on `282fbc0fc366c3791f31b7e1d841250971b0b980`.
+> **Documentation closeout:** Phase 12E on branch `docs/sandbox-phase12-completion-20260813`
 
-This file is the detailed durable tracker for Phase 12 of `AGENT_SANDBOX_ROADMAP_2026-08.md`. Phase 12 is not complete until both the first-party protocol-v2 Windows runtime and persistent local extension processes use native Windows confinement with Windows-native test evidence, followed by the planned adversarial assurance pass.
+This file is the durable Windows-specific tracker for Phase 12 of `AGENT_SANDBOX_ROADMAP_2026-08.md`. The implementation and native assurance slices are complete. Phase 12E reconciles operator/runtime documentation with the merged behavior; it does not add new Windows privilege or capability claims.
 
-## Required security properties
+## Completion summary
 
-1. **Restricted identity/token** — arbitrary processes execute under an AppContainer/lowbox or equivalently restricted Windows identity rather than the backend's unrestricted security context.
-2. **Per-sandbox identity** — ACL-scoped resources use an application-issued unique restricting SID or unique AppContainer package SID so authority cannot be reused by another sandbox under the same user.
-3. **Process-tree confinement** — a Windows Job Object contains descendants and uses `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`; process creation must bind Job membership before untrusted code executes.
-4. **Filesystem confinement** — arbitrary process access is limited to sandbox-owned resources or explicitly staged/granted resources. Host workspace ACLs must not be widened as a convenience shortcut.
-5. **No ambient secrets** — existing sandbox environment validation remains authoritative and arbitrary processes do not inherit the backend environment.
-6. **No network by default** — restricted tokens and ACLs alone are insufficient. A Windows runtime may advertise `NetworkIsolation=true` only when an AppContainer/equivalent default-deny network boundary is natively proven.
-7. **Fail closed** — unsupported mount/network/interpreter behavior is rejected rather than approximated with weaker host execution.
-8. **Truthful capabilities** — runtime capability bits change only after implementation plus Windows-native behavior evidence.
-
-## Workstreams
-
-| Slice | Scope | Status | Evidence / exit criterion |
+| Slice | Scope | Status | Final evidence |
 |---|---|---|---|
-| 12A | Native security primitives | **COMPLETE** | PR #127 passed hardened Windows-native restricted-token, per-sandbox SID, cross-sandbox ACL denial, Job Object, full Quality/Security, and multi-architecture container validation; squash-merged as `c68ba013d3ad41ff2044646733d38ab981b3dc87`. |
-| 12B | First-party protocol-v2 Windows runtime | **COMPLETE** | PR #128 final head `282fbc0f` passed the native Windows confinement suite, backend format/vet/tests/race, Chromium, frontend, Helm, Security, Windows plugin/desktop compatibility, and applicable container builds; squash-merged as `43c1c42b`. |
-| 12C | Persistent stdio MCP/plugin confinement | **IN PROGRESS** | Corrected branch `agent/sandbox-windows-extensions-12c-20260812` contains only the intended 11-file implementation/doc diff at checkpoint `42f48e2b`. Draft #134 proved Windows plugin lifecycle/native sandbox compatibility but failed Linux formatting; the exact canonical `gofmt` correction is now applied. #137 was closed without merge after an unrelated CI-workflow diff was identified. Exit requires a fresh PR and exact-final-head full validation. |
-| 12D | Adversarial Windows assurance | NOT STARTED | Expand direct extension/runtime evidence for descendant escape/teardown, cross-sandbox authority reuse, reparse/hard-link/rename behavior, network escape, secret inheritance, cancellation, staging edge cases, and mode-policy behavior. |
-| 12E | Documentation and completion | NOT STARTED | Finalize operator/runtime docs and mark Phase 12 complete only after 12C is merged and 12D evidence closes the remaining Windows assurance gaps. |
+| 12A | Native Windows security primitives | **COMPLETE** | PR #127; unique per-sandbox SID authority, restricted-token primitives, Job Objects, DACL helpers, and cross-sandbox denial; squash-merged as `c68ba013d3ad41ff2044646733d38ab981b3dc87`. |
+| 12B | First-party protocol-v2 Windows runtime | **COMPLETE** | PR #128 final head `282fbc0fc366c3791f31b7e1d841250971b0b980`; exact-head Quality, Security, Windows-native, Chromium/race, Helm, and applicable container validation; squash-merged as `43c1c42bebf245ded6722d742fcb3ea0a71b4502`. |
+| 12C | Persistent stdio MCP/plugin confinement | **COMPLETE** | PR #139 final head `f8076939c7bb27a3938a0a91d89c9b2ec444b977`; Quality, Security, applicable containers, Windows lifecycle/native jobs, and no unresolved review threads; squash-merged as `69590078223f85f4a6eb5c64aa24959aafa10835`. |
+| 12D | Adversarial Windows assurance | **COMPLETE** | PR #149 final head `8f4ee1b7de5d3ea6203c44089dadfae4fd6d30cb`; Quality, Security, Windows adversarial/native, Chromium/race, desktop/plugin, and linux/amd64+linux/arm64 container validation; squash-merged as `65bf1cd807b9cd94a2e7b62e653c9057366c6e8b`. |
+| 12E | Documentation reconciliation | **COMPLETE when this closeout PR merges** | Reconciles this tracker, the primary roadmap, runtime/operator docs, and architecture wording with the merged 12A–12D behavior. |
 
-## Phase 12A — merged foundation
+## Enforced Windows runtime boundary
 
-PR #127 established the reusable Windows primitives:
+The first-party protocol-v2 Windows runtime is implemented with Windows AppContainer and Job Objects.
 
-- cryptographically random per-sandbox restricting SIDs;
-- restricted primary-token creation with `CreateRestrictedToken`;
-- kill-on-close Job Objects;
-- SID-scoped DACL helpers that preserve the normal identity access check;
-- native tests proving one sandbox cannot reuse another sandbox's ACL authority.
+Confirmed behavior:
 
-The first #127 implementation used the well-known Restricted Code SID. Manual review caught that the identity was reusable by other restricted processes under the same Windows user. It was replaced before merge with a unique application-issued restricting SID and cross-sandbox denial coverage. Final head `8b491a80de9543afcd259d5d5959794bb4a61eaa` passed the full applicable gate set before squash merge as `c68ba013`.
+- Windows 10+ feature detection for the required AppContainer APIs;
+- a unique ephemeral AppContainer profile/package SID per runtime session;
+- `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` applied at process creation;
+- zero AppContainer network capabilities, so the runtime is no-network by default;
+- Job Object membership applied at process creation through `PROC_THREAD_ATTRIBUTE_JOB_LIST`, avoiding a start-unrestricted/post-assign window;
+- explicit inherited handle list limited to stdin/stdout/stderr;
+- process-tree teardown on root completion, cancellation, timeout, or session destruction;
+- runtime-owned minimal environment rather than ambient backend inheritance;
+- wall-time and stdout/stderr bounds;
+- retryable profile cleanup when Windows temporarily blocks deletion.
 
-## Phase 12B — merged first-party Windows runtime
+The runtime intentionally does **not** advertise destination allowlisting, memory quota, CPU quota, PID/process-count quota, or physical disk quota enforcement.
 
-PR #128 added the first Windows implementation of the protocol-v2 `Runtime` interface.
+## Workspace and filesystem policy
 
-### Runtime boundary
+Windows arbitrary-process execution does not widen ACLs on user workspace roots.
 
-- requires Windows 10 or newer and feature-detects the required stable AppContainer APIs;
-- creates an ephemeral AppContainer profile per runtime session;
-- launches arbitrary processes with `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` and zero network capabilities;
-- attaches a kill-on-close Job Object through `PROC_THREAD_ATTRIBUTE_JOB_LIST` at process creation rather than assigning after start;
-- constrains inherited handles to stdin/stdout/stderr with `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`;
-- terminates remaining Job descendants when the root command exits, cancels, or times out;
-- uses a minimal runtime-owned environment and validates every explicit environment entry with the sandbox secret policy;
-- enforces wall-time plus bounded stdout/stderr without advertising CPU/memory/PID/disk quotas.
+- No project mount produces an AppContainer-owned ephemeral writable workspace.
+- One `read_only` project mount may be staged into AppContainer-owned storage.
+- Arbitrary-process `read_write` and `read_write_no_delete` project mounts fail closed.
+- Staging is bounded to 20,000 entries and 256 MiB.
+- Reparse points, junctions, multiply-linked files, special files, traversal, and destination escapes are rejected.
+- After each source file is opened, `GetFinalPathNameByHandle` must still resolve that exact handle under the canonical source root before bytes are copied.
+- The staged workspace receives a protected read-only DACL for the AppContainer package SID; backend user, LocalSystem, and Administrators retain cleanup authority.
+- AppContainer-owned home/tmp remain writable.
 
-The AppContainer package SID is the 12B process/filesystem/network identity. The Phase 12A random restricting-SID primitive remains available for explicitly SID-scoped resources, but it is not layered on top of the AppContainer process token because doing so would also require explicit read/execute grants for every executable and DLL loaded by the child.
+These controls close the staged-copy reparse/rename/hard-link class directly exercised by Phase 12 tests. Broader workspace-registry/path-component TOCTOU assurance outside these staging flows remains tracked under Phases 5 and 17.
 
-### Workspace policy
+## Persistent plugin and stdio MCP confinement
 
-PR #128 intentionally does not alter user workspace ACLs.
+Phase 12C moved persistent local extensions behind the shared managed-process boundary without changing their JSON-RPC streaming protocols.
 
-- no mount creates an ephemeral writable workspace inside the AppContainer profile;
-- one `read_only` mount is copied into the AppContainer profile and exposed read-only;
-- `read_write` and `read_write_no_delete` arbitrary-process mounts fail closed;
-- staging is limited to 20,000 entries / 256 MiB, rejects reparse points, multiply-linked files and special files, validates destination containment, and closes each source handle immediately;
-- after every source file is opened, `GetFinalPathNameByHandle` must resolve that opened handle beneath the canonical source root before bytes are copied;
-- the staged workspace uses a protected DACL: current backend user, LocalSystem, and Administrators retain cleanup authority; the AppContainer package SID receives only read/traverse/execute authority;
-- `home` and `tmp` are sandbox-owned writable directories.
+`CommandProcess` supplies the lifecycle needed by MCP/plugins:
 
-The copy/staging limit is an admission/operational bound only. `DiskLimit` remains `false` because 12B does not enforce a physical runtime disk quota.
+- `StdinPipe`;
+- `StdoutPipe`;
+- `StderrPipe`;
+- `Start`;
+- `Wait`;
+- `Kill`.
 
-### Final native evidence
+On Windows:
+
+- `OMNILLM_EXTENSION_SANDBOX_MODE=auto` selects native AppContainer confinement when the backend is available;
+- `required` fails closed if native confinement cannot be provided;
+- `off` is the explicit sanitized-host compatibility override;
+- each persistent extension receives a unique ephemeral AppContainer profile;
+- non-System32 command bundles and required working-directory content are staged read-only instead of granting the child access to the original host directory;
+- absolute arguments are remapped only when they resolve beneath staged command/workspace roots; unrelated absolute host arguments fail closed;
+- `.cmd`/`.bat` launch through System32 `cmd.exe` while the script remains staged inside the AppContainer profile;
+- home/tmp are AppContainer-owned and writable;
+- ambient backend environment is absent;
+- credential-sensitive explicit environment values remain rejected under native confinement unless the narrow operator override `OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true` is intentionally enabled;
+- cancellation and forced shutdown terminate the Job-backed process tree;
+- transient profile cleanup failure is retried rather than abandoning an unreachable profile.
+
+## Native adversarial assurance
+
+Phase 12D added direct `windows-latest` evidence beyond ordinary lifecycle success.
+
+PR #149 proves:
+
+- the child token is actually AppContainer;
+- a confined extension cannot write its staged command bundle;
+- AppContainer-owned home is writable;
+- unrelated host-file reads and writes are denied;
+- one concurrently running extension cannot reuse another extension profile's filesystem authority;
+- an ambient `OMNILLM_MASTER_KEY` is absent;
+- a parent loopback listener is unreachable under the no-network policy;
+- root exit kills a spawned descendant, verified with a host-held process handle;
+- context cancellation returns `context.Canceled` and kills the descendant process tree;
+- workspace staging rejects Windows hard links and junction/reparse points;
+- unrelated absolute extension arguments fail closed;
+- sensitive explicit environment values fail closed in `required` mode;
+- `auto` and `required` select `windowsExtensionProcess`, while `off` selects the sanitized host adapter.
+
+The dedicated Windows job also continues to run the Phase 12A/12B runtime/primitives suite and `cmd/sandboxd` Windows compilation/testing.
+
+## Validation record
+
+### PR #128 — first-party runtime
 
 Final head `282fbc0fc366c3791f31b7e1d841250971b0b980` passed:
 
-- the dedicated Windows confinement suite, including AppContainer token state, read-only staged workspace, unrelated-host-file read/write denial, ambient-secret absence, loopback denial, descendant teardown, active-`Destroy` synchronization, and retryable cleanup failure handling;
-- `cmd/sandboxd` Windows compilation/testing;
+- Windows AppContainer/runtime confinement;
+- active-destroy synchronization and retryable cleanup regression;
 - backend formatting, vet, unit/integration tests, and race detector;
-- Windows plugin lifecycle and desktop bindings;
-- frontend lint/unit/build and full Chromium Playwright smoke;
-- Helm validation;
-- dependency audit plus Go and JavaScript/TypeScript CodeQL;
-- applicable Linux multi-architecture frontend/backend container builds.
+- Windows plugin lifecycle and desktop compatibility;
+- frontend lint/unit/build;
+- Chromium Playwright;
+- Helm;
+- dependency audit and Go/JavaScript-TypeScript CodeQL;
+- applicable multi-architecture container builds.
 
-PR #128 then squash-merged as `43c1c42bebf245ded6722d742fcb3ea0a71b4502`.
+### PR #139 — persistent extensions
 
-## Phase 12C — active persistent extension confinement
+Final head `f8076939c7bb27a3938a0a91d89c9b2ec444b977` passed Quality Gate, Security Scan, applicable container validation, Windows plugin/native jobs, and review-thread inspection before merge.
 
-The corrected branch moves persistent stdio MCP/plugin processes from the sanitized Windows compatibility boundary to native AppContainer confinement while preserving their existing streaming JSON-RPC lifecycle. Development PR #134 and clean-replay PR #137 are both closed without merge; the branch named above is the current source of truth pending a fresh validation PR.
+### PR #149 — adversarial assurance
 
-### Managed process seam
+Final head `8f4ee1b7de5d3ea6203c44089dadfae4fd6d30cb` passed:
 
-`backend/internal/sandbox/process.go` now defines a narrow `CommandProcess` lifecycle surface:
+- complete Quality Gate, including formatting/vet/tests/race, Windows sandbox/plugin/desktop, frontend, Helm, and Chromium;
+- complete Security Scan, including dependency audit and both CodeQL lanes;
+- frontend and backend container builds for `linux/amd64` and `linux/arm64` plus Helm container validation;
+- no unresolved review threads.
 
-- `StdinPipe`, `StdoutPipe`, `StderrPipe`;
-- `Start` and `Wait`;
-- `Kill` for process-tree termination.
+PR #149 squash-merged as `65bf1cd807b9cd94a2e7b62e653c9057366c6e8b`.
 
-The host and Linux Bubblewrap implementations remain adapters around `*exec.Cmd`. MCP already consumed only the pipe/start/wait subset. Plugin forced shutdown now calls `CommandProcess.Kill()` rather than reaching through `cmd.Process`, which lets Windows terminate the whole Job Object without rewriting protocol code.
+## Explicitly open work outside Phase 12 completion
 
-### Windows extension launch boundary
+Phase 12 completion does not imply the wider sandbox program is complete.
 
-The Windows platform adapter:
+Still open:
 
-- feature-detects Windows 10+ AppContainer APIs;
-- in `required` mode, fails closed if native confinement is unavailable;
-- in `auto` mode, uses native Windows confinement when available and falls back only when the OS/API backend itself is unavailable;
-- validates explicit extension environment values with the existing credential-sensitive policy before native launch;
-- creates a unique ephemeral AppContainer profile for each persistent process;
-- stages non-System32 command directories read-only into the profile rather than widening ACLs on the original host path;
-- stages an explicit/inferred working directory read-only when needed;
-- remaps absolute arguments only when they resolve beneath staged roots and rejects unrelated absolute host arguments;
-- gives the child runtime-owned `home`/`tmp` and a minimal Windows environment rather than ambient backend state;
-- supplies AppContainer security capabilities, Job membership, and the explicit stdio handle list in the same process-creation attribute list;
-- launches `.cmd`/`.bat` through the System32 command processor while keeping the staged script path inside the AppContainer profile;
-- terminates the Job on cancellation, forced plugin shutdown, and root-process completion so descendants cannot outlive the persistent extension lifecycle;
-- performs immediate bounded profile cleanup and, if Windows temporarily blocks cleanup, keeps retrying the same idempotent cleanup on a delayed timer rather than abandoning an unreachable profile.
+- **Issue #151:** protocol-v2 explicit `Cancel(runtimeID, executionID)` is not addressable while synchronous `Exec` is running because the execution ID is currently returned only when `Exec` completes. Context cancellation and session `Destroy` work; this is a separate API-contract defect.
+- **Phase 2:** packaging/deployment polish for first-party workers and remaining runtime enforcement work.
+- **Phases 5/17:** broader workspace-registry/path-component TOCTOU assurance outside the Windows staging flow.
+- **Phase 7:** memory/CPU/PID/disk quotas are not implemented or advertised.
+- **Phase 8:** destination-enforced egress is not implemented; first-party Windows remains no-network rather than allowlisted-network.
+- **Phase 9:** service-specific brokered credential consumers remain.
+- **Phase 13:** macOS native confinement remains independent future work.
+- **Phase 15:** dedicated hardened server/Kubernetes sandbox workers remain future work.
 
-The staging limits currently reuse the 12B admission bounds. Complex command lines that hide host paths inside opaque string arguments are not rewritten; native AppContainer ACLs remain the enforcement boundary, and broader adversarial/path-shape assurance is tracked in 12D.
+Python and JavaScript shortcuts in the first-party Windows protocol-v2 runtime also remain fail-closed until an AppContainer-readable interpreter/package design is intentionally implemented and natively tested. Persistent extensions may stage their own command bundles subject to the stricter extension path policy; that does not make arbitrary host interpreters generally available to protocol-v2 code execution.
 
-### Current 12C validation evidence
+## Completion decision
 
-Development draft #134 provided useful behavior evidence even though its first Linux backend job stopped at formatting:
+Phase 12's stated objective is satisfied: both first-party protocol-v2 execution and persistent local plugin/stdio MCP execution now have OS-enforced Windows confinement with behavior-level native Windows evidence, including adversarial negative tests.
 
-- the Windows plugin lifecycle job passed end-to-end through `NewHostCommandRunner()`, which now selects the native Windows extension backend in `auto` mode;
-- the existing dedicated Windows sandbox package compiled the new Windows files and passed its native suite;
-- frontend and Helm checks passed;
-- the Linux failure was limited to non-canonical `gofmt` output in `process.go` and `extension_process_windows_lifecycle.go`.
-
-The lifecycle-file formatting was corrected, and the remaining `process.go` formatter discrepancy was traced to Go's alignment of consecutive one-line adapter methods; the exact canonical alignment is now applied in checkpoint `42f48e2b`. Against `main` `54a9a1849340f2f9c3ca1a393b979c5e739fc2fe`, that branch changes exactly the intended 11 Phase 12C files and no CI workflow file. The branch is one disjoint GitHub-tool commit behind `main`; the next PR merge ref must therefore pass the current full gate set before merge.
-
-## Integration constraints / remaining design work
-
-- Python/Node runtime availability is not assumed merely because an interpreter is installed. Persistent extensions may stage a command bundle and related working-directory resources, but unsupported path shapes still fail closed rather than receiving broad host ACL grants.
-- Explicit credential-sensitive extension environment values remain rejected under native confinement unless the existing narrow `OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true` operator override is set. The desired long-term path remains brokered/scoped credentials rather than raw environment secrets.
-- Destination allowlisting is not implemented. Windows AppContainer execution remains no-network by default.
-- Memory, CPU, process-count, and physical disk quotas remain unimplemented and unadvertised.
-- `sandboxd` remains operator-run rather than automatically packaged into desktop/server distributions; packaging remains tracked under the broader first-party runtime/deployment work.
-- The 12B/12C staged-copy path binds each opened source handle back to the canonical source root before copying. Broader workspace-registry/path-component TOCTOU assurance outside staged-copy flows remains tracked under Phases 5 and 17.
-- 12D still needs direct adversarial extension evidence beyond the current end-to-end plugin lifecycle and shared native-primitives evidence.
-
-## Validation policy
-
-Phase 12 requires the normal repository Quality Gate and Security Scan plus Windows-native confinement/lifecycle jobs. Applicable container builds must also pass. No control becomes complete from API usage, cross-compilation, or capability flags alone.
-
-## Progress log
-
-- **2026-08-12 — PR #127:** opened Phase 12A native Windows primitives.
-- **2026-08-12 — #127 audit:** replaced globally reusable Restricted Code SID ACL authority with unique per-sandbox SIDs and added cross-sandbox denial coverage.
-- **2026-08-12 — #127:** final hardened head passed Quality, Security, native Windows, Chromium/race, Helm, and multi-architecture container validation; squash-merged as `c68ba013`.
-- **2026-08-12 — PR #128:** opened first-party Windows AppContainer runtime implementation.
-- **2026-08-12 — #128 audit:** closed the staging handle/rename escape and made failed profile cleanup retryable rather than unreachable.
-- **2026-08-13 — #128 final validation:** exact head `282fbc0f` passed the full Quality, Security, Windows-native, Chromium/race, Helm, and applicable container gates; squash-merged as `43c1c42b`.
-- **2026-08-13 — #134:** opened development draft for native persistent Windows extension confinement; initial Windows plugin/native jobs passed and Linux formatting differences were identified.
-- **2026-08-13 — #137:** opened a clean replay PR, then closed it without merge after review found an unrelated CI-workflow diff introduced by a coverage experiment.
-- **2026-08-13 — 12C recovery:** restored the original implementation branch, applied the exact remaining `gofmt` alignment fix, and verified its diff against live `main` contains only the intended 11 Phase 12C files. A fresh validation PR is still required.
+No remaining item above is required to claim the **Windows confinement backend** exists. Each remains tracked under its own roadmap phase or issue and must fail closed where the corresponding control is unavailable.
