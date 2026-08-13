@@ -1,0 +1,50 @@
+name: M3A deployment hardening once
+
+on:
+  push:
+    branches:
+      - feat/github-merge-eligibility-evidence-m3a-20260812
+    paths:
+      - .github/workflows/m3a-deployment-hardening.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/github-merge-eligibility-evidence-m3a-20260812
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+      - name: Harden deployment evidence and remove helper
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('backend/internal/gitrepo/github_pull_request_merge_eligibility.go')
+          text = path.read_text()
+          text = text.replace('"strings"\n)', '"strings"\n\t"time"\n)')
+          text = text.replace(
+          '''const (\n\tmaxGitHubMergeEligibilityReviewRequests = 20\n\tmaxGitHubRequiredDeployments            = 20\n\tmaxGitHubSignatureEvidenceCommits       = 100\n)''',
+          '''const (\n\tmaxGitHubMergeEligibilityReviewRequests = 20\n\tmaxGitHubRequiredDeployments            = 20\n\tmaxGitHubDeploymentsPerEnvironment      = 20\n\tmaxGitHubDeploymentStatusEvidence       = 100\n\tmaxGitHubSignatureEvidenceCommits       = 100\n)''')
+          text = text.replace(
+          '''type githubMergeEligibilityDeployment struct {\n\tID          int64  `json:"id"`\n\tSHA         string `json:"sha"`\n\tEnvironment string `json:"environment"`\n}\n\ntype githubMergeEligibilityDeploymentStatus struct {\n\tState string `json:"state"`\n}''',
+          '''type githubMergeEligibilityDeployment struct {\n\tID          int64  `json:"id"`\n\tSHA         string `json:"sha"`\n\tEnvironment string `json:"environment"`\n\tCreatedAt   string `json:"created_at"`\n}\n\ntype githubMergeEligibilityDeploymentStatus struct {\n\tState     string `json:"state"`\n\tCreatedAt string `json:"created_at"`\n}''')
+          old = '''func (s *RemoteService) inspectGitHubRequiredDeployments(ctx context.Context, token, owner, repository, head string, environments []string) ([]GitHubRequiredDeploymentEligibility, bool, bool) {\n\tenvironments = sortedUniqueStrings(environments)\n\tif len(environments) == 0 {\n\t\treturn nil, true, true\n\t}\n\tif len(environments) > maxGitHubRequiredDeployments {\n\t\treturn nil, false, false\n\t}\n\tstates := make([]GitHubRequiredDeploymentEligibility, 0, len(environments))\n\tallSatisfied := true\n\tfor _, environment := range environments {\n\t\tquery := url.Values{}\n\t\tquery.Set("sha", head)\n\t\tquery.Set("environment", environment)\n\t\tquery.Set("per_page", "1")\n\t\tendpoint := fmt.Sprintf("/repos/%s/%s/deployments?%s", owner, repository, query.Encode())\n\t\tvar deployments []githubMergeEligibilityDeployment\n\t\tif err := s.doGitHubJSON(ctx, token, http.MethodGet, endpoint, nil, http.StatusOK, &deployments); err != nil {\n\t\t\treturn states, false, false\n\t\t}\n\t\tstate := GitHubRequiredDeploymentEligibility{Environment: environment}\n\t\tif len(deployments) == 0 {\n\t\t\tallSatisfied = false\n\t\t\tstates = append(states, state)\n\t\t\tcontinue\n\t\t}\n\t\tdeployment := deployments[0]\n\t\tif deployment.ID <= 0 || !validRemoteHash(deployment.SHA) || !strings.EqualFold(deployment.SHA, head) || deployment.Environment != environment {\n\t\t\treturn states, false, false\n\t\t}\n\t\tstatusEndpoint := fmt.Sprintf("/repos/%s/%s/deployments/%d/statuses?per_page=1", owner, repository, deployment.ID)\n\t\tvar statuses []githubMergeEligibilityDeploymentStatus\n\t\tif err := s.doGitHubJSON(ctx, token, http.MethodGet, statusEndpoint, nil, http.StatusOK, &statuses); err != nil {\n\t\t\treturn states, false, false\n\t\t}\n\t\tif len(statuses) > 0 {\n\t\t\tstate.State = strings.ToLower(strings.TrimSpace(statuses[0].State))\n\t\t}\n\t\tstate.Satisfied = state.State == "success"\n\t\tif !state.Satisfied {\n\t\t\tallSatisfied = false\n\t\t}\n\t\tstates = append(states, state)\n\t}\n\treturn states, allSatisfied, true\n}\n'''
+          new = '''func (s *RemoteService) inspectGitHubRequiredDeployments(ctx context.Context, token, owner, repository, head string, environments []string) ([]GitHubRequiredDeploymentEligibility, bool, bool) {\n\tenvironments = sortedUniqueStrings(environments)\n\tif len(environments) == 0 {\n\t\treturn nil, true, true\n\t}\n\tif len(environments) > maxGitHubRequiredDeployments {\n\t\treturn nil, false, false\n\t}\n\tstates := make([]GitHubRequiredDeploymentEligibility, 0, len(environments))\n\tallSatisfied := true\n\tfor _, environment := range environments {\n\t\tquery := url.Values{}\n\t\tquery.Set("sha", head)\n\t\tquery.Set("environment", environment)\n\t\tquery.Set("per_page", strconv.Itoa(maxGitHubDeploymentsPerEnvironment+1))\n\t\tendpoint := fmt.Sprintf("/repos/%s/%s/deployments?%s", owner, repository, query.Encode())\n\t\tvar deployments []githubMergeEligibilityDeployment\n\t\tif err := s.doGitHubJSON(ctx, token, http.MethodGet, endpoint, nil, http.StatusOK, &deployments); err != nil {\n\t\t\treturn states, false, false\n\t\t}\n\t\tstate := GitHubRequiredDeploymentEligibility{Environment: environment}\n\t\tif len(deployments) == 0 {\n\t\t\tallSatisfied = false\n\t\t\tstates = append(states, state)\n\t\t\tcontinue\n\t\t}\n\t\tif len(deployments) > maxGitHubDeploymentsPerEnvironment {\n\t\t\treturn states, false, false\n\t\t}\n\t\tdeployment, ok := latestGitHubDeploymentForEnvironment(deployments, head, environment)\n\t\tif !ok {\n\t\t\treturn states, false, false\n\t\t}\n\t\tstatusEndpoint := fmt.Sprintf("/repos/%s/%s/deployments/%d/statuses?per_page=%d", owner, repository, deployment.ID, maxGitHubDeploymentStatusEvidence)\n\t\tvar statuses []githubMergeEligibilityDeploymentStatus\n\t\tif err := s.doGitHubJSON(ctx, token, http.MethodGet, statusEndpoint, nil, http.StatusOK, &statuses); err != nil {\n\t\t\treturn states, false, false\n\t\t}\n\t\tif len(statuses) >= maxGitHubDeploymentStatusEvidence {\n\t\t\treturn states, false, false\n\t\t}\n\t\tif len(statuses) > 0 {\n\t\t\tlatestStatus, ok := latestGitHubDeploymentStatus(statuses)\n\t\t\tif !ok {\n\t\t\t\treturn states, false, false\n\t\t\t}\n\t\t\tstate.State = strings.ToLower(strings.TrimSpace(latestStatus.State))\n\t\t\tif !knownGitHubDeploymentState(state.State) {\n\t\t\t\treturn states, false, false\n\t\t\t}\n\t\t}\n\t\tstate.Satisfied = state.State == "success"\n\t\tif !state.Satisfied {\n\t\t\tallSatisfied = false\n\t\t}\n\t\tstates = append(states, state)\n\t}\n\treturn states, allSatisfied, true\n}\n\nfunc latestGitHubDeploymentForEnvironment(deployments []githubMergeEligibilityDeployment, head, environment string) (githubMergeEligibilityDeployment, bool) {\n\tvar latest githubMergeEligibilityDeployment\n\tvar latestCreated time.Time\n\tseen := false\n\tfor _, deployment := range deployments {\n\t\tif deployment.ID <= 0 || !validRemoteHash(deployment.SHA) || !strings.EqualFold(deployment.SHA, head) || deployment.Environment != environment {\n\t\t\treturn githubMergeEligibilityDeployment{}, false\n\t\t}\n\t\tcreated, err := time.Parse(time.RFC3339, strings.TrimSpace(deployment.CreatedAt))\n\t\tif err != nil {\n\t\t\treturn githubMergeEligibilityDeployment{}, false\n\t\t}\n\t\tif !seen || created.After(latestCreated) {\n\t\t\tlatest = deployment\n\t\t\tlatestCreated = created\n\t\t\tseen = true\n\t\t\tcontinue\n\t\t}\n\t\tif created.Equal(latestCreated) && deployment.ID != latest.ID {\n\t\t\treturn githubMergeEligibilityDeployment{}, false\n\t\t}\n\t}\n\treturn latest, seen\n}\n\nfunc latestGitHubDeploymentStatus(statuses []githubMergeEligibilityDeploymentStatus) (githubMergeEligibilityDeploymentStatus, bool) {\n\tvar latest githubMergeEligibilityDeploymentStatus\n\tvar latestCreated time.Time\n\tseen := false\n\tfor _, status := range statuses {\n\t\tcreated, err := time.Parse(time.RFC3339, strings.TrimSpace(status.CreatedAt))\n\t\tif err != nil {\n\t\t\treturn githubMergeEligibilityDeploymentStatus{}, false\n\t\t}\n\t\tif !seen || created.After(latestCreated) {\n\t\t\tlatest = status\n\t\t\tlatestCreated = created\n\t\t\tseen = true\n\t\t\tcontinue\n\t\t}\n\t\tif created.Equal(latestCreated) && strings.TrimSpace(status.State) != strings.TrimSpace(latest.State) {\n\t\t\treturn githubMergeEligibilityDeploymentStatus{}, false\n\t\t}\n\t}\n\treturn latest, seen\n}\n\nfunc knownGitHubDeploymentState(state string) bool {\n\tswitch strings.ToLower(strings.TrimSpace(state)) {\n\tcase "error", "failure", "inactive", "in_progress", "queued", "pending", "success":\n\t\treturn true\n\tdefault:\n\t\treturn false\n\t}\n}\n'''
+          if old not in text:
+              raise SystemExit('deployment function anchor not found')
+          text = text.replace(old, new)
+          path.write_text(text)
+          PY
+          gofmt -w backend/internal/gitrepo/github_pull_request_merge_eligibility.go
+          rm .github/workflows/m3a-deployment-hardening.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/internal/gitrepo/github_pull_request_merge_eligibility.go .github/workflows/m3a-deployment-hardening.yml
+          git commit -m "fix(github): make deployment evidence order-independent" || exit 0
+          git push origin HEAD:feat/github-merge-eligibility-evidence-m3a-20260812
