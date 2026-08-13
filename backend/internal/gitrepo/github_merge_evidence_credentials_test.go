@@ -9,7 +9,7 @@ import (
 func TestUserScopedRemoteServiceMergeEligibilityUsesConnectedActorCredential(t *testing.T) {
 	base, head := newMergeEligibilityTestService(t, mergeEligibilityFixture{
 		checkAppID: 15368, checkConclusion: "success", statusState: "success",
-		reviewDecision: "APPROVED", approvingReviews: 1, deploymentState: "success",
+		reviewDecision: "APPROVED", deploymentState: "success",
 	})
 	originalTransport := base.githubClient.Transport
 	base.githubClient.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
