@@ -83,7 +83,7 @@ func TestBindingCapabilityBootstrapRegistersOnlyOperatorAuthorizedFamilies(t *te
 
 	for _, name := range []string{
 		"git_remotes", "git_remote_status", "git_fetch", "git_push", "git_publish_branch",
-		"github_get_pull_request", "github_get_pull_request_review_threads", "github_create_pull_request",
+		"github_get_pull_request", "github_get_pull_request_review_threads", "github_create_draft_pull_request",
 		"github_reply_to_pull_request_review_comment", "github_set_pull_request_review_thread_resolved",
 		"github_mark_pull_request_ready_for_review", "github_get_pull_request_merge_requirements",
 		"github_get_pull_request_merge_policy_evidence", "github_get_pull_request_merge_eligibility",
@@ -139,7 +139,7 @@ func TestBindingCapabilityBootstrapFetchUsesIndependentLocalWriteGate(t *testing
 	if _, ok := registry.Get("git_fetch"); !ok {
 		t.Fatal("binding-aware remote access plus local Git write should register git_fetch")
 	}
-	for _, name := range []string{"git_push", "git_publish_branch", "github_get_pull_request", "github_create_pull_request"} {
+	for _, name := range []string{"git_push", "git_publish_branch", "github_get_pull_request", "github_create_draft_pull_request"} {
 		if _, ok := registry.Get(name); ok {
 			t.Fatalf("fetch prerequisites alone must not register %s", name)
 		}
