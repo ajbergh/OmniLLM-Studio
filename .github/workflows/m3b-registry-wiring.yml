@@ -1,0 +1,36 @@
+name: M3B registry wiring once
+
+on:
+  push:
+    branches:
+      - feat/github-guarded-direct-merge-m3b-20260812
+    paths:
+      - scripts/m3b_registry_patch.py
+      - .github/workflows/m3b-registry-wiring.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/github-guarded-direct-merge-m3b-20260812
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+      - name: Apply M3B registry wiring
+        run: python3 scripts/m3b_registry_patch.py
+      - name: Format and remove temporary helpers
+        run: |
+          cd backend
+          gofmt -w internal/tools/registry.go internal/tools/registry_github_credentials.go internal/tools/github_pull_request_merge_tool.go
+          cd ..
+          rm scripts/m3b_registry_patch.py .github/workflows/m3b-registry-wiring.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend scripts .github/workflows
+          git commit -m "feat(github): register guarded direct merge tool"
+          git push
