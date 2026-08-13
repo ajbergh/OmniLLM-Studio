@@ -7,6 +7,8 @@ The durable implementation program and threat model are tracked in:
 - `AGENT_SANDBOX_ROADMAP_2026-08.md`
 - `AGENT_SANDBOX_ARCHITECTURE.md`
 - `AGENT_SANDBOX_THREAT_MODEL.md`
+- `AGENT_SANDBOX_PHASE12_WINDOWS_2026-08.md`
+- `AGENT_SANDBOX_PHASE12D_WINDOWS_ASSURANCE_2026-08.md`
 
 ## Protocol-v2 configuration
 
@@ -23,7 +25,7 @@ During the migration from the historical one-shot code-sandbox adapter, `OMNILLM
 
 The backend refuses redirects from a protocol-v2 HTTP runtime. Plain HTTP is accepted only for loopback endpoints; non-loopback runtime endpoints require HTTPS.
 
-## First-party Linux worker
+## First-party worker
 
 The first-party worker executable is:
 
@@ -31,6 +33,10 @@ The first-party worker executable is:
 cd backend
 go run ./cmd/sandboxd
 ```
+
+The same `sandboxd` executable selects the supported local runtime for its host platform. Packaging `sandboxd` into all desktop/server distributions remains separate deployment work; the source/runtime implementations described below are already present.
+
+### Linux configuration
 
 Required configuration:
 
@@ -47,9 +53,9 @@ OMNILLM_SANDBOX_SCRATCH_ROOT=/absolute/path/to/scratch-parent
 OMNILLM_SANDBOX_BWRAP=/usr/bin/bwrap
 ```
 
-The current Linux runtime uses Bubblewrap. `OMNILLM_SANDBOX_ROOTFS` must point to an operator-prepared runtime filesystem containing only the interpreters/build tools intentionally available to sandbox workloads. The runtime mounts that root filesystem read-only and creates a separate ephemeral writable `/workspace` scratch directory for sessions without a project workspace. It does **not** bind-mount the host root into the sandbox.
+The Linux runtime uses Bubblewrap. `OMNILLM_SANDBOX_ROOTFS` must point to an operator-prepared runtime filesystem containing only the interpreters/build tools intentionally available to sandbox workloads. The runtime mounts that root filesystem read-only and creates a separate ephemeral writable `/workspace` scratch directory for sessions without a project workspace. It does **not** bind-mount the host root into the sandbox.
 
-### Current enforced Linux controls
+#### Enforced Linux controls
 
 The runtime currently advertises these controls as enforced:
 
@@ -61,13 +67,13 @@ The runtime currently advertises these controls as enforced:
 - bounded wall time;
 - bounded stdout and stderr.
 
-It intentionally does **not** advertise destination allowlist egress, memory, CPU, PID-count, or physical disk quota enforcement yet. Runtime capability negotiation allows the Broker to fail closed when a workload/deployment requires a control the selected worker cannot enforce.
+It intentionally does **not** advertise destination allowlist egress, memory, CPU, PID-count, or physical disk quota enforcement. Runtime capability negotiation allows the Broker to fail closed when a workload/deployment requires a control the selected worker cannot enforce.
 
-### Workspace mounts
+#### Linux workspace mounts
 
 Models never provide physical host paths to the runtime. The backend resolves an owner-scoped opaque workspace ID to a trusted runtime-only mount descriptor after validating the stored grant.
 
-The current Linux worker supports at most one project workspace per sandbox execution:
+The Linux worker supports at most one project workspace per sandbox execution:
 
 - `read_only` is mounted read-only at `/workspace`;
 - `read_write_no_delete` is narrowed to read-only for arbitrary shell execution because a POSIX bind mount cannot reliably enforce write-without-delete semantics;
@@ -75,7 +81,60 @@ The current Linux worker supports at most one project workspace per sandbox exec
 
 The current `terminal_exec` tool deliberately requests only a read-only project mount. Source mutations remain routed through the state-bound, journaled workspace mutation tools.
 
-### Desktop workspace settings and grants
+### Windows first-party runtime
+
+Windows native confinement Phase 12 is complete. On supported Windows 10+ hosts, `NewLocalRuntime` uses stable AppContainer/process-creation mechanisms rather than unrestricted host execution.
+
+The Windows runtime:
+
+- creates an ephemeral AppContainer profile/package SID per runtime session;
+- launches children with `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` and **zero AppContainer network capabilities**;
+- attaches a kill-on-close Job Object through `PROC_THREAD_ATTRIBUTE_JOB_LIST` at process creation, eliminating a pre-confinement execution window;
+- restricts inherited handles to explicit stdio handles through `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`;
+- tears down Job descendants on root completion, execution-context cancellation, timeout, and session destruction;
+- uses a minimal runtime-owned environment and applies the sandbox credential-sensitive environment policy to explicit values;
+- enforces bounded wall time and stdout/stderr;
+- does not advertise CPU, memory, process-count, or physical disk quotas.
+
+#### Windows workspace policy
+
+Windows arbitrary-process execution does not widen ACLs on the user's source workspace.
+
+- no project mount creates an ephemeral writable workspace inside the AppContainer profile;
+- one `read_only` project mount may be staged into AppContainer-owned storage;
+- `read_write` and `read_write_no_delete` arbitrary-process mounts fail closed;
+- staged input is bounded to 20,000 entries / 256 MiB;
+- staging rejects reparse points/junctions, multiply-linked files, and special files;
+- every opened source handle is resolved with `GetFinalPathNameByHandle` and must still be beneath the canonical source root before bytes are copied;
+- the staged workspace receives a protected DACL granting the AppContainer only read/traverse/execute authority;
+- runtime-owned `home` and `tmp` remain writable inside the AppContainer profile.
+
+The staging limit is an admission/operational bound, not a physical disk quota.
+
+#### Windows native evidence
+
+The merged native suite includes normal and adversarial evidence for:
+
+- AppContainer token state and distinct per-session/per-extension identities;
+- denial of unrelated host-file reads/writes;
+- cross-profile authority isolation;
+- read-only staged workspace/extension bundles;
+- writable sandbox-owned home/tmp;
+- absence of ambient backend secrets;
+- default-deny loopback/network behavior;
+- descendant Job teardown after root completion and context cancellation;
+- active session destruction/cleanup behavior;
+- hard-link and junction/reparse-point staging rejection;
+- fail-closed unrelated absolute extension arguments;
+- extension policy-mode selection (`auto`, `required`, `off`).
+
+Phase 12D final head `8f4ee1b7de5d3ea6203c44089dadfae4fd6d30cb` passed the complete Quality, Security, native Windows, race, Chromium Playwright, Helm, and multi-architecture container gate set before merge in PR #149.
+
+### Windows code-language limitation
+
+The Windows arbitrary-process runtime deliberately fails closed for Python and JavaScript code shortcuts until an AppContainer-readable interpreter/package layout is implemented and natively validated. This does not affect explicit executable/argv execution when the executable is accessible under the runtime's confinement policy. There is no hidden fallback to unrestricted host Python or Node.
+
+## Desktop workspace settings and grants
 
 Phase 11 adds a safe Settings surface for inspecting the active sandbox and managing filesystem grants without exposing configured host roots to model tools or normal API responses.
 
@@ -110,11 +169,13 @@ The Wails desktop build uses its native folder picker to select a directory. Des
 
 Grant deletion revokes authorization only; it never removes files from disk. The UI can show whether a journaled change is revertable, but Phase 11 deliberately does not add an HTTP revert shortcut. Reverts remain behind the existing governed workspace tool and approval boundary.
 
-### Network grants
+## Network grants
 
 The backend supports owner-bound destination grants, but authorization is distinct from enforcement. A sandbox that requests `NetworkAllowlist` must run on a runtime that advertises `network_allowlist=true`.
 
-The first-party Linux Bubblewrap runtime currently advertises `network_allowlist=false`, so it remains no-network even when a user has an approved destination grant. This is intentional fail-closed behavior until an enforceable first-party egress mechanism lands.
+The first-party Linux Bubblewrap runtime and Windows AppContainer runtime currently advertise `network_allowlist=false`, so both remain no-network even when a user has an approved destination grant. This is intentional fail-closed behavior until an enforceable first-party destination-scoped egress mechanism lands.
+
+Windows native persistent extensions also use AppContainer with zero network capabilities; they do not currently implement destination allowlisting.
 
 ## Code execution
 
@@ -127,7 +188,7 @@ The first-party Linux Bubblewrap runtime currently advertises `network_allowlist
 - network is disabled by default;
 - the runtime must advertise OS, filesystem, network, and process-tree isolation for the tool to create a session.
 
-Supported code modes remain Python, JavaScript, and shell, subject to the binaries provided by the configured sandbox root filesystem. Python code execution uses isolated interpreter flags (`-I -S`).
+On Linux, supported code modes remain Python, JavaScript, and shell subject to binaries in the configured sandbox root filesystem. Python code execution uses isolated interpreter flags (`-I -S`). Windows code-language shortcuts remain fail-closed as described above until the interpreter layout is natively validated.
 
 ## Restricted Python analysis
 
@@ -137,11 +198,11 @@ Supported code modes remain Python, JavaScript, and shell, subject to the binari
 OMNILLM_CODE_EXEC_ENABLED=true
 ```
 
-and an available protocol-v2 Broker. Without both, the tool is disabled. Analysis sessions are ephemeral, network-disabled, bounded, and destroyed after execution.
+and an available protocol-v2 Broker. Without both, the tool is disabled. Analysis sessions are ephemeral, network-disabled, bounded, and destroyed after execution. A Windows runtime that cannot provide the required confined Python interpreter fails closed rather than using host Python.
 
 ## Worker API
 
-The authenticated worker currently exposes:
+The authenticated worker exposes:
 
 ```text
 GET    /v2/capabilities
@@ -154,15 +215,21 @@ DELETE /v2/sandboxes/{runtime_id}
 
 The model does not call these endpoints directly. The backend Broker owns public `sbx_...` session IDs and maps them to runtime-private IDs.
 
+### Explicit execution cancellation caveat — issue #151
+
+Context cancellation, timeouts, session `Destroy`, and runtime process-tree teardown are implemented and tested. A separate protocol lifecycle defect remains open as issue #151: synchronous `Exec` currently returns the runtime-generated `execution_id` only after the execution completes, while the separate `/cancel` operation requires that ID. A caller therefore cannot use the explicit execution-ID cancellation endpoint against an active synchronous `Exec` unless the protocol is changed to make the execution reference known at start time.
+
+This is not a Windows confinement regression—the Windows Job teardown paths are natively proven—but operators/developers should not treat the explicit `Cancel(executionID)` endpoint as a complete active-execution control until #151 is repaired.
+
 ## Artifact trust boundary
 
 Protocol v2 describes sandbox outputs with application-owned artifact IDs, name, MIME type, size, and SHA-256 metadata. Arbitrary worker-supplied artifact URLs are not the trust boundary. Later artifact-promotion work must validate ownership, size, content/path safety, and hashes before registering sandbox outputs with normal OmniLLM storage.
 
 ## Local plugins and stdio MCP
 
-Local plugins and stdio MCP servers are persistent streaming subprocesses, so they keep their existing JSON-RPC stdin/stdout lifecycle while process construction moves behind the shared extension-confinement policy.
+Local plugins and stdio MCP servers are persistent streaming subprocesses, so they keep their existing JSON-RPC stdin/stdout lifecycle while process construction uses the shared extension-confinement policy.
 
-Phase 10 configuration is:
+Configuration is:
 
 ```text
 OMNILLM_EXTENSION_SANDBOX_MODE=auto|required|off
@@ -170,14 +237,30 @@ OMNILLM_EXTENSION_SANDBOX_MODE=auto|required|off
 
 The default is `auto`:
 
-- on Linux, `auto` uses Bubblewrap when `OMNILLM_SANDBOX_ROOTFS` is configured; otherwise it preserves the existing sanitized host-process boundary;
-- on Windows and macOS, `auto` preserves the sanitized boundary until native confinement backends are implemented;
-- `required` fails closed if native extension confinement is unavailable or not configured;
+- on Linux, `auto` uses Bubblewrap when `OMNILLM_SANDBOX_ROOTFS` is configured; otherwise it preserves the sanitized host-process boundary;
+- on Windows, `auto` uses the native AppContainer/Job backend when the required Windows APIs are available;
+- on macOS, `auto` still preserves the sanitized boundary until Phase 13 provides a native backend;
+- `required` fails closed if native extension confinement is unavailable/not configured;
 - `off` explicitly selects the sanitized host compatibility boundary.
 
-The sanitized compatibility boundary still strips ambient backend secrets. Explicitly configured MCP/plugin environment values continue to work in compatibility mode so existing configured extension credentials are not silently broken.
+The sanitized compatibility boundary strips ambient backend secrets. Explicitly configured MCP/plugin environment values continue to work in compatibility mode so existing configured extension credentials are not silently broken.
 
-When native Linux extension confinement is active, the child receives a read-only rootfs, private namespaces/session, private tmp/home, no network, read-only extension/working-directory mounts, and a cleared environment. Credential-sensitive explicit environment entries are rejected by default. A deployment that knowingly requires a legacy extension credential may opt in with:
+When native Linux extension confinement is active, the child receives a read-only rootfs, private namespaces/session, private tmp/home, no network, read-only extension/working-directory mounts, and a cleared environment.
+
+When native Windows extension confinement is active, the child receives:
+
+- a unique ephemeral AppContainer profile;
+- zero network capabilities;
+- creation-time Job Object membership;
+- explicit inherited stdio handles only;
+- read-only staged command bundle/working-directory roots rather than host ACL widening;
+- runtime-owned writable home/tmp;
+- a minimal non-ambient Windows environment;
+- argument remapping only for absolute paths beneath staged roots; unrelated absolute host arguments fail closed;
+- Job teardown on root completion, context cancellation, and forced plugin shutdown;
+- retryable AppContainer profile cleanup.
+
+Credential-sensitive explicit environment entries are rejected by default under native confinement. A deployment that knowingly requires a legacy extension credential may opt in with:
 
 ```text
 OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true
@@ -188,10 +271,10 @@ That override should be treated as transitional. Service-specific credential bro
 ## Platform status
 
 - **Linux:** first-party Bubblewrap code/terminal runtime is available; persistent extension confinement is available when a sandbox rootfs is configured. Resource quotas and destination-enforced egress remain incomplete.
-- **Windows:** native confinement phase pending; `OMNILLM_EXTENSION_SANDBOX_MODE=required` fails closed while `auto` retains the sanitized extension boundary.
-- **macOS:** native confinement phase pending; `OMNILLM_EXTENSION_SANDBOX_MODE=required` fails closed while `auto` retains the sanitized extension boundary.
-- **Server/Kubernetes:** dedicated worker/deployment phase pending; arbitrary tenant execution must not be added to the primary API container as a shortcut.
+- **Windows:** native AppContainer/Job code/terminal runtime and persistent extension confinement are implemented and natively adversarial-tested. The runtime remains no-network, does not advertise memory/CPU/PID/disk quotas, and fails closed for Python/JavaScript shortcuts until a confined interpreter layout is validated. Explicit execution-ID cancellation addressability remains issue #151.
+- **macOS:** native confinement Phase 13 is not started; `required` fails closed while `auto` retains the sanitized extension boundary.
+- **Server/Kubernetes:** dedicated worker/deployment phase remains pending; arbitrary tenant execution must not be added to the primary API container as a shortcut.
 
 ## Validation
 
-Sandbox changes use the repository's standard backend/frontend/Playwright gates as applicable, plus Security Scan and container/deployment validation for security-sensitive runtime work. Platform confinement is not considered complete solely because code cross-compiles; native isolation tests are required for each supported OS.
+Sandbox changes use the repository's standard backend/frontend/Playwright gates as applicable, plus Security Scan and container/deployment validation for security-sensitive runtime work. Windows confinement additionally runs native `windows-latest` sandbox/adversarial, plugin-lifecycle, and desktop compatibility jobs. Platform confinement is never considered complete solely because code cross-compiles or capability flags are set; native behavior evidence is required for each supported OS.
