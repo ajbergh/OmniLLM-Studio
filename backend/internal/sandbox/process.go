@@ -55,7 +55,7 @@ func wrapExecCommand(cmd *exec.Cmd) CommandProcess {
 	return &execCommandProcess{cmd: cmd}
 }
 
-func (p *execCommandProcess) StdinPipe() (io.WriteCloser, error)  { return p.cmd.StdinPipe() }
+func (p *execCommandProcess) StdinPipe() (io.WriteCloser, error) { return p.cmd.StdinPipe() }
 func (p *execCommandProcess) StdoutPipe() (io.ReadCloser, error) { return p.cmd.StdoutPipe() }
 func (p *execCommandProcess) StderrPipe() (io.ReadCloser, error) { return p.cmd.StderrPipe() }
 func (p *execCommandProcess) Start() error                      { return p.cmd.Start() }
