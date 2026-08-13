@@ -363,3 +363,13 @@ func (s *UserScopedRemoteService) GetPullRequestMergeEligibility(ctx context.Con
 	}
 	return scoped.GetPullRequestMergeEligibility(ctx, remoteID, number)
 }
+
+// MergePullRequest delegates M3B through the same request-scoped credential used
+// for its fresh M2/M3A preflight and the one-shot merge request.
+func (s *UserScopedRemoteService) MergePullRequest(ctx context.Context, remoteID string, number int, expectedHead string) (*GitHubPullRequestMergeResult, error) {
+	scoped, err := s.scoped(ctx, remoteID)
+	if err != nil || scoped == nil {
+		return nil, err
+	}
+	return scoped.MergePullRequest(ctx, remoteID, number, expectedHead)
+}

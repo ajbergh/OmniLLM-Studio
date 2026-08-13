@@ -96,6 +96,7 @@ type githubPullRequestReadResponse struct {
 	Draft          bool   `json:"draft"`
 	State          string `json:"state"`
 	Merged         bool   `json:"merged"`
+	MergeCommitSHA string `json:"merge_commit_sha"`
 	Mergeable      *bool  `json:"mergeable"`
 	MergeableState string `json:"mergeable_state"`
 	UpdatedAt      string `json:"updated_at"`

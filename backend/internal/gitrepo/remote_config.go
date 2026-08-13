@@ -40,6 +40,9 @@ const (
 	// GitHubPullRequestReadyEnabledEnv independently enables advancing an exact
 	// reviewed draft pull request to ready-for-review state.
 	GitHubPullRequestReadyEnabledEnv = "OMNILLM_GITHUB_PULL_REQUEST_READY_ENABLED"
+	// GitHubPullRequestMergeEnabledEnv independently enables the guarded direct
+	// merge mutation. Read/create/reply/ready/push access does not imply merge.
+	GitHubPullRequestMergeEnabledEnv = "OMNILLM_GITHUB_PULL_REQUEST_MERGE_ENABLED"
 )
 
 var credentialEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
@@ -62,6 +65,8 @@ type RemoteConfig struct {
 	AllowPullRequestReply            bool   `json:"allow_pull_request_reply,omitempty"`
 	AllowPullRequestThreadResolution bool   `json:"allow_pull_request_thread_resolution,omitempty"`
 	AllowPullRequestReady            bool   `json:"allow_pull_request_ready,omitempty"`
+	AllowPullRequestMerge            bool   `json:"allow_pull_request_merge,omitempty"`
+	PullRequestMergeMethod           string `json:"pull_request_merge_method,omitempty"`
 	AllowDefaultBranchPush           bool   `json:"allow_default_branch_push,omitempty"`
 	AllowClone                       bool   `json:"allow_clone,omitempty"`
 }
@@ -80,6 +85,8 @@ type RemoteSummary struct {
 	PullRequestReplyAllowed            bool   `json:"pull_request_reply_allowed"`
 	PullRequestThreadResolutionAllowed bool   `json:"pull_request_thread_resolution_allowed"`
 	PullRequestReadyAllowed            bool   `json:"pull_request_ready_allowed"`
+	PullRequestMergeAllowed            bool   `json:"pull_request_merge_allowed"`
+	PullRequestMergeMethod             string `json:"pull_request_merge_method,omitempty"`
 	DefaultBranchPushAllowed           bool   `json:"default_branch_push_allowed"`
 	CloneAllowed                       bool   `json:"clone_allowed"`
 }
@@ -114,6 +121,7 @@ func normalizeRemoteConfig(candidate RemoteConfig) (RemoteConfig, bool) {
 	candidate.URL = strings.TrimSpace(candidate.URL)
 	candidate.Username = strings.TrimSpace(candidate.Username)
 	candidate.TokenEnv = strings.TrimSpace(candidate.TokenEnv)
+	candidate.PullRequestMergeMethod = strings.ToLower(strings.TrimSpace(candidate.PullRequestMergeMethod))
 	if !ValidRepositoryID(candidate.Repository) || candidate.URL == "" {
 		return RemoteConfig{}, false
 	}
@@ -134,6 +142,13 @@ func normalizeRemoteConfig(candidate RemoteConfig) (RemoteConfig, bool) {
 		return RemoteConfig{}, false
 	}
 	if candidate.AllowDefaultBranchPush && !candidate.AllowPush {
+		return RemoteConfig{}, false
+	}
+	if candidate.AllowPullRequestMerge {
+		if !candidate.AllowPullRequestRead || !validGitHubMergeMethod(candidate.PullRequestMergeMethod) {
+			return RemoteConfig{}, false
+		}
+	} else if candidate.PullRequestMergeMethod != "" {
 		return RemoteConfig{}, false
 	}
 	return candidate, true
