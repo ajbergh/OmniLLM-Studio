@@ -9,22 +9,26 @@ Detailed design and operator documentation:
 - `docs/AGENT_SANDBOX_ARCHITECTURE.md`
 - `docs/AGENT_SANDBOX_THREAT_MODEL.md`
 - `docs/SANDBOX_RUNTIME.md`
+- `docs/AGENT_SANDBOX_PHASE12_WINDOWS_2026-08.md`
 
 This file is the durable implementation tracker. Update it whenever a phase changes status, a PR opens or merges, an enforcement limitation changes, or validation evidence changes.
 
 ## Current checkpoint — 2026-08-12
 
-The authoritative default branch is now `main` at **`87727495bfa51dc12b2e00a7b9317039e4fd0ca9`**, the squash merge of Phase 11 PR #125.
+At the latest Phase 12B integration checkpoint, the authoritative default branch was `main` at **`788df6e0944a1e2608203e79cd0d29e44eeb0875`**. The most recent merged sandbox milestone remains Phase 12A PR #127, squash-merged as **`c68ba013d3ad41ff2044646733d38ab981b3dc87`**; `main` has subsequently advanced with disjoint Image Studio and GitHub merge-policy work.
 
-Sandbox lineage now has three validated integration milestones:
+Sandbox lineage now has four validated integration milestones:
 
 - **PR #118**, squash-merged as `a216323e512fbecb1aa0c7c14df866f85ef76eb0`, recovered the cumulative sandbox implementation onto the then-current `main` and repaired integration defects found during manual audit.
 - **PR #119**, squash-merged as `dd91b246736451fafc498659fa582ff605e1bf16`, added persistent extension confinement policy for local plugins and stdio MCP without rewriting their streaming lifecycle.
 - **PR #125**, squash-merged as `87727495bfa51dc12b2e00a7b9317039e4fd0ca9`, added the desktop sandbox/workspace Settings experience, safe owner-scoped review APIs, native workspace selection, and direct-loopback path-grant hardening.
+- **PR #127**, squash-merged as `c68ba013d3ad41ff2044646733d38ab981b3dc87`, added Windows-native restricted-token/per-sandbox-SID primitives, kill-on-close Job Objects, ACL helpers, and behavior-level `windows-latest` confinement evidence.
 
-#118, #119, and #125 each passed the applicable repository validation set before merge, including backend format/vet/tests/race, frontend lint/unit/build, Windows compatibility coverage, full Chromium Playwright smoke, Helm checks, Security Scan, and Linux multi-architecture container validation.
+#118, #119, #125, and #127 each passed the applicable repository validation set before merge, including backend format/vet/tests/race, frontend lint/unit/build, Windows coverage, full Chromium Playwright smoke, Helm checks, Security Scan, and applicable Linux multi-architecture container validation.
 
-Historical stacked PRs #101, #104, #105, #107, #108, #109, #110, and #111 were closed as superseded after #118 merged. Stale Phase 11 PR **#121** was closed after its reviewed implementation was replayed cleanly onto current `main` as **PR #125**.
+Phase 12B is active in **PR #128** on branch `agent/sandbox-windows-runtime-12b-20260812`, clean-replayed directly from `main` `788df6e0` after the default branch advanced. Exact-final-head validation remains required before merge.
+
+Historical stacked PRs #101, #104, #105, #107, #108, #109, #110, and #111 were closed as superseded after #118 merged. Stale Phase 11 PR #121 was closed after its reviewed implementation was replayed cleanly as #125.
 
 ## Non-negotiable invariants
 
@@ -54,59 +58,76 @@ Status values: `NOT STARTED`, `IN PROGRESS`, `COMPLETE`, `BLOCKED`.
 | 4 | Route `code_execute` + `python_analysis` through Broker | P1 | **COMPLETE** | merged PR #118 | Legacy unauthenticated execution path retired; both tools use owner-bound Broker sessions; restricted Python has no host-Python fallback. |
 | 5 | Workspace registry + RO/RW-no-delete/RW grants + durable journal | P1 | **IN PROGRESS** | implementation merged in #118 | Opaque owner-scoped grants, canonical roots, state-bound atomic mutations, before/after hashes, bounded snapshots, and reverts are on `main`. Residual path-component TOCTOU/rename-swap assurance remains. |
 | 6 | Workspace list/search/read/write/apply-patch/delete/revert tools | P1 | **IN PROGRESS** | implementation merged in #118 | Governed tool family is on `main`, high-risk mutations default to Ask, host roots stay hidden, and mutations use the journaled filesystem layer. Completion tracks Phase 5 containment assurance. |
-| 7 | `terminal_exec` + cancellation + runtime resource controls | P1 | **IN PROGRESS** | implementation merged in #118 | Explicit argv execution, owner-bound sessions, read-only project mounts, TTL cleanup, wall/output limits, and cancellation are on `main`. Memory/CPU/PID/disk limits remain intentionally false until enforced. |
-| 8 | Network broker + destination approvals | P1 | **IN PROGRESS** | implementation merged in #118 | Owner-bound `sng_` grants, operator domain/port policy, grant consumption, and `network_allowlist` capability fail-close are on `main`. First-party destination-enforced egress remains unimplemented. |
+| 7 | `terminal_exec` + cancellation + runtime resource controls | P1 | **IN PROGRESS** | implementation merged in #118; Windows work #128 | Explicit argv execution, owner-bound sessions, read-only project mounts, TTL cleanup, wall/output limits, and cancellation are on `main` for Linux. Memory/CPU/PID/disk limits remain intentionally false. PR #128 adds a Windows-native execution plane without widening those quota claims. |
+| 8 | Network broker + destination approvals | P1 | **IN PROGRESS** | implementation merged in #118 | Owner-bound `sng_` grants, operator domain/port policy, grant consumption, and `network_allowlist` capability fail-close are on `main`. First-party destination-enforced egress remains unimplemented; Windows #128 is intentionally no-network only. |
 | 9 | Credential broker + raw-secret environment rejection | P1 | **IN PROGRESS** | implementation merged in #118 | Host-side opaque `sch_` handles, owner/TTL checks, and arbitrary-sandbox credential/auth-agent/proxy environment rejection are on `main`. Service-specific credential consumers remain. |
-| 10 | Local plugin + stdio MCP confinement policy migration | P1 | **COMPLETE** | merged PR #119 (`dd91b246`) | Shared process-construction seam now supports `auto|required|off`; Linux can use Bubblewrap/rootfs, required mode fails closed, and Windows/macOS preserve the sanitized compatibility boundary until native backends land. Full validation passed before merge. |
+| 10 | Local plugin + stdio MCP confinement policy migration | P1 | **COMPLETE** | merged PR #119 (`dd91b246`) | Shared process-construction seam supports `auto|required|off`; Linux can use Bubblewrap/rootfs, required mode fails closed, and Windows/macOS preserve the sanitized compatibility boundary until native extension backends land. |
 | 11 | Desktop workspace/sandbox UX + change review | P1 | **COMPLETE** | merged PR #125 (`87727495`) | Safe status/workspace/change APIs, Wails folder picker, opaque grant management, capability truth, review-only journal history, direct-loopback grant hardening, `/v1` client routing, and full CI/security/container validation are on `main`. |
-| 12 | Windows native confinement backend | P1 | NOT STARTED | next | Restricted identity/token, Job Object/process-tree confinement, ACL-scoped workspace, and Windows-native isolation evidence required. |
+| 12 | Windows native confinement backend | P1 | **IN PROGRESS** | #127 merged; PR #128 active | 12A native token/SID/Job/ACL primitives are on `main`. 12B adds first-party AppContainer `NewLocalRuntime`, creation-time Job membership, explicit handles, default-deny network, RO staging, and behavior-level native tests. `fa22da80` passed the complete dedicated Windows confinement suite; exact-final-head full repository validation is pending after canonical formatting/replay. Completion still requires 12C extension confinement plus 12D adversarial evidence. |
 | 13 | macOS native confinement backend | P1 | NOT STARTED | TBD | OS-enforced file/network/process confinement and macOS-native isolation evidence required. |
 | 14 | Durable sandbox-backed agent tasks | P2 | NOT STARTED | TBD | Persist sandbox/task association and support pause/resume/cancel/checkpoint/recovery/scheduling without weakening ownership. |
 | 15 | Server/Kubernetes sandbox workers | P2 | NOT STARTED | TBD | Separate worker identity/pods, quotas, hardened security context, network policy, and no arbitrary tenant execution in the API pod. |
 | 16 | Multi-agent isolated worktrees/workspaces | P2 | NOT STARTED | TBD | Independent writable workspaces/worktrees with reviewed promotion/reconciliation. |
-| 17 | Adversarial sandbox assurance suite | Continuous | **IN PROGRESS** | #99, #118, #119, #125 onward | Expand negative coverage with every phase; native confinement cannot be declared complete from cross-compilation alone. |
+| 17 | Adversarial sandbox assurance suite | Continuous | **IN PROGRESS** | #99, #118, #119, #125, #127, #128 onward | Expand negative coverage with every phase; native confinement cannot be declared complete from cross-compilation alone. |
 
 ## Phase 11 — merged implementation details
 
-PR **#125** was replayed from then-current `main`, validated on final head `1789fcd582be46be679ac07965002c7f4e960095`, and squash-merged as `87727495bfa51dc12b2e00a7b9317039e4fd0ca9`.
+PR #125 was replayed from then-current `main`, validated on final head `1789fcd582be46be679ac07965002c7f4e960095`, and squash-merged as `87727495bfa51dc12b2e00a7b9317039e4fd0ca9`.
 
-Implemented surfaces:
+Implemented surfaces include authenticated safe sandbox status/workspace/change APIs, safe DTOs, direct-loopback path-grant hardening, Wails folder selection, Agent Sandbox Settings UI, truthful capability badges, ephemeral physical-path handling, governed change review, and `/v1/sandbox/...` frontend routing.
 
-- authenticated `/v1/sandbox/status` reporting actual Broker/runtime capabilities and extension policy without returning rootfs paths, runtime URLs, tokens, or secrets;
-- owner-scoped workspace listing that returns opaque workspace ID, access mode, and timestamps only;
-- owner-scoped recent change review returning relative path, operation, before/after existence and hashes, revertability, and timestamp only;
-- an explicit safe change-history DTO that does **not** serialize internal user, conversation, agent-run, task, sandbox, or execution identifiers;
-- host-path grant creation gated by authenticated multi-user admin authorization (or local solo-mode ownership), `OMNILLM_SANDBOX_ALLOW_PATH_GRANTS=true`, and a direct loopback request;
-- forwarded client-address headers fail the path-grant loopback check closed so Chi `RealIP` rewriting cannot turn an untrusted forwarded address into grant authority;
-- grant revocation that removes the database authorization only and never deletes workspace files;
-- Wails-native folder selection for desktop builds;
-- desktop-only default enablement of the path-grant flow, using the existing protected per-launch loopback capability URL;
-- an Agent Sandbox panel embedded in the existing Tools diagnostics/settings surface;
-- individual capability badges so namespace isolation is not confused with destination allowlist enforcement;
-- ephemeral frontend handling of the selected physical path: after an opaque grant is created, the path is cleared from component state;
-- review-only display of reversible changes. No direct HTTP revert bypass is added; actual revert remains behind the governed workspace tool/approval path;
-- frontend requests pinned to `/v1/sandbox/...`, with a focused Vitest routing contract and the full Chromium suite covering the Settings→Tools flow.
+Server/web deployments do not gain a generic remote filesystem picker. Operators must explicitly enable host-path grants, and creation remains direct-loopback-only.
 
-Server/web deployments do **not** gain a generic remote filesystem picker. Operators must explicitly enable host-path grants, and creation remains direct-loopback-only.
+Final #125 validation evidence included backend format/vet/tests/race, frontend lint/unit/build, Windows plugin/desktop checks, full Chromium Playwright, Helm, Go and JavaScript/TypeScript CodeQL, dependency audit, and frontend/backend Linux amd64/arm64 container builds.
 
-Final #125 validation evidence:
+## Phase 12 — Windows native confinement
 
-- backend canonical formatting, vet, full tests, and race detector — **PASS**;
-- frontend lint, unit tests, and production build — **PASS**;
-- Windows plugin lifecycle and Windows desktop binding/contract checks — **PASS**;
-- full Chromium Playwright smoke suite — **PASS**;
-- Helm lint/render/topology checks — **PASS**;
-- Go CodeQL, JavaScript/TypeScript CodeQL, and dependency vulnerability audit — **PASS**;
-- frontend and backend Linux amd64/arm64 container builds — **PASS**.
+Detailed status lives in `docs/AGENT_SANDBOX_PHASE12_WINDOWS_2026-08.md`.
+
+### Phase 12A — merged #127
+
+Implemented and natively proved:
+
+- per-sandbox restricting SID generation;
+- restricted primary-token creation;
+- kill-on-close Job Objects;
+- SID-scoped DACL helpers;
+- cross-sandbox ACL denial under the same Windows account.
+
+Manual review caught and fixed a first implementation that used the globally reusable Restricted Code SID. Final hardened head `8b491a80de9543afcd259d5d5959794bb4a61eaa` passed the full applicable gate set and merged as `c68ba013`.
+
+### Phase 12B — active #128
+
+PR #128 proposes the first Windows `NewLocalRuntime` implementation using stable AppContainer/process-creation mechanisms:
+
+- one AppContainer profile/package SID per runtime session;
+- zero AppContainer network capabilities, so the runtime remains no-network;
+- Job Object membership and inherited-handle restriction at child creation time;
+- Job teardown on root completion/cancel/timeout;
+- minimal non-ambient environment;
+- bounded wall/output limits;
+- ephemeral writable sandbox workspace or bounded staged `read_only` host workspace;
+- protected staged-workspace DACL and no host workspace ACL mutation;
+- fail-closed writable arbitrary-process mounts;
+- post-open `GetFinalPathNameByHandle` containment verification before staged bytes are copied;
+- native child assertions for AppContainer token state, read-only workspace, unrelated-host-file read/write denial, ambient-secret absence, loopback denial, and host-source immutability;
+- native descendant teardown and active-`Destroy` synchronization coverage;
+- `cmd/sandboxd` compilation/testing in the dedicated Windows sandbox job.
+
+Head `fa22da808423b9cd47652d74b639f8eda2d052aa` passed the complete dedicated Windows confinement suite plus Windows plugin lifecycle, frontend/Helm, Security Scan, and applicable container builds. The full Quality Gate still failed because the new Windows source was not canonical `gofmt` output. Canonical formatting was then applied and the intended PR state was clean-replayed onto `main` `788df6e0`; that earlier native pass is diagnostic evidence only, and the exact final head must pass every gate before merge.
+
+Python and JavaScript language shortcuts remain fail-closed in this Windows slice until an AppContainer-readable interpreter/package design is natively validated. This is an explicit feature-completion gap, not a hidden host fallback.
 
 ## Current execution order
 
-1. Implement Phase 12 Windows native confinement on a fresh branch from the post-#125 `main`.
-2. Require Windows-native evidence for restricted identity/token, Job Object descendant confinement/teardown, and ACL-scoped filesystem access before Phase 12 can become complete.
-3. Implement and natively validate macOS confinement independently in Phase 13.
-4. Continue Phase 2/5/7/8/9 enforcement work rather than overclaiming completion: native runtime fixtures/packaging, resource quotas, destination-enforced egress, workspace TOCTOU assurance, and service-specific credential consumers remain open.
-5. Add durable tasks, dedicated server/Kubernetes workers, and multi-agent worktree isolation as separate P2 slices.
-6. Keep the adversarial assurance suite continuous across every phase.
+1. Finish and natively validate Phase 12B PR #128 on its exact final head; merge only after full Quality, Security, Windows, Chromium/race, Helm, and applicable container checks pass.
+2. Start Phase 12C from post-#128 `main`: confine persistent stdio MCP/plugin processes on Windows without a pre-confinement execution window or streaming regression.
+3. Expand Phase 12D adversarial Windows evidence: descendant teardown, cross-sandbox authority reuse, reparse/hard-link/rename escape, network bypass, secret inheritance, and cancellation.
+4. Mark Phase 12 complete only after first-party runtime and persistent extension surfaces both have native Windows evidence.
+5. Implement and natively validate macOS confinement independently in Phase 13.
+6. Continue Phase 2/5/7/8/9 enforcement work: runtime packaging, quotas, destination-enforced egress, workspace TOCTOU assurance, and service-specific credential consumers remain open.
+7. Add durable tasks, dedicated server/Kubernetes workers, and multi-agent worktree isolation as separate P2 slices.
+8. Keep the adversarial assurance suite continuous across every phase.
 
 ## Open enforcement gaps
 
@@ -117,12 +138,14 @@ Final #125 validation evidence:
 - Small-file mutations are atomic and journaled with before/after hashes.
 - Patch/delete/revert flows are stale-state bound.
 - `read_write_no_delete` is narrowed to read-only for arbitrary POSIX shell access rather than approximated unsafely.
-- `terminal_exec` currently requests read-only project mounts so source writes remain in the journaled workspace-tool path.
-- **Still open:** a residual path-component TOCTOU class exists if an independently writable parent is swapped between validation and mutation. Phase 5/17 remain incomplete until this is natively addressed/tested.
+- `terminal_exec` requests read-only project mounts so source writes remain in the journaled workspace-tool path.
+- Windows #128 stages read-only workspace input into AppContainer-owned storage rather than widening ACLs on the original host workspace; writable arbitrary-process mounts remain fail-closed.
+- Windows #128 also binds every opened staging source handle back to the canonical source root with `GetFinalPathNameByHandle` before copying, closing the specific checked-path/reparse-or-rename staging escape identified during review.
+- **Still open:** the broader Phase 5 workspace-registry/path-component TOCTOU class outside the 12B staged-copy flow remains when independently writable namespace components can change between validation and use. Phase 5/17 remain incomplete until those paths are natively addressed/tested.
 
 ### Runtime resources
 
-Currently represented as enforceable by the first-party Linux runtime:
+Currently represented as enforceable by the merged first-party Linux runtime:
 
 - OS/process namespace isolation;
 - filesystem isolation through read-only rootfs plus explicit trusted mounts;
@@ -131,7 +154,9 @@ Currently represented as enforceable by the first-party Linux runtime:
 - session TTL cleanup;
 - wall-time and stdout/stderr limits.
 
-Still intentionally **not advertised** until implemented and validated:
+PR #128 proposes equivalent Windows claims only where native AppContainer/Job behavior is tested: OS/filesystem/network/process-tree isolation plus wall/output/cancellation. It does not advertise resource quotas.
+
+Still intentionally not advertised until implemented and validated:
 
 - memory quota;
 - CPU quota;
@@ -143,8 +168,9 @@ Still intentionally **not advertised** until implemented and validated:
 - Default is no network.
 - Network authorization requires operator destination policy plus an owner-bound high-risk grant.
 - IP literals and localhost are rejected from the grant surface.
-- A runtime must separately advertise destination-allowlist enforcement; namespace isolation alone is not equivalent.
-- **Still open:** the first-party Linux runtime does not yet enforce destination-scoped egress and therefore remains no-network even when a destination grant exists.
+- A runtime must separately advertise destination-allowlist enforcement; isolation alone is not equivalent to allowlisting.
+- The first-party Linux runtime does not yet enforce destination-scoped egress and remains no-network even when a destination grant exists.
+- Windows #128 is likewise intentionally no-network; destination allowlisting remains false/unimplemented.
 
 ### Credentials
 
@@ -160,10 +186,12 @@ Phase 10 established the policy boundary:
 - `OMNILLM_EXTENSION_SANDBOX_MODE=auto|required|off`;
 - Linux `auto` uses Bubblewrap only when a sandbox rootfs is configured;
 - `required` fails closed when native confinement is unavailable;
-- Windows/macOS `auto` retain the sanitized host compatibility boundary until Phases 12/13;
+- Windows/macOS `auto` retain the sanitized host compatibility boundary until their native extension backends land;
 - ambient backend secrets remain stripped in compatibility mode;
 - native Linux extension confinement clears the environment and rejects credential-sensitive explicit environment by default;
 - `OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true` is a narrow transitional operator override, not the desired long-term credential path.
+
+Phase 12B does not change this Windows extension behavior. That migration is Phase 12C.
 
 ## Security acceptance categories
 
@@ -199,7 +227,7 @@ cd ..
 npx playwright test --project=chromium
 ```
 
-Repository CI additionally covers Windows plugin lifecycle behavior, Windows desktop binding contracts, Helm/deployment validation, Security Scan/CodeQL/dependency audit, and applicable Linux amd64/arm64 container builds.
+Repository CI additionally covers Windows plugin lifecycle, Windows desktop bindings, dedicated Windows sandbox confinement behavior, Helm/deployment validation, Security Scan/CodeQL/dependency audit, and applicable Linux amd64/arm64 container builds.
 
 A phase is `COMPLETE` only when its stated enforcement properties are implemented, validated, and—when intended for the default branch—actually merged to `main`. Partial, feature-gated, compatibility, platform-limited, or audit-known behavior remains `IN PROGRESS` or `BLOCKED`.
 
@@ -208,4 +236,6 @@ A phase is `COMPLETE` only when its stated enforcement properties are implemente
 - **2026-08-12 — #118:** recovered the cumulative sandbox stack onto current `main`, repaired runtime/Broker/tool integration defects, passed the full gate set, and merged as `a216323e`.
 - **2026-08-12 — #119:** added persistent extension confinement policy, passed the full gate set, and merged as `dd91b246`.
 - **2026-08-12 — #121:** closed without merge as stale after `main` advanced.
-- **2026-08-12 — #125:** replayed Phase 11 from `054a235a`; manual audit fixed safe change-history serialization and forwarded-address loopback spoofing. The first Playwright run then exposed a missing `/v1` frontend route prefix; the client was corrected, a focused unit contract added, and the final head passed Quality Gate, Security Scan, Helm, Windows compatibility checks, full Chromium smoke, and both multi-architecture container builds before merge as `87727495`.
+- **2026-08-12 — #125:** replayed Phase 11 from current `main`; manual audit fixed safe change-history serialization and forwarded-address loopback spoofing. Playwright then exposed a missing `/v1` frontend route prefix; it was fixed and final validation passed before merge as `87727495`.
+- **2026-08-12 — #127:** added native Windows SID/token/Job/ACL primitives. Manual audit replaced globally reusable Restricted Code SID authority with per-sandbox SIDs; hardened native/full gates passed and #127 merged as `c68ba013`.
+- **2026-08-12 — #128:** opened first-party Windows AppContainer runtime. Head `fa22da80` passed the complete dedicated Windows confinement suite, plugin lifecycle, frontend/Helm, Security, and containers; Quality failed only on canonical formatting. The Windows files were then canonicalized and the intended nine-file PR state was clean-replayed from `main` `788df6e0`; exact-final-head validation remains pending.
