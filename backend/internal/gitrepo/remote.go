@@ -61,6 +61,7 @@ type RemoteService struct {
 	githubPullRequestReplyEnabled            bool
 	githubPullRequestThreadResolutionEnabled bool
 	githubPullRequestReadyEnabled            bool
+	githubPullRequestMergeEnabled            bool
 	cloneEnabled                             bool
 	cloneMaxBytes                            int64
 	cloneMaxEntries                          int64
@@ -91,6 +92,7 @@ func NewRemoteServiceFromEnvironment(local *Service) *RemoteService {
 	service.githubPullRequestReplyEnabled = boolEnvironment(GitHubPullRequestReplyEnabledEnv)
 	service.githubPullRequestThreadResolutionEnabled = boolEnvironment(GitHubPullRequestThreadResolutionEnabledEnv)
 	service.githubPullRequestReadyEnabled = boolEnvironment(GitHubPullRequestReadyEnabledEnv)
+	service.githubPullRequestMergeEnabled = boolEnvironment(GitHubPullRequestMergeEnabledEnv)
 	if maxBytes, maxEntries, ok := cloneLimitsFromEnvironment(); ok {
 		service.cloneMaxBytes = maxBytes
 		service.cloneMaxEntries = maxEntries
@@ -157,6 +159,12 @@ func (s *RemoteService) GitHubPullRequestReadyEnabled() bool {
 	return s != nil && s.githubPullRequestReadyEnabled
 }
 
+// GitHubPullRequestMergeEnabled reports the independent process-wide gate for
+// guarded direct pull request merge.
+func (s *RemoteService) GitHubPullRequestMergeEnabled() bool {
+	return s != nil && s.githubPullRequestMergeEnabled
+}
+
 // PushMutationEnabled reports whether the process has enabled all global gates
 // required for a remote push mutation. Per-remote policy is checked by Push.
 func (s *RemoteService) PushMutationEnabled() bool {
@@ -205,6 +213,13 @@ func (s *RemoteService) GitHubPullRequestReadyMutationEnabled() bool {
 	return s != nil && s.Enabled() && s.GitHubPullRequestReadyEnabled()
 }
 
+// GitHubPullRequestMergeMutationEnabled reports whether the process permits the
+// guarded direct-merge mutation. M3B deliberately also requires the independent
+// PR-read gate because every merge must run a fresh M3A read-only preflight.
+func (s *RemoteService) GitHubPullRequestMergeMutationEnabled() bool {
+	return s != nil && s.GitHubPullRequestReadAccessEnabled() && s.GitHubPullRequestMergeEnabled()
+}
+
 // CloneMutationEnabled reports whether all process-wide clone prerequisites are
 // present. Per-remote allow_clone and destination state are checked by Clone.
 func (s *RemoteService) CloneMutationEnabled() bool {
@@ -235,6 +250,8 @@ func (s *RemoteService) Remotes(ctx context.Context) []RemoteSummary {
 			PullRequestReplyAllowed:            s.GitHubPullRequestReplyMutationEnabled() && remoteSupportsGitHubPullRequestReply(remote),
 			PullRequestThreadResolutionAllowed: s.GitHubPullRequestThreadResolutionMutationEnabled() && remoteSupportsGitHubPullRequestThreadResolution(remote),
 			PullRequestReadyAllowed:            s.GitHubPullRequestReadyMutationEnabled() && remoteSupportsGitHubPullRequestReady(remote),
+			PullRequestMergeAllowed:            s.GitHubPullRequestMergeMutationEnabled() && remoteSupportsGitHubPullRequestMerge(remote),
+			PullRequestMergeMethod:             remote.PullRequestMergeMethod,
 			DefaultBranchPushAllowed:           s.PushMutationEnabled() && remote.AllowPush && remote.AllowDefaultBranchPush,
 			CloneAllowed:                       s.CloneMutationEnabled() && remote.AllowClone,
 		})

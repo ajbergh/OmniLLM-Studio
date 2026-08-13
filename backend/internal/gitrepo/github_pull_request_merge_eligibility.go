@@ -33,6 +33,7 @@ type GitHubPullRequestMergeEligibilityResult struct {
 	PullRequest                  int                                   `json:"pull_request"`
 	Head                         string                                `json:"head"`
 	BaseBranch                   string                                `json:"base_branch"`
+	AllowedMergeMethods          []string                              `json:"allowed_merge_methods"`
 	PolicyEvidenceComplete       bool                                  `json:"policy_evidence_complete"`
 	DefaultBaseVerified          bool                                  `json:"default_base_verified"`
 	PullRequestStateEligible     bool                                  `json:"pull_request_state_eligible"`
@@ -189,7 +190,9 @@ func (s *RemoteService) GetPullRequestMergeEligibility(ctx context.Context, remo
 
 	result := &GitHubPullRequestMergeEligibilityResult{
 		Remote: strings.TrimSpace(remoteID), Repository: remote.Repository, PullRequest: number,
-		Head: policy.Head, BaseBranch: policy.BaseBranch, PolicyEvidenceComplete: policy.EvidenceComplete,
+		Head: policy.Head, BaseBranch: policy.BaseBranch,
+		AllowedMergeMethods:     sortedUniqueStrings(policy.Requirements.AllowedMergeMethods),
+		PolicyEvidenceComplete:  policy.EvidenceComplete,
 		StrictBaseCurrent:       !policy.Requirements.StrictStatusChecks,
 		RequiredChecksSatisfied: len(policy.Requirements.RequiredStatusChecks) == 0,
 		ReviewsSatisfied:        !gitHubMergeReviewsRequired(&policy.Requirements),

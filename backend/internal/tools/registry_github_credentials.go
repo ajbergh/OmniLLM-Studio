@@ -150,6 +150,8 @@ func (r *Registry) rebindRemoteGitHubServices(service *gitrepo.UserScopedRemoteS
 			typed.service = service
 		case *githubPullRequestMergeEligibilityTool:
 			typed.service = service
+		case *githubPullRequestMergeTool:
+			typed.service = service
 		}
 	}
 }
