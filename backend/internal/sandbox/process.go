@@ -58,8 +58,8 @@ func wrapExecCommand(cmd *exec.Cmd) CommandProcess {
 func (p *execCommandProcess) StdinPipe() (io.WriteCloser, error) { return p.cmd.StdinPipe() }
 func (p *execCommandProcess) StdoutPipe() (io.ReadCloser, error) { return p.cmd.StdoutPipe() }
 func (p *execCommandProcess) StderrPipe() (io.ReadCloser, error) { return p.cmd.StderrPipe() }
-func (p *execCommandProcess) Start() error                      { return p.cmd.Start() }
-func (p *execCommandProcess) Wait() error                       { return p.cmd.Wait() }
+func (p *execCommandProcess) Start() error                       { return p.cmd.Start() }
+func (p *execCommandProcess) Wait() error                        { return p.cmd.Wait() }
 func (p *execCommandProcess) Kill() error {
 	if p.cmd.Process == nil {
 		return fmt.Errorf("process has not started")
