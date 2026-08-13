@@ -2,7 +2,7 @@
 
 This document records the implementation program that brought OmniLLM-Studio's Chat Studio tool, agent, and extensibility experience toward functional parity with mature tool-calling chat runtimes while preserving OmniLLM-Studio's local-first architecture and creative-studio differentiation.
 
-> **Status:** Phases 3–8 are implemented on `main`. The phase sections below are retained as an implementation record and now include current-state anchors. New work should be driven by verified runtime gaps rather than by the historical phase numbering.
+> **Status:** Historical Phases 3–8 are implemented on `main`. This file is retained as the program record and was refreshed on 2026-08-13 so its current-state anchors match the live runtime. New work should be driven by verified gaps, not by assuming an old phase description is still current.
 
 ## Invariants
 
@@ -12,6 +12,8 @@ This document records the implementation program that brought OmniLLM-Studio's C
 4. Deterministic routing may select a capability, but it must use the same policy and execution boundary as model-selected tools.
 5. Capability availability, policy, provider support, credentials, and runtime health are separate states.
 6. Large tool catalogs should be discovered progressively instead of injecting every schema into every turn.
+7. Authentication is not authorization: a connected GitHub identity, plugin, MCP server, or external credential source never widens operator/tool policy by itself.
+8. Arbitrary model-directed process execution must use the sandbox/confinement architecture rather than running in the primary backend process.
 
 ## Completed phases
 
@@ -19,288 +21,293 @@ This document records the implementation program that brought OmniLLM-Studio's C
 
 Implemented outcomes:
 
-- Deterministic Chat Studio shortcuts use the same effective capability policy as model-selected tools.
-- `allow` may execute a deterministic preflight; `ask` intentionally falls through to the approval-aware tool loop; `deny` fails closed.
-- Denied, disabled, or unknown capabilities are suppressed from model-facing discovery.
-- Request-scoped tool selection continues to narrow deterministic shortcuts.
+- Chat Studio and Agent Mode resolve tool availability through the same registry/executor policy boundary.
+- Settings `Off`, `Ask`, and `On` behavior is enforced at execution time, not only in the UI.
+- Deterministic routing uses the same tool policy as model-selected calls.
+- Tool result/error events are surfaced instead of silently disappearing.
+- Capability, policy, credentials, and runtime availability remain distinct concepts.
 
-Primary implementation anchors:
+Current anchors include:
 
-- `backend/internal/api/chat_capability_policy.go`
-- `backend/internal/api/chat_tool_runtime.go`
-- `backend/internal/api/chat_turn_tools.go`
+- `backend/internal/tools/registry.go`
 - `backend/internal/tools/executor.go`
-
-### Phase 4 — Per-turn controls and tri-state UX — COMPLETE
-
-Implemented outcomes:
-
-- Chat turns support `tool_mode`, `allowed_tools`, and `required_tool` restrictions.
-- Per-turn restrictions are intersected with the effective tool policy and are also enforced at execution time.
-- Chat Studio includes a composer tool picker.
-- Settings exposes explicit Allow / Ask / Off policy controls rather than a binary tool toggle.
-
-Primary implementation anchors:
-
-- `backend/internal/api/chat_turn_tools.go`
 - `backend/internal/api/message_handler.go`
-- `frontend/src/components/ToolPicker.tsx`
-- `frontend/src/components/ChatView.tsx`
-- `frontend/src/components/SettingsPanel.tsx`
-- `frontend/src/types.ts`
+- Chat Studio tool Settings and scoped authorization UI.
 
-### Phase 5 — Reusable agents and Skills — COMPLETE
+### Phase 4 — Tool catalog and progressive discovery — COMPLETE
 
 Implemented outcomes:
 
-- Assistant Profiles persist reusable provider/model, system instructions, permitted tools, workspace scope, and attached Skills.
-- Profiles are available through backend APIs and frontend management UI and support portability workflows.
-- Skills are reusable Markdown instruction packages.
-- `skill_list` exposes compact metadata only; `skill_read` loads one selected Skill body on demand, preserving progressive disclosure instead of injecting all Skill text into every prompt.
+- Tool metadata is normalized through the registry.
+- Large catalogs can be discovered progressively instead of forcing every schema into every model turn.
+- Built-in, plugin, MCP, Git/GitHub, browser, sandbox, sports, and creative capability families use the same discoverability/policy concepts.
+- Tool descriptions remain model-facing contracts rather than permission grants.
 
-Primary implementation anchors:
-
-- `backend/internal/models/assistant_profile.go`
-- `backend/internal/repository/assistant_profile.go`
-- `backend/internal/repository/assistant_profile_portability.go`
-- `backend/internal/api/assistant_profile_handler.go`
-- `backend/internal/tools/skill_tools.go`
-- `frontend/src/assistantProfilesApi.ts`
-- `frontend/src/components/AssistantProfilesPanel.tsx`
-- `docs/ASSISTANT_PROFILE_PORTABILITY_2026-08.md`
-
-### Phase 6 — OpenAPI and MCP integration parity — COMPLETE
+### Phase 5 — Agent loop and approval lifecycle — COMPLETE
 
 Implemented outcomes:
 
-- OpenAPI 3.x servers can be persisted and surfaced as governed OmniLLM tools alongside MCP capabilities.
-- OpenAPI operations are converted into bounded tool definitions with per-tool policy, ownership checks, safe target construction, response limits, and readiness/runtime management.
-- The frontend includes OpenAPI server configuration and inspection UI.
-- MCP remains integrated through the same registry/executor policy boundary, including the hardened remote authentication and ownership behavior documented elsewhere in the repository.
+- Multi-step agent execution shares the normal tool executor.
+- Side-effecting/high-risk tools can stop for approval and resume after a decision.
+- Tool lifecycle/result/error events remain visible to the conversation rather than being swallowed.
+- Cancellation and bounded execution are part of the runtime contract.
 
-Primary implementation anchors:
+Durable long-running task scheduling/recovery remains a separate sandbox/agent roadmap item; completion of this historical phase did not imply a persistent Codex/Cowork-style task scheduler.
 
-- `backend/internal/openapi/manager.go`
-- `backend/internal/models/openapi_server.go`
-- `backend/internal/repository/openapi_server.go`
-- `backend/internal/api/openapi_handler.go`
-- `frontend/src/openApiServersApi.ts`
-- `frontend/src/components/OpenAPIServersPanel.tsx`
-- `docs/MCP_HOW_TO_FAQ.md`
-
-### Phase 7 — Sandboxed code execution and programmatic orchestration — COMPLETE
+### Phase 6 — Extensibility and MCP/plugin governance — COMPLETE
 
 Implemented outcomes:
 
-- `code_execute` exists only when an external sandbox service is configured; arbitrary code is never run by the OmniLLM backend process.
-- Code execution is bounded by language, input-size, result-size, session, and timeout contracts.
-- `tool_batch` provides governed programmatic orchestration over authorized registered tools, with bounded child calls and no recursive batch execution.
-- Child invocations re-enter the shared Executor so policy, approval, timeout, idempotency, audit, and request restrictions remain authoritative.
+- Local plugins and stdio MCP servers are first-class extension surfaces.
+- Extension tools are still filtered through the normal registry/executor policy.
+- Ambient backend secret inheritance was removed from local extension subprocesses.
+- `OMNILLM_EXTENSION_SANDBOX_MODE=auto|required|off` defines the confinement policy boundary.
+- Linux can use Bubblewrap/rootfs confinement; Windows now uses native AppContainer/Job confinement when available; macOS native confinement remains Phase 13 work.
 
-Primary implementation anchors:
+Current sandbox/runtime details live in:
 
-- `backend/internal/codesandbox/`
+- `docs/SANDBOX_RUNTIME.md`
+- `docs/AGENT_SANDBOX_ARCHITECTURE.md`
+- `docs/AGENT_SANDBOX_ROADMAP_2026-08.md`
+
+### Phase 7 — Governed local compute and developer workflows — COMPLETE as a tool-surface milestone
+
+The original Phase 7 goal was to add code execution, terminal/file/Git workflows, and safer local developer tooling without giving the model unrestricted host access.
+
+#### Current code-execution architecture
+
+`code_execute` no longer depends on the retired unauthenticated one-shot `/v1/execute` design.
+
+Current flow:
+
+```text
+Chat / Agent tool call
+        |
+        v
+Tool Executor policy / approval
+        |
+        v
+sandbox.Broker
+owner-bound sbx_ session + capability checks
+        |
+        v
+protocol-v2 Runtime
+local Linux/Windows or authenticated HTTP worker
+        |
+        v
+OS-confined process
+```
+
+`backend/internal/tools/code_sandbox_tool.go` creates/reuses application-issued `sbx_...` sessions through `backend/internal/sandbox.Broker`. Ownership is revalidated on reuse; network is off by default; runtime capability requirements fail closed.
+
+`python_analysis` keeps its restricted Python policy as defense in depth but also executes through the Broker/runtime path. It does not silently fall back to unrestricted host Python.
+
+Runtime configuration is documented in `docs/SANDBOX_RUNTIME.md`. The primary protocol-v2 HTTP settings are:
+
+```text
+OMNILLM_SANDBOX_URL=<authenticated-protocol-v2-worker>
+OMNILLM_SANDBOX_TOKEN=<service-token>
+```
+
+`OMNILLM_CODE_SANDBOX_URL` is retained only as a URL compatibility alias for the protocol-v2 worker; it is not the old `/v1/execute` contract.
+
+Linux and Windows have first-party local confinement implementations. Windows native confinement Phase 12 is complete. macOS native confinement is not yet implemented.
+
+#### Workspace and terminal controls
+
+- Workspaces are identified by opaque application-owned IDs; model tool arguments do not receive physical host roots.
+- Workspace mutations use governed list/search/read/write/apply-patch/delete/revert tools plus state-bound journaling.
+- `terminal_exec` uses explicit argv execution and the sandbox Broker/runtime boundary.
+- Current terminal project access is deliberately read-only; source mutation remains in journaled workspace tools.
+- Resource/capability claims are fail-closed and reflect controls actually enforced by the selected runtime.
+
+#### Guarded Git and GitHub workflow
+
+The local/host-side Git workflow now extends well beyond the original Phase 7 baseline:
+
+```text
+workspace edit/build/test
+        |
+        v
+git_status / git_diff
+        |
+        v
+reviewed local-state digest
+        |
+        v
+git_stage / git_commit
+        |
+        v
+git_remote_status / git_fetch
+        |
+        v
+git_push / git_publish_branch
+        |
+        v
+GitHub PR / review / merge tools
+```
+
+Guarded Git mutations remain bound to reviewed repository/worktree/head state. GitHub collaboration includes PR inspection, check/status inspection, feedback/review threads, draft PR creation, review replies, thread resolution, draft-to-ready transition, merge-policy/eligibility inspection, and guarded direct merge.
+
+`github_merge_pull_request` is **implemented**. It is a critical-risk mutation that accepts only configured `remote`, positive PR `number`, and exact 40-character `expected_head`. The server performs a fresh fail-closed eligibility preflight, requires the current default base and operator-configured allowed merge method, sends one exact-head merge request, does not delete the source branch, and does not automatically retry an ambiguous mutation outcome.
+
+Current anchors include:
+
+- `backend/internal/gitrepo/github_pull_request_merge.go`
+- `backend/internal/tools/github_pull_request_merge_tool.go`
+- `backend/internal/gitrepo/github_pull_request_merge_eligibility.go`
+- `backend/internal/tools/github_pull_request_merge_eligibility_tool.go`
+
+The old statement that “M3B guarded direct merge is the next gap” is no longer current.
+
+### Phase 8 — Reliability, observability, and user-facing trust — COMPLETE as the historical parity phase
+
+Implemented outcomes include:
+
+- bounded tool results and explicit error results;
+- lifecycle/progress events for tool and generation workflows;
+- approval-state visibility;
+- cancellation/timeout propagation through major tool paths;
+- safer handling of provider/tool failures rather than silent success;
+- expanded smoke/unit/integration coverage across Chat Studio tools and Settings behavior.
+
+The repository's current Quality Gate, Security Scan, native Windows confinement jobs, Playwright smoke suite, Helm checks, and applicable container builds provide the ongoing regression boundary. This does not mean every future capability is complete; it means the historical Phase 8 reliability foundation is on `main`.
+
+## Post-program current-state refresh — 2026-08-13
+
+### GitHub App identity and repository bindings
+
+OmniLLM-Studio now has a first-class user-scoped GitHub App connection and repository-binding architecture documented in `docs/GITHUB_APP_AUTH.md`.
+
+Important current semantics:
+
+- user GitHub credentials are credential sources only;
+- repository bindings are owner-scoped associations, not permission grants;
+- static operator remotes remain authoritative on ID collisions;
+- operator-owned binding capability policy is snapshotted at startup;
+- binding-backed Git/GitHub tool shells are registered only when startup operator policy plus existing process-wide gates can potentially authorize them;
+- actual invocation still revalidates owner binding/account identity, credentials, exact per-remote policy, reviewed Git state, approval, and global gates;
+- binding-derived policy cannot grant clone or default-branch push.
+
+This closes the earlier gap where a user could connect GitHub but binding-only repositories could not surface the appropriate governed tool families.
+
+### Guarded direct merge
+
+M1 merge requirements, M2 actor/policy evidence, M3A current-state eligibility, and M3B guarded merge are all implemented in code. Any documentation that still calls M3B future work should be treated as stale and updated against current `main`.
+
+The merge implementation deliberately remains stricter than ordinary collaboration mutations because it changes the configured default branch.
+
+### Sandbox maturity
+
+The sandbox program has advanced independently beyond the historical Phase 7 tool milestone:
+
+- protocol-v2 Broker sessions and ownership checks are on `main`;
+- Linux first-party Bubblewrap confinement is available;
+- Windows AppContainer/Job confinement and persistent extension confinement are implemented and natively adversarial-tested;
+- workspace grants/journaling/change review are implemented;
+- network destination authorization exists, but first-party destination-enforced egress is not yet implemented;
+- memory/CPU/PID/physical-disk quotas are not yet advertised;
+- macOS native confinement remains open;
+- packaged dedicated server/Kubernetes workers and durable sandbox-backed tasks remain open.
+
+## Verified remaining gaps
+
+The following are current gaps after refreshing this program against live `main`; they replace older “next phase” assumptions.
+
+### P0/P1 — sandbox/runtime completion work
+
+Tracked in `docs/AGENT_SANDBOX_ROADMAP_2026-08.md`:
+
+- macOS native confinement (Phase 13);
+- broader workspace path-component TOCTOU/rename-swap assurance outside staged-copy flows;
+- memory, CPU, PID/process-count, and physical-disk quotas;
+- first-party destination-enforced egress/allowlisting;
+- service-specific credential broker consumers;
+- `sandboxd` packaging and dedicated server/Kubernetes worker deployment;
+- durable sandbox-backed task scheduling/recovery;
+- multi-agent isolated worktrees/workspaces.
+
+Issue #151 separately tracks explicit execution-ID cancellation addressability for active synchronous sandbox executions. Context cancellation, timeout, session destruction, and process-tree teardown work; the explicit ID-addressed cancellation contract is a narrower lifecycle defect.
+
+### P1/P2 — developer collaboration breadth
+
+The repository now has guarded local Git, remote publication, extensive PR review workflows, and guarded merge. Remaining parity opportunities should be evaluated individually rather than treated as a missing generic “GitHub merge” phase. Candidate areas include:
+
+- richer issue/project/discussion lifecycle tools where they support real Chat Studio workflows;
+- explicit remote branch cleanup/deletion with separate high-risk gates if operator demand justifies it;
+- managed multi-worktree lifecycle tied to future multi-agent isolation rather than unrestricted raw Git worktree commands;
+- deeper CI/action log diagnostics surfaced through bounded, repository-scoped tools;
+- release/tag workflows only with similarly strict reviewed-state and operator-policy boundaries.
+
+### P2 — durable agent execution
+
+For Codex/Cowork-style parity, the major remaining difference is not basic tool calling; it is durable execution orchestration:
+
+- persisted task/sandbox association;
+- pause/resume/cancel/recovery after process or application restart;
+- queued scheduling/admission control;
+- durable checkpoints and artifacts;
+- isolated parallel agents/worktrees;
+- dedicated worker execution in server/Kubernetes modes.
+
+These belong to the sandbox/agent task roadmap rather than another expansion of the synchronous Chat tool catalog.
+
+### P2 — external-service breadth
+
+Plugin/MCP extensibility is in place, but built-in integration breadth can still grow where a first-party experience materially improves safety or UX. Any new service integration should preserve the same distinction between credential connection, operator authorization, scoped approval, and runtime/tool availability.
+
+## Current architecture anchors
+
+When reviewing or extending Chat Studio tools, start from these live areas rather than the historical implementation order:
+
+### Tool policy and execution
+
+- `backend/internal/tools/registry.go`
+- `backend/internal/tools/executor.go`
+- `backend/internal/api/message_handler.go`
+- tool Settings/scoped authorization frontend components
+
+### Sandbox/code/terminal/workspace
+
+- `backend/internal/sandbox/`
 - `backend/internal/tools/code_sandbox_tool.go`
-- `backend/internal/tools/tool_batch.go`
-- `backend/internal/api/chat_tool_runtime.go`
+- `backend/internal/tools/python_analysis_tool.go`
+- `backend/internal/tools/terminal_exec_tool.go`
+- workspace tool/journal implementation under `backend/internal/sandbox/` and `backend/internal/tools/`
+- `docs/SANDBOX_RUNTIME.md`
+- `docs/AGENT_SANDBOX_ROADMAP_2026-08.md`
 
-## Code sandbox runtime
+### Git/GitHub
 
-Arbitrary code execution is never performed by the OmniLLM backend process. Configure an external sandbox implementing `POST /v1/execute` with:
+- `backend/internal/gitrepo/`
+- `backend/internal/tools/git_*`
+- `backend/internal/tools/github_*`
+- `docs/GITHUB_APP_AUTH.md`
+- current GitHub merge policy/eligibility implementation and tests
 
-```bash
-OMNILLM_CODE_SANDBOX_URL=http://sandbox:8090
-```
+### Plugins/MCP/browser/creative tools
 
-When the variable is absent, `code_execute` is not registered. The sandbox is responsible for process/container isolation, filesystem lifecycle, and network policy; network access should be disabled by default.
+- plugin and MCP managers/runners under `backend/internal/`
+- browser/headless-browser tools and SSRF/session controls
+- image/music/video generation tool families and their provider-specific adapters
 
-`tool_batch` is a high-risk orchestration tool. It can execute at most eight child calls, never recurses, and every child call re-enters the shared Executor so policy, approvals, idempotency, audit, and request-scoped restrictions remain authoritative.
+## Validation expectations for new parity work
 
-### Phase 8 — Scoped permissions and deferred ToolSearch — COMPLETE
+Any future parity slice should be considered complete only when:
 
-Implemented outcomes:
+1. availability/registration is correct;
+2. Settings/scoped policy is enforced by the Executor;
+3. model-facing schema does not expose application-owned security inputs;
+4. side effects have an appropriate risk/approval class;
+5. errors are visible and bounded;
+6. cancellation/timeout semantics are defined;
+7. backend/frontend/API contracts are updated together when applicable;
+8. focused negative tests prove the permission boundary;
+9. the relevant repository Quality/Security/platform/container gates pass on the exact final head;
+10. durable docs are updated to describe what is actually implemented, not the intended future state.
 
-- Effective policy composes global → user → workspace → conversation → per-turn restrictions with monotonic tightening.
-- Scoped permission lookup failures fail closed.
-- Large catalogs use `tool_search` for compact request-scoped discovery and `tool_invoke` for deferred invocation rather than injecting every schema into each turn.
-- Assistant Profile allowlists, scoped policy, per-turn restrictions, planning, parallelization barriers, and execution share the same policy boundary.
-- Decision/audit context is persisted sufficiently for the runtime to explain and enforce scoped availability decisions.
+## Program conclusion
 
-Primary implementation anchors:
+The August 2026 parity program successfully moved OmniLLM-Studio from a growing collection of tool integrations to a governed capability runtime with shared policy, extensibility, sandboxed local execution, workspace/Git workflows, user-scoped GitHub integration, and guarded hosted collaboration through merge.
 
-- `backend/internal/models/tool_scope.go`
-- `backend/internal/repository/scoped_tool_permission.go`
-- `backend/internal/api/scoped_tool_permission_handler.go`
-- `backend/internal/tools/executor_scoped.go`
-- `backend/internal/tools/tool_search.go`
-- `frontend/src/scopedToolPermissionsApi.ts`
-- `frontend/src/components/ScopedToolPermissionsPanel.tsx`
-
-## Scoped policy and deferred discovery runtime
-
-The effective permission chain is global → user → workspace → conversation → per-turn restriction. Persisted scoped policies are monotonic (`allow < ask < deny`): a lower scope may tighten access but never widen an inherited Ask or Deny. Database lookup errors fail closed.
-
-Large catalogs use `tool_search` for compact request-scoped discovery and `tool_invoke` for generic invocation. Both honor the same scoped policy, Assistant Profile allowlist, and per-turn restrictions as directly advertised tools. Chat and Agent planning filter scoped-denied tools before model exposure, and parallel planning treats scoped Ask/Deny as sequential barriers.
-
-## Post-program extensions already implemented
-
-The original parity program did not include a full coding-agent Git/GitHub workflow. Subsequent work now provides a governed loop from local changes through hosted review, readiness, and fail-closed merge-policy evidence:
-
-- local Git inspection and reviewed local mutations;
-- guarded remote inspection, fetch, existing-branch push, and clone;
-- separately gated creation/publication of a new remote feature branch;
-- separately gated GitHub.com draft pull request creation bound to reviewed local and remote Git state;
-- bounded read-only pull-request metadata/listing and exact-head CI/check inspection;
-- a provider-result trust boundary that treats hosted/tool text as untrusted reference data rather than instruction authority;
-- bounded hosted review, inline-comment, timeline-comment, and review-request inspection;
-- bounded cursor-based review-thread state/location inspection through fixed application-owned GraphQL;
-- separately gated replies to reviewed top-level inline review comments;
-- separately gated resolve/unresolve of an exact reviewed review thread with PR-head, ownership, state, and viewer-capability revalidation;
-- separately gated transition of an exact reviewed draft PR to ready-for-review state with fresh head/default-base revalidation and fixed application-owned GraphQL;
-- bounded M1 merge-requirements inspection that binds normalized policy to the current PR head/base;
-- bounded M2 merge-policy evidence that corroborates classic REST/GraphQL policy, active ruleset bypass visibility, configured-actor repository role, and exact PR state while remaining strictly read-only;
-- bounded M3A current-state merge eligibility that composes fresh M2 evidence with exact-head checks, review, deployment, thread, signature, default-base, and mergeability evidence while remaining strictly read-only.
-
-Primary implementation/documentation anchors:
-
-- `docs/LOCAL_GIT_TOOLS.md`
-- `docs/REMOTE_GIT_TOOLS.md`
-- `docs/GITHUB_PULL_REQUEST_TOOLS.md`
-- `docs/GITHUB_PULL_REQUEST_READY_FOR_REVIEW.md`
-- `docs/GITHUB_PULL_REQUEST_MERGE_REQUIREMENTS.md`
-- `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`
-- `docs/TOOL_RESULT_TRUST_BOUNDARY.md`
-- `backend/internal/gitrepo/github_pull_request.go`
-- `backend/internal/gitrepo/github_pull_request_read.go`
-- `backend/internal/gitrepo/github_pull_request_feedback.go`
-- `backend/internal/gitrepo/github_pull_request_threads.go`
-- `backend/internal/gitrepo/github_pull_request_reply.go`
-- `backend/internal/gitrepo/github_pull_request_thread_resolution.go`
-- `backend/internal/gitrepo/github_pull_request_ready.go`
-- `backend/internal/gitrepo/github_pull_request_merge_requirements.go`
-- `backend/internal/gitrepo/github_pull_request_merge_policy_evidence.go`
-- `backend/internal/gitrepo/github_pull_request_merge_eligibility.go`
-- `backend/internal/tools/github_pull_request_merge_policy_evidence_tool.go`
-- `backend/internal/tools/github_pull_request_merge_eligibility_tool.go`
-
-## Verified next gaps
-
-The next program remains driven by concrete missing runtime capabilities rather than by historical phase numbering.
-
-### Completed — Guarded draft-to-ready transition
-
-`github_mark_pull_request_ready_for_review` is independently gated and accepts only configured remote ID, PR number, and exact reviewed head. Repository/API/token/node/base remain operator/application-derived; the service requires the PR to remain open, unmerged, draft, on the exact reviewed head, and targeted at the configured remote's advertised default branch before issuing a fixed GitHub ready-for-review mutation.
-
-Implementation anchors:
-
-- `backend/internal/gitrepo/github_pull_request_ready.go`
-- `backend/internal/tools/github_pull_request_ready_tool.go`
-- `docs/GITHUB_PULL_REQUEST_READY_FOR_REVIEW.md`
-
-### Completed — Phase M1 normalized merge requirements
-
-`github_get_pull_request_merge_requirements` is registered under the independent GitHub PR-read permission. The model supplies only configured remote ID and PR number; repository/API/token/head/base, active rules, classic protection, and repository merge-method settings are application/GitHub derived.
-
-Implemented outcomes include exact head/base binding, bounded active-rule inspection, classic branch-protection inspection, merge-method normalization, merge queue, required status checks, strict policy, review/code-owner/last-push/stale-review requirements, conversation resolution, deployments, linear history, signatures, lock state, unknown material-rule handling, and explicit fail-closed `merge_policy_complete`.
-
-M1 intentionally leaves policy incomplete where classic coverage or actor/ruleset bypass visibility cannot be proven.
-
-### Completed — Phase M2 merge policy evidence
-
-`github_get_pull_request_merge_policy_evidence` is also registered only under the GitHub PR-read gate. It adds bounded read-only evidence rather than mutation authority.
-
-Implemented outcomes:
-
-- starts from a fresh M1 result for the exact configured PR;
-- corroborates classic branch protection across REST and exact-ref GraphQL;
-- supplements required deployment environments and app-bound required checks;
-- distinguishes a positively confirmed unprotected branch from permission-obscured protection;
-- re-reads active branch rules and inspects at most 20 deduplicated ruleset details;
-- requires `bypass_actors` to be visibly present in every active ruleset detail before bypass evidence can be complete;
-- verifies the connected viewer's repository role and treats custom roles as unverified;
-- fails closed on source disagreement, hidden bypass data, permission-obscured classic protection, custom roles, unknown material policy, or PR head/base movement;
-- always reports `direct_merge_supported=false`.
-
-A real validation against OmniLLM-Studio showed why this distinction matters: active rules for `main` were visible and empty while classic protection returned a permission-obscured response. M2 correctly treats that combination as incomplete rather than guessing that the branch is unprotected.
-
-Implementation anchors:
-
-- `backend/internal/gitrepo/github_pull_request_merge_policy_evidence.go`
-- `backend/internal/gitrepo/github_pull_request_merge_policy_evidence_test.go`
-- `backend/internal/gitrepo/github_pull_request_merge_policy_visibility_test.go`
-- `backend/internal/tools/github_pull_request_merge_policy_evidence_tool.go`
-- `docs/GITHUB_PULL_REQUEST_MERGE_REQUIREMENTS.md`
-- `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`
-
-### Completed — Phase M3A current-state merge eligibility
-
-`github_get_pull_request_merge_eligibility` is registered only under the existing GitHub PR-read gate. It composes a fresh M2 evidence pass with bounded current-state checks for exact-head CI/App identity, qualifying approval count, code-owner state, strict base currency, review-thread resolution, timestamp-selected deployments, signatures, default base, mergeability, and final head/base stability. Known-unsatisfied evidence returns complete-but-ineligible; hidden/truncated/ambiguous evidence fails closed. Last-push approval remains intentionally unsupported until actor-aware proof is available. `direct_merge_supported` always remains false.
-
-Implementation anchors:
-
-- `backend/internal/gitrepo/github_pull_request_merge_eligibility.go`
-- `backend/internal/gitrepo/github_pull_request_merge_eligibility_test.go`
-- `backend/internal/gitrepo/github_pull_request_merge_eligibility_bounds_test.go`
-- `backend/internal/tools/github_pull_request_merge_eligibility_tool.go`
-- `docs/GITHUB_PULL_REQUEST_MERGE_REQUIREMENTS.md`
-- `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`
-
-### Priority 1 — Phase M3B guarded direct merge — CONDITIONAL NEXT SLICE
-
-M3A now provides the fail-closed current-state predicate, so guarded direct merge can be implemented as the next isolated engineering slice **only if the mutation reruns M3A immediately before mutation and refuses unless eligibility is complete and satisfied**.
-
-Required M3 boundary:
-
-- independent process and per-remote merge gates;
-- model inputs limited to configured remote ID, positive PR number, and exact reviewed head SHA;
-- repository/API/token/base and merge method derived from operator/application configuration;
-- require open, non-draft, unmerged state and exact advertised default-base binding;
-- run a fresh M3A eligibility pass immediately before mutation and require `eligibility_complete=true` plus `eligible=true`; M3A itself reruns M2;
-- reject merge queue rather than bypassing or approximating it;
-- freshly validate exact-head required checks/statuses with integration binding;
-- freshly validate review/code-owner/last-push/stale-review requirements;
-- freshly validate conversation-resolution and deployment prerequisites;
-- refuse unknown/unverifiable material requirements;
-- intersect the operator merge method with current repository/ruleset policy;
-- issue exactly one GitHub merge request with the exact-head server-side precondition;
-- treat an ambiguous provider/network outcome as requiring reinspection rather than automatic retry;
-- never infer authorization from provider `viewerCan*`, administrator status, other Git/GitHub mutation gates, or stale M1/M2 reads;
-- never delete the source branch implicitly.
-
-Repositories/credentials that hide classic protection, ruleset bypass actors, actor-role semantics, last-push actor relationships, or other material evidence remain unsupported for direct merge. Detailed threat model and validation requirements are maintained in `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`.
-
-### Priority 2 — Lower-priority collaboration/operations gaps
-
-These remain intentionally unsupported until a concrete workflow need justifies a separate capability and threat-model review:
-
-- request/remove reviewers or teams;
-- submit/dismiss reviews;
-- rerun/cancel GitHub Actions workflows;
-- arbitrary PR metadata changes such as labels, assignees, milestones, or base retargeting;
-- close/reopen arbitrary PRs;
-- delete hosted source branches;
-- merge-queue enrollment/dequeue controls.
-
-Their absence is intentional rather than a stale implementation omission.
-
-## Validation
-
-Changes to this program's runtime should pass:
-
-```bash
-cd backend
-gofmt -w <changed-go-files>
-go vet ./...
-go test ./...
-go test -race ./...
-
-cd ../frontend
-npm run lint
-npm run test:unit
-npm run build
-
-cd ..
-npx playwright test --project=chromium
-```
-
-Focused tests should additionally cover policy intersection, approval behavior, disabled-tool discovery suppression, provider compatibility, request-scoped restrictions, and regression paths for deterministic shortcuts. Security-sensitive Git, GitHub, browser, plugin, auth, persistence, and deployment changes should also pass the repository Security Scan and applicable container/release validation before merge.
+The next maturity gains are predominantly **runtime isolation across remaining platforms, durable agent/task orchestration, resource/network enforcement, and carefully selected collaboration/service breadth**—not another wholesale rewrite of Chat Studio's core tool-calling architecture.
