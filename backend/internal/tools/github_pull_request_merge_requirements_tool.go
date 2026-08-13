@@ -14,8 +14,9 @@ type githubPullRequestMergeRequirementsTool struct {
 }
 
 // NewGitHubPullRequestMergeRequirementsTools returns bounded read-only
-// merge-policy inspection tools under the existing GitHub pull-request read
-// gate. M2 evidence is additive only when the service implements its reader.
+// merge-policy and merge-eligibility inspection tools under the existing
+// GitHub pull-request read gate. Later evidence layers are additive only when
+// the service implements their reader interfaces.
 func NewGitHubPullRequestMergeRequirementsTools(service gitrepo.GitHubPullRequestMergeRequirementsReader) []Tool {
 	if service == nil {
 		return nil
@@ -24,6 +25,11 @@ func NewGitHubPullRequestMergeRequirementsTools(service gitrepo.GitHubPullReques
 	if evidenceService, ok := service.(gitrepo.GitHubPullRequestMergePolicyEvidenceReader); ok {
 		if evidenceTool := newGitHubPullRequestMergePolicyEvidenceTool(evidenceService); evidenceTool != nil {
 			out = append(out, evidenceTool)
+		}
+	}
+	if eligibilityService, ok := service.(gitrepo.GitHubPullRequestMergeEligibilityReader); ok {
+		if eligibilityTool := newGitHubPullRequestMergeEligibilityTool(eligibilityService); eligibilityTool != nil {
+			out = append(out, eligibilityTool)
 		}
 	}
 	return out
