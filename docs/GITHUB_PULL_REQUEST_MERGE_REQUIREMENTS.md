@@ -1,11 +1,12 @@
 # GitHub pull request merge requirements
 
-OmniLLM-Studio exposes two bounded, read-only GitHub merge-policy inspection capabilities for a configured pull request:
+OmniLLM-Studio exposes three bounded, read-only GitHub merge-evidence capabilities for a configured pull request:
 
 - `github_get_pull_request_merge_requirements` — Phase M1 policy normalization;
-- `github_get_pull_request_merge_policy_evidence` — Phase M2 policy/actor corroboration.
+- `github_get_pull_request_merge_policy_evidence` — Phase M2 policy/actor corroboration;
+- `github_get_pull_request_merge_eligibility` — Phase M3A exact-head current-state eligibility.
 
-Neither capability merges a pull request, grants merge permission, changes repository policy, or authorizes a later merge by itself. Phase M2 deliberately returns `direct_merge_supported=false` even when its evidence is complete.
+None merges a pull request, grants merge permission, changes repository policy, or authorizes a later merge by itself. M2 and M3A deliberately return `direct_merge_supported=false` even when their evidence is complete.
 
 ## Operator configuration
 
@@ -24,7 +25,7 @@ and:
 }
 ```
 
-No merge-specific process flag, per-remote merge permission, merge method, or side-effecting GitHub capability is introduced by M1 or M2.
+No merge-specific process flag, per-remote merge permission, merge method, or side-effecting GitHub capability is introduced by M1, M2, or M3A.
 
 ## M1 — normalized merge requirements
 
@@ -170,9 +171,35 @@ Evidence remains incomplete or blocking when:
 
 The implementation never intentionally invokes a bypass mechanism.
 
+## M3A — current-state merge eligibility
+
+### `github_get_pull_request_merge_eligibility`
+
+M3A starts from a fresh M2 policy/actor evidence pass and then evaluates whether the exact current PR state satisfies the visible policy. Model inputs remain only configured `remote` plus positive PR `number`; repository identity, head/base, required checks, reviewers, deployments, rules, and API endpoints remain application/provider-derived.
+
+M3A checks:
+
+- open, non-draft, unmerged state and known positive mergeability;
+- configured repository default-base binding;
+- strict base currency when required;
+- exact-head required checks/statuses, including numeric GitHub App binding;
+- bounded qualifying approval count from write-eligible latest opinionated reviews;
+- stale-review head association when stale approvals are dismissed;
+- provider review decision and outstanding code-owner requests;
+- bounded review-thread resolution when required;
+- exact-head deployment evidence for each required environment, with newest deployment/status selected by validated timestamps;
+- bounded commit-signature evidence when required;
+- final exact head/base revalidation.
+
+`eligibility_complete=true` means the evidence set was complete enough to decide. `eligible=true` additionally means no known prerequisite is unsatisfied. A missing or truncated page, unknown mergeability, hidden policy, unstable head/base, ambiguous deployment ordering, or other unverifiable prerequisite clears completeness rather than being treated as satisfied.
+
+M3A intentionally fails closed for `require_last_push_approval`: GitHub's aggregate review state and approval count do not prove that an approving reviewer differs from the actor responsible for the most recent reviewable push. Until a bounded actor-aware proof exists, such repositories remain unsupported for direct merge.
+
+Every M3A result keeps `direct_merge_supported=false`.
+
 ## Security boundary
 
-Both merge-policy tools are low-risk, read-only, networked, credentialed, and parallel-safe. They use the existing dedicated GitHub transport:
+All three merge-evidence tools are low-risk, read-only, networked, credentialed, and parallel-safe. They use the existing dedicated GitHub transport:
 
 - API host fixed to `https://api.github.com`;
 - repository derived only from the operator-configured `github.com` Git remote;
@@ -185,17 +212,15 @@ Both merge-policy tools are low-risk, read-only, networked, credentialed, and pa
 
 These tools do not add or imply permission to merge, mark ready, create/close/retarget a PR, reply, resolve a thread, push Git refs, rerun workflows, request reviewers, alter rulesets/branch protection, or delete a branch.
 
-## Implication for Phase M3
+## Implication for Phase M3B
 
-M2 establishes a fail-closed evidence primitive that a future direct-merge implementation may call immediately before mutation. It does **not** establish that every configured token or repository will produce complete evidence.
+M3A establishes the read-only current-state predicate needed by a future direct-merge implementation. A future `github_merge_pull_request` must rerun M3A immediately before mutation and refuse unless `eligibility_complete=true` and `eligible=true` for the exact expected head/base. M3A itself reruns M2, so hidden policy/bypass/actor evidence remains fail-closed.
 
-A future `github_merge_pull_request` implementation must therefore refuse before mutation unless a fresh M2 pass for the exact PR/head/base returns `evidence_complete=true`. Repositories or credentials that hide classic protection, ruleset bypass actors, actor role semantics, or other material policy must remain unsupported for direct merge.
-
-M3 must also independently validate current check/review/thread/deployment satisfaction and mergeability; M2 proves policy visibility, not fulfillment of every current-state prerequisite.
+Repositories whose policy requires unsupported last-push approval, or whose required evidence is hidden/truncated/ambiguous, remain unsupported for direct merge.
 
 ## Validation coverage
 
-Focused M1/M2 tests cover or should continue to cover:
+Focused M1/M2/M3A tests cover or should continue to cover:
 
 - operator-bound repository/token and exact PR head/base binding;
 - nullable mergeability;
@@ -216,6 +241,7 @@ Focused M1/M2 tests cover or should continue to cover:
 - strict `remote + number` model-facing arguments;
 - read-only registration under the GitHub PR-read gate;
 - independence from every GitHub mutation gate;
-- `direct_merge_supported=false` for all M2 results.
+- `direct_merge_supported=false` for all M2/M3A results;
+- exact-head app-bound checks, strict-base state, bounded qualifying approval counts, code-owner state, deployment timestamp selection, signature bounds, last-push fail-closed behavior, and final head/base revalidation.
 
 Before merging M2 or any future M3 work, the exact final PR head should pass repository formatting, vet, backend tests/race, frontend lint/unit/build, Windows/Helm/Playwright coverage, Security Scan, and backend/frontend container validation.

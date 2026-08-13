@@ -158,7 +158,8 @@ The original parity program did not include a full coding-agent Git/GitHub workf
 - separately gated resolve/unresolve of an exact reviewed review thread with PR-head, ownership, state, and viewer-capability revalidation;
 - separately gated transition of an exact reviewed draft PR to ready-for-review state with fresh head/default-base revalidation and fixed application-owned GraphQL;
 - bounded M1 merge-requirements inspection that binds normalized policy to the current PR head/base;
-- bounded M2 merge-policy evidence that corroborates classic REST/GraphQL policy, active ruleset bypass visibility, configured-actor repository role, and exact PR state while remaining strictly read-only.
+- bounded M2 merge-policy evidence that corroborates classic REST/GraphQL policy, active ruleset bypass visibility, configured-actor repository role, and exact PR state while remaining strictly read-only;
+- bounded M3A current-state merge eligibility that composes fresh M2 evidence with exact-head checks, review, deployment, thread, signature, default-base, and mergeability evidence while remaining strictly read-only.
 
 Primary implementation/documentation anchors:
 
@@ -178,7 +179,9 @@ Primary implementation/documentation anchors:
 - `backend/internal/gitrepo/github_pull_request_ready.go`
 - `backend/internal/gitrepo/github_pull_request_merge_requirements.go`
 - `backend/internal/gitrepo/github_pull_request_merge_policy_evidence.go`
+- `backend/internal/gitrepo/github_pull_request_merge_eligibility.go`
 - `backend/internal/tools/github_pull_request_merge_policy_evidence_tool.go`
+- `backend/internal/tools/github_pull_request_merge_eligibility_tool.go`
 
 ## Verified next gaps
 
@@ -229,9 +232,22 @@ Implementation anchors:
 - `docs/GITHUB_PULL_REQUEST_MERGE_REQUIREMENTS.md`
 - `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`
 
-### Priority 1 — Phase M3 guarded direct merge — CONDITIONAL NEXT SLICE
+### Completed — Phase M3A current-state merge eligibility
 
-M2 now provides a fail-closed evidence primitive, so guarded direct merge can be implemented as the next isolated engineering slice **only if the mutation refuses whenever a fresh M2 pass is incomplete**. M2 does not guarantee that every repository/token can satisfy its evidence requirements.
+`github_get_pull_request_merge_eligibility` is registered only under the existing GitHub PR-read gate. It composes a fresh M2 evidence pass with bounded current-state checks for exact-head CI/App identity, qualifying approval count, code-owner state, strict base currency, review-thread resolution, timestamp-selected deployments, signatures, default base, mergeability, and final head/base stability. Known-unsatisfied evidence returns complete-but-ineligible; hidden/truncated/ambiguous evidence fails closed. Last-push approval remains intentionally unsupported until actor-aware proof is available. `direct_merge_supported` always remains false.
+
+Implementation anchors:
+
+- `backend/internal/gitrepo/github_pull_request_merge_eligibility.go`
+- `backend/internal/gitrepo/github_pull_request_merge_eligibility_test.go`
+- `backend/internal/gitrepo/github_pull_request_merge_eligibility_bounds_test.go`
+- `backend/internal/tools/github_pull_request_merge_eligibility_tool.go`
+- `docs/GITHUB_PULL_REQUEST_MERGE_REQUIREMENTS.md`
+- `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`
+
+### Priority 1 — Phase M3B guarded direct merge — CONDITIONAL NEXT SLICE
+
+M3A now provides the fail-closed current-state predicate, so guarded direct merge can be implemented as the next isolated engineering slice **only if the mutation reruns M3A immediately before mutation and refuses unless eligibility is complete and satisfied**.
 
 Required M3 boundary:
 
@@ -239,7 +255,7 @@ Required M3 boundary:
 - model inputs limited to configured remote ID, positive PR number, and exact reviewed head SHA;
 - repository/API/token/base and merge method derived from operator/application configuration;
 - require open, non-draft, unmerged state and exact advertised default-base binding;
-- run a fresh M2 evidence pass immediately before mutation and require `evidence_complete=true` plus complete normalized policy;
+- run a fresh M3A eligibility pass immediately before mutation and require `eligibility_complete=true` plus `eligible=true`; M3A itself reruns M2;
 - reject merge queue rather than bypassing or approximating it;
 - freshly validate exact-head required checks/statuses with integration binding;
 - freshly validate review/code-owner/last-push/stale-review requirements;
@@ -251,7 +267,7 @@ Required M3 boundary:
 - never infer authorization from provider `viewerCan*`, administrator status, other Git/GitHub mutation gates, or stale M1/M2 reads;
 - never delete the source branch implicitly.
 
-Repositories/credentials that hide classic protection, ruleset bypass actors, actor-role semantics, or other material policy remain unsupported for direct merge. Detailed threat model and validation requirements are maintained in `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`.
+Repositories/credentials that hide classic protection, ruleset bypass actors, actor-role semantics, last-push actor relationships, or other material evidence remain unsupported for direct merge. Detailed threat model and validation requirements are maintained in `docs/GITHUB_PULL_REQUEST_MERGE_DESIGN_2026-08.md`.
 
 ### Priority 2 — Lower-priority collaboration/operations gaps
 
