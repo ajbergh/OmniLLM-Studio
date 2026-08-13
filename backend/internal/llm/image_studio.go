@@ -77,6 +77,19 @@ func (s *Service) ImageStudioGenerate(ctx context.Context, req ImageStudioReques
 	if req.OperationType == "edit" && !caps.SupportsEditing {
 		return nil, fmt.Errorf("selected provider/model does not support image editing")
 	}
+	if req.MaskImage != nil && strings.TrimSpace(req.MaskImage.Data) != "" {
+		if !caps.SupportsMasking || caps.MaskingMode == ImageMaskingNone {
+			return nil, fmt.Errorf("selected provider/model does not support area-mask editing")
+		}
+		if caps.MaskingMode == ImageMaskingPixel {
+			if req.ReferenceImage == nil {
+				return nil, fmt.Errorf("pixel mask requires a base image")
+			}
+			if err := validatePixelMaskPair(model, *req.ReferenceImage, *req.MaskImage); err != nil {
+				return nil, fmt.Errorf("invalid pixel mask: %w", err)
+			}
+		}
+	}
 
 	geometry, err := resolveImageStudioGeometry(providerType, req.OperationType, req.Size, req.Geometry)
 	if err != nil {
@@ -117,7 +130,6 @@ func resolveImageStudioGeometry(providerType, operation, legacySize string, geom
 	if size == "" {
 		size = strings.TrimSpace(legacySize)
 	}
-
 	resolution := imageStudioGeometryResolution{Mode: mode}
 	switch mode {
 	case ImageGeometryPreserveSource:
@@ -126,24 +138,18 @@ func resolveImageStudioGeometry(providerType, operation, legacySize string, geom
 		}
 		switch strings.ToLower(providerType) {
 		case "openai":
-			// Current OpenAI image edit APIs use auto when no explicit output
-			// geometry was requested. This avoids the legacy 1024x1024 fallback.
 			resolution.LegacySize = "auto"
 		case "gemini", "openrouter":
-			// Gemini preserves input geometry when imageConfig is omitted.
-			// OpenRouter's dedicated Images API likewise accepts omitted geometry.
 			resolution.LegacySize = ""
 		default:
 			resolution.LegacySize = ""
 		}
 		return resolution, nil
-
 	case ImageGeometryProviderAuto:
 		if strings.EqualFold(providerType, "openai") {
 			resolution.LegacySize = "auto"
 		}
 		return resolution, nil
-
 	case ImageGeometryExplicit:
 		if size == "" || strings.EqualFold(size, "auto") {
 			return resolution, fmt.Errorf("explicit image geometry requires a concrete size")
@@ -210,10 +216,8 @@ func collectStudioInputReferences(req ImageStudioRequest) []map[string]interface
 			return
 		}
 		refs = append(refs, map[string]interface{}{
-			"type": "image_url",
-			"image_url": map[string]interface{}{
-				"url": imageReferenceDataURL(ref),
-			},
+			"type":      "image_url",
+			"image_url": map[string]interface{}{"url": imageReferenceDataURL(ref)},
 		})
 	}
 	if req.ReferenceImage != nil {
@@ -229,10 +233,7 @@ func collectStudioInputReferences(req ImageStudioRequest) []map[string]interface
 }
 
 func buildOpenRouterStudioImageBody(model string, req ImageStudioRequest, geometry imageStudioGeometryResolution) map[string]interface{} {
-	body := map[string]interface{}{
-		"model":  model,
-		"prompt": req.Prompt,
-	}
+	body := map[string]interface{}{"model": model, "prompt": req.Prompt}
 	if req.N > 0 {
 		body["n"] = req.N
 	}
@@ -264,7 +265,6 @@ func (s *Service) openRouterStudioImageGenerate(ctx context.Context, baseURL, ap
 	if err != nil {
 		return nil, fmt.Errorf("marshal OpenRouter image request: %w", err)
 	}
-
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create OpenRouter image request: %w", err)
@@ -275,7 +275,6 @@ func (s *Service) openRouterStudioImageGenerate(ctx context.Context, baseURL, ap
 	if apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-
 	client := &http.Client{Timeout: 180 * time.Second, Transport: s.httpClient.Transport}
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -289,7 +288,6 @@ func (s *Service) openRouterStudioImageGenerate(ctx context.Context, baseURL, ap
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("OpenRouter image API returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
-
 	var result struct {
 		Data []struct {
 			B64JSON string `json:"b64_json"`
@@ -319,11 +317,7 @@ func buildTogetherStudioImageBody(model string, req ImageStudioRequest, geometry
 	if req.OperationType == "edit" || req.ReferenceImage != nil || len(req.ReferenceImages) > 0 || len(req.StyleReferenceImages) > 0 {
 		return nil, fmt.Errorf("selected Together model transport is generation-only in Image Studio")
 	}
-	body := map[string]interface{}{
-		"model":           model,
-		"prompt":          req.Prompt,
-		"response_format": "base64",
-	}
+	body := map[string]interface{}{"model": model, "prompt": req.Prompt, "response_format": "base64"}
 	if req.N > 0 {
 		body["n"] = req.N
 	}

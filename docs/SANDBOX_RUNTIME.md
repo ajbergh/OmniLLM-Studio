@@ -75,6 +75,41 @@ The current Linux worker supports at most one project workspace per sandbox exec
 
 The current `terminal_exec` tool deliberately requests only a read-only project mount. Source mutations remain routed through the state-bound, journaled workspace mutation tools.
 
+### Desktop workspace settings and grants
+
+Phase 11 adds a safe Settings surface for inspecting the active sandbox and managing filesystem grants without exposing configured host roots to model tools or normal API responses.
+
+The authenticated settings API exposes:
+
+```text
+GET    /v1/sandbox/status
+GET    /v1/sandbox/workspaces
+POST   /v1/sandbox/workspaces
+DELETE /v1/sandbox/workspaces/{workspace_id}
+GET    /v1/sandbox/workspaces/{workspace_id}/changes
+```
+
+Response contracts are intentionally narrow:
+
+- runtime status reports capability booleans and extension-sandbox mode, not runtime URL/token/rootfs configuration;
+- workspace lists return only opaque ID, access mode, and timestamps;
+- recent change history returns relative path, operation, before/after existence and hashes, revertability, and timestamp;
+- internal user, conversation, agent-run, task, sandbox, execution, snapshot-content, and physical-root fields are not serialized through these Settings endpoints.
+
+Physical host paths are accepted only by the grant-creation endpoint. Creation requires all of the following:
+
+1. administrator authorization;
+2. `OMNILLM_SANDBOX_ALLOW_PATH_GRANTS=true`;
+3. the actual HTTP socket peer is loopback.
+
+`RemoteAddr` is used for the loopback check; forwarded client-IP headers are not trusted for this decision.
+
+Server/web deployments therefore do not gain a generic remote host-filesystem selector merely because the Settings API exists. An operator must explicitly enable path grants, and creation remains loopback-only.
+
+The Wails desktop build uses its native folder picker to select a directory. Desktop startup enables the path-grant flow for its protected per-launch loopback capability URL. The selected physical path is kept only in ephemeral frontend component state and cleared after the backend converts it into an opaque owner-scoped grant.
+
+Grant deletion revokes authorization only; it never removes files from disk. The UI can show whether a journaled change is revertable, but Phase 11 deliberately does not add an HTTP revert shortcut. Reverts remain behind the existing governed workspace tool and approval boundary.
+
 ### Network grants
 
 The backend supports owner-bound destination grants, but authorization is distinct from enforcement. A sandbox that requests `NetworkAllowlist` must run on a runtime that advertises `network_allowlist=true`.
