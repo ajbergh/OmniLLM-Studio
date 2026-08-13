@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -30,7 +29,7 @@ type ExtensionCommandRunner struct{}
 // NewExtensionCommandRunner returns the persistent extension process runner.
 func NewExtensionCommandRunner() ExtensionCommandRunner { return ExtensionCommandRunner{} }
 
-func (ExtensionCommandRunner) CommandContext(ctx context.Context, spec ProcessSpec) (*exec.Cmd, error) {
+func (ExtensionCommandRunner) CommandContext(ctx context.Context, spec ProcessSpec) (CommandProcess, error) {
 	mode, err := CurrentExtensionSandboxMode()
 	if err != nil {
 		return nil, err
