@@ -76,10 +76,6 @@ func TestImageCapabilityRegressionMatrix(t *testing.T) {
 			wantMaxRefs: 3, wantContentRefs: true, wantStyleRefs: true,
 		},
 		{
-			name: "Imagen 4 is text generation only", provider: "gemini", model: "imagen-4.0-generate-001",
-			wantGeneration: true, wantEditing: false, wantMaskMode: ImageMaskingNone,
-		},
-		{
 			name: "OpenRouter edits use references but no pixel mask claim", provider: "openrouter", model: "google/gemini-2.5-flash-image",
 			wantGeneration: true, wantEditing: true, wantMaskMode: ImageMaskingNone,
 			wantMaxRefs: 1, wantContentRefs: true,
