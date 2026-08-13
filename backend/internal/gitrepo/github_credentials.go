@@ -341,3 +341,25 @@ func (s *UserScopedRemoteService) GetPullRequestMergeRequirements(ctx context.Co
 	}
 	return scoped.GetPullRequestMergeRequirements(ctx, remoteID, number)
 }
+
+// GetPullRequestMergePolicyEvidence delegates M2 policy/actor evidence through
+// the request-scoped credential so configured-actor semantics match the actual
+// credential used for this invocation.
+func (s *UserScopedRemoteService) GetPullRequestMergePolicyEvidence(ctx context.Context, remoteID string, number int) (*GitHubPullRequestMergePolicyEvidenceResult, error) {
+	scoped, err := s.scoped(ctx, remoteID)
+	if err != nil || scoped == nil {
+		return nil, err
+	}
+	return scoped.GetPullRequestMergePolicyEvidence(ctx, remoteID, number)
+}
+
+// GetPullRequestMergeEligibility delegates M3A exact-head eligibility inspection
+// through the request-scoped credential. The scoped service then performs the
+// complete M2 -> M3A read sequence with that same credential.
+func (s *UserScopedRemoteService) GetPullRequestMergeEligibility(ctx context.Context, remoteID string, number int) (*GitHubPullRequestMergeEligibilityResult, error) {
+	scoped, err := s.scoped(ctx, remoteID)
+	if err != nil || scoped == nil {
+		return nil, err
+	}
+	return scoped.GetPullRequestMergeEligibility(ctx, remoteID, number)
+}

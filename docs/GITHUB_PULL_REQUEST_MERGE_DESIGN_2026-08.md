@@ -2,7 +2,7 @@
 
 ## Status
 
-**Phase M1 merge-requirements inspection and Phase M2 read-only merge-policy evidence are implemented. `github_merge_pull_request` remains intentionally not implemented. Phase M3 guarded direct merge is the next candidate slice, but it must fail closed unless a fresh M2 evidence pass is complete for the exact PR/head/base and configured actor.**
+**Phase M1 merge-requirements inspection, Phase M2 policy/actor evidence, and Phase M3A read-only current-state merge eligibility are implemented. `github_merge_pull_request` remains intentionally not implemented. Phase M3B guarded direct merge is the next candidate slice and must consume a fresh complete M3A result for the exact PR/head/base immediately before mutation.**
 
 The hosted coding workflow now covers draft PR creation, exact-head PR/check/feedback/thread inspection, review-comment replies, thread resolution, guarded draft-to-ready transition, normalized merge-requirements inspection, and actor/policy evidence corroboration. Merge remains the first lifecycle action that irreversibly changes the configured default branch, so its mutation boundary must be stricter than all preceding collaboration tools.
 
@@ -16,9 +16,10 @@ The runtime provides:
 - `github_get_pull_request_review_threads` — bounded review-thread state/location;
 - `github_mark_pull_request_ready_for_review` — separately gated draft-to-ready mutation;
 - `github_get_pull_request_merge_requirements` — M1 normalized merge policy;
-- `github_get_pull_request_merge_policy_evidence` — M2 classic/ruleset/actor corroboration.
+- `github_get_pull_request_merge_policy_evidence` — M2 classic/ruleset/actor corroboration;
+- `github_get_pull_request_merge_eligibility` — M3A exact-head current-state eligibility evidence.
 
-M1 and M2 are both read-only under the existing GitHub PR-read gate. Neither registers, enables, or calls a merge mutation.
+M1, M2, and M3A are all read-only under the existing GitHub PR-read gate. None registers, enables, or calls a merge mutation.
 
 ## Phase M1 — normalized merge requirements — IMPLEMENTED
 
@@ -102,6 +103,26 @@ A REST `403` remains incomplete even when GraphQL reports no classic rule.
 
 During M2 validation against OmniLLM-Studio, the active-rules read for `main` was visible and empty while the classic protection REST endpoint was permission-obscured. That real response pattern validates the fail-closed rule: zero visible active rules plus a `403` must not be converted into "unprotected".
 
+## Phase M3A — current-state merge eligibility — IMPLEMENTED
+
+M3A adds `github_get_pull_request_merge_eligibility` as a bounded read-only eligibility reader. It always starts from a fresh M2 pass and remains bound to the exact hosted PR head/base.
+
+M3A proves, where bounded evidence is complete:
+
+- open, ready-for-review, unmerged PR state and known positive mergeability;
+- repository default-base binding and strict base currency when required;
+- exact-head required checks, including numeric GitHub App identity;
+- qualifying write-eligible approval count using bounded latest opinionated reviews;
+- code-owner state corroboration through provider review state plus outstanding code-owner requests;
+- bounded required review-thread resolution;
+- exact-head required deployment success selected by validated timestamps rather than undocumented list ordering;
+- required commit signature evidence within the bounded first page;
+- final PR head/base stability after inspection.
+
+Known-unsatisfied requirements produce `eligibility_complete=true` with `eligible=false`. Hidden, truncated, stale, ambiguous, or otherwise unverifiable evidence produces `eligibility_complete=false`. M3A explicitly leaves last-push approval unsupported because aggregate review state does not prove that the approving reviewer differs from the actor responsible for the most recent reviewable push.
+
+Every M3A result keeps `direct_merge_supported=false`; this phase is evidence, not mutation authority.
+
 ## Threat model for direct merge
 
 A future merge tool must assume:
@@ -119,9 +140,9 @@ A future merge tool must assume:
 
 The design prefers false negatives over a policy-bypassing false positive.
 
-## Phase M3 — guarded direct merge — NEXT CANDIDATE
+## Phase M3B — guarded direct merge — NEXT CANDIDATE
 
-M2 closes the architecture gap by providing a fail-closed evidence predicate. It does **not** guarantee that every repository/token can satisfy it. M3 may therefore be implemented only as a mutation that refuses whenever the configured credential cannot produce complete evidence.
+M3A closes the current-state evidence gap but deliberately does not authorize mutation. M3B may therefore be implemented only as a separately gated high-risk mutation that runs a fresh M3A pass and refuses whenever eligibility evidence is incomplete or unsatisfied.
 
 ### Independent operator gates
 
@@ -172,8 +193,8 @@ Immediately before any merge request, M3 must:
 2. fetch the PR and require open, non-draft, unmerged state;
 3. require current hosted head == `expected_head`;
 4. advertise the configured Git remote and require PR base == advertised default branch;
-5. run a **fresh M2 evidence pass** for the exact PR/head/base;
-6. require `evidence_complete=true` and `merge_policy_complete=true`;
+5. run a **fresh M3A eligibility pass** for the exact PR/head/base; M3A itself reruns M2;
+6. require `eligibility_complete=true`, `eligible=true`, `evidence_complete=true`, and `merge_policy_complete=true`;
 7. reject merge-queue policy rather than approximating queue semantics;
 8. require current mergeability to be known and positive;
 9. inspect exact-head checks/statuses and require every normalized required check to be satisfied with its integration binding where applicable;
@@ -185,7 +206,7 @@ Immediately before any merge request, M3 must:
 15. refuse on any unknown material rule or unverifiable prerequisite;
 16. issue exactly one fixed GitHub merge request with the exact-head SHA precondition.
 
-A stale result from any prior read tool must never substitute for this immediate preflight.
+A stale result from any prior read tool must never substitute for this immediate preflight. Repositories whose active policy requires last-push approval remain unsupported until an actor-aware bounded proof is implemented.
 
 ## Exact-head compare-and-swap
 
@@ -248,4 +269,4 @@ M1–M3 do not combine or implicitly authorize:
 
 ## Decision
 
-**M1 and M2 are implemented as fail-closed read-only prerequisites. The next engineering slice may implement M3 guarded direct merge, but M3 must refuse unless a fresh M2 result proves `evidence_complete=true` for the exact configured repository, actor, PR head, and base. Permission-obscured or otherwise incomplete policy remains unsupported rather than bypassed.**
+**M1, M2, and M3A are implemented as fail-closed read-only prerequisites. The next engineering slice may implement M3B guarded direct merge, but M3B must refuse unless a fresh M3A result proves `eligibility_complete=true` and `eligible=true` for the exact configured repository, actor, PR head, and base. Permission-obscured, truncated, last-push-dependent, or otherwise incomplete evidence remains unsupported rather than bypassed.**
