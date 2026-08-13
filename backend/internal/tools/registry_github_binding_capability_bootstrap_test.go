@@ -99,6 +99,31 @@ func TestBindingCapabilityBootstrapRegistersOnlyOperatorAuthorizedFamilies(t *te
 	if connectedCalls != 0 || resolveCalls != 0 || bindingCalls != 0 {
 		t.Fatalf("registry construction consulted user GitHub state: connected=%d resolve=%d bindings=%d", connectedCalls, resolveCalls, bindingCalls)
 	}
+
+	for _, name := range []string{"git_fetch", "git_push", "github_get_pull_request", "github_create_draft_pull_request", "github_merge_pull_request"} {
+		tool, ok := registry.Get(name)
+		if !ok {
+			t.Fatalf("missing representative binding tool %s", name)
+		}
+		var scoped bool
+		switch typed := tool.(type) {
+		case *gitRemoteFetchTool:
+			_, scoped = typed.service.(*gitrepo.UserScopedRemoteService)
+		case *gitRemotePushTool:
+			_, scoped = typed.service.(*gitrepo.UserScopedRemoteService)
+		case *githubPullRequestReadTool:
+			_, scoped = typed.service.(*gitrepo.UserScopedRemoteService)
+		case *githubDraftPullRequestTool:
+			_, scoped = typed.service.(*gitrepo.UserScopedRemoteService)
+		case *githubPullRequestMergeTool:
+			_, scoped = typed.service.(*gitrepo.UserScopedRemoteService)
+		default:
+			t.Fatalf("unexpected representative tool type %T for %s", tool, name)
+		}
+		if !scoped {
+			t.Fatalf("bootstrapped tool %s was not rebound to request-scoped GitHub service", name)
+		}
+	}
 }
 
 func TestBindingCapabilityBootstrapSeparatesPushFromBranchPublication(t *testing.T) {
