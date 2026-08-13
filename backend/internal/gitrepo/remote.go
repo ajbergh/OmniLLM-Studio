@@ -62,6 +62,7 @@ type RemoteService struct {
 	githubPullRequestThreadResolutionEnabled bool
 	githubPullRequestReadyEnabled            bool
 	githubPullRequestMergeEnabled            bool
+	githubBindingCapabilities                map[string]GitHubBindingCapabilities
 	cloneEnabled                             bool
 	cloneMaxBytes                            int64
 	cloneMaxEntries                          int64
@@ -73,7 +74,8 @@ type RemoteService struct {
 
 // NewRemoteServiceFromEnvironment constructs the remote service from operator
 // configuration. Entries referring to an unconfigured local repository are
-// discarded, preventing a remote definition from creating a filesystem target.
+// discarded, preventing a remote definition or binding capability policy from
+// creating a filesystem target.
 func NewRemoteServiceFromEnvironment(local *Service) *RemoteService {
 	configured := ParseRemoteConfig(os.Getenv(RemotesEnv))
 	filtered := make(map[string]RemoteConfig, len(configured))
@@ -86,6 +88,14 @@ func NewRemoteServiceFromEnvironment(local *Service) *RemoteService {
 	}
 	service := newRemoteService(filtered, boolEnvironment(RemoteEnabledEnv), boolEnvironment(RemotePushEnabledEnv), newRemoteStatusTransport(), os.LookupEnv)
 	service.local = local
+	service.githubBindingCapabilities = make(map[string]GitHubBindingCapabilities)
+	if local != nil {
+		for repositoryID, policy := range ParseGitHubBindingCapabilities(os.Getenv(GitHubBindingCapabilitiesEnv)) {
+			if local.HasRepository(repositoryID) {
+				service.githubBindingCapabilities[repositoryID] = policy
+			}
+		}
+	}
 	service.branchCreateEnabled = boolEnvironment(RemoteBranchCreateEnabledEnv)
 	service.githubPullRequestEnabled = boolEnvironment(GitHubPullRequestEnabledEnv)
 	service.githubPullRequestReadEnabled = boolEnvironment(GitHubPullRequestReadEnabledEnv)

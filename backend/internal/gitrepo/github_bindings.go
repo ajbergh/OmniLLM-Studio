@@ -125,6 +125,9 @@ func (s *UserScopedRemoteService) serviceWithBindings(ctx context.Context) (*Rem
 		if _, exists := clone.remotes[remoteID]; exists {
 			continue
 		}
+		if policy, configured := s.githubBindingCapabilities[remote.Repository]; configured {
+			remote = applyGitHubBindingCapabilities(remote, policy)
+		}
 		clone.remotes[remoteID] = remote
 		changed = true
 	}
