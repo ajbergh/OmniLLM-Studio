@@ -75,7 +75,7 @@ func TestBindingOnlyBootstrapDoesNotRegisterMutationOrHostedGitHubTools(t *testi
 
 	for _, name := range []string{
 		"git_fetch", "git_push", "git_publish_branch", "git_clone",
-		"github_get_pull_request", "github_create_pull_request",
+		"github_get_pull_request", "github_create_draft_pull_request",
 		"github_reply_to_pull_request_review_comment", "github_set_pull_request_review_thread_resolved",
 		"github_mark_pull_request_ready_for_review", "github_get_pull_request_merge_requirements",
 		"github_get_pull_request_merge_policy_evidence", "github_get_pull_request_merge_eligibility",
