@@ -17,7 +17,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const windowsExtensionCleanupAttempts = 20
+const (
+	windowsExtensionCleanupAttempts      = 20
+	windowsExtensionCleanupRetryInterval = 5 * time.Second
+)
 
 type windowsExtensionProcess struct {
 	ctx  context.Context
@@ -413,6 +416,11 @@ func cleanupWindowsExtensionProfile(profileName, profileRoot string) error {
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("Windows extension profile cleanup did not complete")
+	}
+	if profileName != "" {
+		time.AfterFunc(windowsExtensionCleanupRetryInterval, func() {
+			_ = cleanupWindowsExtensionProfile(profileName, profileRoot)
+		})
 	}
 	return lastErr
 }
