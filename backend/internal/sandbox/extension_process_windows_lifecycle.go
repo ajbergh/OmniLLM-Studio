@@ -419,7 +419,9 @@ func cleanupWindowsExtensionProfile(profileName, profileRoot string) error {
 
 type windowsExtensionExitError struct{ code uint32 }
 
-func (e *windowsExtensionExitError) Error() string { return fmt.Sprintf("Windows extension process exited with code %d", e.code) }
+func (e *windowsExtensionExitError) Error() string {
+	return fmt.Sprintf("Windows extension process exited with code %d", e.code)
+}
 func (e *windowsExtensionExitError) ExitCode() int { return int(e.code) }
 
 var _ CommandProcess = (*windowsExtensionProcess)(nil)
