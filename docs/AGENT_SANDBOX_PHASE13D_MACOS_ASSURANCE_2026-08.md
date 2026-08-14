@@ -1,6 +1,6 @@
 # Agent Sandbox Phase 13D — macOS Adversarial Assurance — August 2026
 
-> **Status:** IN PROGRESS — first native adversarial suite green; stacked behind Phase 13C
+> **Status:** IN PROGRESS — first native adversarial suite green; rebased PR #166 requires final exact-head validation on the merged Phase 13C baseline
 >
 > Phase 13D validates escape attempts and the truthful boundary of macOS process teardown. It does not upgrade capability claims merely because ordinary descendants are easy to terminate.
 
@@ -100,9 +100,7 @@ Therefore Phase 13D must **not** change `ProcessTreeIsolation` to true.
 
 Before Phase 13 can be closed:
 
-- Phase 13B must merge after its exact-head Quality/Security/container/native gates;
-- Phase 13C must merge after its exact-head native extension and repository gates;
-- this Phase 13D branch must be normalized onto the merged dependencies;
+- this Phase 13D branch must remain normalized onto the merged dependencies;
 - authoritative current roadmap/runtime docs must be reconciled to the final merged state;
 - exact final-head Quality Gate, Security Scan, macOS runtime/extension/adversarial workflows, applicable container validation, race/Playwright/Helm checks, and final review/diff checks must pass.
 

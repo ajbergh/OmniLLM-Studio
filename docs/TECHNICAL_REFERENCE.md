@@ -84,7 +84,7 @@ Conversation and attachment rebuilds index replacement vectors before atomically
 
 The codebase also includes exact and pure-Go HNSW `VectorIndex` implementations, a generation coordinator, and a bearer-token HTTP adapter. These are supporting library capabilities on this branch; the normal runtime remains chromem-go and deployment configuration does not yet select HNSW or a remote index owner.
 
-Detailed design: [RAG modernization architecture](RAG_MODERNIZATION.md). Branch status: [RAG modernization status](RAG_MODERNIZATION_STATUS.md).
+Detailed design: [RAG modernization architecture](RAG_MODERNIZATION.md). Historical implementation status is [archived](archive/completed/RAG_MODERNIZATION_STATUS.md).
 
 ### Image Studio
 

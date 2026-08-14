@@ -473,7 +473,7 @@ The current stdio implementation can work in containers only if the runtime and 
 
 For example, an `npx`-based MCP server needs Node/npm available in the backend container. Filesystem access is limited to mounted container paths.
 
-Remote Streamable HTTP MCP support is deferred and would likely be the better fit for many Kubernetes deployments.
+Remote Streamable HTTP MCP support is implemented. Kubernetes deployments still need an operator-approved endpoint, network policy, OAuth/client configuration where applicable, and the same MCP tool-policy controls; it does not remove the separate sandbox-worker deployment work.
 
 ## Which files implement MCP?
 

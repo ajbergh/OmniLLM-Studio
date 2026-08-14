@@ -3,15 +3,14 @@
 Use these files for the current sandbox implementation state after Windows Phase 12 and during macOS Phase 13:
 
 - `AGENT_SANDBOX_ROADMAP_CURRENT_2026-08.md` — active phase status, open enforcement gaps, and execution order.
-- `SANDBOX_RUNTIME_CURRENT_2026-08.md` — current runtime and persistent-extension operator behavior; macOS runtime details are additionally tracked in the Phase 13 record until persistent-extension confinement lands.
+- `SANDBOX_RUNTIME_CURRENT_2026-08.md` — current runtime and persistent-extension operator behavior.
 - `AGENT_SANDBOX_ARCHITECTURE_CURRENT_2026-08.md` — implemented Broker/runtime/managed-process architecture and platform boundaries.
-- `AGENT_SANDBOX_PHASE12_WINDOWS_2026-08.md` — completed Windows Phase 12 implementation and validation record.
-- `AGENT_SANDBOX_PHASE12D_WINDOWS_ASSURANCE_2026-08.md` — direct adversarial Windows assurance evidence.
+- `AGENT_SANDBOX_PHASE13D_MACOS_ASSURANCE_2026-08.md` — active macOS adversarial-assurance record.
 - `AGENT_SANDBOX_PHASE13_MACOS_2026-08.md` — macOS native-confinement implementation and validation record.
 - `AGENT_SANDBOX_PHASE13D_MACOS_ASSURANCE_2026-08.md` — macOS adversarial-assurance evidence and explicit teardown limitation.
 - `AGENT_SANDBOX_THREAT_MODEL.md` — threat model and adversarial acceptance principles.
 
-The older aggregate files `AGENT_SANDBOX_ROADMAP_2026-08.md`, `SANDBOX_RUNTIME.md`, and `AGENT_SANDBOX_ARCHITECTURE.md` remain useful historical design snapshots. The versioned current-state documents and this index are the authoritative references for current status.
+Completed Windows Phase 12 records and older aggregate snapshots are retained under `archive/`. The versioned current-state documents, this index, and `MASTER_PLAN.md` are authoritative for current status and outstanding work.
 
 ## Current checkpoint
 

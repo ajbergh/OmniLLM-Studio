@@ -1,6 +1,6 @@
 # Agent Sandbox Architecture — Current State (August 2026)
 
-This document records the implemented execution architecture after Windows Phase 12. It supplements the earlier `AGENT_SANDBOX_ARCHITECTURE.md` design snapshot.
+This document records the implemented execution architecture after Windows Phase 12 and macOS Phases 13A–13C. It supplements the earlier `AGENT_SANDBOX_ARCHITECTURE.md` design snapshot.
 
 ## Trust boundaries
 
@@ -66,7 +66,7 @@ Current first-party platform implementations:
 
 - **Linux:** Bubblewrap with an operator-prepared read-only rootfs.
 - **Windows 10+:** AppContainer plus Job Objects.
-- **macOS:** not implemented; Phase 13 remains open.
+- **macOS:** Seatbelt-backed local runtime plus persistent-extension confinement. Phase 13D adversarial assurance remains the final phase exit gate; its deliberately detached-descendant limitation keeps `process_tree_isolation=false`.
 
 ## Persistent extension process seam
 
@@ -110,7 +110,7 @@ This preserves MCP/plugin protocol code while allowing forced shutdown to termin
 
 ### macOS
 
-Native extension confinement remains unimplemented. `required` fails closed; `auto` remains compatibility behavior pending Phase 13.
+The fixed `/usr/bin/sandbox-exec` Seatbelt backend now confines both first-party local runtime executions and persistent stdio MCP/plugin processes. In `auto` and `required` modes, native confinement is selected when the platform primitive is available; `required` fails closed if it is unavailable, while `off` remains the explicit sanitized-host compatibility mode. The per-process profile supplies explicit system/command/working-directory read roots, runtime-owned home/tmp write roots, reconstructed environment, and default network denial. Process-group teardown is proven for ordinary descendants but not intentionally detached sessions, so no stronger process-tree claim is made.
 
 ## Windows enforcement design
 
@@ -266,7 +266,7 @@ Final Phase 12D head `8f4ee1b7de5d3ea6203c44089dadfae4fd6d30cb` passed the full 
 - Destination-scoped egress enforcement.
 - Broader workspace-registry/path-component TOCTOU assurance.
 - Service-specific credential broker consumers.
-- macOS native confinement.
+- macOS adversarial assurance and a disposition for intentionally detached descendants.
 - Dedicated server/Kubernetes workers.
 - Durable sandbox-backed tasks and multi-agent worktree isolation.
 

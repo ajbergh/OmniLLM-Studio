@@ -363,7 +363,7 @@ This is enforced both by `values.schema.json` (`const: 1`) and by an explicit `f
 - **chromem-go** persists to a directory on local disk. Two writers competing for the same file is undefined behavior.
 - The 15-minute session-cleanup ticker is in-process and expects to be the only one running it.
 
-You get one writer. Period. Multi-replica scale-out requires migrating to Postgres + an external vector store (Qdrant / pgvector / hosted chromem) and is documented as a future plan in [`docs/internal_docs/Kubernetes_Helm_Plan.md`](internal_docs/Kubernetes_Helm_Plan.md) §9.
+You get one writer. Period. Multi-replica scale-out requires migrating to Postgres plus an external vector store (Qdrant / pgvector / hosted chromem); it remains a separately approved deployment initiative rather than a supported Helm topology.
 
 ### Sizing the PVC
 
@@ -576,7 +576,7 @@ The chart does not yet ship Prometheus exporters or Grafana dashboards. What you
 - **Health:** `GET /v1/health` returns `{"ok":true}`. Used by liveness / readiness / startup probes.
 - **Version:** `GET /v1/version` returns the build version.
 
-Prometheus `/metrics` is on the backlog (see [`Kubernetes_Helm_Plan.md`](internal_docs/Kubernetes_Helm_Plan.md) §10 Phase 5).
+Prometheus `/metrics` is not currently exposed; add it only through a separately approved observability initiative.
 
 Useful kubectl one-liners while debugging:
 
@@ -773,7 +773,7 @@ SQLite is single-writer at the file level, and chromem-go vector collections are
 No. Even with RWX, SQLite is single-writer. RWX would only help if multiple readers needed concurrent access, which is not the architecture.
 
 **Can I bring my own database (Postgres / MySQL)?**
-Not yet. The backend hard-depends on `mattn/go-sqlite3` and chromem-go. A Postgres + pgvector backend is on the roadmap (see `docs/internal_docs/Kubernetes_Helm_Plan.md` §9) and is the prerequisite for multi-replica scale.
+Not yet. The backend uses SQLite and chromem-go. A Postgres plus pgvector backend would be a prerequisite for multi-replica scale and is not currently committed on the master plan.
 
 **Is the desktop app affected by anything in this guide?**
 No. The Wails desktop binary is built and distributed exactly as before. The container path is purely additive — none of the existing build scripts or release workflows are touched.
@@ -805,5 +805,5 @@ Watch `deploy/helm/omnillm-studio/Chart.yaml` `version`. Bumps signal template-s
 | Dockerfiles | [`deploy/docker/`](../deploy/docker/) |
 | Local docker-compose | [`deploy/docker/docker-compose.yaml`](../deploy/docker/docker-compose.yaml) |
 | CI workflow (images + helm lint) | [`.github/workflows/container.yml`](../.github/workflows/container.yml) |
-| Design doc / status log | [`docs/internal_docs/Kubernetes_Helm_Plan.md`](internal_docs/Kubernetes_Helm_Plan.md) |
+| Outstanding work | [Master plan](MASTER_PLAN.md) |
 | Wails / web release workflow (untouched) | [`.github/workflows/release.yml`](../.github/workflows/release.yml) |

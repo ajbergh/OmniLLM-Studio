@@ -80,4 +80,4 @@ cd backend
 go test -run '^$' -bench BenchmarkVectorIndexes -benchmem ./internal/rag
 ```
 
-See [RAG modernization status](RAG_MODERNIZATION_STATUS.md) and [RAG validation](RAG_BACKEND_VALIDATION.md) for branch-specific completion and validation results.
+Historical [implementation status](archive/completed/RAG_MODERNIZATION_STATUS.md) and [validation evidence](archive/completed/RAG_BACKEND_VALIDATION.md) are retained for the completed branch checkpoint.
