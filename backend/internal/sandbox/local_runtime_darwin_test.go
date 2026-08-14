@@ -58,13 +58,14 @@ func TestDarwinLocalRuntimeReadOnlyWorkspaceDeniesHostReadsWritesAndNetwork(t *t
 		t.Fatalf("read-only workspace write unexpectedly succeeded: %#v", result)
 	}
 
+	const hostSecret = "OMNILLM-DARWIN-HOST-SECRET-CONTENT"
 	outsideRoot := t.TempDir()
-	outsidePath := filepath.Join(outsideRoot, "host-secret.txt")
-	if err := os.WriteFile(outsidePath, []byte("host-secret\n"), 0o600); err != nil {
+	outsidePath := filepath.Join(outsideRoot, "outside.txt")
+	if err := os.WriteFile(outsidePath, []byte(hostSecret+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	result = execDarwinRuntimeHelper(t, runtime, runtimeID, "read", outsidePath)
-	if result.ExitCode == 0 || strings.Contains(result.Stdout, "host-secret") {
+	if result.ExitCode == 0 || strings.Contains(result.Stdout, hostSecret) {
 		t.Fatalf("host read outside granted roots unexpectedly succeeded: %#v", result)
 	}
 
