@@ -36,7 +36,9 @@ func darwinSeatbeltProfile(writeRoots []string) (string, error) {
 // darwinSeatbeltRuntimeProfile builds the Phase 13B runtime profile. Unlike the
 // Phase 13A primitive proof, file reads are allowed only beneath explicit,
 // canonicalized system/session roots and writes only beneath explicit session
-// roots. Network remains denied because no network operation is granted.
+// roots. Parent path components receive metadata-only traversal so the kernel
+// can resolve those granted roots without granting sibling file contents.
+// Network remains denied because no network operation is granted.
 func darwinSeatbeltRuntimeProfile(readRoots, writeRoots []string) (string, error) {
 	reads, err := darwinCanonicalSeatbeltDirectories("read", readRoots)
 	if err != nil {
@@ -52,6 +54,11 @@ func darwinSeatbeltRuntimeProfile(readRoots, writeRoots []string) (string, error
 
 	var profile strings.Builder
 	darwinWriteSeatbeltBase(&profile)
+	for _, ancestor := range darwinSeatbeltPathAncestors(append(append([]string(nil), reads...), writes...)) {
+		profile.WriteString("(allow file-read-metadata (literal ")
+		profile.WriteString(strconv.Quote(ancestor))
+		profile.WriteString("))\n")
+	}
 	for _, root := range reads {
 		profile.WriteString("(allow file-read* (subpath ")
 		profile.WriteString(strconv.Quote(root))
@@ -93,6 +100,26 @@ func darwinCanonicalSeatbeltDirectories(kind string, roots []string) ([]string, 
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func darwinSeatbeltPathAncestors(roots []string) []string {
+	seen := make(map[string]struct{})
+	for _, root := range roots {
+		root = filepath.Clean(root)
+		for parent := filepath.Dir(root); ; parent = filepath.Dir(parent) {
+			seen[parent] = struct{}{}
+			next := filepath.Dir(parent)
+			if next == parent {
+				break
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for root := range seen {
+		out = append(out, root)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func darwinWriteSeatbeltBase(profile *strings.Builder) {
