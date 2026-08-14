@@ -71,7 +71,7 @@ Protocol-v2 Python and JavaScript shortcuts remain fail closed until an AppConta
 
 macOS Phase 13 uses the fixed system `/usr/bin/sandbox-exec` launcher and explicit Seatbelt profiles.
 
-Phase 13A proved the native primitive. Phase 13B adds the first-party protocol-v2 Darwin local runtime with:
+Phase 13A proved the native primitive. Phase 13B, merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`, adds the first-party protocol-v2 Darwin local runtime with:
 
 - per-session canonical workspace/home/tmp roots;
 - no mount or one trusted `read_only` workspace mount;
@@ -86,7 +86,7 @@ Phase 13A proved the native primitive. Phase 13B adds the first-party protocol-v
 - caller-known execution IDs and explicit cancellation;
 - process-group teardown for ordinary descendants.
 
-The Darwin runtime truthfully reports `process_tree_isolation=false` until Phase 13D tests or implements containment for hostile descendants that detach into an independent process group/session. Destination allowlists and memory/CPU/PID/disk quotas also remain unadvertised.
+The Darwin runtime truthfully reports `process_tree_isolation=false`. Phase 13D adversarial evidence confirms that a deliberately `setsid`-detached descendant may outlive process-group cancellation while retaining Seatbelt filesystem/network confinement. Destination allowlists and memory/CPU/PID/disk quotas also remain unadvertised.
 
 ## Persistent plugins and stdio MCP
 
@@ -120,7 +120,7 @@ OMNILLM_EXTENSION_SANDBOX_MODE=auto|required|off
 
 ### macOS — Phase 13C
 
-The Phase 13C implementation adds a Darwin `platformExtensionCommandContext` backed by the same fixed native Seatbelt primitive proven in 13A/13B.
+PR #164 adds a Darwin `platformExtensionCommandContext` backed by the same fixed native Seatbelt primitive proven in 13A/13B.
 
 When `/usr/bin/sandbox-exec` is available:
 
@@ -136,11 +136,12 @@ When `/usr/bin/sandbox-exec` is available:
 - ambient backend secrets are not inherited;
 - the existing `OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true` override remains a transitional explicit operator choice for configured secret-bearing values; it does not alter network denial;
 - streaming stdin/stdout/stderr remains available through the shared `CommandProcess` lifecycle;
-- context cancellation and explicit kill terminate the ordinary process group before scratch cleanup.
+- context cancellation and explicit kill terminate the ordinary process group before scratch cleanup;
+- scratch cleanup retains the original temporary path even if canonicalization fails, avoiding a cleanup leak on a failed launch.
 
-As with the Phase 13B runtime, Phase 13C does not claim containment for an adversarial descendant that successfully detaches into an independent process group/session. That remains Phase 13D assurance work.
+As with the Phase 13B runtime, Phase 13C does not claim authoritative teardown for an adversarial descendant that successfully detaches into an independent process group/session.
 
-Phase 13C is not complete until its exact final PR head passes native `macos-latest` extension lifecycle/confinement tests plus applicable repository gates.
+The initial stacked Phase 13C implementation passed native `macos-latest` extension lifecycle/confinement tests. After #162 merged, #164 was normalized to a clean seven-file delta from current `main`; its exact normalized head must pass native extension assurance plus applicable repository gates before merge.
 
 ## Extension environment policy
 
@@ -176,6 +177,6 @@ Windows Phase 12 completed through:
 
 PR #149 final head `8f4ee1b7de5d3ea6203c44089dadfae4fd6d30cb` passed Quality Gate, Security Scan, native Windows sandbox/plugin/desktop checks, backend format/vet/tests/race, Chromium, frontend, Helm, dependency audit, both CodeQL lanes, and frontend/backend `linux/amd64` plus `linux/arm64` container builds before squash merge as `65bf1cd807b9cd94a2e7b62e653c9057366c6e8b`.
 
-macOS Phase 13A merged in PR #159. Phase 13B is tracked in PR #162 and Phase 13C is tracked on the follow-on persistent-extension branch/PR. Their phase documents record exact native evidence and completion status.
+macOS Phase 13A merged in PR #159. Phase 13B passed native macOS runtime assurance and repository gates and merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`. Phase 13C is in final validation in PR #164. Follow-on Phase 13D adversarial assurance is tracked in draft PR #166 and its initial stacked native adversarial suite is green.
 
 Cross-compilation alone is never considered platform-confinement evidence.
