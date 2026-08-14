@@ -28,14 +28,14 @@ type GitHubPullRequestWorkflowJobsReader interface {
 // the exact pull-request head. It intentionally omits provider object IDs, URLs,
 // logs, artifacts, runner names, and output text.
 type GitHubPullRequestWorkflowJobsResult struct {
-	Remote        string                    `json:"remote"`
-	Repository    string                    `json:"repository"`
-	PullRequest   int                       `json:"pull_request"`
-	Head          string                    `json:"head"`
-	WorkflowRuns  []GitHubWorkflowRunResult `json:"workflow_runs"`
-	RunsTruncated bool                      `json:"runs_truncated,omitempty"`
-	JobsTruncated bool                      `json:"jobs_truncated,omitempty"`
-	StepsTruncated bool                     `json:"steps_truncated,omitempty"`
+	Remote         string                    `json:"remote"`
+	Repository     string                    `json:"repository"`
+	PullRequest    int                       `json:"pull_request"`
+	Head           string                    `json:"head"`
+	WorkflowRuns   []GitHubWorkflowRunResult `json:"workflow_runs"`
+	RunsTruncated  bool                      `json:"runs_truncated,omitempty"`
+	JobsTruncated  bool                      `json:"jobs_truncated,omitempty"`
+	StepsTruncated bool                      `json:"steps_truncated,omitempty"`
 }
 
 // GitHubWorkflowRunResult is bounded untrusted metadata for one Actions run.
@@ -151,6 +151,7 @@ func (s *RemoteService) GetPullRequestWorkflowJobs(ctx context.Context, remoteID
 		}
 		if totalJobs >= maxGitHubWorkflowJobsTotal {
 			jobsTruncated = true
+			runsTruncated = true
 			break
 		}
 
