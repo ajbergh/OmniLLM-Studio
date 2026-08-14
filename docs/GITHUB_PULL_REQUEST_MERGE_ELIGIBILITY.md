@@ -2,13 +2,13 @@
 
 Phase M3A adds `github_get_pull_request_merge_eligibility`, a bounded **read-only** evidence tool for deciding whether the current hosted state of one configured GitHub pull request satisfies the merge policy that OmniLLM-Studio can prove.
 
-M3A does not merge a pull request, choose a merge method, delete a branch, change repository policy, or grant merge authority. Every result returns:
+M3A itself does not merge a pull request, choose a merge method, delete a branch, change repository policy, or grant merge authority. Every M3A result returns:
 
 ```text
 direct_merge_supported = false
 ```
 
-The future side-effecting merge slice is Phase M3B. Any older generic `M3` wording in the merge design refers to that M3B mutation boundary; M3A remains read-only.
+Phase M3B is now implemented separately as the critical-risk `github_merge_pull_request` mutation. M3B consumes a **fresh** M3A result internally immediately before mutation; it does not change M3A's read-only result contract or turn a previously displayed M3A result into authorization.
 
 ## Operator and model boundary
 
@@ -99,7 +99,7 @@ Until OmniLLM-Studio has a bounded actor-aware source that can prove that relati
 last_push_approval_evidence_unavailable
 ```
 
-This is intentional fail-closed behavior.
+This is intentional fail-closed behavior. Because M3B requires a complete and eligible fresh M3A result, repositories whose active policy requires this unavailable proof also remain unsupported for guarded direct merge.
 
 ### Review-thread resolution
 
@@ -150,23 +150,41 @@ Current M3A safety bounds include:
 
 The implementation intentionally prefers a false negative or incomplete result over silently widening one of these bounds into an authorization decision.
 
-## M3B handoff
+## M3B guarded merge integration
 
-A future `github_merge_pull_request` mutation must be separately gated and high-risk. It must not treat a previously displayed M3A result as a durable authorization token.
+`github_merge_pull_request` is implemented as a separate critical-risk mutation with independent operator authorization:
 
-Immediately before its one-shot merge request, M3B must:
+```text
+OMNILLM_GITHUB_PULL_REQUEST_MERGE_ENABLED=true
+```
 
-1. bind the configured repository/credential and exact user-reviewed `expected_head`;
-2. run M3A again for the PR;
-3. require `eligibility_complete=true` and `eligible=true`;
-4. require the returned head to equal `expected_head` and the returned base to remain the configured default branch;
-5. require the operator-configured merge method to remain allowed by the fresh normalized policy;
-6. refuse merge-queue, last-push-dependent, hidden, truncated, ambiguous, or otherwise unsupported evidence;
-7. issue exactly one fixed GitHub merge request with the exact-head server-side SHA precondition;
-8. never delete the source branch implicitly;
-9. never automatically retry an ambiguous network/provider outcome without first reinspecting hosted state and obtaining a new complete preflight/approval.
+The configured remote must also enable merge, retain pull-request read access, and choose an operator-controlled merge method:
 
-M3B merge authority must be independent from PR read/create/reply/thread-resolution/ready gates, local Git write access, remote Git push access, administrator status, and provider `viewerCan*` fields.
+```json
+{
+  "allow_pull_request_read": true,
+  "allow_pull_request_merge": true,
+  "pull_request_merge_method": "squash"
+}
+```
+
+The model-facing M3B arguments are limited to configured `remote`, positive PR `number`, and exact reviewed `expected_head`.
+
+Immediately before its one-shot merge request, M3B:
+
+1. binds the configured repository/credential and exact user-reviewed `expected_head`;
+2. runs M3A again for the PR;
+3. requires `eligibility_complete=true` and `eligible=true`;
+4. requires the fresh M3A head to equal `expected_head` and the base to remain the verified repository default branch;
+5. requires the operator-configured merge method to remain allowed by the fresh normalized policy;
+6. therefore refuses merge-queue, last-push-dependent, hidden, truncated, ambiguous, stale, or otherwise unsupported evidence through the fail-closed M3A/M2 path;
+7. issues exactly one fixed GitHub merge request with the exact-head server-side SHA precondition;
+8. never deletes the source branch implicitly;
+9. never automatically submits a second merge request after an ambiguous network/provider outcome.
+
+For an ambiguous mutation outcome, M3B performs one bounded hosted-state reinspection and reports success only when the merged PR can be confirmed against the expected head/base and a valid merge commit. Otherwise the caller must reinspect hosted state before considering another merge attempt.
+
+M3B merge authority remains independent from PR read/create/reply/thread-resolution/ready gates, local Git write access, remote Git push access, administrator status, and provider `viewerCan*` fields.
 
 ## Validation coverage
 
@@ -184,6 +202,8 @@ M3A tests cover the positive composed M1 → M2 → M3A path and fail-closed cas
 - strict `{remote, number}` tool arguments;
 - read-only low-risk tool metadata;
 - registration only under the independent PR-read gate;
-- `direct_merge_supported=false` for every result.
+- `direct_merge_supported=false` for every M3A result.
 
-The exact final PR head must still pass the repository-wide formatting, vet, backend unit/integration/race, frontend lint/unit/build, Windows/Helm/Playwright, Security Scan, and backend/frontend container gates before M3A is merged.
+M3B adds focused coverage for independent merge gates, strict `{remote, number, expected_head}` arguments, fresh eligibility enforcement, exact-head/default-base binding, configured merge-method intersection, one-shot mutation behavior, ambiguous-outcome reinspection, no implicit branch deletion, and independence from unrelated Git/GitHub mutation permissions.
+
+Changes to either surface must pass the repository-wide formatting, vet, backend unit/integration/race, frontend lint/unit/build, Windows/Helm/Playwright, Security Scan, and applicable backend/frontend container gates on the exact final head.
