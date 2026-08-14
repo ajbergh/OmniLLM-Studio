@@ -1,12 +1,12 @@
 # Agent Sandbox Phase 13 — macOS Native Confinement — August 2026
 
-> **Status:** IN PROGRESS — 13A merged; 13B at final merge gate in PR #162; 13C implementation under native validation
+> **Status:** IN PROGRESS — 13A and 13B merged; 13C implementation is in final exact-head validation; 13D adversarial assurance is staged in follow-on PR #166
 >
 > Phase 13 is intentionally split into native-evidence slices. Controls are advertised only after the first-party implementation enforces them and native macOS CI proves the behavior.
 
 ## Objective
 
-Bring macOS to the same truthful confinement standard used for Linux and Windows. Missing primitives and unsupported requested controls fail closed. A normal process-tree behavior test is not enough to advertise adversarial process-tree isolation; that remains a later assurance item.
+Bring macOS to the same truthful confinement standard used for Linux and Windows. Missing primitives and unsupported requested controls fail closed. A normal process-tree behavior test is not enough to advertise adversarial process-tree isolation; that remains an explicit limitation unless a stronger native teardown primitive is implemented and proven.
 
 ## Phase 13A — Seatbelt foundation — merged in PR #159
 
@@ -26,7 +26,7 @@ It proved on `macos-latest` that a default-deny Seatbelt profile can:
 
 13A intentionally allowed broad host reads for compatibility and therefore did not register a Darwin `NewLocalRuntime` or advertise filesystem isolation.
 
-## Phase 13B — first-party local runtime — PR #162 merge gate
+## Phase 13B — first-party local runtime — merged in PR #162
 
 Phase 13B wires Darwin into the protocol-v2 local runtime instead of the unsupported-platform stub.
 
@@ -120,7 +120,7 @@ Execution uses:
 - process-group cancellation for ordinary descendants;
 - explicit teardown wait before session deletion.
 
-Normal descendant cancellation is tested, but `ProcessTreeIsolation` remains **false** because a hostile descendant may attempt to detach into an independent process group/session. Phase 13D must resolve or formally constrain that case before the capability can be advertised.
+Normal descendant cancellation is tested, but `ProcessTreeIsolation` remains **false** because a hostile descendant may detach into an independent process group/session.
 
 ### Truthful capabilities in 13B
 
@@ -140,13 +140,11 @@ Any `CreateRequest.Requirements` demanding one of the unsupported controls there
 
 ### Native 13B assurance
 
-A dedicated `macOS Sandbox Runtime Assurance` workflow runs on `macos-latest` and executes both the 13A Seatbelt primitive suite and the 13B `TestDarwinLocalRuntime*` suite.
+The dedicated `macOS Sandbox Runtime Assurance` workflow runs on `macos-latest` and covers truthful capability reporting, allowed staged reads, denied host reads/workspace writes/network, ephemeral workspace persistence, output bounds, ambient-secret non-inheritance, environment rejection, caller-known cancellation, ordinary descendant termination, unsafe staging rejection, mount policy, and executable policy.
 
-The suite covers truthful capability reporting, allowed staged reads, denied host reads/workspace writes/network, ephemeral workspace persistence, output bounds, ambient-secret non-inheritance, environment rejection, caller-known cancellation, ordinary descendant termination, unsafe staging rejection, mount policy, and executable policy.
+PR #162's exact final head passed native macOS runtime assurance, Quality Gate, Security Scan, Helm validation, applicable frontend/backend container validation, and final review/diff checks before squash merge as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`.
 
-The current PR #162 final-candidate head has passed this native suite. **13B is not complete until the same exact head also clears the repository Quality Gate, Security Scan, applicable container validation, and final review/diff checks before merge.**
-
-## Phase 13C — persistent extension confinement — implementation in progress
+## Phase 13C — persistent extension confinement — PR #164 final validation
 
 Phase 13C adds a Darwin-specific `platformExtensionCommandContext` without changing MCP/plugin callers or the shared `CommandProcess` streaming lifecycle.
 
@@ -198,7 +196,9 @@ One extension's scratch/home authority is not added to another extension's profi
 
 The Darwin extension process preserves streaming stdin/stdout/stderr and uses a dedicated process group so ordinary descendants are terminated on context cancellation or explicit `Kill` before the scratch root is removed.
 
-As with 13B, this ordinary descendant behavior does **not** justify a broader process-tree confinement claim against deliberately detached sessions. Phase 13D owns that adversarial requirement.
+The scratch cleanup path is retained independently from its canonicalized Seatbelt path so a failure while resolving the newly created temporary root cannot orphan the original directory.
+
+As with 13B, this ordinary descendant behavior does **not** justify a broader process-tree confinement claim against deliberately detached sessions.
 
 ### Native 13C assurance
 
@@ -216,22 +216,22 @@ A dedicated `macOS Extension Sandbox Assurance` workflow runs on `macos-latest` 
 - context cancellation and ordinary descendant teardown;
 - continued explicit `off` compatibility behavior.
 
-**13C is not complete until the exact final PR head passes this native suite plus repository Quality, Security, applicable container, and final review/diff checks.**
+The initial stacked 13C implementation passed its native macOS extension assurance. After #162 merged, #164 was rebuilt as a clean seven-file delta from current `main`; its exact normalized final-candidate head must pass the native suite plus Quality, Security, applicable container/Helm, and final review/diff checks before merge.
 
-## Phase 13D — adversarial assurance and completion review
+## Phase 13D — adversarial assurance and completion review — draft PR #166
 
-Still required:
+The follow-on 13D branch adds direct adversarial evidence for:
 
-- path-component/symlink/rename escape attempts around session roots;
-- workspace-source mutation races beyond the current copy-time identity checks;
-- writable-root aliasing/canonicalization attacks;
+- deterministic workspace-source identity swaps between observation and open;
+- writable-root symlink alias attempts against unrelated host paths;
 - cross-runtime authority reuse attempts;
-- detached process/session escape attempts;
-- cancellation, timeout, and forced teardown under adversarial descendants;
-- persistent-extension equivalents;
-- exact final-head Quality, Security, native macOS, race/Playwright, Helm, and applicable container validation.
+- deliberately detached runtime descendants;
+- deliberately detached persistent-extension descendants;
+- preservation of Seatbelt filesystem/network confinement after `setsid` detachment.
 
-Phase 13 may be marked complete only after both arbitrary sandbox execution and persistent extension processes have native macOS confinement evidence and the final capability report matches that evidence.
+The first native 13D adversarial run passed on its stacked implementation head. It also demonstrated the truthful limitation: a deliberately detached descendant can outlive ordinary process-group cancellation/root kill while remaining Seatbelt-confined. Therefore `process_tree_isolation` must remain false unless a stronger native teardown mechanism is implemented and proven.
+
+PR #166 must be normalized onto the merged 13C result and pass exact final-head repository/native gates before Phase 13 is closed.
 
 ## Known platform constraint
 
