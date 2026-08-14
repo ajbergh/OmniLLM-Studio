@@ -17,6 +17,7 @@ type Session struct {
 	UserID         string
 	BrowserContext *rod.Browser
 	Page           *rod.Page
+	RequestRouter  *rod.HijackRouter
 	CreatedAt      time.Time
 	LastUsedAt     time.Time
 	CurrentURL     string

@@ -1,11 +1,10 @@
 # Agent Sandbox — Current Documentation Index (August 2026)
 
-Use these files for the current sandbox implementation state after Windows Phase 12 and during macOS Phase 13:
+Use these files for the current sandbox implementation state after Windows Phase 12 and completed macOS Phase 13:
 
 - `AGENT_SANDBOX_ROADMAP_CURRENT_2026-08.md` — active phase status, open enforcement gaps, and execution order.
 - `SANDBOX_RUNTIME_CURRENT_2026-08.md` — current runtime and persistent-extension operator behavior.
 - `AGENT_SANDBOX_ARCHITECTURE_CURRENT_2026-08.md` — implemented Broker/runtime/managed-process architecture and platform boundaries.
-- `AGENT_SANDBOX_PHASE13D_MACOS_ASSURANCE_2026-08.md` — active macOS adversarial-assurance record.
 - `AGENT_SANDBOX_PHASE13_MACOS_2026-08.md` — macOS native-confinement implementation and validation record.
 - `AGENT_SANDBOX_PHASE13D_MACOS_ASSURANCE_2026-08.md` — macOS adversarial-assurance evidence and explicit teardown limitation.
 - `AGENT_SANDBOX_THREAT_MODEL.md` — threat model and adversarial acceptance principles.
@@ -22,7 +21,7 @@ macOS Phase 13A is complete in PR #159, merged as `ce7d880ab39402671a6f39407ea93
 
 macOS Phase 13B merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`. The first-party Darwin local runtime uses per-session Seatbelt confinement, detached read-only workspace staging, narrow filesystem roots, default network denial, bounded execution output/wall time, sanitized environment construction, and the caller-known cancellation contract.
 
-macOS Phase 13C merged in PR #164 as `44f410793a70444963ec1eecb989b15df159b5f1`, adding native Seatbelt confinement for persistent stdio MCP/plugin processes. Phase 13D adversarial assurance is in final exact-head validation in rebased PR #166. It proves confinement survives deliberately detached descendants while preserving the truthful `process_tree_isolation=false` capability report.
+macOS Phase 13C merged in PR #164 as `44f410793a70444963ec1eecb989b15df159b5f1`, adding native Seatbelt confinement for persistent stdio MCP/plugin processes. Phase 13D adversarial assurance merged in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`, completing Phase 13. It proves confinement survives deliberately detached descendants while preserving the truthful `process_tree_isolation=false` capability report.
 
 Still open after Phase 13:
 

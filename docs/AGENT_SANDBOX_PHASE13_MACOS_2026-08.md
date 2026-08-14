@@ -1,6 +1,6 @@
 # Agent Sandbox Phase 13 — macOS Native Confinement — August 2026
 
-> **Status:** IN PROGRESS — 13A, 13B, and 13C merged; rebased 13D adversarial assurance is in final exact-head validation in PR #166
+> **Status:** COMPLETE — 13A through 13D merged; final adversarial assurance landed in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`
 >
 > Phase 13 is intentionally split into native-evidence slices. Controls are advertised only after the first-party implementation enforces them and native macOS CI proves the behavior.
 
@@ -218,9 +218,9 @@ A dedicated `macOS Extension Sandbox Assurance` workflow runs on `macos-latest` 
 
 PR #164's exact final head passed native extension/runtime assurance, Quality Gate, Security Scan, Helm and container validation, and final review/diff checks before squash merge as `44f410793a70444963ec1eecb989b15df159b5f1`.
 
-## Phase 13D — adversarial assurance and completion review — rebased PR #166 final validation
+## Phase 13D — adversarial assurance and completion review — merged in PR #166
 
-The follow-on 13D branch adds direct adversarial evidence for:
+Phase 13D adds direct adversarial evidence for:
 
 - deterministic workspace-source identity swaps between observation and open;
 - writable-root symlink alias attempts against unrelated host paths;
@@ -231,7 +231,7 @@ The follow-on 13D branch adds direct adversarial evidence for:
 
 The first native 13D adversarial run passed on its stacked implementation head. It also demonstrated the truthful limitation: a deliberately detached descendant can outlive ordinary process-group cancellation/root kill while remaining Seatbelt-confined. Therefore `process_tree_isolation` must remain false unless a stronger native teardown mechanism is implemented and proven.
 
-PR #166 is rebuilt from the merged 13C result and must pass exact final-head repository/native gates before Phase 13 is closed.
+PR #166 passed its exact final-head repository/native gates and merged as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`, closing Phase 13. The detached-process limitation remains documented and `process_tree_isolation` remains false.
 
 ## Known platform constraint
 

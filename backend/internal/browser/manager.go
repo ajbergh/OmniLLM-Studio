@@ -22,7 +22,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const browserOperationTimeout = 45 * time.Second
+const (
+	browserOperationTimeout         = 45 * time.Second
+	browserRequestValidationTimeout = 5 * time.Second
+)
 
 // NavigateOptions configures a browser navigation.
 type NavigateOptions struct {
@@ -82,6 +85,7 @@ type Manager struct {
 	launcher   *launcher.Launcher
 	profileDir string
 	sessions   map[string]*Session
+	validate   func(context.Context, string) error
 
 	initOnce sync.Once
 	initErr  error
@@ -92,6 +96,7 @@ type Manager struct {
 type pageLease struct {
 	page           *rod.Page
 	browserContext *rod.Browser
+	requestRouter  *rod.HijackRouter
 	session        *Session
 	ephemeral      bool
 	releaseOnce    sync.Once
@@ -106,6 +111,7 @@ func (l *pageLease) release() {
 			l.session.opMu.Unlock()
 		}
 		if l.ephemeral {
+			stopRequestRouter(l.requestRouter)
 			_ = l.page.Close()
 			disposeBrowserContext(l.browserContext)
 		}
@@ -120,6 +126,7 @@ func NewManager(cfg *config.Config, repo *repository.BrowserSessionRepo) *Manage
 		cfg:      cfg,
 		repo:     repo,
 		sessions: make(map[string]*Session),
+		validate: validateURL,
 		stopCh:   make(chan struct{}),
 	}
 }
@@ -150,7 +157,7 @@ func (m *Manager) NavigatePage(ctx context.Context, opts NavigateOptions) (*Navi
 	if err := m.ensureEnabled(); err != nil {
 		return nil, err
 	}
-	if err := validateURL(ctx, opts.URL); err != nil {
+	if err := m.validateRequestURL(ctx, opts.URL); err != nil {
 		return nil, err
 	}
 	lease, err := m.pageForNavigation(ctx, opts.UserID, opts.SessionID)
@@ -225,7 +232,7 @@ func (m *Manager) Screenshot(ctx context.Context, opts ScreenshotOptions) ([]byt
 		return nil, "", "", fmt.Errorf("url or session_id is required")
 	}
 	if opts.URL != "" {
-		if err := validateURL(ctx, opts.URL); err != nil {
+		if err := m.validateRequestURL(ctx, opts.URL); err != nil {
 			return nil, "", "", err
 		}
 	}
@@ -319,7 +326,7 @@ func (m *Manager) PDFSnapshot(ctx context.Context, opts PDFOptions) ([]byte, str
 		return nil, "", "", fmt.Errorf("url or session_id is required")
 	}
 	if opts.URL != "" {
-		if err := validateURL(ctx, opts.URL); err != nil {
+		if err := m.validateRequestURL(ctx, opts.URL); err != nil {
 			return nil, "", "", err
 		}
 	}
@@ -353,19 +360,21 @@ func (m *Manager) CreateSession(ctx context.Context, userID string) (*models.Bro
 	if err := m.ensureEnabled(); err != nil {
 		return nil, err
 	}
-	browserContext, page, err := m.newIsolatedPage(ctx)
+	browserContext, page, requestRouter, err := m.newIsolatedPage(ctx)
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
 	session := &Session{
 		ID: "sess_" + uuid.New().String(), UserID: userID,
-		BrowserContext: browserContext, Page: page, CreatedAt: now, LastUsedAt: now,
+		BrowserContext: browserContext, Page: page, RequestRouter: requestRouter,
+		CreatedAt: now, LastUsedAt: now,
 	}
 
 	m.mu.Lock()
 	if m.cfg.BrowserMaxSessions > 0 && m.countSessionsForUserLocked(userID) >= m.cfg.BrowserMaxSessions {
 		m.mu.Unlock()
+		stopRequestRouter(requestRouter)
 		_ = page.Close()
 		disposeBrowserContext(browserContext)
 		return nil, fmt.Errorf("maximum browser sessions reached for user (%d)", m.cfg.BrowserMaxSessions)
@@ -448,6 +457,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 
 		for _, session := range sessions {
 			session.opMu.Lock()
+			stopRequestRouter(session.RequestRouter)
 			_ = session.Page.Close()
 			disposeBrowserContext(session.BrowserContext)
 			session.opMu.Unlock()
@@ -480,13 +490,13 @@ func (m *Manager) pageForNavigation(ctx context.Context, userID, sessionID strin
 			return nil, err
 		}
 		session.opMu.Lock()
-		return &pageLease{page: session.Page, browserContext: session.BrowserContext, session: session}, nil
+		return &pageLease{page: session.Page, browserContext: session.BrowserContext, requestRouter: session.RequestRouter, session: session}, nil
 	}
-	browserContext, page, err := m.newIsolatedPage(ctx)
+	browserContext, page, requestRouter, err := m.newIsolatedPage(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &pageLease{page: page, browserContext: browserContext, ephemeral: true}, nil
+	return &pageLease{page: page, browserContext: browserContext, requestRouter: requestRouter, ephemeral: true}, nil
 }
 
 func (m *Manager) getSession(userID, id string) (*Session, error) {
@@ -509,6 +519,7 @@ func (m *Manager) closeSessionInternal(id string) error {
 	}
 	session.opMu.Lock()
 	defer session.opMu.Unlock()
+	stopRequestRouter(session.RequestRouter)
 	pageErr := session.Page.Close()
 	disposeBrowserContext(session.BrowserContext)
 	return pageErr
@@ -627,26 +638,67 @@ func (m *Manager) ensureBrowser(ctx context.Context) (*rod.Browser, error) {
 	return browser, nil
 }
 
-func (m *Manager) newIsolatedPage(ctx context.Context) (*rod.Browser, *rod.Page, error) {
+func (m *Manager) newIsolatedPage(ctx context.Context) (*rod.Browser, *rod.Page, *rod.HijackRouter, error) {
 	browser, err := m.ensureBrowser(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	browserContext, err := browser.Incognito()
 	if err != nil {
-		return nil, nil, fmt.Errorf("create isolated browser context: %w", err)
+		return nil, nil, nil, fmt.Errorf("create isolated browser context: %w", err)
 	}
 	page, err := stealth.Page(browserContext)
 	if err != nil {
 		disposeBrowserContext(browserContext)
-		return nil, nil, fmt.Errorf("create stealth page: %w", err)
+		return nil, nil, nil, fmt.Errorf("create stealth page: %w", err)
 	}
 	if err := applyStealthProfile(page.Timeout(browserOperationTimeout)); err != nil {
 		_ = page.Close()
 		disposeBrowserContext(browserContext)
-		return nil, nil, fmt.Errorf("apply browser profile: %w", err)
+		return nil, nil, nil, fmt.Errorf("apply browser profile: %w", err)
 	}
-	return browserContext, page, nil
+	requestRouter, err := m.startRequestPerimeter(page)
+	if err != nil {
+		_ = page.Close()
+		disposeBrowserContext(browserContext)
+		return nil, nil, nil, err
+	}
+	return browserContext, page, requestRouter, nil
+}
+
+func (m *Manager) startRequestPerimeter(page *rod.Page) (*rod.HijackRouter, error) {
+	if err := (proto.NetworkSetBypassServiceWorker{Bypass: true}).Call(page); err != nil {
+		return nil, fmt.Errorf("bypass service-worker request handling: %w", err)
+	}
+	router := page.HijackRequests()
+	if err := router.Add("*", proto.NetworkResourceType(""), func(hijack *rod.Hijack) {
+		requestCtx, cancel := context.WithTimeout(context.Background(), browserRequestValidationTimeout)
+		defer cancel()
+		if err := m.validateRequestURL(requestCtx, hijack.Request.URL().String()); err != nil {
+			hijack.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+			return
+		}
+		hijack.ContinueRequest(&proto.FetchContinueRequest{})
+	}); err != nil {
+		stopRequestRouter(router)
+		return nil, fmt.Errorf("install browser request perimeter: %w", err)
+	}
+	go router.Run()
+	return router, nil
+}
+
+func (m *Manager) validateRequestURL(ctx context.Context, raw string) error {
+	validator := validateURL
+	if m != nil && m.validate != nil {
+		validator = m.validate
+	}
+	return validator(ctx, raw)
+}
+
+func stopRequestRouter(router *rod.HijackRouter) {
+	if router != nil {
+		_ = router.Stop()
+	}
 }
 
 func disposeBrowserContext(browserContext *rod.Browser) {
@@ -661,7 +713,7 @@ func (m *Manager) validatePageDestination(ctx context.Context, lease *pageLease,
 	if strings.HasPrefix(finalURL, "about:blank") && fallback == "" {
 		return finalURL, nil
 	}
-	if err := validateURL(ctx, finalURL); err != nil {
+	if err := m.validateRequestURL(ctx, finalURL); err != nil {
 		if lease.session != nil {
 			id := lease.session.ID
 			// The current operation owns opMu. Remove the session now; release()
@@ -672,6 +724,7 @@ func (m *Manager) validatePageDestination(ctx context.Context, lease *pageLease,
 			go func(session *Session) {
 				session.opMu.Lock()
 				defer session.opMu.Unlock()
+				stopRequestRouter(session.RequestRouter)
 				_ = session.Page.Close()
 				disposeBrowserContext(session.BrowserContext)
 				if m.repo != nil {
@@ -714,6 +767,7 @@ func (m *Manager) evictExpired() {
 	m.mu.Unlock()
 	for _, session := range expired {
 		session.opMu.Lock()
+		stopRequestRouter(session.RequestRouter)
 		_ = session.Page.Close()
 		disposeBrowserContext(session.BrowserContext)
 		session.opMu.Unlock()

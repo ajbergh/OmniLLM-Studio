@@ -2,27 +2,17 @@
 
 > **Authoritative source for outstanding engineering work.**
 >
-> Audited against repository `main` at `44f4107` on 2026-08-14. Completed initiatives and superseded plans are in [archive/README.md](archive/README.md). This document deliberately excludes completed work except where it is needed to explain a dependency.
+> Audited against repository `main` at `113a2b9` on 2026-08-14. Completed initiatives and superseded plans are in [archive/README.md](archive/README.md). This document deliberately excludes completed work except where it is needed to explain a dependency. macOS sandbox Phase 13, previously the top open item, completed in PR #166 (`d52ab16`).
 
 ## Execution order
 
-1. Complete macOS Phase 13D assurance before expanding sandbox privileges or platform claims.
+1. Close the browser request perimeter: complete and validate request-time enforcement for every browser-controlled network path.
 2. Address sandbox correctness/security gaps: path-race assurance, resource quotas, egress enforcement, and credential delivery.
-3. Resolve platform-wide data/runtime safety debt: browser subresource controls and SQLite foreign-key admission.
+3. Resolve remaining platform-wide data/runtime safety debt, beginning with SQLite foreign-key admission and cookie-session migration validation.
 4. Add durable sandbox-backed task/worker infrastructure; it depends on the sandbox hardening work above.
-5. Close verified feature reliability gaps (router and Video validation/fidelity), then consider new GitHub/URL capabilities.
-
-## P0 — macOS sandbox completion
-
-### Phase 13D native adversarial assurance
-
-- **Status:** IN PROGRESS
-- **Implemented:** Phase 13A Seatbelt foundation (#159), 13B first-party local runtime (#162), and 13C persistent stdio MCP/plugin confinement (#164, `44f4107`). Darwin deliberately reports `process_tree_isolation=false`.
-- **Remaining:** Rebase/validate/merge PR #166 on the merged 13C result; retain native tests for staging source swaps, symlink aliases, cross-runtime access, loopback denial, detached runtime/extension descendants, and cleanup. Keep the documented detached-process limitation unless stronger teardown is implemented and proven.
-- **Files:** `backend/internal/sandbox/extension_process_darwin.go`, `backend/internal/sandbox/*darwin*`, `.github/workflows/sandbox-macos-*.yml`.
-- **Dependency/risk:** #164 is merged; only exact-final-head native and repository validation is usable evidence. Seatbelt confinement continuing after `setsid` does not prove reaping of that process.
-- **Next action:** Normalize #166 to `main`, run its macOS workflow plus applicable quality/security/container gates, then update the current sandbox docs only after merge.
-- **Derived from:** `AGENT_SANDBOX_PHASE13_MACOS_2026-08.md`, `AGENT_SANDBOX_ROADMAP_CURRENT_2026-08.md`.
+5. Finish router, video, and URL-context correctness/validation work.
+6. Charter one narrow GitHub G7D capability only after higher-risk correctness work is stable.
+7. Reconsider explicitly deferred enhancements only when product demand justifies them.
 
 ## P1 — sandbox hardening and deployment
 
@@ -50,12 +40,12 @@
 
 ### Browser request perimeter
 
-- **Status:** NEEDS VALIDATION
-- **Implemented:** The headless browser uses incognito contexts, managed profiles, feature gating, navigation checks, and browser tools.
-- **Remaining:** Verify and, if absent, implement full CDP enforcement for subresources, frames, WebSockets, and service-worker traffic; ensure the navigation-level network policy cannot be bypassed by embedded requests.
-- **Files:** `backend/internal/browser/manager.go`, `backend/internal/browser/session.go`, `backend/internal/api/browser_fallback_navigator.go`.
-- **Dependency/risk:** This is a security-boundary check. The existing remediation record explicitly left it as follow-up; source review did not find a complete CDP interception path.
-- **Next action:** Produce a focused threat model and native/browser integration tests before changing browser networking behavior.
+- **Status:** IN PROGRESS
+- **Implemented:** The headless browser uses incognito contexts, managed profiles, feature gating, navigation checks, and browser tools. Request-time CDP interception now validates page/frame/subresource requests and aborts requests that fail the public HTTP(S) policy; page traffic bypasses service-worker response handling. A browser-backed fetch/subresource regression fixture is included.
+- **Remaining:** Run the new browser-backed fixture on a host/CI runner where Chromium starts successfully, then add redirect, iframe, media, and WebSocket cases; prove or close interception coverage for worker/service-worker initiated traffic; address the DNS validation-to-connect race (for example with a controlled egress proxy or address-pinned transport). Do not describe the perimeter as complete until those paths are proven.
+- **Files:** `backend/internal/browser/manager.go`, `backend/internal/browser/manager_test.go`, `backend/internal/browser/session.go`, `backend/internal/api/browser_fallback_navigator.go`.
+- **Dependency/risk:** CDP validation blocks known private/internal destinations before dispatch but does not pin Chromium's DNS result to the address validated by Go. Worker targets may have separate CDP sessions.
+- **Next action:** Add adversarial Chromium fixtures and close worker/WebSocket/DNS-rebinding coverage before enabling the browser in exposed deployments.
 - **Derived from:** archived `REMEDIATION_STATUS_2026-07-18.md`, archived `Plan-headless-Chrome-tool.md`.
 
 ### SQLite foreign-key admission

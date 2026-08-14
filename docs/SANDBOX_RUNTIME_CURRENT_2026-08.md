@@ -1,6 +1,6 @@
 # Sandbox Runtime — Current Platform Status (August 2026)
 
-This document records the current first-party sandbox and persistent-extension behavior after Windows Phase 12 and during macOS Phase 13. It supplements the older `SANDBOX_RUNTIME.md` historical snapshot.
+This document records the current first-party sandbox and persistent-extension behavior after Windows Phase 12 and completed macOS Phase 13. It supplements the older `SANDBOX_RUNTIME.md` historical snapshot.
 
 ## Shared protocol-v2 boundary
 
@@ -177,6 +177,6 @@ Windows Phase 12 completed through:
 
 PR #149 final head `8f4ee1b7de5d3ea6203c44089dadfae4fd6d30cb` passed Quality Gate, Security Scan, native Windows sandbox/plugin/desktop checks, backend format/vet/tests/race, Chromium, frontend, Helm, dependency audit, both CodeQL lanes, and frontend/backend `linux/amd64` plus `linux/arm64` container builds before squash merge as `65bf1cd807b9cd94a2e7b62e653c9057366c6e8b`.
 
-macOS Phase 13A merged in PR #159. Phase 13B passed native macOS runtime assurance and repository gates and merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`. Phase 13C merged in PR #164 as `44f410793a70444963ec1eecb989b15df159b5f1`. Rebased Phase 13D adversarial assurance is tracked in PR #166 and requires exact-head native and repository validation before Phase 13 is closed.
+macOS Phase 13A merged in PR #159. Phase 13B passed native macOS runtime assurance and repository gates and merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`. Phase 13C merged in PR #164 as `44f410793a70444963ec1eecb989b15df159b5f1`. Phase 13D adversarial assurance passed its native and repository gates and merged in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`, closing Phase 13 without changing the truthful detached-process limitation.
 
 Cross-compilation alone is never considered platform-confinement evidence.

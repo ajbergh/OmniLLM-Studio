@@ -66,7 +66,7 @@ Current first-party platform implementations:
 
 - **Linux:** Bubblewrap with an operator-prepared read-only rootfs.
 - **Windows 10+:** AppContainer plus Job Objects.
-- **macOS:** Seatbelt-backed local runtime plus persistent-extension confinement. Phase 13D adversarial assurance remains the final phase exit gate; its deliberately detached-descendant limitation keeps `process_tree_isolation=false`.
+- **macOS:** Seatbelt-backed local runtime plus persistent-extension confinement. Phase 13D adversarial assurance completed in PR #166; its deliberately detached-descendant limitation keeps `process_tree_isolation=false`.
 
 ## Persistent extension process seam
 

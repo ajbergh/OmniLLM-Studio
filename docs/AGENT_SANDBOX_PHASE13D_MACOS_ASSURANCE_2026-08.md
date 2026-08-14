@@ -1,6 +1,6 @@
 # Agent Sandbox Phase 13D — macOS Adversarial Assurance — August 2026
 
-> **Status:** IN PROGRESS — first native adversarial suite green; rebased PR #166 requires final exact-head validation on the merged Phase 13C baseline
+> **Status:** COMPLETE — merged in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17` after exact-head native and repository validation
 >
 > Phase 13D validates escape attempts and the truthful boundary of macOS process teardown. It does not upgrade capability claims merely because ordinary descendants are easy to terminate.
 
@@ -96,12 +96,8 @@ It also proves that process-group cancellation is not equivalent to authoritativ
 
 Therefore Phase 13D must **not** change `ProcessTreeIsolation` to true.
 
-## Remaining completion gates
+## Completion record
 
-Before Phase 13 can be closed:
+The Phase 13D branch was normalized onto the merged dependencies, its exact final head passed the applicable native and repository gates, and PR #166 merged as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`. Phase 13 is closed.
 
-- this Phase 13D branch must remain normalized onto the merged dependencies;
-- authoritative current roadmap/runtime docs must be reconciled to the final merged state;
-- exact final-head Quality Gate, Security Scan, macOS runtime/extension/adversarial workflows, applicable container validation, race/Playwright/Helm checks, and final review/diff checks must pass.
-
-The known detached-process teardown limitation may remain documented after Phase 13 if capability reporting stays false and no operator-facing contract claims stronger containment.
+The known detached-process teardown limitation remains active: capability reporting stays false and no operator-facing contract may claim stronger containment unless a stronger native teardown mechanism is implemented and proven.
