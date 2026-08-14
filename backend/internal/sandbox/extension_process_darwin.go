@@ -43,17 +43,17 @@ func platformExtensionCommandContext(ctx context.Context, spec ProcessSpec, mode
 	if err != nil {
 		return nil, err
 	}
-	root, err := os.MkdirTemp("", "omnillm-extension-darwin-")
+	scratchRoot, err := os.MkdirTemp("", "omnillm-extension-darwin-")
 	if err != nil {
 		return nil, fmt.Errorf("create macOS extension scratch root: %w", err)
 	}
 	cleanup := true
 	defer func() {
 		if cleanup {
-			_ = os.RemoveAll(root)
+			_ = os.RemoveAll(scratchRoot)
 		}
 	}()
-	root, err = filepath.EvalSymlinks(root)
+	root, err := filepath.EvalSymlinks(scratchRoot)
 	if err != nil {
 		return nil, fmt.Errorf("resolve macOS extension scratch root: %w", err)
 	}
