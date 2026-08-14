@@ -19,55 +19,98 @@ const darwinSandboxExecPath = "/usr/bin/sandbox-exec"
 // to prove the native Seatbelt boundary before it is wired into Runtime or
 // persistent extension composition. This foundation profile permits ordinary
 // process startup and host reads, denies network by default, and permits writes
-// only below explicitly canonicalized roots. A later phase must narrow file
-// reads before advertising filesystem isolation for the first-party runtime.
+// only below explicitly canonicalized roots. The Phase 13B runtime uses
+// darwinSeatbeltRuntimeProfile instead so host-wide reads are not granted.
 func darwinSeatbeltProfile(writeRoots []string) (string, error) {
-	roots := make([]string, 0, len(writeRoots))
-	seen := make(map[string]struct{}, len(writeRoots))
-	for _, root := range writeRoots {
+	writes, err := darwinCanonicalSeatbeltDirectories("write", writeRoots)
+	if err != nil {
+		return "", err
+	}
+	var profile strings.Builder
+	darwinWriteSeatbeltBase(&profile)
+	profile.WriteString("(allow file-read*)\n")
+	darwinWriteSeatbeltWrites(&profile, writes)
+	return profile.String(), nil
+}
+
+// darwinSeatbeltRuntimeProfile builds the Phase 13B runtime profile. Unlike the
+// Phase 13A primitive proof, file reads are allowed only beneath explicit,
+// canonicalized system/session roots and writes only beneath explicit session
+// roots. Network remains denied because no network operation is granted.
+func darwinSeatbeltRuntimeProfile(readRoots, writeRoots []string) (string, error) {
+	reads, err := darwinCanonicalSeatbeltDirectories("read", readRoots)
+	if err != nil {
+		return "", err
+	}
+	writes, err := darwinCanonicalSeatbeltDirectories("write", writeRoots)
+	if err != nil {
+		return "", err
+	}
+	if len(reads) == 0 {
+		return "", fmt.Errorf("Seatbelt runtime requires at least one read root")
+	}
+
+	var profile strings.Builder
+	darwinWriteSeatbeltBase(&profile)
+	for _, root := range reads {
+		profile.WriteString("(allow file-read* (subpath ")
+		profile.WriteString(strconv.Quote(root))
+		profile.WriteString("))\n")
+	}
+	darwinWriteSeatbeltWrites(&profile, writes)
+	return profile.String(), nil
+}
+
+func darwinCanonicalSeatbeltDirectories(kind string, roots []string) ([]string, error) {
+	out := make([]string, 0, len(roots))
+	seen := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
 		root = strings.TrimSpace(root)
 		if root == "" {
 			continue
 		}
 		absolute, err := filepath.Abs(root)
 		if err != nil {
-			return "", fmt.Errorf("absolute Seatbelt write root: %w", err)
+			return nil, fmt.Errorf("absolute Seatbelt %s root: %w", kind, err)
 		}
 		resolved, err := filepath.EvalSymlinks(absolute)
 		if err != nil {
-			return "", fmt.Errorf("resolve Seatbelt write root: %w", err)
+			return nil, fmt.Errorf("resolve Seatbelt %s root: %w", kind, err)
 		}
 		info, err := os.Stat(resolved)
 		if err != nil {
-			return "", fmt.Errorf("inspect Seatbelt write root: %w", err)
+			return nil, fmt.Errorf("inspect Seatbelt %s root: %w", kind, err)
 		}
 		if !info.IsDir() {
-			return "", fmt.Errorf("Seatbelt write root must be a directory")
+			return nil, fmt.Errorf("Seatbelt %s root must be a directory", kind)
 		}
 		resolved = filepath.Clean(resolved)
 		if _, ok := seen[resolved]; ok {
 			continue
 		}
 		seen[resolved] = struct{}{}
-		roots = append(roots, resolved)
+		out = append(out, resolved)
 	}
-	sort.Strings(roots)
+	sort.Strings(out)
+	return out, nil
+}
 
-	var profile strings.Builder
+func darwinWriteSeatbeltBase(profile *strings.Builder) {
 	profile.WriteString("(version 1)\n")
 	profile.WriteString("(deny default)\n")
 	profile.WriteString("(allow process*)\n")
 	profile.WriteString("(allow sysctl-read)\n")
 	profile.WriteString("(allow mach-lookup)\n")
 	profile.WriteString("(allow ipc-posix-shm*)\n")
-	profile.WriteString("(allow file-read*)\n")
+}
+
+func darwinWriteSeatbeltWrites(profile *strings.Builder, roots []string) {
 	profile.WriteString("(allow file-write* (literal \"/dev/null\"))\n")
 	for _, root := range roots {
 		profile.WriteString("(allow file-write* (subpath ")
 		profile.WriteString(strconv.Quote(root))
 		profile.WriteString("))\n")
 	}
-	return profile.String(), nil
 }
 
 // darwinSeatbeltCommand constructs a command under the fixed system Seatbelt
@@ -85,7 +128,7 @@ func darwinSeatbeltCommand(ctx context.Context, profile, command string, args ..
 	if err != nil {
 		return nil, fmt.Errorf("macOS Seatbelt launcher unavailable: %w", err)
 	}
-	if !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
+	if !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
 		return nil, fmt.Errorf("macOS Seatbelt launcher is not executable")
 	}
 
