@@ -7,7 +7,8 @@ Use these files for the current sandbox implementation state after Windows Phase
 - `AGENT_SANDBOX_ARCHITECTURE_CURRENT_2026-08.md` — implemented Broker/runtime/managed-process architecture and platform boundaries.
 - `AGENT_SANDBOX_PHASE12_WINDOWS_2026-08.md` — completed Windows Phase 12 implementation and validation record.
 - `AGENT_SANDBOX_PHASE12D_WINDOWS_ASSURANCE_2026-08.md` — direct adversarial Windows assurance evidence.
-- `AGENT_SANDBOX_PHASE13_MACOS_2026-08.md` — active macOS native-confinement implementation and validation record.
+- `AGENT_SANDBOX_PHASE13_MACOS_2026-08.md` — macOS native-confinement implementation and validation record.
+- `AGENT_SANDBOX_PHASE13D_MACOS_ASSURANCE_2026-08.md` — macOS adversarial-assurance evidence and explicit teardown limitation.
 - `AGENT_SANDBOX_THREAT_MODEL.md` — threat model and adversarial acceptance principles.
 
 The older aggregate files `AGENT_SANDBOX_ROADMAP_2026-08.md`, `SANDBOX_RUNTIME.md`, and `AGENT_SANDBOX_ARCHITECTURE.md` remain useful historical design snapshots. The versioned current-state documents and this index are the authoritative references for current status.
@@ -20,12 +21,12 @@ Explicit execution cancellation addressability is complete in PR #155, merged as
 
 macOS Phase 13A is complete in PR #159, merged as `ce7d880ab39402671a6f39407ea9319418089de4`. The fixed `/usr/bin/sandbox-exec` Seatbelt primitive and native denial behavior are proven on `macos-latest`.
 
-macOS Phase 13B is implemented in PR #162 and is in final exact-head validation. The first-party Darwin local runtime now uses per-session Seatbelt confinement, detached read-only workspace staging, narrow filesystem roots, default network denial, bounded execution output/wall time, sanitized environment construction, and the caller-known cancellation contract. It deliberately does **not** advertise process-tree isolation, destination allowlists, or resource quotas that are not yet proven/enforced.
+macOS Phase 13B merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`. The first-party Darwin local runtime uses per-session Seatbelt confinement, detached read-only workspace staging, narrow filesystem roots, default network denial, bounded execution output/wall time, sanitized environment construction, and the caller-known cancellation contract.
 
-Still open after 13B:
+macOS Phase 13C merged in PR #164 as `44f410793a70444963ec1eecb989b15df159b5f1`, adding native Seatbelt confinement for persistent stdio MCP/plugin processes. Phase 13D adversarial assurance is in final exact-head validation in rebased PR #166. It proves confinement survives deliberately detached descendants while preserving the truthful `process_tree_isolation=false` capability report.
 
-- Phase 13C native confinement for persistent stdio MCP/plugin processes on macOS;
-- Phase 13D adversarial macOS assurance, including detached-process/session escape attempts and path-race pressure;
+Still open after Phase 13:
+
 - memory/CPU/PID/disk quotas where platform enforcement is not yet implemented;
 - destination-enforced egress;
 - broader workspace-registry/path-component TOCTOU assurance;
