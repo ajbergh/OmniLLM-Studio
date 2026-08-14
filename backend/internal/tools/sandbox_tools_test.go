@@ -37,7 +37,7 @@ func (r *toolSandboxRuntime) Exec(_ context.Context, _ string, request sandbox.E
 	if stdout == "" {
 		stdout = "ok"
 	}
-	return &sandbox.ExecResult{ExecutionID: "exec-1", Stdout: stdout, ExitCode: 0}, nil
+	return &sandbox.ExecResult{ExecutionID: request.ExecutionID, Stdout: stdout, ExitCode: 0}, nil
 }
 func (r *toolSandboxRuntime) Cancel(context.Context, string, string) error { return nil }
 func (r *toolSandboxRuntime) Status(context.Context, string) (*sandbox.Status, error) {

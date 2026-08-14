@@ -211,9 +211,18 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		}
 	}
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
-	executionID := "exec_" + uuid.NewString()
+	executionID, err := executionIDOrNew(request.ExecutionID)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	activeKey := runtimeID + "\x00" + executionID
 	r.mu.Lock()
+	if _, exists := r.active[activeKey]; exists {
+		r.mu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("sandbox execution id is already active")
+	}
 	r.active[activeKey] = cancel
 	r.mu.Unlock()
 	defer func() {
@@ -347,6 +356,9 @@ func runtimeWorkspaceMountArgs(session localRuntimeSession) ([]string, string, e
 }
 
 func (r *LocalRuntime) Cancel(_ context.Context, runtimeID, executionID string) error {
+	if err := validateExecutionID(executionID); err != nil {
+		return err
+	}
 	key := runtimeID + "\x00" + executionID
 	r.mu.RLock()
 	cancel, ok := r.active[key]

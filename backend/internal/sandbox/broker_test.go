@@ -10,6 +10,7 @@ import (
 type fakeRuntime struct {
 	capabilities RuntimeCapabilities
 	created      RuntimeCreateRequest
+	lastExec     ExecRequest
 	execCount    int
 	destroyCount int
 }
@@ -23,7 +24,8 @@ func (f *fakeRuntime) Create(_ context.Context, request RuntimeCreateRequest) (s
 
 func (f *fakeRuntime) Exec(_ context.Context, _ string, request ExecRequest) (*ExecResult, error) {
 	f.execCount++
-	return &ExecResult{ExecutionID: "exec-1", Stdout: request.Command, ExitCode: 0}, nil
+	f.lastExec = request
+	return &ExecResult{ExecutionID: request.ExecutionID, Stdout: request.Command, ExitCode: 0}, nil
 }
 
 func (f *fakeRuntime) Cancel(context.Context, string, string) error { return nil }

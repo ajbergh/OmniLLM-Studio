@@ -168,10 +168,25 @@ func (b *Broker) Exec(ctx context.Context, owner OwnerScope, sessionID string, r
 	if err := validateExecRequest(request); err != nil {
 		return nil, err
 	}
+	executionID, err := executionIDOrNew(request.ExecutionID)
+	if err != nil {
+		return nil, err
+	}
+	request.ExecutionID = executionID
 	request.Args = append([]string(nil), request.Args...)
 	request.Stdin = append([]byte(nil), request.Stdin...)
 	request.Env = cloneStringMap(request.Env)
-	return b.runtime.Exec(ctx, session.RuntimeID, request)
+	result, err := b.runtime.Exec(ctx, session.RuntimeID, request)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, fmt.Errorf("sandbox runtime returned an empty execution result")
+	}
+	if result.ExecutionID != executionID {
+		return nil, fmt.Errorf("sandbox runtime returned mismatched execution id")
+	}
+	return result, nil
 }
 
 func (b *Broker) Cancel(ctx context.Context, owner OwnerScope, sessionID, executionID string) error {
@@ -179,8 +194,8 @@ func (b *Broker) Cancel(ctx context.Context, owner OwnerScope, sessionID, execut
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(executionID) == "" {
-		return fmt.Errorf("sandbox execution id is required")
+	if err := validateExecutionID(executionID); err != nil {
+		return err
 	}
 	return b.runtime.Cancel(ctx, session.RuntimeID, executionID)
 }
