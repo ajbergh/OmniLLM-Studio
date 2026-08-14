@@ -97,10 +97,21 @@ func TestImportExternalAssetCopiesMusicBytes(t *testing.T) {
 	writeTestFile(t, filepath.Join(attachmentsDir, musicPath), sourceBytes)
 
 	musicSessions := repository.NewMusicSessionRepo(database)
+	musicGenerations := repository.NewMusicGenerationRepo(database)
 	musicAssets := repository.NewMusicAssetRepo(database)
 	session, err := musicSessions.Create("", "Track", "gemini", "lyria-3-clip-preview")
 	if err != nil {
 		t.Fatalf("create music session: %v", err)
+	}
+	generation := &models.MusicGeneration{
+		ID:        "generation-1",
+		SessionID: session.ID,
+		Title:     "Output",
+		Provider:  "gemini",
+		Model:     "lyria-3-clip-preview",
+	}
+	if err := musicGenerations.Create(generation); err != nil {
+		t.Fatalf("create music generation: %v", err)
 	}
 	duration := int64(12000)
 	musicAsset := &models.MusicAsset{

@@ -20,8 +20,8 @@ func TestAgentRuntimeMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 50 {
-		t.Fatalf("expected schema version 50, got %d", version)
+	if version != 51 {
+		t.Fatalf("expected schema version 51, got %d", version)
 	}
 	for _, table := range []string{
 		"tool_invocations", "agent_events", "agent_jobs", "scheduled_tasks", "memories", "app_connections",

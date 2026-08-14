@@ -156,6 +156,25 @@ func (r *UserRepo) Update(id string, input UpdateUserInput) (*models.User, error
 
 // Delete removes a user by ID.
 func (r *UserRepo) Delete(id string) error {
-	_, err := r.db.Exec("DELETE FROM users WHERE id = ?", id)
-	return err
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin delete user: %w", err)
+	}
+	defer tx.Rollback()
+
+	// These two legacy foreign keys intentionally use NO ACTION so preserve
+	// authored content by anonymizing it before the user row is removed.
+	if _, err := tx.Exec("UPDATE conversations SET user_id = NULL WHERE user_id = ?", id); err != nil {
+		return fmt.Errorf("anonymize user conversations: %w", err)
+	}
+	if _, err := tx.Exec("UPDATE messages SET user_id = NULL WHERE user_id = ?", id); err != nil {
+		return fmt.Errorf("anonymize user messages: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM users WHERE id = ?", id); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete user: %w", err)
+	}
+	return nil
 }

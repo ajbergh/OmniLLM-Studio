@@ -2,13 +2,13 @@
 
 > **Authoritative source for outstanding engineering work.**
 >
-> Audited against repository `main` at `113a2b9` on 2026-08-14. Completed initiatives and superseded plans are in [archive/README.md](archive/README.md). This document deliberately excludes completed work except where it is needed to explain a dependency. macOS sandbox Phase 13, previously the top open item, completed in PR #166 (`d52ab16`).
+> Audited against repository `main` at `113a2b9` plus the current implementation worktree on 2026-08-14. Completed initiatives and superseded plans are in [archive/README.md](archive/README.md). This document deliberately excludes completed work except where it is needed to explain a dependency. macOS sandbox Phase 13, previously the top open item, completed in PR #166 (`d52ab16`). SQLite foreign-key admission is also complete in the current worktree (schema V51).
 
 ## Execution order
 
-1. Close the browser request perimeter: complete and validate request-time enforcement for every browser-controlled network path.
+1. Validate the completed browser egress implementation on a Chromium-capable CI/host runner, including iframe, media, redirect, WebSocket, worker, and service-worker fixtures.
 2. Address sandbox correctness/security gaps: path-race assurance, resource quotas, egress enforcement, and credential delivery.
-3. Resolve remaining platform-wide data/runtime safety debt, beginning with SQLite foreign-key admission and cookie-session migration validation.
+3. Resolve remaining platform-wide data/runtime safety debt, beginning with cookie-session migration validation.
 4. Add durable sandbox-backed task/worker infrastructure; it depends on the sandbox hardening work above.
 5. Finish router, video, and URL-context correctness/validation work.
 6. Charter one narrow GitHub G7D capability only after higher-risk correctness work is stable.
@@ -40,23 +40,13 @@
 
 ### Browser request perimeter
 
-- **Status:** IN PROGRESS
-- **Implemented:** The headless browser uses incognito contexts, managed profiles, feature gating, navigation checks, and browser tools. Request-time CDP interception now validates page/frame/subresource requests and aborts requests that fail the public HTTP(S) policy; page traffic bypasses service-worker response handling. A browser-backed fetch/subresource regression fixture is included.
-- **Remaining:** Run the new browser-backed fixture on a host/CI runner where Chromium starts successfully, then add redirect, iframe, media, and WebSocket cases; prove or close interception coverage for worker/service-worker initiated traffic; address the DNS validation-to-connect race (for example with a controlled egress proxy or address-pinned transport). Do not describe the perimeter as complete until those paths are proven.
-- **Files:** `backend/internal/browser/manager.go`, `backend/internal/browser/manager_test.go`, `backend/internal/browser/session.go`, `backend/internal/api/browser_fallback_navigator.go`.
-- **Dependency/risk:** CDP validation blocks known private/internal destinations before dispatch but does not pin Chromium's DNS result to the address validated by Go. Worker targets may have separate CDP sessions.
-- **Next action:** Add adversarial Chromium fixtures and close worker/WebSocket/DNS-rebinding coverage before enabling the browser in exposed deployments.
+- **Status:** NEEDS VALIDATION
+- **Implemented:** The headless browser uses incognito contexts, managed profiles, feature gating, navigation checks, and browser tools. CDP interception remains as defense in depth. Chromium now has a mandatory local egress proxy with loopback bypass disabled; the proxy resolves every HTTP, HTTPS/CONNECT, redirect, and WebSocket destination against the public-address policy and pins the outbound connection to the validated address, closing the DNS validation-to-connect race. QUIC is disabled and WebRTC is restricted from non-proxied UDP. Unit fixtures cover private-address rejection, address pinning, redirect revalidation, CONNECT tunneling, and WebSocket upgrade forwarding; the browser-backed fetch/subresource fixture is present.
+- **Remaining:** Run the browser-backed fixture on a host/CI runner where Chromium is not terminated during startup, then extend native fixtures across iframe, media, redirect, WebSocket, dedicated/shared worker, and service-worker traffic. The network-layer implementation is complete, but do not call the perimeter operationally validated or enable it in exposed deployments until that runner evidence exists.
+- **Files:** `backend/internal/browser/manager.go`, `backend/internal/browser/manager_test.go`, `backend/internal/browser/egress_proxy.go`, `backend/internal/browser/egress_proxy_test.go`, `backend/internal/browser/session.go`, `backend/internal/api/browser_fallback_navigator.go`.
+- **Dependency/risk:** Unit-level proxy evidence is green. Native Chromium validation is currently blocked on this Windows host because both installed Chrome and the Playwright Chromium build are forcibly closed while Rod creates the first stealth page; this is an environment limitation, not a passing browser result.
+- **Next action:** Add a Chromium-capable CI job for the adversarial fixture matrix and require it before exposed browser deployment.
 - **Derived from:** archived `REMEDIATION_STATUS_2026-07-18.md`, archived `Plan-headless-Chrome-tool.md`.
-
-### SQLite foreign-key admission
-
-- **Status:** NOT STARTED
-- **Implemented:** WAL/busy-timeout and related SQLite pragmas are configured; foreign keys are deliberately disabled (`backend/internal/db/db.go`).
-- **Remaining:** Audit delete paths, detect/repair existing orphan rows, add compatibility migration/tests, then enable foreign-key enforcement safely.
-- **Files:** `backend/internal/db/db.go`, repositories and migrations under `backend/internal/repository/` and `backend/internal/db/`.
-- **Dependency/risk:** Enabling this globally without repairing data can break existing installations.
-- **Next action:** Build a read-only orphan audit/report first, agree migration behavior, then gate the pragma change on a clean repair path.
-- **Derived from:** archived `REMEDIATION_STATUS_2026-07-18.md`, archived `copilot_video_editor_rve_true_up_prompt.md`.
 
 ### Cookie-session migration closeout
 

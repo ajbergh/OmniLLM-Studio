@@ -79,13 +79,16 @@ type Manager struct {
 	cfg  *config.Config
 	repo *repository.BrowserSessionRepo
 
-	mu         sync.RWMutex
-	launchMu   sync.Mutex
-	browser    *rod.Browser
-	launcher   *launcher.Launcher
-	profileDir string
-	sessions   map[string]*Session
-	validate   func(context.Context, string) error
+	mu            sync.RWMutex
+	launchMu      sync.Mutex
+	browser       *rod.Browser
+	launcher      *launcher.Launcher
+	egressProxy   *browserEgressProxy
+	profileDir    string
+	sessions      map[string]*Session
+	validate      func(context.Context, string) error
+	resolveTarget targetResolver
+	newLauncher   func() *launcher.Launcher
 
 	initOnce sync.Once
 	initErr  error
@@ -123,11 +126,13 @@ func NewManager(cfg *config.Config, repo *repository.BrowserSessionRepo) *Manage
 		cfg = config.Load()
 	}
 	return &Manager{
-		cfg:      cfg,
-		repo:     repo,
-		sessions: make(map[string]*Session),
-		validate: validateURL,
-		stopCh:   make(chan struct{}),
+		cfg:           cfg,
+		repo:          repo,
+		sessions:      make(map[string]*Session),
+		validate:      validateURL,
+		resolveTarget: resolvePublicTarget,
+		newLauncher:   launcher.New,
+		stopCh:        make(chan struct{}),
 	}
 }
 
@@ -451,8 +456,9 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 		m.sessions = make(map[string]*Session)
 		browser := m.browser
 		browserLauncher := m.launcher
+		egressProxy := m.egressProxy
 		profileDir := m.profileDir
-		m.browser, m.launcher, m.profileDir = nil, nil, ""
+		m.browser, m.launcher, m.egressProxy, m.profileDir = nil, nil, nil, ""
 		m.mu.Unlock()
 
 		for _, session := range sessions {
@@ -472,6 +478,11 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 		}
 		if browserLauncher != nil {
 			browserLauncher.Cleanup()
+		}
+		if egressProxy != nil {
+			if err := egressProxy.Close(ctx); err != nil && firstErr == nil {
+				firstErr = err
+			}
 		}
 		if profileDir != "" {
 			_ = os.RemoveAll(profileDir)
@@ -602,13 +613,26 @@ func (m *Manager) ensureBrowser(ctx context.Context) (*rod.Browser, error) {
 	if err := os.MkdirAll(profileDir, 0700); err != nil {
 		return nil, fmt.Errorf("create browser profile: %w", err)
 	}
-	browserLauncher := launcher.New().
+	egressProxy, err := startBrowserEgressProxy(m.resolveTarget)
+	if err != nil {
+		_ = os.RemoveAll(profileDir)
+		return nil, err
+	}
+	browserLauncher := launcher.New()
+	if m.newLauncher != nil {
+		browserLauncher = m.newLauncher()
+	}
+	browserLauncher = browserLauncher.
 		Context(context.Background()).
 		Headless(true).
 		UserDataDir(profileDir).
 		Set("disable-blink-features", "AutomationControlled").
 		Set("disable-extensions").
 		Set("disable-dev-shm-usage").
+		Set("disable-quic").
+		Set("proxy-server", egressProxy.URL()).
+		Set("proxy-bypass-list", "<-loopback>").
+		Set("webrtc-ip-handling-policy", "disable_non_proxied_udp").
 		Set("lang", "en-US")
 	if m.cfg.BrowserNoSandbox {
 		browserLauncher = browserLauncher.NoSandbox(true)
@@ -618,12 +642,14 @@ func (m *Manager) ensureBrowser(ctx context.Context) (*rod.Browser, error) {
 	}
 	controlURL, err := browserLauncher.Launch()
 	if err != nil {
+		_ = egressProxy.Close(context.Background())
 		_ = os.RemoveAll(profileDir)
 		return nil, fmt.Errorf("launch chromium: %w", err)
 	}
 	browser := rod.New().ControlURL(controlURL)
 	if err := browser.Connect(); err != nil {
 		browserLauncher.Cleanup()
+		_ = egressProxy.Close(context.Background())
 		_ = os.RemoveAll(profileDir)
 		return nil, fmt.Errorf("connect chromium: %w", err)
 	}
@@ -633,6 +659,7 @@ func (m *Manager) ensureBrowser(ctx context.Context) (*rod.Browser, error) {
 	m.mu.Lock()
 	m.browser = browser
 	m.launcher = browserLauncher
+	m.egressProxy = egressProxy
 	m.profileDir = profileDir
 	m.mu.Unlock()
 	return browser, nil

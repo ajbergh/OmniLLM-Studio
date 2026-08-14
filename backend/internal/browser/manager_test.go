@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -87,8 +89,15 @@ func TestDetectBotProtection(t *testing.T) {
 }
 
 func TestRequestPerimeterBlocksRejectedSubresource(t *testing.T) {
-	browserPath, found := launcher.LookPath()
-	if !found {
+	browserPath := strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_TEST_EXEC_PATH"))
+	if browserPath == "" {
+		var found bool
+		browserPath, found = launcher.LookPath()
+		if !found {
+			t.Skip("no local Chromium-compatible browser found")
+		}
+	}
+	if _, err := os.Stat(browserPath); err != nil {
 		t.Skip("no local Chromium-compatible browser found")
 	}
 
@@ -113,6 +122,26 @@ func TestRequestPerimeterBlocksRejectedSubresource(t *testing.T) {
 		BrowserMaxSessions: 1,
 		BrowserSessionTTL:  time.Minute,
 	}, nil)
+	manager.newLauncher = func() *launcher.Launcher {
+		return launcher.New().Leakless(false)
+	}
+	pageURL, err := url.Parse(pageServer.URL)
+	if err != nil {
+		t.Fatalf("parse page URL: %v", err)
+	}
+	blockedURL, err := url.Parse(blockedServer.URL)
+	if err != nil {
+		t.Fatalf("parse blocked URL: %v", err)
+	}
+	manager.resolveTarget = func(ctx context.Context, host, port string) ([]net.IP, error) {
+		if host == pageURL.Hostname() && port == pageURL.Port() {
+			return []net.IP{net.ParseIP("127.0.0.1")}, nil
+		}
+		if host == blockedURL.Hostname() && port == blockedURL.Port() {
+			return nil, errors.New("test proxy policy rejected destination")
+		}
+		return resolvePublicTarget(ctx, host, port)
+	}
 	manager.validate = func(_ context.Context, raw string) error {
 		if strings.HasPrefix(raw, blockedServer.URL) {
 			blockedValidations.Add(1)

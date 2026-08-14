@@ -11,6 +11,12 @@ func TestSessionTokensAreHashedAtRest(t *testing.T) {
 	database := newTestDB(t)
 	repo := repository.NewSessionRepo(database)
 	const token = "plaintext-session-token-for-test"
+	if _, err := database.Exec(`
+		INSERT INTO users (id, username, display_name, password_hash, role)
+		VALUES ('user-1', 'user-1', 'User One', 'hash', 'member')
+	`); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
 
 	session, err := repo.Create("user-1", token, time.Now().UTC().Add(time.Hour))
 	if err != nil {

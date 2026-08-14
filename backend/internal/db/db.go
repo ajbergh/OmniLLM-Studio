@@ -1,9 +1,11 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/ajbergh/omnillm-studio/internal/crypto"
 	_ "modernc.org/sqlite"
@@ -23,11 +25,8 @@ func Open(path string) (*sql.DB, error) {
 	// silently ignored by this driver, which left the database running without
 	// WAL or a busy timeout until 2026-06-10.
 	//
-	// foreign_keys stays OFF deliberately: the schema declares FK constraints
-	// but they have never been enforced under this driver; enabling them needs
-	// a dedicated audit of delete paths and existing orphaned rows first.
 	dsn := fmt.Sprintf(
-		"%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-64000)&_pragma=mmap_size(268435456)&_pragma=temp_store(MEMORY)&_pragma=journal_size_limit(67108864)",
+		"%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-64000)&_pragma=mmap_size(268435456)&_pragma=temp_store(MEMORY)&_pragma=journal_size_limit(67108864)&_pragma=foreign_keys(1)",
 		path,
 	)
 	db, err := sql.Open("sqlite", dsn)
@@ -88,6 +87,20 @@ func Migrate(db *sql.DB) error {
 	// Run versioned migrations starting from V2 onwards.
 	if err := runVersionedMigrations(db); err != nil {
 		return fmt.Errorf("versioned migrations: %w", err)
+	}
+
+	// Older releases declared foreign keys without enforcing them. Repair only
+	// relationships whose schema already defines an unambiguous delete action,
+	// then refuse startup if any ambiguous orphan remains.
+	if err := repairForeignKeyOrphans(db); err != nil {
+		return fmt.Errorf("repair foreign-key orphans: %w", err)
+	}
+	violations, err := ForeignKeyViolations(db)
+	if err != nil {
+		return fmt.Errorf("audit foreign-key integrity: %w", err)
+	}
+	if len(violations) > 0 {
+		return fmt.Errorf("foreign-key integrity check failed: %s", formatForeignKeyViolations(violations))
 	}
 
 	// Encrypt any existing plaintext API keys
@@ -151,6 +164,7 @@ func versionedMigrations() []Migration {
 		{Version: 48, Name: "mcp_oauth_credentials", SQL: migrationMCPOAuthCredentials},
 		{Version: 49, Name: "mcp_oauth_registration_binding", SQL: migrationMCPOAuthRegistrationBinding},
 		{Version: 50, Name: "mcp_oauth_incremental_scope", SQL: migrationMCPOAuthIncrementalScope},
+		{Version: 51, Name: "foreign_key_admission", SQL: migrationForeignKeyAdmission},
 	}
 }
 
@@ -182,31 +196,214 @@ func runVersionedMigrations(db *sql.DB) error {
 		}
 		log.Printf("[db] applying migration V%d: %s", m.Version, m.Name)
 
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("begin tx for V%d: %w", m.Version, err)
-		}
-
-		if _, err := tx.Exec(m.SQL); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migration V%d (%s) failed: %w", m.Version, m.Name, err)
-		}
-
-		if _, err := tx.Exec(
-			"INSERT INTO schema_versions (version, name) VALUES (?, ?)",
-			m.Version, m.Name,
-		); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("record V%d: %w", m.Version, err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit V%d: %w", m.Version, err)
+		if err := runVersionedMigration(db, m); err != nil {
+			return err
 		}
 		log.Printf("[db] migration V%d applied successfully", m.Version)
 	}
 
 	return nil
+}
+
+// runVersionedMigration applies one migration on a dedicated connection.
+// V22 rebuilds agent_runs. Foreign-key enforcement must be suspended before
+// its transaction or SQLite would cascade-delete agent_steps when the old
+// parent table is dropped. All current and future migrations remain enforced.
+func runVersionedMigration(db *sql.DB, m Migration) (retErr error) {
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		return fmt.Errorf("acquire connection for V%d: %w", m.Version, err)
+	}
+	defer conn.Close()
+
+	foreignKeysSuspended := false
+	if m.Version == 22 {
+		var foreignKeysEnabled int
+		if err := conn.QueryRowContext(context.Background(), "PRAGMA foreign_keys").Scan(&foreignKeysEnabled); err != nil {
+			return fmt.Errorf("query foreign-key state for V%d: %w", m.Version, err)
+		}
+		foreignKeysSuspended = foreignKeysEnabled == 1
+	}
+	if foreignKeysSuspended {
+		if _, err := conn.ExecContext(context.Background(), "PRAGMA foreign_keys = OFF"); err != nil {
+			return fmt.Errorf("suspend foreign keys for V%d: %w", m.Version, err)
+		}
+		defer func() {
+			if _, err := conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON"); err != nil && retErr == nil {
+				retErr = fmt.Errorf("restore foreign keys after V%d: %w", m.Version, err)
+			}
+		}()
+	}
+
+	tx, err := conn.BeginTx(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("begin tx for V%d: %w", m.Version, err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(m.SQL); err != nil {
+		return fmt.Errorf("migration V%d (%s) failed: %w", m.Version, m.Name, err)
+	}
+	if _, err := tx.Exec(
+		"INSERT INTO schema_versions (version, name) VALUES (?, ?)",
+		m.Version, m.Name,
+	); err != nil {
+		return fmt.Errorf("record V%d: %w", m.Version, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit V%d: %w", m.Version, err)
+	}
+	return nil
+}
+
+// ForeignKeyViolation describes one row returned by PRAGMA foreign_key_check.
+// RowID is nil for WITHOUT ROWID tables.
+type ForeignKeyViolation struct {
+	Table       string
+	RowID       *int64
+	ParentTable string
+	ForeignKey  int
+}
+
+// ForeignKeyViolations performs a read-only integrity audit across every table.
+func ForeignKeyViolations(db *sql.DB) ([]ForeignKeyViolation, error) {
+	rows, err := db.Query("PRAGMA foreign_key_check")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var violations []ForeignKeyViolation
+	for rows.Next() {
+		var violation ForeignKeyViolation
+		var rowID sql.NullInt64
+		if err := rows.Scan(&violation.Table, &rowID, &violation.ParentTable, &violation.ForeignKey); err != nil {
+			return nil, err
+		}
+		if rowID.Valid {
+			value := rowID.Int64
+			violation.RowID = &value
+		}
+		violations = append(violations, violation)
+	}
+	return violations, rows.Err()
+}
+
+type foreignKeyDefinition struct {
+	fromColumns []string
+	onDelete    string
+}
+
+func foreignKeyForViolation(db *sql.DB, violation ForeignKeyViolation) (foreignKeyDefinition, error) {
+	query := fmt.Sprintf("PRAGMA foreign_key_list(%s)", quoteSQLiteIdentifier(violation.Table))
+	rows, err := db.Query(query)
+	if err != nil {
+		return foreignKeyDefinition{}, err
+	}
+	defer rows.Close()
+
+	var definition foreignKeyDefinition
+	for rows.Next() {
+		var id, sequence int
+		var parentTable, fromColumn, toColumn, onUpdate, onDelete, match string
+		if err := rows.Scan(&id, &sequence, &parentTable, &fromColumn, &toColumn, &onUpdate, &onDelete, &match); err != nil {
+			return foreignKeyDefinition{}, err
+		}
+		if id == violation.ForeignKey {
+			definition.fromColumns = append(definition.fromColumns, fromColumn)
+			definition.onDelete = strings.ToUpper(onDelete)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return foreignKeyDefinition{}, err
+	}
+	if len(definition.fromColumns) == 0 {
+		return foreignKeyDefinition{}, fmt.Errorf("foreign key %d not found on table %q", violation.ForeignKey, violation.Table)
+	}
+	return definition, nil
+}
+
+func repairForeignKeyOrphans(db *sql.DB) error {
+	for pass := 0; pass < 16; pass++ {
+		violations, err := ForeignKeyViolations(db)
+		if err != nil {
+			return err
+		}
+		if len(violations) == 0 {
+			return nil
+		}
+
+		repaired := int64(0)
+		for _, violation := range violations {
+			if violation.RowID == nil {
+				continue
+			}
+			definition, err := foreignKeyForViolation(db, violation)
+			if err != nil {
+				return err
+			}
+
+			var statement string
+			switch definition.onDelete {
+			case "CASCADE":
+				statement = fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", quoteSQLiteIdentifier(violation.Table))
+			case "SET NULL":
+				assignments := make([]string, 0, len(definition.fromColumns))
+				for _, column := range definition.fromColumns {
+					assignments = append(assignments, quoteSQLiteIdentifier(column)+" = NULL")
+				}
+				statement = fmt.Sprintf("UPDATE %s SET %s WHERE rowid = ?", quoteSQLiteIdentifier(violation.Table), strings.Join(assignments, ", "))
+			default:
+				if isLegacyNullableUserReference(violation, definition) {
+					statement = fmt.Sprintf("UPDATE %s SET user_id = NULL WHERE rowid = ?", quoteSQLiteIdentifier(violation.Table))
+				} else {
+					continue
+				}
+			}
+
+			result, err := db.Exec(statement, *violation.RowID)
+			if err != nil {
+				return fmt.Errorf("repair %s rowid %d: %w", violation.Table, *violation.RowID, err)
+			}
+			count, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			repaired += count
+		}
+		if repaired == 0 {
+			return nil
+		}
+	}
+	return fmt.Errorf("foreign-key repair did not converge after 16 passes")
+}
+
+func isLegacyNullableUserReference(violation ForeignKeyViolation, definition foreignKeyDefinition) bool {
+	if violation.ParentTable != "users" || len(definition.fromColumns) != 1 || definition.fromColumns[0] != "user_id" {
+		return false
+	}
+	return violation.Table == "conversations" || violation.Table == "messages"
+}
+
+func quoteSQLiteIdentifier(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+}
+
+func formatForeignKeyViolations(violations []ForeignKeyViolation) string {
+	const limit = 8
+	parts := make([]string, 0, min(len(violations), limit)+1)
+	for i, violation := range violations {
+		if i == limit {
+			parts = append(parts, fmt.Sprintf("and %d more", len(violations)-limit))
+			break
+		}
+		row := "without-rowid"
+		if violation.RowID != nil {
+			row = fmt.Sprintf("rowid=%d", *violation.RowID)
+		}
+		parts = append(parts, fmt.Sprintf("%s[%s] -> %s (fk=%d)", violation.Table, row, violation.ParentTable, violation.ForeignKey))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // SchemaVersion returns the current schema version.
@@ -1389,4 +1586,21 @@ ALTER TABLE mcp_oauth_credentials ADD COLUMN client_issuer TEXT NOT NULL DEFAULT
 // WWW-Authenticate insufficient_scope challenges.
 const migrationMCPOAuthIncrementalScope = `
 ALTER TABLE mcp_oauth_credentials ADD COLUMN required_scope TEXT NOT NULL DEFAULT '';
+`
+
+// V51: admit databases created while SQLite foreign-key enforcement was off.
+// User-owned conversations and messages intentionally survive user deletion,
+// so their legacy NO ACTION references are normalized to anonymous ownership.
+// CASCADE and SET NULL orphans are repaired from their declared schema actions
+// by repairForeignKeyOrphans after all versioned migrations have run.
+const migrationForeignKeyAdmission = `
+UPDATE conversations
+SET user_id = NULL
+WHERE user_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM users WHERE users.id = conversations.user_id);
+
+UPDATE messages
+SET user_id = NULL
+WHERE user_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM users WHERE users.id = messages.user_id);
 `

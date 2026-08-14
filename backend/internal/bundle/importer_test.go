@@ -102,6 +102,15 @@ func TestImportConversationRestoresCurrentFields(t *testing.T) {
 	workspaceID := "workspace-1"
 	userID := "user-1"
 	parentID := "message-parent"
+	if _, err := database.Exec("INSERT INTO workspaces (id, name) VALUES (?, 'Imported Workspace')", workspaceID); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO users (id, username, display_name, password_hash, role)
+		VALUES (?, 'import-user', 'Import User', 'hash', 'member')
+	`, userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
 	now := time.Now().UTC().Truncate(time.Second)
 	bundle := &ConversationBundle{
 		Conversation: models.Conversation{
