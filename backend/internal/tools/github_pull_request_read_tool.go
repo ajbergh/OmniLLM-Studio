@@ -16,7 +16,8 @@ type githubPullRequestReadTool struct {
 
 // NewGitHubPullRequestReadTools returns read-only GitHub collaboration tools.
 // Registration is independently gated from draft-PR creation and Git writes.
-// Services that also implement GitHubPullRequestFeedbackReader or
+// Services that also implement GitHubPullRequestFeedbackReader,
+// GitHubPullRequestCheckDiagnosticsReader, or
 // GitHubPullRequestMergeRequirementsReader receive those bounded read-only tools
 // under the same operator-controlled pull-request read gate.
 func NewGitHubPullRequestReadTools(service gitrepo.GitHubPullRequestReader) []Tool {
@@ -27,6 +28,9 @@ func NewGitHubPullRequestReadTools(service gitrepo.GitHubPullRequestReader) []To
 		&githubPullRequestReadTool{service: service, name: "github_get_pull_request"},
 		&githubPullRequestReadTool{service: service, name: "github_list_pull_requests"},
 		&githubPullRequestReadTool{service: service, name: "github_get_pull_request_checks"},
+	}
+	if diagnosticService, ok := service.(gitrepo.GitHubPullRequestCheckDiagnosticsReader); ok {
+		out = append(out, NewGitHubPullRequestCheckDiagnosticsTool(diagnosticService))
 	}
 	if feedbackService, ok := service.(gitrepo.GitHubPullRequestFeedbackReader); ok {
 		out = append(out, NewGitHubPullRequestFeedbackTools(feedbackService)...)
