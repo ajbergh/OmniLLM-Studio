@@ -1,0 +1,67 @@
+name: One-shot NanoID lock refresh
+
+on:
+  push:
+    branches:
+      - fix/security-go12513-nanoid-20260813
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lock:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/security-go12513-nanoid-20260813
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Refresh only the NanoID lock entry
+        working-directory: frontend
+        run: npm update nanoid --package-lock-only --ignore-scripts --no-audit
+
+      - name: Verify the lockfile delta is NanoID-only
+        run: |
+          python - <<'PY'
+          import json
+          import subprocess
+
+          path = "frontend/package-lock.json"
+          old = json.loads(subprocess.check_output(["git", "show", f"HEAD:{path}"], text=True))
+          with open(path, encoding="utf-8") as handle:
+              new = json.load(handle)
+
+          old_entry = old["packages"]["node_modules/nanoid"]
+          new_entry = new["packages"]["node_modules/nanoid"]
+          if old_entry.get("version") != "3.3.16":
+              raise SystemExit(f"unexpected starting NanoID version: {old_entry.get('version')}")
+          if new_entry.get("version") != "3.3.18":
+              raise SystemExit(f"NanoID did not update to 3.3.18: {new_entry.get('version')}")
+          if "nanoid-3.3.18.tgz" not in new_entry.get("resolved", ""):
+              raise SystemExit("NanoID resolved artifact is not 3.3.18")
+
+          expected = json.loads(json.dumps(old))
+          expected["packages"]["node_modules/nanoid"] = new_entry
+          if expected != new:
+              raise SystemExit("npm changed package-lock content outside the NanoID package entry")
+          PY
+          git diff --exit-code -- frontend/package.json
+          git diff --check -- frontend/package-lock.json
+
+      - name: Commit the lock refresh and remove this one-shot workflow
+        run: |
+          git rm .github/workflows/issue-security-nanoid-lock-once.yml
+          git add frontend/package-lock.json
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(frontend): update NanoID to 3.3.18"
+          git push origin HEAD:fix/security-go12513-nanoid-20260813
