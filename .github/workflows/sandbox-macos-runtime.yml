@@ -32,20 +32,11 @@ jobs:
           set -o pipefail
           test -x /usr/bin/sandbox-exec
           go test ./internal/sandbox -run '^TestDarwin(LocalRuntime|Seatbelt)' -count=1 -v 2>&1 | tee ../sandbox-macos-runtime.log
-      - name: Capture Seatbelt denial diagnostics
-        if: failure()
-        run: |
-          /usr/bin/log show --last 5m --style compact \
-            --predicate '(process == "kernel" OR process == "sandboxd") AND eventMessage CONTAINS[c] "deny"' \
-            | tail -n 300 \
-            | tee sandbox-macos-denials.log || true
       - name: Upload macOS sandbox runtime diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: sandbox-macos-runtime-diagnostics
-          path: |
-            sandbox-macos-runtime.log
-            sandbox-macos-denials.log
+          path: sandbox-macos-runtime.log
           if-no-files-found: ignore
           retention-days: 14
