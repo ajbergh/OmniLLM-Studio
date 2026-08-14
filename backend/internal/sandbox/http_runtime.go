@@ -86,16 +86,27 @@ func (r *HTTPRuntime) Create(ctx context.Context, request RuntimeCreateRequest) 
 
 // Exec executes one command inside a runtime-owned session.
 func (r *HTTPRuntime) Exec(ctx context.Context, runtimeID string, request ExecRequest) (*ExecResult, error) {
+	if request.ExecutionID != "" {
+		if err := validateExecutionID(request.ExecutionID); err != nil {
+			return nil, err
+		}
+	}
 	var response ExecResult
 	path := "/v2/sandboxes/" + url.PathEscape(runtimeID) + "/exec"
 	if err := r.doJSON(ctx, http.MethodPost, path, request, &response); err != nil {
 		return nil, err
+	}
+	if request.ExecutionID != "" && response.ExecutionID != request.ExecutionID {
+		return nil, fmt.Errorf("sandbox runtime returned mismatched execution id")
 	}
 	return &response, nil
 }
 
 // Cancel requests cancellation of one runtime execution.
 func (r *HTTPRuntime) Cancel(ctx context.Context, runtimeID, executionID string) error {
+	if err := validateExecutionID(executionID); err != nil {
+		return err
+	}
 	path := "/v2/sandboxes/" + url.PathEscape(runtimeID) + "/cancel"
 	return r.doJSON(ctx, http.MethodPost, path, map[string]string{"execution_id": executionID}, nil)
 }

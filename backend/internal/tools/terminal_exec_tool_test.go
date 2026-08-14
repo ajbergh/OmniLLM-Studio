@@ -36,7 +36,7 @@ func (r *terminalRuntime) Create(_ context.Context, request sandbox.RuntimeCreat
 
 func (r *terminalRuntime) Exec(_ context.Context, _ string, request sandbox.ExecRequest) (*sandbox.ExecResult, error) {
 	r.exec = request
-	return &sandbox.ExecResult{ExecutionID: "exec-1", Stdout: "PASS\n", ExitCode: 0}, nil
+	return &sandbox.ExecResult{ExecutionID: request.ExecutionID, Stdout: "PASS\n", ExitCode: 0}, nil
 }
 
 func (r *terminalRuntime) Cancel(context.Context, string, string) error { return nil }

@@ -274,7 +274,11 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		}
 	}
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
-	executionID := "exec_" + uuid.NewString()
+	executionID, err := executionIDOrNew(request.ExecutionID)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	activeKey := runtimeID + "\x00" + executionID
 	done := make(chan struct{})
 	r.mu.Lock()
@@ -283,6 +287,11 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		r.mu.Unlock()
 		cancel()
 		return nil, fmt.Errorf("sandbox runtime session is being destroyed")
+	}
+	if _, exists := r.active[activeKey]; exists {
+		r.mu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("sandbox execution id is already active")
 	}
 	r.active[activeKey] = windowsActiveExecution{cancel: cancel, done: done}
 	r.mu.Unlock()
@@ -336,6 +345,9 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 }
 
 func (r *LocalRuntime) Cancel(_ context.Context, runtimeID, executionID string) error {
+	if err := validateExecutionID(executionID); err != nil {
+		return err
+	}
 	key := runtimeID + "\x00" + executionID
 	r.mu.RLock()
 	execution, ok := r.active[key]
