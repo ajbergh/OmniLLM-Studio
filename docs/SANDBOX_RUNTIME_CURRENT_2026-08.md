@@ -1,6 +1,6 @@
 # Sandbox Runtime — Current Platform Status (August 2026)
 
-This document records the current first-party sandbox and persistent-extension behavior after Windows Phase 12. It supplements the older `SANDBOX_RUNTIME.md` historical snapshot.
+This document records the current first-party sandbox and persistent-extension behavior after Windows Phase 12 and during macOS Phase 13. It supplements the older `SANDBOX_RUNTIME.md` historical snapshot.
 
 ## Shared protocol-v2 boundary
 
@@ -16,6 +16,8 @@ OMNILLM_SANDBOX_TOKEN=<long-random-service-token>
 The service token is backend/runtime state, not model-facing data. Plain HTTP is limited to loopback endpoints; non-loopback runtime URLs require HTTPS and redirects are rejected.
 
 The first-party worker is `backend/cmd/sandboxd`.
+
+Caller-known canonical execution IDs are supported end-to-end. A caller may choose the execution reference before dispatch, active duplicate IDs fail closed, and `Cancel(runtime_id, execution_id)` addresses the exact active execution. This contract was completed in PR #155.
 
 ## Linux first-party runtime
 
@@ -65,6 +67,27 @@ Explicit command execution and shell code are supported. Shell code uses System3
 
 Protocol-v2 Python and JavaScript shortcuts remain fail closed until an AppContainer-readable interpreter/package design is intentionally implemented and natively tested.
 
+## macOS first-party runtime
+
+macOS Phase 13 uses the fixed system `/usr/bin/sandbox-exec` launcher and explicit Seatbelt profiles.
+
+Phase 13A proved the native primitive. Phase 13B, merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`, adds the first-party protocol-v2 Darwin local runtime with:
+
+- per-session canonical workspace/home/tmp roots;
+- no mount or one trusted `read_only` workspace mount;
+- bounded read-only workspace staging (20,000 files / 256 MiB) instead of granting the live host workspace path;
+- rejection of symbolic links, hard links, special files, traversal, and copy-time source identity/size changes;
+- explicit system/session file-read roots rather than host-wide reads;
+- write access only to runtime-owned home/tmp and the ephemeral workspace when no host workspace is mounted;
+- zero network operations in the Seatbelt profile;
+- a fixed executable search path and rejection of arbitrary model-selected host executables outside approved runtime roots;
+- reconstructed minimal environment with sensitive/proxy keys, runtime-owned path/home/temp keys, and `DYLD_*` injection rejected;
+- bounded wall time/stdout/stderr;
+- caller-known execution IDs and explicit cancellation;
+- process-group teardown for ordinary descendants.
+
+The Darwin runtime truthfully reports `process_tree_isolation=false`. Phase 13D adversarial evidence confirms that a deliberately `setsid`-detached descendant may outlive process-group cancellation while retaining Seatbelt filesystem/network confinement. Destination allowlists and memory/CPU/PID/disk quotas also remain unadvertised.
+
 ## Persistent plugins and stdio MCP
 
 Persistent extensions keep their existing streaming JSON-RPC lifecycle behind the shared managed-process boundary.
@@ -95,25 +118,46 @@ OMNILLM_EXTENSION_SANDBOX_MODE=auto|required|off
 - root completion, context cancellation, and forced shutdown terminate descendants;
 - transient profile cleanup failures are retried.
 
-### macOS
+### macOS — Phase 13C
 
-Native extension confinement is not implemented yet. `required` fails closed; `auto` retains compatibility behavior until Phase 13.
+PR #164 adds a Darwin `platformExtensionCommandContext` backed by the same fixed native Seatbelt primitive proven in 13A/13B.
+
+When `/usr/bin/sandbox-exec` is available:
+
+- `auto` selects native Seatbelt confinement;
+- `required` selects native confinement and fails closed if the primitive is unavailable;
+- `off` remains the explicit sanitized-host compatibility path;
+- each extension receives a unique runtime-owned home/tmp scratch root;
+- the canonical extension command directory and optional canonical working directory are read-only;
+- system/runtime read roots are explicit and network operations are not granted;
+- writes are limited to the per-extension home/tmp roots plus `/dev/null`;
+- the child environment is reconstructed from a fixed path/home/tmp/lang base plus validated explicit configuration;
+- `PATH`, `HOME`, temp/shell authority, and all `DYLD_*` overrides are rejected in native mode;
+- ambient backend secrets are not inherited;
+- the existing `OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true` override remains a transitional explicit operator choice for configured secret-bearing values; it does not alter network denial;
+- streaming stdin/stdout/stderr remains available through the shared `CommandProcess` lifecycle;
+- context cancellation and explicit kill terminate the ordinary process group before scratch cleanup;
+- scratch cleanup retains the original temporary path even if canonicalization fails, avoiding a cleanup leak on a failed launch.
+
+As with the Phase 13B runtime, Phase 13C does not claim authoritative teardown for an adversarial descendant that successfully detaches into an independent process group/session.
+
+The initial stacked Phase 13C implementation passed native `macos-latest` extension lifecycle/confinement tests. After #162 merged, #164 was normalized to a clean seven-file delta from current `main`; its exact normalized head must pass native extension assurance plus applicable repository gates before merge.
 
 ## Extension environment policy
 
 Compatibility-mode processes use a sanitized host environment rather than inheriting the backend environment wholesale.
 
-Native Linux and Windows extension confinement rejects credential-sensitive explicit environment values by default. `OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true` is a narrow transitional compatibility override, not the preferred secret-delivery architecture.
+Native Linux, Windows, and Darwin extension confinement rejects credential-sensitive explicit environment values by default. `OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true` is a narrow transitional compatibility override, not the preferred secret-delivery architecture.
 
 ## Network policy
 
 Owner-bound destination grants exist in the Broker, but authorization is separate from runtime enforcement.
 
-The first-party Linux and Windows runtimes currently remain no-network and report `network_allowlist=false`. Destination-scoped egress remains open Phase 8 work.
+The first-party Linux, Windows, and Darwin runtimes currently remain no-network and report `network_allowlist=false`. Native persistent extensions likewise receive no network authority. Destination-scoped egress remains open Phase 8 work.
 
 ## Resource-policy limits
 
-The first-party runtime does not currently claim enforcement of:
+The first-party runtime does not currently claim universal enforcement of:
 
 - memory quota;
 - CPU quota;
@@ -121,12 +165,6 @@ The first-party runtime does not currently claim enforcement of:
 - physical disk quota.
 
 Those capability bits must remain false until implementation and native validation exist.
-
-## Explicit cancellation caveat
-
-Issue #151 tracks a protocol-v2 correctness defect: synchronous `Exec` currently returns its internally generated execution ID only after completion, so an external caller cannot yet address `Cancel(runtime_id, execution_id)` while the execution is running.
-
-Context cancellation and session `Destroy` do terminate active process trees and are natively tested. Issue #151 is an API-contract defect, not a Windows OS-confinement gap.
 
 ## Validation record
 
@@ -138,5 +176,7 @@ Windows Phase 12 completed through:
 - PR #149 — direct adversarial Windows assurance.
 
 PR #149 final head `8f4ee1b7de5d3ea6203c44089dadfae4fd6d30cb` passed Quality Gate, Security Scan, native Windows sandbox/plugin/desktop checks, backend format/vet/tests/race, Chromium, frontend, Helm, dependency audit, both CodeQL lanes, and frontend/backend `linux/amd64` plus `linux/arm64` container builds before squash merge as `65bf1cd807b9cd94a2e7b62e653c9057366c6e8b`.
+
+macOS Phase 13A merged in PR #159. Phase 13B passed native macOS runtime assurance and repository gates and merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`. Phase 13C is in final validation in PR #164. Follow-on Phase 13D adversarial assurance is tracked in draft PR #166 and its initial stacked native adversarial suite is green.
 
 Cross-compilation alone is never considered platform-confinement evidence.
