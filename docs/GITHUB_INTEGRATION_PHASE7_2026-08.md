@@ -160,4 +160,3 @@ G7A/G7B do not:
 - add a hosted mutation.
 
 G7C does not change those non-goals; it records why raw log access remains deferred until a separate guarded design exists.
-
