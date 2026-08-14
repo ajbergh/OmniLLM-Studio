@@ -1,6 +1,6 @@
 # GitHub Integration Phase G7 — Collaboration Diagnostics — August 2026
 
-> **Status:** IN PROGRESS — G7A merged in PR #161; G7B implementation under validation
+> **Status:** IN PROGRESS — G7A merged in PR #161; G7B implementation under final validation; G7C threat review recommends deferring raw workflow-log access
 >
 > GitHub App authentication and repository-binding authorization are complete through G6. G7 is a separate collaboration-parity program; it does not reopen or weaken the G1-G6 credential and authorization boundary.
 
@@ -104,8 +104,6 @@ This provider permission is not inferred from a repository binding and is not si
 
 G7B remains a read-only PR/CI diagnostic capability and adds no hosted mutation authority. Repository selection, exact PR head, workflow-run IDs, job IDs, API host, and credentials all remain outside model control.
 
-If later work adds raw textual logs, artifact retrieval, workflow re-runs/cancellation, or any other capability beyond bounded metadata inspection, it requires a dedicated threat/authorization review rather than inheriting G7B authority automatically.
-
 ### G7B exit criteria
 
 - exact-head PR binding and provider-side head revalidation;
@@ -118,15 +116,32 @@ If later work adds raw textual logs, artifact retrieval, workflow re-runs/cancel
 - tool remains low-risk/read-only/parallel-safe;
 - exact final PR head passes Quality Gate, Security Scan, applicable container validation, and final review/diff checks.
 
-## Planned follow-up slices
+## G7C — raw textual CI log threat review — implementation deferred
 
-### G7C — bounded textual log diagnostics, only if justified
+The dedicated review is recorded in `GITHUB_INTEGRATION_PHASE7C_LOG_THREAT_REVIEW_2026-08.md`.
 
-Only after a dedicated threat review, consider a bounded tail/error-window view for a single backend-derived failed job. Required safeguards include strict byte/line limits, secret-pattern review/redaction, no archive download surface to the model, exact-head binding, and explicit operator policy if the capability exceeds the existing CI/check read authorization contract.
+The current decision is **not** to expose raw GitHub Actions job logs under the G7A/G7B PR-read authority.
+
+Reasons:
+
+- logs are arbitrary repository/action output and can disclose transformed credentials or sensitive non-secret data;
+- raw log transport can require download/redirect behavior that would expand the deliberately fixed-host, no-redirect GitHub API boundary;
+- logs are large/unbounded compared with annotations and status metadata;
+- log text is a prompt-injection/control-confusion surface and cannot be merge/authorization evidence;
+- provider masking is not a sufficient OmniLLM redaction policy;
+- G7A annotations plus G7B workflow/job/step metadata should be evaluated before accepting the larger risk surface.
+
+A future G7C code slice is conditional on an independent workflow-log authorization gate/per-remote policy, provider-permission documentation, a dedicated safe redirect/download transport, independent compressed/decoded/result bounds, pre-model redaction with adversarial tests, exact-head/backend-derived job binding, and untrusted-content typing.
+
+The shared GitHub API client's redirect prohibition remains unchanged.
+
+## Planned follow-up slice
 
 ### G7D — broader collaboration lifecycle
 
 Issues/projects/discussions, remote branch cleanup, release/tag mutation, workflow re-runs/cancellation, and other hosted operations remain separate tool families. Each must receive its own threat model and independent operator controls rather than inheriting PR-read authority.
+
+Safer next parity work should prioritize bounded collaboration metadata/actions with explicit independent authorization families instead of weakening the CI content boundary.
 
 ## Non-goals
 
@@ -141,3 +156,5 @@ G7A/G7B do not:
 - infer required status checks from annotations/workflow metadata;
 - rerun/cancel workflows or jobs;
 - add a hosted mutation.
+
+G7C does not change those non-goals; it records why raw log access remains deferred until a separate guarded design exists.
