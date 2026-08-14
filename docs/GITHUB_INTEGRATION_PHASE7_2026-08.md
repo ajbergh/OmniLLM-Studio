@@ -1,6 +1,6 @@
 # GitHub Integration Phase G7 — Collaboration Diagnostics — August 2026
 
-> **Status:** IN PROGRESS — G7A merged in PR #161; G7B implementation under final validation; G7C threat review recommends deferring raw workflow-log access
+> **Status:** G7A and G7B merged in PRs #161 and #163; G7C threat review complete and raw workflow-log access remains deferred
 >
 > GitHub App authentication and repository-binding authorization are complete through G6. G7 is a separate collaboration-parity program; it does not reopen or weaken the G1-G6 credential and authorization boundary.
 
@@ -53,7 +53,7 @@ Hosted annotation title/message/path fields are untrusted provider content. They
 
 G7A's exact final PR head passed the repository Quality Gate, Security Scan, applicable container validation, and final review-thread check before merge.
 
-## G7B — bounded workflow/job status correlation — implementation in progress
+## G7B — bounded workflow/job status correlation — merged in PR #163
 
 ### Problem
 
@@ -116,6 +116,8 @@ G7B remains a read-only PR/CI diagnostic capability and adds no hosted mutation 
 - tool remains low-risk/read-only/parallel-safe;
 - exact final PR head passes Quality Gate, Security Scan, applicable container validation, and final review/diff checks.
 
+G7B's exact final PR head met these criteria before merge as `7e3516cfbefa551a6889d336774d71eac299ac29`.
+
 ## G7C — raw textual CI log threat review — implementation deferred
 
 The dedicated review is recorded in `GITHUB_INTEGRATION_PHASE7C_LOG_THREAT_REVIEW_2026-08.md`.
@@ -158,3 +160,4 @@ G7A/G7B do not:
 - add a hosted mutation.
 
 G7C does not change those non-goals; it records why raw log access remains deferred until a separate guarded design exists.
+
