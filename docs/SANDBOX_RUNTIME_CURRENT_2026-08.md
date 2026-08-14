@@ -120,7 +120,7 @@ OMNILLM_EXTENSION_SANDBOX_MODE=auto|required|off
 
 ### macOS — Phase 13C
 
-PR #164 adds a Darwin `platformExtensionCommandContext` backed by the same fixed native Seatbelt primitive proven in 13A/13B.
+PR #164 merged a Darwin `platformExtensionCommandContext` backed by the same fixed native Seatbelt primitive proven in 13A/13B, as `44f410793a70444963ec1eecb989b15df159b5f1`.
 
 When `/usr/bin/sandbox-exec` is available:
 
@@ -141,7 +141,7 @@ When `/usr/bin/sandbox-exec` is available:
 
 As with the Phase 13B runtime, Phase 13C does not claim authoritative teardown for an adversarial descendant that successfully detaches into an independent process group/session.
 
-The initial stacked Phase 13C implementation passed native `macos-latest` extension lifecycle/confinement tests. After #162 merged, #164 was normalized to a clean seven-file delta from current `main`; its exact normalized head must pass native extension assurance plus applicable repository gates before merge.
+PR #164's normalized exact head passed native `macos-latest` extension lifecycle/confinement tests and applicable repository gates before merge.
 
 ## Extension environment policy
 
@@ -177,6 +177,6 @@ Windows Phase 12 completed through:
 
 PR #149 final head `8f4ee1b7de5d3ea6203c44089dadfae4fd6d30cb` passed Quality Gate, Security Scan, native Windows sandbox/plugin/desktop checks, backend format/vet/tests/race, Chromium, frontend, Helm, dependency audit, both CodeQL lanes, and frontend/backend `linux/amd64` plus `linux/arm64` container builds before squash merge as `65bf1cd807b9cd94a2e7b62e653c9057366c6e8b`.
 
-macOS Phase 13A merged in PR #159. Phase 13B passed native macOS runtime assurance and repository gates and merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`. Phase 13C is in final validation in PR #164. Follow-on Phase 13D adversarial assurance is tracked in draft PR #166 and its initial stacked native adversarial suite is green.
+macOS Phase 13A merged in PR #159. Phase 13B passed native macOS runtime assurance and repository gates and merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`. Phase 13C merged in PR #164 as `44f410793a70444963ec1eecb989b15df159b5f1`. Rebased Phase 13D adversarial assurance is tracked in PR #166 and requires exact-head native and repository validation before Phase 13 is closed.
 
 Cross-compilation alone is never considered platform-confinement evidence.

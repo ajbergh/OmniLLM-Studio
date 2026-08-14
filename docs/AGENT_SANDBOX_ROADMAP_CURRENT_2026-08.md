@@ -2,7 +2,7 @@
 
 > **Status:** ACTIVE
 >
-> **Checkpoint:** Windows Phase 12 is complete. Explicit execution cancellation is complete in PR #155. macOS Phase 13A is merged in PR #159 and Phase 13B is in final validation in PR #162.
+> **Checkpoint:** Windows Phase 12 is complete. Explicit execution cancellation is complete in PR #155. macOS Phases 13A, 13B, and 13C are merged in PRs #159, #162, and #164; rebased Phase 13D is in final validation in PR #166.
 
 ## Program invariants
 
@@ -30,10 +30,10 @@
 | 7 | `terminal_exec` + cancellation + resource controls | **IN PROGRESS** | Caller-known execution IDs and explicit cancellation merged in #155 with Linux/Windows/HTTP/`sandboxd` coverage. Wall/output bounds exist. Memory/CPU/PID/disk quotas remain open. |
 | 8 | Network broker + destination approvals | **IN PROGRESS** | Owner-bound grants exist; first-party Linux/Windows/Darwin runtimes remain no-network because destination-enforced egress is not implemented. |
 | 9 | Credential broker | **IN PROGRESS** | Opaque owner/TTL handles and raw-secret environment rejection exist; service-specific consumers remain. |
-| 10 | Local plugin + stdio MCP confinement policy | **COMPLETE** | `auto|required|off` and shared managed-process seam are implemented; Linux can use Bubblewrap and Windows uses AppContainer. macOS native implementation is Phase 13C. |
+| 10 | Local plugin + stdio MCP confinement policy | **COMPLETE** | `auto|required|off` and shared managed-process seam are implemented; Linux uses Bubblewrap, Windows uses AppContainer, and macOS uses Seatbelt after #164. |
 | 11 | Desktop sandbox/workspace UX | **COMPLETE** | Workspace grants, review APIs, Settings UX, and loopback grant hardening merged in #125. |
 | 12 | Windows native confinement backend | **COMPLETE** | #127, #128, #139, and #149 provide protocol-v2 and persistent-extension AppContainer/Job confinement with native adversarial evidence. |
-| 13 | macOS native confinement backend | **IN PROGRESS** | 13A Seatbelt primitive merged in #159. 13B first-party local runtime is implemented in #162 and has native runtime tests; final exact-head repository validation is required before merge. 13C persistent extensions and 13D adversarial assurance remain. |
+| 13 | macOS native confinement backend | **IN PROGRESS** | 13A Seatbelt primitive (#159), 13B first-party local runtime (#162), and 13C persistent extensions (#164) are merged. Rebased 13D adversarial assurance in #166 is the final phase exit gate. |
 | 14 | Durable sandbox-backed agent tasks | NOT STARTED | Persist sandbox/task association and recovery/scheduling semantics. |
 | 15 | Server/Kubernetes sandbox workers | NOT STARTED | Separate worker identity/pods, quotas, hardened security context, and network policy. |
 | 16 | Multi-agent isolated worktrees/workspaces | NOT STARTED | Independent writable workspaces with reviewed promotion/reconciliation. |
@@ -55,9 +55,9 @@ PR #149's exact final head passed Quality Gate, Security Scan, native Windows sa
 ## macOS Phase 13 lineage
 
 - **13A / PR #159** — fixed `/usr/bin/sandbox-exec` Seatbelt primitive, canonicalized policy roots, default network deny, explicit write-root proof, and native `macos-latest` evidence; merged as `ce7d880ab39402671a6f39407ea9319418089de4`.
-- **13B / PR #162** — first-party Darwin local runtime. Read-only workspaces are copied into bounded per-session staging instead of exposing live host paths; the runtime uses explicit system/session read roots, session-only writes, default network deny, bounded wall/output execution, sanitized environment reconstruction, and caller-known cancellation. Native tests prove allowed staged reads, denied host reads/writes/network, environment isolation, output bounds, unsafe staging rejection, and ordinary descendant cancellation. Final exact-head repository validation is still required before merge.
-- **13C** — next: native persistent stdio MCP/plugin Seatbelt confinement through `platformExtensionCommandContext` with `auto|required|off` semantics and native lifecycle/denial tests.
-- **13D** — final macOS adversarial assurance: detached process/session attempts, path/symlink/rename pressure, cross-runtime authority reuse, cancellation/timeout/forced teardown, and persistent-extension equivalents.
+- **13B / PR #162** — first-party Darwin local runtime, merged as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2` after native and repository validation.
+- **13C / PR #164** — native persistent stdio MCP/plugin Seatbelt confinement with `auto|required|off` semantics and native lifecycle/denial tests, merged as `44f410793a70444963ec1eecb989b15df159b5f1`.
+- **13D / PR #166** — final macOS adversarial assurance: detached process/session attempts, path/symlink/rename pressure, cross-runtime authority reuse, and persistent-extension equivalents. Its rebased exact head must pass native and repository gates before Phase 13 closes.
 
 ## Open enforcement gaps
 
@@ -87,19 +87,17 @@ Arbitrary sandbox environments reject credential-bearing keys and dangerous auth
 
 - Linux `auto`: Bubblewrap when a sandbox rootfs is configured; otherwise compatibility behavior unless `required` is selected.
 - Windows `auto`: native AppContainer when available; `required`: fail closed; `off`: explicit sanitized-host compatibility.
-- macOS: native persistent extension confinement remains Phase 13C. Until then, `required` must continue to fail closed and `auto` must not claim native extension confinement.
-- Native Linux/Windows confinement rejects credential-sensitive explicit environment values by default. `OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true` is a transitional operator override.
+- macOS: native persistent extension confinement is active after #164; `required` fails closed if the native primitive is unavailable and `off` remains the explicit sanitized-host compatibility path.
+- Native Linux/Windows/Darwin confinement rejects credential-sensitive explicit environment values by default. `OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true` is a transitional operator override.
 
 ### Process-tree isolation on Darwin
 
-13B uses process-group cancellation for ordinary descendants and tests that behavior, but deliberately reports `process_tree_isolation=false`. A hostile descendant can attempt to create an independent process group/session; 13D must prove a stronger enforcement boundary or formally preserve this limitation before the capability may be advertised.
+Darwin uses process-group cancellation for ordinary descendants and deliberately reports `process_tree_isolation=false`. 13D proves that a deliberately detached descendant remains Seatbelt-confined but may outlive ordinary process-group cancellation, so the capability remains false until a stronger native teardown primitive is implemented and proven.
 
 ## Execution order
 
-1. Complete and merge Phase 13B only after its exact final head passes native macOS assurance plus repository Quality, Security, and applicable container checks.
-2. Implement Phase 13C persistent-extension Seatbelt confinement with native stdio lifecycle, host-file/network denial, environment, and descendant-teardown evidence.
-3. Complete Phase 13D adversarial macOS assurance and reconcile runtime/operator docs.
-4. Continue Phase 2/5/7/8/9 work: packaging, quotas, destination-enforced egress, broader TOCTOU assurance, and service-specific credential consumers.
+1. Complete and merge rebased Phase 13D only after its exact final head passes native macOS assurance plus repository Quality, Security, and applicable container checks.
+2. Continue Phase 2/5/7/8/9 work: packaging, quotas, destination-enforced egress, broader TOCTOU assurance, and service-specific credential consumers.
 5. Continue Phase 17 adversarial assurance with every platform/runtime change.
 
 ## Validation discipline

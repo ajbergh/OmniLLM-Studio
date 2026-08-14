@@ -1,6 +1,6 @@
 # Agent Sandbox Phase 13 — macOS Native Confinement — August 2026
 
-> **Status:** IN PROGRESS — 13A and 13B merged; 13C implementation is in final exact-head validation; 13D adversarial assurance is staged in follow-on PR #166
+> **Status:** IN PROGRESS — 13A, 13B, and 13C merged; rebased 13D adversarial assurance is in final exact-head validation in PR #166
 >
 > Phase 13 is intentionally split into native-evidence slices. Controls are advertised only after the first-party implementation enforces them and native macOS CI proves the behavior.
 
@@ -144,7 +144,7 @@ The dedicated `macOS Sandbox Runtime Assurance` workflow runs on `macos-latest` 
 
 PR #162's exact final head passed native macOS runtime assurance, Quality Gate, Security Scan, Helm validation, applicable frontend/backend container validation, and final review/diff checks before squash merge as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`.
 
-## Phase 13C — persistent extension confinement — PR #164 final validation
+## Phase 13C — persistent extension confinement — merged in PR #164
 
 Phase 13C adds a Darwin-specific `platformExtensionCommandContext` without changing MCP/plugin callers or the shared `CommandProcess` streaming lifecycle.
 
@@ -216,9 +216,9 @@ A dedicated `macOS Extension Sandbox Assurance` workflow runs on `macos-latest` 
 - context cancellation and ordinary descendant teardown;
 - continued explicit `off` compatibility behavior.
 
-The initial stacked 13C implementation passed its native macOS extension assurance. After #162 merged, #164 was rebuilt as a clean seven-file delta from current `main`; its exact normalized final-candidate head must pass the native suite plus Quality, Security, applicable container/Helm, and final review/diff checks before merge.
+PR #164's exact final head passed native extension/runtime assurance, Quality Gate, Security Scan, Helm and container validation, and final review/diff checks before squash merge as `44f410793a70444963ec1eecb989b15df159b5f1`.
 
-## Phase 13D — adversarial assurance and completion review — draft PR #166
+## Phase 13D — adversarial assurance and completion review — rebased PR #166 final validation
 
 The follow-on 13D branch adds direct adversarial evidence for:
 
@@ -231,7 +231,7 @@ The follow-on 13D branch adds direct adversarial evidence for:
 
 The first native 13D adversarial run passed on its stacked implementation head. It also demonstrated the truthful limitation: a deliberately detached descendant can outlive ordinary process-group cancellation/root kill while remaining Seatbelt-confined. Therefore `process_tree_isolation` must remain false unless a stronger native teardown mechanism is implemented and proven.
 
-PR #166 must be normalized onto the merged 13C result and pass exact final-head repository/native gates before Phase 13 is closed.
+PR #166 is rebuilt from the merged 13C result and must pass exact final-head repository/native gates before Phase 13 is closed.
 
 ## Known platform constraint
 

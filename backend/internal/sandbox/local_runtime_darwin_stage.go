@@ -65,49 +65,60 @@ func stageDarwinReadOnlyWorkspace(source, destination string) error {
 		if info.Size() < 0 || bytesCopied+info.Size() > maxDarwinStagedWorkspaceBytes {
 			return fmt.Errorf("workspace staging exceeds %d bytes", maxDarwinStagedWorkspaceBytes)
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return err
-		}
-		input, err := os.Open(path)
+		written, err := stageDarwinReadOnlyFile(path, target, relative, info)
 		if err != nil {
 			return err
-		}
-		openedInfo, statErr := input.Stat()
-		if statErr != nil {
-			_ = input.Close()
-			return statErr
-		}
-		if !os.SameFile(info, openedInfo) || !openedInfo.Mode().IsRegular() {
-			_ = input.Close()
-			return fmt.Errorf("workspace source changed while staging %q", relative)
-		}
-		mode := os.FileMode(0o400)
-		if openedInfo.Mode()&0o111 != 0 {
-			mode = 0o500
-		}
-		output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
-		if err != nil {
-			_ = input.Close()
-			return err
-		}
-		written, copyErr := io.Copy(output, input)
-		closeOutErr := output.Close()
-		closeInErr := input.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeOutErr != nil {
-			return closeOutErr
-		}
-		if closeInErr != nil {
-			return closeInErr
-		}
-		if written != openedInfo.Size() {
-			return fmt.Errorf("workspace source changed size while staging %q", relative)
 		}
 		bytesCopied += written
 		return nil
 	})
+}
+
+// stageDarwinReadOnlyFile copies one path only if the opened source is still the
+// same regular inode observed by the directory walk. Keeping this check in a
+// focused helper makes the source-swap defense deterministic to test in 13D.
+func stageDarwinReadOnlyFile(path, target, relative string, observed os.FileInfo) (int64, error) {
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return 0, err
+	}
+	input, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	openedInfo, statErr := input.Stat()
+	if statErr != nil {
+		_ = input.Close()
+		return 0, statErr
+	}
+	if !os.SameFile(observed, openedInfo) || !openedInfo.Mode().IsRegular() {
+		_ = input.Close()
+		return 0, fmt.Errorf("workspace source changed while staging %q", relative)
+	}
+	mode := os.FileMode(0o400)
+	if openedInfo.Mode()&0o111 != 0 {
+		mode = 0o500
+	}
+	output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	if err != nil {
+		_ = input.Close()
+		return 0, err
+	}
+	written, copyErr := io.Copy(output, input)
+	closeOutErr := output.Close()
+	closeInErr := input.Close()
+	if copyErr != nil {
+		return 0, copyErr
+	}
+	if closeOutErr != nil {
+		return 0, closeOutErr
+	}
+	if closeInErr != nil {
+		return 0, closeInErr
+	}
+	if written != openedInfo.Size() {
+		return 0, fmt.Errorf("workspace source changed size while staging %q", relative)
+	}
+	return written, nil
 }
 
 type darwinBoundedOutput struct {
