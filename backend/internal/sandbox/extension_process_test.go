@@ -37,8 +37,8 @@ func TestExtensionSandboxModeParsing(t *testing.T) {
 }
 
 func TestExtensionAutoCompatibilityKeepsExplicitConfiguredEnvironment(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows auto mode uses native AppContainer confinement")
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		t.Skip("native platform confinement owns auto-mode extension environment policy")
 	}
 	t.Setenv("OMNILLM_EXTENSION_SANDBOX_MODE", "auto")
 	t.Setenv("OMNILLM_SANDBOX_ROOTFS", "")
@@ -59,8 +59,8 @@ func TestExtensionAutoCompatibilityKeepsExplicitConfiguredEnvironment(t *testing
 }
 
 func TestExtensionRequiredFailsClosedWithoutNativeConfiguration(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows required mode has a native AppContainer backend")
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		t.Skip("native platform confinement implements required mode")
 	}
 	t.Setenv("OMNILLM_EXTENSION_SANDBOX_MODE", "required")
 	t.Setenv("OMNILLM_SANDBOX_ROOTFS", "")

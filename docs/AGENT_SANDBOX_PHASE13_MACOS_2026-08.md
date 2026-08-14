@@ -1,6 +1,6 @@
 # Agent Sandbox Phase 13 — macOS Native Confinement — August 2026
 
-> **Status:** IN PROGRESS — 13A merged; 13B implementation under native validation
+> **Status:** IN PROGRESS — 13A merged; 13B at final merge gate in PR #162; 13C implementation under native validation
 >
 > Phase 13 is intentionally split into native-evidence slices. Controls are advertised only after the first-party implementation enforces them and native macOS CI proves the behavior.
 
@@ -26,7 +26,7 @@ It proved on `macos-latest` that a default-deny Seatbelt profile can:
 
 13A intentionally allowed broad host reads for compatibility and therefore did not register a Darwin `NewLocalRuntime` or advertise filesystem isolation.
 
-## Phase 13B — first-party local runtime — implementation in progress
+## Phase 13B — first-party local runtime — PR #162 merge gate
 
 Phase 13B wires Darwin into the protocol-v2 local runtime instead of the unsupported-platform stub.
 
@@ -77,6 +77,8 @@ Read access is limited to canonicalized session roots plus existing system/runti
 - `/private/etc`
 - Homebrew/MacPorts roots when present (`/opt/homebrew`, `/opt/local`)
 
+macOS path resolution also requires directory-data access on parent components. The runtime grants `file-read-data` and metadata only to the exact ancestor directories of approved roots; sibling file contents remain outside the `file-read*` subpath grants and are denied by native tests.
+
 Writes are limited to:
 
 - `/dev/null`;
@@ -122,7 +124,7 @@ Normal descendant cancellation is tested, but `ProcessTreeIsolation` remains **f
 
 ### Truthful capabilities in 13B
 
-The proposed Darwin runtime reports:
+The Darwin runtime reports:
 
 - `os_isolation = true`
 - `filesystem_isolation = true`
@@ -140,35 +142,81 @@ Any `CreateRequest.Requirements` demanding one of the unsupported controls there
 
 A dedicated `macOS Sandbox Runtime Assurance` workflow runs on `macos-latest` and executes both the 13A Seatbelt primitive suite and the 13B `TestDarwinLocalRuntime*` suite.
 
-The 13B native suite covers:
+The suite covers truthful capability reporting, allowed staged reads, denied host reads/workspace writes/network, ephemeral workspace persistence, output bounds, ambient-secret non-inheritance, environment rejection, caller-known cancellation, ordinary descendant termination, unsafe staging rejection, mount policy, and executable policy.
 
-- truthful capability reporting;
-- allowed staged-workspace reads;
-- read-only workspace write denial;
-- ungranted host-file read denial;
-- loopback network denial;
-- ephemeral workspace write/read persistence within one session;
-- stdout/stderr bounding;
+The current PR #162 final-candidate head has passed this native suite. **13B is not complete until the same exact head also clears the repository Quality Gate, Security Scan, applicable container validation, and final review/diff checks before merge.**
+
+## Phase 13C — persistent extension confinement — implementation in progress
+
+Phase 13C adds a Darwin-specific `platformExtensionCommandContext` without changing MCP/plugin callers or the shared `CommandProcess` streaming lifecycle.
+
+### Policy composition
+
+The existing operator policy remains authoritative:
+
+```text
+OMNILLM_EXTENSION_SANDBOX_MODE=auto|required|off
+```
+
+On Darwin:
+
+- `required` uses the fixed `/usr/bin/sandbox-exec` native backend and fails closed if it is unavailable;
+- `auto` selects the same native backend when Seatbelt is available;
+- `off` remains the explicit sanitized-host compatibility boundary;
+- unsupported platforms retain their existing fail-closed `required` behavior.
+
+No child is launched before the Seatbelt profile is supplied to the fixed system launcher.
+
+### Extension filesystem and network boundary
+
+Each native persistent extension receives a unique runtime-owned `home` and `tmp` root.
+
+Read access is limited to:
+
+- explicit system/runtime roots already used by 13B;
+- the canonical extension command directory;
+- the canonical configured working directory when it differs from the command directory;
+- the extension's own home/tmp roots.
+
+Write access is limited to the unique home/tmp roots and `/dev/null`. Command and working-directory content stays read-only.
+
+No network operation is granted. Loopback access is therefore denied along with external network access.
+
+One extension's scratch/home authority is not added to another extension's profile. Native tests exercise cross-extension read denial.
+
+### Environment boundary
+
+13C reuses the existing native-extension sensitive-environment policy:
+
+- credential/proxy-sensitive explicit values are rejected by default;
+- `OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true` remains an explicit transitional operator override;
+- ambient backend secrets are not inherited;
+- Darwin additionally rejects confinement-owned `PATH`, `HOME`, temp/shell keys and all `DYLD_*` injection variables;
+- runtime-owned `PATH`, `HOME`, `TMPDIR`, and `LANG` values are reconstructed before launch.
+
+### Process lifecycle
+
+The Darwin extension process preserves streaming stdin/stdout/stderr and uses a dedicated process group so ordinary descendants are terminated on context cancellation or explicit `Kill` before the scratch root is removed.
+
+As with 13B, this ordinary descendant behavior does **not** justify a broader process-tree confinement claim against deliberately detached sessions. Phase 13D owns that adversarial requirement.
+
+### Native 13C assurance
+
+A dedicated `macOS Extension Sandbox Assurance` workflow runs on `macos-latest` and covers:
+
+- `auto` native selection and `required` behavior;
+- persistent stdio request/response lifecycle;
+- extension command-directory write denial;
+- per-extension home write success;
+- unrelated host read/write denial;
+- cross-extension scratch read denial;
 - ambient secret non-inheritance;
-- credential-sensitive, `DYLD_*`, and runtime-owned environment rejection;
-- caller-known cancellation and ordinary descendant termination;
-- rejection of symlink and hard-link staging;
-- rejection of writable workspace mounts;
-- rejection of unapproved host executables.
+- loopback network denial;
+- sensitive/`DYLD_*`/runtime-owned environment rejection;
+- context cancellation and ordinary descendant teardown;
+- continued explicit `off` compatibility behavior.
 
-**13B is not complete until the exact final PR head passes this native suite plus the repository Quality Gate, Security Scan, and applicable container validation.**
-
-## Phase 13C — persistent extension confinement
-
-Still required:
-
-- Darwin-specific `platformExtensionCommandContext` implementation;
-- `required` uses Seatbelt or fails closed;
-- `auto` selects the native backend when prerequisites are satisfied;
-- no pre-confinement child execution window;
-- sanitized/minimal environment and credential-sensitive explicit environment rejection;
-- stdio lifecycle compatibility for MCP and local plugins;
-- native descendant termination plus host-file/network denial evidence.
+**13C is not complete until the exact final PR head passes this native suite plus repository Quality, Security, applicable container, and final review/diff checks.**
 
 ## Phase 13D — adversarial assurance and completion review
 
