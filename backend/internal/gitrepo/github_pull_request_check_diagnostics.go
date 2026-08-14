@@ -114,8 +114,11 @@ func (s *RemoteService) GetPullRequestCheckDiagnostics(ctx context.Context, remo
 		return nil, fmt.Errorf("GitHub check diagnostics could not be inspected")
 	}
 
+	checksTruncated := response.TotalCount > maxGitHubCheckResults || len(response.CheckRuns) > maxGitHubCheckResults
+	if len(response.CheckRuns) > maxGitHubCheckResults {
+		response.CheckRuns = response.CheckRuns[:maxGitHubCheckResults]
+	}
 	checks := make([]GitHubCheckDiagnosticResult, 0, maxGitHubDiagnosticChecks)
-	checksTruncated := false
 	annotationsTruncated := false
 	totalAnnotations := 0
 	for _, check := range response.CheckRuns {
@@ -124,6 +127,11 @@ func (s *RemoteService) GetPullRequestCheckDiagnostics(ctx context.Context, remo
 		}
 		if len(checks) >= maxGitHubDiagnosticChecks {
 			checksTruncated = true
+			break
+		}
+		if totalAnnotations >= maxGitHubDiagnosticAnnotations {
+			checksTruncated = true
+			annotationsTruncated = true
 			break
 		}
 		if check.ID <= 0 {
