@@ -12,7 +12,8 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: '1.25.x'
+  # Keep Go pinned to a patched toolchain because stdlib advisories are blocking audit failures.
+  GO_VERSION: '1.25.13'
   NODE_VERSION: '24'
 
 jobs:
@@ -45,13 +46,17 @@ jobs:
       - name: Root npm audit
         id: root_audit
         continue-on-error: true
-        run: npm audit --audit-level=high 2>&1 | tee root-npm-audit.log
+        run: |
+          set -o pipefail
+          npm audit --audit-level=high 2>&1 | tee root-npm-audit.log
 
       - name: Frontend npm audit
         id: frontend_audit
         continue-on-error: true
         working-directory: frontend
-        run: npm audit --audit-level=high 2>&1 | tee ../frontend-npm-audit.log
+        run: |
+          set -o pipefail
+          npm audit --audit-level=high 2>&1 | tee ../frontend-npm-audit.log
 
       - name: Upload dependency audit reports
         if: always()
