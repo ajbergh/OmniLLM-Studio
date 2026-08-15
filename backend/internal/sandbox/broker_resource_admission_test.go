@@ -8,10 +8,10 @@ import (
 
 func TestBrokerRejectsUnenforceableRequestedResourceLimits(t *testing.T) {
 	tests := []struct {
-		name       string
-		limits     ResourceLimits
-		wantField  string
-		enable     func(*RuntimeCapabilities)
+		name      string
+		limits    ResourceLimits
+		wantField string
+		enable    func(*RuntimeCapabilities)
 	}{
 		{
 			name:      "memory",
