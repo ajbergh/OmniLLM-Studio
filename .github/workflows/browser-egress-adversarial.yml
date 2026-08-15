@@ -1,0 +1,55 @@
+name: Browser egress adversarial assurance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-egress-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25.13'
+  NODE_VERSION: '24'
+
+jobs:
+  chromium-egress:
+    name: Chromium native egress fixture matrix
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Prove native browser egress perimeter
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          export OMNILLM_BROWSER_TEST_EXEC_PATH="$(node -e "console.log(require('../node_modules/playwright').chromium.executablePath())")"
+          export OMNILLM_BROWSER_TEST_REQUIRE=true
+          printf 'Chromium: %s\n' "$OMNILLM_BROWSER_TEST_EXEC_PATH"
+          test -x "$OMNILLM_BROWSER_TEST_EXEC_PATH"
+          go test ./internal/browser -run '^TestRequestPerimeterNativeFixtureMatrix$' -count=1 -v 2>&1 | tee ../browser-egress-adversarial.log
+      - name: Upload browser egress diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-egress-adversarial-diagnostics
+          path: browser-egress-adversarial.log
+          if-no-files-found: ignore
+          retention-days: 14
