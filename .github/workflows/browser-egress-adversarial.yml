@@ -42,6 +42,10 @@ jobs:
           set -euo pipefail
           export OMNILLM_BROWSER_TEST_EXEC_PATH="$(node -e "console.log(require('../node_modules/playwright').chromium.executablePath())")"
           export OMNILLM_BROWSER_TEST_REQUIRE=true
+          # GitHub-hosted Ubuntu blocks Chromium's user-namespace sandbox before
+          # startup. Disable that independent process sandbox only for this
+          # network-perimeter fixture; production defaults remain unchanged.
+          export OMNILLM_BROWSER_TEST_NO_SANDBOX=true
           printf 'Chromium: %s\n' "$OMNILLM_BROWSER_TEST_EXEC_PATH"
           test -x "$OMNILLM_BROWSER_TEST_EXEC_PATH"
           go test ./internal/browser -run '^TestRequestPerimeterNativeFixtureMatrix$' -count=1 -v 2>&1 | tee ../browser-egress-adversarial.log
