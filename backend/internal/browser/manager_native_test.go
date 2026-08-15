@@ -24,9 +24,13 @@ const browserNativeFixtureTimeout = 10 * time.Second
 // cannot escape the browser request perimeter through common subresource and
 // worker mechanisms. CI sets OMNILLM_BROWSER_TEST_REQUIRE=true so a missing or
 // unusable Chromium binary is a hard failure rather than a skipped assurance test.
+// OMNILLM_BROWSER_TEST_NO_SANDBOX is test-only: GitHub's Ubuntu hosted runner
+// blocks Chromium's user-namespace sandbox before startup, so that runner disables
+// the Chromium process sandbox only to exercise the independent egress boundary.
 func TestRequestPerimeterNativeFixtureMatrix(t *testing.T) {
 	browserPath := strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_TEST_EXEC_PATH"))
 	requireBrowser := strings.EqualFold(strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_TEST_REQUIRE")), "true")
+	testNoSandbox := strings.EqualFold(strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_TEST_NO_SANDBOX")), "true")
 	if browserPath == "" {
 		var found bool
 		browserPath, found = launcher.LookPath()
@@ -123,6 +127,7 @@ if ('serviceWorker' in navigator) {
 		BrowserCacheDir:    t.TempDir(),
 		BrowserMaxSessions: 1,
 		BrowserSessionTTL:  time.Minute,
+		BrowserNoSandbox:   testNoSandbox,
 	}, nil)
 	manager.newLauncher = func() *launcher.Launcher {
 		return launcher.New().Leakless(false)
