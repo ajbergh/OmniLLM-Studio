@@ -90,6 +90,7 @@ func TestWindowsSandboxJobLeavesMemoryUnboundedAtZero(t *testing.T) {
 
 func TestWindowsLocalRuntimeEnforcesAggregateMemoryLimit(t *testing.T) {
 	if os.Getenv("OMNILLM_WINDOWS_MEMORY_LIMIT_CHILD") == "1" {
+		fmt.Println("memory_limit_child_started=1")
 		blocks := make([][]byte, 0, 64)
 		for i := 0; i < 64; i++ {
 			block := make([]byte, 8<<20)
@@ -175,6 +176,9 @@ func TestWindowsLocalRuntimeEnforcesAggregateMemoryLimit(t *testing.T) {
 	}
 	if !strings.Contains(result.Stdout, "memory_limit_root_started=1") {
 		t.Fatalf("memory-limit root did not start: stdout=%q stderr=%q", result.Stdout, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "memory_limit_child_started=1") {
+		t.Fatalf("memory-limited descendant did not start before allocation attempt: stdout=%q stderr=%q", result.Stdout, result.Stderr)
 	}
 	if !strings.Contains(result.Stdout, "memory_limit_child_denied=") {
 		t.Fatalf("aggregate memory denial not observed: stdout=%q stderr=%q", result.Stdout, result.Stderr)
