@@ -4,24 +4,27 @@ package sandbox
 
 import (
 	"fmt"
-	"os"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // captureWorkspaceRootIdentity returns the stable Linux filesystem identity of
-// an already-canonical workspace root. Device+inode binds the grant to the
-// directory object rather than only to the pathname that currently names it.
+// an already-canonical workspace root. The root is opened without following a
+// symlink and identity is derived from the opened directory descriptor, so the
+// grant binds to the directory object rather than a separate pathname stat.
 func captureWorkspaceRootIdentity(path string) (string, error) {
-	info, err := os.Stat(path)
+	rootFD, err := unix.Open(path, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
-		return "", fmt.Errorf("stat workspace root identity: %w", err)
+		return "", fmt.Errorf("open workspace root identity: %w", err)
 	}
-	if !info.IsDir() {
+	defer unix.Close(rootFD)
+
+	var stat unix.Stat_t
+	if err := unix.Fstat(rootFD, &stat); err != nil {
+		return "", fmt.Errorf("stat workspace root identity handle: %w", err)
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFDIR {
 		return "", fmt.Errorf("workspace root is not a directory")
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat == nil {
-		return "", fmt.Errorf("workspace root identity is unavailable")
 	}
 	return fmt.Sprintf("linux:%d:%d", uint64(stat.Dev), uint64(stat.Ino)), nil
 }
