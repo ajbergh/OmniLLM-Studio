@@ -26,12 +26,12 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
-      - name: Prove symlink denial and rename-race containment
+      - name: Prove symlink denial rename-race containment and root identity binding
         working-directory: backend
         shell: bash
         run: |
           set -euo pipefail
-          go test ./internal/sandbox -run '^TestLinuxWorkspace(Read|Mutation)' -count=10 -v 2>&1 | tee ../sandbox-workspace-linux.log
+          go test ./internal/sandbox -run '^TestLinuxWorkspace(Read|Mutation|Grant|Legacy)' -count=10 -v 2>&1 | tee ../sandbox-workspace-linux.log
       - name: Upload Linux workspace diagnostics
         if: always()
         uses: actions/upload-artifact@v7
