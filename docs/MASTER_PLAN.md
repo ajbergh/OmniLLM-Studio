@@ -2,11 +2,11 @@
 
 > **Authoritative source for outstanding engineering work.**
 >
-> Audited against repository `main` through PR #170 (`9a2db5b`) plus the current PR #171 implementation branch on 2026-08-16. Completed initiatives and superseded plans are in [archive/README.md](archive/README.md). This document deliberately excludes completed work except where it is needed to explain a dependency. macOS sandbox Phase 13 completed in PR #166 (`d52ab16`). Native Chromium browser-egress assurance completed in PR #168 (`76f4f4c`). SQLite foreign-key admission is also complete (schema V51).
+> Audited against repository `main` through PR #171 (`11dfab99`) plus the current PR #172 implementation branch on 2026-08-16. Completed initiatives and superseded plans are in [archive/README.md](archive/README.md). This document deliberately excludes completed work except where it is needed to explain a dependency. macOS sandbox Phase 13 completed in PR #166 (`d52ab16`). Native Chromium browser-egress assurance completed in PR #168 (`76f4f4c`). SQLite foreign-key admission is also complete (schema V51).
 
 ## Execution order
 
-1. Continue sandbox correctness/security hardening: finish Windows process-count quotas, then add Windows aggregate memory quotas, broader TOCTOU assurance, destination-enforced sandbox egress, and credential consumers.
+1. Continue sandbox correctness/security hardening: complete Windows aggregate memory quotas in #172, then add Linux cgroup-v2 capability detection and PID/memory enforcement, broader TOCTOU assurance, destination-enforced sandbox egress, and credential consumers. Resolve CPU semantics before enabling a CPU capability; physical-disk accounting remains separate work.
 2. Resolve remaining platform-wide data/runtime safety debt, beginning with cookie-session migration validation.
 3. Add durable sandbox-backed task/worker infrastructure; it depends on the sandbox hardening work above.
 4. Finish router, video, and URL-context correctness/validation work.
@@ -18,11 +18,11 @@
 ### Enforced quotas, egress, TOCTOU assurance, and credential consumers
 
 - **Status:** IN PROGRESS
-- **Implemented:** Broker ownership/grants, no-network first-party Linux/Windows/Darwin runtimes, bounded wall/output limits, safe staged read-only workspace copies, opaque credential handles, journaled workspace mutation tools, fail-closed Broker admission for unsupported non-zero memory/CPU/PID/disk quota requests (#170), and native Windows Job Object process-count enforcement on the current #171 branch.
-- **Remaining:** Complete #171 on its normalized final head; enforce and natively test aggregate memory, CPU, and physical-disk quotas; add PID/process-count quotas for supported Linux/macOS designs rather than claiming the Windows capability universally; implement destination-scoped egress resistant to DNS/proxy/redirect/private-address bypass; extend workspace registry/path-component TOCTOU tests beyond the staging flows; add service-specific credential-broker consumers.
+- **Implemented:** Broker ownership/grants, no-network first-party Linux/Windows/Darwin runtimes, bounded wall/output limits, safe staged read-only workspace copies, opaque credential handles, journaled workspace mutation tools, fail-closed Broker admission for unsupported non-zero memory/CPU/PID/disk quota requests (#170), merged Windows Job Object process-count enforcement (#171), and natively proven Windows aggregate Job memory enforcement on the current #172 branch.
+- **Remaining:** Complete #172 on its documentation-inclusive final head; add Linux cgroup-v2 controller/delegation detection and natively proven per-execution PID then memory controls; resolve aggregate/cumulative CPU-time semantics before enabling `cpu_limit`; design enforceable physical-disk accounting; implement destination-scoped egress resistant to DNS/proxy/redirect/private-address bypass; extend workspace registry/path-component TOCTOU tests beyond the staging flows; add service-specific credential-broker consumers. macOS resource capabilities remain false until independently proven.
 - **Files:** `backend/internal/sandbox/`, `backend/cmd/sandboxd/`, `backend/internal/tools/`, `backend/internal/repository/scoped_tool_permission.go`.
-- **Dependency/risk:** Capability reporting is runtime/platform-specific. Do not advertise a capability before native enforcement and negative evidence exist. Browser egress validation is not a substitute for arbitrary sandbox socket enforcement. Egress requires a separately enforceable runtime boundary, not just a Broker grant.
-- **Next action:** Merge #171 only after the normalized head passes native Windows and repository gates, then implement Windows aggregate Job Object memory enforcement (`JOB_OBJECT_LIMIT_JOB_MEMORY`) with child-process over-limit evidence before setting `memory_limit=true`.
+- **Dependency/risk:** Capability reporting is runtime/platform-specific. Do not advertise a capability before native enforcement and negative evidence exist. Browser egress validation is not a substitute for arbitrary sandbox socket enforcement. Egress requires a separately enforceable runtime boundary, not just a Broker grant. cgroup-v2 capability must remain false when the worker lacks delegated writable controllers.
+- **Next action:** Merge #172 only after its documentation-inclusive exact head passes native Windows and repository gates; then implement Linux cgroup-v2 capability/delegation detection and a focused `pids.max` slice with native descendant/over-limit evidence before setting Linux `pid_limit=true`.
 - **Derived from:** `AGENT_SANDBOX_ROADMAP_CURRENT_2026-08.md`, `SANDBOX_RUNTIME_CURRENT_2026-08.md`, `SANDBOX_QUOTA_EGRESS_HARDENING_DESIGN_2026-08.md`, `AGENT_SANDBOX_THREAT_MODEL.md`.
 
 ### Durable sandbox tasks and isolated workers

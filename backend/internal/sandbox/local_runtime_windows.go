@@ -82,9 +82,9 @@ func NewLocalRuntime(_ LocalRuntimeConfig) (Runtime, error) {
 }
 
 // Capabilities reports only controls enforced by this implementation. Windows
-// Job Objects enforce process-count quotas from process creation. Memory, CPU,
-// disk, and destination allowlisting remain false until separately implemented
-// and proven. AppContainer is launched with no network capabilities.
+// Job Objects enforce process-count and aggregate committed-memory quotas from
+// process creation. CPU, disk, and destination allowlisting remain false until
+// separately implemented and proven. AppContainer has no network capabilities.
 func (r *LocalRuntime) Capabilities() RuntimeCapabilities {
 	return RuntimeCapabilities{
 		Name:                 "windows-appcontainer",
@@ -94,7 +94,7 @@ func (r *LocalRuntime) Capabilities() RuntimeCapabilities {
 		NetworkIsolation:     true,
 		NetworkAllowlist:     false,
 		ProcessTreeIsolation: true,
-		MemoryLimit:          false,
+		MemoryLimit:          true,
 		CPULimit:             false,
 		PIDLimit:             true,
 		DiskLimit:            false,
@@ -634,7 +634,10 @@ func runWindowsAppContainerProcess(
 	stdoutLimit int64,
 	stderrLimit int64,
 ) (int, string, string, bool, bool, error) {
-	job, err := createWindowsSandboxJob(session.spec.Resources.MaxProcesses)
+	job, err := createWindowsSandboxJobWithLimits(
+		session.spec.Resources.MaxProcesses,
+		session.spec.Resources.MemoryBytes,
+	)
 	if err != nil {
 		return 0, "", "", false, false, err
 	}
