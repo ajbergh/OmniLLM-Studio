@@ -269,8 +269,8 @@ type TextEdit struct {
 }
 
 // Search finds bounded text matches without following symlinked directories or
-// reading oversized files. Candidate names discovered by WalkDir are reopened
-// through the platform read boundary before any content is trusted.
+// reading oversized files. Platform search enumeration owns candidate discovery
+// and bounded reads so Linux can keep both on one descriptor-relative lineage.
 type SearchMatch struct {
 	Path    string `json:"path"`
 	Line    int    `json:"line"`
@@ -294,56 +294,26 @@ func (s *WorkspaceFS) Search(ownerUserID, workspaceID, query string, maxMatches 
 		maxMatches = 50
 	}
 	matches := make([]SearchMatch, 0, min(maxMatches, 50))
-	err = filepath.WalkDir(workspace.RootPath, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if path == workspace.RootPath {
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		rel, err := filepath.Rel(workspace.RootPath, path)
-		if err != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-		if rel == ".git" || strings.HasPrefix(rel, ".git/") {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
-			return nil
-		}
-		data, _, readErr := readWorkspaceRegularFile(workspace.RootPath, rel, 1<<20)
-		if readErr != nil || strings.IndexByte(string(data), 0) >= 0 {
-			return nil
+	lowerQuery := strings.ToLower(query)
+	err = enumerateWorkspaceSearchCandidates(workspace.RootPath, workspace.RootIdentity, 1<<20, func(rel string, data []byte) bool {
+		if strings.IndexByte(string(data), 0) >= 0 {
+			return true
 		}
 		for index, line := range strings.Split(string(data), "\n") {
-			if strings.Contains(strings.ToLower(line), strings.ToLower(query)) {
+			if strings.Contains(strings.ToLower(line), lowerQuery) {
 				preview := strings.TrimSpace(line)
 				if len(preview) > 300 {
 					preview = preview[:300]
 				}
 				matches = append(matches, SearchMatch{Path: rel, Line: index + 1, Preview: preview})
 				if len(matches) >= maxMatches {
-					return filepath.SkipAll
+					return false
 				}
 			}
 		}
-		return nil
+		return true
 	})
-	if err != nil && err != filepath.SkipAll {
+	if err != nil {
 		return nil, err
 	}
 	sort.Slice(matches, func(i, j int) bool {
