@@ -95,6 +95,17 @@ func TestLocalRuntimeCapabilitiesDoNotOverclaimResourceOrNetworkLimits(t *testin
 	}
 }
 
+func TestLocalRuntimeAdvertisesPIDLimitOnlyWithDelegatedManager(t *testing.T) {
+	runtime := &LocalRuntime{pidCgroup: &linuxPIDCgroupManager{root: "/delegated"}}
+	capabilities := runtime.Capabilities()
+	if !capabilities.PIDLimit {
+		t.Fatalf("runtime did not advertise initialized PID control: %#v", capabilities)
+	}
+	if capabilities.NetworkAllowlist || capabilities.MemoryLimit || capabilities.CPULimit || capabilities.DiskLimit {
+		t.Fatalf("runtime overclaims unrelated controls: %#v", capabilities)
+	}
+}
+
 func TestValidateRuntimeMountsRequiresTrustedResolution(t *testing.T) {
 	root := t.TempDir()
 	owner := OwnerScope{UserID: "user-1"}
