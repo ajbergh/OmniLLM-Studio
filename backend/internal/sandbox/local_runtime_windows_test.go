@@ -53,10 +53,10 @@ func TestWindowsLocalRuntimeCapabilities(t *testing.T) {
 	if capabilities.Name != "windows-appcontainer" {
 		t.Fatalf("runtime name = %q", capabilities.Name)
 	}
-	if !capabilities.OSIsolation || !capabilities.FilesystemIsolation || !capabilities.NetworkIsolation || !capabilities.ProcessTreeIsolation {
+	if !capabilities.OSIsolation || !capabilities.FilesystemIsolation || !capabilities.NetworkIsolation || !capabilities.ProcessTreeIsolation || !capabilities.PIDLimit {
 		t.Fatalf("Windows runtime did not advertise required enforced capabilities: %+v", capabilities)
 	}
-	if capabilities.NetworkAllowlist || capabilities.MemoryLimit || capabilities.CPULimit || capabilities.PIDLimit || capabilities.DiskLimit {
+	if capabilities.NetworkAllowlist || capabilities.MemoryLimit || capabilities.CPULimit || capabilities.DiskLimit {
 		t.Fatalf("Windows runtime over-advertised unenforced capabilities: %+v", capabilities)
 	}
 }
