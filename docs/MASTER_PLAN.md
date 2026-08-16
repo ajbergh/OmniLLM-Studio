@@ -2,29 +2,28 @@
 
 > **Authoritative source for outstanding engineering work.**
 >
-> Audited against repository `main` at `113a2b9` plus the current implementation worktree on 2026-08-14. Completed initiatives and superseded plans are in [archive/README.md](archive/README.md). This document deliberately excludes completed work except where it is needed to explain a dependency. macOS sandbox Phase 13, previously the top open item, completed in PR #166 (`d52ab16`). SQLite foreign-key admission is also complete in the current worktree (schema V51).
+> Audited against repository `main` through PR #170 (`9a2db5b`) plus the current PR #171 implementation branch on 2026-08-16. Completed initiatives and superseded plans are in [archive/README.md](archive/README.md). This document deliberately excludes completed work except where it is needed to explain a dependency. macOS sandbox Phase 13 completed in PR #166 (`d52ab16`). Native Chromium browser-egress assurance completed in PR #168 (`76f4f4c`). SQLite foreign-key admission is also complete (schema V51).
 
 ## Execution order
 
-1. Validate the completed browser egress implementation on a Chromium-capable CI/host runner, including iframe, media, redirect, WebSocket, worker, and service-worker fixtures.
-2. Address sandbox correctness/security gaps: path-race assurance, resource quotas, egress enforcement, and credential delivery.
-3. Resolve remaining platform-wide data/runtime safety debt, beginning with cookie-session migration validation.
-4. Add durable sandbox-backed task/worker infrastructure; it depends on the sandbox hardening work above.
-5. Finish router, video, and URL-context correctness/validation work.
-6. Charter one narrow GitHub G7D capability only after higher-risk correctness work is stable.
-7. Reconsider explicitly deferred enhancements only when product demand justifies them.
+1. Continue sandbox correctness/security hardening: finish Windows process-count quotas, then add Windows aggregate memory quotas, broader TOCTOU assurance, destination-enforced sandbox egress, and credential consumers.
+2. Resolve remaining platform-wide data/runtime safety debt, beginning with cookie-session migration validation.
+3. Add durable sandbox-backed task/worker infrastructure; it depends on the sandbox hardening work above.
+4. Finish router, video, and URL-context correctness/validation work.
+5. Charter one narrow GitHub G7D capability only after higher-risk correctness work is stable.
+6. Reconsider explicitly deferred enhancements only when product demand justifies them.
 
 ## P1 — sandbox hardening and deployment
 
 ### Enforced quotas, egress, TOCTOU assurance, and credential consumers
 
 - **Status:** IN PROGRESS
-- **Implemented:** Broker ownership/grants, no-network first-party Linux/Windows/Darwin runtimes, bounded wall/output limits, safe staged read-only workspace copies, opaque credential handles, and journaled workspace mutation tools.
-- **Remaining:** Enforce and natively test memory, CPU, PID/process-count, and physical-disk quotas; implement destination-scoped egress resistant to DNS/proxy/redirect/private-address bypass; extend workspace registry/path-component TOCTOU tests beyond the staging flows; add service-specific credential-broker consumers.
+- **Implemented:** Broker ownership/grants, no-network first-party Linux/Windows/Darwin runtimes, bounded wall/output limits, safe staged read-only workspace copies, opaque credential handles, journaled workspace mutation tools, fail-closed Broker admission for unsupported non-zero memory/CPU/PID/disk quota requests (#170), and native Windows Job Object process-count enforcement on the current #171 branch.
+- **Remaining:** Complete #171 on its normalized final head; enforce and natively test aggregate memory, CPU, and physical-disk quotas; add PID/process-count quotas for supported Linux/macOS designs rather than claiming the Windows capability universally; implement destination-scoped egress resistant to DNS/proxy/redirect/private-address bypass; extend workspace registry/path-component TOCTOU tests beyond the staging flows; add service-specific credential-broker consumers.
 - **Files:** `backend/internal/sandbox/`, `backend/cmd/sandboxd/`, `backend/internal/tools/`, `backend/internal/repository/scoped_tool_permission.go`.
-- **Dependency/risk:** Do not advertise a capability before platform enforcement and negative evidence exist. Egress requires a separately enforceable runtime boundary, not just a Broker grant.
-- **Next action:** Write a platform-by-platform quota/egress design with capability reporting and adversarial test criteria; take one independently verifiable control at a time.
-- **Derived from:** `AGENT_SANDBOX_ROADMAP_CURRENT_2026-08.md`, `SANDBOX_RUNTIME_CURRENT_2026-08.md`, `AGENT_SANDBOX_THREAT_MODEL.md`.
+- **Dependency/risk:** Capability reporting is runtime/platform-specific. Do not advertise a capability before native enforcement and negative evidence exist. Browser egress validation is not a substitute for arbitrary sandbox socket enforcement. Egress requires a separately enforceable runtime boundary, not just a Broker grant.
+- **Next action:** Merge #171 only after the normalized head passes native Windows and repository gates, then implement Windows aggregate Job Object memory enforcement (`JOB_OBJECT_LIMIT_JOB_MEMORY`) with child-process over-limit evidence before setting `memory_limit=true`.
+- **Derived from:** `AGENT_SANDBOX_ROADMAP_CURRENT_2026-08.md`, `SANDBOX_RUNTIME_CURRENT_2026-08.md`, `SANDBOX_QUOTA_EGRESS_HARDENING_DESIGN_2026-08.md`, `AGENT_SANDBOX_THREAT_MODEL.md`.
 
 ### Durable sandbox tasks and isolated workers
 
@@ -37,16 +36,6 @@
 - **Derived from:** `AGENT_SANDBOX_ROADMAP_CURRENT_2026-08.md`.
 
 ## P1 — correctness and security debt
-
-### Browser request perimeter
-
-- **Status:** NEEDS VALIDATION
-- **Implemented:** The headless browser uses incognito contexts, managed profiles, feature gating, navigation checks, and browser tools. CDP interception remains as defense in depth. Chromium now has a mandatory local egress proxy with loopback bypass disabled; the proxy resolves every HTTP, HTTPS/CONNECT, redirect, and WebSocket destination against the public-address policy and pins the outbound connection to the validated address, closing the DNS validation-to-connect race. QUIC is disabled and WebRTC is restricted from non-proxied UDP. Unit fixtures cover private-address rejection, address pinning, redirect revalidation, CONNECT tunneling, and WebSocket upgrade forwarding; the browser-backed fetch/subresource fixture is present.
-- **Remaining:** Run the browser-backed fixture on a host/CI runner where Chromium is not terminated during startup, then extend native fixtures across iframe, media, redirect, WebSocket, dedicated/shared worker, and service-worker traffic. The network-layer implementation is complete, but do not call the perimeter operationally validated or enable it in exposed deployments until that runner evidence exists.
-- **Files:** `backend/internal/browser/manager.go`, `backend/internal/browser/manager_test.go`, `backend/internal/browser/egress_proxy.go`, `backend/internal/browser/egress_proxy_test.go`, `backend/internal/browser/session.go`, `backend/internal/api/browser_fallback_navigator.go`.
-- **Dependency/risk:** Unit-level proxy evidence is green. Native Chromium validation is currently blocked on this Windows host because both installed Chrome and the Playwright Chromium build are forcibly closed while Rod creates the first stealth page; this is an environment limitation, not a passing browser result.
-- **Next action:** Add a Chromium-capable CI job for the adversarial fixture matrix and require it before exposed browser deployment.
-- **Derived from:** archived `REMEDIATION_STATUS_2026-07-18.md`, archived `Plan-headless-Chrome-tool.md`.
 
 ### Cookie-session migration closeout
 
