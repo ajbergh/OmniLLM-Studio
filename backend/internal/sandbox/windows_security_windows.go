@@ -105,13 +105,26 @@ func createWindowsKillOnCloseJob() (windows.Handle, error) {
 	return createWindowsSandboxJob(0)
 }
 
-// createWindowsSandboxJob creates the pre-start Job Object used by one sandbox
-// execution. maxProcesses <= 0 leaves process count unbounded; otherwise Windows
-// enforces JOB_OBJECT_LIMIT_ACTIVE_PROCESS for the root process and all descendants
-// from the moment the root is created in the Job Object.
+// createWindowsSandboxJob creates a sandbox Job with only process-count
+// enforcement. It remains as the compatibility helper for existing callers and
+// tests that do not request an aggregate memory quota.
 func createWindowsSandboxJob(maxProcesses int) (windows.Handle, error) {
+	return createWindowsSandboxJobWithLimits(maxProcesses, 0)
+}
+
+// createWindowsSandboxJobWithLimits creates the pre-start Job Object used by
+// one sandbox execution. maxProcesses <= 0 leaves process count unbounded and
+// memoryBytes <= 0 leaves aggregate committed memory unbounded. Positive limits
+// are enforced for the root process and every descendant from process creation.
+func createWindowsSandboxJobWithLimits(maxProcesses int, memoryBytes int64) (windows.Handle, error) {
 	if maxProcesses < 0 {
 		return 0, fmt.Errorf("Windows sandbox process limit cannot be negative")
+	}
+	if memoryBytes < 0 {
+		return 0, fmt.Errorf("Windows sandbox memory limit cannot be negative")
+	}
+	if memoryBytes > 0 && uint64(memoryBytes) > uint64(^uintptr(0)) {
+		return 0, fmt.Errorf("Windows sandbox memory limit exceeds platform address size")
 	}
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
@@ -122,6 +135,10 @@ func createWindowsSandboxJob(maxProcesses int) (windows.Handle, error) {
 	if maxProcesses > 0 {
 		info.BasicLimitInformation.LimitFlags |= windows.JOB_OBJECT_LIMIT_ACTIVE_PROCESS
 		info.BasicLimitInformation.ActiveProcessLimit = uint32(maxProcesses)
+	}
+	if memoryBytes > 0 {
+		info.BasicLimitInformation.LimitFlags |= windows.JOB_OBJECT_LIMIT_JOB_MEMORY
+		info.JobMemoryLimit = uintptr(memoryBytes)
 	}
 	if _, err := windows.SetInformationJobObject(
 		job,
