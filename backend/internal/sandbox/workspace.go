@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS sandbox_workspaces (
     id TEXT NOT NULL,
     owner_user_id TEXT NOT NULL,
     root_path TEXT NOT NULL,
+    root_identity TEXT,
     mode TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -50,15 +51,17 @@ CREATE INDEX IF NOT EXISTS idx_sandbox_workspace_changes_scope
     ON sandbox_workspace_changes(user_id, workspace_id, created_at DESC);
 `
 
-// FileWorkspace is an application-owned filesystem grant. RootPath is internal
-// host state and must not be returned through model-facing workspace tools.
+// FileWorkspace is an application-owned filesystem grant. RootPath and
+// RootIdentity are internal host state and must not be returned through
+// model-facing workspace tools.
 type FileWorkspace struct {
-	ID          string
-	OwnerUserID string
-	RootPath    string
-	Mode        MountMode
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID           string
+	OwnerUserID  string
+	RootPath     string
+	RootIdentity string
+	Mode         MountMode
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // WorkspaceRegistry persists explicit filesystem grants and resolves opaque IDs
@@ -77,12 +80,46 @@ func NewWorkspaceRegistry(db *sql.DB) (*WorkspaceRegistry, error) {
 	if _, err := db.Exec(workspaceSchema); err != nil {
 		return nil, fmt.Errorf("ensure sandbox workspace schema: %w", err)
 	}
+	if err := ensureWorkspaceIdentityColumn(db); err != nil {
+		return nil, err
+	}
 	return &WorkspaceRegistry{db: db}, nil
 }
 
+func ensureWorkspaceIdentityColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(sandbox_workspaces)`)
+	if err != nil {
+		return fmt.Errorf("inspect sandbox workspace schema: %w", err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return fmt.Errorf("inspect sandbox workspace schema: %w", err)
+		}
+		if name == "root_identity" {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect sandbox workspace schema: %w", err)
+	}
+	if found {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE sandbox_workspaces ADD COLUMN root_identity TEXT`); err != nil {
+		return fmt.Errorf("add sandbox workspace root identity: %w", err)
+	}
+	return nil
+}
+
 // Register creates or replaces one owner-scoped filesystem grant. The physical
-// root is canonicalized now; a later symlink swap of a parent/root does not
-// silently change the stored target.
+// root is canonicalized and, on platforms with a proven identity primitive,
+// bound to the filesystem object that occupies that path at registration time.
 func (r *WorkspaceRegistry) Register(ownerUserID, id, root string, mode MountMode) (*FileWorkspace, error) {
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	id = strings.TrimSpace(id)
@@ -99,43 +136,82 @@ func (r *WorkspaceRegistry) Register(ownerUserID, id, root string, mode MountMod
 	if err != nil {
 		return nil, err
 	}
+	identity, err := captureWorkspaceRootIdentity(canonical)
+	if err != nil {
+		return nil, err
+	}
+	if workspaceRootIdentityRequired() && identity == "" {
+		return nil, fmt.Errorf("workspace root identity is required on this platform")
+	}
 	now := time.Now().UTC()
 	_, err = r.db.Exec(`
-INSERT INTO sandbox_workspaces (id, owner_user_id, root_path, mode, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO sandbox_workspaces (id, owner_user_id, root_path, root_identity, mode, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id, owner_user_id) DO UPDATE SET
     root_path=excluded.root_path,
+    root_identity=excluded.root_identity,
     mode=excluded.mode,
-    updated_at=excluded.updated_at`, id, ownerUserID, canonical, string(mode), now, now)
+    updated_at=excluded.updated_at`, id, ownerUserID, canonical, nullableString(identity), string(mode), now, now)
 	if err != nil {
 		return nil, fmt.Errorf("register sandbox workspace: %w", err)
 	}
 	return r.Get(ownerUserID, id)
 }
 
-// Get resolves one workspace only within the exact owner scope.
+// Get resolves one workspace only within the exact owner scope and, where the
+// platform supports durable root identity, verifies that the registered path
+// still names the same filesystem object before returning the grant.
 func (r *WorkspaceRegistry) Get(ownerUserID, id string) (*FileWorkspace, error) {
 	var workspace FileWorkspace
 	var mode string
-	err := r.db.QueryRow(`SELECT id, owner_user_id, root_path, mode, created_at, updated_at
+	var rootIdentity sql.NullString
+	err := r.db.QueryRow(`SELECT id, owner_user_id, root_path, root_identity, mode, created_at, updated_at
 FROM sandbox_workspaces WHERE id=? AND owner_user_id=?`, strings.TrimSpace(id), strings.TrimSpace(ownerUserID)).
-		Scan(&workspace.ID, &workspace.OwnerUserID, &workspace.RootPath, &mode, &workspace.CreatedAt, &workspace.UpdatedAt)
+		Scan(&workspace.ID, &workspace.OwnerUserID, &workspace.RootPath, &rootIdentity, &mode, &workspace.CreatedAt, &workspace.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("sandbox workspace not found")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read sandbox workspace: %w", err)
 	}
+	workspace.RootIdentity = strings.TrimSpace(rootIdentity.String)
 	workspace.Mode = MountMode(mode)
 	if err := validateMountMode(workspace.Mode); err != nil {
 		return nil, fmt.Errorf("stored sandbox workspace mode is invalid")
 	}
+	if err := verifyWorkspaceRootIdentity(workspace.RootPath, workspace.RootIdentity); err != nil {
+		return nil, err
+	}
 	return &workspace, nil
 }
 
-// List returns owner-scoped grants in deterministic ID order.
+func verifyWorkspaceRootIdentity(rootPath, expectedIdentity string) error {
+	if !workspaceRootIdentityRequired() {
+		return nil
+	}
+	expectedIdentity = strings.TrimSpace(expectedIdentity)
+	if expectedIdentity == "" {
+		return fmt.Errorf("sandbox workspace grant predates durable root identity; re-register the workspace")
+	}
+	canonical, err := canonicalWorkspaceRoot(rootPath)
+	if err != nil || canonical != rootPath {
+		return fmt.Errorf("workspace root is no longer safely canonical")
+	}
+	currentIdentity, err := captureWorkspaceRootIdentity(rootPath)
+	if err != nil {
+		return err
+	}
+	if currentIdentity != expectedIdentity {
+		return fmt.Errorf("workspace root identity changed; re-register the workspace")
+	}
+	return nil
+}
+
+// List returns owner-scoped grants in deterministic ID order. On platforms with
+// durable root identity, stale/legacy grants are omitted rather than surfaced as
+// usable grants; callers must re-register them through a trusted path.
 func (r *WorkspaceRegistry) List(ownerUserID string) ([]FileWorkspace, error) {
-	rows, err := r.db.Query(`SELECT id, owner_user_id, root_path, mode, created_at, updated_at
+	rows, err := r.db.Query(`SELECT id, owner_user_id, root_path, root_identity, mode, created_at, updated_at
 FROM sandbox_workspaces WHERE owner_user_id=? ORDER BY id`, strings.TrimSpace(ownerUserID))
 	if err != nil {
 		return nil, fmt.Errorf("list sandbox workspaces: %w", err)
@@ -145,10 +221,18 @@ FROM sandbox_workspaces WHERE owner_user_id=? ORDER BY id`, strings.TrimSpace(ow
 	for rows.Next() {
 		var workspace FileWorkspace
 		var mode string
-		if err := rows.Scan(&workspace.ID, &workspace.OwnerUserID, &workspace.RootPath, &mode, &workspace.CreatedAt, &workspace.UpdatedAt); err != nil {
+		var rootIdentity sql.NullString
+		if err := rows.Scan(&workspace.ID, &workspace.OwnerUserID, &workspace.RootPath, &rootIdentity, &mode, &workspace.CreatedAt, &workspace.UpdatedAt); err != nil {
 			return nil, err
 		}
+		workspace.RootIdentity = strings.TrimSpace(rootIdentity.String)
 		workspace.Mode = MountMode(mode)
+		if err := validateMountMode(workspace.Mode); err != nil {
+			return nil, fmt.Errorf("stored sandbox workspace mode is invalid")
+		}
+		if err := verifyWorkspaceRootIdentity(workspace.RootPath, workspace.RootIdentity); err != nil {
+			continue
+		}
 		out = append(out, workspace)
 	}
 	return out, rows.Err()
