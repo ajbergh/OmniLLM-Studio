@@ -2,7 +2,7 @@
 
 > **Status:** ACTIVE
 >
-> **Checkpoint:** Windows Phase 12 is complete. Explicit execution cancellation is complete in PR #155. macOS Phase 13 is complete through Phase 13D, merged in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`. Native browser egress assurance merged in PR #168, Broker resource admission fails closed after PR #170, Windows process-count quotas merged in PR #171, and PR #172 adds natively proven Windows aggregate memory enforcement pending final documentation-inclusive validation.
+> **Checkpoint:** Windows Phase 12 is complete. Explicit execution cancellation is complete in PR #155. macOS Phase 13 is complete through Phase 13D, merged in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`. Native browser egress assurance merged in PR #168, Broker resource admission fails closed after PR #170, Windows process-count quotas merged in PR #171, Windows aggregate memory enforcement merged in PR #172 as `bc9eb6f204db9dcb2c6fb3670262ef8d0c58cb3f`, and PR #173 now has native Ubuntu evidence for delegated Linux cgroup-v2 `pids.max` enforcement pending final documentation-inclusive validation.
 
 ## Program invariants
 
@@ -22,12 +22,12 @@
 |---|---|---|---|
 | 0 | Architecture, threat model, durable roadmap | **COMPLETE** | Core design documents are on `main`. |
 | 1 | Protocol v2 + owner-bound sessions | **COMPLETE** | Broker sessions, ownership/TTL checks, authenticated worker protocol, bounded results, and capability negotiation merged in #118. |
-| 2 | First-party runtime abstraction + Linux execution plane | **IN PROGRESS** | Bubblewrap/rootfs runtime and `sandboxd` exist. Packaging and cgroup-v2 quota enforcement remain open. |
+| 2 | First-party runtime abstraction + Linux execution plane | **IN PROGRESS** | Bubblewrap/rootfs runtime and `sandboxd` exist. PR #173 adds natively proven delegated cgroup-v2 PID enforcement; packaging and Linux memory enforcement remain open. |
 | 3 | Immediate stdio MCP/plugin subprocess hardening | **COMPLETE** | Ambient environment inheritance removed in #99. |
 | 4 | Broker-backed `code_execute` + `python_analysis` | **COMPLETE** | Owner-bound execution; restricted Python has no unrestricted host fallback. |
 | 5 | Workspace registry + grants + durable journal | **IN PROGRESS** | Owner-scoped grants and state-bound journaled mutations exist; broader path-component TOCTOU assurance remains. |
 | 6 | Governed workspace tools | **IN PROGRESS** | Read/write/patch/delete/revert tools exist; completion tracks Phase 5 assurance. |
-| 7 | `terminal_exec` + cancellation + resource controls | **IN PROGRESS** | Caller-known execution IDs and explicit cancellation merged in #155. Broker quota requests fail closed when unsupported (#170). Windows process-count quotas merged in #171 and aggregate memory enforcement is natively proven in #172. Linux/macOS resource quotas, CPU semantics, and physical-disk quotas remain open. |
+| 7 | `terminal_exec` + cancellation + resource controls | **IN PROGRESS** | Caller-known execution IDs and explicit cancellation merged in #155. Broker quota requests fail closed when unsupported (#170). Windows process-count quotas merged in #171, aggregate memory enforcement merged in #172, and Linux PID enforcement has native evidence in #173. Linux memory, macOS resource quotas, CPU semantics, and physical-disk quotas remain open. |
 | 8 | Network broker + destination approvals | **IN PROGRESS** | Owner-bound grants exist; first-party Linux/Windows/Darwin runtimes remain no-network because destination-enforced egress is not implemented. |
 | 9 | Credential broker | **IN PROGRESS** | Opaque owner/TTL handles and raw-secret environment rejection exist; service-specific consumers remain. |
 | 10 | Local plugin + stdio MCP confinement policy | **COMPLETE** | `auto|required|off` and shared managed-process seam are implemented; Linux uses Bubblewrap, Windows uses AppContainer, and macOS uses Seatbelt after #164. |
@@ -35,9 +35,9 @@
 | 12 | Windows native confinement backend | **COMPLETE** | #127, #128, #139, and #149 provide protocol-v2 and persistent-extension AppContainer/Job confinement with native adversarial evidence. |
 | 13 | macOS native confinement backend | **COMPLETE** | 13A Seatbelt primitive (#159), 13B first-party local runtime (#162), 13C persistent extensions (#164), and 13D adversarial assurance (#166) are merged. The proven detached-descendant limitation remains explicit. |
 | 14 | Durable sandbox-backed agent tasks | NOT STARTED | Persist sandbox/task association and recovery/scheduling semantics. |
-| 15 | Server/Kubernetes sandbox workers | NOT STARTED | Separate worker identity/pods, quotas, hardened security context, and network policy. |
+| 15 | Server/Kubernetes sandbox workers | NOT STARTED | Separate worker identity/pods, quotas, hardened security context, cgroup delegation, and network policy. |
 | 16 | Multi-agent isolated worktrees/workspaces | NOT STARTED | Independent writable workspaces with reviewed promotion/reconciliation. |
-| 17 | Adversarial assurance suite | **IN PROGRESS** | Continuous negative/platform-native testing across all phases; browser-native egress assurance is covered by #168 and Windows quota controls have native negative evidence. |
+| 17 | Adversarial assurance suite | **IN PROGRESS** | Continuous negative/platform-native testing across all phases; browser-native egress assurance is covered by #168, Windows quota controls have native negative evidence, and #173 adds a dedicated Linux cgroup-v2 quota lane. |
 
 ## Windows Phase 12 lineage
 
@@ -71,11 +71,13 @@ Broader workspace-registry/path-component TOCTOU cases outside those staging flo
 
 ### Resource controls
 
-Enforced where applicable: OS/filesystem/no-network isolation, TTL cleanup, wall-time bounds, stdout/stderr bounds, platform-specific process teardown, Windows Job Object process-count limits, and Windows aggregate Job committed-memory limits.
+Enforced where applicable: OS/filesystem/no-network isolation, TTL cleanup, wall-time bounds, stdout/stderr bounds, platform-specific process teardown, Windows Job Object process-count limits, Windows aggregate Job committed-memory limits, and Linux delegated cgroup-v2 `pids.max` when the runtime starts with a usable operator-prepared cgroup boundary.
 
-Broker admission rejects non-zero memory, CPU, process-count, or disk limits when the selected runtime does not advertise the matching capability. Windows advertises `pid_limit=true` after #171 and `memory_limit=true` in #172 after native Job Object enforcement. Linux and macOS still report memory/PID/CPU/disk quota capabilities false.
+Broker admission rejects non-zero memory, CPU, process-count, or disk limits when the selected runtime does not advertise the matching capability. Windows advertises `pid_limit=true` after #171 and `memory_limit=true` after #172. Linux advertises `pid_limit=true` only when `OMNILLM_SANDBOX_CGROUP_ROOT` identifies a writable delegated cgroup-v2 root with the `pids` controller and the worker is positioned inside that delegation so atomic `CLONE_INTO_CGROUP` placement succeeds. Otherwise Linux continues to report the capability false or fails startup when an explicitly configured boundary is unusable. Linux memory/CPU/disk and all macOS resource quota capabilities remain false.
 
-The next independently verifiable platform slice is Linux cgroup-v2 controller detection and fail-closed delegation semantics, followed by per-execution `pids.max` enforcement and then `memory.max` plus `memory.events` evidence. CPU remains deferred until the cumulative `cpu_time_ms` contract is reconciled with cgroup/Job Object CPU primitives; physical-disk accounting remains a separate design problem.
+The cgroup-v2 `pids` controller limits tasks, not only distinct process IDs, so threads also consume the configured `resources.max_processes` ceiling. This is intentionally a conservative upper bound: it cannot permit more distinct processes than requested, but heavily threaded workloads may reach the ceiling earlier.
+
+The next independently verifiable platform slice is Linux aggregate memory enforcement with `memory.max` plus `memory.events` evidence. CPU remains deferred until the cumulative `cpu_time_ms` contract is reconciled with cgroup/Job Object CPU primitives; physical-disk accounting remains a separate design problem.
 
 ### Network
 
@@ -100,15 +102,14 @@ Darwin uses process-group cancellation for ordinary descendants and deliberately
 
 ## Execution order
 
-1. Complete and merge Windows aggregate Job memory enforcement (#172) only after its documentation-inclusive final head passes native Windows and repository-wide gates.
-2. Implement Linux cgroup-v2 controller/delegation detection with truthful capability reporting and fail-closed startup/admission semantics.
-3. Add Linux per-execution PID enforcement with `pids.max` and native descendant/over-limit evidence, then add memory enforcement with `memory.max` and `memory.events` evidence.
-4. Resolve the aggregate/cumulative CPU-time semantic contract before enabling `cpu_limit` on any platform; design physical-disk accounting separately.
-5. Continue Phase 5/8/9 work: broader TOCTOU assurance, destination-enforced egress, and service-specific credential consumers.
-6. Continue Phase 17 adversarial assurance with every platform/runtime change.
+1. Complete and merge Linux cgroup-v2 PID enforcement (#173) only after its documentation-inclusive exact head passes the dedicated native Ubuntu quota lane and repository-wide gates.
+2. Add Linux aggregate memory enforcement with `memory.max`, native descendant allocation pressure, and `memory.events` evidence on the same delegated execution-cgroup boundary.
+3. Resolve the aggregate/cumulative CPU-time semantic contract before enabling `cpu_limit` on any platform; design physical-disk accounting separately.
+4. Continue Phase 5/8/9 work: broader TOCTOU assurance, destination-enforced egress, and service-specific credential consumers.
+5. Continue Phase 17 adversarial assurance with every platform/runtime change.
 
 ## Validation discipline
 
 A sandbox phase is complete only when platform-native negative tests exist, capability claims match enforcement, unsupported controls are explicit, and the exact merge head passes applicable repository checks.
 
-Windows Phase 12 met that bar through PRs #127, #128, #139, and #149. macOS Phase 13 met the same standard incrementally for arbitrary local execution (13B), persistent extensions (13C), and final adversarial assurance (13D). PR #171 met the bar on its normalized final head and merged as `11dfab99e73fe414e45cc44b0f33d4c80789295a`. PR #172 has native Windows memory-limit evidence green on implementation head `a73ef3939e909992cf5dab16422e101c7dd0011b`; the final documentation-inclusive head must pass the same applicable gates before merge.
+Windows Phase 12 met that bar through PRs #127, #128, #139, and #149. macOS Phase 13 met the same standard incrementally for arbitrary local execution (13B), persistent extensions (13C), and final adversarial assurance (13D). PR #171 met the bar and merged as `11dfab99e73fe414e45cc44b0f33d4c80789295a`. PR #172 met the bar and merged as `bc9eb6f204db9dcb2c6fb3670262ef8d0c58cb3f`. PR #173 has native Ubuntu delegated-cgroup evidence green on implementation head `57964e8ec585928d61534f76b3a5a5a12a869c2f`; its documentation-inclusive final head must pass the same applicable gates before merge.

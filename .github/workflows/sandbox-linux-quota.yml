@@ -1,0 +1,86 @@
+name: Linux Sandbox Quota Assurance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-linux-quota-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25.13'
+
+jobs:
+  sandbox-linux-quota:
+    name: Linux delegated cgroup PID confinement
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - name: Install Bubblewrap
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap
+      - name: Prepare delegated cgroup-v2 subtree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f /sys/fs/cgroup/cgroup.controllers
+          grep -qw pids /sys/fs/cgroup/cgroup.controllers
+          if ! grep -qw pids /sys/fs/cgroup/cgroup.subtree_control; then
+            echo +pids | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null
+          fi
+          root=/sys/fs/cgroup/omnillm-sandbox-ci
+          sudo mkdir "$root"
+          sudo chown "$(id -u):$(id -g)" \
+            "$root" \
+            "$root/cgroup.procs" \
+            "$root/cgroup.subtree_control" \
+            "$root/cgroup.threads"
+          printf 'OMNILLM_TEST_CGROUP_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
+      - name: Prove native Linux PID quota boundary
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$OMNILLM_TEST_CGROUP_ROOT"
+          worker="$root/worker"
+          mkdir "$worker"
+          # Model a privileged service manager placing sandboxd into a worker
+          # child before the worker drops privilege. Execution cgroups remain
+          # runtime-created siblings under the delegated root.
+          echo $$ | sudo tee "$worker/cgroup.procs" >/dev/null
+          grep -qx "$$" "$worker/cgroup.procs"
+          printf '%s\n' 'delegated-root:'
+          stat -c '%u:%g %a %n' "$root" "$root/cgroup.procs" "$root/cgroup.subtree_control"
+          printf '%s\n' 'worker-child:'
+          stat -c '%u:%g %a %n' "$worker" "$worker/cgroup.procs"
+          go test ./internal/sandbox -run '^TestLinuxCgroup' -count=1 -v 2>&1 | tee ../sandbox-linux-quota.log
+      - name: Upload Linux quota diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sandbox-linux-quota-diagnostics
+          path: sandbox-linux-quota.log
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Cleanup delegated cgroup subtree
+        if: always()
+        shell: bash
+        run: |
+          root=/sys/fs/cgroup/omnillm-sandbox-ci
+          if [ -d "$root" ]; then
+            if [ -f "$root/cgroup.kill" ]; then
+              echo 1 | sudo tee "$root/cgroup.kill" >/dev/null || true
+            fi
+            sudo find "$root" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+          fi

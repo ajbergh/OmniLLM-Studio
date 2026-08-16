@@ -6,4 +6,5 @@ type LocalRuntimeConfig struct {
 	RootFS      string
 	ScratchRoot string
 	BwrapPath   string
+	CgroupRoot  string
 }

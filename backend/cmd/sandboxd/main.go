@@ -37,6 +37,7 @@ func main() {
 		RootFS:      os.Getenv("OMNILLM_SANDBOX_ROOTFS"),
 		ScratchRoot: os.Getenv("OMNILLM_SANDBOX_SCRATCH_ROOT"),
 		BwrapPath:   os.Getenv("OMNILLM_SANDBOX_BWRAP"),
+		CgroupRoot:  os.Getenv("OMNILLM_SANDBOX_CGROUP_ROOT"),
 	})
 	if err != nil {
 		log.Fatalf("initialize sandbox runtime: %v", err)

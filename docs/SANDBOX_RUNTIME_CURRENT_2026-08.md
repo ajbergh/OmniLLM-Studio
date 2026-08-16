@@ -1,6 +1,6 @@
 # Sandbox Runtime — Current Platform Status (August 2026)
 
-This document records the current first-party sandbox and persistent-extension behavior after Windows Phase 12 and completed macOS Phase 13. It supplements the older `SANDBOX_RUNTIME.md` historical snapshot.
+This document records the current first-party sandbox and persistent-extension behavior after Windows Phase 12, completed macOS Phase 13, and the active resource-quota hardening program. It supplements the older `SANDBOX_RUNTIME.md` historical snapshot.
 
 ## Shared protocol-v2 boundary
 
@@ -31,9 +31,26 @@ Current enforced controls:
 - process-tree/session teardown;
 - session TTL cleanup;
 - wall-time bounds;
-- stdout/stderr bounds.
+- stdout/stderr bounds;
+- optional cgroup-v2 PID/task quota enforcement when the worker starts with a correctly delegated cgroup boundary.
 
-The Linux first-party runtime does not advertise destination allowlisting, memory quota, CPU quota, PID quota, or physical disk quota enforcement. The approved next quota slice is cgroup-v2 capability detection followed by per-execution PID and memory controllers; unsupported or undelegated hosts must remain fail closed.
+### Linux cgroup-v2 PID boundary
+
+PR #173 adds dynamic Linux `pid_limit` support. To enable it, operators configure:
+
+```text
+OMNILLM_SANDBOX_CGROUP_ROOT=/sys/fs/cgroup/<delegated-root>
+```
+
+The configured path must be a writable delegated cgroup-v2 subtree with the `pids` controller available. The service manager or other trusted supervisor must place `sandboxd` inside a child cgroup beneath that delegated root before the worker runs with its ordinary service identity. Per-execution cgroups are then created as siblings beneath the delegated root.
+
+At runtime startup, OmniLLM-Studio verifies the controller/delegation boundary and probes atomic cgroup placement. Executions with a non-zero `resources.max_processes` receive a dedicated cgroup with `pids.max` set before Bubblewrap executes. Go's Linux `UseCgroupFD`/`CgroupFD` path uses `clone3(CLONE_INTO_CGROUP)`, avoiding a post-launch window where untrusted code could fork before being moved into the controller. If no cgroup root is configured, Linux continues to advertise `pid_limit=false`; if an explicitly configured boundary is unusable, initialization fails closed rather than claiming enforcement.
+
+The cgroup-v2 `pids` controller counts kernel tasks, including threads. Therefore `resources.max_processes` is a conservative upper bound: it cannot allow more distinct processes than requested, but heavily threaded workloads can exhaust the limit before reaching that many distinct process IDs.
+
+The dedicated Ubuntu native assurance lane proved the boundary on PR #173 implementation head `57964e8ec585928d61534f76b3a5a5a12a869c2f`: the worker was placed inside the delegated subtree, startup atomic-placement probing succeeded, a Python parent plus first child consumed `pids.max=2`, and a second `fork()` was denied; zero maps to `pids.max=max`, and execution-cgroup cleanup succeeded. The documentation-inclusive final PR head must still pass all applicable gates before merge.
+
+Linux memory, CPU, physical-disk, and destination-allowlist capability bits remain false. The next resource slice is aggregate memory enforcement with `memory.max` plus `memory.events` evidence on the same delegated per-execution cgroup boundary.
 
 ## Windows first-party runtime
 
@@ -53,7 +70,7 @@ Current enforced controls:
 - bounded wall time, stdout, and stderr;
 - retryable AppContainer profile cleanup.
 
-The Windows runtime advertises `pid_limit=true` after PR #171 proved `MaxProcesses=1` prevents a nested child process from running. PR #172 adds `memory_limit=true` only after native `windows-latest` evidence proved that a descendant starts inside the same Job and a 512 MiB `VirtualAlloc(MEM_RESERVE|MEM_COMMIT)` request is synchronously denied under a 256 MiB aggregate Job memory ceiling. CPU, physical-disk, and destination-allowlist capability bits remain false.
+The Windows runtime advertises `pid_limit=true` after PR #171 proved `MaxProcesses=1` prevents a nested child process from running. PR #172 merged `memory_limit=true` as `bc9eb6f204db9dcb2c6fb3670262ef8d0c58cb3f` after native `windows-latest` evidence proved that a descendant starts inside the same Job and a 512 MiB `VirtualAlloc(MEM_RESERVE|MEM_COMMIT)` request is synchronously denied under a 256 MiB aggregate Job memory ceiling. CPU, physical-disk, and destination-allowlist capability bits remain false.
 
 ### Windows workspace policy
 
@@ -107,6 +124,8 @@ OMNILLM_EXTENSION_SANDBOX_MODE=auto|required|off
 - `auto` uses Bubblewrap when the sandbox rootfs is configured;
 - `required` fails closed when native confinement cannot be supplied;
 - `off` uses the sanitized host compatibility boundary.
+
+The cgroup-v2 quota work in PR #173 applies to the protocol-v2 first-party Linux sandbox runtime; it does not by itself add resource quota claims to persistent Linux stdio extensions.
 
 ### Windows
 
@@ -164,7 +183,7 @@ The first-party Linux, Windows, and Darwin runtimes currently remain no-network 
 Resource capability reporting is platform-specific rather than universal.
 
 - Windows: `pid_limit=true` and `memory_limit=true`; `resources.max_processes` and aggregate `resources.memory_bytes` are enforced by the pre-start Job Object for the root process and descendants.
-- Linux: memory, CPU, PID/process-count, and physical-disk quota bits remain false pending cgroup-v2 delegated-controller work.
+- Linux: `pid_limit=true` only when startup verifies a correctly delegated cgroup-v2 `pids` boundary; otherwise it remains false. Memory, CPU, and physical-disk quota bits remain false. The `pids` controller counts threads as tasks in addition to distinct processes.
 - macOS: memory, CPU, PID/process-count, and physical-disk quota bits remain false.
 - All first-party runtimes: CPU and physical-disk quota enforcement remain open.
 
@@ -181,7 +200,9 @@ Windows Phase 12 completed through:
 
 PR #149 final head `8f4ee1b7de5d3ea6203c44089dadfae4fd6d30cb` passed Quality Gate, Security Scan, native Windows sandbox/plugin/desktop checks, backend format/vet/tests/race, Chromium, frontend, Helm, dependency audit, both CodeQL lanes, and frontend/backend `linux/amd64` plus `linux/arm64` container builds before squash merge as `65bf1cd807b9cd94a2e7b62e653c9057366c6e8b`.
 
-Browser native egress assurance merged in PR #168 as `76f4f4c55a8370fb036290daa8a4054f00be1232`. Broker fail-closed resource admission merged in PR #170 as `9a2db5bf34f51502b3872145057e21d62c9d1ed1`. Windows PID-limit enforcement merged in PR #171 as `11dfab99e73fe414e45cc44b0f33d4c80789295a` after the normalized final head passed native Windows and repository-wide gates. PR #172 adds aggregate Windows Job memory enforcement; native `windows-latest` Job configuration, zero/negative compatibility, and descendant over-limit evidence are green on implementation head `a73ef3939e909992cf5dab16422e101c7dd0011b`. The documentation-inclusive final head must still pass applicable gates before merge.
+Browser native egress assurance merged in PR #168 as `76f4f4c55a8370fb036290daa8a4054f00be1232`. Broker fail-closed resource admission merged in PR #170 as `9a2db5bf34f51502b3872145057e21d62c9d1ed1`. Windows PID-limit enforcement merged in PR #171 as `11dfab99e73fe414e45cc44b0f33d4c80789295a`. Windows aggregate memory enforcement passed its documentation-inclusive matrix and merged in PR #172 as `bc9eb6f204db9dcb2c6fb3670262ef8d0c58cb3f`.
+
+PR #173 adds the first Linux cgroup-v2 resource control. Native Ubuntu run `31953994847` passed delegated-root setup, supervisor worker placement inside the delegation, atomic placement probing, `pids.max=2` over-limit denial, zero-limit compatibility, and controller cleanup on implementation head `57964e8ec585928d61534f76b3a5a5a12a869c2f`. The documentation-inclusive final head must still pass applicable repository and platform gates before merge.
 
 macOS Phase 13A merged in PR #159. Phase 13B passed native macOS runtime assurance and repository gates and merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`. Phase 13C merged in PR #164 as `44f410793a70444963ec1eecb989b15df159b5f1`. Phase 13D adversarial assurance passed its native and repository gates and merged in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`, closing Phase 13 without changing the truthful detached-process limitation.
 

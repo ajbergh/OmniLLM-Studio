@@ -35,6 +35,7 @@ type LocalRuntime struct {
 	rootFS      string
 	scratchRoot string
 	bwrapPath   string
+	pidCgroup   *linuxPIDCgroupManager
 
 	mu       sync.RWMutex
 	sessions map[string]localRuntimeSession
@@ -42,8 +43,10 @@ type LocalRuntime struct {
 }
 
 // NewLocalRuntime constructs the Linux Bubblewrap runtime. RootFS and the bwrap
-// executable are resolved/canonicalized at startup. Destination-allowlisted
-// network access remains disabled until an enforceable egress layer is present.
+// executable are resolved/canonicalized at startup. A configured cgroup-v2
+// subtree is enabled only after delegated pids-controller and clone-into-cgroup
+// probes succeed. Destination-allowlisted network access remains disabled until
+// an enforceable egress layer is present.
 func NewLocalRuntime(config LocalRuntimeConfig) (Runtime, error) {
 	rootFS, err := canonicalDirectory(config.RootFS)
 	if err != nil {
@@ -75,10 +78,16 @@ func NewLocalRuntime(config LocalRuntimeConfig) (Runtime, error) {
 		return nil, fmt.Errorf("sandbox scratch root: %w", err)
 	}
 
+	pidCgroup, err := newLinuxPIDCgroupManager(config.CgroupRoot, bwrap)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox cgroup: %w", err)
+	}
+
 	return &LocalRuntime{
 		rootFS:      rootFS,
 		scratchRoot: scratchRoot,
 		bwrapPath:   bwrap,
+		pidCgroup:   pidCgroup,
 		sessions:    make(map[string]localRuntimeSession),
 		active:      make(map[string]context.CancelFunc),
 	}, nil
@@ -96,7 +105,7 @@ func (r *LocalRuntime) Capabilities() RuntimeCapabilities {
 		ProcessTreeIsolation: true,
 		MemoryLimit:          false,
 		CPULimit:             false,
-		PIDLimit:             false,
+		PIDLimit:             r != nil && r.pidCgroup != nil,
 		DiskLimit:            false,
 	}
 }
@@ -110,6 +119,9 @@ func (r *LocalRuntime) Create(_ context.Context, request RuntimeCreateRequest) (
 	}
 	if err := requireCapabilities(r.Capabilities(), request.Spec.Requirements); err != nil {
 		return "", err
+	}
+	if request.Spec.Resources.MaxProcesses > 0 && !r.Capabilities().PIDLimit {
+		return "", fmt.Errorf("linux sandbox cannot enforce requested process-count quota")
 	}
 	if request.Spec.Network.Mode != "" && request.Spec.Network.Mode != NetworkNone {
 		return "", fmt.Errorf("linux sandbox network access is not enabled in this runtime revision")
@@ -232,6 +244,20 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		r.mu.Unlock()
 	}()
 
+	var executionCgroup *linuxExecutionCgroup
+	if session.spec.Resources.MaxProcesses > 0 {
+		if r.pidCgroup == nil {
+			return nil, fmt.Errorf("linux sandbox process-count quota became unavailable")
+		}
+		executionCgroup, err = r.pidCgroup.createExecution(session.spec.Resources.MaxProcesses)
+		if err != nil {
+			return nil, fmt.Errorf("create Linux sandbox PID cgroup: %w", err)
+		}
+		defer func() {
+			_ = executionCgroup.cleanup()
+		}()
+	}
+
 	bwrapArgs := []string{
 		"--die-with-parent",
 		"--new-session",
@@ -273,6 +299,11 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 	bwrapArgs = append(bwrapArgs, commandArgs...)
 
 	cmd := exec.CommandContext(execCtx, r.bwrapPath, bwrapArgs...)
+	if executionCgroup != nil {
+		if err := executionCgroup.attach(cmd); err != nil {
+			return nil, fmt.Errorf("attach Linux sandbox PID cgroup: %w", err)
+		}
+	}
 	cmd.Env = SanitizedEnvironment(nil)
 	if len(request.Stdin) > 0 {
 		cmd.Stdin = strings.NewReader(string(request.Stdin))
