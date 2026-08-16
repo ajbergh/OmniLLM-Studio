@@ -38,23 +38,24 @@ func enumerateWorkspaceSearchCandidates(root, expectedRootIdentity string, maxBy
 		return fmt.Errorf("workspace root identity changed before search")
 	}
 
-	return walkWorkspaceSearchDirectory(rootFD, "", maxBytes, visit)
+	_, err = walkWorkspaceSearchDirectory(rootFD, "", maxBytes, visit)
+	return err
 }
 
-func walkWorkspaceSearchDirectory(dirFD int, prefix string, maxBytes int64, visit func(string, []byte) bool) error {
+func walkWorkspaceSearchDirectory(dirFD int, prefix string, maxBytes int64, visit func(string, []byte) bool) (bool, error) {
 	dupFD, err := unix.Dup(dirFD)
 	if err != nil {
-		return fmt.Errorf("duplicate workspace search directory: %w", err)
+		return false, fmt.Errorf("duplicate workspace search directory: %w", err)
 	}
 	dir := os.NewFile(uintptr(dupFD), "workspace-search-dir")
 	if dir == nil {
 		_ = unix.Close(dupFD)
-		return fmt.Errorf("open workspace search directory handle")
+		return false, fmt.Errorf("open workspace search directory handle")
 	}
 	entries, err := dir.ReadDir(-1)
 	_ = dir.Close()
 	if err != nil {
-		return nil
+		return false, nil
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 
@@ -80,11 +81,11 @@ func walkWorkspaceSearchDirectory(dirFD int, prefix string, maxBytes int64, visi
 			if err != nil {
 				continue
 			}
-			if err := walkWorkspaceSearchDirectory(childFD, rel, maxBytes, visit); err != nil {
-				_ = unix.Close(childFD)
-				return err
-			}
+			stop, walkErr := walkWorkspaceSearchDirectory(childFD, rel, maxBytes, visit)
 			_ = unix.Close(childFD)
+			if walkErr != nil || stop {
+				return stop, walkErr
+			}
 		case unix.S_IFREG:
 			fileFD, err := unix.Openat(dirFD, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 			if err != nil {
@@ -106,9 +107,9 @@ func walkWorkspaceSearchDirectory(dirFD int, prefix string, maxBytes int64, visi
 				continue
 			}
 			if !visit(rel, data) {
-				return nil
+				return true, nil
 			}
 		}
 	}
-	return nil
+	return false, nil
 }
