@@ -2,10 +2,7 @@ package sandbox
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -86,31 +83,18 @@ func cleanWorkspaceRelativePath(input string) (string, error) {
 	return clean, nil
 }
 
-// ReadFile reads a bounded regular file and returns its current SHA-256.
+// ReadFile reads a bounded regular file and returns its current SHA-256. The
+// platform read boundary is responsible for keeping the file lookup bound to
+// the granted root while bytes are opened and consumed.
 func (s *WorkspaceFS) ReadFile(ownerUserID, workspaceID, relativePath string, maxBytes int64) ([]byte, string, error) {
-	_, path, _, err := s.Resolve(ownerUserID, workspaceID, relativePath, false)
+	workspace, _, clean, err := s.Resolve(ownerUserID, workspaceID, relativePath, false)
 	if err != nil {
 		return nil, "", err
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, "", err
-	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return nil, "", fmt.Errorf("workspace path is not a regular file")
 	}
 	if maxBytes <= 0 || maxBytes > 8<<20 {
 		maxBytes = 2 << 20
 	}
-	if info.Size() > maxBytes {
-		return nil, "", fmt.Errorf("workspace file exceeds %d bytes", maxBytes)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, "", err
-	}
-	hash := sha256.Sum256(data)
-	return data, hex.EncodeToString(hash[:]), nil
+	return readWorkspaceRegularFile(workspace.RootPath, clean, maxBytes)
 }
 
 // WriteFile atomically creates/replaces a small regular file. The optional
@@ -270,7 +254,8 @@ type TextEdit struct {
 }
 
 // Search finds bounded text matches without following symlinked directories or
-// reading oversized files.
+// reading oversized files. Candidate names discovered by WalkDir are reopened
+// through the platform read boundary before any content is trusted.
 type SearchMatch struct {
 	Path    string `json:"path"`
 	Line    int    `json:"line"`
@@ -281,6 +266,10 @@ func (s *WorkspaceFS) Search(ownerUserID, workspaceID, query string, maxMatches 
 	workspace, err := s.registry.Get(ownerUserID, workspaceID)
 	if err != nil {
 		return nil, err
+	}
+	root, err := canonicalWorkspaceRoot(workspace.RootPath)
+	if err != nil || root != workspace.RootPath {
+		return nil, fmt.Errorf("workspace root is no longer safely canonical")
 	}
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -321,13 +310,8 @@ func (s *WorkspaceFS) Search(ownerUserID, workspaceID, query string, maxMatches 
 		if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
 			return nil
 		}
-		file, err := os.Open(path)
-		if err != nil {
-			return nil
-		}
-		data, readErr := io.ReadAll(io.LimitReader(file, (1<<20)+1))
-		_ = file.Close()
-		if readErr != nil || len(data) > 1<<20 || strings.IndexByte(string(data), 0) >= 0 {
+		data, _, readErr := readWorkspaceRegularFile(workspace.RootPath, rel, 1<<20)
+		if readErr != nil || strings.IndexByte(string(data), 0) >= 0 {
 			return nil
 		}
 		for index, line := range strings.Split(string(data), "\n") {
