@@ -64,7 +64,7 @@ func TestBrokerRejectsUnenforceableRequestedResourceLimits(t *testing.T) {
 				t.Fatal("runtime Create must not run when a requested quota is unenforceable")
 			}
 
-			t.enable(&runtime.capabilities)
+			tt.enable(&runtime.capabilities)
 			if _, err := broker.Create(context.Background(), owner, request); err != nil {
 				t.Fatalf("Create() with matching capability error = %v", err)
 			}
