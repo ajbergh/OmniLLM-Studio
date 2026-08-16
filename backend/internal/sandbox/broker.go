@@ -53,6 +53,9 @@ func (b *Broker) Create(ctx context.Context, owner OwnerScope, request CreateReq
 	if err := requireCapabilities(capabilities, request.Requirements); err != nil {
 		return nil, err
 	}
+	if err := requireEnforceableResourceLimits(capabilities, request.Resources); err != nil {
+		return nil, err
+	}
 	if request.Network.Mode == NetworkApprovalRequired {
 		return nil, fmt.Errorf("sandbox network approval must be resolved to an owner-bound grant before runtime creation")
 	}
@@ -332,6 +335,30 @@ func validateResourceLimits(limits ResourceLimits) error {
 		limits.MaxProcesses < 0 || limits.MaxFiles < 0 || limits.MaxStdoutBytes < 0 || limits.MaxStderrBytes < 0 ||
 		limits.MaxArtifactBytes < 0 {
 		return fmt.Errorf("sandbox resource limits cannot be negative")
+	}
+	return nil
+}
+
+// requireEnforceableResourceLimits rejects quota requests that would otherwise
+// be silently accepted by a runtime that does not advertise the matching control.
+// Callers do not need to duplicate resource values in RuntimeRequirements for
+// admission to fail closed.
+func requireEnforceableResourceLimits(cap RuntimeCapabilities, limits ResourceLimits) error {
+	missing := make([]string, 0, 4)
+	if limits.MemoryBytes > 0 && !cap.MemoryLimit {
+		missing = append(missing, "memory_bytes")
+	}
+	if limits.CPUTimeMS > 0 && !cap.CPULimit {
+		missing = append(missing, "cpu_time_ms")
+	}
+	if limits.MaxProcesses > 0 && !cap.PIDLimit {
+		missing = append(missing, "max_processes")
+	}
+	if limits.DiskBytes > 0 && !cap.DiskLimit {
+		missing = append(missing, "disk_bytes")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("sandbox runtime %q cannot enforce requested resource limits: %s", cap.Name, strings.Join(missing, ", "))
 	}
 	return nil
 }
