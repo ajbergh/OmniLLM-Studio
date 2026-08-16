@@ -100,16 +100,29 @@ func createWindowsFilteredToken(restrictingSID *windows.SID) (windows.Token, err
 }
 
 // createWindowsKillOnCloseJob creates a Job Object whose process tree is
-// terminated when the final job handle is closed. Process assignment is kept
-// separate so later runtime integration can bind children at creation time and
-// avoid an escape window before assignment.
+// terminated when the final job handle is closed.
 func createWindowsKillOnCloseJob() (windows.Handle, error) {
+	return createWindowsSandboxJob(0)
+}
+
+// createWindowsSandboxJob creates the pre-start Job Object used by one sandbox
+// execution. maxProcesses <= 0 leaves process count unbounded; otherwise Windows
+// enforces JOB_OBJECT_LIMIT_ACTIVE_PROCESS for the root process and all descendants
+// from the moment the root is created in the Job Object.
+func createWindowsSandboxJob(maxProcesses int) (windows.Handle, error) {
+	if maxProcesses < 0 {
+		return 0, fmt.Errorf("Windows sandbox process limit cannot be negative")
+	}
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return 0, fmt.Errorf("create job object: %w", err)
 	}
 	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
 	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if maxProcesses > 0 {
+		info.BasicLimitInformation.LimitFlags |= windows.JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+		info.BasicLimitInformation.ActiveProcessLimit = uint32(maxProcesses)
+	}
 	if _, err := windows.SetInformationJobObject(
 		job,
 		windows.JobObjectExtendedLimitInformation,
@@ -117,7 +130,7 @@ func createWindowsKillOnCloseJob() (windows.Handle, error) {
 		uint32(unsafe.Sizeof(info)),
 	); err != nil {
 		windows.CloseHandle(job)
-		return 0, fmt.Errorf("configure kill-on-close job object: %w", err)
+		return 0, fmt.Errorf("configure Windows sandbox job object: %w", err)
 	}
 	return job, nil
 }
