@@ -55,12 +55,15 @@ jobs:
           root="$OMNILLM_TEST_CGROUP_ROOT"
           worker="$root/worker"
           mkdir "$worker"
-          # Model the production worker topology: sandboxd itself lives inside
-          # the delegated subtree, while per-execution cgroups are siblings.
-          # This makes the delegated root the writable common ancestor required
-          # by cgroup-v2 migration/CLONE_INTO_CGROUP containment rules.
-          echo $$ > "$worker/cgroup.procs"
+          # Model a privileged service manager placing sandboxd into a worker
+          # child before the worker drops privilege. Execution cgroups remain
+          # runtime-created siblings under the delegated root.
+          echo $$ | sudo tee "$worker/cgroup.procs" >/dev/null
           grep -qx "$$" "$worker/cgroup.procs"
+          printf '%s\n' 'delegated-root:'
+          stat -c '%u:%g %a %n' "$root" "$root/cgroup.procs" "$root/cgroup.subtree_control"
+          printf '%s\n' 'worker-child:'
+          stat -c '%u:%g %a %n' "$worker" "$worker/cgroup.procs"
           go test ./internal/sandbox -run '^TestLinuxCgroup' -count=1 -v 2>&1 | tee ../sandbox-linux-quota.log
       - name: Upload Linux quota diagnostics
         if: always()
