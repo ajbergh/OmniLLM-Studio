@@ -112,6 +112,7 @@ func TestWindowsLocalRuntimeEnforcesAggregateMemoryLimit(t *testing.T) {
 		}
 		child := exec.Command(executable, "-test.run=^TestWindowsLocalRuntimeEnforcesAggregateMemoryLimit$")
 		child.Env = append(os.Environ(), "OMNILLM_WINDOWS_MEMORY_LIMIT_CHILD=1")
+		child.Stdin = os.Stdin
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
 		err = child.Run()
