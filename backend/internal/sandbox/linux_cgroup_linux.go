@@ -150,11 +150,19 @@ func (m *linuxCgroupManager) createExecution(maxProcesses int, memoryBytes int64
 	}
 	if m.memoryEnabled {
 		limit := "max"
+		swapLimit := "max"
 		if memoryBytes > 0 {
 			limit = strconv.FormatInt(memoryBytes, 10)
+			// memory.max does not include swap authority. A positive application
+			// memory ceiling therefore also disables cgroup swap so anonymous pages
+			// cannot escape the requested aggregate byte bound.
+			swapLimit = "0"
 		}
 		if err := os.WriteFile(filepath.Join(dir, "memory.max"), []byte(limit), 0); err != nil {
 			return nil, fmt.Errorf("configure execution memory.max: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "memory.swap.max"), []byte(swapLimit), 0); err != nil {
+			return nil, fmt.Errorf("configure execution memory.swap.max: %w", err)
 		}
 	}
 
