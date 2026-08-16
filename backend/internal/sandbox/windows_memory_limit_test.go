@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +17,7 @@ import (
 )
 
 const windowsSandboxMemoryTestLimit = int64(256 << 20)
+const windowsSandboxMemoryTestRequest = uintptr(512 << 20)
 
 func TestWindowsSandboxJobMemoryLimitConfiguration(t *testing.T) {
 	job, err := createWindowsSandboxJobWithLimits(3, windowsSandboxMemoryTestLimit)
@@ -91,17 +91,19 @@ func TestWindowsSandboxJobLeavesMemoryUnboundedAtZero(t *testing.T) {
 func TestWindowsLocalRuntimeEnforcesAggregateMemoryLimit(t *testing.T) {
 	if os.Getenv("OMNILLM_WINDOWS_MEMORY_LIMIT_CHILD") == "1" {
 		fmt.Println("memory_limit_child_started=1")
-		blocks := make([][]byte, 0, 64)
-		for i := 0; i < 64; i++ {
-			block := make([]byte, 8<<20)
-			for offset := 0; offset < len(block); offset += 4096 {
-				block[offset] = byte(i + 1)
-			}
-			blocks = append(blocks, block)
+		address, err := windows.VirtualAlloc(
+			0,
+			windowsSandboxMemoryTestRequest,
+			windows.MEM_RESERVE|windows.MEM_COMMIT,
+			windows.PAGE_READWRITE,
+		)
+		if err != nil {
+			fmt.Printf("memory_limit_allocation_denied=%v\n", err)
+			os.Exit(0)
 		}
-		fmt.Printf("memory_limit_bypassed=%d\n", len(blocks)*(8<<20))
-		runtime.KeepAlive(blocks)
-		os.Exit(0)
+		_ = windows.VirtualFree(address, 0, windows.MEM_RELEASE)
+		fmt.Printf("memory_limit_bypassed=%d\n", windowsSandboxMemoryTestRequest)
+		os.Exit(73)
 	}
 	if os.Getenv("OMNILLM_WINDOWS_MEMORY_LIMIT_ROOT") == "1" {
 		fmt.Println("memory_limit_root_started=1")
@@ -115,12 +117,10 @@ func TestWindowsLocalRuntimeEnforcesAggregateMemoryLimit(t *testing.T) {
 		child.Stdin = os.Stdin
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
-		err = child.Run()
-		if err == nil {
-			fmt.Println("memory_limit_child_unexpected_success=1")
+		if err := child.Run(); err != nil {
+			fmt.Printf("memory_limit_child_error=%v\n", err)
 			os.Exit(72)
 		}
-		fmt.Printf("memory_limit_child_denied=%v\n", err)
 		os.Exit(0)
 	}
 
@@ -181,10 +181,10 @@ func TestWindowsLocalRuntimeEnforcesAggregateMemoryLimit(t *testing.T) {
 	if !strings.Contains(result.Stdout, "memory_limit_child_started=1") {
 		t.Fatalf("memory-limited descendant did not start before allocation attempt: stdout=%q stderr=%q", result.Stdout, result.Stderr)
 	}
-	if !strings.Contains(result.Stdout, "memory_limit_child_denied=") {
-		t.Fatalf("aggregate memory denial not observed: stdout=%q stderr=%q", result.Stdout, result.Stderr)
+	if !strings.Contains(result.Stdout, "memory_limit_allocation_denied=") {
+		t.Fatalf("aggregate memory allocation denial not observed: stdout=%q stderr=%q", result.Stdout, result.Stderr)
 	}
-	if strings.Contains(result.Stdout, "memory_limit_bypassed=") || strings.Contains(result.Stdout, "memory_limit_child_unexpected_success=1") {
-		t.Fatalf("child escaped aggregate memory quota: stdout=%q stderr=%q", result.Stdout, result.Stderr)
+	if strings.Contains(result.Stdout, "memory_limit_bypassed=") || strings.Contains(result.Stdout, "memory_limit_child_error=") {
+		t.Fatalf("memory-limit evidence was not a clean allocation denial: stdout=%q stderr=%q", result.Stdout, result.Stderr)
 	}
 }
