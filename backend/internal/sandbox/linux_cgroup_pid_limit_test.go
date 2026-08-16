@@ -54,15 +54,15 @@ func TestLinuxCgroupPIDLimitNative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := newLinuxPIDCgroupManager(root, bwrap)
+	manager, err := newLinuxCgroupManager(root, bwrap)
 	if err != nil {
-		t.Fatalf("initialize delegated PID cgroup manager: %v", err)
+		t.Fatalf("initialize delegated cgroup manager: %v", err)
 	}
-	if manager == nil {
-		t.Fatal("delegated cgroup root did not enable PID manager")
+	if manager == nil || !manager.pidsEnabled {
+		t.Fatal("delegated cgroup root did not enable PID control")
 	}
 
-	execution, err := manager.createExecution(2)
+	execution, err := manager.createExecution(2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,8 +93,8 @@ func TestLinuxCgroupUnlimitedExecutionNative(t *testing.T) {
 	if root == "" {
 		t.Skip("native delegated cgroup-v2 root not configured")
 	}
-	manager := &linuxPIDCgroupManager{root: root}
-	execution, err := manager.createExecution(0)
+	manager := &linuxCgroupManager{root: root, pidsEnabled: true, memoryEnabled: true}
+	execution, err := manager.createExecution(0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,11 +103,18 @@ func TestLinuxCgroupUnlimitedExecutionNative(t *testing.T) {
 			t.Errorf("cleanup execution cgroup: %v", err)
 		}
 	}()
-	limit, err := os.ReadFile(filepath.Join(execution.path, "pids.max"))
+	pidLimit, err := os.ReadFile(filepath.Join(execution.path, "pids.max"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(string(limit)) != "max" {
-		t.Fatalf("pids.max = %q, want max", strings.TrimSpace(string(limit)))
+	if strings.TrimSpace(string(pidLimit)) != "max" {
+		t.Fatalf("pids.max = %q, want max", strings.TrimSpace(string(pidLimit)))
+	}
+	memoryLimit, err := os.ReadFile(filepath.Join(execution.path, "memory.max"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(memoryLimit)) != "max" {
+		t.Fatalf("memory.max = %q, want max", strings.TrimSpace(string(memoryLimit)))
 	}
 }

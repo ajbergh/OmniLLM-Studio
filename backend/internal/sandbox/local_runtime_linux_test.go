@@ -95,13 +95,25 @@ func TestLocalRuntimeCapabilitiesDoNotOverclaimResourceOrNetworkLimits(t *testin
 	}
 }
 
-func TestLocalRuntimeAdvertisesPIDLimitOnlyWithDelegatedManager(t *testing.T) {
-	runtime := &LocalRuntime{pidCgroup: &linuxPIDCgroupManager{root: "/delegated"}}
-	capabilities := runtime.Capabilities()
-	if !capabilities.PIDLimit {
-		t.Fatalf("runtime did not advertise initialized PID control: %#v", capabilities)
+func TestLocalRuntimeAdvertisesOnlyDelegatedCgroupCapabilities(t *testing.T) {
+	pidOnly := &LocalRuntime{cgroup: &linuxCgroupManager{root: "/delegated", pidsEnabled: true}}
+	capabilities := pidOnly.Capabilities()
+	if !capabilities.PIDLimit || capabilities.MemoryLimit {
+		t.Fatalf("PID-only delegation capabilities = %#v", capabilities)
 	}
-	if capabilities.NetworkAllowlist || capabilities.MemoryLimit || capabilities.CPULimit || capabilities.DiskLimit {
+
+	memoryOnly := &LocalRuntime{cgroup: &linuxCgroupManager{root: "/delegated", memoryEnabled: true}}
+	capabilities = memoryOnly.Capabilities()
+	if !capabilities.MemoryLimit || capabilities.PIDLimit {
+		t.Fatalf("memory-only delegation capabilities = %#v", capabilities)
+	}
+
+	both := &LocalRuntime{cgroup: &linuxCgroupManager{root: "/delegated", pidsEnabled: true, memoryEnabled: true}}
+	capabilities = both.Capabilities()
+	if !capabilities.PIDLimit || !capabilities.MemoryLimit {
+		t.Fatalf("combined delegation capabilities = %#v", capabilities)
+	}
+	if capabilities.NetworkAllowlist || capabilities.CPULimit || capabilities.DiskLimit {
 		t.Fatalf("runtime overclaims unrelated controls: %#v", capabilities)
 	}
 }

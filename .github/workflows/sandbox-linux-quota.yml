@@ -18,7 +18,7 @@ env:
 
 jobs:
   sandbox-linux-quota:
-    name: Linux delegated cgroup PID confinement
+    name: Linux delegated cgroup quota confinement
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -36,8 +36,16 @@ jobs:
           set -euo pipefail
           test -f /sys/fs/cgroup/cgroup.controllers
           grep -qw pids /sys/fs/cgroup/cgroup.controllers
+          grep -qw memory /sys/fs/cgroup/cgroup.controllers
+          controllers=()
           if ! grep -qw pids /sys/fs/cgroup/cgroup.subtree_control; then
-            echo +pids | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null
+            controllers+=(+pids)
+          fi
+          if ! grep -qw memory /sys/fs/cgroup/cgroup.subtree_control; then
+            controllers+=(+memory)
+          fi
+          if [ "${#controllers[@]}" -gt 0 ]; then
+            printf '%s ' "${controllers[@]}" | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null
           fi
           root=/sys/fs/cgroup/omnillm-sandbox-ci
           sudo mkdir "$root"
@@ -47,7 +55,7 @@ jobs:
             "$root/cgroup.subtree_control" \
             "$root/cgroup.threads"
           printf 'OMNILLM_TEST_CGROUP_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
-      - name: Prove native Linux PID quota boundary
+      - name: Prove native Linux PID and memory quota boundaries
         working-directory: backend
         shell: bash
         run: |
@@ -62,6 +70,8 @@ jobs:
           grep -qx "$$" "$worker/cgroup.procs"
           printf '%s\n' 'delegated-root:'
           stat -c '%u:%g %a %n' "$root" "$root/cgroup.procs" "$root/cgroup.subtree_control"
+          printf '%s\n' 'available-controllers:'
+          cat "$root/cgroup.controllers"
           printf '%s\n' 'worker-child:'
           stat -c '%u:%g %a %n' "$worker" "$worker/cgroup.procs"
           go test ./internal/sandbox -run '^TestLinuxCgroup' -count=1 -v 2>&1 | tee ../sandbox-linux-quota.log

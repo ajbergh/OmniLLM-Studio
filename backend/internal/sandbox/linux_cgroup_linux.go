@@ -15,12 +15,15 @@ import (
 
 const linuxCgroupCleanupTimeout = 2 * time.Second
 
-// linuxPIDCgroupManager owns one explicitly delegated cgroup-v2 subtree for
-// sandbox executions. It is enabled only when the operator supplies a cgroup
-// root that can create child cgroups, enable the pids controller, and atomically
-// place a new process into a child cgroup with clone3(CLONE_INTO_CGROUP).
-type linuxPIDCgroupManager struct {
-	root string
+// linuxCgroupManager owns one explicitly delegated cgroup-v2 subtree for
+// sandbox executions. Individual resource capabilities are enabled only when
+// the operator-delegated root exposes the matching controller. Atomic process
+// placement is probed independently so no untrusted process runs before its
+// execution cgroup authority exists.
+type linuxCgroupManager struct {
+	root          string
+	pidsEnabled   bool
+	memoryEnabled bool
 }
 
 type linuxExecutionCgroup struct {
@@ -28,7 +31,7 @@ type linuxExecutionCgroup struct {
 	file *os.File
 }
 
-func newLinuxPIDCgroupManager(configuredRoot, probeExecutable string) (*linuxPIDCgroupManager, error) {
+func newLinuxCgroupManager(configuredRoot, probeExecutable string) (*linuxCgroupManager, error) {
 	configuredRoot = strings.TrimSpace(configuredRoot)
 	if configuredRoot == "" {
 		return nil, nil
@@ -41,17 +44,27 @@ func newLinuxPIDCgroupManager(configuredRoot, probeExecutable string) (*linuxPID
 	if err != nil {
 		return nil, fmt.Errorf("read delegated cgroup controllers: %w", err)
 	}
-	if _, ok := controllers["pids"]; !ok {
-		return nil, fmt.Errorf("sandbox cgroup root does not delegate the pids controller")
+
+	manager := &linuxCgroupManager{root: root}
+	if _, ok := controllers["pids"]; ok {
+		if err := ensureLinuxCgroupController(root, "pids"); err != nil {
+			return nil, err
+		}
+		manager.pidsEnabled = true
 	}
-	if err := ensureLinuxCgroupController(root, "pids"); err != nil {
-		return nil, err
+	if _, ok := controllers["memory"]; ok {
+		if err := ensureLinuxCgroupController(root, "memory"); err != nil {
+			return nil, err
+		}
+		manager.memoryEnabled = true
+	}
+	if !manager.pidsEnabled && !manager.memoryEnabled {
+		return nil, fmt.Errorf("sandbox cgroup root does not delegate pids or memory controllers")
 	}
 
-	manager := &linuxPIDCgroupManager{root: root}
-	probe, err := manager.createExecution(1)
+	probe, err := manager.createExecution(0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("probe delegated pids controller: %w", err)
+		return nil, fmt.Errorf("probe delegated cgroup controllers: %w", err)
 	}
 	probeErr := probeCloneIntoLinuxCgroup(probe, probeExecutable)
 	cleanupErr := probe.cleanup()
@@ -98,13 +111,23 @@ func readLinuxCgroupTokens(path string) (map[string]struct{}, error) {
 	return out, nil
 }
 
-func (m *linuxPIDCgroupManager) createExecution(maxProcesses int) (*linuxExecutionCgroup, error) {
+func (m *linuxCgroupManager) createExecution(maxProcesses int, memoryBytes int64) (*linuxExecutionCgroup, error) {
 	if m == nil {
-		return nil, fmt.Errorf("Linux cgroup PID manager is unavailable")
+		return nil, fmt.Errorf("Linux cgroup manager is unavailable")
 	}
 	if maxProcesses < 0 {
 		return nil, fmt.Errorf("Linux sandbox process limit cannot be negative")
 	}
+	if memoryBytes < 0 {
+		return nil, fmt.Errorf("Linux sandbox memory limit cannot be negative")
+	}
+	if maxProcesses > 0 && !m.pidsEnabled {
+		return nil, fmt.Errorf("Linux cgroup pids controller is unavailable")
+	}
+	if memoryBytes > 0 && !m.memoryEnabled {
+		return nil, fmt.Errorf("Linux cgroup memory controller is unavailable")
+	}
+
 	dir, err := os.MkdirTemp(m.root, "omnillm-exec-")
 	if err != nil {
 		return nil, fmt.Errorf("create execution cgroup: %w", err)
@@ -116,19 +139,66 @@ func (m *linuxPIDCgroupManager) createExecution(maxProcesses int) (*linuxExecuti
 		}
 	}()
 
-	limit := "max"
-	if maxProcesses > 0 {
-		limit = strconv.Itoa(maxProcesses)
+	if m.pidsEnabled {
+		limit := "max"
+		if maxProcesses > 0 {
+			limit = strconv.Itoa(maxProcesses)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "pids.max"), []byte(limit), 0); err != nil {
+			return nil, fmt.Errorf("configure execution pids.max: %w", err)
+		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "pids.max"), []byte(limit), 0); err != nil {
-		return nil, fmt.Errorf("configure execution pids.max: %w", err)
+	if m.memoryEnabled {
+		limit := "max"
+		swapLimit := "max"
+		if memoryBytes > 0 {
+			limit = strconv.FormatInt(memoryBytes, 10)
+			// memory.max does not include swap authority. A positive application
+			// memory ceiling therefore also disables cgroup swap so anonymous pages
+			// cannot escape the requested aggregate byte bound.
+			swapLimit = "0"
+		}
+		if err := os.WriteFile(filepath.Join(dir, "memory.max"), []byte(limit), 0); err != nil {
+			return nil, fmt.Errorf("configure execution memory.max: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "memory.swap.max"), []byte(swapLimit), 0); err != nil {
+			return nil, fmt.Errorf("configure execution memory.swap.max: %w", err)
+		}
 	}
+
 	file, err := os.Open(dir)
 	if err != nil {
 		return nil, fmt.Errorf("open execution cgroup: %w", err)
 	}
 	cleanup = false
 	return &linuxExecutionCgroup{path: dir, file: file}, nil
+}
+
+func (c *linuxExecutionCgroup) memoryEvents() (map[string]uint64, error) {
+	if c == nil || strings.TrimSpace(c.path) == "" {
+		return nil, fmt.Errorf("Linux execution cgroup is unavailable")
+	}
+	content, err := os.ReadFile(filepath.Join(c.path, "memory.events"))
+	if err != nil {
+		return nil, fmt.Errorf("read execution memory.events: %w", err)
+	}
+	events := make(map[string]uint64)
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if len(fields) != 2 {
+			return nil, fmt.Errorf("parse execution memory.events line %q", line)
+		}
+		value, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parse execution memory.events %s: %w", fields[0], err)
+		}
+		events[fields[0]] = value
+	}
+	return events, nil
 }
 
 func (c *linuxExecutionCgroup) attach(cmd *exec.Cmd) error {
