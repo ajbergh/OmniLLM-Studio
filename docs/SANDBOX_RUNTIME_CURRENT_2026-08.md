@@ -33,7 +33,7 @@ Current enforced controls:
 - wall-time bounds;
 - stdout/stderr bounds.
 
-The Linux first-party runtime does not advertise destination allowlisting, memory quota, CPU quota, PID quota, or physical disk quota enforcement.
+The Linux first-party runtime does not advertise destination allowlisting, memory quota, CPU quota, PID quota, or physical disk quota enforcement. The approved next quota slice is cgroup-v2 capability detection followed by per-execution PID and memory controllers; unsupported or undelegated hosts must remain fail closed.
 
 ## Windows first-party runtime
 
@@ -46,13 +46,14 @@ Current enforced controls:
 - zero AppContainer network capabilities;
 - Job Object membership applied at process creation;
 - process-count quota enforcement with `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` when `resources.max_processes` is non-zero;
+- aggregate process-tree committed-memory enforcement with `JOB_OBJECT_LIMIT_JOB_MEMORY` when `resources.memory_bytes` is non-zero;
 - explicit inherited stdio handle list;
 - process-tree teardown on root completion, cancellation, timeout, or session destruction;
 - runtime-owned minimal environment rather than ambient backend inheritance;
 - bounded wall time, stdout, and stderr;
 - retryable AppContainer profile cleanup.
 
-The Windows runtime advertises `pid_limit=true` only after native `windows-latest` evidence proved that `MaxProcesses=1` prevents a nested child process from running. Memory, CPU, physical-disk, and destination-allowlist capability bits remain false.
+The Windows runtime advertises `pid_limit=true` after PR #171 proved `MaxProcesses=1` prevents a nested child process from running. PR #172 adds `memory_limit=true` only after native `windows-latest` evidence proved that a descendant starts inside the same Job and a 512 MiB `VirtualAlloc(MEM_RESERVE|MEM_COMMIT)` request is synchronously denied under a 256 MiB aggregate Job memory ceiling. CPU, physical-disk, and destination-allowlist capability bits remain false.
 
 ### Windows workspace policy
 
@@ -162,10 +163,10 @@ The first-party Linux, Windows, and Darwin runtimes currently remain no-network 
 
 Resource capability reporting is platform-specific rather than universal.
 
-- Windows: `pid_limit=true`; `resources.max_processes` is enforced by the pre-start Job Object for the root process and descendants.
-- Linux: memory, CPU, PID/process-count, and physical-disk quota bits remain false.
+- Windows: `pid_limit=true` and `memory_limit=true`; `resources.max_processes` and aggregate `resources.memory_bytes` are enforced by the pre-start Job Object for the root process and descendants.
+- Linux: memory, CPU, PID/process-count, and physical-disk quota bits remain false pending cgroup-v2 delegated-controller work.
 - macOS: memory, CPU, PID/process-count, and physical-disk quota bits remain false.
-- All first-party runtimes: memory, CPU, and physical-disk quota enforcement remain open.
+- All first-party runtimes: CPU and physical-disk quota enforcement remain open.
 
 The Broker fails closed on non-zero memory, CPU, process-count, or disk quota requests whenever the selected runtime does not advertise the matching capability. Capability bits must remain false until implementation and native validation exist for that runtime.
 
@@ -180,7 +181,7 @@ Windows Phase 12 completed through:
 
 PR #149 final head `8f4ee1b7de5d3ea6203c44089dadfae4fd6d30cb` passed Quality Gate, Security Scan, native Windows sandbox/plugin/desktop checks, backend format/vet/tests/race, Chromium, frontend, Helm, dependency audit, both CodeQL lanes, and frontend/backend `linux/amd64` plus `linux/arm64` container builds before squash merge as `65bf1cd807b9cd94a2e7b62e653c9057366c6e8b`.
 
-Browser native egress assurance merged in PR #168 as `76f4f4c55a8370fb036290daa8a4054f00be1232`. Broker fail-closed resource admission merged in PR #170 as `9a2db5bf34f51502b3872145057e21d62c9d1ed1`. Windows PID-limit enforcement is implemented on PR #171 and has passed native `windows-latest` process-count denial evidence on the previously validated stacked head; the normalized final head must also pass applicable repository gates before merge.
+Browser native egress assurance merged in PR #168 as `76f4f4c55a8370fb036290daa8a4054f00be1232`. Broker fail-closed resource admission merged in PR #170 as `9a2db5bf34f51502b3872145057e21d62c9d1ed1`. Windows PID-limit enforcement merged in PR #171 as `11dfab99e73fe414e45cc44b0f33d4c80789295a` after the normalized final head passed native Windows and repository-wide gates. PR #172 adds aggregate Windows Job memory enforcement; native `windows-latest` Job configuration, zero/negative compatibility, and descendant over-limit evidence are green on implementation head `a73ef3939e909992cf5dab16422e101c7dd0011b`. The documentation-inclusive final head must still pass applicable gates before merge.
 
 macOS Phase 13A merged in PR #159. Phase 13B passed native macOS runtime assurance and repository gates and merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`. Phase 13C merged in PR #164 as `44f410793a70444963ec1eecb989b15df159b5f1`. Phase 13D adversarial assurance passed its native and repository gates and merged in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`, closing Phase 13 without changing the truthful detached-process limitation.
 
