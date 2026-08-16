@@ -26,7 +26,7 @@ A runtime may advertise a resource capability only when a non-zero request value
 
 | Capability | Request field | Required semantics |
 |---|---|---|
-| `memory_limit` | `resources.memory_bytes` | Bound aggregate sandbox execution memory at or below the configured byte ceiling; child processes must not evade the same bound. |
+| `memory_limit` | `resources.memory_bytes` | Bound aggregate sandbox execution memory at or below the configured byte ceiling, including preventing separately governed swap authority from defeating that ceiling; child processes must not evade the same bound. |
 | `cpu_limit` | `resources.cpu_time_ms` | Bound aggregate CPU consumption for the sandbox execution/process tree; wall time is not equivalent. |
 | `pid_limit` | `resources.max_processes` | Bound the number of concurrently active processes in the sandbox execution tree. |
 | `disk_limit` | `resources.disk_bytes` | Bound bytes attributable to sandbox-writable storage, including runtime-owned workspace/home/tmp and generated artifacts where applicable. |
@@ -65,11 +65,11 @@ Implementation order:
 1. detect writable/delegated cgroup-v2 support at runtime startup;
 2. create one cgroup per sandbox execution before untrusted code starts;
 3. map `max_processes` to `pids.max`;
-4. map `memory_bytes` to `memory.max` and observe `memory.events` for enforcement evidence;
+4. for positive `memory_bytes`, map the byte ceiling to `memory.max`, set `memory.swap.max=0` so anonymous pages cannot escape through separately governed swap, and observe `memory.events` for OOM enforcement evidence;
 5. define CPU semantics explicitly before mapping to `cpu.max`/accounting because `cpu_time_ms` is cumulative time while `cpu.max` is a rate/quota control;
 6. account writable runtime roots for disk separately; cgroups do not provide a portable physical-disk-byte quota.
 
-If the worker lacks the required delegated controller, the corresponding capability remains false and a required capability fails closed at creation.
+The PID and memory capabilities are independent. If the worker lacks a required delegated controller or strict memory/swap interface, the corresponding capability remains false and a non-zero request for that resource fails closed.
 
 ### macOS Seatbelt runtime
 
@@ -126,6 +126,7 @@ Every new control needs both positive and negative tests.
 - **Lifecycle:** cancellation, timeout, TTL cleanup, and destroy remove the controller and descendants.
 - **Race:** rapid create/exec/cancel/destroy does not leave an unbounded process/controller behind.
 - **Capability truth:** status/capability output exactly matches the native control proven on that platform.
+- **Memory evidence:** verify the configured hard memory limit and any required swap restriction, then require kernel accounting (`memory.events`) to show the over-limit descendant was constrained; an allocation merely failing for an unrelated reason is insufficient.
 - **Egress:** DNS rebinding shape, redirect, proxy env, private-address destination, alternate port, WebSocket, and direct-socket bypass attempts all fail unless explicitly authorized and enforced.
 
 ## Implementation sequence
@@ -133,7 +134,7 @@ Every new control needs both positive and negative tests.
 1. Add generic admission validation that rejects any non-zero memory/CPU/PID/disk request when the selected runtime capability is false.
 2. Implement Windows PID limit using the existing pre-start Job Object boundary and add native negative tests.
 3. Implement Windows aggregate memory limit and native child-process tests.
-4. Add Linux cgroup-v2 capability detection and PID limit; then memory limit.
+4. Add Linux cgroup-v2 capability detection and PID limit; then strict memory limit with `memory.max`, swap denial, and `memory.events` evidence.
 5. Resolve CPU semantic mismatch before enabling `cpu_limit` anywhere.
 6. Design physical-disk accounting/enforcement for runtime-owned writable roots.
 7. Keep sandbox egress at `network=none` while designing a forced-egress worker boundary; implement destination-scoped egress only with both application and network bypass evidence.
