@@ -101,7 +101,7 @@ func (s *WorkspaceFS) ReadFile(ownerUserID, workspaceID, relativePath string, ma
 // expectedSHA256 binds replacement to a previously reviewed state. Existing
 // files larger than the journal snapshot cap or non-regular files are rejected.
 func (s *WorkspaceFS) WriteFile(ctx context.Context, owner OwnerScope, workspaceID, relativePath string, data []byte, expectedSHA256 string) (*WorkspaceChange, error) {
-	workspace, path, clean, err := s.Resolve(owner.UserID, workspaceID, relativePath, true)
+	workspace, _, clean, err := s.Resolve(owner.UserID, workspaceID, relativePath, true)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,12 @@ func (s *WorkspaceFS) WriteFile(ctx context.Context, owner OwnerScope, workspace
 	if len(data) > maxWorkspaceMutationBytes {
 		return nil, fmt.Errorf("workspace write exceeds %d bytes", maxWorkspaceMutationBytes)
 	}
-	before, err := CaptureFileState(path)
+	target, err := openWorkspaceMutationTarget(workspace.RootPath, clean)
+	if err != nil {
+		return nil, err
+	}
+	defer target.Close()
+	before, err := target.Capture()
 	if err != nil {
 		return nil, err
 	}
@@ -125,12 +130,12 @@ func (s *WorkspaceFS) WriteFile(ctx context.Context, owner OwnerScope, workspace
 	if before.Exists && before.Mode.Perm() != 0 {
 		mode = before.Mode.Perm()
 	}
-	if err := atomicWriteFile(path, data, mode); err != nil {
+	if err := target.Write(data, mode); err != nil {
 		return nil, err
 	}
-	after, err := CaptureFileState(path)
+	after, err := target.Capture()
 	if err != nil {
-		_ = restoreFileState(path, before)
+		_ = target.Restore(before)
 		return nil, err
 	}
 	operation := "write"
@@ -139,7 +144,7 @@ func (s *WorkspaceFS) WriteFile(ctx context.Context, owner OwnerScope, workspace
 	}
 	change, err := s.registry.RecordWorkspaceChange(ctx, owner, workspaceID, clean, operation, "", "", before, after)
 	if err != nil {
-		_ = restoreFileState(path, before)
+		_ = target.Restore(before)
 		return nil, fmt.Errorf("workspace write journal failed; mutation rolled back: %w", err)
 	}
 	return change, nil
@@ -148,14 +153,19 @@ func (s *WorkspaceFS) WriteFile(ctx context.Context, owner OwnerScope, workspace
 // DeleteFile removes one small regular file only from a full read_write grant
 // and requires its current hash so delete approval cannot apply to new bytes.
 func (s *WorkspaceFS) DeleteFile(ctx context.Context, owner OwnerScope, workspaceID, relativePath, expectedSHA256 string) (*WorkspaceChange, error) {
-	workspace, path, clean, err := s.Resolve(owner.UserID, workspaceID, relativePath, false)
+	workspace, _, clean, err := s.Resolve(owner.UserID, workspaceID, relativePath, false)
 	if err != nil {
 		return nil, err
 	}
 	if workspace.Mode != MountReadWrite {
 		return nil, fmt.Errorf("workspace does not permit deletion")
 	}
-	before, err := CaptureFileState(path)
+	target, err := openWorkspaceMutationTarget(workspace.RootPath, clean)
+	if err != nil {
+		return nil, err
+	}
+	defer target.Close()
+	before, err := target.Capture()
 	if err != nil {
 		return nil, err
 	}
@@ -165,13 +175,13 @@ func (s *WorkspaceFS) DeleteFile(ctx context.Context, owner OwnerScope, workspac
 	if expectedSHA256 == "" || before.SHA256 != strings.ToLower(strings.TrimSpace(expectedSHA256)) {
 		return nil, fmt.Errorf("workspace delete requires the current reviewed sha256")
 	}
-	if err := os.Remove(path); err != nil {
+	if err := target.Delete(); err != nil {
 		return nil, err
 	}
 	after := FileState{Exists: false, Revertable: true}
 	change, err := s.registry.RecordWorkspaceChange(ctx, owner, workspaceID, clean, "delete", "", "", before, after)
 	if err != nil {
-		_ = restoreFileState(path, before)
+		_ = target.Restore(before)
 		return nil, fmt.Errorf("workspace delete journal failed; mutation rolled back: %w", err)
 	}
 	return change, nil
@@ -217,14 +227,19 @@ func (s *WorkspaceFS) RevertChange(ctx context.Context, owner OwnerScope, change
 	if !change.Revertable {
 		return nil, fmt.Errorf("workspace change is not automatically revertable")
 	}
-	workspace, path, clean, err := s.Resolve(owner.UserID, change.WorkspaceID, change.RelativePath, !change.AfterExists)
+	workspace, _, clean, err := s.Resolve(owner.UserID, change.WorkspaceID, change.RelativePath, !change.AfterExists)
 	if err != nil {
 		return nil, err
 	}
 	if workspace.Mode == MountReadOnly {
 		return nil, fmt.Errorf("workspace is read-only")
 	}
-	current, err := CaptureFileState(path)
+	target, err := openWorkspaceMutationTarget(workspace.RootPath, clean)
+	if err != nil {
+		return nil, err
+	}
+	defer target.Close()
+	current, err := target.Capture()
 	if err != nil {
 		return nil, err
 	}
@@ -232,16 +247,16 @@ func (s *WorkspaceFS) RevertChange(ctx context.Context, owner OwnerScope, change
 		return nil, fmt.Errorf("workspace change can no longer be reverted because the file changed")
 	}
 	before := FileState{Exists: change.BeforeExists, SHA256: change.BeforeSHA256, Mode: beforeMode, Content: beforeContent, Revertable: true}
-	if err := restoreFileState(path, before); err != nil {
+	if err := target.Restore(before); err != nil {
 		return nil, err
 	}
-	after, err := CaptureFileState(path)
+	after, err := target.Capture()
 	if err != nil {
 		return nil, err
 	}
 	revertRecord, err := s.registry.RecordWorkspaceChange(ctx, owner, change.WorkspaceID, clean, "revert", "", "", current, after)
 	if err != nil {
-		_ = restoreFileState(path, current)
+		_ = target.Restore(current)
 		return nil, fmt.Errorf("workspace revert journal failed; revert rolled back: %w", err)
 	}
 	return revertRecord, nil

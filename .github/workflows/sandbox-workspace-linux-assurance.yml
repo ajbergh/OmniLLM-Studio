@@ -18,7 +18,7 @@ env:
 
 jobs:
   workspace-linux-paths:
-    name: Linux workspace descriptor-relative reads
+    name: Linux workspace descriptor-relative operations
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go test ./internal/sandbox -run '^TestLinuxWorkspaceRead' -count=10 -v 2>&1 | tee ../sandbox-workspace-linux.log
+          go test ./internal/sandbox -run '^TestLinuxWorkspace(Read|Mutation)' -count=10 -v 2>&1 | tee ../sandbox-workspace-linux.log
       - name: Upload Linux workspace diagnostics
         if: always()
         uses: actions/upload-artifact@v7
