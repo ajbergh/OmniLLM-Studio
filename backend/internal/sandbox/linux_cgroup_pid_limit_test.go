@@ -11,7 +11,32 @@ import (
 )
 
 const linuxCgroupTestRootEnv = "OMNILLM_TEST_CGROUP_ROOT"
-const linuxCgroupPIDHelperEnv = "OMNILLM_TEST_CGROUP_PID_HELPER"
+
+const linuxPIDLimitProbe = `
+import errno
+import os
+import sys
+import time
+
+first = os.fork()
+if first == 0:
+    time.sleep(5)
+    os._exit(0)
+
+try:
+    second = os.fork()
+except OSError as exc:
+    if exc.errno != errno.EAGAIN:
+        print("unexpected_fork_error", exc.errno, flush=True)
+        sys.exit(2)
+    print("pid_limit_enforced", flush=True)
+    sys.exit(0)
+
+if second == 0:
+    os._exit(0)
+print("pid_limit_bypassed", flush=True)
+sys.exit(3)
+`
 
 // TestLinuxCgroupPIDLimitNative is intentionally opt-in because ordinary unit
 // test environments do not own a delegated cgroup-v2 subtree. The dedicated CI
@@ -22,6 +47,10 @@ func TestLinuxCgroupPIDLimitNative(t *testing.T) {
 		t.Skip("native delegated cgroup-v2 root not configured")
 	}
 	bwrap, err := exec.LookPath("bwrap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	python, err := exec.LookPath("python3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,8 +67,7 @@ func TestLinuxCgroupPIDLimitNative(t *testing.T) {
 		t.Fatal(err)
 	}
 	executionPath := execution.path
-	cmd := exec.Command(os.Args[0], "-test.run=^TestLinuxCgroupPIDLimitHelper$", "-test.count=1")
-	cmd.Env = append(os.Environ(), linuxCgroupPIDHelperEnv+"=1")
+	cmd := exec.Command(python, "-c", linuxPIDLimitProbe)
 	if err := execution.attach(cmd); err != nil {
 		_ = execution.cleanup()
 		t.Fatal(err)
@@ -47,7 +75,10 @@ func TestLinuxCgroupPIDLimitNative(t *testing.T) {
 	output, runErr := cmd.CombinedOutput()
 	cleanupErr := execution.cleanup()
 	if runErr != nil {
-		t.Fatalf("PID-limit helper failed: %v\n%s", runErr, output)
+		t.Fatalf("PID-limit probe failed: %v\n%s", runErr, output)
+	}
+	if !strings.Contains(string(output), "pid_limit_enforced") || strings.Contains(string(output), "pid_limit_bypassed") {
+		t.Fatalf("PID-limit probe did not observe enforcement:\n%s", output)
 	}
 	if cleanupErr != nil {
 		t.Fatalf("cleanup execution cgroup: %v", cleanupErr)
@@ -78,26 +109,5 @@ func TestLinuxCgroupUnlimitedExecutionNative(t *testing.T) {
 	}
 	if strings.TrimSpace(string(limit)) != "max" {
 		t.Fatalf("pids.max = %q, want max", strings.TrimSpace(string(limit)))
-	}
-}
-
-func TestLinuxCgroupPIDLimitHelper(t *testing.T) {
-	if os.Getenv(linuxCgroupPIDHelperEnv) != "1" {
-		return
-	}
-	first := exec.Command("sleep", "5")
-	if err := first.Start(); err != nil {
-		t.Fatalf("start first child within PID quota: %v", err)
-	}
-	defer func() {
-		_ = first.Process.Kill()
-		_ = first.Wait()
-	}()
-
-	second := exec.Command("sleep", "5")
-	if err := second.Start(); err == nil {
-		_ = second.Process.Kill()
-		_ = second.Wait()
-		t.Fatal("second child started beyond pids.max=2")
 	}
 }
