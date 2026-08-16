@@ -22,30 +22,28 @@ const browserNativeFixtureTimeout = 10 * time.Second
 
 // TestRequestPerimeterNativeFixtureMatrix proves that Chromium-originated traffic
 // cannot escape the browser request perimeter through common subresource and
-// worker mechanisms. CI sets OMNILLM_BROWSER_TEST_REQUIRE=true so a missing or
-// unusable Chromium binary is a hard failure rather than a skipped assurance test.
+// worker mechanisms. The fixture is intentionally opt-in because generic backend
+// runners may happen to contain a Chromium binary without providing deterministic
+// browser lifecycle semantics. Dedicated assurance sets OMNILLM_BROWSER_TEST_REQUIRE=true.
 // OMNILLM_BROWSER_TEST_NO_SANDBOX is test-only: GitHub's Ubuntu hosted runner
 // blocks Chromium's user-namespace sandbox before startup, so that runner disables
 // the Chromium process sandbox only to exercise the independent egress boundary.
 func TestRequestPerimeterNativeFixtureMatrix(t *testing.T) {
 	browserPath := strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_TEST_EXEC_PATH"))
 	requireBrowser := strings.EqualFold(strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_TEST_REQUIRE")), "true")
+	if !requireBrowser {
+		t.Skip("native browser egress fixture runs only in the dedicated assurance job")
+	}
 	testNoSandbox := strings.EqualFold(strings.TrimSpace(os.Getenv("OMNILLM_BROWSER_TEST_NO_SANDBOX")), "true")
 	if browserPath == "" {
 		var found bool
 		browserPath, found = launcher.LookPath()
 		if !found {
-			if requireBrowser {
-				t.Fatal("OMNILLM_BROWSER_TEST_REQUIRE=true but no Chromium-compatible browser was found")
-			}
-			t.Skip("no local Chromium-compatible browser found")
+			t.Fatal("OMNILLM_BROWSER_TEST_REQUIRE=true but no Chromium-compatible browser was found")
 		}
 	}
 	if _, err := os.Stat(browserPath); err != nil {
-		if requireBrowser {
-			t.Fatalf("required Chromium-compatible browser is unavailable at %q: %v", browserPath, err)
-		}
-		t.Skipf("no local Chromium-compatible browser found at %q: %v", browserPath, err)
+		t.Fatalf("required Chromium-compatible browser is unavailable at %q: %v", browserPath, err)
 	}
 
 	blockedHosts := []string{
@@ -166,11 +164,6 @@ if ('serviceWorker' in navigator) {
 	if _, err := manager.NavigatePage(context.Background(), NavigateOptions{
 		URL: pageServer.URL, Extract: "text",
 	}); err != nil {
-		message := strings.ToLower(err.Error())
-		startupFailure := strings.Contains(message, "launch chromium") || strings.Contains(message, "connect chromium") || strings.Contains(message, "create stealth page")
-		if startupFailure && !requireBrowser {
-			t.Skipf("local browser could not start: %v", err)
-		}
 		t.Fatalf("navigate native browser fixture: %v", err)
 	}
 	navigated = true
