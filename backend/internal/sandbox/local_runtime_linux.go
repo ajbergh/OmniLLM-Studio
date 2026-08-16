@@ -249,7 +249,7 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		if r.pidCgroup == nil {
 			return nil, fmt.Errorf("linux sandbox process-count quota became unavailable")
 		}
-		executionCgroup, err = r.pidCgroup.create(executionID, session.spec.Resources.MaxProcesses)
+		executionCgroup, err = r.pidCgroup.createExecution(session.spec.Resources.MaxProcesses)
 		if err != nil {
 			return nil, fmt.Errorf("create Linux sandbox PID cgroup: %w", err)
 		}
@@ -300,7 +300,9 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 
 	cmd := exec.CommandContext(execCtx, r.bwrapPath, bwrapArgs...)
 	if executionCgroup != nil {
-		cmd.SysProcAttr = executionCgroup.sysProcAttr()
+		if err := executionCgroup.attach(cmd); err != nil {
+			return nil, fmt.Errorf("attach Linux sandbox PID cgroup: %w", err)
+		}
 	}
 	cmd.Env = SanitizedEnvironment(nil)
 	if len(request.Stdin) > 0 {
