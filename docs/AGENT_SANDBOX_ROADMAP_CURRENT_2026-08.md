@@ -2,7 +2,7 @@
 
 > **Status:** ACTIVE
 >
-> **Checkpoint:** Windows Phase 12 is complete. Explicit execution cancellation is complete in PR #155. macOS Phase 13 is complete through Phase 13D, merged in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`. Native browser egress assurance merged in PR #168, Broker resource admission fails closed after PR #170, Windows process-count quotas merged in PR #171, Windows aggregate memory enforcement merged in PR #172 as `bc9eb6f204db9dcb2c6fb3670262ef8d0c58cb3f`, Linux cgroup-v2 PID enforcement merged in PR #173 as `981691a0058efd7a061cc892d3f43f1edf4d22e3`, strict aggregate Linux memory enforcement merged in PR #174 as `c8adc3cd4e8492b57ff4b05450e84a46f409edbc`, and PR #175 now has focused native Ubuntu evidence for descriptor-relative Linux workspace content reads under symlink/rename pressure pending final documentation-inclusive validation.
+> **Checkpoint:** Windows Phase 12 is complete. Explicit execution cancellation is complete in PR #155. macOS Phase 13 is complete through Phase 13D, merged in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`. Native browser egress assurance merged in PR #168, Broker resource admission fails closed after PR #170, Windows process-count quotas merged in PR #171, Windows aggregate memory enforcement merged in PR #172 as `bc9eb6f204db9dcb2c6fb3670262ef8d0c58cb3f`, Linux cgroup-v2 PID enforcement merged in PR #173 as `981691a0058efd7a061cc892d3f43f1edf4d22e3`, strict aggregate Linux memory enforcement merged in PR #174 as `c8adc3cd4e8492b57ff4b05450e84a46f409edbc`, Linux descriptor-relative workspace content reads merged in PR #175 as `925e258539bc16ad4bf96c1d1c6d78f49dd64ada`, and PR #176 now has focused native Ubuntu evidence for descriptor-relative Linux workspace mutation transactions under parent rename/symlink replacement pressure pending final documentation-inclusive validation.
 
 ## Program invariants
 
@@ -25,8 +25,8 @@
 | 2 | First-party runtime abstraction + Linux execution plane | **IN PROGRESS** | Bubblewrap/rootfs runtime and `sandboxd` exist. #173 merged delegated cgroup-v2 PID enforcement and #174 merged aggregate memory enforcement. Packaging remains open. |
 | 3 | Immediate stdio MCP/plugin subprocess hardening | **COMPLETE** | Ambient environment inheritance removed in #99. |
 | 4 | Broker-backed `code_execute` + `python_analysis` | **COMPLETE** | Owner-bound execution; restricted Python has no unrestricted host fallback. |
-| 5 | Workspace registry + grants + durable journal | **IN PROGRESS** | Owner-scoped grants and state-bound journaled mutations exist. #175 proves Linux read/search content is reopened relative to pinned directory FDs and cannot be redirected by tested parent/final symlink swaps. Mutation paths, root-identity replacement, search enumeration races, and non-Linux descriptor-relative operations remain open. |
-| 6 | Governed workspace tools | **IN PROGRESS** | Read/write/patch/delete/revert tools exist; Linux read/search content gains the #175 descriptor-relative boundary, while write/delete/revert completion still tracks Phase 5 assurance. |
+| 5 | Workspace registry + grants + durable journal | **IN PROGRESS** | Owner-scoped grants and state-bound journaled mutations exist. #175 binds Linux read/search content opens to pinned directory FDs; #176 binds Linux write/delete/revert state capture, mutation, verification, and rollback to one pinned parent-directory identity. Registered-root identity replacement, search enumeration races, and non-Linux descriptor-relative operations remain open. |
+| 6 | Governed workspace tools | **IN PROGRESS** | Read/write/patch/delete/revert tools exist. Linux read/search content is protected by #175; Linux write/delete/revert transactions gain the #176 descriptor-relative mutation boundary. Completion still tracks root-identity and remaining cross-platform Phase 5 assurance. |
 | 7 | `terminal_exec` + cancellation + resource controls | **IN PROGRESS** | Caller-known execution IDs and explicit cancellation merged in #155. Broker quota requests fail closed when unsupported (#170). Windows PID/memory quotas merged in #171/#172; Linux PID/memory quotas merged in #173/#174. macOS resource quotas, CPU semantics, and physical-disk quotas remain open. |
 | 8 | Network broker + destination approvals | **IN PROGRESS** | Owner-bound grants exist; first-party Linux/Windows/Darwin runtimes remain no-network because destination-enforced egress is not implemented. |
 | 9 | Credential broker | **IN PROGRESS** | Opaque owner/TTL handles and raw-secret environment rejection exist; service-specific consumers remain. |
@@ -37,7 +37,7 @@
 | 14 | Durable sandbox-backed agent tasks | NOT STARTED | Persist sandbox/task association and recovery/scheduling semantics. |
 | 15 | Server/Kubernetes sandbox workers | NOT STARTED | Separate worker identity/pods, quotas, hardened security context, cgroup delegation, and network policy. |
 | 16 | Multi-agent isolated worktrees/workspaces | NOT STARTED | Independent writable workspaces with reviewed promotion/reconciliation. |
-| 17 | Adversarial assurance suite | **IN PROGRESS** | Continuous negative/platform-native testing across all phases; browser-native egress assurance is covered by #168, Windows quota controls have native negative evidence, Linux cgroup-v2 quota assurance covers PID/memory, and #175 adds a focused Ubuntu workspace path-race lane. |
+| 17 | Adversarial assurance suite | **IN PROGRESS** | Continuous negative/platform-native testing across all phases; browser-native egress assurance is covered by #168, Windows quota controls have native negative evidence, Linux cgroup-v2 quota assurance covers PID/memory, and the Ubuntu workspace path-race lane now exercises both #175 content reads and #176 mutation transactions ten times per run. |
 
 ## Windows Phase 12 lineage
 
@@ -67,9 +67,11 @@ Windows staged-copy flows reject reparse points/junctions, hard links, special f
 
 Darwin 13B staging rejects symbolic links, hard links, special files, traversal, source-identity changes, and size changes while copying. The Seatbelt runtime grants file contents only below explicit read roots; exact ancestor directories receive only the directory traversal access macOS requires to resolve those roots. Live host workspace roots are not granted to a staged read-only session.
 
-On Linux workspace tools, #175 replaces pathname re-open for file content with descriptor-relative traversal from an already-open workspace root. Each parent is opened with `O_NOFOLLOW|O_DIRECTORY`, the final file is opened with `O_NOFOLLOW`, and the opened inode is validated with `fstat`; search candidates discovered by `WalkDir` are reopened through the same read boundary before bytes are trusted. The focused Ubuntu lane runs final/parent symlink denial plus repeated rename-to-outside-symlink pressure ten times. Transient lookup failures are acceptable under the race, but outside bytes are a hard failure.
+On Linux workspace tools, #175 replaces pathname re-open for file content with descriptor-relative traversal from an already-open workspace root. Each parent is opened with `O_NOFOLLOW|O_DIRECTORY`, the final file is opened with `O_NOFOLLOW`, and the opened inode is validated with `fstat`; search candidates discovered by `WalkDir` are reopened through the same read boundary before bytes are trusted.
 
-This does **not** close all workspace TOCTOU work. `WriteFile`, delete, journal rollback/revert, and related state capture still contain pathname re-resolution windows; replacement of the registered root path itself is not bound to a persisted filesystem identity; `WalkDir` candidate enumeration remains pathname-based; and non-Linux governed workspace reads still use their prior pathname behavior. These remain Phase 5/17 work.
+#176 extends descriptor-relative identity through governed mutations. `WriteFile`, delete, and revert now acquire a platform mutation target; on Linux this target pins the workspace root and final parent directory, captures the final file with `openat(O_NOFOLLOW)` plus `fstat`, creates replacement files inside the pinned parent, commits them with `renameat`, deletes with `unlinkat`, and uses the same pinned parent for after-state capture and journal-failure rollback. Native negative coverage renames the granted parent, replaces its old pathname with a symlink to an outside directory, and proves write/delete/restore continue to affect only the pinned detached directory while the outside file remains unchanged. The combined Ubuntu workspace lane runs read and mutation path-race tests ten times.
+
+This does **not** close all workspace TOCTOU work. The registry stores the canonical root pathname but not a durable filesystem identity, so replacement of the registered workspace root before a new operation can transfer the pathname to a different directory. `WalkDir` candidate enumeration remains pathname-based, and non-Linux governed workspace operations still use their prior pathname behavior. These remain Phase 5/17 work.
 
 ### Resource controls
 
@@ -104,15 +106,16 @@ Darwin uses process-group cancellation for ordinary descendants and deliberately
 
 ## Execution order
 
-1. Complete and merge Linux workspace read/search path-race hardening (#175) only after its documentation-inclusive exact head passes the focused Ubuntu workspace assurance and repository-wide gates.
-2. Harden mutation/root-identity workspace TOCTOU cases in a separate reviewable slice; preserve exact reviewed-state and rollback semantics while removing pathname re-resolution windows.
-3. Resolve the aggregate/cumulative CPU-time semantic contract before enabling `cpu_limit` on any platform; design physical-disk accounting separately.
-4. Continue Phase 8/9 work: destination-enforced egress and service-specific credential consumers.
-5. Continue Phase 17 adversarial assurance with every platform/runtime change.
-6. After the intended deployment’s required quota/egress hardening is complete, advance durable sandbox-backed tasks and isolated workers.
+1. Complete and merge Linux workspace mutation path-race hardening (#176) only after its documentation-inclusive exact head passes the combined Ubuntu workspace assurance and repository-wide gates.
+2. Persist and verify exact granted-root filesystem identity so replacement of a registered root pathname cannot silently transfer workspace authority; keep this a separate reviewable schema/runtime slice.
+3. Address remaining search-enumeration and non-Linux workspace path-race assurance without weakening existing state/digest and rollback semantics.
+4. Resolve the aggregate/cumulative CPU-time semantic contract before enabling `cpu_limit` on any platform; design physical-disk accounting separately.
+5. Continue Phase 8/9 work: destination-enforced egress and service-specific credential consumers.
+6. Continue Phase 17 adversarial assurance with every platform/runtime change.
+7. After the intended deployment’s required quota/egress hardening is complete, advance durable sandbox-backed tasks and isolated workers.
 
 ## Validation discipline
 
 A sandbox phase is complete only when platform-native negative tests exist, capability claims match enforcement, unsupported controls are explicit, and the exact merge head passes applicable repository checks.
 
-Windows Phase 12 met that bar through PRs #127, #128, #139, and #149. macOS Phase 13 met the same standard incrementally for arbitrary local execution (13B), persistent extensions (13C), and final adversarial assurance (13D). PR #171 merged as `11dfab99e73fe414e45cc44b0f33d4c80789295a`; PR #172 merged as `bc9eb6f204db9dcb2c6fb3670262ef8d0c58cb3f`; PR #173 passed its exact-head native/repository matrix and merged as `981691a0058efd7a061cc892d3f43f1edf4d22e3`; PR #174 passed its exact-head native/repository matrix and merged as `c8adc3cd4e8492b57ff4b05450e84a46f409edbc`. PR #175 has focused native Ubuntu workspace path-race evidence green on implementation head `00c6020b59c196516b486326f099a92675d2cbf4`; its documentation-inclusive final head must pass the same applicable gates before merge.
+Windows Phase 12 met that bar through PRs #127, #128, #139, and #149. macOS Phase 13 met the same standard incrementally for arbitrary local execution (13B), persistent extensions (13C), and final adversarial assurance (13D). PR #171 merged as `11dfab99e73fe414e45cc44b0f33d4c80789295a`; PR #172 merged as `bc9eb6f204db9dcb2c6fb3670262ef8d0c58cb3f`; PR #173 passed its exact-head native/repository matrix and merged as `981691a0058efd7a061cc892d3f43f1edf4d22e3`; PR #174 passed its exact-head native/repository matrix and merged as `c8adc3cd4e8492b57ff4b05450e84a46f409edbc`; PR #175 passed its exact-head native/repository matrix and merged as `925e258539bc16ad4bf96c1d1c6d78f49dd64ada`. PR #176 has focused native Ubuntu workspace-operation evidence green on implementation head `74ee4d02282fd7c642c8fc002eae79556db6dfdf`; its documentation-inclusive final head must pass the same applicable gates before merge.
