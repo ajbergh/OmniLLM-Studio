@@ -51,7 +51,16 @@ jobs:
         working-directory: backend
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
+          root="$OMNILLM_TEST_CGROUP_ROOT"
+          worker="$root/worker"
+          mkdir "$worker"
+          # Model the production worker topology: sandboxd itself lives inside
+          # the delegated subtree, while per-execution cgroups are siblings.
+          # This makes the delegated root the writable common ancestor required
+          # by cgroup-v2 migration/CLONE_INTO_CGROUP containment rules.
+          echo $$ > "$worker/cgroup.procs"
+          grep -qx "$$" "$worker/cgroup.procs"
           go test ./internal/sandbox -run '^TestLinuxCgroup' -count=1 -v 2>&1 | tee ../sandbox-linux-quota.log
       - name: Upload Linux quota diagnostics
         if: always()
@@ -70,5 +79,5 @@ jobs:
             if [ -f "$root/cgroup.kill" ]; then
               echo 1 | sudo tee "$root/cgroup.kill" >/dev/null || true
             fi
-            sudo rmdir "$root" || true
+            sudo find "$root" -depth -type d -exec rmdir {} \; 2>/dev/null || true
           fi
