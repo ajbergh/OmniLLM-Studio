@@ -23,7 +23,8 @@ if child == 0:
         chunks = []
         for _ in range(256):
             block = bytearray(1024 * 1024)
-            block[0] = 1
+            for offset in range(0, len(block), 4096):
+                block[offset] = 1
             block[-1] = 1
             chunks.append(block)
         print("memory_limit_bypassed", flush=True)
