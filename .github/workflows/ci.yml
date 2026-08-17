@@ -277,6 +277,12 @@ jobs:
       - run: npm ci
       - working-directory: frontend
         run: npm ci
+      - name: Install parity media dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          command -v ffmpeg
+          command -v ffprobe
       - run: npx playwright install --with-deps chromium
       - name: Generate deterministic fixture and media
         working-directory: backend
