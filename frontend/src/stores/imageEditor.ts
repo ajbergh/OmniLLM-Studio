@@ -266,16 +266,12 @@ export const useImageEditorStore = create<ImageEditorState>((set, get) => ({
   },
 
   generate: async (conversationId, req) => {
-    const { activeSessionId, contentReferenceIds, styleReferenceIds } = get();
+    const { activeSessionId } = get();
     if (!activeSessionId) return;
 
     set({ generating: true, error: null });
     try {
-      const result = await imageSessionApi.generate(conversationId, activeSessionId, {
-        ...req,
-        reference_image_ids: req.reference_image_ids ?? contentReferenceIds,
-        style_reference_ids: req.style_reference_ids ?? styleReferenceIds,
-      });
+      const result = await imageSessionApi.generate(conversationId, activeSessionId, req);
       set((s) => ({
         nodes: [...s.nodes, result.node],
         activeNodeId: result.node.id,
@@ -295,16 +291,12 @@ export const useImageEditorStore = create<ImageEditorState>((set, get) => ({
   },
 
   edit: async (conversationId, req) => {
-    const { activeSessionId, contentReferenceIds, styleReferenceIds } = get();
+    const { activeSessionId } = get();
     if (!activeSessionId) return;
 
     set({ generating: true, error: null });
     try {
-      const result = await imageSessionApi.edit(conversationId, activeSessionId, {
-        ...req,
-        reference_image_ids: req.reference_image_ids ?? contentReferenceIds,
-        style_reference_ids: req.style_reference_ids ?? styleReferenceIds,
-      });
+      const result = await imageSessionApi.edit(conversationId, activeSessionId, req);
       set((s) => ({
         nodes: [...s.nodes, result.node],
         activeNodeId: result.node.id,
