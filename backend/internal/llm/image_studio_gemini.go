@@ -18,11 +18,17 @@ func buildGeminiStudioImageBody(req ImageStudioRequest, geometry imageStudioGeom
 	generationConfig := map[string]interface{}{
 		"responseModalities": []string{"IMAGE", "TEXT"},
 	}
-	if geometry.Mode == ImageGeometryExplicit && geometry.AspectRatio != "" {
-		generationConfig["responseFormat"] = map[string]interface{}{
-			"image": map[string]interface{}{
-				"aspectRatio": geometry.AspectRatio,
-			},
+	if geometry.Mode == ImageGeometryExplicit {
+		aspectRatio := sizeToGeminiAspectRatio(geometry.Size)
+		if aspectRatio == "" {
+			aspectRatio = geometry.AspectRatio
+		}
+		if aspectRatio != "" {
+			generationConfig["responseFormat"] = map[string]interface{}{
+				"image": map[string]interface{}{
+					"aspectRatio": aspectRatio,
+				},
+			}
 		}
 	}
 
