@@ -28,7 +28,7 @@ test('video edit studio core editing flow', async ({ page }) => {
   await expect(page.getByText(/Scale:/).first()).toBeVisible();
   await expect(page.getByText(/Layer order/).first()).toBeVisible();
 
-  // Caption editor and export/render panel live behind right-rail tabs.
+  // Caption editor and export/render panel share the left workspace tabs.
   await page.getByRole('tab', { name: 'Captions' }).click();
   await expect(page.getByRole('heading', { name: 'Captions' })).toBeVisible();
 
