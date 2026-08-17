@@ -128,19 +128,14 @@ func (s *Service) ImageStudioGenerate(ctx context.Context, req ImageStudioReques
 	switch strings.ToLower(providerType) {
 	case "openrouter":
 		return s.openRouterStudioImageGenerate(ctx, baseURL, apiKey, model, req, geometry)
+	case "gemini", "imagen":
+		return s.geminiStudioImageGenerate(ctx, baseURL, apiKey, model, req, geometry)
 	case "together":
 		return s.togetherStudioImageGenerate(ctx, baseURL, apiKey, model, req, geometry)
 	default:
 		legacy := req.ImageRequest
 		legacy.Model = model
 		legacy.Size = geometry.LegacySize
-		if strings.EqualFold(providerType, "gemini") || strings.EqualFold(providerType, "imagen") {
-			// The generic Gemini transport still serializes explicit geometry using
-			// the retired generationConfig.imageConfig field. Suppress only that
-			// field here so Image Studio reuses the established authenticated
-			// transport until explicit geometry moves to responseFormat.image.
-			legacy.Size = ""
-		}
 		return s.ImageGenerate(ctx, legacy)
 	}
 }
