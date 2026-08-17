@@ -92,9 +92,32 @@ func TestParityMetricsAndArtifacts(t *testing.T) {
 	if err := WriteParityReport(output, report, []ParityFramePair{pair}); err != nil {
 		t.Fatalf("write parity artifacts: %v", err)
 	}
-	for _, name := range []string{"parity-report.json", "parity-report.md", filepath.Join("frames", "exact-side-by-side.png"), filepath.Join("frames", "exact-heatmap.png")} {
+	for _, name := range []string{"parity-report.json", "parity-report.md", filepath.Join("frames", "000012-exact-side-by-side.png"), filepath.Join("frames", "000012-exact-heatmap.png")} {
 		if info, err := os.Stat(filepath.Join(output, name)); err != nil || info.Size() == 0 {
 			t.Fatalf("missing parity artifact %s: %v", name, err)
+		}
+	}
+}
+
+func TestParityDiagnosticArtifactNamesIncludeFrameIndex(t *testing.T) {
+	frame := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	pairs := []ParityFramePair{
+		{Name: "repeated-sample", FrameIndex: 21, TimeMS: 700, Preview: frame, Rendered: frame},
+		{Name: "repeated-sample", FrameIndex: 141, TimeMS: 4700, Preview: frame, Rendered: frame},
+	}
+	report := BuildParityReport("test-fixture", "timeline-hash", "manifest-hash", pairs, nil, DefaultParityThresholds())
+	output := t.TempDir()
+	if err := WriteParityReport(output, report, pairs); err != nil {
+		t.Fatalf("write parity artifacts: %v", err)
+	}
+	for _, name := range []string{
+		"000021-repeated-sample-side-by-side.png",
+		"000021-repeated-sample-heatmap.png",
+		"000141-repeated-sample-side-by-side.png",
+		"000141-repeated-sample-heatmap.png",
+	} {
+		if info, err := os.Stat(filepath.Join(output, "frames", name)); err != nil || info.Size() == 0 {
+			t.Fatalf("missing unique parity artifact %s: %v", name, err)
 		}
 	}
 }

@@ -270,10 +270,11 @@ func WriteParityReport(outputDir string, report ParityReport, pairs []ParityFram
 		return err
 	}
 	for _, pair := range pairs {
-		name := sanitizePathSegment(pair.Name)
-		if name == "" {
-			name = fmt.Sprintf("frame-%d", pair.FrameIndex)
+		label := sanitizePathSegment(pair.Name)
+		if label == "" {
+			label = "frame"
 		}
+		name := fmt.Sprintf("%06d-%s", pair.FrameIndex, label)
 		if len(name) > 96 {
 			name = name[:80] + "-" + contentSHA256([]byte(name))[:12]
 		}

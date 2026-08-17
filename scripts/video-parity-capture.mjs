@@ -34,7 +34,6 @@ try {
     ...(args['storage-state'] ? { storageState: path.resolve(args['storage-state']) } : {}),
   });
   const page = await context.newPage();
-  const cdp = await context.newCDPSession(page);
   await page.goto(args.url, { waitUntil: 'networkidle' });
   const authToken = await page.evaluate(() => window.localStorage.getItem('omnillm_auth_token'));
   const requestHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {};
@@ -50,7 +49,23 @@ try {
   }
   const program = page.getByTestId('video-preview-program');
   await program.waitFor({ state: 'visible' });
-  await page.addStyleTag({ content: '[data-testid="video-preview-program"]{border:0!important}' });
+  const canvasWidth = fixture.timeline.canvas.width;
+  const canvasHeight = fixture.timeline.canvas.height;
+  await program.evaluate((element, canvas) => {
+    const fit = element.parentElement;
+    if (!fit) throw new Error('preview program has no fit container');
+    fit.style.setProperty('width', `${canvas.width}px`, 'important');
+    fit.style.setProperty('height', `${canvas.height}px`, 'important');
+    fit.style.setProperty('min-height', `${canvas.height}px`, 'important');
+    fit.style.setProperty('flex', '0 0 auto', 'important');
+    fit.style.setProperty('padding', '0', 'important');
+    element.style.setProperty('border', '0', 'important');
+    element.style.setProperty('flex', '0 0 auto', 'important');
+  }, { width: canvasWidth, height: canvasHeight });
+  await page.waitForFunction(({ width, height }) => {
+    const rect = document.querySelector('[data-testid="video-preview-program"]')?.getBoundingClientRect();
+    return Boolean(rect && Math.abs(rect.width - width) < 0.01 && Math.abs(rect.height - height) < 0.01);
+  }, { width: canvasWidth, height: canvasHeight });
 
   for (const sample of samples) {
     let safeName = `${String(sample.frame_index).padStart(6, '0')}-${sample.name.replace(/[^a-zA-Z0-9._-]+/g, '-')}`;
@@ -68,18 +83,16 @@ try {
     await page.waitForFunction((frameIndex) => document.querySelector('[data-testid="video-preview-program"]')?.dataset.parityFrameIndex === String(frameIndex), sample.frame_index);
     const box = await program.boundingBox();
     if (!box) throw new Error(`preview program has no bounding box for frame ${sample.frame_index}`);
-    const canvasWidth = fixture.timeline.canvas.width;
-    const canvasHeight = fixture.timeline.canvas.height;
-    const capture = await cdp.send('Page.captureScreenshot', {
-      format: 'png',
-      captureBeyondViewport: false,
-      clip: { x: box.x, y: box.y, width: box.width, height: box.height, scale: canvasWidth / box.width },
-    });
-    const previewPNG = Buffer.from(capture.data, 'base64');
-    await fs.writeFile(path.join(previewDir, `${safeName}.png`), previewPNG);
-    if (Math.abs((box.height * canvasWidth) / box.width - canvasHeight) > 1) {
-      throw new Error(`preview aspect ratio ${box.width}x${box.height} does not match fixture ${canvasWidth}x${canvasHeight}`);
+    if (Math.abs(box.width - canvasWidth) >= 0.01 || Math.abs(box.height - canvasHeight) >= 0.01) {
+      throw new Error(`preview program ${box.width}x${box.height} does not match fixture ${canvasWidth}x${canvasHeight}`);
     }
+    const previewPNG = await program.screenshot({ type: 'png', animations: 'disabled', caret: 'hide' });
+    const pngWidth = previewPNG.readUInt32BE(16);
+    const pngHeight = previewPNG.readUInt32BE(20);
+    if (pngWidth !== canvasWidth || pngHeight !== canvasHeight) {
+      throw new Error(`preview PNG ${pngWidth}x${pngHeight} does not match fixture ${canvasWidth}x${canvasHeight}`);
+    }
+    await fs.writeFile(path.join(previewDir, `${safeName}.png`), previewPNG);
 
     const endpoint = new URL(`/v1/video/render-snapshots/${encodeURIComponent(snapshotID)}/frames/${sample.frame_index}`, args.url).toString();
     const response = await context.request.get(endpoint, { headers: requestHeaders });
