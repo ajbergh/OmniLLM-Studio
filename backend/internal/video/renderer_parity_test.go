@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,6 +83,9 @@ func TestParityMetricsAndArtifacts(t *testing.T) {
 	if audio.OffsetSamples != 2 || audio.Correlation < .999999 {
 		t.Fatalf("audio alignment mismatch: %+v", audio)
 	}
+	if audio.SampleCountsMatch || audio.Pass {
+		t.Fatalf("different sample counts must fail parity: %+v", audio)
+	}
 
 	report := BuildParityReport("test-fixture", "timeline-hash", "manifest-hash", []ParityFramePair{pair}, &audio, thresholds)
 	output := t.TempDir()
@@ -92,6 +96,32 @@ func TestParityMetricsAndArtifacts(t *testing.T) {
 		if info, err := os.Stat(filepath.Join(output, name)); err != nil || info.Size() == 0 {
 			t.Fatalf("missing parity artifact %s: %v", name, err)
 		}
+	}
+}
+
+func TestParseAndApplyParityEBUR128Summary(t *testing.T) {
+	measurement, err := parseParityEBUR128Summary(`scanner progress I: -99.0 LUFS
+Summary:
+
+  Integrated loudness:
+    I:         -21.1 LUFS
+    Threshold: -31.6 LUFS
+
+  True peak:
+    Peak:       -3.1 dBFS
+`)
+	if err != nil || measurement.IntegratedLUFS != -21.1 || measurement.TruePeakDBFS != -3.1 {
+		t.Fatalf("measurement=%+v err=%v", measurement, err)
+	}
+	thresholds := DefaultParityThresholds()
+	metric := ParityAudioMetric{Pass: true}
+	ApplyParityEBUR128(&metric, measurement, ParityEBUR128Measurement{IntegratedLUFS: -21.2, TruePeakDBFS: -3.2}, thresholds)
+	if !metric.EBUR128Measured || !metric.Pass || math.Abs(metric.IntegratedLUFSDifference-.1) > 1e-9 || math.Abs(metric.TruePeakDBFSDifference-.1) > 1e-9 {
+		t.Fatalf("threshold-boundary EBU metric=%+v", metric)
+	}
+	ApplyParityEBUR128(&metric, measurement, ParityEBUR128Measurement{IntegratedLUFS: -21.3, TruePeakDBFS: -3.1}, thresholds)
+	if metric.Pass {
+		t.Fatalf("out-of-tolerance loudness should fail: %+v", metric)
 	}
 }
 
@@ -200,6 +230,33 @@ func TestRendererDiagnosticAudioPadsToExactTimelineSampleCount(t *testing.T) {
 	const expectedBytes = 1500 * 48 * 2 * 2
 	if len(result.Data) != expectedBytes {
 		t.Fatalf("diagnostic PCM bytes = %d, want %d", len(result.Data), expectedBytes)
+	}
+}
+
+func TestProbeParityDeliveryCountsDecodedFramesAndPTS(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("FFmpeg is unavailable")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("FFprobe is unavailable")
+	}
+	mediaPath := filepath.Join(t.TempDir(), "delivery.mp4")
+	cmd := exec.Command(ffmpeg,
+		"-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "color=c=black:s=160x90:r=10:d=1.2",
+		"-c:v", "libx264", "-pix_fmt", "yuv420p", mediaPath,
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create delivery fixture: %v: %s", err, output)
+	}
+	metric, err := ProbeParityDelivery(context.Background(), ffprobe, mediaPath, 1200, 10)
+	if err != nil {
+		t.Fatalf("probe delivery: %v", err)
+	}
+	if !metric.Pass || metric.ActualFrameCount != 12 || metric.ActualStartTimeSeconds != 0 || metric.ActualDurationSeconds != 1.2 {
+		t.Fatalf("unexpected delivery metric: %+v", metric)
 	}
 }
 

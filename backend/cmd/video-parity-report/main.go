@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -28,6 +29,10 @@ func main() {
 	previewAudio := flag.String("preview-audio", "", "optional signed 16-bit little-endian PCM (interleaved channels are compared as a sample sequence)")
 	renderedAudio := flag.String("rendered-audio", "", "optional signed 16-bit little-endian PCM (interleaved channels are compared as a sample sequence)")
 	maxAudioOffset := flag.Int("max-audio-offset", 2400, "maximum offset searched when aligning PCM samples")
+	ffmpeg := flag.String("ffmpeg", "", "optional FFmpeg binary path used for EBU R128 audio measurement")
+	deliveryMedia := flag.String("delivery-media", "", "optional final delivery video to validate with FFprobe")
+	expectedDurationMS := flag.Int64("expected-duration-ms", 0, "expected delivery timeline duration in milliseconds")
+	ffprobe := flag.String("ffprobe", "", "optional FFprobe binary path")
 	allowFail := flag.Bool("allow-fail", false, "write baseline artifacts without returning exit code 2 when parity thresholds fail")
 	flag.Parse()
 
@@ -60,9 +65,26 @@ func main() {
 			exitf("read rendered audio: %v", err)
 		}
 		metric := video.CompareParityAudio(preview, rendered, *maxAudioOffset, thresholds)
+		previewLoudness, err := video.MeasureParityEBUR128(context.Background(), *ffmpeg, *previewAudio)
+		if err != nil {
+			exitf("measure preview audio loudness: %v", err)
+		}
+		renderedLoudness, err := video.MeasureParityEBUR128(context.Background(), *ffmpeg, *renderedAudio)
+		if err != nil {
+			exitf("measure rendered audio loudness: %v", err)
+		}
+		video.ApplyParityEBUR128(&metric, previewLoudness, renderedLoudness, thresholds)
 		audioMetric = &metric
 	}
 	report := video.BuildParityReport(*fixture, *timelineHash, *manifestHash, pairs, audioMetric, thresholds)
+	if strings.TrimSpace(*deliveryMedia) != "" {
+		metric, err := video.ProbeParityDelivery(context.Background(), *ffprobe, *deliveryMedia, *expectedDurationMS, float64(*fps))
+		if err != nil {
+			exitf("probe delivery: %v", err)
+		}
+		report.Delivery = &metric
+		report.Pass = report.Pass && metric.Pass
+	}
 	if err := video.WriteParityReport(*outputDir, report, pairs); err != nil {
 		exitf("write report: %v", err)
 	}

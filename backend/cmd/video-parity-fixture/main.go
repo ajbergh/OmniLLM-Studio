@@ -67,7 +67,10 @@ func generateFixtureMedia(outputDir string) error {
 		{"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=24", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=24", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", filepath.Join(mediaDir, "asset-landscape.mp4")},
 		{"-f", "lavfi", "-i", "smptebars=size=360x640:rate=30:duration=24", "-f", "lavfi", "-i", "sine=frequency=660:sample_rate=48000:duration=24", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", filepath.Join(mediaDir, "asset-portrait.mp4")},
 		{"-f", "lavfi", "-i", "testsrc2=size=512x512:rate=1:duration=1", "-frames:v", "1", filepath.Join(mediaDir, "asset-square.png")},
-		{"-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000:duration=24", "-ac", "1", "-c:a", "pcm_s16le", filepath.Join(mediaDir, "asset-audio.wav")},
+		// A swept tone plus deterministic one-second impulses makes sample-offset
+		// correlation unambiguous; a constant sine aliases at many offsets and can
+		// make a correct mix appear shifted by a whole number of periods.
+		{"-f", "lavfi", "-i", "aevalsrc=0.09*sin(2*PI*(220*t+30*t*t))+if(lt(mod(t\\,1)\\,0.004)\\,0.35\\,0):s=48000:d=24", "-ac", "1", "-c:a", "pcm_s16le", filepath.Join(mediaDir, "asset-audio.wav")},
 	}
 	for _, args := range commands {
 		full := append([]string{"-hide_banner", "-loglevel", "error", "-y"}, args...)

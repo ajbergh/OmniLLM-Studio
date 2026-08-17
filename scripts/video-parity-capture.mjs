@@ -86,6 +86,34 @@ try {
     if (!response.ok()) throw new Error(`diagnostic frame ${sample.frame_index}: HTTP ${response.status()} ${await response.text()}`);
     await fs.writeFile(path.join(renderedDir, `${safeName}.png`), await response.body());
   }
+  const previewAudioRequestID = `preview-audio-${snapshotID}`;
+  const previewAudioResult = await page.evaluate((requestId) => new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener('omnillm:video-parity-audio-ready', ready);
+      reject(new Error('preview audio render timed out'));
+    }, 60_000);
+    const ready = (event) => {
+      if (event.detail?.requestId !== requestId) return;
+      window.clearTimeout(timeout);
+      window.removeEventListener('omnillm:video-parity-audio-ready', ready);
+      if (event.detail.error) reject(new Error(event.detail.error));
+      else resolve(event.detail);
+    };
+    window.addEventListener('omnillm:video-parity-audio-ready', ready);
+    window.dispatchEvent(new CustomEvent('omnillm:video-parity-audio-request', { detail: { requestId } }));
+  }), previewAudioRequestID);
+  const previewAudioBase64 = await page.evaluate(async (url) => {
+    const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
+    const chunks = [];
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+    }
+    return btoa(chunks.join(''));
+  }, previewAudioResult.url);
+  const previewAudio = path.join(output, 'preview-audio-s16le-48k-stereo.pcm');
+  await fs.writeFile(previewAudio, Buffer.from(previewAudioBase64, 'base64'));
+  await fs.writeFile(path.join(output, 'preview-audio-metadata.json'), `${JSON.stringify(previewAudioResult.metadata, null, 2)}\n`);
+
   const audioEndpoint = new URL(`/v1/video/render-snapshots/${encodeURIComponent(snapshotID)}/audio.pcm`, args.url).toString();
   const audioResponse = await context.request.get(audioEndpoint, { headers: requestHeaders });
   let renderedAudio = null;
@@ -95,9 +123,53 @@ try {
   } else {
     throw new Error(`diagnostic audio: HTTP ${audioResponse.status()} ${await audioResponse.text()}`);
   }
-  console.log(JSON.stringify({ output, previewDir, renderedDir, renderedAudio, snapshotID, editorURL, seedResult, samples: samples.length }));
+  let deliveryResult = null;
+  if (args['capture-delivery'] === 'true') {
+    if (!seedResult) throw new Error('--capture-delivery true requires --media-dir project seeding');
+    deliveryResult = await captureDelivery({ context, baseURL: args.url, headers: requestHeaders, seedResult, fixture, output });
+    await fs.writeFile(path.join(output, 'delivery-result.json'), `${JSON.stringify(deliveryResult, null, 2)}\n`);
+  }
+  console.log(JSON.stringify({ output, previewDir, renderedDir, previewAudio, renderedAudio, deliveryResult, snapshotID, editorURL, seedResult, samples: samples.length }));
 } finally {
   await browser.close();
+}
+
+async function captureDelivery({ context, baseURL, headers, seedResult, fixture, output }) {
+  const apiURL = (pathname) => new URL(`/v1${pathname}`, baseURL).toString();
+  const response = await context.request.post(apiURL(`/video/projects/${encodeURIComponent(seedResult.project_id)}/render`), {
+    headers,
+    data: {
+      format: 'mp4', codec: 'h264', resolution: 'project', fps: fixture.timeline.canvas.fps,
+      quality: 'high', include_audio: true, burn_in_captions: true, strict_parity: false,
+      timeline_id: seedResult.timeline_id,
+      timeline_revision: seedResult.timeline_revision,
+      timeline_sha256: seedResult.timeline_sha256,
+    },
+  });
+  if (!response.ok()) throw new Error(`delivery submission: HTTP ${response.status()} ${await response.text()}`);
+  let job = await response.json();
+  const deadline = Date.now() + 10 * 60_000;
+  while (job.status === 'queued' || job.status === 'running') {
+    if (Date.now() >= deadline) throw new Error(`delivery job ${job.id} timed out after 10 minutes`);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const poll = await context.request.get(apiURL(`/video/render-jobs/${encodeURIComponent(job.id)}`), { headers });
+    if (!poll.ok()) throw new Error(`delivery poll: HTTP ${poll.status()} ${await poll.text()}`);
+    job = await poll.json();
+  }
+  if (job.status !== 'completed' || !job.output_asset_id) {
+    throw new Error(`delivery job ${job.id} ended ${job.status}: ${job.error || 'no output asset'}`);
+  }
+  const download = await context.request.get(apiURL(`/video/assets/${encodeURIComponent(job.output_asset_id)}/download`), { headers });
+  if (!download.ok()) throw new Error(`delivery download: HTTP ${download.status()} ${await download.text()}`);
+  const deliveryPath = path.join(output, 'delivery.mp4');
+  await fs.writeFile(deliveryPath, await download.body());
+  return {
+    path: deliveryPath,
+    job_id: job.id,
+    snapshot_id: job.snapshot_id,
+    output_asset_id: job.output_asset_id,
+    timeline_sha256: job.timeline_sha256,
+  };
 }
 
 async function seedFixtureProject({ context, fixture, mediaDir, baseURL, headers }) {

@@ -319,7 +319,8 @@ jobs:
             --url http://127.0.0.1:14173 \
             --fixture output/video-parity-ci/fixture/parity-torture-v1.json \
             --media-dir output/video-parity-ci/fixture/media \
-            --output output/video-parity-ci/capture
+            --output output/video-parity-ci/capture \
+            --capture-delivery true
           timeline_hash="$(node -p "require('./output/video-parity-ci/capture/seed-result.json').timeline_sha256")"
           (
             cd backend
@@ -330,6 +331,10 @@ jobs:
               --fps 30 \
               --fixture parity-torture-v1 \
               --timeline-sha256 "$timeline_hash" \
+              --preview-audio ../output/video-parity-ci/capture/preview-audio-s16le-48k-stereo.pcm \
+              --rendered-audio ../output/video-parity-ci/capture/rendered-audio-s16le-48k-stereo.pcm \
+              --delivery-media ../output/video-parity-ci/capture/delivery.mp4 \
+              --expected-duration-ms 20000 \
               --allow-fail
           )
       - name: Record parity toolchain

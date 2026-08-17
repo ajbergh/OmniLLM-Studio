@@ -20,6 +20,9 @@ const (
 	DefaultParitySSIM             = 0.995
 	DefaultParityAudioCorrelation = 0.999
 	DefaultParityAudioOffset      = 1
+	DefaultParityAudioPeakDelta   = 0.001
+	DefaultParityAudioLUFSDelta   = 0.1
+	DefaultParityAudioTPDelta     = 0.1
 )
 
 type ParityBounds struct {
@@ -64,47 +67,62 @@ type ParityFrameMetric struct {
 }
 
 type ParityAudioMetric struct {
-	PreviewSamples     int     `json:"preview_samples"`
-	RenderedSamples    int     `json:"rendered_samples"`
-	OffsetSamples      int     `json:"offset_samples"`
-	Correlation        float64 `json:"correlation"`
-	PreviewPeak        float64 `json:"preview_peak"`
-	RenderedPeak       float64 `json:"rendered_peak"`
-	PeakDifference     float64 `json:"peak_difference"`
-	PreviewLUFSApprox  float64 `json:"preview_lufs_approx"`
-	RenderedLUFSApprox float64 `json:"rendered_lufs_approx"`
-	LUFSDifference     float64 `json:"lufs_difference"`
-	Pass               bool    `json:"pass"`
+	PreviewSamples           int     `json:"preview_samples"`
+	RenderedSamples          int     `json:"rendered_samples"`
+	SampleCountsMatch        bool    `json:"sample_counts_match"`
+	OffsetSamples            int     `json:"offset_samples"`
+	Correlation              float64 `json:"correlation"`
+	PreviewPeak              float64 `json:"preview_peak"`
+	RenderedPeak             float64 `json:"rendered_peak"`
+	PeakDifference           float64 `json:"peak_difference"`
+	PreviewLUFSApprox        float64 `json:"preview_lufs_approx"`
+	RenderedLUFSApprox       float64 `json:"rendered_lufs_approx"`
+	LUFSDifference           float64 `json:"lufs_difference"`
+	EBUR128Measured          bool    `json:"ebu_r128_measured"`
+	PreviewIntegratedLUFS    float64 `json:"preview_integrated_lufs,omitempty"`
+	RenderedIntegratedLUFS   float64 `json:"rendered_integrated_lufs,omitempty"`
+	IntegratedLUFSDifference float64 `json:"integrated_lufs_difference,omitempty"`
+	PreviewTruePeakDBFS      float64 `json:"preview_true_peak_dbfs,omitempty"`
+	RenderedTruePeakDBFS     float64 `json:"rendered_true_peak_dbfs,omitempty"`
+	TruePeakDBFSDifference   float64 `json:"true_peak_dbfs_difference,omitempty"`
+	Pass                     bool    `json:"pass"`
 }
 
 type ParityThresholds struct {
-	ChannelTolerance        uint8   `json:"channel_tolerance"`
-	MinimumPixelPassRate    float64 `json:"minimum_pixel_pass_rate"`
-	MinimumSSIM             float64 `json:"minimum_ssim"`
-	MinimumAudioCorrelation float64 `json:"minimum_audio_correlation"`
-	MaximumAudioOffset      int     `json:"maximum_audio_offset_samples"`
+	ChannelTolerance               uint8   `json:"channel_tolerance"`
+	MinimumPixelPassRate           float64 `json:"minimum_pixel_pass_rate"`
+	MinimumSSIM                    float64 `json:"minimum_ssim"`
+	MinimumAudioCorrelation        float64 `json:"minimum_audio_correlation"`
+	MaximumAudioOffset             int     `json:"maximum_audio_offset_samples"`
+	MaximumAudioPeakDifference     float64 `json:"maximum_audio_peak_difference"`
+	MaximumAudioLUFSDifference     float64 `json:"maximum_audio_lufs_difference"`
+	MaximumAudioTruePeakDifference float64 `json:"maximum_audio_true_peak_dbfs_difference"`
 }
 
 func DefaultParityThresholds() ParityThresholds {
 	return ParityThresholds{
-		ChannelTolerance:        DefaultParityChannelTolerance,
-		MinimumPixelPassRate:    DefaultParityPixelPassRate,
-		MinimumSSIM:             DefaultParitySSIM,
-		MinimumAudioCorrelation: DefaultParityAudioCorrelation,
-		MaximumAudioOffset:      DefaultParityAudioOffset,
+		ChannelTolerance:               DefaultParityChannelTolerance,
+		MinimumPixelPassRate:           DefaultParityPixelPassRate,
+		MinimumSSIM:                    DefaultParitySSIM,
+		MinimumAudioCorrelation:        DefaultParityAudioCorrelation,
+		MaximumAudioOffset:             DefaultParityAudioOffset,
+		MaximumAudioPeakDifference:     DefaultParityAudioPeakDelta,
+		MaximumAudioLUFSDifference:     DefaultParityAudioLUFSDelta,
+		MaximumAudioTruePeakDifference: DefaultParityAudioTPDelta,
 	}
 }
 
 type ParityReport struct {
-	SchemaVersion  int                 `json:"schema_version"`
-	GeneratedAt    time.Time           `json:"generated_at"`
-	Fixture        string              `json:"fixture"`
-	TimelineSHA256 string              `json:"timeline_sha256,omitempty"`
-	ManifestSHA256 string              `json:"asset_manifest_sha256,omitempty"`
-	Thresholds     ParityThresholds    `json:"thresholds"`
-	Frames         []ParityFrameMetric `json:"frames"`
-	Audio          *ParityAudioMetric  `json:"audio,omitempty"`
-	Pass           bool                `json:"pass"`
+	SchemaVersion  int                   `json:"schema_version"`
+	GeneratedAt    time.Time             `json:"generated_at"`
+	Fixture        string                `json:"fixture"`
+	TimelineSHA256 string                `json:"timeline_sha256,omitempty"`
+	ManifestSHA256 string                `json:"asset_manifest_sha256,omitempty"`
+	Thresholds     ParityThresholds      `json:"thresholds"`
+	Frames         []ParityFrameMetric   `json:"frames"`
+	Audio          *ParityAudioMetric    `json:"audio,omitempty"`
+	Delivery       *ParityDeliveryMetric `json:"delivery,omitempty"`
+	Pass           bool                  `json:"pass"`
 }
 
 type ParityFramePair struct {
@@ -197,11 +215,26 @@ func CompareParityFrame(pair ParityFramePair, thresholds ParityThresholds) Parit
 }
 
 func CompareParityAudio(preview, rendered []float64, maxOffset int, thresholds ParityThresholds) ParityAudioMetric {
-	metric := ParityAudioMetric{PreviewSamples: len(preview), RenderedSamples: len(rendered)}
+	metric := ParityAudioMetric{PreviewSamples: len(preview), RenderedSamples: len(rendered), SampleCountsMatch: len(preview) == len(rendered)}
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
 	bestCorrelation := -2.0
+	bestOffset := 0
 	for offset := -maxOffset; offset <= maxOffset; offset++ {
+		correlation := sampledCorrelationAtOffset(preview, rendered, offset, 4096)
+		if betterAudioOffset(correlation, offset, bestCorrelation, bestOffset) {
+			bestCorrelation, bestOffset = correlation, offset
+		}
+	}
+	// Compute the reported correlation over every overlapping sample and refine
+	// around the coarse candidate. This keeps 20-second PCM comparisons bounded
+	// instead of doing billions of operations for every possible offset.
+	bestCorrelation = -2
+	refineRadius := 8
+	for offset := maxInt(-maxOffset, bestOffset-refineRadius); offset <= minInt(maxOffset, bestOffset+refineRadius); offset++ {
 		correlation := correlationAtOffset(preview, rendered, offset)
-		if correlation > bestCorrelation {
+		if betterAudioOffset(correlation, offset, bestCorrelation, metric.OffsetSamples) {
 			bestCorrelation, metric.OffsetSamples = correlation, offset
 		}
 	}
@@ -210,12 +243,13 @@ func CompareParityAudio(preview, rendered []float64, maxOffset int, thresholds P
 	metric.PeakDifference = math.Abs(metric.PreviewPeak - metric.RenderedPeak)
 	metric.PreviewLUFSApprox, metric.RenderedLUFSApprox = approximateLUFS(preview), approximateLUFS(rendered)
 	metric.LUFSDifference = math.Abs(metric.PreviewLUFSApprox - metric.RenderedLUFSApprox)
-	metric.Pass = math.Abs(float64(metric.OffsetSamples)) <= float64(thresholds.MaximumAudioOffset) && metric.Correlation >= thresholds.MinimumAudioCorrelation
+	metric.Pass = metric.SampleCountsMatch && math.Abs(float64(metric.OffsetSamples)) <= float64(thresholds.MaximumAudioOffset) &&
+		metric.Correlation >= thresholds.MinimumAudioCorrelation && metric.PeakDifference <= thresholds.MaximumAudioPeakDifference+1e-12
 	return metric
 }
 
 func BuildParityReport(fixture, timelineHash, manifestHash string, pairs []ParityFramePair, audio *ParityAudioMetric, thresholds ParityThresholds) ParityReport {
-	report := ParityReport{SchemaVersion: 1, GeneratedAt: time.Now().UTC(), Fixture: fixture, TimelineSHA256: timelineHash, ManifestSHA256: manifestHash, Thresholds: thresholds, Audio: audio, Pass: true}
+	report := ParityReport{SchemaVersion: 2, GeneratedAt: time.Now().UTC(), Fixture: fixture, TimelineSHA256: timelineHash, ManifestSHA256: manifestHash, Thresholds: thresholds, Audio: audio, Pass: true}
 	for _, pair := range pairs {
 		metric := CompareParityFrame(pair, thresholds)
 		report.Frames = append(report.Frames, metric)
@@ -278,6 +312,16 @@ func parityReportMarkdown(report ParityReport) string {
 	}
 	if report.Audio != nil {
 		fmt.Fprintf(&b, "\nAudio: offset `%d` samples, correlation `%.6f`, peak difference `%.6f`, approximate LUFS difference `%.3f`.\n", report.Audio.OffsetSamples, report.Audio.Correlation, report.Audio.PeakDifference, report.Audio.LUFSDifference)
+		if report.Audio.EBUR128Measured {
+			fmt.Fprintf(&b, "\nEBU R128: integrated loudness `%.1f/%.1f LUFS` (difference `%.1f LU`), true peak `%.1f/%.1f dBFS` (difference `%.1f dB`).\n",
+				report.Audio.PreviewIntegratedLUFS, report.Audio.RenderedIntegratedLUFS, report.Audio.IntegratedLUFSDifference,
+				report.Audio.PreviewTruePeakDBFS, report.Audio.RenderedTruePeakDBFS, report.Audio.TruePeakDBFSDifference)
+		}
+	}
+	if report.Delivery != nil {
+		fmt.Fprintf(&b, "\nDelivery: `%d/%d` decoded frames, start `%.6fs`, duration `%.6fs`, FPS `%.6f`, CFR `%t`, result `%t`.\n",
+			report.Delivery.ActualFrameCount, report.Delivery.ExpectedFrameCount, report.Delivery.ActualStartTimeSeconds,
+			report.Delivery.ActualDurationSeconds, report.Delivery.ActualFPS, report.Delivery.ConstantFrameRate, report.Delivery.Pass)
 	}
 	return b.String()
 }
@@ -359,6 +403,49 @@ func correlationAtOffset(a, b []float64, offset int) float64 {
 		return 0
 	}
 	return cov / math.Sqrt(va*vb)
+}
+
+func sampledCorrelationAtOffset(a, b []float64, offset, maxPoints int) float64 {
+	aStart, bStart := 0, 0
+	if offset > 0 {
+		bStart = offset
+	} else {
+		aStart = -offset
+	}
+	n := minInt(len(a)-aStart, len(b)-bStart)
+	if n < 2 {
+		return -1
+	}
+	step := maxInt(1, n/maxInt(maxPoints, 2))
+	count := 0
+	var ma, mb float64
+	for i := 0; i < n; i += step {
+		ma += a[aStart+i]
+		mb += b[bStart+i]
+		count++
+	}
+	ma /= float64(count)
+	mb /= float64(count)
+	var va, vb, cov float64
+	for i := 0; i < n; i += step {
+		da, db := a[aStart+i]-ma, b[bStart+i]-mb
+		va += da * da
+		vb += db * db
+		cov += da * db
+	}
+	if va == 0 || vb == 0 {
+		if va == vb {
+			return 1
+		}
+		return 0
+	}
+	return cov / math.Sqrt(va*vb)
+}
+
+func betterAudioOffset(correlation float64, offset int, bestCorrelation float64, bestOffset int) bool {
+	const tieTolerance = 1e-12
+	return correlation > bestCorrelation+tieTolerance ||
+		(math.Abs(correlation-bestCorrelation) <= tieTolerance && math.Abs(float64(offset)) < math.Abs(float64(bestOffset)))
 }
 
 func signalPeak(samples []float64) float64 {

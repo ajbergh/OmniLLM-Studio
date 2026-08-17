@@ -8,6 +8,10 @@ param(
   [string]$ManifestSHA256 = "",
   [string]$PreviewAudio = "",
   [string]$RenderedAudio = "",
+  [string]$FFmpeg = "",
+  [string]$DeliveryMedia = "",
+  [long]$ExpectedDurationMS = 0,
+  [string]$FFprobe = "",
   [switch]$AllowFail
 )
 
@@ -29,6 +33,15 @@ $arguments = @(
 )
 if ($PreviewAudio -and $RenderedAudio) {
   $arguments += @("--preview-audio", (Resolve-Path $PreviewAudio).Path, "--rendered-audio", (Resolve-Path $RenderedAudio).Path)
+  if ($FFmpeg) {
+    $arguments += @("--ffmpeg", $FFmpeg)
+  }
+}
+if ($DeliveryMedia) {
+  $arguments += @("--delivery-media", (Resolve-Path $DeliveryMedia).Path, "--expected-duration-ms", $ExpectedDurationMS)
+  if ($FFprobe) {
+    $arguments += @("--ffprobe", $FFprobe)
+  }
 }
 if ($AllowFail) {
   $arguments += "--allow-fail"

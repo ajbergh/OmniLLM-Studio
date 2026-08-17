@@ -16,7 +16,7 @@
 import { Check, Crop, Crosshair, Grid3x3, Maximize2, Minimize2, Pause, Play, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
-import { videoApi } from '../../api';
+import { getAuthToken, videoApi } from '../../api';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import { ContextMenu } from '../common/ContextMenu';
 import type { ContextMenuEntry } from '../common/ContextMenu';
@@ -25,6 +25,7 @@ import { sampleKeyframes } from './effects/keyframeUtils';
 import { ShapePreview } from './ShapePreview';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineTrack } from '../../types/video';
 import { applyDecoderBudget, buildTimelineIntervalIndex, queryActiveClips } from './pro/timelineIndex';
+import { renderPreviewPCM } from './parity/previewAudioRenderer';
 
 function formatTime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -159,6 +160,7 @@ export function VideoPreviewCanvas() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [editingTextClipId, setEditingTextClipId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const parityAudioURLRef = useRef<string | null>(null);
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -196,6 +198,45 @@ export function VideoPreviewCanvas() {
     window.addEventListener('omnillm:video-parity-seek', onParitySeek);
     return () => window.removeEventListener('omnillm:video-parity-seek', onParitySeek);
   }, [selectClip, setPlayhead, setPlaying, timeline?.canvas.fps]);
+
+  // Independent browser/Web Audio reference for the Phase 0 parity harness.
+  // The response is a blob URL so multi-megabyte PCM does not travel through
+  // CustomEvent serialization; the capture runner reads and releases it.
+  useEffect(() => {
+    const onParityAudioRequest = async (event: Event) => {
+      const detail = (event as CustomEvent<{ requestId?: string }>).detail || {};
+      const requestId = detail.requestId || 'preview-audio';
+      try {
+        if (!timeline) throw new Error('timeline is not loaded');
+        const token = getAuthToken();
+        const result = await renderPreviewPCM(timeline, assets, async (asset) => {
+          const headers: Record<string, string> = {};
+          if (token) headers.Authorization = `Bearer ${token}`;
+          const response = await fetch(videoApi.downloadUrl(asset.id), { headers });
+          if (!response.ok) throw new Error(`asset ${asset.id}: HTTP ${response.status}`);
+          return response.arrayBuffer();
+        });
+        if (parityAudioURLRef.current) URL.revokeObjectURL(parityAudioURLRef.current);
+        const url = URL.createObjectURL(new Blob([result.pcm], { type: 'audio/pcm' }));
+        parityAudioURLRef.current = url;
+        const { pcm: _pcm, ...metadata } = result;
+        void _pcm;
+        window.dispatchEvent(new CustomEvent('omnillm:video-parity-audio-ready', {
+          detail: { requestId, url, metadata },
+        }));
+      } catch (reason) {
+        window.dispatchEvent(new CustomEvent('omnillm:video-parity-audio-ready', {
+          detail: { requestId, error: reason instanceof Error ? reason.message : String(reason) },
+        }));
+      }
+    };
+    window.addEventListener('omnillm:video-parity-audio-request', onParityAudioRequest);
+    return () => {
+      window.removeEventListener('omnillm:video-parity-audio-request', onParityAudioRequest);
+      if (parityAudioURLRef.current) URL.revokeObjectURL(parityAudioURLRef.current);
+      parityAudioURLRef.current = null;
+    };
+  }, [assets, timeline]);
 
   const toggleFullscreen = () => {
     if (document.fullscreenElement) {

@@ -106,8 +106,32 @@ func ExpandTimelineForFidelity(doc TimelineDocument, fps, maxSegments int) Timel
 			clip := normalizeRenderClip(original)
 			cursorTrack.Clips = append(cursorTrack.Clips, cursorOverlayClips(clip, fps, maxSegments)...)
 			clip.Cursor = nil
+			if clip.AudioOnly || out.Tracks[ti].Type == TrackTypeAudio || out.Tracks[ti].Type == TrackTypeMusic {
+				// The FFmpeg audio graph already evaluates trim/rate, volume
+				// keyframes, fades, mute/solo, and processing continuously. Splitting
+				// an audio clip into visual sampling segments resets its fades and
+				// duplicates the same source hundreds of times.
+				expanded = append(expanded, clip)
+				continue
+			}
 			if clipNeedsSampling(clip) || clipNeedsCameraSampling(out.Scenes, clip) {
-				expanded = append(expanded, sampleRenderClip(clip, out.Scenes, out.Canvas, fps, maxSegments)...)
+				segments := sampleRenderClip(clip, out.Scenes, out.Canvas, fps, maxSegments)
+				if clip.AssetID != "" && !clip.Muted {
+					// Sampled visual segments must not each contribute a soundtrack.
+					// Keep one untouched audio-only copy so the mix remains continuous;
+					// image assets naturally drop out during media resolution.
+					for index := range segments {
+						segments[index].Muted = true
+					}
+					audioCopy := cloneTimelineClip(clip)
+					audioCopy.ID = uuid.NewString()
+					audioCopy.AudioOnly = true
+					audioCopy.Cursor = nil
+					expanded = append(expanded, segments...)
+					expanded = append(expanded, audioCopy)
+				} else {
+					expanded = append(expanded, segments...)
+				}
 			} else {
 				expanded = append(expanded, applySceneCamera(clip, out.Scenes, out.Canvas, clip.StartMS+clip.DurationMS/2))
 			}
@@ -287,6 +311,9 @@ func renderTextLayout(value, align string, letterSpacing float64) string {
 func clipNeedsSampling(clip TimelineClip) bool {
 	for _, keyframe := range clip.Keyframes {
 		property := strings.ToLower(strings.TrimSpace(keyframe.Property))
+		if property == "volume" {
+			continue
+		}
 		if knownKeyframeProperties[property] || strings.HasPrefix(property, "effect.") || strings.HasPrefix(property, "effect:") {
 			return true
 		}
