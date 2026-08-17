@@ -24,7 +24,7 @@ func TestBuildGeminiStudioImageBodyUsesResponseFormatGeometry(t *testing.T) {
 				Data:     "bWFzaw==",
 				MimeType: "image/png",
 			},
-			ReferenceImages: []ReferenceImage{{Data: "cmVm", MimeType: "image/webp"}},
+			ReferenceImages:      []ReferenceImage{{Data: "cmVm", MimeType: "image/webp"}},
 			StyleReferenceImages: []ReferenceImage{{Data: "c3R5bGU=", MimeType: "image/png"}},
 		},
 	}
@@ -115,7 +115,22 @@ func TestGeminiStudioImageGenerateFansOutVariants(t *testing.T) {
 			t.Errorf("candidateCount unexpectedly serialized: %#v", generationConfig)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}}]}`)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"candidates": []interface{}{
+				map[string]interface{}{
+					"content": map[string]interface{}{
+						"parts": []interface{}{
+							map[string]interface{}{
+								"inlineData": map[string]interface{}{
+									"mimeType": "image/png",
+									"data":     "aW1hZ2U=",
+								},
+							},
+						},
+					},
+				},
+			},
+		})
 	}))
 	defer server.Close()
 
@@ -148,8 +163,7 @@ func TestGeminiStudioImageGenerateSurfacesProviderErrors(t *testing.T) {
 	} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(status)
-				fmt.Fprint(w, `{"error":{"message":"provider rejected request"}}`)
+				http.Error(w, "provider rejected request", status)
 			}))
 			defer server.Close()
 
