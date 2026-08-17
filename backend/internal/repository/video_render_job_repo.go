@@ -83,6 +83,8 @@ func (r *VideoRenderJobRepo) CreateWithSnapshot(j *models.VideoRenderJob, snapsh
 	j.Renderer = snapshot.Renderer
 	j.RendererVersion = snapshot.RendererVersion
 	j.RenderContractVersion = snapshot.RenderContractVersion
+	j.RenderSourceMode = "immutable_snapshot"
+	j.ExactSourceAvailable = true
 
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -337,6 +339,11 @@ func scanVideoRenderJob(row rowScanner) (*models.VideoRenderJob, error) {
 	}
 	if snapshotID.Valid {
 		j.SnapshotID = &snapshotID.String
+		j.RenderSourceMode = "immutable_snapshot"
+		j.ExactSourceAvailable = true
+	} else {
+		j.RenderSourceMode = "legacy_mutable_source"
+		j.ExactSourceAvailable = false
 	}
 	if timelineRevision.Valid {
 		j.TimelineRevision = timelineRevision.Int64

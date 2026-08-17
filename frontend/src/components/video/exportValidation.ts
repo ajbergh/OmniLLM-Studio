@@ -23,6 +23,7 @@ export function validateExport(
 ): ExportValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const fidelityIssues: string[] = [];
   if (!timeline) {
     return { errors: ['No timeline loaded'], warnings };
   }
@@ -84,36 +85,68 @@ export function validateExport(
     warnings.push(`${lockedWithClips.length} locked layer${lockedWithClips.length === 1 ? ' renders' : 's render'} normally (lock only blocks editing)`);
   }
 
-  // Preview-only/partial features actually used by this timeline.
-  const previewOnlyEffects = new Set(EFFECT_DEFINITIONS.filter((definition) => !definition.exportSupported).map((definition) => definition.type as string));
-  const usedPreviewEffects = new Set<string>();
-  const previewOnlyTransitions = new Set(TRANSITION_DEFINITIONS.filter((definition) => !definition.exportSupported).map((definition) => definition.type as string));
-  const usedPreviewTransitions = new Set<string>();
-  const previewOnlyAnnotations = new Set(ANNOTATION_DEFINITIONS.filter((definition) => definition.exportSupport === 'preview').map((definition) => definition.kind as string));
-  const usedPreviewAnnotations = new Set<string>();
-  let cursorClips = 0;
-  for (const { clip } of allClips) {
-    for (const effect of clip.effects || []) {
-      if (effect.enabled && previewOnlyEffects.has(effect.type)) usedPreviewEffects.add(effect.type);
-    }
-    for (const transition of clip.transitions || []) {
-      if (previewOnlyTransitions.has(transition.type)) usedPreviewTransitions.add(transition.type);
-    }
-    if (clip.shape && previewOnlyAnnotations.has(clip.shape.kind)) usedPreviewAnnotations.add(clip.shape.kind);
-    if (clip.cursor?.events?.length) cursorClips += 1;
-  }
-  if (usedPreviewEffects.size > 0) {
-    warnings.push(`Preview-only effects will not export: ${Array.from(usedPreviewEffects).join(', ')}`);
-  }
-  if (usedPreviewTransitions.size > 0) {
-    warnings.push(`Preview-only transitions will not export: ${Array.from(usedPreviewTransitions).join(', ')}`);
-  }
-  if (usedPreviewAnnotations.size > 0) {
-    warnings.push(`Preview-only annotations will not export: ${Array.from(usedPreviewAnnotations).join(', ')}`);
-  }
-  if (cursorClips > 0) {
-    warnings.push('Cursor effects are preview-only and will not draw in the export');
-  }
+  // Report only authored limitations, with stable document paths. Runtime
+  // capability data is authoritative; registries describe feature-specific
+  // preview/export behavior within the broader capability.
+  const featureSupport = new Map((capabilities?.features || []).map((feature) => [feature.feature, feature]));
+  timeline.tracks.forEach((track, trackIndex) => {
+    track.clips.forEach((clip, clipIndex) => {
+      const path = `tracks[${trackIndex}].clips[${clipIndex}]`;
+      (clip.effects || []).forEach((effect, effectIndex) => {
+        if (!effect.enabled) return;
+        const definition = EFFECT_DEFINITIONS.find((item) => item.type === effect.type);
+        const support = featureSupport.get(definition?.exportFeature || 'effects');
+        if (!definition?.exportSupported || support?.supported === false) {
+          fidelityIssues.push(`${path}.effects[${effectIndex}]: ${effect.type} is not supported by the active exporter`);
+        } else if (support?.partial) {
+          fidelityIssues.push(`${path}.effects[${effectIndex}]: ${effect.type} is partial${support.notes ? ` — ${support.notes}` : ''}`);
+        } else if (definition.previewFilter(effect.params || {}) === null) {
+          fidelityIssues.push(`${path}.effects[${effectIndex}]: ${effect.type} is not represented exactly in the editor preview`);
+        }
+      });
+      (clip.transitions || []).forEach((transition, transitionIndex) => {
+        const definition = TRANSITION_DEFINITIONS.find((item) => item.type === transition.type);
+        const support = featureSupport.get('transitions');
+        if (!definition?.exportSupported || support?.supported === false) {
+          fidelityIssues.push(`${path}.transitions[${transitionIndex}]: ${transition.type} is not supported by the active exporter`);
+        } else if (support?.partial || definition.exportNote) {
+          fidelityIssues.push(`${path}.transitions[${transitionIndex}]: ${transition.type} is approximate${definition.exportNote ? ` — ${definition.exportNote}` : support?.notes ? ` — ${support.notes}` : ''}`);
+        }
+      });
+      if (clip.shape) {
+        const definition = ANNOTATION_DEFINITIONS.find((item) => item.kind === clip.shape?.kind);
+        const support = featureSupport.get('annotations');
+        if (!definition || definition.exportSupport !== 'full' || support?.partial || support?.supported === false) {
+          fidelityIssues.push(`${path}.shape: ${clip.shape.kind} is ${definition?.exportSupport === 'preview' ? 'not exported' : 'approximate'}${definition?.exportNote ? ` — ${definition.exportNote}` : ''}`);
+        }
+      }
+      if (clip.cursor?.events?.length) {
+        const support = featureSupport.get('cursor_effects');
+        fidelityIssues.push(`${path}.cursor: cursor overlays are ${support?.supported === false ? 'unsupported' : 'sampled/partial'}${support?.notes ? ` — ${support.notes}` : ''}`);
+      }
+      if (clip.text) {
+        const support = featureSupport.get('text_overlays');
+        if (support?.partial || support?.supported === false) {
+          fidelityIssues.push(`${path}.text: text layout is ${support.supported === false ? 'unsupported' : 'partial'}${support.notes ? ` — ${support.notes}` : ''}`);
+        }
+      }
+      if ((clip.keyframes || []).length > 0) {
+        const support = featureSupport.get('keyframes');
+        fidelityIssues.push(`${path}.keyframes: animation uses ${support?.supported === false ? 'unsupported' : 'sampled/partial'} export evaluation${support?.notes ? ` — ${support.notes}` : ''}`);
+      }
+      for (const key of ['rotation_x', 'rotation_y', 'anchor_x', 'anchor_y', 'perspective', 'crop'] as const) {
+        const value = clip.transform?.[key];
+        const authored = typeof value === 'object' ? Object.values(value || {}).some((entry) => Number(entry) !== 0) : Number(value || 0) !== 0;
+        if (authored) fidelityIssues.push(`${path}.transform.${key}: CSS and FFmpeg transform semantics differ`);
+      }
+    });
+  });
+  (timeline.scenes || []).forEach((scene, sceneIndex) => {
+    if (scene.camera) fidelityIssues.push(`scenes[${sceneIndex}].camera: camera projection is sampled/partial`);
+    (scene.effects || []).forEach((effect, effectIndex) => {
+      if (effect.enabled) fidelityIssues.push(`scenes[${sceneIndex}].effects[${effectIndex}]: ${effect.type} does not share one preview/export implementation`);
+    });
+  });
 
   // Captions falling outside the timeline are silently cut off.
   const strayCaptions = timeline.tracks
@@ -136,11 +169,14 @@ export function validateExport(
     }
   }
 
-  // Track solo is ephemeral preview state, so whether the user relies on it
-  // is unknowable here — the capability footer covers that warning instead.
   if (!capabilities) {
-    warnings.push('Renderer capability data is unavailable — export-fidelity warnings may be incomplete');
+    const message = 'Renderer capability data is unavailable — parity cannot be verified';
+    if (settings.strict_parity) errors.push(message);
+    else warnings.push(message);
   }
+
+  if (settings.strict_parity) errors.push(...fidelityIssues);
+  else warnings.push(...fidelityIssues);
 
   return { errors, warnings };
 }

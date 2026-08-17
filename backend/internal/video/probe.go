@@ -12,16 +12,16 @@ import (
 
 // MediaProbe holds metadata extracted from a media file via ffprobe.
 type MediaProbe struct {
-	DurationMS int64
-	Width      int
-	Height     int
-	FPS        float64
-	VideoCodec string
-	AudioCodec string
+	DurationMS int64   `json:"duration_ms,omitempty"`
+	Width      int     `json:"width,omitempty"`
+	Height     int     `json:"height,omitempty"`
+	FPS        float64 `json:"fps,omitempty"`
+	VideoCodec string  `json:"video_codec,omitempty"`
+	AudioCodec string  `json:"audio_codec,omitempty"`
 	// Channels and SampleRate describe the first audio stream, if any.
-	AudioChannels   int
-	AudioSampleRate int
-	HasAudio        bool
+	AudioChannels   int  `json:"audio_channels,omitempty"`
+	AudioSampleRate int  `json:"audio_sample_rate,omitempty"`
+	HasAudio        bool `json:"has_audio"`
 }
 
 // ProbeMedia extracts duration/dimensions/FPS using ffprobe when available.
@@ -33,6 +33,28 @@ func ProbeMedia(ctx context.Context, path string) (*MediaProbe, error) {
 	if err != nil {
 		return nil, nil
 	}
+	return probeMediaWithBinary(ctx, binary, path)
+}
+
+// ProbeMediaRequired is the fail-closed render-submission variant. Unlike the
+// upload enrichment path, immutable render preflight cannot accept an
+// unavailable decoder or a file that yields no usable streams.
+func ProbeMediaRequired(ctx context.Context, path string) (*MediaProbe, error) {
+	binary, err := exec.LookPath("ffprobe")
+	if err != nil {
+		return nil, fmt.Errorf("ffprobe is required for render preflight: %w", err)
+	}
+	probe, err := probeMediaWithBinary(ctx, binary, path)
+	if err != nil {
+		return nil, err
+	}
+	if probe == nil {
+		return nil, fmt.Errorf("media contains no decodable audio or video streams")
+	}
+	return probe, nil
+}
+
+func probeMediaWithBinary(ctx context.Context, binary, path string) (*MediaProbe, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(probeCtx, binary,

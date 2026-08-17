@@ -170,6 +170,41 @@ func TestRecoverInterruptedRenderJobUsesPersistedSnapshot(t *testing.T) {
 	waitForRenderTerminal(t, service, job.ID)
 }
 
+func TestStrictParitySubmissionCreatesNoJobForKnownMismatch(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "strict.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	service := newImportTestService(database, filepath.Join(t.TempDir(), "attachments"))
+	project, err := service.CreateProject("", "Strict Parity", "openrouter", "test-model", 1280, 720, 30, "16:9")
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	doc := NewEmptyTimeline(project.Width, project.Height, project.FPS)
+	doc.Tracks[0].Clips = []TimelineClip{{ID: "text-clip", DurationMS: 1000, Text: &TimelineText{Text: "Not exact yet"}}}
+	timeline, _, err := service.SaveTimeline(context.Background(), "", project.ID, doc)
+	if err != nil {
+		t.Fatalf("save timeline: %v", err)
+	}
+	_, err = service.StartRender(context.Background(), "", project.ID, ExportSettings{
+		Format: "mp4", Resolution: "project", Quality: "standard", StrictParity: true,
+	}, RenderBinding{TimelineID: timeline.ID, TimelineRevision: timeline.Revision, TimelineSHA256: timeline.ContentSHA256})
+	if err == nil || !strings.Contains(err.Error(), "strict parity blocked") || !strings.Contains(err.Error(), "tracks[0].clips[0].text") {
+		t.Fatalf("strict parity submission error = %v", err)
+	}
+	jobs, err := service.renderJobs.ListByProject(project.ID)
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("strict parity rejection created jobs: %+v", jobs)
+	}
+}
+
 func TestRenderAssetManifestDetectsMissingAndChangedSources(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "assets.db"))
 	if err != nil {
@@ -187,8 +222,29 @@ func TestRenderAssetManifestDetectsMissingAndChangedSources(t *testing.T) {
 	}
 	doc := NewEmptyTimeline(project.Width, project.Height, project.FPS)
 	doc.Tracks[0].Clips = []TimelineClip{{ID: "missing-clip", AssetID: "missing-asset", DurationMS: 1000}}
-	if _, _, _, err := service.buildRenderAssetManifest(project.ID, "00000000-0000-0000-0000-000000000001", doc); err == nil || !strings.Contains(err.Error(), "missing asset") {
+	if _, _, _, err := service.buildRenderAssetManifest(context.Background(), project.ID, "00000000-0000-0000-0000-000000000001", doc); err == nil || !strings.Contains(err.Error(), "missing asset") {
 		t.Fatalf("missing source error = %v", err)
+	}
+	projectID := project.ID
+	assetRepo := repository.NewVideoAssetRepo(database)
+	corruptRelativePath := filepath.ToSlash(filepath.Join("video", project.ID, "corrupt.mp4"))
+	corruptAbsolutePath := filepath.Join(attachmentsDir, filepath.FromSlash(corruptRelativePath))
+	if err := os.MkdirAll(filepath.Dir(corruptAbsolutePath), 0o755); err != nil {
+		t.Fatalf("create corrupt asset directory: %v", err)
+	}
+	if err := os.WriteFile(corruptAbsolutePath, []byte("not an mp4"), 0o644); err != nil {
+		t.Fatalf("write corrupt asset: %v", err)
+	}
+	corruptAsset := &models.VideoAsset{
+		ProjectID: &projectID, SourceType: "upload", Kind: "video", FileName: "corrupt.mp4",
+		FilePath: corruptRelativePath, MimeType: "video/mp4", SizeBytes: 10,
+	}
+	if err := assetRepo.Create(corruptAsset); err != nil {
+		t.Fatalf("create corrupt asset record: %v", err)
+	}
+	doc.Tracks[0].Clips = []TimelineClip{{ID: "corrupt-clip", AssetID: corruptAsset.ID, DurationMS: 1000}}
+	if _, _, _, err := service.buildRenderAssetManifest(context.Background(), project.ID, "00000000-0000-0000-0000-000000000003", doc); err == nil || !strings.Contains(err.Error(), "corrupt or undecodable") {
+		t.Fatalf("corrupt source error = %v", err)
 	}
 
 	relativePath := filepath.ToSlash(filepath.Join("video", project.ID, "source.bin"))
@@ -199,16 +255,15 @@ func TestRenderAssetManifestDetectsMissingAndChangedSources(t *testing.T) {
 	if err := os.WriteFile(absolutePath, []byte("original"), 0o644); err != nil {
 		t.Fatalf("write asset: %v", err)
 	}
-	projectID := project.ID
 	asset := &models.VideoAsset{
-		ProjectID: &projectID, SourceType: "upload", Kind: "video", FileName: "source.bin",
+		ProjectID: &projectID, SourceType: "upload", Kind: "other", FileName: "source.bin",
 		FilePath: relativePath, MimeType: "application/octet-stream", SizeBytes: 8,
 	}
-	if err := repository.NewVideoAssetRepo(database).Create(asset); err != nil {
+	if err := assetRepo.Create(asset); err != nil {
 		t.Fatalf("create asset record: %v", err)
 	}
 	doc.Tracks[0].Clips = []TimelineClip{{ID: "source-clip", AssetID: asset.ID, DurationMS: 1000}}
-	entries, manifestJSON, manifestHash, err := service.buildRenderAssetManifest(project.ID, "00000000-0000-0000-0000-000000000002", doc)
+	entries, manifestJSON, manifestHash, err := service.buildRenderAssetManifest(context.Background(), project.ID, "00000000-0000-0000-0000-000000000002", doc)
 	if err != nil {
 		t.Fatalf("build manifest: %v", err)
 	}

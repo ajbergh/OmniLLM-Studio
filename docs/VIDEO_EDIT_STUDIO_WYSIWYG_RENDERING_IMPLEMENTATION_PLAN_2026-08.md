@@ -8,13 +8,13 @@
 ## Implementation tracker
 
 **Started:** 2026-08-17  
-**Current milestone:** Phase 1 — immutable render submission hardening  
-**Current status:** Core immutable-submission path implemented; compatibility and strict-parity follow-ups remain
+**Current milestone:** Phase 0 — reproducible parity baseline
+**Current status:** Phase 1 complete; the torture fixture and comparison harness are next
 
 | Phase | Status | Progress note |
 |---|---|---|
-| Phase 0 — Parity baseline | Not started | Scheduled after the immutable-snapshot foundation is merged |
-| Phase 1 — Immutable submission | In progress (85%) | Core revision/hash, durable staged inputs, snapshot/job transaction, stale-revision protection, snapshot-only execution/recovery, identity metadata, and hash-dirty paths are implemented; legacy labeling, HTTP/concurrency coverage, decode preflight, and strict-parity capability cleanup remain |
+| Phase 0 — Parity baseline | Next | Immutable-snapshot foundation is complete; implement the torture fixture, diagnostic frame/audio outputs, comparison metrics, and report artifact |
+| Phase 1 — Immutable submission | Complete | Revision/hash binding, durable staged inputs, decode preflight, snapshot-only execution/recovery, identity metadata, legacy labeling, path-specific capability diagnostics, Strict Parity, and HTTP/frontend concurrency coverage are implemented |
 | Phase 2 — Canonical contract | Not started | — |
 | Phase 3 — Shared preview | Not started | — |
 | Phase 4 — Shared worker | Not started | — |
@@ -31,7 +31,10 @@
 - **2026-08-17:** Referenced source bytes are copied into a contained, snapshot-owned staging directory before enqueue. The manifest points only to staged bytes, so changing or deleting the original asset cannot change queued output; staging is removed with the render job.
 - **2026-08-17:** Completed-job and output-asset metadata now record snapshot, timeline, asset-manifest, contract, renderer, and renderer-version identity. Interrupted snapshot-bound jobs resume from the same persisted snapshot and staged inputs after restart.
 - **2026-08-17:** The frontend now saves before enqueue, submits the exact returned revision/hash, and derives its “changed since render” state from the newest completed job's immutable timeline hash, including overlapping jobs.
-- **2026-08-17:** Verification passed for the focused Go suites (`internal/db`, `internal/repository`, `internal/video`, `internal/api`), the frontend production build, and all 83 frontend unit tests. The full Go suite passed except for the pre-existing Windows symlink-privilege test `internal/gitrepo/TestCloneQuotaFilesystemCountsSymlinkTargetBytesAndEntry`.
+- **2026-08-17:** Added required FFprobe validation for referenced image/video/audio sources before enqueue. Undecodable media blocks submission with exact clip/asset context, and verified stream metadata is frozen into the asset manifest.
+- **2026-08-17:** Historical snapshot-less jobs are labeled `legacy_mutable_source`, report that exact source material is unavailable, fail closed on execution/recovery, and use explicit “render current timeline” retry copy.
+- **2026-08-17:** Corrected stale wipe, zoom, cursor, and annotation capability messages. Export preflight now reports exact timeline paths for authored limitations, and Strict Parity promotes those limitations to blocking errors in both the client and backend.
+- **2026-08-17:** Phase 1 verification passed for focused Go suites (`internal/db`, `internal/repository`, `internal/video`, `internal/api`), the frontend production build, and all 86 frontend unit tests. The full Go suite passed except for the pre-existing Windows symlink-privilege test `internal/gitrepo/TestCloneQuotaFilesystemCountsSymlinkTargetBytesAndEntry`.
 
 ## Executive recommendation
 
@@ -44,7 +47,7 @@ The recommended fix is to introduce one canonical, deterministic TypeScript rend
 
 A Remotion-based player/worker is the recommended implementation because it lets the editor and export execute the same frame-driven React composition. The Go backend should continue to own authorization, validation, persistence, immutable render snapshots, scheduling, admission limits, cancellation, asset storage, diagnostics, and output asset creation. The existing `video.Renderer` interface remains the adapter boundary.
 
-The first production fix must be immutable render snapshots. Today a queued job stores a timeline ID and `runRenderJob` reloads the mutable timeline later. A user can click Render, continue editing while the job waits, and receive output from a different revision than the one they submitted.
+The first production fix was immutable render snapshots. At plan creation, a queued job stored a timeline ID and `runRenderJob` reloaded the mutable timeline later. Phase 1 now binds every new render to an immutable revision and durable staged source bytes.
 
 ## What “1:1” means
 
@@ -355,21 +358,22 @@ No phase should be declared complete solely because code exists. Each phase has 
 | Durable source-byte retention | Implemented | Each referenced source is copied into a contained snapshot-owned staging directory; logical/original deletion and mutation no longer affect the job, and staging is deleted with the job |
 | Snapshot-only worker execution | Implemented | The worker no longer reloads mutable timeline JSON, settings, or asset rows |
 | Identity metadata | Implemented | Job and output asset metadata record snapshot, timeline, manifest, contract, renderer, and renderer-version identity |
-| Missing/corrupt input behavior | Partial | Missing and post-enqueue changed bytes block/fail with asset context; media decode/probe corruption must be promoted into enqueue preflight |
+| Missing/corrupt input behavior | Implemented | Missing files, containment violations, undecodable media, and post-enqueue staged-byte changes block/fail with exact clip and asset context |
 | Hash-based dirty-render UI | Implemented | Uses the newest completed job in creation order, avoiding overlapping-job completion races |
-| Capability messages and Strict parity mode | Not started | Remains in this phase |
-| Historical snapshot-less jobs | Partial | Reads remain compatible and execution fails closed; explicit `legacy_mutable_source` labeling and exact-retry disabling remain |
+| Capability messages and Strict parity mode | Implemented | Runtime capability data drives path-specific diagnostics; stale wipe/zoom/cursor/annotation claims are corrected; Strict Parity blocks known mismatches in client and backend |
+| Historical snapshot-less jobs | Implemented | Reads remain compatible, jobs are labeled `legacy_mutable_source`, exact source is reported unavailable, and execution/recovery fails closed |
 
 ### Verification status
 
 | Scenario | Status |
 |---|---|
 | Mutate timeline after enqueue; renderer still receives submitted snapshot | Passing automated Go test |
-| Submit stale revision; no job is created | Passing service test; direct HTTP 409 integration assertion remains |
-| Missing source or changed bytes | Passing automated Go tests |
+| Submit stale revision; no job is created | Passing service and direct HTTP 409 tests |
+| Missing, undecodable, deleted, or changed source bytes | Passing automated Go tests |
 | Active asset lease lifecycle | Passing repository test |
 | Two overlapping revisions and dirty-render selection | Passing frontend unit test |
 | Restart with queued snapshots | Passing automated Go test |
+| Strict Parity rejects path-specific known mismatches without creating a job | Passing backend and frontend tests |
 
 ### Work
 

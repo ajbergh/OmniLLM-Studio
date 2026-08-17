@@ -78,3 +78,29 @@ func TestVideoTimelineRevisionAndRenderSnapshotLease(t *testing.T) {
 		t.Fatalf("snapshot after job deletion = %+v, %v", deletedSnapshot, err)
 	}
 }
+
+func TestLegacyRenderJobIsExplicitlyLabeled(t *testing.T) {
+	database := newTestDB(t)
+	projects := repository.NewVideoProjectRepo(database)
+	timelines := repository.NewVideoTimelineRepo(database)
+	renderJobs := repository.NewVideoRenderJobRepo(database)
+	project, err := projects.Create("", "Legacy Test", "openrouter", "test-model", 1280, 720, 30, "16:9")
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	timeline := &models.VideoTimeline{ProjectID: project.ID, Active: true, TimelineJSON: `{}`, DurationMS: 1000}
+	if err := timelines.Create(timeline); err != nil {
+		t.Fatalf("create timeline: %v", err)
+	}
+	job := &models.VideoRenderJob{ProjectID: project.ID, TimelineID: timeline.ID, SettingsJSON: `{}`}
+	if err := renderJobs.Create(job); err != nil {
+		t.Fatalf("create legacy job: %v", err)
+	}
+	fetched, err := renderJobs.GetByID(job.ID)
+	if err != nil {
+		t.Fatalf("get legacy job: %v", err)
+	}
+	if fetched.RenderSourceMode != "legacy_mutable_source" || fetched.ExactSourceAvailable {
+		t.Fatalf("legacy source identity = %+v", fetched)
+	}
+}

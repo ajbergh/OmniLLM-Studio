@@ -203,7 +203,7 @@ export function VideoRenderPanel() {
         aria-expanded={advancedOpen}
       >
         {advancedOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-        Advanced — codec, captions, range
+        Advanced — codec, parity, captions, range
       </button>
       {advancedOpen && (
         <div className="mt-2 grid grid-cols-2 gap-2 rounded-md border border-border bg-surface-alt/50 p-2">
@@ -237,6 +237,17 @@ export function VideoRenderPanel() {
                 <option key={kbps} value={kbps}>{kbps} kbps</option>
               ))}
             </select>
+          </label>
+          <label className="col-span-2 flex items-center gap-2 text-xs text-text-secondary">
+            <input
+              type="checkbox"
+              checked={exportSettings.strict_parity === true}
+              onChange={(event) => setExportSetting('strict_parity', event.target.checked)}
+            />
+            <span>
+              Strict parity
+              <span className="ml-1 text-[10px] text-text-muted">Block known preview/export differences</span>
+            </span>
           </label>
           <label className="col-span-2 flex items-center gap-2 text-xs text-text-secondary">
             <input

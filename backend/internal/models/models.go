@@ -999,6 +999,8 @@ type VideoRenderJob struct {
 	Renderer              string     `json:"renderer,omitempty"`
 	RendererVersion       string     `json:"renderer_version,omitempty"`
 	RenderContractVersion int        `json:"render_contract_version,omitempty"`
+	RenderSourceMode      string     `json:"render_source_mode"`
+	ExactSourceAvailable  bool       `json:"exact_source_available"`
 	Status                string     `json:"status"`
 	Progress              float64    `json:"progress"`
 	SettingsJSON          string     `json:"settings_json"`

@@ -212,13 +212,16 @@ type ExportSettings struct {
 	// (e.g. "youtube_16_9", "shorts_9_16", "square_1_1", "custom").
 	Preset string `json:"preset,omitempty"`
 	// Width/Height override Resolution when both are set (custom export size).
-	Width                 int    `json:"width,omitempty"`
-	Height                int    `json:"height,omitempty"`
-	FPS                   int    `json:"fps,omitempty"`
-	Quality               string `json:"quality,omitempty"`
-	IncludeAudio          bool   `json:"include_audio"`
-	RegisterInFileLibrary bool   `json:"register_in_file_library,omitempty"`
-	EstimatedDurationMS   int64  `json:"estimated_duration_ms,omitempty"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+	FPS          int    `json:"fps,omitempty"`
+	Quality      string `json:"quality,omitempty"`
+	IncludeAudio bool   `json:"include_audio"`
+	// StrictParity blocks submission when the current preview/export paths are
+	// known to interpret an authored feature differently.
+	StrictParity          bool  `json:"strict_parity,omitempty"`
+	RegisterInFileLibrary bool  `json:"register_in_file_library,omitempty"`
+	EstimatedDurationMS   int64 `json:"estimated_duration_ms,omitempty"`
 	// BurnInCaptions controls whether caption-track text draws into the frame.
 	// Nil preserves the historical always-on behavior.
 	BurnInCaptions *bool `json:"burn_in_captions,omitempty"`

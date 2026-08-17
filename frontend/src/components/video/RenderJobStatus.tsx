@@ -116,6 +116,11 @@ export function RenderJobStatus({
         <div className="h-full bg-primary" style={{ width: `${Math.max(3, progress)}%` }} />
       </div>
       {job.error && <p className="mt-2 text-[10px] text-danger">{job.error}</p>}
+      {job.render_source_mode === 'legacy_mutable_source' && (
+        <p className="mt-1.5 rounded border border-amber-500/20 bg-amber-500/5 px-1.5 py-1 text-[10px] text-amber-300">
+          Legacy render — its exact timeline and source bytes are unavailable. Rendering again uses the current saved timeline.
+        </p>
+      )}
       {settingsSummary && (
         <button
           className="mt-1.5 block w-full truncate text-left text-[10px] text-text-muted hover:text-text"
@@ -141,7 +146,7 @@ export function RenderJobStatus({
       {menu && (() => {
         const items: ContextMenuEntry[] = [
           { label: 'Download output', disabled: job.status !== 'completed' || !job.output_asset_id, action: () => onDownload(job.id) },
-          { label: 'Render again with these settings', disabled: !onRetry, action: () => onRetry?.(job.id) },
+          { label: 'Render current timeline with these settings', disabled: !onRetry, action: () => onRetry?.(job.id) },
           { label: 'Register output in File Library', disabled: job.status !== 'completed' || !job.output_asset_id, action: () => { void registerInLibrary(); } },
           'divider',
           { label: 'Copy error', disabled: !job.error, action: () => copyToClipboard(job.error || '', 'Error') },

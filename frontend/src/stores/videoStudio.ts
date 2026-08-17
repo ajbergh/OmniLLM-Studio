@@ -89,6 +89,7 @@ const DEFAULT_EXPORT: VideoExportSettings = {
   fps: 30,
   quality: 'standard',
   include_audio: true,
+  strict_parity: false,
   register_in_file_library: false,
 };
 

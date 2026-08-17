@@ -479,6 +479,8 @@ export interface VideoExportSettings {
   fps?: number;
   quality?: 'draft' | 'standard' | 'high';
   include_audio: boolean;
+  /** Block export when an authored feature is known to differ from preview. */
+  strict_parity?: boolean;
   register_in_file_library?: boolean;
   estimated_duration_ms?: number;
   /** Draw caption-track text into the frame (default true when omitted). */
@@ -505,6 +507,8 @@ export interface VideoRenderJob {
   renderer?: string;
   renderer_version?: string;
   render_contract_version?: number;
+  render_source_mode: 'immutable_snapshot' | 'legacy_mutable_source' | string;
+  exact_source_available: boolean;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
   progress: number;
   settings_json: string;

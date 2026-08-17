@@ -1,6 +1,7 @@
 package video
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -26,6 +27,7 @@ type RenderAssetManifestEntry struct {
 	ClipIDs    []string          `json:"clip_ids"`
 	FileSHA256 string            `json:"file_sha256"`
 	SizeBytes  int64             `json:"size_bytes"`
+	Media      *MediaProbe       `json:"media,omitempty"`
 }
 
 func contentSHA256(data []byte) string {
@@ -143,7 +145,7 @@ func stageRenderAsset(sourcePath, destinationPath string) (hash string, size int
 
 // buildRenderAssetManifest validates every referenced source and returns a
 // stable, sorted manifest. Paths must remain inside the attachments root.
-func (s *Service) buildRenderAssetManifest(projectID, snapshotID string, doc TimelineDocument) (entries []RenderAssetManifestEntry, manifestJSON string, manifestSHA256 string, err error) {
+func (s *Service) buildRenderAssetManifest(ctx context.Context, projectID, snapshotID string, doc TimelineDocument) (entries []RenderAssetManifestEntry, manifestJSON string, manifestSHA256 string, err error) {
 	if _, err := renderSnapshotStagingDir(s.attachmentsDir, snapshotID); err != nil {
 		return nil, "", "", err
 	}
@@ -206,9 +208,22 @@ func (s *Service) buildRenderAssetManifest(projectID, snapshotID string, doc Tim
 		stagedAsset := asset
 		stagedAsset.FilePath = filepath.ToSlash(stagedRelativePath)
 		stagedAsset.SizeBytes = sizeBytes
+		var media *MediaProbe
+		if renderAssetRequiresMediaProbe(stagedAsset) {
+			media, err = ProbeMediaRequired(ctx, stagedPath)
+			if err != nil {
+				return nil, "", "", fmt.Errorf("timeline clips %s reference corrupt or undecodable asset %q: %w", strings.Join(references[assetID], ", "), assetID, err)
+			}
+			if renderAssetRequiresAudio(stagedAsset) && !media.HasAudio {
+				return nil, "", "", fmt.Errorf("timeline clips %s reference asset %q without a decodable audio stream", strings.Join(references[assetID], ", "), assetID)
+			}
+			if renderAssetRequiresVideo(stagedAsset) && media.VideoCodec == "" && media.Width == 0 && media.Height == 0 {
+				return nil, "", "", fmt.Errorf("timeline clips %s reference asset %q without a decodable visual stream", strings.Join(references[assetID], ", "), assetID)
+			}
+		}
 		entries = append(entries, RenderAssetManifestEntry{
 			Asset: stagedAsset, ClipIDs: append([]string(nil), references[assetID]...),
-			FileSHA256: fileHash, SizeBytes: sizeBytes,
+			FileSHA256: fileHash, SizeBytes: sizeBytes, Media: media,
 		})
 	}
 	raw, err := json.Marshal(entries)
@@ -216,6 +231,25 @@ func (s *Service) buildRenderAssetManifest(projectID, snapshotID string, doc Tim
 		return nil, "", "", fmt.Errorf("marshal render asset manifest: %w", err)
 	}
 	return entries, string(raw), contentSHA256(raw), nil
+}
+
+func renderAssetRequiresMediaProbe(asset models.VideoAsset) bool {
+	kind := strings.ToLower(strings.TrimSpace(asset.Kind))
+	mimeType := strings.ToLower(strings.TrimSpace(asset.MimeType))
+	return kind == "video" || kind == "audio" || kind == "music" || kind == "image" ||
+		strings.HasPrefix(mimeType, "video/") || strings.HasPrefix(mimeType, "audio/") || strings.HasPrefix(mimeType, "image/")
+}
+
+func renderAssetRequiresAudio(asset models.VideoAsset) bool {
+	kind := strings.ToLower(strings.TrimSpace(asset.Kind))
+	mimeType := strings.ToLower(strings.TrimSpace(asset.MimeType))
+	return kind == "audio" || kind == "music" || strings.HasPrefix(mimeType, "audio/")
+}
+
+func renderAssetRequiresVideo(asset models.VideoAsset) bool {
+	kind := strings.ToLower(strings.TrimSpace(asset.Kind))
+	mimeType := strings.ToLower(strings.TrimSpace(asset.MimeType))
+	return kind == "video" || kind == "image" || strings.HasPrefix(mimeType, "video/") || strings.HasPrefix(mimeType, "image/")
 }
 
 // assetsFromRenderSnapshot verifies that the immutable manifest and source

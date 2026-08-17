@@ -1511,8 +1511,13 @@ func (s *Service) StartRender(ctx context.Context, userID, projectID string, set
 			return nil, fmt.Errorf("%w: the timeline changed after the submitted revision; save and render again", ErrTimelineRevisionConflict)
 		}
 	}
+	if settings.StrictParity {
+		if err := strictParityError(StrictParityIssues(doc)); err != nil {
+			return nil, err
+		}
+	}
 	snapshotID := uuid.New().String()
-	entries, assetManifestJSON, assetManifestSHA256, err := s.buildRenderAssetManifest(project.ID, snapshotID, doc)
+	entries, assetManifestJSON, assetManifestSHA256, err := s.buildRenderAssetManifest(ctx, project.ID, snapshotID, doc)
 	if err != nil {
 		return nil, err
 	}
