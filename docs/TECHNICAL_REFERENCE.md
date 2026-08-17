@@ -44,7 +44,7 @@
 | **Image Studio** | Full canvas editor with generation, editing, inpainting, variant comparison, and branching history |
 | **Music Studio** | Generate, play, download, and manage Gemini Lyria music tracks through OpenRouter or Gemini direct |
 | **Video Studio** | Project-based AI video creation and conversational editing with Gemini Omni Flash, Gemini Veo, OpenRouter Video, and Luma; guided multimodal inputs, cinematic/audio prompting, local asset upload, history, and output preview |
-| **Video Edit Studio** | Timeline editing, multi-asset media bin, preview canvas, inspector, AI edit planning, and FFmpeg render/export |
+| **Video Edit Studio** | NLE and Motion Design workspace with scenes, 2.5D camera, semantic animation blocks, multi-asset media bin, preview canvas, governed AI tools, and FFmpeg render/export |
 | **Markdown Rendering** | Syntax highlighting, KaTeX math, Mermaid diagrams, inline image rendering |
 | **Auto-Titling** | Conversations are automatically titled based on the first exchange |
 
@@ -154,15 +154,16 @@ Video Edit Studio owns timeline composition and export for video projects. It us
 | Capability | Description |
 |------------|-------------|
 | **Media Bin** | Generated outputs plus imported File Library, Music Studio, and Image Studio assets |
-| **Timeline** | Multi-track video, image, audio, music, text, caption, shape, and callout timeline with move, trim, split, 0.25×–4× clip speed/target-duration retiming, duplicate, delete, track mute/lock/visibility, fades, volume, effects, transitions, and keyframes |
-| **Preview** | Asset-driven timeline preview with managed video/audio playback, fades, volume keyframes, solo, speed, and preview-only master gain |
-| **Export** | Persistent render jobs — FFmpeg composites real video/image media plus text overlays into durable MP4/WebM, including constant-speed video/audio retiming with pitch-preserving audio |
-| **AI Assistance** | LLM-backed storyboard and edit-plan generation (with deterministic fallbacks); rule-based social-format variants, apply-plan, and validate-plan |
+| **Timeline** | Multi-track video, image, audio, music, text, caption, shape, and callout editing with move/trim/split, 0.25×–4× retiming, persisted track solo, fades, effects, transitions, spatial keyframes, scenes, and scene-boundary snapping |
+| **Motion Design** | Fifth editor mode with Design / Animate / Effects / AI / Export, a 21-block In/During/Out registry, editable generated keyframes, cubic Bezier and segment-local spring curves, and remixable templates with persistent replaceable slots |
+| **Preview** | Asset-driven 2.5D timeline preview with managed video/audio playback, depth-aware camera parallax, scene effects, fades, volume keyframes, solo, speed, and preview-only master gain |
+| **Export** | Persistent FFmpeg jobs for durable MP4/WebM, including constant-speed retiming, persisted solo audio mixing, deterministic curve expansion, camera projection, and tested cinematic scene effects |
+| **AI Assistance** | LLM-backed storyboard and revision-bound edit plans plus governed project-inspect, atomic mutation, diagnostic render, status, and cancel tools; diagnostics use real render artifacts and a three-iteration maximum |
 | **Cross-Studio Imports** | One-click import from File Library, Music Studio, and Image Studio into the project media bin |
 | **Send to Chat** | Copy any video asset into a conversation attachment and navigate directly to that chat |
 | **Register in Library** | Ingest any video asset into the global File Library scope for RAG retrieval and library search |
 
-Docs: `docs/VIDEO_STUDIO.md`, `docs/VIDEO_STUDIO_ARCHITECTURE.md`, `docs/VIDEO_PROVIDER_ADAPTERS.md`, `docs/VIDEO_TIMELINE_SCHEMA.md`, and `docs/VIDEO_RENDERING.md`.
+Docs: `docs/VIDEO_STUDIO.md`, `docs/VIDEO_STUDIO_ARCHITECTURE.md`, `docs/VIDEO_MOTION_DESIGN_ROADMAP_2026-08.md`, `docs/VIDEO_PROVIDER_ADAPTERS.md`, `docs/VIDEO_TIMELINE_SCHEMA.md`, and `docs/VIDEO_RENDERING.md`.
 
 ### Platform
 
@@ -717,7 +718,7 @@ All routes are under `/v1/`.
 | `PATCH` | `/v1/plugins/:name` | Update plugin |
 | `DELETE` | `/v1/plugins/:name` | Uninstall plugin |
 
-Built-in tools include `web_search`, `sports_lookup`, `calculator`, `url_fetch`, and `generate_word_doc`. `sports_lookup` accepts scores, schedules, standings, betting odds, news, rosters, injuries, transactions, rankings, player stats, league stats, and stat leaderboards across supported ESPN leagues including IPL cricket:
+Built-in tools include `web_search`, `sports_lookup`, `calculator`, `url_fetch`, and `generate_word_doc`, plus Video Studio tools: `video_project_inspect`, `video_timeline_mutate`, `video_render_frame`, `video_render_preview`, `video_render_status`, and `video_render_cancel`. The motion tools require an explicit project/timeline/revision binding; mutations are atomic, and diagnostic rendering is bounded. `sports_lookup` accepts scores, schedules, standings, betting odds, news, rosters, injuries, transactions, rankings, player stats, league stats, and stat leaderboards across supported ESPN leagues including IPL cricket:
 
 ```json
 {

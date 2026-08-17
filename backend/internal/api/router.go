@@ -334,6 +334,12 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	// Complete Agent Runtime composition after Studio services exist.
 	toolRegistry.MustRegister(tools.NewMusicGenerateJobTool(jobManager, musicService))
 	toolRegistry.MustRegister(tools.NewVideoGenerateJobTool(jobManager, videoService))
+	toolRegistry.MustRegister(tools.NewVideoProjectInspectTool(videoService))
+	toolRegistry.MustRegister(tools.NewVideoTimelineMutateTool(videoService))
+	toolRegistry.MustRegister(tools.NewVideoRenderFrameTool(videoService))
+	toolRegistry.MustRegister(tools.NewVideoRenderPreviewTool(videoService))
+	toolRegistry.MustRegister(tools.NewVideoRenderJobStatusTool(videoService))
+	toolRegistry.MustRegister(tools.NewVideoRenderJobCancelTool(videoService))
 	taskScheduler, err := tasks.NewScheduler(database, agentRunner, convoRepo, msgRepo)
 	if err != nil {
 		log.Fatalf("init scheduled agent tasks: %v", err)

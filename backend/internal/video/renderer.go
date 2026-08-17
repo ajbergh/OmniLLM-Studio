@@ -366,6 +366,13 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 		return nil
 	}
 	var result []resolvedClip
+	anySolo := false
+	for _, track := range req.Timeline.Tracks {
+		if track.Solo {
+			anySolo = true
+			break
+		}
+	}
 	// One audio-stream lookup per asset, not per clip.
 	audioProbeCache := map[string]bool{}
 	for trackIndex, track := range req.Timeline.Tracks {
@@ -377,7 +384,11 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 			if !ok || asset.FilePath == "" {
 				continue
 			}
-			fullPath := filepath.Join(req.AttachmentsDir, filepath.FromSlash(asset.FilePath))
+			assetPath := filepath.FromSlash(asset.FilePath)
+			fullPath := assetPath
+			if !filepath.IsAbs(assetPath) {
+				fullPath = filepath.Join(req.AttachmentsDir, assetPath)
+			}
 			if _, err := os.Stat(fullPath); err != nil {
 				continue // file not found on disk — skip silently
 			}
@@ -410,7 +421,7 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 				// Video clips on hidden tracks still contribute their audio.
 				rc.isVideo, rc.isImage = false, false
 			}
-			if track.Muted || rc.clip.Muted {
+			if track.Muted || rc.clip.Muted || (anySolo && !track.Solo) {
 				rc.hasAudio = false
 			}
 			if rc.isVideo || rc.isImage || rc.hasAudio {
@@ -572,8 +583,8 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 			chain = append(chain, fmt.Sprintf("crop=iw*%.4f:ih*%.4f:iw*%.4f:ih*%.4f",
 				1-tr.cropLeft-tr.cropRight, 1-tr.cropTop-tr.cropBottom, tr.cropLeft, tr.cropTop))
 		}
-		scaledW := maxInt(2, int(float64(width)*tr.scale+0.5))
-		scaledH := maxInt(2, int(float64(height)*tr.scale+0.5))
+		scaledW := maxInt(2, int(float64(width)*tr.scaleX+0.5))
+		scaledH := maxInt(2, int(float64(height)*tr.scaleY+0.5))
 		chain = append(chain, fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease", scaledW, scaledH))
 		chain = append(chain, effectFilters(rc.clip.Effects)...)
 		chain = append(chain, "format=rgba")
@@ -622,6 +633,14 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 		prevV = ovLabel
 	}
 
+	// Scene effects run once on the composited frame and are timeline-gated.
+	for sceneIndex, scene := range doc.Scenes {
+		for effectIndex, filter := range sceneEffectFilters(scene) {
+			outLabel := fmt.Sprintf("[scene%d_%d_v]", sceneIndex, effectIndex)
+			parts = append(parts, prevV+filter+outLabel)
+			prevV = outLabel
+		}
+	}
 	videoLabel = prevV
 
 	// ── Audio clips ─────────────────────────────────────────────────────────
@@ -900,6 +919,7 @@ func drawTextAlphaExpr(clip TimelineClip, startS, endS float64) string {
 type clipRenderTransform struct {
 	x, y                                     float64
 	scale                                    float64
+	scaleX, scaleY                           float64
 	rotation                                 float64
 	opacity                                  float64
 	cropTop, cropRight, cropBottom, cropLeft float64
@@ -909,7 +929,7 @@ type clipRenderTransform struct {
 // parseClipTransform extracts renderable transform values with safe defaults.
 // Crop values are fractions of the source frame (0–0.95 per edge).
 func parseClipTransform(transform map[string]any) clipRenderTransform {
-	tr := clipRenderTransform{scale: 1, opacity: 1}
+	tr := clipRenderTransform{scale: 1, scaleX: 1, scaleY: 1, opacity: 1}
 	if transform == nil {
 		return tr
 	}
@@ -922,8 +942,19 @@ func parseClipTransform(transform map[string]any) clipRenderTransform {
 	if v, ok := numericTransform(transform, "rotation"); ok {
 		tr.rotation = math.Mod(v, 360)
 	}
+	if v, ok := numericTransform(transform, "rotation_z"); ok {
+		tr.rotation = math.Mod(v, 360)
+	}
 	if v, ok := numericTransform(transform, "scale"); ok && v > 0 {
 		tr.scale = clampFloat(v, 0.05, 4)
+		tr.scaleX = tr.scale
+		tr.scaleY = tr.scale
+	}
+	if v, ok := numericTransform(transform, "scale_x"); ok && v > 0 {
+		tr.scaleX = clampFloat(v, 0.05, 4)
+	}
+	if v, ok := numericTransform(transform, "scale_y"); ok && v > 0 {
+		tr.scaleY = clampFloat(v, 0.05, 4)
 	}
 	if v, ok := numericTransform(transform, "opacity"); ok {
 		tr.opacity = clampFloat(v, 0, 1)
@@ -1096,6 +1127,57 @@ func effectFilters(effects []TimelineEffect) []string {
 			blend := numericOrZero(effect.Params, "blend")
 			filters = append(filters, fmt.Sprintf("chromakey=%s:%.3f:%.3f",
 				color, clampFloat(similarity, 0.01, 1), clampFloat(blend, 0, 0.5)))
+		case EffectTypeFilmGrain:
+			if !hasAmount {
+				amount = 8
+			}
+			filters = append(filters, fmt.Sprintf("noise=alls=%.2f:allf=t+u", clampFloat(amount, 0, 40)))
+		case EffectTypeBloom:
+			if !hasAmount {
+				amount = 0.25
+			}
+			filters = append(filters, fmt.Sprintf("gblur=sigma=%.2f", clampFloat(amount*8, 0.1, 20)))
+		case EffectTypeColorGrade:
+			if !hasAmount {
+				amount = 1.08
+			}
+			filters = append(filters, fmt.Sprintf("eq=contrast=%.3f:saturation=%.3f", clampFloat(amount, 0.5, 2), clampFloat(amount, 0.5, 2)))
+		case EffectTypeEdgeFade:
+			if !hasAmount {
+				amount = 0.35
+			}
+			filters = append(filters, fmt.Sprintf("vignette=a=%.4f", clampFloat(amount, 0, 1)*math.Pi/2))
+		case EffectTypeRGBSplit:
+			if !hasAmount {
+				amount = 3
+			}
+			shift := int(clampFloat(amount, 0, 20) + 0.5)
+			filters = append(filters, fmt.Sprintf("rgbashift=rh=%d:bh=-%d:edge=smear", shift, shift))
+		case EffectTypeGhostTrail:
+			filters = append(filters, "tmix=frames=3:weights='1 1 1'")
+		case EffectTypeMotionBlur:
+			filters = append(filters, "tmix=frames=3:weights='1 2 1'")
+		case EffectTypeDepthOfField, EffectTypeRackFocus:
+			if !hasAmount {
+				amount = 2
+			}
+			filters = append(filters, fmt.Sprintf("gblur=sigma=%.2f", clampFloat(amount, 0, 12)))
+		}
+	}
+	return filters
+}
+
+func sceneEffectFilters(scene TimelineScene) []string {
+	start := float64(scene.StartMS) / 1000
+	end := float64(scene.StartMS+scene.DurationMS) / 1000
+	enable := fmt.Sprintf(":enable='between(t\\,%.3f\\,%.3f)'", start, end)
+	filters := make([]string, 0)
+	for _, effect := range scene.Effects {
+		if !effect.Enabled {
+			continue
+		}
+		for _, filter := range effectFilters([]TimelineEffect{effect}) {
+			filters = append(filters, filter+enable)
 		}
 	}
 	return filters
@@ -1105,7 +1187,8 @@ func effectFilters(effects []TimelineEffect) []string {
 // keyframed position property. Keyframe time_ms is clip-relative; clipStartS
 // converts segment boundaries to output-timeline seconds (overlay expressions
 // evaluate `t` in output time). The value holds flat before the first and
-// after the last keyframe. Easing curves are approximated linearly at export.
+// after the last keyframe. Non-linear curves are normally expanded to static
+// segments by FidelityRenderer before this fallback expression is reached.
 // Returns "" when the property has no keyframes.
 func positionKeyframeExpr(keyframes []TimelineKeyframe, property string, clipStartS float64) string {
 	var points []TimelineKeyframe

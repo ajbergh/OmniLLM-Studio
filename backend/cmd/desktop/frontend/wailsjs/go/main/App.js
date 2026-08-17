@@ -5,3 +5,23 @@
 export function GetAPIBase() {
   return window['go']['main']['App']['GetAPIBase']();
 }
+
+export function ImportNativeCapture(arg1, arg2) {
+  return window['go']['main']['App']['ImportNativeCapture'](arg1, arg2);
+}
+
+export function NativeCaptureCapabilities() {
+  return window['go']['main']['App']['NativeCaptureCapabilities']();
+}
+
+export function SelectSandboxWorkspace() {
+  return window['go']['main']['App']['SelectSandboxWorkspace']();
+}
+
+export function StartNativeCapture(arg1) {
+  return window['go']['main']['App']['StartNativeCapture'](arg1);
+}
+
+export function StopNativeCapture(arg1) {
+  return window['go']['main']['App']['StopNativeCapture'](arg1);
+}

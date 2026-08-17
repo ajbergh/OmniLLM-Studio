@@ -2,7 +2,7 @@
 // timeline semantics — a timeline edited in "simple trim" opens identically in
 // the full editor.
 
-export type EditorModeKey = 'full' | 'simple_trim' | 'captions_only' | 'social_clip';
+export type EditorModeKey = 'full' | 'simple_trim' | 'captions_only' | 'social_clip' | 'motion_design';
 
 export interface EditorModeFeatures {
   /** AI assistant section in the inspector. */
@@ -17,6 +17,11 @@ export interface EditorModeFeatures {
   canvasControls: boolean;
   addTrack: boolean;
   addTextClip: boolean;
+  designAnimateTabs: boolean;
+  animationBlocks: boolean;
+  sceneControls: boolean;
+  spatialControls: boolean;
+  cameraControls: boolean;
 }
 
 export interface EditorModeDefinition {
@@ -40,6 +45,11 @@ export const EDITOR_MODES: EditorModeDefinition[] = [
       canvasControls: true,
       addTrack: true,
       addTextClip: true,
+      designAnimateTabs: false,
+      animationBlocks: true,
+      sceneControls: true,
+      spatialControls: true,
+      cameraControls: true,
     },
   },
   {
@@ -55,6 +65,11 @@ export const EDITOR_MODES: EditorModeDefinition[] = [
       canvasControls: false,
       addTrack: false,
       addTextClip: false,
+      designAnimateTabs: false,
+      animationBlocks: false,
+      sceneControls: false,
+      spatialControls: false,
+      cameraControls: false,
     },
   },
   {
@@ -70,6 +85,11 @@ export const EDITOR_MODES: EditorModeDefinition[] = [
       canvasControls: false,
       addTrack: false,
       addTextClip: false,
+      designAnimateTabs: false,
+      animationBlocks: false,
+      sceneControls: false,
+      spatialControls: false,
+      cameraControls: false,
     },
   },
   {
@@ -85,6 +105,31 @@ export const EDITOR_MODES: EditorModeDefinition[] = [
       canvasControls: true,
       addTrack: false,
       addTextClip: true,
+      designAnimateTabs: false,
+      animationBlocks: true,
+      sceneControls: true,
+      spatialControls: false,
+      cameraControls: false,
+    },
+  },
+  {
+    key: 'motion_design',
+    label: 'Motion design',
+    description: 'Design, animate, add cinematic effects, and direct scenes.',
+    features: {
+      assistant: true,
+      transformControls: true,
+      effectControls: true,
+      captionsPanel: false,
+      templates: true,
+      canvasControls: true,
+      addTrack: true,
+      addTextClip: true,
+      designAnimateTabs: true,
+      animationBlocks: true,
+      sceneControls: true,
+      spatialControls: true,
+      cameraControls: true,
     },
   },
 ];

@@ -6,9 +6,9 @@
 
 ### Renderer fidelity
 
-The production renderer now composes a fidelity-expansion layer before the existing FFmpeg graph. Render-only expansion samples eased transform and effect keyframes into deterministic static segments, approximates zoom and directional wipe transitions, renders cursor pointers and click rings, normalizes unsupported annotations to exportable primitives, and approximates letter spacing/alignment without modifying persisted timeline JSON.
+The production renderer composes a fidelity-expansion layer before the FFmpeg graph. Render-only expansion samples transform, effect-amount, scene-camera, cubic Bezier, and segment-local spring keyframes into deterministic static segments; it applies 2.5D camera projection/parallax and scene-gated cinematic filters before encoding. It also approximates zoom and directional-wipe transitions, renders cursor pointers and click rings, normalizes unsupported annotations to exportable primitives, and approximates letter spacing/alignment without modifying persisted timeline JSON.
 
-Capability metadata remains conservative. Rounded corners, true geometric annotation paths, click audio, true two-clip crossfades, drop shadow, and background blur remain partial until their FFmpeg implementations have golden-frame coverage.
+Capability metadata remains conservative. Track solo, motion curves, camera motion, and the tested cinematic scene effects are export-capable. Rounded corners, true geometric annotation paths, click audio, true two-clip crossfades, drop shadow, background blur, and true X/Y tilt remain partial until their FFmpeg implementations have golden-frame coverage.
 
 ### Durable scheduling
 
@@ -37,7 +37,7 @@ Timeline metadata can enable an FFmpeg audio chain with high-pass/FFT denoise, v
 
 ### Large-project scalability
 
-The frontend includes a binary-search timeline interval index, visible-window clip filtering, video decoder budgeting, and patch-based undo/redo support. Horizontal clip virtualization uses viewport time bounds with overscan. Preview uses indexed active-clip queries and substitutes thumbnails for video layers outside the decoder budget.
+The frontend includes a binary-search timeline interval index, visible-window clip filtering, video decoder budgeting, scene-boundary snapping, 2.5D preview composition, and patch-based undo/redo support. Horizontal clip virtualization uses viewport time bounds with overscan. Preview uses indexed active-clip queries and substitutes thumbnails for video layers outside the decoder budget. CI exercises a 2,000-clip / 16,000-keyframe fixture with frame-computation, heap, document-size, and patch-size budgets.
 
 ## Validation requirements
 
@@ -47,6 +47,7 @@ The frontend includes a binary-search timeline interval index, visible-window cl
 - `npm run test:smoke`
 - Windows desktop build and native capture smoke test
 - Golden-media render fixture execution on a runner with FFmpeg
+- Motion Design browser smoke (`tests/video-motion-design.smoke.spec.ts`)
 
 ## Remaining platform boundaries
 
@@ -54,3 +55,4 @@ The frontend includes a binary-search timeline interval index, visible-window cl
 - Golden media tests skip when FFmpeg is unavailable.
 - Advanced speech diarization, non-English translation, and provider cost reporting depend on provider response capabilities.
 - True geometric ellipse/arrow/speech-bubble rendering and click-sound synthesis remain explicit partial renderer capabilities.
+- Diagnostic agent renders are limited to 1280×720, five seconds, and three refinement iterations; they use the same durable render queue and ownership checks as normal exports.

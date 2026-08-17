@@ -1,7 +1,7 @@
 /**
  * One timeline layer row: a sticky header (rename, mute/lock/visibility, solo
  * badge, drag-to-resize height) plus the clip lane, which handles asset/clip
- * drag-and-drop with snapping to clip edges, markers, and the playhead.
+ * drag-and-drop with snapping to clip/scene edges, markers, and the playhead.
  */
 import { useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
@@ -17,12 +17,13 @@ const DEFAULT_TRACK_HEIGHT = 52;
 /** A snap target with what it represents, so drag guides can say why they snapped. */
 export interface SnapPoint {
   ms: number;
-  kind: 'playhead' | 'marker' | 'clip' | 'edge';
+  kind: 'playhead' | 'marker' | 'scene' | 'clip' | 'edge';
 }
 
 const SNAP_GUIDE_STYLES: Record<SnapPoint['kind'], { line: string; label: string }> = {
   playhead: { line: 'bg-primary/90', label: 'playhead' },
   marker: { line: 'bg-amber-400/90', label: 'marker' },
+  scene: { line: 'bg-fuchsia-400/90', label: 'scene boundary' },
   clip: { line: 'bg-sky-400/90', label: 'clip edge' },
   edge: { line: 'bg-white/70', label: 'timeline' },
 };

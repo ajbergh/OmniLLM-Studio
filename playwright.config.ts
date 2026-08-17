@@ -9,6 +9,7 @@ const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const smokeRoot = path.resolve(__dirname, 'backend', 'test-results', 'playwright-smoke');
 const smokeDbPath = path.join(smokeRoot, 'smoke.db');
 const smokeAttachmentsDir = path.join(smokeRoot, 'attachments');
+const useExternalServers = process.env.OMNILLM_PLAYWRIGHT_EXTERNAL_SERVERS === '1';
 
 if (process.env.TEST_WORKER_INDEX === undefined) {
   fs.mkdirSync(smokeRoot, { recursive: true });
@@ -120,7 +121,7 @@ export default defineConfig({
   ],
 
   /* Run your local dev server before starting the tests */
-  webServer: [
+  webServer: useExternalServers ? undefined : [
     {
       command: 'go run ./cmd/server',
       cwd: path.resolve(__dirname, 'backend'),

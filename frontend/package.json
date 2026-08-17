@@ -11,7 +11,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "test:video-performance": "vitest run src/components/video/pro/videoPerformanceFixture.test.ts --reporter=verbose"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

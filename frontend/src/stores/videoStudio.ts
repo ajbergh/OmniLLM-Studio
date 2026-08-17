@@ -16,7 +16,8 @@ import { videoApi } from '../api';
 import { CAPTION_PRESETS, parseCaptions, serializeSrt, serializeVtt } from '../components/video/captions/captionUtils';
 import type { CaptionCue, CaptionPresetKey } from '../components/video/captions/captionUtils';
 import { annotationDefaults, ANNOTATION_PRESETS } from '../components/video/effects/annotationRegistry';
-import { motionPreset } from '../components/video/effects/motionPresets';
+import { animationBlock } from '../components/video/motion/animationBlockRegistry';
+import { compileAnimationBlock } from '../components/video/motion/animationBlockCompiler';
 import { TIMELINE_TEMPLATES } from '../components/video/templates/timelineTemplates';
 import type { EditorModeKey } from '../components/video/editorModes';
 
@@ -25,7 +26,7 @@ const EDITOR_MODE_STORAGE_KEY = 'omnillm-video-editor-mode';
 function initialEditorMode(): EditorModeKey {
   if (typeof window === 'undefined') return 'full';
   const stored = window.localStorage.getItem(EDITOR_MODE_STORAGE_KEY);
-  return stored === 'simple_trim' || stored === 'captions_only' || stored === 'social_clip' ? stored : 'full';
+  return stored === 'simple_trim' || stored === 'captions_only' || stored === 'social_clip' || stored === 'motion_design' ? stored : 'full';
 }
 import type {
   InputAsset,
@@ -49,6 +50,8 @@ import type {
   VideoTimelineEffect,
   VideoTimelineKeyframe,
   VideoTimelineRecord,
+  VideoTimelineScene,
+  VideoSceneCamera,
   VideoTimelineShape,
   VideoTimelineTrack,
   VideoTimelineTrackType,
@@ -388,6 +391,7 @@ interface VideoStudioState {
   selectedClipId: string | null;
   selectedClipIds: string[];
   selectedTrackId: string | null;
+  selectedSceneId: string | null;
   // Ephemeral playback solo — only this track contributes preview audio.
   // Not persisted to the timeline document and ignored by export.
   soloTrackId: string | null;
@@ -507,8 +511,11 @@ interface VideoStudioState {
   updateClipEffect: (clipId: string, effectId: string, patch: Partial<Omit<VideoTimelineEffect, 'id'>>) => Promise<void>;
   reorderClipEffect: (clipId: string, effectId: string, direction: -1 | 1) => Promise<void>;
   addKeyframe: (clipId: string, keyframe: Omit<VideoTimelineKeyframe, 'id'>) => Promise<void>;
-  /** Replaces pan/zoom (x/y/scale) keyframes with a generated motion preset. */
+  /** Backward-compatible alias for semantic animation blocks. */
   applyMotionPreset: (clipId: string, presetKey: string) => Promise<void>;
+  applyAnimationBlock: (clipId: string, blockKey: string, options?: { mode?: 'replace' | 'stack'; durationMs?: number; delayMs?: number; params?: Record<string, number | string> }) => Promise<void>;
+  updateAnimationBlock: (clipId: string, blockId: string, patch: { durationMs?: number; delayMs?: number; params?: Record<string, number | string> }) => Promise<void>;
+  removeAnimationBlock: (clipId: string, blockId: string) => Promise<void>;
   updateKeyframe: (clipId: string, keyframeId: string, patch: Partial<Omit<VideoTimelineKeyframe, 'id'>>) => Promise<void>;
   removeKeyframe: (clipId: string, keyframeId: string) => Promise<void>;
   addTrack: (type?: VideoTimelineTrackType, name?: string) => Promise<void>;
@@ -519,7 +526,7 @@ interface VideoStudioState {
   duplicateTrack: (trackId: string) => Promise<void>;
   insertTrackAdjacent: (trackId: string, where: 'above' | 'below') => Promise<void>;
   clearTrack: (trackId: string) => Promise<void>;
-  toggleTrackSolo: (trackId: string) => void;
+  toggleTrackSolo: (trackId: string) => Promise<void>;
   moveTrackToEdge: (trackId: string, edge: 'top' | 'bottom') => Promise<void>;
   selectClipsOnTrack: (trackId: string) => void;
   setSelectedClips: (ids: string[]) => void;
@@ -532,6 +539,17 @@ interface VideoStudioState {
   copyClipAttributes: (clipId?: string) => void;
   pasteClipAttributes: (clipId?: string) => Promise<void>;
   setTimelineDuration: (durationMs: number) => Promise<void>;
+  addScene: (options?: { name?: string; startMs?: number; durationMs?: number }) => Promise<void>;
+  updateScene: (sceneId: string, patch: Partial<Pick<VideoTimelineScene, 'name' | 'start_ms' | 'duration_ms'>>) => Promise<void>;
+  duplicateScene: (sceneId: string) => Promise<void>;
+  deleteScene: (sceneId: string) => Promise<void>;
+  reorderScene: (sceneId: string, targetIndex: number) => Promise<void>;
+  selectScene: (sceneId: string | null) => void;
+  updateSceneCamera: (sceneId: string, patch: Partial<VideoSceneCamera>) => Promise<void>;
+  applyCameraPreset: (sceneId: string, preset: string) => Promise<void>;
+  addSceneEffect: (sceneId: string, effect: Omit<VideoTimelineEffect, 'id'>) => Promise<void>;
+  removeSceneEffect: (sceneId: string, effectId: string) => Promise<void>;
+  replaceTemplateSlot: (slot: string, assetId: string) => Promise<void>;
   splitAllAtPlayhead: () => Promise<void>;
   toggleClipMute: (clipId?: string) => Promise<void>;
   detachClipAudio: (clipId: string) => Promise<void>;
@@ -598,6 +616,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   selectedClipId: null,
   selectedClipIds: [],
   selectedTrackId: null,
+  selectedSceneId: null,
   soloTrackId: null,
   followPlayhead: true,
   clipClipboard: null,
@@ -768,6 +787,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         selectedClipId: null,
         selectedClipIds: [],
         selectedTrackId: null,
+        selectedSceneId: null,
+        soloTrackId: null,
         playheadMs: 0,
         timelineUndoStack: [],
         timelineRedoStack: [],
@@ -1113,6 +1134,8 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         selectedClipId: null,
         selectedClipIds: [],
         selectedTrackId: null,
+        selectedSceneId: detail.document.scenes?.[0]?.id || null,
+        soloTrackId: detail.document.tracks.find((track) => track.solo)?.id || null,
         saveStatus: 'saved',
         saveError: null,
       });
@@ -2453,25 +2476,101 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   },
 
   applyMotionPreset: async (clipId, presetKey) => {
+    if (presetKey === 'restore') {
+      const current = get().timeline;
+      if (!current) return;
+      const next = cloneTimeline(current);
+      const loc = findClip(next, clipId);
+      if (!loc || loc.track.locked) return;
+      const generated = new Set((loc.clip.animation_blocks || []).flatMap((block) => block.generated_keyframe_ids));
+      loc.clip.keyframes = (loc.clip.keyframes || []).filter((keyframe) => !generated.has(keyframe.id) && !(['x', 'y', 'scale'].includes(keyframe.property) && (loc.clip.animation_blocks || []).length === 0));
+      loc.clip.animation_blocks = [];
+      set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+      await get().saveTimeline(next);
+      toast.success('Removed generated motion');
+      return;
+    }
+    await get().applyAnimationBlock(clipId, presetKey, { mode: 'replace' });
+  },
+
+  applyAnimationBlock: async (clipId, blockKey, options = {}) => {
     const current = get().timeline;
-    const preset = motionPreset(presetKey);
-    if (!current || !preset) return;
+    const definition = animationBlock(blockKey);
+    if (!current || !definition) return;
     const next = cloneTimeline(current);
     const loc = findClip(next, clipId);
     if (!loc || loc.track.locked) return;
-    const generated = preset.build(loc.clip, next.canvas)
-      .map((spec) => ({ ...spec, id: newId('keyframe') }));
-    // Motion presets own the pan/zoom envelope; other properties keep theirs.
-    loc.clip.keyframes = [
-      ...(loc.clip.keyframes || []).filter((keyframe) => !['x', 'y', 'scale'].includes(keyframe.property)),
-      ...generated,
-    ];
+    let effectId: string | undefined;
+    if (definition.requiredEffect === 'blur') {
+      let effect = (loc.clip.effects || []).find((item) => item.type === 'blur');
+      if (!effect) {
+        effect = { id: newId('effect'), type: 'blur', enabled: true, params: { amount: 0 } };
+        loc.clip.effects = [...(loc.clip.effects || []), effect];
+      }
+      effectId = effect.id;
+    }
+    const existingBlocks = loc.clip.animation_blocks || [];
+    const replaceBlocks = options.mode !== 'stack' ? existingBlocks.filter((block) => block.family === definition.family) : [];
+    const replacedIds = new Set(replaceBlocks.flatMap((block) => block.generated_keyframe_ids));
+    const compiled = compileAnimationBlock(loc.clip, next.canvas, blockKey, {
+      durationMs: options.durationMs,
+      delayMs: options.delayMs,
+      params: options.params,
+      effectId,
+      idFactory: newId,
+    });
+    loc.clip.keyframes = [...(loc.clip.keyframes || []).filter((keyframe) => !replacedIds.has(keyframe.id)), ...compiled.keyframes]
+      .sort((a, b) => a.time_ms - b.time_ms);
+    loc.clip.animation_blocks = [...existingBlocks.filter((block) => !replaceBlocks.some((candidate) => candidate.id === block.id)), compiled.block];
     set((state) => ({
       timeline: next,
       ...withTimelineHistory(state, current),
     }));
     await get().saveTimeline(next);
-    toast.success(generated.length > 0 ? `Applied "${preset.label}" motion` : 'Removed pan/zoom motion');
+    toast.success(`Applied "${definition.label}" animation`);
+  },
+
+  updateAnimationBlock: async (clipId, blockId, patch) => {
+    const current = get().timeline;
+    if (!current) return;
+    const source = findClip(current, clipId)?.clip.animation_blocks?.find((block) => block.id === blockId);
+    if (!source) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    if (!loc || loc.track.locked) return;
+    const target = loc.clip.animation_blocks?.find((block) => block.id === blockId);
+    if (!target) return;
+    const effectId = (loc.clip.effects || []).find((effect) => effect.type === 'blur')?.id;
+    const generated = compileAnimationBlock(loc.clip, next.canvas, target.block_key, {
+      // start_ms already includes the stored delay. The compiler adds delay,
+      // so pass the undelayed base to keep edits from drifting on every blur.
+      startMs: Math.max(0, target.start_ms - (target.delay_ms || 0)),
+      durationMs: patch.durationMs ?? target.duration_ms,
+      delayMs: patch.delayMs ?? target.delay_ms,
+      params: { ...(target.params as Record<string, number | string> || {}), ...(patch.params || {}) },
+      effectId,
+      idFactory: newId,
+    });
+    const removed = new Set(target.generated_keyframe_ids);
+    generated.block.id = target.id;
+    loc.clip.keyframes = [...loc.clip.keyframes.filter((keyframe) => !removed.has(keyframe.id)), ...generated.keyframes].sort((a, b) => a.time_ms - b.time_ms);
+    loc.clip.animation_blocks = (loc.clip.animation_blocks || []).map((block) => block.id === blockId ? generated.block : block);
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  removeAnimationBlock: async (clipId, blockId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const loc = findClip(next, clipId);
+    const block = loc?.clip.animation_blocks?.find((candidate) => candidate.id === blockId);
+    if (!loc || !block || loc.track.locked) return;
+    const generated = new Set(block.generated_keyframe_ids);
+    loc.clip.keyframes = loc.clip.keyframes.filter((keyframe) => !generated.has(keyframe.id));
+    loc.clip.animation_blocks = (loc.clip.animation_blocks || []).filter((candidate) => candidate.id !== blockId);
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
   },
 
   updateClipTransition: async (clipId, transitionId, patch) => {
@@ -2724,7 +2823,15 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     await get().saveTimeline(next);
   },
 
-  toggleTrackSolo: (trackId) => set((state) => ({ soloTrackId: state.soloTrackId === trackId ? null : trackId })),
+  toggleTrackSolo: async (trackId) => {
+    const current = get().timeline;
+    if (!current) return;
+    const nextSolo = get().soloTrackId === trackId ? null : trackId;
+    const next = cloneTimeline(current);
+    next.tracks.forEach((track) => { track.solo = track.id === nextSolo; });
+    set((state) => ({ soloTrackId: nextSolo, timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
 
   moveTrackToEdge: async (trackId, edge) => {
     const current = get().timeline;
@@ -2886,6 +2993,198 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     next.duration_ms = Math.max(1000, Math.round(durationMs));
     // Never shrink below the last clip end.
     recomputeDuration(next);
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  addScene: async (options = {}) => {
+    const current = get().timeline;
+    if (!current) return;
+    const next = cloneTimeline(current);
+    const scenes = next.scenes || [];
+    const startMs = Math.max(0, Math.round(options.startMs ?? (scenes.length ? Math.max(...scenes.map((scene) => scene.start_ms + scene.duration_ms)) : 0)));
+    const durationMs = Math.max(250, Math.round(options.durationMs ?? Math.max(1000, next.duration_ms - startMs)));
+    const scene: VideoTimelineScene = { id: newId('scene'), name: options.name?.trim() || `Scene ${scenes.length + 1}`, start_ms: startMs, duration_ms: durationMs, metadata: {} };
+    if (scenes.some((candidate) => scene.start_ms < candidate.start_ms + candidate.duration_ms && scene.start_ms + scene.duration_ms > candidate.start_ms)) {
+      toast.error('Scene ranges cannot overlap');
+      return;
+    }
+    next.scenes = [...scenes, scene].sort((a, b) => a.start_ms - b.start_ms);
+    next.duration_ms = Math.max(next.duration_ms, startMs + durationMs);
+    set((state) => ({ timeline: next, selectedSceneId: scene.id, playheadMs: scene.start_ms, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  updateScene: async (sceneId, patch) => {
+    const current = get().timeline;
+    if (!current?.scenes) return;
+    const next = cloneTimeline(current);
+    const index = next.scenes?.findIndex((scene) => scene.id === sceneId) ?? -1;
+    if (index < 0 || !next.scenes) return;
+    const candidate = { ...next.scenes[index], ...patch };
+    candidate.start_ms = Math.max(0, Math.round(candidate.start_ms));
+    candidate.duration_ms = Math.max(1, Math.round(candidate.duration_ms));
+    if (next.scenes.some((scene, sceneIndex) => sceneIndex !== index && candidate.start_ms < scene.start_ms + scene.duration_ms && candidate.start_ms + candidate.duration_ms > scene.start_ms)) {
+      toast.error('Scene ranges cannot overlap');
+      return;
+    }
+    next.scenes[index] = candidate;
+    next.scenes.sort((a, b) => a.start_ms - b.start_ms);
+    next.duration_ms = Math.max(next.duration_ms, candidate.start_ms + candidate.duration_ms);
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  duplicateScene: async (sceneId) => {
+    const current = get().timeline;
+    const source = current?.scenes?.find((scene) => scene.id === sceneId);
+    if (!current || !source) return;
+    const next = cloneTimeline(current);
+    const destinationStart = Math.max(...(next.scenes || []).map((scene) => scene.start_ms + scene.duration_ms), 0);
+    const duplicate = JSON.parse(JSON.stringify(source)) as VideoTimelineScene;
+    duplicate.id = newId('scene');
+    duplicate.name = `${source.name} copy`;
+    duplicate.start_ms = destinationStart;
+    if (duplicate.camera?.keyframes) duplicate.camera.keyframes = duplicate.camera.keyframes.map((keyframe) => ({ ...keyframe, id: newId('camera-keyframe') }));
+    duplicate.effects = (duplicate.effects || []).map((effect) => ({ ...effect, id: newId('effect') }));
+    for (const track of next.tracks) {
+      const clones = track.clips.filter((clip) => clip.start_ms >= source.start_ms && clip.start_ms + clip.duration_ms <= source.start_ms + source.duration_ms).map((clip) => {
+        const copy = JSON.parse(JSON.stringify(clip)) as VideoTimelineClip;
+        copy.id = newId('clip');
+        copy.start_ms = destinationStart + (clip.start_ms - source.start_ms);
+        const remappedKeyframes = new Map<string, string>();
+        copy.keyframes = copy.keyframes.map((keyframe) => {
+          const id = newId('keyframe');
+          remappedKeyframes.set(keyframe.id, id);
+          return { ...keyframe, id };
+        });
+        copy.animation_blocks = (copy.animation_blocks || []).map((block) => ({
+          ...block,
+          id: newId('animation-block'),
+          generated_keyframe_ids: block.generated_keyframe_ids.map((id) => remappedKeyframes.get(id)).filter((id): id is string => Boolean(id)),
+        }));
+        return copy;
+      });
+      track.clips.push(...clones);
+    }
+    next.scenes = [...(next.scenes || []), duplicate];
+    next.duration_ms = Math.max(next.duration_ms, duplicate.start_ms + duplicate.duration_ms);
+    set((state) => ({ timeline: next, selectedSceneId: duplicate.id, playheadMs: duplicate.start_ms, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  deleteScene: async (sceneId) => {
+    const current = get().timeline;
+    const scene = current?.scenes?.find((candidate) => candidate.id === sceneId);
+    if (!current || !scene) return;
+    const end = scene.start_ms + scene.duration_ms;
+    const crosses = current.tracks.some((track) => track.clips.some((clip) => clip.start_ms < end && clip.start_ms + clip.duration_ms > scene.start_ms && !(clip.start_ms >= scene.start_ms && clip.start_ms + clip.duration_ms <= end)));
+    if (crosses) { toast.error('Move or trim clips crossing this scene boundary before deleting it'); return; }
+    const next = cloneTimeline(current);
+    next.tracks.forEach((track) => { track.clips = track.clips.filter((clip) => !(clip.start_ms >= scene.start_ms && clip.start_ms + clip.duration_ms <= end)); });
+    next.scenes = (next.scenes || []).filter((candidate) => candidate.id !== sceneId);
+    set((state) => ({ timeline: next, selectedSceneId: next.scenes?.[0]?.id || null, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  reorderScene: async (sceneId, targetIndex) => {
+    const current = get().timeline;
+    if (!current?.scenes || current.scenes.length < 2) return;
+    if (!current.scenes.some((scene) => scene.id === sceneId)) return;
+    // Work with copies: scene reorder must not mutate the current snapshot
+    // before it is recorded in the undo history.
+    const ordered = current.scenes.map((scene) => JSON.parse(JSON.stringify(scene)) as VideoTimelineScene).sort((a, b) => a.start_ms - b.start_ms);
+    const source = ordered.splice(ordered.findIndex((scene) => scene.id === sceneId), 1)[0];
+    ordered.splice(Math.max(0, Math.min(ordered.length, targetIndex)), 0, source);
+    const crosses = current.tracks.some((track) => track.clips.some((clip) => current.scenes!.some((scene) => clip.start_ms < scene.start_ms + scene.duration_ms && clip.start_ms + clip.duration_ms > scene.start_ms && !(clip.start_ms >= scene.start_ms && clip.start_ms + clip.duration_ms <= scene.start_ms + scene.duration_ms))));
+    if (crosses) { toast.error('Scene reorder is blocked by a clip crossing a scene boundary'); return; }
+    const next = cloneTimeline(current);
+    let cursor = Math.min(...ordered.map((scene) => scene.start_ms));
+    const offsets = new Map<string, { old: number; next: number }>();
+    ordered.forEach((scene) => { offsets.set(scene.id, { old: scene.start_ms, next: cursor }); scene.start_ms = cursor; cursor += scene.duration_ms; });
+    next.tracks.forEach((track) => track.clips.forEach((clip) => {
+      const owner = current.scenes!.find((scene) => clip.start_ms >= scene.start_ms && clip.start_ms + clip.duration_ms <= scene.start_ms + scene.duration_ms);
+      const offset = owner ? offsets.get(owner.id) : undefined;
+      if (offset) clip.start_ms = offset.next + (clip.start_ms - offset.old);
+    }));
+    next.scenes = ordered;
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  selectScene: (sceneId) => {
+    const scene = get().timeline?.scenes?.find((candidate) => candidate.id === sceneId);
+    set({ selectedSceneId: sceneId, ...(scene ? { playheadMs: scene.start_ms } : {}) });
+  },
+
+  updateSceneCamera: async (sceneId, patch) => {
+    const current = get().timeline;
+    if (!current?.scenes) return;
+    const next = cloneTimeline(current);
+    const scene = next.scenes?.find((candidate) => candidate.id === sceneId);
+    if (!scene) return;
+    scene.camera = { field_of_view: 50, ...(scene.camera || {}), ...patch };
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  applyCameraPreset: async (sceneId, preset) => {
+    const current = get().timeline;
+    if (!current?.scenes) return;
+    const next = cloneTimeline(current);
+    const scene = next.scenes?.find((candidate) => candidate.id === sceneId);
+    if (!scene) return;
+    const point = (property: VideoTimelineKeyframe['property'], time_ms: number, value: number, easing: VideoTimelineKeyframe['easing'] = 'ease-in-out'): VideoTimelineKeyframe => ({ id: newId('camera-keyframe'), property, time_ms, value, easing });
+    const end = scene.duration_ms;
+    const presets: Record<string, VideoTimelineKeyframe[]> = {
+      push_in: [point('z', 0, 0), point('z', end, 220)],
+      pull_out: [point('z', 0, 220), point('z', end, 0)],
+      pan_left: [point('x', 0, 180), point('x', end, -180)],
+      pan_right: [point('x', 0, -180), point('x', end, 180)],
+      crane_up: [point('y', 0, 140), point('y', end, -140)],
+      crane_down: [point('y', 0, -140), point('y', end, 140)],
+      dolly_left: [point('x', 0, 160), point('x', end, -160), point('z', 0, 0), point('z', end, 90)],
+      dolly_right: [point('x', 0, -160), point('x', end, 160), point('z', 0, 0), point('z', end, 90)],
+      orbit: [point('rotation_y', 0, -12), point('rotation_y', end, 12), point('x', 0, -120), point('x', end, 120)],
+      handheld: [point('x', 0, -6), point('x', end / 3, 8), point('x', end * 2 / 3, -4), point('x', end, 5), point('rotation_z', 0, -0.8), point('rotation_z', end / 2, 0.9), point('rotation_z', end, -0.4)],
+      rack_focus: [point('focus_depth', 0, -300), point('focus_depth', end, 300)],
+    };
+    const keyframes = presets[preset];
+    if (!keyframes) return;
+    scene.camera = { field_of_view: 50, ...(scene.camera || {}), keyframes };
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  addSceneEffect: async (sceneId, effect) => {
+    const current = get().timeline;
+    if (!current?.scenes) return;
+    const next = cloneTimeline(current);
+    const scene = next.scenes?.find((candidate) => candidate.id === sceneId);
+    if (!scene) return;
+    scene.effects = [...(scene.effects || []), { ...effect, id: newId('effect') }];
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  removeSceneEffect: async (sceneId, effectId) => {
+    const current = get().timeline;
+    if (!current?.scenes) return;
+    const next = cloneTimeline(current);
+    const scene = next.scenes?.find((candidate) => candidate.id === sceneId);
+    if (!scene) return;
+    scene.effects = (scene.effects || []).filter((effect) => effect.id !== effectId);
+    set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
+    await get().saveTimeline(next);
+  },
+
+  replaceTemplateSlot: async (slot, assetId) => {
+    const current = get().timeline;
+    if (!current || !get().assets.some((asset) => asset.id === assetId)) return;
+    const next = cloneTimeline(current);
+    let replaced = false;
+    next.tracks.forEach((track) => track.clips.forEach((clip) => { if (clip.template_slot === slot) { clip.asset_id = assetId; replaced = true; } }));
+    if (!replaced) { toast.error(`Template slot "${slot}" was not found`); return; }
     set((state) => ({ timeline: next, ...withTimelineHistory(state, current) }));
     await get().saveTimeline(next);
   },
@@ -3328,11 +3627,7 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
         assistantPlan: null,
         ...(previous ? withTimelineHistory(state, previous) : { timelineRedoStack: [] }),
       }));
-      if (plan.issues && plan.issues.length > 0) {
-        toast.info(`Edit plan applied — ${plan.issues.length} invalid operation${plan.issues.length === 1 ? '' : 's'} skipped`);
-      } else {
-        toast.success('Edit plan applied');
-      }
+      toast.success(`Edit plan applied · ${operations.length} operation${operations.length === 1 ? '' : 's'}`);
     } catch (err) {
       toast.error((err as Error).message);
     }

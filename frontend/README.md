@@ -1,54 +1,31 @@
-# React + TypeScript + Vite
+# OmniLLM-Studio frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The frontend is the React 19, TypeScript, Vite, Tailwind, and Zustand client for OmniLLM-Studio. It includes Chat, Image, Music, Video Studio, and Video Edit Studio.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Use Node.js 24 or newer.
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+```bash
+npm ci
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The development server proxies API calls to the backend. Set `OMNILLM_API_PROXY_TARGET` when the backend is not running at its default local address.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Verification
 
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
+```bash
+npm run lint
+npm run test:unit
+npm run test:video-performance
+npm run build
 ```
+
+`test:video-performance` exercises the large Motion Design fixture (2,000 clips and 16,000 keyframes) and records index, frame-computation, memory, document-size, and patch-size evidence. Browser coverage, including the Motion Design smoke test, runs from the repository root through Playwright.
+
+## Video Edit Studio
+
+Video Edit Studio is one Zustand-backed timeline editor with five modes. Motion Design adds a Design / Animate / Effects / AI / Export workflow, scenes, cameras, 2.5D preview composition, animation blocks, editable curves, cinematic scene effects, and remixable templates while retaining the normal NLE timeline and undo behavior.
+
+The authoritative product references are in [`../docs/VIDEO_STUDIO.md`](../docs/VIDEO_STUDIO.md), [`../docs/VIDEO_TIMELINE_SCHEMA.md`](../docs/VIDEO_TIMELINE_SCHEMA.md), and [`../docs/VIDEO_MOTION_DESIGN_ROADMAP_2026-08.md`](../docs/VIDEO_MOTION_DESIGN_ROADMAP_2026-08.md).

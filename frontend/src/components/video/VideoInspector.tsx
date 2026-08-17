@@ -20,11 +20,13 @@ import { KEYFRAME_EASINGS, KEYFRAME_PROPERTIES } from './effects/keyframeUtils';
 import { transitionDefinition } from './effects/transitionRegistry';
 import { ANNOTATION_PRESETS, annotationDefinition } from './effects/annotationRegistry';
 import { MOTION_PRESETS } from './effects/motionPresets';
+import { AnimationBlockPicker } from './motion/AnimationBlockPicker';
+import { AnimationBlockEditor } from './motion/AnimationBlockEditor';
 import { AnnotationBrowser, EffectBrowser, TransitionBrowser } from './EffectBrowser';
 import { describeOperationDiff } from './planDiff';
-import type { VideoTimelineClip, VideoTimelineKeyframe } from '../../types/video';
+import type { VideoMotionCurve, VideoTimelineClip, VideoTimelineKeyframe } from '../../types/video';
 
-type InspectorFocus = 'properties' | 'effects' | 'transitions' | 'audio';
+type InspectorFocus = 'properties' | 'design' | 'animate' | 'effects' | 'transitions' | 'audio';
 
 function selectedClip(): VideoTimelineClip | null {
   const { timeline, selectedClipId } = useVideoStudioStore.getState();
@@ -160,6 +162,10 @@ export function VideoInspector({
   const removeClipTransition = useVideoStudioStore((state) => state.removeClipTransition);
   const addKeyframe = useVideoStudioStore((state) => state.addKeyframe);
   const applyMotionPreset = useVideoStudioStore((state) => state.applyMotionPreset);
+  const applyAnimationBlock = useVideoStudioStore((state) => state.applyAnimationBlock);
+  const updateAnimationBlock = useVideoStudioStore((state) => state.updateAnimationBlock);
+  const removeAnimationBlock = useVideoStudioStore((state) => state.removeAnimationBlock);
+  const replaceTemplateSlot = useVideoStudioStore((state) => state.replaceTemplateSlot);
   const updateKeyframe = useVideoStudioStore((state) => state.updateKeyframe);
   const removeKeyframe = useVideoStudioStore((state) => state.removeKeyframe);
   const bringClipForward = useVideoStudioStore((state) => state.bringClipForward);
@@ -198,7 +204,7 @@ export function VideoInspector({
 
   const showAssistant = section === 'all' || section === 'assistant';
   const showProperties = section === 'all' || section === 'properties';
-  const showGeneralProperties = focus === 'properties';
+  const showGeneralProperties = focus === 'properties' || focus === 'design';
   const showAudioControls = focus === 'properties' || focus === 'audio';
   const showEffectControls = focus === 'properties' || focus === 'effects';
   const showTransitionControls = focus === 'properties' || focus === 'transitions';
@@ -210,6 +216,117 @@ export function VideoInspector({
         : focus === 'audio'
           ? 'Audio'
           : 'Inspector';
+
+  if (focus === 'animate') {
+    return (
+      <div className="min-h-0 space-y-3 overflow-y-auto p-3" data-testid="motion-animate-inspector">
+        <div>
+          <h2 className="text-sm font-semibold text-text">Animate</h2>
+          <p className="mt-1 text-[10px] text-text-muted">Apply an In, During, or Out block. Click replaces that family; Shift-click stacks.</p>
+        </div>
+        {!clip ? <p className="rounded-md border border-border bg-surface p-3 text-xs text-text-muted">Select a clip to animate.</p> : (
+          <>
+            <AnimationBlockPicker onApply={(blockKey, mode) => { void applyAnimationBlock(clip.id, blockKey, { mode }); }} />
+            <div className="space-y-1">
+              {(clip.animation_blocks || []).map((block) => (
+                <AnimationBlockEditor key={block.id} block={block} onUpdate={(patch) => { void updateAnimationBlock(clip.id, block.id, patch); }} onRemove={() => { void removeAnimationBlock(clip.id, block.id); }} />
+              ))}
+              {(clip.animation_blocks || []).length === 0 && <p className="text-[10px] text-text-muted">No animation blocks yet. Add one above or author property keyframes below.</p>}
+            </div>
+            <div className="space-y-2 rounded-lg border border-border bg-surface p-2">
+              <div>
+                <h3 className="text-xs font-medium text-text">Property keyframes</h3>
+                <p className="text-[10px] text-text-muted">Generated and manual keyframes share the same editable timeline.</p>
+              </div>
+              <select
+                value=""
+                onChange={(event) => {
+                  const property = event.target.value as VideoTimelineKeyframe['property'];
+                  if (!KEYFRAME_PROPERTIES.includes(property)) return;
+                  const currentValue = property === 'volume'
+                    ? clip.volume ?? 1
+                    : Number(clip.transform?.[property as keyof NonNullable<VideoTimelineClip['transform']>] ?? (property === 'scale' || property === 'scale_x' || property === 'scale_y' || property === 'opacity' ? 1 : 0));
+                  const timeMs = Math.max(0, Math.min(clip.duration_ms, Math.round(playheadMs - clip.start_ms)));
+                  void addKeyframe(clip.id, { property, time_ms: timeMs, value: currentValue, easing: 'ease-in-out' });
+                }}
+                className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary"
+                aria-label="Add motion keyframe at playhead"
+              >
+                <option value="">+ Add keyframe at playhead…</option>
+                {KEYFRAME_PROPERTIES.map((property) => <option key={property} value={property}>{property}</option>)}
+              </select>
+              <div className="space-y-1">
+                {clip.keyframes.map((keyframe) => {
+                  const curveType = keyframe.curve?.type || 'easing';
+                  return (
+                    <div key={keyframe.id} className="rounded-md border border-border bg-surface-alt p-2 text-[10px] text-text-muted">
+                      <div className="flex items-center gap-1">
+                        <span className="min-w-0 flex-1 truncate font-medium text-text-secondary">{keyframe.property}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={clip.duration_ms}
+                          value={keyframe.time_ms}
+                          onChange={(event) => { void updateKeyframe(clip.id, keyframe.id, { time_ms: Math.max(0, Math.min(clip.duration_ms, Math.round(Number(event.target.value)))) }); }}
+                          className="w-16 rounded border border-border bg-surface px-1 py-0.5"
+                          aria-label={`${keyframe.property} motion keyframe time milliseconds`}
+                        />
+                        <span>ms</span>
+                        <button
+                          className="rounded p-0.5 hover:text-text"
+                          onClick={() => { void removeKeyframe(clip.id, keyframe.id); }}
+                          aria-label={`Remove ${keyframe.property} motion keyframe`}
+                        ><Trash2 size={11} /></button>
+                      </div>
+                      <div className="mt-1 grid grid-cols-2 gap-1">
+                        <input
+                          type="number"
+                          step={0.05}
+                          value={keyframe.value}
+                          onChange={(event) => { void updateKeyframe(clip.id, keyframe.id, { value: Number(event.target.value) }); }}
+                          className="rounded border border-border bg-surface px-1 py-0.5"
+                          aria-label={`${keyframe.property} motion keyframe value`}
+                        />
+                        <select
+                          value={curveType}
+                          onChange={(event) => {
+                            const type = event.target.value;
+                            const curve: VideoMotionCurve | undefined = type === 'bezier'
+                              ? { type: 'bezier', x1: 0.42, y1: 0, x2: 0.58, y2: 1 }
+                              : type === 'spring'
+                                ? { type: 'spring', stiffness: 170, damping: 26, mass: 1 }
+                                : undefined;
+                            void updateKeyframe(clip.id, keyframe.id, { curve });
+                          }}
+                          className="rounded border border-border bg-surface px-1 py-0.5"
+                          aria-label={`${keyframe.property} motion curve`}
+                        >
+                          <option value="easing">Easing</option>
+                          <option value="bezier">Cubic Bezier</option>
+                          <option value="spring">Spring</option>
+                        </select>
+                      </div>
+                      {curveType === 'easing' && (
+                        <select
+                          value={keyframe.easing || 'linear'}
+                          onChange={(event) => { void updateKeyframe(clip.id, keyframe.id, { easing: event.target.value as VideoTimelineKeyframe['easing'] }); }}
+                          className="mt-1 w-full rounded border border-border bg-surface px-1 py-0.5"
+                          aria-label={`${keyframe.property} motion easing`}
+                        >
+                          {KEYFRAME_EASINGS.map((easing) => <option key={easing} value={easing}>{easing}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  );
+                })}
+                {clip.keyframes.length === 0 && <p className="text-[10px] text-text-muted">No keyframes yet.</p>}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-0 overflow-y-auto p-3">
@@ -485,6 +602,21 @@ export function VideoInspector({
           )
         ) : (
           <div className="space-y-3">
+            {showGeneralProperties && clip.template_slot && !clip.text && (
+              <Field label={`Template slot: ${clip.template_slot}`}>
+                <select
+                  value={clip.asset_id || ''}
+                  onChange={(event) => { if (event.target.value) void replaceTemplateSlot(clip.template_slot as string, event.target.value); }}
+                  className="min-h-8 w-full rounded-md border border-border bg-surface-alt px-2 text-xs text-text-secondary"
+                  aria-label={`Replace template slot ${clip.template_slot}`}
+                >
+                  <option value="">Choose project media…</option>
+                  {assets
+                    .filter((asset) => ['video', 'image', 'audio', 'music'].includes(asset.kind))
+                    .map((asset) => <option key={asset.id} value={asset.id}>{asset.file_name}</option>)}
+                </select>
+              </Field>
+            )}
             {/* Timing accepts timecode (MM:SS.cc / H:MM:SS.cc) or plain seconds. */}
             {showGeneralProperties && (
               <div className="grid grid-cols-2 gap-2">
@@ -621,6 +753,18 @@ export function VideoInspector({
                 <Slider label="Scale" min={0.25} max={3} step={0.05} value={clip.transform.scale} onChange={(value) => { void updateClipTransform(selectedClipId as string, { scale: value }); }} />
                 <Slider label="Opacity" min={0} max={1} step={0.05} value={clip.transform.opacity} onChange={(value) => { void updateClipTransform(selectedClipId as string, { opacity: value }); }} />
                 <Slider label="Rotation" min={-180} max={180} step={1} value={clip.transform.rotation} onChange={(value) => { void updateClipTransform(selectedClipId as string, { rotation: value }); }} />
+                {modeFeatures.spatialControls && (
+                  <div className="col-span-2 grid grid-cols-2 gap-2 rounded-md border border-border bg-surface-alt p-2" data-testid="spatial-transform-controls">
+                    <Slider label="Depth Z" min={-2000} max={2000} step={10} value={clip.transform.z || 0} onChange={(value) => { void updateClipTransform(clip.id, { z: value }); }} />
+                    <Slider label="Perspective" min={100} max={4000} step={25} value={clip.transform.perspective || 1200} onChange={(value) => { void updateClipTransform(clip.id, { perspective: value }); }} />
+                    <Slider label="Tilt X" min={-85} max={85} step={1} value={clip.transform.rotation_x || 0} onChange={(value) => { void updateClipTransform(clip.id, { rotation_x: value }); }} />
+                    <Slider label="Tilt Y" min={-85} max={85} step={1} value={clip.transform.rotation_y || 0} onChange={(value) => { void updateClipTransform(clip.id, { rotation_y: value }); }} />
+                    <Slider label="Scale X" min={0.1} max={4} step={0.05} value={clip.transform.scale_x || clip.transform.scale} onChange={(value) => { void updateClipTransform(clip.id, { scale_x: value }); }} />
+                    <Slider label="Scale Y" min={0.1} max={4} step={0.05} value={clip.transform.scale_y || clip.transform.scale} onChange={(value) => { void updateClipTransform(clip.id, { scale_y: value }); }} />
+                    <Slider label="Anchor X" min={-1000} max={1000} step={5} value={clip.transform.anchor_x || 0} onChange={(value) => { void updateClipTransform(clip.id, { anchor_x: value }); }} />
+                    <Slider label="Anchor Y" min={-1000} max={1000} step={5} value={clip.transform.anchor_y || 0} onChange={(value) => { void updateClipTransform(clip.id, { anchor_y: value }); }} />
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-1">
                   {(() => {
                     const asset = clip.asset_id ? assets.find((item) => item.id === clip.asset_id) : undefined;
@@ -960,7 +1104,7 @@ export function VideoInspector({
                       key={preset.key}
                       onClick={() => { void applyMotionPreset(selectedClipId as string, preset.key); }}
                       className="rounded-md border border-border bg-surface-alt px-2 py-1 text-[10px] text-text-muted hover:text-text"
-                      title={`${preset.description} — generates editable keyframes (scale animation is preview-only at export)`}
+                      title={`${preset.description} — generates editable keyframes with preview/export parity`}
                     >
                       {preset.label}
                     </button>
@@ -975,7 +1119,7 @@ export function VideoInspector({
                   const currentValue =
                     property === 'volume'
                       ? clip.volume ?? 1
-                      : clip.transform?.[property] ?? (property === 'scale' || property === 'opacity' ? 1 : 0);
+                      : Number(clip.transform?.[property as keyof NonNullable<VideoTimelineClip['transform']>] ?? (property === 'scale' || property === 'opacity' ? 1 : 0));
                   // Keyframe times are clip-relative (measured from clip start).
                   const timeMs = Math.max(0, Math.min(clip.duration_ms, Math.round(playheadMs - clip.start_ms)));
                   void addKeyframe(selectedClipId as string, { property, time_ms: timeMs, value: currentValue, easing: 'ease-in-out' });

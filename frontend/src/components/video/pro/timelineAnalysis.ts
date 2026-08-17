@@ -29,6 +29,9 @@ export interface TimelineMetrics {
   keyframes: number;
   effects: number;
   transitions: number;
+  scenes: number;
+  animation_blocks: number;
+  camera_keyframes: number;
   cursor_events: number;
   duration_ms: number;
   max_visual_overlap: number;
@@ -124,6 +127,9 @@ export function analyzeTimeline(
         keyframes: 0,
         effects: 0,
         transitions: 0,
+        scenes: 0,
+        animation_blocks: 0,
+        camera_keyframes: 0,
         cursor_events: 0,
         duration_ms: 0,
         max_visual_overlap: 0,
@@ -210,6 +216,21 @@ export function analyzeTimeline(
       });
     }
 
+    if (clip.template_slot && !clip.asset_id && !clip.text) {
+      issues.push({
+        id: issueId('missing-template-slot', index), severity: 'error', category: 'media',
+        title: `Template slot “${clip.template_slot}” is empty`,
+        detail: 'Choose project media for this persisted template slot before export.', clip_id: clip.id, track_id: track.id, time_ms: clip.start_ms, fix: 'select_clip',
+      });
+    }
+
+    const transform = clip.transform || { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
+    const usesSpatial = Boolean(transform.z || transform.rotation_x || transform.rotation_y || transform.scale_x || transform.scale_y || transform.perspective || clip.keyframes.some((keyframe) => ['z', 'rotation_x', 'rotation_y', 'scale_x', 'scale_y'].includes(keyframe.property)));
+    const spatialSupport = rendererFeature(capabilities, 'spatial_3d_transform');
+    if (usesSpatial && (!spatialSupport?.supported || spatialSupport.partial)) {
+      issues.push({ id: issueId('spatial-export', index), severity: 'warning', category: 'export', title: '2.5D export is partial', detail: spatialSupport?.notes || 'Depth and tilt may differ at export.', clip_id: clip.id, track_id: track.id, time_ms: clip.start_ms });
+    }
+
     if ((clip.volume ?? 1) > 1) {
       issues.push({
         id: issueId('gain', index),
@@ -263,13 +284,24 @@ export function analyzeTimeline(
         id: issueId('keyframe-export', index),
         severity: 'warning',
         category: 'export',
-        title: 'Some keyframes are preview-only',
-        detail: keyframeSupport.notes || 'Scale or opacity animation may not match the editor preview at export.',
+        title: 'Keyframes use sampled export segments',
+        detail: keyframeSupport.notes || 'Animated properties are approximated with deterministic render segments.',
         clip_id: clip.id,
         track_id: track.id,
         time_ms: clip.start_ms,
       });
     }
+  });
+
+  (document.scenes || []).forEach((scene, index) => {
+    if (scene.camera) {
+      const support = rendererFeature(capabilities, 'camera_motion');
+      if (!support?.supported || support.partial) issues.push({ id: issueId('camera-export', index), severity: 'warning', category: 'export', title: 'Camera export is partial', detail: support?.notes || 'Camera motion may differ at export.', time_ms: scene.start_ms });
+    }
+    (scene.effects || []).filter((effect) => effect.enabled).forEach((effect, effectIndex) => {
+      const support = rendererFeature(capabilities, effect.type);
+      if (!support?.supported || support.partial) issues.push({ id: issueId('scene-effect-export', index, String(effectIndex)), severity: 'warning', category: 'export', title: `${effect.type.replaceAll('_', ' ')} export is limited`, detail: support?.notes || 'This scene effect is preview-only or approximated.', time_ms: scene.start_ms });
+    });
   });
 
   const duplicateGroups = new Map<string, VideoAsset[]>();
@@ -307,6 +339,9 @@ export function analyzeTimeline(
     keyframes: clips.reduce((sum, { clip }) => sum + (clip.keyframes?.length || 0), 0),
     effects: clips.reduce((sum, { clip }) => sum + (clip.effects?.length || 0), 0),
     transitions: clips.reduce((sum, { clip }) => sum + (clip.transitions?.length || 0), 0),
+    scenes: document.scenes?.length || 0,
+    animation_blocks: clips.reduce((sum, { clip }) => sum + (clip.animation_blocks?.length || 0), 0),
+    camera_keyframes: (document.scenes || []).reduce((sum, scene) => sum + (scene.camera?.keyframes?.length || 0), 0),
     cursor_events: clips.reduce((sum, { clip }) => sum + (clip.cursor?.events?.length || 0), 0),
     duration_ms: document.duration_ms,
     max_visual_overlap: maxOverlap(visualEntries),
@@ -321,6 +356,8 @@ export function analyzeTimeline(
       + metrics.keyframes * 0.2
       + metrics.effects * 2
       + metrics.transitions * 1.5
+      + metrics.animation_blocks * 0.5
+      + metrics.camera_keyframes * 0.25
       + metrics.cursor_events * 0.05
       + Math.max(0, metrics.max_visual_overlap - 2) * 10
       + Math.max(0, metrics.max_audio_overlap - 4) * 5,

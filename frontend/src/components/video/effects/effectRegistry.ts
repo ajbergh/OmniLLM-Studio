@@ -16,12 +16,13 @@ export interface EffectParamMeta {
   defaultValue: number;
 }
 
-export type EffectCategory = 'color' | 'blur' | 'stylize' | 'keying';
+export type EffectCategory = 'color' | 'blur' | 'stylize' | 'motion' | 'keying';
 
 export const EFFECT_CATEGORIES: Array<{ key: EffectCategory; label: string }> = [
   { key: 'color', label: 'Color' },
   { key: 'blur', label: 'Blur' },
   { key: 'stylize', label: 'Stylize' },
+  { key: 'motion', label: 'Motion' },
   { key: 'keying', label: 'Keying' },
 ];
 
@@ -31,6 +32,8 @@ export interface EffectDefinition {
   category: EffectCategory;
   /** Whether the FFmpeg renderer applies this effect at export today. */
   exportSupported: boolean;
+  /** Backend renderer feature used for runtime support/partial badges. */
+  exportFeature?: string;
   params: EffectParamMeta[];
   /** CSS filter fragment for the preview canvas, or null when not previewable. */
   previewFilter: (params: Record<string, unknown>) => string | null;
@@ -134,6 +137,15 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
     ],
     previewFilter: () => null,
   },
+  { type: 'film_grain', label: 'Film grain', category: 'stylize', exportSupported: true, exportFeature: 'film_grain', params: [amountParam('Amount', 0, 40, 1, 8)], previewFilter: (params) => `contrast(${1 + numberParam(params, 'amount', 8) / 200})` },
+  { type: 'bloom', label: 'Bloom', category: 'stylize', exportSupported: true, exportFeature: 'bloom', params: [amountParam('Amount', 0, 1, 0.05, 0.25)], previewFilter: (params) => `brightness(${1 + numberParam(params, 'amount', 0.25) * 0.3}) saturate(${1 + numberParam(params, 'amount', 0.25) * 0.2})` },
+  { type: 'color_grade', label: 'Color grade', category: 'color', exportSupported: true, exportFeature: 'color_grade', params: [amountParam('Intensity', 0.5, 2, 0.05, 1.08)], previewFilter: (params) => `contrast(${numberParam(params, 'amount', 1.08)}) saturate(${numberParam(params, 'amount', 1.08)})` },
+  { type: 'edge_fade', label: 'Edge fade', category: 'stylize', exportSupported: true, exportFeature: 'edge_fade', params: [amountParam('Strength', 0, 1, 0.05, 0.35)], previewFilter: () => null },
+  { type: 'rgb_split', label: 'RGB split', category: 'stylize', exportSupported: true, exportFeature: 'rgb_split', params: [amountParam('Offset', 0, 20, 1, 3)], previewFilter: () => null },
+  { type: 'ghost_trail', label: 'Ghost trail', category: 'motion', exportSupported: true, exportFeature: 'ghost_trail', params: [amountParam('Frames', 2, 5, 1, 3)], previewFilter: () => null },
+  { type: 'motion_blur', label: 'Motion blur', category: 'motion', exportSupported: true, exportFeature: 'motion_blur', params: [amountParam('Amount', 0, 1, 0.05, 0.5)], previewFilter: (params) => `blur(${numberParam(params, 'amount', 0.5)}px)` },
+  { type: 'depth_of_field', label: 'Depth of field', category: 'blur', exportSupported: true, exportFeature: 'depth_of_field', params: [amountParam('Blur', 0, 12, 0.5, 2)], previewFilter: (params) => `blur(${numberParam(params, 'amount', 2)}px)` },
+  { type: 'rack_focus', label: 'Rack focus', category: 'blur', exportSupported: true, exportFeature: 'rack_focus', params: [amountParam('Blur', 0, 12, 0.5, 2)], previewFilter: (params) => `blur(${numberParam(params, 'amount', 2)}px)` },
 ];
 
 export function effectDefinition(type: string): EffectDefinition | undefined {

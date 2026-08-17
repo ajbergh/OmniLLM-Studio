@@ -196,6 +196,15 @@ export function VideoPreviewCanvas() {
   const canvasWidth = timeline?.canvas.width || 1920;
   const canvasHeight = timeline?.canvas.height || 1080;
   const stageScale = stageSize.width > 0 ? stageSize.width / canvasWidth : 0;
+  const activeScene = timeline?.scenes?.find((scene) => playheadMs >= scene.start_ms && playheadMs < scene.start_ms + scene.duration_ms);
+  const sceneTimeMs = activeScene ? playheadMs - activeScene.start_ms : 0;
+  const camera = { x: 0, y: 0, z: 0, rotation_x: 0, rotation_y: 0, rotation_z: 0, field_of_view: 50, focus_depth: 0, ...(activeScene?.camera || {}) };
+  if (activeScene?.camera?.keyframes) {
+    for (const property of ['x', 'y', 'z', 'rotation_x', 'rotation_y', 'rotation_z', 'field_of_view', 'focus_depth'] as const) {
+      const sampled = sampleKeyframes(activeScene.camera.keyframes, property, sceneTimeMs);
+      if (sampled !== null) camera[property] = sampled;
+    }
+  }
 
   const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
   const activeIndexed = queryActiveClips(intervalIndex, playheadMs)
@@ -611,7 +620,7 @@ export function VideoPreviewCanvas() {
     // Keyframes (clip-relative time) override static transform values; an
     // in-flight canvas drag overrides both.
     const clipTimeMs = playheadMs - clip.start_ms;
-    for (const property of ['x', 'y', 'scale', 'rotation', 'opacity'] as const) {
+    for (const property of ['x', 'y', 'z', 'scale', 'scale_x', 'scale_y', 'rotation', 'rotation_x', 'rotation_y', 'rotation_z', 'opacity'] as const) {
       const sampled = sampleKeyframes(clip.keyframes, property, clipTimeMs);
       if (sampled !== null) transform[property] = sampled;
     }
@@ -641,7 +650,9 @@ export function VideoPreviewCanvas() {
       width: isMedia ? stageSize.width : undefined,
       height: isMedia ? stageSize.height : undefined,
       maxWidth: stageSize.width,
-      transform: `translate(-50%, -50%) translate(${transform.x * stageScale}px, ${transform.y * stageScale}px) scale(${transform.scale}) rotate(${inCropEdit ? 0 : transform.rotation}deg)`,
+      transformOrigin: `${50 + ((transform.anchor_x || 0) / canvasWidth) * 100}% ${50 + ((transform.anchor_y || 0) / canvasHeight) * 100}%`,
+      transformStyle: 'preserve-3d',
+      transform: `translate(-50%, -50%) translate3d(${(transform.x - camera.x) * stageScale}px, ${(transform.y - camera.y) * stageScale}px, ${((transform.z || 0) - camera.z) * stageScale}px) rotateX(${inCropEdit ? 0 : (transform.rotation_x || 0) - camera.rotation_x}deg) rotateY(${inCropEdit ? 0 : (transform.rotation_y || 0) - camera.rotation_y}deg) rotateZ(${inCropEdit ? 0 : (transform.rotation_z ?? transform.rotation) - camera.rotation_z}deg) scale3d(${transform.scale_x || transform.scale}, ${transform.scale_y || transform.scale}, 1)`,
       opacity,
       filter: composePreviewFilter(clip.effects),
     };
@@ -990,6 +1001,10 @@ export function VideoPreviewCanvas() {
             width: stageSize.width || undefined,
             height: stageSize.height || undefined,
             background: timeline?.canvas.background || '#000000',
+            perspective: `${Math.max(100, activeScene?.camera ? (canvasHeight / (2 * Math.tan(Math.max(1, Math.min(179, camera.field_of_view)) * Math.PI / 360))) * stageScale : 1200 * stageScale)}px`,
+            perspectiveOrigin: '50% 50%',
+            transformStyle: 'preserve-3d',
+            filter: composePreviewFilter(activeScene?.effects),
           }}
           onPointerDown={(event) => {
             // Clicking empty stage space deselects.

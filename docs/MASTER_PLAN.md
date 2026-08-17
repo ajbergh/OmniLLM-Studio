@@ -61,13 +61,13 @@
 
 ### Video export fidelity and operational validation
 
-- **Status:** NEEDS VALIDATION
-- **Implemented:** FFmpeg rendering, capability reporting, provider-backed transcription, Windows capture, media probes/artifacts, interval indexing, clip virtualization, decoder budgeting, poster substitution, and patch-based undo/redo.
-- **Remaining:** Add representative large-project browser frame-time budgets plus React commit/memory artifacts in CI. Preserve and prioritize conservative renderer gaps: true two-clip crossfades, rounded/geometric annotations, drop shadow/background blur, continuous-curve fidelity, track-solo export, and click-audio synthesis. Validate real configured video providers separately; capability metadata must remain conservative.
-- **Files:** `backend/internal/video/renderer.go`, `backend/internal/video/renderer_capabilities.go`, `frontend/src/components/video/`, `tests/video-editor-*.spec.ts`.
+- **Status:** IMPLEMENTED / ONGOING PROVIDER VALIDATION
+- **Implemented:** FFmpeg rendering and capability reporting; provider-backed transcription; Windows capture; media probes/artifacts; interval indexing, clip virtualization, decoder budgeting, and patch-based undo/redo; large-project CI evidence; semantic animation blocks; deterministic Bezier/spring curve expansion; persisted track-solo export; scenes, camera/parallax, and cinematic scene effects; and governed agent diagnostic render tools.
+- **Remaining:** Keep conservative capability reporting for true two-clip crossfades, rounded/geometric annotations, drop shadow/background blur, click-audio synthesis, and partial 3D tilt fidelity. Validate configured video providers with real credentials in deployment-specific smoke runs. Phase 7 review/share remains deliberately optional and inactive.
+- **Files:** `backend/internal/video/`, `backend/internal/tools/video_motion_tools.go`, `frontend/src/components/video/`, `tests/video-motion-design.smoke.spec.ts`.
 - **Dependency/risk:** Renderer capabilities are a model/UI contract. Do not mark a feature supported from preview behavior alone; golden-media coverage is required.
-- **Next action:** Add a large-project performance fixture and CI budget first, then select one renderer-capability gap with golden-media tests.
-- **Derived from:** `VIDEO_RENDERER_RELIABILITY_TRANSCRIPTION_SCALABILITY_2026-07-20.md`, archived `VIDEO_EDIT_STUDIO_COMPLETION_2026-07-20.md`.
+- **Next action:** Revalidate provider integrations when credentials or upstream APIs change, and only promote the remaining partial renderer features with matching golden-media coverage.
+- **Derived from:** `VIDEO_MOTION_DESIGN_ROADMAP_2026-08.md`, `VIDEO_RENDERER_RELIABILITY_TRANSCRIPTION_SCALABILITY_2026-07-20.md`, archived `VIDEO_EDIT_STUDIO_COMPLETION_2026-07-20.md`.
 
 ### URL-context quality gaps
 

@@ -60,6 +60,15 @@ const (
 	EffectTypeChromaKey      = "chroma_key"
 	EffectTypeSharpen        = "sharpen"
 	EffectTypeVignette       = "vignette"
+	EffectTypeFilmGrain      = "film_grain"
+	EffectTypeBloom          = "bloom"
+	EffectTypeColorGrade     = "color_grade"
+	EffectTypeEdgeFade       = "edge_fade"
+	EffectTypeRGBSplit       = "rgb_split"
+	EffectTypeGhostTrail     = "ghost_trail"
+	EffectTypeMotionBlur     = "motion_blur"
+	EffectTypeDepthOfField   = "depth_of_field"
+	EffectTypeRackFocus      = "rack_focus"
 )
 
 const (
@@ -123,6 +132,15 @@ var knownEffectTypes = map[string]bool{
 	EffectTypeChromaKey:      true,
 	EffectTypeSharpen:        true,
 	EffectTypeVignette:       true,
+	EffectTypeFilmGrain:      true,
+	EffectTypeBloom:          true,
+	EffectTypeColorGrade:     true,
+	EffectTypeEdgeFade:       true,
+	EffectTypeRGBSplit:       true,
+	EffectTypeGhostTrail:     true,
+	EffectTypeMotionBlur:     true,
+	EffectTypeDepthOfField:   true,
+	EffectTypeRackFocus:      true,
 }
 
 var knownTransitionTypes = map[string]bool{
@@ -135,12 +153,29 @@ var knownTransitionTypes = map[string]bool{
 }
 
 var knownKeyframeProperties = map[string]bool{
-	"x":        true,
-	"y":        true,
-	"scale":    true,
-	"rotation": true,
-	"opacity":  true,
-	"volume":   true,
+	"x":          true,
+	"y":          true,
+	"scale":      true,
+	"rotation":   true,
+	"opacity":    true,
+	"volume":     true,
+	"z":          true,
+	"rotation_x": true,
+	"rotation_y": true,
+	"rotation_z": true,
+	"scale_x":    true,
+	"scale_y":    true,
+}
+
+var knownCameraKeyframeProperties = map[string]bool{
+	"x": true, "y": true, "z": true,
+	"rotation_x": true, "rotation_y": true, "rotation_z": true,
+	"field_of_view": true, "focus_depth": true,
+}
+
+var knownMotionCurveTypes = map[string]bool{
+	"linear": true, "ease-in": true, "ease-out": true,
+	"ease-in-out": true, "step": true, "bezier": true, "spring": true,
 }
 
 var knownKeyframeEasings = map[string]bool{
@@ -162,6 +197,7 @@ type TimelineDocument struct {
 	DurationMS int64            `json:"duration_ms"`
 	Tracks     []TimelineTrack  `json:"tracks"`
 	Markers    []TimelineMarker `json:"markers"`
+	Scenes     []TimelineScene  `json:"scenes,omitempty"`
 	Metadata   map[string]any   `json:"metadata"`
 }
 
@@ -178,6 +214,7 @@ type TimelineTrack struct {
 	Name    string         `json:"name"`
 	Locked  bool           `json:"locked"`
 	Muted   bool           `json:"muted"`
+	Solo    bool           `json:"solo,omitempty"`
 	Visible bool           `json:"visible"`
 	Height  *int           `json:"height,omitempty"`
 	Clips   []TimelineClip `json:"clips"`
@@ -193,21 +230,74 @@ type TimelineClip struct {
 	PlaybackRate float64 `json:"playback_rate,omitempty"`
 	ZIndex       *int    `json:"z_index,omitempty"`
 	GroupID      string  `json:"group_id,omitempty"`
+	TemplateSlot string  `json:"template_slot,omitempty"`
 	// Muted silences this clip's audio contribution without touching Volume.
 	Muted bool `json:"muted,omitempty"`
 	// AudioOnly suppresses a clip's visual output so a video asset can act as
 	// a detached audio clip.
-	AudioOnly   bool                 `json:"audio_only,omitempty"`
-	Transform   map[string]any       `json:"transform,omitempty"`
-	Volume      *float64             `json:"volume,omitempty"`
-	FadeInMS    int64                `json:"fade_in_ms,omitempty"`
-	FadeOutMS   int64                `json:"fade_out_ms,omitempty"`
-	Text        *TimelineText        `json:"text,omitempty"`
-	Shape       *TimelineShape       `json:"shape,omitempty"`
-	Cursor      *TimelineCursor      `json:"cursor,omitempty"`
-	Effects     []TimelineEffect     `json:"effects"`
-	Transitions []TimelineTransition `json:"transitions,omitempty"`
-	Keyframes   []TimelineKeyframe   `json:"keyframes"`
+	AudioOnly       bool                     `json:"audio_only,omitempty"`
+	Transform       map[string]any           `json:"transform,omitempty"`
+	Volume          *float64                 `json:"volume,omitempty"`
+	FadeInMS        int64                    `json:"fade_in_ms,omitempty"`
+	FadeOutMS       int64                    `json:"fade_out_ms,omitempty"`
+	Text            *TimelineText            `json:"text,omitempty"`
+	Shape           *TimelineShape           `json:"shape,omitempty"`
+	Cursor          *TimelineCursor          `json:"cursor,omitempty"`
+	Effects         []TimelineEffect         `json:"effects"`
+	Transitions     []TimelineTransition     `json:"transitions,omitempty"`
+	Keyframes       []TimelineKeyframe       `json:"keyframes"`
+	AnimationBlocks []TimelineAnimationBlock `json:"animation_blocks,omitempty"`
+	Metadata        map[string]any           `json:"metadata,omitempty"`
+}
+
+// TimelineAnimationBlock records the semantic source of generated keyframes.
+// Keyframes remain the rendering truth; this metadata makes a block safe to
+// re-edit or replace without deleting unrelated manual keyframes.
+type TimelineAnimationBlock struct {
+	ID                   string         `json:"id"`
+	BlockKey             string         `json:"block_key"`
+	Family               string         `json:"family"`
+	StartMS              int64          `json:"start_ms"`
+	DurationMS           int64          `json:"duration_ms"`
+	DelayMS              int64          `json:"delay_ms,omitempty"`
+	Params               map[string]any `json:"params,omitempty"`
+	GeneratedKeyframeIDs []string       `json:"generated_keyframe_ids"`
+}
+
+// MotionCurve is an additive, forward-compatible sibling to Easing. Curve
+// wins when present; Easing remains a nearest-equivalent fallback for older
+// builds. Springs are segment-local and reset velocity at each keyframe.
+type MotionCurve struct {
+	Type      string  `json:"type"`
+	X1        float64 `json:"x1,omitempty"`
+	Y1        float64 `json:"y1,omitempty"`
+	X2        float64 `json:"x2,omitempty"`
+	Y2        float64 `json:"y2,omitempty"`
+	Stiffness float64 `json:"stiffness,omitempty"`
+	Damping   float64 `json:"damping,omitempty"`
+	Mass      float64 `json:"mass,omitempty"`
+}
+
+type TimelineScene struct {
+	ID         string           `json:"id"`
+	Name       string           `json:"name"`
+	StartMS    int64            `json:"start_ms"`
+	DurationMS int64            `json:"duration_ms"`
+	Camera     *TimelineCamera  `json:"camera,omitempty"`
+	Effects    []TimelineEffect `json:"effects,omitempty"`
+	Metadata   map[string]any   `json:"metadata,omitempty"`
+}
+
+type TimelineCamera struct {
+	X           float64            `json:"x,omitempty"`
+	Y           float64            `json:"y,omitempty"`
+	Z           float64            `json:"z,omitempty"`
+	RotationX   float64            `json:"rotation_x,omitempty"`
+	RotationY   float64            `json:"rotation_y,omitempty"`
+	RotationZ   float64            `json:"rotation_z,omitempty"`
+	FieldOfView float64            `json:"field_of_view,omitempty"`
+	FocusDepth  float64            `json:"focus_depth,omitempty"`
+	Keyframes   []TimelineKeyframe `json:"keyframes,omitempty"`
 }
 
 // TimelineShape is a parameterized callout/annotation box. Dimensions are in
@@ -228,8 +318,7 @@ type TimelineShape struct {
 }
 
 // TimelineCursor carries cursor metadata captured with screen recordings so
-// cursor effects can layer onto footage. Persisted but preview-only today —
-// the renderer reports it as unsupported until export support lands.
+// cursor effects can layer onto footage in preview and sampled export.
 type TimelineCursor struct {
 	Visible    bool                  `json:"visible,omitempty"`
 	Scale      float64               `json:"scale,omitempty"`
@@ -286,11 +375,12 @@ type TimelineTransition struct {
 }
 
 type TimelineKeyframe struct {
-	ID       string  `json:"id"`
-	Property string  `json:"property"`
-	TimeMS   int64   `json:"time_ms"`
-	Value    float64 `json:"value"`
-	Easing   string  `json:"easing,omitempty"`
+	ID       string       `json:"id"`
+	Property string       `json:"property"`
+	TimeMS   int64        `json:"time_ms"`
+	Value    float64      `json:"value"`
+	Easing   string       `json:"easing,omitempty"`
+	Curve    *MotionCurve `json:"curve,omitempty"`
 }
 
 // clipPlaybackRate returns the normalized constant source playback rate. A
@@ -515,6 +605,108 @@ func UpgradeTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 	return doc, nil
 }
 
+func normalizeMotionCurve(curve *MotionCurve) (*MotionCurve, error) {
+	if curve == nil {
+		return nil, nil
+	}
+	normalized := *curve
+	normalized.Type = strings.ToLower(strings.TrimSpace(normalized.Type))
+	if !knownMotionCurveTypes[normalized.Type] {
+		return nil, fmt.Errorf("unsupported motion curve type %q", normalized.Type)
+	}
+	values := []float64{normalized.X1, normalized.Y1, normalized.X2, normalized.Y2, normalized.Stiffness, normalized.Damping, normalized.Mass}
+	for _, value := range values {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil, fmt.Errorf("motion curve parameters must be finite")
+		}
+	}
+	switch normalized.Type {
+	case "bezier":
+		normalized.X1 = clampFloat(normalized.X1, 0, 1)
+		normalized.X2 = clampFloat(normalized.X2, 0, 1)
+		normalized.Y1 = clampFloat(normalized.Y1, -4, 4)
+		normalized.Y2 = clampFloat(normalized.Y2, -4, 4)
+	case "spring":
+		if normalized.Stiffness <= 0 {
+			normalized.Stiffness = 170
+		}
+		if normalized.Damping <= 0 {
+			normalized.Damping = 26
+		}
+		if normalized.Mass <= 0 {
+			normalized.Mass = 1
+		}
+		normalized.Stiffness = clampFloat(normalized.Stiffness, 1, 1000)
+		normalized.Damping = clampFloat(normalized.Damping, 0.1, 200)
+		normalized.Mass = clampFloat(normalized.Mass, 0.05, 20)
+	}
+	return &normalized, nil
+}
+
+func normalizeTimelineKeyframe(keyframe *TimelineKeyframe, properties map[string]bool) error {
+	keyframe.Property = strings.ToLower(strings.TrimSpace(keyframe.Property))
+	if !properties[keyframe.Property] {
+		return fmt.Errorf("unsupported keyframe property %q", keyframe.Property)
+	}
+	if keyframe.TimeMS < 0 {
+		return fmt.Errorf("keyframe %q time_ms cannot be negative", keyframe.ID)
+	}
+	if math.IsNaN(keyframe.Value) || math.IsInf(keyframe.Value, 0) {
+		return fmt.Errorf("keyframe %q value must be finite", keyframe.ID)
+	}
+	curve, err := normalizeMotionCurve(keyframe.Curve)
+	if err != nil {
+		return fmt.Errorf("keyframe %q: %w", keyframe.ID, err)
+	}
+	keyframe.Curve = curve
+	keyframe.Easing = strings.ToLower(strings.TrimSpace(keyframe.Easing))
+	if keyframe.Easing != "" && !knownKeyframeEasings[keyframe.Easing] {
+		keyframe.Easing = "linear"
+	}
+	if keyframe.Curve != nil && keyframe.Easing == "" {
+		switch keyframe.Curve.Type {
+		case "spring":
+			keyframe.Easing = "ease-out"
+		case "bezier":
+			keyframe.Easing = "ease-in-out"
+		default:
+			keyframe.Easing = keyframe.Curve.Type
+		}
+	}
+	return nil
+}
+
+func clipKeyframeProperties(clip TimelineClip) map[string]bool {
+	properties := make(map[string]bool, len(knownKeyframeProperties)+len(clip.Effects)*2)
+	for key, value := range knownKeyframeProperties {
+		properties[key] = value
+	}
+	for _, effect := range clip.Effects {
+		properties["effect."+strings.ToLower(strings.TrimSpace(effect.ID))+".amount"] = true
+		properties["effect."+strings.ToLower(strings.TrimSpace(effect.Type))+".amount"] = true
+	}
+	return properties
+}
+
+func normalizeTimelineEffect(effect *TimelineEffect, owner string) error {
+	if effect.ID == "" {
+		effect.ID = "effect-" + uuid.New().String()
+	}
+	effect.Type = strings.ToLower(strings.TrimSpace(effect.Type))
+	if !knownEffectTypes[effect.Type] {
+		return fmt.Errorf("%s has unsupported effect type %q", owner, effect.Type)
+	}
+	if effect.Params == nil {
+		effect.Params = map[string]any{}
+	}
+	for key, raw := range effect.Params {
+		if value, ok := raw.(float64); ok && (math.IsNaN(value) || math.IsInf(value, 0)) {
+			return fmt.Errorf("%s effect %q parameter %q must be finite", owner, effect.ID, key)
+		}
+	}
+	return nil
+}
+
 // ValidateTimelineDocument upgrades, defaults, and canonicalizes a timeline
 // before persistence or rendering. In particular, duration_ms is output time
 // while trim points are source time, so it normalizes each trim_out_ms from
@@ -561,6 +753,80 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 	sort.SliceStable(doc.Markers, func(i, j int) bool {
 		return doc.Markers[i].TimeMS < doc.Markers[j].TimeMS
 	})
+	if doc.Scenes != nil {
+		sceneIDs := map[string]bool{}
+		for si := range doc.Scenes {
+			scene := &doc.Scenes[si]
+			scene.ID = strings.TrimSpace(scene.ID)
+			if scene.ID == "" {
+				scene.ID = "scene-" + uuid.New().String()
+			}
+			if sceneIDs[scene.ID] {
+				return TimelineDocument{}, fmt.Errorf("duplicate scene id %q", scene.ID)
+			}
+			sceneIDs[scene.ID] = true
+			if scene.StartMS < 0 {
+				return TimelineDocument{}, fmt.Errorf("scene %q start_ms cannot be negative", scene.ID)
+			}
+			if scene.DurationMS <= 0 {
+				return TimelineDocument{}, fmt.Errorf("scene %q duration_ms must be greater than zero", scene.ID)
+			}
+			if strings.TrimSpace(scene.Name) == "" {
+				scene.Name = fmt.Sprintf("Scene %d", si+1)
+			}
+			if scene.Metadata == nil {
+				scene.Metadata = map[string]any{}
+			}
+			effectIDs := map[string]bool{}
+			for ei := range scene.Effects {
+				effect := &scene.Effects[ei]
+				if err := normalizeTimelineEffect(effect, fmt.Sprintf("scene %q", scene.ID)); err != nil {
+					return TimelineDocument{}, err
+				}
+				if effectIDs[effect.ID] {
+					return TimelineDocument{}, fmt.Errorf("scene %q has duplicate effect id %q", scene.ID, effect.ID)
+				}
+				effectIDs[effect.ID] = true
+			}
+			if scene.Camera != nil {
+				camera := scene.Camera
+				if camera.FieldOfView <= 0 {
+					camera.FieldOfView = 50
+				}
+				camera.FieldOfView = clampFloat(camera.FieldOfView, 1, 179)
+				cameraValues := []float64{camera.X, camera.Y, camera.Z, camera.RotationX, camera.RotationY, camera.RotationZ, camera.FieldOfView, camera.FocusDepth}
+				for _, value := range cameraValues {
+					if math.IsNaN(value) || math.IsInf(value, 0) {
+						return TimelineDocument{}, fmt.Errorf("scene %q camera values must be finite", scene.ID)
+					}
+				}
+				cameraKeyframeIDs := map[string]bool{}
+				for ki := range camera.Keyframes {
+					keyframe := &camera.Keyframes[ki]
+					if keyframe.ID == "" {
+						keyframe.ID = "camera-keyframe-" + uuid.New().String()
+					}
+					if cameraKeyframeIDs[keyframe.ID] {
+						return TimelineDocument{}, fmt.Errorf("scene %q camera has duplicate keyframe id %q", scene.ID, keyframe.ID)
+					}
+					cameraKeyframeIDs[keyframe.ID] = true
+					if err := normalizeTimelineKeyframe(keyframe, knownCameraKeyframeProperties); err != nil {
+						return TimelineDocument{}, fmt.Errorf("scene %q camera: %w", scene.ID, err)
+					}
+					if keyframe.TimeMS > scene.DurationMS {
+						return TimelineDocument{}, fmt.Errorf("scene %q camera keyframe %q exceeds scene duration", scene.ID, keyframe.ID)
+					}
+				}
+			}
+		}
+		sort.SliceStable(doc.Scenes, func(i, j int) bool { return doc.Scenes[i].StartMS < doc.Scenes[j].StartMS })
+		for i := 1; i < len(doc.Scenes); i++ {
+			previous := doc.Scenes[i-1]
+			if previous.StartMS+previous.DurationMS > doc.Scenes[i].StartMS {
+				return TimelineDocument{}, fmt.Errorf("scenes %q and %q overlap", previous.ID, doc.Scenes[i].ID)
+			}
+		}
+	}
 	if doc.Tracks == nil {
 		doc.Tracks = []TimelineTrack{}
 	}
@@ -630,6 +896,10 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 			// rendering path consumes the same source window.
 			clip.TrimOutMS = clip.TrimInMS + sourceDurationFor(*clip, clip.DurationMS)
 			clip.GroupID = strings.TrimSpace(clip.GroupID)
+			clip.TemplateSlot = strings.TrimSpace(clip.TemplateSlot)
+			if clip.Metadata == nil {
+				clip.Metadata = map[string]any{}
+			}
 			if clip.Transform == nil && track.Type != TrackTypeAudio && track.Type != TrackTypeMusic {
 				clip.Transform = defaultTransform()
 			}
@@ -695,12 +965,8 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 					return TimelineDocument{}, fmt.Errorf("clip %q has duplicate effect id %q", clip.ID, effect.ID)
 				}
 				effectIDs[effect.ID] = true
-				effect.Type = strings.ToLower(strings.TrimSpace(effect.Type))
-				if !knownEffectTypes[effect.Type] {
-					return TimelineDocument{}, fmt.Errorf("clip %q has unsupported effect type %q", clip.ID, effect.Type)
-				}
-				if effect.Params == nil {
-					effect.Params = map[string]any{}
+				if err := normalizeTimelineEffect(effect, fmt.Sprintf("clip %q", clip.ID)); err != nil {
+					return TimelineDocument{}, err
 				}
 			}
 			transitionIDs := map[string]bool{}
@@ -731,16 +997,38 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 					return TimelineDocument{}, fmt.Errorf("clip %q has duplicate keyframe id %q", clip.ID, keyframe.ID)
 				}
 				keyframeIDs[keyframe.ID] = true
-				keyframe.Property = strings.ToLower(strings.TrimSpace(keyframe.Property))
-				if !knownKeyframeProperties[keyframe.Property] {
-					return TimelineDocument{}, fmt.Errorf("clip %q has unsupported keyframe property %q", clip.ID, keyframe.Property)
+				if err := normalizeTimelineKeyframe(keyframe, clipKeyframeProperties(*clip)); err != nil {
+					return TimelineDocument{}, fmt.Errorf("clip %q: %w", clip.ID, err)
 				}
-				if keyframe.TimeMS < 0 {
-					return TimelineDocument{}, fmt.Errorf("clip %q keyframe %q time_ms cannot be negative", clip.ID, keyframe.ID)
+				if keyframe.TimeMS > clip.DurationMS {
+					return TimelineDocument{}, fmt.Errorf("clip %q keyframe %q exceeds clip duration", clip.ID, keyframe.ID)
 				}
-				keyframe.Easing = strings.ToLower(strings.TrimSpace(keyframe.Easing))
-				if keyframe.Easing != "" && !knownKeyframeEasings[keyframe.Easing] {
-					keyframe.Easing = "linear"
+			}
+			blockIDs := map[string]bool{}
+			for bi := range clip.AnimationBlocks {
+				block := &clip.AnimationBlocks[bi]
+				if block.ID == "" {
+					block.ID = "animation-block-" + uuid.New().String()
+				}
+				if blockIDs[block.ID] {
+					return TimelineDocument{}, fmt.Errorf("clip %q has duplicate animation block id %q", clip.ID, block.ID)
+				}
+				blockIDs[block.ID] = true
+				block.BlockKey = strings.ToLower(strings.TrimSpace(block.BlockKey))
+				block.Family = strings.ToLower(strings.TrimSpace(block.Family))
+				if block.BlockKey == "" || (block.Family != "in" && block.Family != "during" && block.Family != "out") {
+					return TimelineDocument{}, fmt.Errorf("clip %q animation block %q has invalid key/family", clip.ID, block.ID)
+				}
+				if block.StartMS < 0 || block.DurationMS <= 0 || block.StartMS+block.DurationMS > clip.DurationMS {
+					return TimelineDocument{}, fmt.Errorf("clip %q animation block %q is outside clip bounds", clip.ID, block.ID)
+				}
+				if block.Params == nil {
+					block.Params = map[string]any{}
+				}
+				for _, generatedID := range block.GeneratedKeyframeIDs {
+					if !keyframeIDs[generatedID] {
+						return TimelineDocument{}, fmt.Errorf("clip %q animation block %q references missing keyframe %q", clip.ID, block.ID, generatedID)
+					}
 				}
 			}
 			if end := clip.StartMS + clip.DurationMS; end > maxEnd {
@@ -753,6 +1041,11 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 	}
 	if maxEnd > doc.DurationMS {
 		doc.DurationMS = maxEnd
+	}
+	for _, scene := range doc.Scenes {
+		if scene.StartMS+scene.DurationMS > doc.DurationMS {
+			return TimelineDocument{}, fmt.Errorf("scene %q exceeds timeline duration", scene.ID)
+		}
 	}
 	return doc, nil
 }

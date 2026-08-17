@@ -1,12 +1,35 @@
 # Video Motion Design Roadmap
 
-> **Status:** PLANNED
+> **Status:** IMPLEMENTED — Phases 0–6 complete; Phase 7 intentionally not activated because it is an optional consideration with no selected hosted workflow.
 >
 > **Purpose:** Durable implementation plan for evolving OmniLLM-Studio Video Edit Studio from a capable nonlinear editor into a combined NLE + motion-design + agentic video-composition workspace.
 >
 > **Baseline:** Re-verified against `main` at `b4520f83ea5d8eb5a3c13692c57e59f4e04462b8` on 2026-08-17. The original draft cited `11dfab99e73fe414e45cc44b0f33d4c80789295a`, which is `feat(sandbox): enforce Windows process-count quotas (#171)` — a sandbox commit 15 revisions behind current `main`. `git diff 11dfab99..HEAD -- backend/internal/video frontend/src/components/video frontend/src/stores/videoStudio.ts frontend/src/types/video.ts` is empty, so no video code changed in that span and the technical baseline below holds. Prefer re-verifying the claims in §2 over trusting the pinned hash.
 >
 > **Product reference:** Raylight (`https://www.raylight.app`) was reviewed as a motion-design reference. The goal is not product cloning. The useful concepts are its Design/Animate separation, semantic animation blocks, scene/shot navigation, depth/camera model, cinematic effects, reusable motion templates, and agent-addressable editing model.
+
+## Implementation status — 2026-08-17
+
+| Phase | Status | Shipped evidence |
+| --- | --- | --- |
+| 0 — Renderer/performance validation | **Complete** | 2,000-clip/16,000-keyframe fixture, CI budgets and artifact, real FFmpeg golden coverage, effect-amount validation/authoring, and persisted track-solo export semantics. |
+| 1 — Motion Design mode | **Complete** | Reachable fifth mode with `Design / Animate / Effects / AI / Export`; mode changes are non-mutating and covered by store and Playwright smoke tests. |
+| 2 — Animation blocks | **Complete** | One 21-block In/During/Out registry and compiler; replace/stack semantics, stored provenance, editable generated keyframes, and atomic undo/autosave mutations. |
+| 3 — Curves and scenes | **Complete** | Additive curve schema, deterministic Bezier/spring sampling in preview and export, scene strip/operations/snapping, per-scene cameras/effects, validation, and undo tests. |
+| 4 — 2.5D/camera | **Complete** | Spatial transforms and keyframes, camera lane/projection/parallax, unchanged additive v1 compatibility, and explicit partial-fidelity capability notes for 3D tilt. |
+| 5 — Effects/templates | **Complete** | Nine cinematic scene effects through preview and FFmpeg, runtime fidelity badges, 12 motion templates, persistent replaceable slots, and missing-slot analysis. |
+| 6 — Agentic Motion Director | **Complete** | Bounded inspect/mutate/frame/preview/status/cancel tools; timeline/revision binding; atomic rejection; real renderer diagnostics; ownership, cancellation, and three-iteration limit. |
+| 7 — Optional review/share | **Not activated** | This phase only asks the product to consider deployment-specific sharing. No deployment model was selected, so local-first export remains the deliberate behavior. |
+
+Validation recorded for this implementation:
+
+- `go test ./internal/video` passes, including real FFmpeg golden renders for motion curves and all nine scene effects.
+- The new governed video-tool contract tests pass. The full backend suite passes every package except one pre-existing `internal/gitrepo` Windows symlink test, which requires the OS `Create symbolic links` privilege; no motion test fails.
+- Frontend unit tests: 19 files / 80 tests pass; TypeScript/Vite production build passes.
+- Performance fixture: 2,000 clips, 480 active-time queries, 2,472,801-byte document, 1.81 ms indexing, 19.07 ms total querying, 0.072 ms p95 frame computation, 22.85 MB heap delta, and 1,758-byte representative animation-block patch.
+- Motion Design Playwright smoke test passes against the built backend/frontend servers.
+
+The baseline and phase-scope prose below is retained as an implementation record. Where it describes the pre-implementation state, the status table and phase-status callouts above are authoritative for the current branch.
 
 ## 1. Goal
 
@@ -175,6 +198,8 @@ Video-editing tools exposed to agents must use the existing Omni tool registry, 
 
 # Phase 0 - Existing renderer and performance validation
 
+> **Implementation status:** COMPLETE — performance budgets, CI evidence, golden renderer coverage, effect-amount keyframes, and persisted solo export are implemented and tested.
+
 ## Objective
 
 Complete the reliability work already identified in `docs/MASTER_PLAN.md:66-67` before significantly increasing animation complexity.
@@ -182,7 +207,7 @@ Complete the reliability work already identified in `docs/MASTER_PLAN.md:66-67` 
 ## Scope
 
 - Add representative large-project browser performance fixtures.
-- Capture frame-time / React commit / memory evidence in CI. **`.github/workflows/ci.yml` currently has no performance job at all** — there is no budget to preserve, only one to create.
+- Capture frame-time / React commit / memory evidence in CI. **At the roadmap baseline, `.github/workflows/ci.yml` had no performance job at all** — there was no budget to preserve, only one to create. Phase 0 added the current evidence job and thresholds.
 - Preserve conservative renderer-capability reporting.
 - Resolve the effect-amount keyframe discrepancy in §2.5 — the matrix must not advertise an unreachable path.
 - Fix the stale comment in `effects/motionPresets.ts:13-17` claiming "Scale keyframes are preview-only at export today"; `renderer_capabilities.go:67` reports sampled scale keyframes as exporting. One of the two is wrong and users read the badge derived from the matrix.
@@ -194,7 +219,7 @@ Current known fidelity debt, confirmed verbatim against `renderer_capabilities.g
 - rounded/geometric annotation fidelity (rounded corners preview-only; ellipse/arrow/speech-bubble normalize to primitives),
 - drop shadow / background blur (unsupported),
 - continuous-curve fidelity (sampled segments only),
-- track-solo export semantics (preview-only monitoring),
+- ~~track-solo export semantics (preview-only monitoring)~~ — resolved in Phase 0; `solo` is persisted and constrains the export audio mix,
 - click-audio synthesis (not synthesized).
 
 ## Primary existing files
@@ -219,6 +244,8 @@ Current known fidelity debt, confirmed verbatim against `renderer_capabilities.g
 ---
 
 # Phase 1 - Motion Design editor mode
+
+> **Implementation status:** COMPLETE — the fifth mode is threaded through the mounted shell with a non-mutating five-tab workflow and smoke coverage.
 
 ## Objective
 
@@ -307,6 +334,8 @@ No timeline schema change is required for the first Motion Design UI release. Mo
 ---
 
 # Phase 2 - Semantic animation blocks
+
+> **Implementation status:** COMPLETE — the legacy presets now derive from one provenance-aware 21-block registry with replace/stack and atomic undo behavior.
 
 ## Objective
 
@@ -417,6 +446,8 @@ Applying or modifying one animation block should produce one undoable user actio
 ---
 
 # Phase 3 - Motion curves and scene/shot ranges
+
+> **Implementation status:** COMPLETE — additive curves and validated scene ranges/cameras/effects are authored, persisted, previewed, exported, snapped, reordered, duplicated, and tested.
 
 ## 3A. Richer easing and springs
 
@@ -547,6 +578,8 @@ Selecting a scene focuses the timeline viewport and scene-level controls without
 
 # Phase 4 - 2.5D transforms and camera model
 
+> **Implementation status:** COMPLETE — spatial transforms/keyframes and depth-based camera parallax are implemented; true X/Y tilt remains explicitly disclosed as an approximate/partial export feature.
+
 ## Objective
 
 Enable dimensional compositions and parallax while retaining the current layer timeline.
@@ -661,7 +694,7 @@ Spatial/camera features must initially report one of:
 - partial,
 - supported.
 
-Only move to `supported` after FFmpeg parity is implemented and covered by golden-media tests. `RendererFeatureSupport` currently encodes this as `Supported bool` + `Partial bool`, so "preview only" is `Supported: false` with an explanatory note — the same shape as `track_solo` today.
+Only move to `supported` after FFmpeg parity is implemented and covered by golden-media tests. `RendererFeatureSupport` encodes this as `Supported bool` + `Partial bool`, so "preview only" is `Supported: false` with an explanatory note. Track solo used this shape at the roadmap baseline and was promoted only after Phase 0 added its tested export path.
 
 ## Acceptance criteria
 
@@ -675,6 +708,8 @@ Only move to `supported` after FFmpeg parity is implemented and covered by golde
 ---
 
 # Phase 5 - Scene-level cinematic effects and motion templates
+
+> **Implementation status:** COMPLETE — all nine effects have real preview/export paths and all requested templates have persistent replaceable slot identity.
 
 ## 5A. Scene-level cinematic effects
 
@@ -692,7 +727,7 @@ Implement renderer-friendly effects first:
 8. Depth-of-field
 9. Rack focus
 
-None of these exist today. The ten current effect types (`timeline.go:53-62`, mirrored at `types/video.ts:298-310`) are `blur`, `brightness`, `contrast`, `saturation`, `grayscale`, `shadow`, `background_blur`, `chroma_key`, `sharpen`, and `vignette`. Note that two of them (`shadow`, `background_blur`) are still **unsupported at export** — adding nine more before closing those widens the fidelity gap the capability matrix has to report.
+None of these existed at the roadmap baseline. Phase 5 added all nine beside the original ten effect types (`blur`, `brightness`, `contrast`, `saturation`, `grayscale`, `shadow`, `background_blur`, `chroma_key`, `sharpen`, and `vignette`). The original `shadow` and `background_blur` limitations remain honestly reported rather than being conflated with the new tested scene effects.
 
 Depth-aware effects (7–9) must wait for a stable spatial/camera model.
 
@@ -772,6 +807,8 @@ Slot identity needs a persistence decision. `TimelineClip` has no slot/role fiel
 ---
 
 # Phase 6 - Agentic Motion Director
+
+> **Implementation status:** COMPLETE — governed, revision-bound inspect/mutate/render/status/cancel tools support a bounded three-pass visual refinement loop without hidden timeline state.
 
 ## Objective
 
@@ -900,6 +937,8 @@ A frame-render endpoint/tool should be designed separately from full export jobs
 ---
 
 # Phase 7 - Optional review/share workflow
+
+> **Implementation status:** NOT ACTIVATED — this phase defines no required feature and explicitly makes sharing optional. No hosted deployment model was selected; local-first export is unchanged.
 
 ## Objective
 
@@ -1299,3 +1338,7 @@ Corrected or added:
 12. Phase 5A (authoring cinematic effects) was missing from the execution order.
 13. Scenes do not need a version bump; a bump is a downgrade hazard for desktop users.
 14. Added missing container decisions: scene camera keyframes, scene effect params, and template slot identity — none of which have a home in the current schema.
+
+## 2026-08-17 — implementation completion review
+
+Phases 0–6 were implemented on the current branch and verified using the evidence table at the top of this document. The implementation kept timeline schema version 1 additive, preserved the existing ordered-layer/patch-history architecture, used one animation registry, and did not introduce a hidden agent timeline. Phase 7 remains an explicit product/deployment decision rather than silently adding a hosted collaboration surface.

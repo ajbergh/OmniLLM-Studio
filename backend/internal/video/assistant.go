@@ -2,6 +2,7 @@ package video
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -40,18 +41,42 @@ type StoryboardResponse struct {
 type EditPlan struct {
 	Summary    string          `json:"summary"`
 	Operations []EditOperation `json:"operations"`
+	TimelineID string          `json:"timeline_id,omitempty"`
+	Revision   string          `json:"revision,omitempty"`
 	// Preview holds one human-readable line per valid operation so the user can
 	// review exactly what will change before applying.
 	Preview []string `json:"preview,omitempty"`
 	// Issues lists operations that failed validation against the current
-	// timeline; these are skipped when the plan is applied.
+	// timeline; their presence causes the entire plan to be rejected.
 	Issues []string `json:"issues,omitempty"`
+}
+
+// TimelineRevision is a stable content binding used to reject stale agent
+// mutations without requiring a database schema migration.
+func TimelineRevision(doc TimelineDocument) (string, error) {
+	raw, err := TimelineToJSON(doc)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(raw))
+	return fmt.Sprintf("sha256:%x", sum[:]), nil
+}
+
+func bindEditPlan(plan *EditPlan, timelineID string, doc TimelineDocument) {
+	if plan == nil {
+		return
+	}
+	plan.TimelineID = timelineID
+	if revision, err := TimelineRevision(doc); err == nil {
+		plan.Revision = revision
+	}
 }
 
 type EditOperation struct {
 	Type       string `json:"type"`
 	ClipID     string `json:"clip_id,omitempty"`
 	TrackID    string `json:"track_id,omitempty"`
+	SceneID    string `json:"scene_id,omitempty"`
 	AssetID    string `json:"asset_id,omitempty"`
 	StartMS    int64  `json:"start_ms,omitempty"`
 	DurationMS int64  `json:"duration_ms,omitempty"`
@@ -60,11 +85,25 @@ type EditOperation struct {
 	Height     int    `json:"height,omitempty"`
 	FPS        int    `json:"fps,omitempty"`
 	// Pointer values distinguish "set to zero" from unset.
-	Volume  *float64 `json:"volume,omitempty"`
-	X       *float64 `json:"x,omitempty"`
-	Y       *float64 `json:"y,omitempty"`
-	Scale   *float64 `json:"scale,omitempty"`
-	Opacity *float64 `json:"opacity,omitempty"`
+	Volume      *float64       `json:"volume,omitempty"`
+	X           *float64       `json:"x,omitempty"`
+	Y           *float64       `json:"y,omitempty"`
+	Scale       *float64       `json:"scale,omitempty"`
+	Opacity     *float64       `json:"opacity,omitempty"`
+	Z           *float64       `json:"z,omitempty"`
+	RotationX   *float64       `json:"rotation_x,omitempty"`
+	RotationY   *float64       `json:"rotation_y,omitempty"`
+	RotationZ   *float64       `json:"rotation_z,omitempty"`
+	ScaleX      *float64       `json:"scale_x,omitempty"`
+	ScaleY      *float64       `json:"scale_y,omitempty"`
+	FieldOfView *float64       `json:"field_of_view,omitempty"`
+	FocusDepth  *float64       `json:"focus_depth,omitempty"`
+	Value       *float64       `json:"value,omitempty"`
+	Property    string         `json:"property,omitempty"`
+	Easing      string         `json:"easing,omitempty"`
+	Curve       *MotionCurve   `json:"curve,omitempty"`
+	EffectType  string         `json:"effect_type,omitempty"`
+	Params      map[string]any `json:"params,omitempty"`
 }
 
 type SocialVariant struct {
@@ -189,7 +228,7 @@ Make each scene prompt cinematic and self-contained (25–60 words). Durations s
 }
 
 func (s *Service) CreateTimelinePlan(ctx context.Context, userID, projectID string, req AssistantRequest) (*EditPlan, error) {
-	_, doc, err := s.GetOrCreateTimeline(ctx, userID, projectID)
+	timeline, doc, err := s.GetOrCreateTimeline(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +245,7 @@ func (s *Service) CreateTimelinePlan(ctx context.Context, userID, projectID stri
 		},
 	}
 	annotatePlan(doc, plan)
+	bindEditPlan(plan, timeline.ID, doc)
 	return plan, nil
 }
 
@@ -223,7 +263,7 @@ func preferClientTimeline(persisted TimelineDocument, req AssistantRequest) Time
 }
 
 func (s *Service) CreateEditPlan(ctx context.Context, userID, projectID string, req AssistantRequest) (*EditPlan, error) {
-	_, doc, err := s.GetOrCreateTimeline(ctx, userID, projectID)
+	timeline, doc, err := s.GetOrCreateTimeline(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -237,6 +277,7 @@ func (s *Service) CreateEditPlan(ctx context.Context, userID, projectID string, 
 			result, err := s.llmEditPlan(ctx, provider, req, timelineContext)
 			if err == nil {
 				annotatePlan(doc, result)
+				bindEditPlan(result, timeline.ID, doc)
 				return result, nil
 			}
 			// Fall through to deterministic on error.
@@ -290,6 +331,7 @@ func (s *Service) CreateEditPlan(ctx context.Context, userID, projectID string, 
 		plan.Operations = append(plan.Operations, EditOperation{Type: "set_duration", DurationMS: 30000})
 	}
 	annotatePlan(doc, &plan)
+	bindEditPlan(&plan, timeline.ID, doc)
 	return &plan, nil
 }
 
@@ -324,11 +366,23 @@ Output ONLY a JSON object matching this schema (no markdown, no explanation):
       "x": <optional number, px offset from canvas center>,
       "y": <optional number, px offset from canvas center>,
       "scale": <optional number 0.05-4>,
-      "opacity": <optional number 0-1>
+      "opacity": <optional number 0-1>,
+      "z": <optional depth>,
+      "rotation_x": <optional degrees>,
+      "rotation_y": <optional degrees>,
+      "rotation_z": <optional degrees>,
+      "scale_x": <optional number 0.05-4>,
+      "scale_y": <optional number 0.05-4>,
+      "scene_id": "<optional existing scene id>",
+      "property": "<optional keyframe property>",
+      "value": <optional keyframe value>,
+      "easing": "<optional fallback easing>",
+      "effect_type": "<optional supported effect>",
+      "params": {"amount": <optional number>}
     }
   ]
 }
-Valid operation types: set_canvas, set_duration, add_text_clip, move_clip, trim_clip, delete_clip, set_volume, add_marker, add_asset_clip, set_transform.
+Valid operation types: set_canvas, set_duration, add_text_clip, move_clip, trim_clip, delete_clip, set_volume, add_marker, add_asset_clip, set_transform, add_keyframe, add_scene, update_camera, apply_scene_effect.
 - set_canvas: provide width, height, fps
 - set_duration: provide duration_ms
 - add_text_clip: provide track_id, start_ms, duration_ms, text
@@ -338,7 +392,11 @@ Valid operation types: set_canvas, set_duration, add_text_clip, move_clip, trim_
 - set_volume: provide clip_id and volume (0 mutes, 1 is unity, up to 2)
 - add_marker: provide start_ms and optionally text as the marker label
 - add_asset_clip: provide asset_id, start_ms, duration_ms, and optionally track_id
-- set_transform: provide clip_id and any of x, y, scale, opacity
+- set_transform: provide clip_id and any supported 2D/2.5D transform field
+- add_keyframe: provide clip_id, start_ms (clip-relative), property, value, and optional easing/curve
+- add_scene: provide start_ms, duration_ms, and optional text as the scene name; scenes cannot overlap
+- update_camera: provide scene_id and at least one camera field
+- apply_scene_effect: provide scene_id, effect_type, and optional params
 Reference ONLY clip ids and track ids that appear in the timeline context. Never invent ids.
 Only include fields relevant to the operation type. Do not include null or zero values for optional fields.`
 
@@ -375,9 +433,26 @@ func (s *Service) ApplyEditPlan(ctx context.Context, userID, projectID string, p
 	if err != nil {
 		return nil, TimelineDocument{}, err
 	}
-	// Validate against the current timeline and apply only the valid subset so
-	// one stale clip reference does not block the rest of the plan.
+	if strings.TrimSpace(plan.TimelineID) == "" || strings.TrimSpace(plan.Revision) == "" {
+		return nil, TimelineDocument{}, fmt.Errorf("edit plan is missing timeline_id or revision; inspect the project again")
+	}
+	if plan.TimelineID != timeline.ID {
+		return nil, TimelineDocument{}, fmt.Errorf("edit plan targets timeline %q, but active timeline is %q", plan.TimelineID, timeline.ID)
+	}
+	currentRevision, err := TimelineRevision(doc)
+	if err != nil {
+		return nil, TimelineDocument{}, err
+	}
+	if plan.Revision != currentRevision {
+		return nil, TimelineDocument{}, fmt.Errorf("stale edit plan: expected revision %s but current revision is %s; inspect and regenerate the plan", plan.Revision, currentRevision)
+	}
+	if len(plan.Issues) > 0 {
+		return nil, TimelineDocument{}, fmt.Errorf("edit plan contains rejected operations; no changes applied: %s", strings.Join(plan.Issues, "; "))
+	}
 	validOps, _, issues := ValidateEditPlanOperations(doc, plan)
+	if len(issues) > 0 {
+		return nil, TimelineDocument{}, fmt.Errorf("edit plan rejected; no changes applied: %s", strings.Join(issues, "; "))
+	}
 	if len(validOps) == 0 {
 		if len(issues) > 0 {
 			return nil, TimelineDocument{}, fmt.Errorf("no valid operations to apply: %s", strings.Join(issues, "; "))
@@ -402,7 +477,7 @@ func (s *Service) ApplyEditPlan(ctx context.Context, userID, projectID string, p
 }
 
 func (s *Service) CreateSocialVariants(ctx context.Context, userID, projectID string, req AssistantRequest) ([]SocialVariant, error) {
-	_, doc, err := s.GetOrCreateTimeline(ctx, userID, projectID)
+	timeline, doc, err := s.GetOrCreateTimeline(ctx, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -444,6 +519,7 @@ func (s *Service) CreateSocialVariants(ctx context.Context, userID, projectID st
 	}
 	for i := range variants {
 		annotatePlan(doc, &variants[i].Plan)
+		bindEditPlan(&variants[i].Plan, timeline.ID, doc)
 	}
 	return variants, nil
 }
@@ -661,8 +737,8 @@ func ValidateEditPlanOperations(doc TimelineDocument, plan EditPlan) (valid []Ed
 			valid = append(valid, op)
 			preview = append(preview, fmt.Sprintf("Add asset %s at %.1fs for %.1fs", op.AssetID, float64(maxInt64(0, op.StartMS))/1000, float64(op.DurationMS)/1000))
 		case "set_transform":
-			if op.ClipID == "" || (op.X == nil && op.Y == nil && op.Scale == nil && op.Opacity == nil) {
-				issues = append(issues, describeIdx+": requires clip_id and at least one of x, y, scale, opacity")
+			if op.ClipID == "" || (op.X == nil && op.Y == nil && op.Z == nil && op.Scale == nil && op.ScaleX == nil && op.ScaleY == nil && op.RotationX == nil && op.RotationY == nil && op.RotationZ == nil && op.Opacity == nil) {
+				issues = append(issues, describeIdx+": requires clip_id and at least one transform value")
 				continue
 			}
 			if _, _, ok := findTimelineClip(doc, op.ClipID); !ok {
@@ -682,8 +758,91 @@ func ValidateEditPlanOperations(doc TimelineDocument, plan EditPlan) (valid []Ed
 			if op.Opacity != nil {
 				changes = append(changes, fmt.Sprintf("opacity=%.2f", *op.Opacity))
 			}
+			if op.Z != nil {
+				changes = append(changes, fmt.Sprintf("z=%.0f", *op.Z))
+			}
+			if op.RotationX != nil {
+				changes = append(changes, fmt.Sprintf("rotation_x=%.1f", *op.RotationX))
+			}
+			if op.RotationY != nil {
+				changes = append(changes, fmt.Sprintf("rotation_y=%.1f", *op.RotationY))
+			}
+			if op.RotationZ != nil {
+				changes = append(changes, fmt.Sprintf("rotation_z=%.1f", *op.RotationZ))
+			}
+			if op.ScaleX != nil {
+				changes = append(changes, fmt.Sprintf("scale_x=%.2f", *op.ScaleX))
+			}
+			if op.ScaleY != nil {
+				changes = append(changes, fmt.Sprintf("scale_y=%.2f", *op.ScaleY))
+			}
 			valid = append(valid, op)
 			preview = append(preview, fmt.Sprintf("Set clip %s transform (%s)", clipLabel(op.ClipID), strings.Join(changes, ", ")))
+		case "add_keyframe":
+			ti, ci, ok := findTimelineClip(doc, op.ClipID)
+			if !ok || op.Value == nil || op.StartMS < 0 || op.StartMS > doc.Tracks[ti].Clips[ci].DurationMS {
+				issues = append(issues, describeIdx+": requires an existing clip_id, value, and in-bounds time_ms")
+				continue
+			}
+			properties := clipKeyframeProperties(doc.Tracks[ti].Clips[ci])
+			if !properties[strings.ToLower(strings.TrimSpace(op.Property))] {
+				issues = append(issues, describeIdx+": unsupported keyframe property")
+				continue
+			}
+			candidate := TimelineKeyframe{ID: "preview", Property: op.Property, TimeMS: op.StartMS, Value: *op.Value, Easing: op.Easing, Curve: op.Curve}
+			if err := normalizeTimelineKeyframe(&candidate, properties); err != nil {
+				issues = append(issues, describeIdx+": "+err.Error())
+				continue
+			}
+			valid = append(valid, op)
+			preview = append(preview, fmt.Sprintf("Add %s keyframe to clip %s at %.2fs", candidate.Property, clipLabel(op.ClipID), float64(op.StartMS)/1000))
+		case "update_camera":
+			found := false
+			for _, scene := range doc.Scenes {
+				if scene.ID == op.SceneID {
+					found = true
+					break
+				}
+			}
+			if !found || (op.X == nil && op.Y == nil && op.Z == nil && op.RotationX == nil && op.RotationY == nil && op.RotationZ == nil && op.FieldOfView == nil && op.FocusDepth == nil) {
+				issues = append(issues, describeIdx+": requires an existing scene_id and at least one camera value")
+				continue
+			}
+			valid = append(valid, op)
+			preview = append(preview, "Update camera for scene "+op.SceneID)
+		case "add_scene":
+			if op.StartMS < 0 || op.DurationMS <= 0 {
+				issues = append(issues, describeIdx+": requires non-negative start_ms and positive duration_ms")
+				continue
+			}
+			end := op.StartMS + op.DurationMS
+			overlaps := false
+			for _, scene := range doc.Scenes {
+				if op.StartMS < scene.StartMS+scene.DurationMS && end > scene.StartMS {
+					overlaps = true
+					break
+				}
+			}
+			if overlaps || end > doc.DurationMS {
+				issues = append(issues, describeIdx+": scene overlaps another scene or exceeds timeline duration")
+				continue
+			}
+			valid = append(valid, op)
+			preview = append(preview, fmt.Sprintf("Add scene %q at %.1fs", strings.TrimSpace(op.Text), float64(op.StartMS)/1000))
+		case "apply_scene_effect":
+			found := false
+			for _, scene := range doc.Scenes {
+				if scene.ID == op.SceneID {
+					found = true
+					break
+				}
+			}
+			if !found || !knownEffectTypes[strings.ToLower(strings.TrimSpace(op.EffectType))] {
+				issues = append(issues, describeIdx+": requires an existing scene_id and supported effect_type")
+				continue
+			}
+			valid = append(valid, op)
+			preview = append(preview, fmt.Sprintf("Apply %s to scene %s", op.EffectType, op.SceneID))
 		default:
 			issues = append(issues, describeIdx+": unsupported operation type")
 		}
@@ -913,6 +1072,96 @@ func ApplyEditPlanToTimeline(doc TimelineDocument, plan EditPlan) (TimelineDocum
 			}
 			if op.Opacity != nil {
 				transform["opacity"] = clampFloat(*op.Opacity, 0, 1)
+			}
+			if op.Z != nil {
+				transform["z"] = *op.Z
+			}
+			if op.RotationX != nil {
+				transform["rotation_x"] = clampFloat(*op.RotationX, -180, 180)
+			}
+			if op.RotationY != nil {
+				transform["rotation_y"] = clampFloat(*op.RotationY, -180, 180)
+			}
+			if op.RotationZ != nil {
+				transform["rotation_z"] = clampFloat(*op.RotationZ, -360, 360)
+			}
+			if op.ScaleX != nil {
+				transform["scale_x"] = clampFloat(*op.ScaleX, 0.05, 4)
+			}
+			if op.ScaleY != nil {
+				transform["scale_y"] = clampFloat(*op.ScaleY, 0.05, 4)
+			}
+		case "add_keyframe":
+			ti, ci, ok := findTimelineClip(doc, op.ClipID)
+			if !ok || op.Value == nil {
+				return TimelineDocument{}, fmt.Errorf("add_keyframe requires an existing clip_id and value")
+			}
+			properties := clipKeyframeProperties(doc.Tracks[ti].Clips[ci])
+			keyframe := TimelineKeyframe{ID: "keyframe-" + uuid.New().String(), Property: op.Property, TimeMS: op.StartMS, Value: *op.Value, Easing: op.Easing, Curve: op.Curve}
+			if err := normalizeTimelineKeyframe(&keyframe, properties); err != nil {
+				return TimelineDocument{}, err
+			}
+			doc.Tracks[ti].Clips[ci].Keyframes = append(doc.Tracks[ti].Clips[ci].Keyframes, keyframe)
+		case "update_camera":
+			found := false
+			for i := range doc.Scenes {
+				if doc.Scenes[i].ID != op.SceneID {
+					continue
+				}
+				found = true
+				if doc.Scenes[i].Camera == nil {
+					doc.Scenes[i].Camera = &TimelineCamera{FieldOfView: 50}
+				}
+				camera := doc.Scenes[i].Camera
+				if op.X != nil {
+					camera.X = *op.X
+				}
+				if op.Y != nil {
+					camera.Y = *op.Y
+				}
+				if op.Z != nil {
+					camera.Z = *op.Z
+				}
+				if op.RotationX != nil {
+					camera.RotationX = *op.RotationX
+				}
+				if op.RotationY != nil {
+					camera.RotationY = *op.RotationY
+				}
+				if op.RotationZ != nil {
+					camera.RotationZ = *op.RotationZ
+				}
+				if op.FieldOfView != nil {
+					camera.FieldOfView = clampFloat(*op.FieldOfView, 1, 179)
+				}
+				if op.FocusDepth != nil {
+					camera.FocusDepth = *op.FocusDepth
+				}
+			}
+			if !found {
+				return TimelineDocument{}, fmt.Errorf("scene %q not found", op.SceneID)
+			}
+		case "add_scene":
+			name := strings.TrimSpace(op.Text)
+			if name == "" {
+				name = fmt.Sprintf("Scene %d", len(doc.Scenes)+1)
+			}
+			doc.Scenes = append(doc.Scenes, TimelineScene{ID: "scene-" + uuid.New().String(), Name: name, StartMS: op.StartMS, DurationMS: op.DurationMS, Metadata: map[string]any{}})
+		case "apply_scene_effect":
+			found := false
+			for i := range doc.Scenes {
+				if doc.Scenes[i].ID != op.SceneID {
+					continue
+				}
+				found = true
+				effect := TimelineEffect{ID: "effect-" + uuid.New().String(), Type: op.EffectType, Enabled: true, Params: cloneAnyMap(op.Params)}
+				if err := normalizeTimelineEffect(&effect, fmt.Sprintf("scene %q", op.SceneID)); err != nil {
+					return TimelineDocument{}, err
+				}
+				doc.Scenes[i].Effects = append(doc.Scenes[i].Effects, effect)
+			}
+			if !found {
+				return TimelineDocument{}, fmt.Errorf("scene %q not found", op.SceneID)
 			}
 		default:
 			return TimelineDocument{}, fmt.Errorf("unsupported edit operation %q", op.Type)

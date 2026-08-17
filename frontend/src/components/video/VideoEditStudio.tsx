@@ -57,7 +57,7 @@ import { EDITOR_MODES, editorModeFeatures } from './editorModes';
 import type { EditorModeKey } from './editorModes';
 import type { LucideIcon } from 'lucide-react';
 
-type InspectorRailTab = 'properties' | 'effects' | 'transitions' | 'captions' | 'audio' | 'assistant' | 'export';
+type InspectorRailTab = 'properties' | 'design' | 'animate' | 'effects' | 'transitions' | 'captions' | 'audio' | 'assistant' | 'export';
 
 function formatStatusTime(ms: number, fps = 30): string {
   const total = Math.max(0, Math.round(ms));
@@ -104,7 +104,7 @@ export function VideoEditStudio() {
   const templatesRef = useRef<HTMLDivElement | null>(null);
 
   // The right rail tabs follow the editor mode's feature gates.
-  const railTabs = [
+  const standardRailTabs = [
     { key: 'properties' as const, label: 'Properties', enabled: true },
     { key: 'effects' as const, label: 'Effects', enabled: modeFeatures.effectControls },
     { key: 'transitions' as const, label: 'Transitions', enabled: modeFeatures.effectControls },
@@ -113,7 +113,14 @@ export function VideoEditStudio() {
     { key: 'assistant' as const, label: 'AI Assistant', enabled: modeFeatures.assistant },
     { key: 'export' as const, label: 'Export', enabled: true },
   ].filter((tab) => tab.enabled);
-  const activeRailTab = railTabs.some((tab) => tab.key === railTab) ? railTab : 'properties';
+  const railTabs = modeFeatures.designAnimateTabs ? [
+    { key: 'design' as const, label: 'Design', enabled: true },
+    { key: 'animate' as const, label: 'Animate', enabled: modeFeatures.animationBlocks },
+    { key: 'effects' as const, label: 'Effects', enabled: modeFeatures.effectControls },
+    { key: 'assistant' as const, label: 'AI', enabled: modeFeatures.assistant },
+    { key: 'export' as const, label: 'Export', enabled: true },
+  ].filter((tab) => tab.enabled) : standardRailTabs;
+  const activeRailTab = railTabs.some((tab) => tab.key === railTab) ? railTab : (modeFeatures.designAnimateTabs ? 'design' : 'properties');
 
   const openFileLibrary = () => {
     window.dispatchEvent(new CustomEvent('omnillm:open-file-library', { detail: { preferredScope: 'all' } }));
@@ -409,6 +416,8 @@ export function VideoEditStudio() {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {activeRailTab === 'properties' && <VideoInspector section="properties" focus="properties" />}
+              {activeRailTab === 'design' && <VideoInspector section="properties" focus="design" />}
+              {activeRailTab === 'animate' && <VideoInspector section="properties" focus="animate" />}
               {activeRailTab === 'effects' && modeFeatures.effectControls && <VideoInspector section="properties" focus="effects" />}
               {activeRailTab === 'transitions' && modeFeatures.effectControls && <VideoInspector section="properties" focus="transitions" />}
               {activeRailTab === 'audio' && <VideoInspector section="properties" focus="audio" />}
