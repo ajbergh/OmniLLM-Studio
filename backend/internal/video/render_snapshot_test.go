@@ -20,6 +20,18 @@ type snapshotCaptureRenderer struct {
 	requests chan RenderRequest
 }
 
+type shutdownCaptureRenderer struct {
+	entered chan struct{}
+	exited  chan struct{}
+}
+
+func (r *shutdownCaptureRenderer) Render(ctx context.Context, _ RenderRequest, _ func(RenderProgress)) (*RenderResult, error) {
+	close(r.entered)
+	defer close(r.exited)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func waitForRenderTerminal(t *testing.T, service *Service, jobID string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -114,6 +126,51 @@ func TestRenderUsesSubmittedTimelineSnapshot(t *testing.T) {
 		t.Fatalf("timeline did not advance: submitted=%+v current=%+v", binding, current)
 	}
 	waitForRenderTerminal(t, service, job.ID)
+}
+
+func TestServiceShutdownWaitsForActiveRenderWorkers(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "shutdown.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	service := newImportTestService(database, filepath.Join(t.TempDir(), "attachments"))
+	renderer := &shutdownCaptureRenderer{entered: make(chan struct{}), exited: make(chan struct{})}
+	service.renderer = renderer
+	project, err := service.CreateProject("", "Shutdown", "openrouter", "test-model", 1280, 720, 30, "16:9")
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	timeline, _, err := service.SaveTimeline(context.Background(), "", project.ID, NewEmptyTimeline(project.Width, project.Height, project.FPS))
+	if err != nil {
+		t.Fatalf("save timeline: %v", err)
+	}
+	if _, err := service.StartRender(context.Background(), "", project.ID, ExportSettings{
+		Format: "mp4", Resolution: "project", Quality: "standard",
+	}, RenderBinding{
+		TimelineID: timeline.ID, TimelineRevision: timeline.Revision, TimelineSHA256: timeline.ContentSHA256,
+	}); err != nil {
+		t.Fatalf("start render: %v", err)
+	}
+	select {
+	case <-renderer.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("renderer did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := service.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown service: %v", err)
+	}
+	select {
+	case <-renderer.exited:
+	default:
+		t.Fatal("shutdown returned before the active render worker exited")
+	}
 }
 
 func TestRecoverInterruptedRenderJobUsesPersistedSnapshot(t *testing.T) {

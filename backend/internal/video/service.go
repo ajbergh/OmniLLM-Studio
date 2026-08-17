@@ -54,6 +54,15 @@ type Service struct {
 	// the DB status.
 	renderCancelsMu sync.Mutex
 	renderCancels   map[string]context.CancelFunc
+
+	// backgroundCtx owns every asynchronous generation and render worker.
+	// Shutdown closes admission, cancels this context, and waits for the group
+	// so callers can safely close the shared database afterward.
+	backgroundMu     sync.Mutex
+	backgroundCtx    context.Context
+	backgroundCancel context.CancelFunc
+	backgroundClosed bool
+	backgroundWG     sync.WaitGroup
 }
 
 func NewService(
@@ -66,6 +75,7 @@ func NewService(
 	attachmentsDir string,
 	llmSvc llmCompleter,
 ) *Service {
+	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	return &Service{
 		projects:         projects,
 		generations:      generations,
@@ -79,7 +89,38 @@ func NewService(
 		renderer:         NewProductionRenderer(""),
 		llm:              llmSvc,
 		renderCancels:    map[string]context.CancelFunc{},
+		backgroundCtx:    backgroundCtx,
+		backgroundCancel: backgroundCancel,
 	}
+}
+
+// beginBackground reserves one service-owned worker. The returned finish
+// function must be called exactly once by the worker before it exits.
+func (s *Service) beginBackground() (context.Context, context.CancelFunc, func(), bool) {
+	s.backgroundMu.Lock()
+	defer s.backgroundMu.Unlock()
+	if s.backgroundClosed {
+		return nil, nil, nil, false
+	}
+	ctx, cancel := context.WithCancel(s.backgroundCtx)
+	s.backgroundWG.Add(1)
+	finish := func() {
+		cancel()
+		s.backgroundWG.Done()
+	}
+	return ctx, cancel, finish, true
+}
+
+func (s *Service) launchBackground(run func(context.Context)) bool {
+	ctx, _, finish, ok := s.beginBackground()
+	if !ok {
+		return false
+	}
+	go func() {
+		defer finish()
+		run(ctx)
+	}()
+	return true
 }
 
 func (s *Service) ConfigureExternalAssetSources(
@@ -685,8 +726,13 @@ func (s *Service) GenerateAsync(ctx context.Context, userID string, req Generate
 		return project, nil, err
 	}
 
-	// Start background generation goroutine.
-	go s.runGenerationBackground(context.Background(), userID, project.ID, generation.ID, modelID, providerKey, req, enhancedPrompt)
+	// Start a service-owned background generation worker.
+	if !s.launchBackground(func(ctx context.Context) {
+		s.runGenerationBackground(ctx, userID, project.ID, generation.ID, modelID, providerKey, req, enhancedPrompt)
+	}) {
+		_ = s.generations.MarkFailed(generation.ID, "video service is shutting down")
+		return project, generation, errors.New("video service is shutting down")
+	}
 
 	return project, generation, nil
 }
@@ -1066,7 +1112,9 @@ func (s *Service) RecoverPendingGenerations() {
 		if !isGemini {
 			continue
 		}
-		go s.pollAndFinalize(context.Background(), projectID, generationID, modelID, providerKey, gemProv, opName, req)
+		s.launchBackground(func(ctx context.Context) {
+			s.pollAndFinalize(ctx, projectID, generationID, modelID, providerKey, gemProv, opName, req)
+		})
 	}
 }
 
@@ -1561,11 +1609,14 @@ func (s *Service) StartRender(ctx context.Context, userID, projectID string, set
 }
 
 func (s *Service) launchRenderJob(jobID string) {
-	renderCtx, cancel := context.WithCancel(context.Background())
+	renderCtx, cancel, finish, ok := s.beginBackground()
+	if !ok {
+		return
+	}
 	s.renderCancelsMu.Lock()
 	if _, exists := s.renderCancels[jobID]; exists {
 		s.renderCancelsMu.Unlock()
-		cancel()
+		finish()
 		return
 	}
 	s.renderCancels[jobID] = cancel
@@ -1575,7 +1626,7 @@ func (s *Service) launchRenderJob(jobID string) {
 			s.renderCancelsMu.Lock()
 			delete(s.renderCancels, jobID)
 			s.renderCancelsMu.Unlock()
-			cancel()
+			finish()
 		}()
 		s.runRenderJob(renderCtx, jobID)
 	}()

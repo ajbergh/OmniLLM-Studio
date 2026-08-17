@@ -326,9 +326,10 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	videoHandler := NewVideoHandler(videoService, videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, convoRepo, attachRepo, fileLibrarySvc, cfg.AttachmentsDir)
 	videoTranscriptionService := video.NewVideoTranscriptionService(videoTranscriptRepo, providerRepo, videoProjectRepo, videoAssetRepo, cfg.AttachmentsDir)
 	videoTranscriptionHandler := NewVideoTranscriptionHandler(videoTranscriptionService)
-	// Resume any generation poll goroutines that were in-flight when the server last stopped.
-	go videoService.RecoverPendingGenerations()
-	go videoService.RecoverInterruptedRenderJobsDurable()
+	// Complete the startup scans before returning the router. Any work they
+	// resume is owned and drained by videoService.Shutdown.
+	videoService.RecoverPendingGenerations()
+	videoService.RecoverInterruptedRenderJobsDurable()
 	crossoverHandler := NewCrossoverHandler(llmService, providerRepo)
 
 	// Complete Agent Runtime composition after Studio services exist.

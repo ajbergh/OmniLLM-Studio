@@ -436,10 +436,34 @@ func (s *ScheduledRenderer) Shutdown(ctx context.Context) error {
 
 // Shutdown drains the active video renderer during application shutdown.
 func (s *Service) Shutdown(ctx context.Context) error {
-	if shutdowner, ok := s.renderer.(interface{ Shutdown(context.Context) error }); ok {
-		return shutdowner.Shutdown(ctx)
+	s.backgroundMu.Lock()
+	if !s.backgroundClosed {
+		s.backgroundClosed = true
+		s.backgroundCancel()
 	}
-	return nil
+	s.backgroundMu.Unlock()
+
+	var firstErr error
+	if shutdowner, ok := s.renderer.(interface{ Shutdown(context.Context) error }); ok {
+		if err := shutdowner.Shutdown(ctx); err != nil {
+			firstErr = err
+		}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.backgroundWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return firstErr
+	case <-ctx.Done():
+		if firstErr != nil {
+			return firstErr
+		}
+		return ctx.Err()
+	}
 }
 
 func renderUserID(req RenderRequest) string {
