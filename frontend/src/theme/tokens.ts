@@ -5,7 +5,7 @@
  * Token names use camelCase; the CSS variable mapping is in cssVars.ts.
  */
 
-export type ThemeId = 'aurora' | 'ember' | 'light' | 'terminal';
+export type ThemeId = 'oled' | 'aurora' | 'ember' | 'light' | 'terminal';
 
 /**
  * Complete set of design tokens defining a color theme.

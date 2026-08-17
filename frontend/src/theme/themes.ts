@@ -1,6 +1,59 @@
 import type { ThemeDefinition, ThemeId } from './tokens';
 
 /**
+ * OLED Black — true pure black (#000000) theme optimized for OLED displays with crisp contrast.
+ */
+const oled: ThemeDefinition = {
+  id: 'oled',
+  name: 'OLED Black',
+  isDark: true,
+  tokens: {
+    // Surfaces — true pitch blacks and ultra-dark neutral layers
+    surface: '#000000',
+    background: '#000000',
+    surfaceRaised: '#080808',
+    surfaceAlt: '#0f0f0f',
+    surfaceLight: '#171717',
+    surfaceHover: '#171717',
+    surfaceGlass: 'rgba(0, 0, 0, 0.85)',
+
+    // Borders — subtle dark neutrals with high-contrast focus
+    border: '#1f1f1f',
+    borderSubtle: '#141414',
+    borderFocus: '#6366f1',
+
+    // Text — clean high-contrast neutrals
+    text: '#f3f4f6',
+    textSecondary: '#9ca3af',
+    textMuted: '#6b7280',
+
+    // Brand — vibrant indigo/purple accents tailored for deep black background
+    primary: '#6366f1',
+    primaryHover: '#818cf8',
+    primaryGlow: 'rgba(99, 102, 241, 0.20)',
+    primaryRgb: '99, 102, 241',
+    accent: '#a855f7',
+    accentGlow: 'rgba(168, 85, 247, 0.20)',
+    accentRgb: '168, 85, 247',
+
+    // Status
+    danger: '#ef4444',
+    dangerSoft: 'rgba(239, 68, 68, 0.15)',
+    success: '#10b981',
+    successSoft: 'rgba(16, 185, 129, 0.15)',
+    warning: '#f59e0b',
+    warningSoft: 'rgba(245, 158, 11, 0.15)',
+
+    // Shadows — deeper contrast on true black
+    shadowSm: '0 1px 2px rgba(0, 0, 0, 0.8)',
+    shadowMd: '0 4px 12px rgba(0, 0, 0, 0.85)',
+    shadowLg: '0 8px 32px rgba(0, 0, 0, 0.9)',
+    shadowGlow: '0 0 20px rgba(99, 102, 241, 0.18)',
+    shadowGlowLg: '0 0 60px rgba(99, 102, 241, 0.12), 0 0 20px rgba(168, 85, 247, 0.10)',
+  },
+};
+
+/**
  * Aurora Ink — default dark theme with indigo/purple tones.
  * Values extracted verbatim from the existing @theme block in index.css.
  */
@@ -217,10 +270,11 @@ const terminal: ThemeDefinition = {
 };
 
 /** All available themes. */
-export const THEMES: ThemeDefinition[] = [aurora, ember, light, terminal];
+export const THEMES: ThemeDefinition[] = [oled, aurora, ember, light, terminal];
 
 /** O(1) lookup by theme ID. */
 export const THEME_MAP: Record<ThemeId, ThemeDefinition> = {
+  oled,
   aurora,
   ember,
   light,
@@ -228,4 +282,4 @@ export const THEME_MAP: Record<ThemeId, ThemeDefinition> = {
 };
 
 /** Default theme ID. */
-export const DEFAULT_THEME_ID: ThemeId = 'aurora';
+export const DEFAULT_THEME_ID: ThemeId = 'oled';
