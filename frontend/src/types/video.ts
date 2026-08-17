@@ -225,6 +225,15 @@ export interface VideoTimelineTransform {
   scale: number;
   rotation: number;
   opacity: number;
+  z?: number;
+  rotation_x?: number;
+  rotation_y?: number;
+  rotation_z?: number;
+  scale_x?: number;
+  scale_y?: number;
+  anchor_x?: number;
+  anchor_y?: number;
+  perspective?: number;
   crop?: { top: number; right: number; bottom: number; left: number };
 }
 
@@ -307,7 +316,16 @@ export interface VideoTimelineEffect {
     | 'background_blur'
     | 'chroma_key'
     | 'sharpen'
-    | 'vignette';
+    | 'vignette'
+    | 'film_grain'
+    | 'bloom'
+    | 'color_grade'
+    | 'edge_fade'
+    | 'rgb_split'
+    | 'ghost_trail'
+    | 'motion_blur'
+    | 'depth_of_field'
+    | 'rack_focus';
   enabled: boolean;
   params: Record<string, unknown>;
 }
@@ -321,10 +339,55 @@ export interface VideoTimelineTransition {
 
 export interface VideoTimelineKeyframe {
   id: string;
-  property: 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume';
+  property:
+    | 'x' | 'y' | 'z'
+    | 'scale' | 'scale_x' | 'scale_y'
+    | 'rotation' | 'rotation_x' | 'rotation_y' | 'rotation_z'
+    | 'opacity' | 'volume'
+    | `effect.${string}.amount`
+    | 'field_of_view' | 'focus_depth';
   time_ms: number;
   value: number;
   easing?: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'step';
+  curve?: VideoMotionCurve;
+}
+
+export type VideoMotionCurve =
+  | { type: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'step' }
+  | { type: 'bezier'; x1: number; y1: number; x2: number; y2: number }
+  | { type: 'spring'; stiffness: number; damping: number; mass: number };
+
+export interface VideoAnimationBlock {
+  id: string;
+  block_key: string;
+  family: 'in' | 'during' | 'out';
+  start_ms: number;
+  duration_ms: number;
+  delay_ms?: number;
+  params?: Record<string, unknown>;
+  generated_keyframe_ids: string[];
+}
+
+export interface VideoSceneCamera {
+  x?: number;
+  y?: number;
+  z?: number;
+  rotation_x?: number;
+  rotation_y?: number;
+  rotation_z?: number;
+  field_of_view?: number;
+  focus_depth?: number;
+  keyframes?: VideoTimelineKeyframe[];
+}
+
+export interface VideoTimelineScene {
+  id: string;
+  name: string;
+  start_ms: number;
+  duration_ms: number;
+  camera?: VideoSceneCamera;
+  effects?: VideoTimelineEffect[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface VideoTimelineClip {
@@ -341,6 +404,7 @@ export interface VideoTimelineClip {
   playback_rate?: number;
   z_index?: number;
   group_id?: string;
+  template_slot?: string;
   /** Silences this clip's audio without touching volume. */
   muted?: boolean;
   /** Suppresses visuals so a video asset acts as detached audio. */
@@ -355,6 +419,8 @@ export interface VideoTimelineClip {
   effects: VideoTimelineEffect[];
   transitions?: VideoTimelineTransition[];
   keyframes: VideoTimelineKeyframe[];
+  animation_blocks?: VideoAnimationBlock[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface VideoTimelineTrack {
@@ -363,6 +429,7 @@ export interface VideoTimelineTrack {
   name: string;
   locked: boolean;
   muted: boolean;
+  solo?: boolean;
   visible: boolean;
   height?: number;
   clips: VideoTimelineClip[];
@@ -380,6 +447,7 @@ export interface VideoTimelineDocument {
   duration_ms: number;
   tracks: VideoTimelineTrack[];
   markers: VideoTimelineMarker[];
+  scenes?: VideoTimelineScene[];
   metadata: Record<string, unknown>;
 }
 
@@ -390,6 +458,8 @@ export interface VideoTimelineRecord {
   active: boolean;
   timeline_json: string;
   duration_ms: number;
+  revision: number;
+  content_sha256: string;
   created_at: string;
   updated_at: string;
 }
@@ -409,6 +479,8 @@ export interface VideoExportSettings {
   fps?: number;
   quality?: 'draft' | 'standard' | 'high';
   include_audio: boolean;
+  /** Block export when an authored feature is known to differ from preview. */
+  strict_parity?: boolean;
   register_in_file_library?: boolean;
   estimated_duration_ms?: number;
   /** Draw caption-track text into the frame (default true when omitted). */
@@ -428,6 +500,15 @@ export interface VideoRenderJob {
   id: string;
   project_id: string;
   timeline_id: string;
+  snapshot_id?: string;
+  timeline_revision?: number;
+  timeline_sha256?: string;
+  asset_manifest_sha256?: string;
+  renderer?: string;
+  renderer_version?: string;
+  render_contract_version?: number;
+  render_source_mode: 'immutable_snapshot' | 'legacy_mutable_source' | string;
+  exact_source_available: boolean;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
   progress: number;
   settings_json: string;
@@ -477,10 +558,17 @@ export interface VideoStoryboardResponse {
   prompt_seed: string;
 }
 
+export type VideoEditOperationType =
+  | 'set_canvas' | 'set_duration' | 'trim_clip' | 'add_text_clip'
+  | 'move_clip' | 'delete_clip' | 'set_volume' | 'add_marker'
+  | 'add_asset_clip' | 'set_transform' | 'add_keyframe'
+  | 'add_scene' | 'update_camera' | 'apply_scene_effect';
+
 export interface VideoEditOperation {
-  type: 'set_canvas' | 'set_duration' | 'trim_clip' | 'add_text_clip' | 'move_clip' | 'delete_clip' | 'set_volume' | 'add_marker' | 'add_asset_clip' | 'set_transform' | string;
+  type: VideoEditOperationType;
   clip_id?: string;
   track_id?: string;
+  scene_id?: string;
   asset_id?: string;
   start_ms?: number;
   duration_ms?: number;
@@ -493,14 +581,30 @@ export interface VideoEditOperation {
   y?: number;
   scale?: number;
   opacity?: number;
+  z?: number;
+  rotation_x?: number;
+  rotation_y?: number;
+  rotation_z?: number;
+  scale_x?: number;
+  scale_y?: number;
+  field_of_view?: number;
+  focus_depth?: number;
+  value?: number;
+  property?: VideoTimelineKeyframe['property'];
+  easing?: VideoTimelineKeyframe['easing'];
+  curve?: VideoMotionCurve;
+  effect_type?: VideoTimelineEffect['type'];
+  params?: Record<string, unknown>;
 }
 
 export interface VideoEditPlan {
   summary: string;
   operations: VideoEditOperation[];
+  timeline_id?: string;
+  revision?: string;
   /** Human-readable per-operation descriptions for valid operations. */
   preview?: string[];
-  /** Operations that failed validation against the current timeline (skipped on apply). */
+  /** Operations that failed validation; apply rejects the whole plan. */
   issues?: string[];
 }
 

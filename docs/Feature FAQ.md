@@ -21,7 +21,8 @@ A comprehensive guide to all features in OmniLLM-Studio, covering what each feat
 13. [Artifact Export System](#13-artifact-export-system)
 14. [Feature Flags](#14-feature-flags)
 15. [Model Context Protocol (MCP)](#15-model-context-protocol-mcp)
-16. [General Questions](#16-general-questions)
+16. [Video Studio & Motion Design](#16-video-studio--motion-design)
+17. [General Questions](#17-general-questions)
 
 ---
 
@@ -172,6 +173,7 @@ The Tool Calling Framework provides a generic, extensible system for the AI to i
 | **Calculator** | Evaluates mathematical expressions safely using Go's AST parser. |
 | **URL Fetch** | Fetches and extracts readable text content from any URL. |
 | **Word Document Generation** | Converts Markdown content into a downloadable `.docx` file. |
+| **Video Motion Director** | Inspects an owned video project, applies revision-bound atomic edits, and queues bounded diagnostic renders with status and cancellation controls. |
 
 ### How does it work?
 
@@ -1040,7 +1042,15 @@ A: Once a server is connected and its tools are synced, they appear in your stan
 
 ---
 
-## 16. General Questions
+## 16. Video Studio & Motion Design
+
+**Availability:** Built in. Open a Video Studio project, then choose **Video Edit Studio** from the project workspace.
+
+### Where is the complete Video Edit Studio FAQ?
+
+The dedicated [Video Edit Studio FAQ set](VIDEO_EDIT_STUDIO_FAQ.md) covers setup, timeline editing, Motion Design, media, recording, audio, captions, export, AI plans, Motion Director tools, and troubleshooting. It is the authoritative how-to guide for the editor; this general FAQ keeps only the entry point.
+
+## 17. General Questions
 
 ### What is OmniLLM-Studio?
 

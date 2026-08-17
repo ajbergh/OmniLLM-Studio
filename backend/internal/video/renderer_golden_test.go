@@ -53,10 +53,12 @@ func TestRendererGoldenMedia(t *testing.T) {
 			ID: "media", Type: TrackTypeLayer, Name: "Media", Visible: true,
 			Clips: []TimelineClip{{
 				ID: "source", AssetID: "source-asset", DurationMS: duration, TrimOutMS: duration,
-				Transform: map[string]any{"x": 0.0, "y": 0.0, "scale": 1.0, "rotation": 0.0, "opacity": 1.0},
+				Transform: map[string]any{"x": 0.0, "y": 0.0, "scale": 0.5, "rotation": 0.0, "opacity": 1.0},
 				Keyframes: []TimelineKeyframe{
-					{ID: "scale-start", Property: "scale", TimeMS: 0, Value: 1, Easing: "ease-in-out"},
-					{ID: "scale-end", Property: "scale", TimeMS: 1000, Value: 1.2, Easing: "ease-in-out"},
+					{ID: "scale-start", Property: "scale", TimeMS: 0, Value: 0.5, Easing: "ease-out"},
+					{ID: "scale-end", Property: "scale", TimeMS: 1000, Value: 0.6, Easing: "ease-out", Curve: &MotionCurve{Type: "spring", Stiffness: 170, Damping: 26, Mass: 1}},
+					{ID: "x-start", Property: "x", TimeMS: 0, Value: 0, Easing: "ease-in-out"},
+					{ID: "x-end", Property: "x", TimeMS: 1000, Value: 8, Easing: "ease-in-out", Curve: &MotionCurve{Type: "bezier", X1: .42, Y1: 0, X2: .58, Y2: 1}},
 				},
 				Cursor: &TimelineCursor{
 					Visible: true, Scale: 1, Highlight: true, ClickRings: true,
@@ -150,6 +152,7 @@ func TestRendererGoldenMedia(t *testing.T) {
 	}
 	red, green, blue := pixel(160, 90)
 	if red < 180 || green > 80 || blue > 80 {
+		t.Logf("ffmpeg command: %v", result.Metadata["ffmpeg_command"])
 		t.Fatalf("center pixel does not match red source composition: rgb(%d,%d,%d)", red, green, blue)
 	}
 	cornerR, cornerG, cornerB := pixel(5, 5)
@@ -170,5 +173,38 @@ func TestRendererGoldenMedia(t *testing.T) {
 
 	if command, _ := result.Metadata["ffmpeg_command"].(string); command == "" {
 		t.Fatal("renderer metadata omitted FFmpeg command diagnostics")
+	}
+}
+
+// TestRendererGoldenCinematicSceneEffects sends every scene effect advertised
+// as export-capable through a real FFmpeg encode. The assertion is semantic
+// (successful, decodable output) because codec bytes vary across builds.
+func TestRendererGoldenCinematicSceneEffects(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("FFmpeg is unavailable")
+	}
+	effectTypes := []string{
+		EffectTypeFilmGrain, EffectTypeBloom, EffectTypeColorGrade,
+		EffectTypeEdgeFade, EffectTypeRGBSplit, EffectTypeGhostTrail,
+		EffectTypeMotionBlur, EffectTypeDepthOfField, EffectTypeRackFocus,
+	}
+	effects := make([]TimelineEffect, 0, len(effectTypes))
+	for _, effectType := range effectTypes {
+		effects = append(effects, TimelineEffect{ID: "golden-" + effectType, Type: effectType, Enabled: true, Params: map[string]any{"amount": 1.0}})
+	}
+	doc := NewEmptyTimeline(320, 180, 24)
+	doc.DurationMS = 500
+	doc.Scenes = []TimelineScene{{ID: "scene", Name: "Golden effects", StartMS: 0, DurationMS: 500, Effects: effects}}
+	result, err := NewFFmpegRenderer(ffmpeg).Render(context.Background(), RenderRequest{
+		Project:  models.VideoProject{ID: "effects-golden", Width: 320, Height: 180, FPS: 24, DurationMS: 500},
+		Timeline: doc,
+		Settings: ExportSettings{Format: "mp4", Resolution: "project", FPS: 24, Quality: "draft", IncludeAudio: false},
+	}, nil)
+	if err != nil {
+		t.Fatalf("render cinematic scene effects: %v", err)
+	}
+	if len(result.Data) < 1000 || result.Width != 320 || result.Height != 180 {
+		t.Fatalf("unexpected cinematic effect render: bytes=%d size=%dx%d", len(result.Data), result.Width, result.Height)
 	}
 }

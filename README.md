@@ -45,7 +45,7 @@ Start with a rough idea. Research it against the web and your own files. Turn it
 | **02** | **Create and edit images** | Generate across providers, paint masks directly on a canvas, inpaint regions, compare variants, use references, and branch from any visual direction. |
 | **03** | **Compose original music** | Shape Gemini Lyria tracks with genre, mood, instruments, BPM, structure, and lyrics—then play, manage, and download them in the same workspace. |
 | **04** | **Generate cinematic video** | Move from text, images, audio, or reference video to generated scenes with guided camera, composition, lighting, continuity, and native-audio controls. |
-| **05** | **Edit on a production timeline** | Combine video, images, audio, music, captions, shapes, effects, transitions, fades, speed changes, and sampled keyframes; record on Windows, transcribe through configured providers, finish audio, and export through a durable FFmpeg render queue. |
+| **05** | **Edit and animate on a production timeline** | Combine video, images, audio, music, captions, shapes, effects, transitions, fades, 2.5D camera motion, semantic animation blocks, scenes, and editable curves; record on Windows, transcribe through configured providers, and export through a durable FFmpeg render queue. |
 | **06** | **Work from your own knowledge** | Search a durable File Library with hybrid keyword + vector retrieval, bring citations into the conversation, and keep private files ahead of web results. |
 | **07** | **Research and automate** | Search the web, read full pages, operate a headless browser, pull live sports data, call MCP servers, and extend the system with plugins. |
 | **08** | **Compare, measure, and deliver** | Run model evaluations, track usage and cost, organize workspaces, and export polished Word, Excel, CSV, PDF, Markdown, HTML, JSON, and YAML artifacts. |
@@ -179,16 +179,18 @@ Prefer a native desktop window, helper scripts, containers, or Kubernetes? Jump 
 - [Technical reference](docs/TECHNICAL_REFERENCE.md) — models, architecture, API routes, environment variables, builds, and deployment
 - [Feature FAQ](docs/Feature%20FAQ.md) — how the major capabilities behave in practice
 - [RAG modernization architecture](docs/RAG_MODERNIZATION.md) — hybrid retrieval, embedding isolation, safe rebuilds, and optional vector backends
-- [RAG implementation status](docs/RAG_MODERNIZATION_STATUS.md) — default runtime versus implemented opt-in components
+- [RAG architecture and implementation status](docs/RAG_MODERNIZATION.md) — default runtime, migration path, and opt-in components
 - [MCP guide and FAQ](docs/MCP_HOW_TO_FAQ.md) — connect external tool servers to chat and agent workflows
 
 ### Video creation and editing
 
 - [Video Studio guide](docs/VIDEO_STUDIO.md)
+- [Video Edit Studio FAQ](docs/VIDEO_EDIT_STUDIO_FAQ.md) — practical editing, motion, media, caption, export, and AI guidance
 - [Video Studio architecture](docs/VIDEO_STUDIO_ARCHITECTURE.md)
 - [Provider adapters](docs/VIDEO_PROVIDER_ADAPTERS.md)
 - [Timeline schema](docs/VIDEO_TIMELINE_SCHEMA.md)
 - [Rendering, scheduling, transcription, capture, and scalability](docs/VIDEO_RENDERING.md)
+- [Motion Design implementation status](docs/VIDEO_MOTION_DESIGN_ROADMAP_2026-08.md)
 
 ### Deployment
 
@@ -197,7 +199,7 @@ Prefer a native desktop window, helper scripts, containers, or Kubernetes? Jump 
 
 ## Under the hood
 
-OmniLLM-Studio pairs a Go backend with a React and TypeScript interface, SQLite persistence and FTS5 retrieval, embedding-space-isolated chromem vector collections, streaming responses, encrypted secrets, and a bounded FFmpeg rendering pipeline. Video Edit Studio adds durable render scheduling, provider-backed transcript persistence, Windows-native capture, export audio processing, timeline virtualization, decoder budgeting, and patch-based undo. The application can run as a Wails desktop app, a headless web service, or a single-replica Kubernetes deployment.
+OmniLLM-Studio pairs a Go backend with a React and TypeScript interface, SQLite persistence and FTS5 retrieval, embedding-space-isolated chromem vector collections, streaming responses, encrypted secrets, and a bounded FFmpeg rendering pipeline. Video Edit Studio adds durable render scheduling, provider-backed transcript persistence, Windows-native capture, 2.5D scene/camera composition, semantic animation blocks, agent-governed diagnostic renders, timeline virtualization, decoder budgeting, and patch-based undo. The application can run as a Wails desktop app, a headless web service, or a single-replica Kubernetes deployment.
 
 That is the short version. The diagrams, API surface, data model, environment variables, provider matrices, build scripts, and deployment details live in the [technical reference](docs/TECHNICAL_REFERENCE.md).
 

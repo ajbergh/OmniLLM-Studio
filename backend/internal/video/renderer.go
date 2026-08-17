@@ -43,13 +43,14 @@ type RenderRequest struct {
 
 // resolvedClip is a timeline clip with its asset file path resolved to an absolute path.
 type resolvedClip struct {
-	inputIdx   int
-	trackIndex int
-	clip       TimelineClip
-	filePath   string
-	isVideo    bool
-	isImage    bool
-	isAudio    bool
+	inputIdx      int
+	trackIndex    int
+	clip          TimelineClip
+	filePath      string
+	isVideo       bool
+	isImage       bool
+	isAudio       bool
+	audioChannels int
 	// hasAudio reports whether a video asset carries an audio stream that
 	// should join the mixdown (always true for audio assets).
 	hasAudio bool
@@ -98,6 +99,9 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 	if req.Project.ID == "" {
 		return nil, fmt.Errorf("project is required")
 	}
+	if req.Settings.DiagnosticFrameIndex != nil && req.Settings.DiagnosticAudio {
+		return nil, fmt.Errorf("diagnostic frame and audio outputs are mutually exclusive")
+	}
 	var err error
 	req.Timeline, err = ValidateTimelineDocument(req.Timeline)
 	if err != nil {
@@ -136,18 +140,31 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		fps = DefaultProjectFPS
 	}
 	durationSeconds := float64(maxInt64(req.Timeline.DurationMS, 1000)) / 1000.0
+	var diagnosticFrameSeconds float64
+	if req.Settings.DiagnosticFrameIndex != nil {
+		if *req.Settings.DiagnosticFrameIndex < 0 {
+			return nil, fmt.Errorf("diagnostic frame index must be non-negative")
+		}
+		diagnosticFrameSeconds = float64(*req.Settings.DiagnosticFrameIndex) / float64(fps)
+	}
 	background := ffmpegColor(req.Timeline.Canvas.Background, "0x000000")
 
 	if progress != nil {
 		progress(RenderProgress{Stage: "preparing", Message: "Preparing FFmpeg timeline composition", Progress: 0.15})
 	}
-	tmp, err := os.CreateTemp("", "omnillm-video-render-*."+format)
+	outputExtension := format
+	if req.Settings.DiagnosticFrameIndex != nil {
+		outputExtension = "png"
+	} else if req.Settings.DiagnosticAudio {
+		outputExtension = "pcm"
+	}
+	workDir, err := os.MkdirTemp("", "omnillm-video-render-*")
 	if err != nil {
 		return nil, err
 	}
-	outputPath := tmp.Name()
-	_ = tmp.Close()
-	defer os.Remove(outputPath)
+	defer os.RemoveAll(workDir)
+	outputName := "output." + outputExtension
+	outputPath := filepath.Join(workDir, outputName)
 
 	args := []string{
 		"-hide_banner",
@@ -169,7 +186,17 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 			}
 		}
 		resolved = visualOnly
+	} else if req.Settings.DiagnosticAudio {
+		audioOnly := make([]resolvedClip, 0, len(resolved))
+		for _, rc := range resolved {
+			if rc.hasAudio {
+				rc.isVideo, rc.isImage, rc.isAudio = false, false, true
+				audioOnly = append(audioOnly, rc)
+			}
+		}
+		resolved = audioOnly
 	}
+	resolved = aliasResolvedClipInputs(workDir, resolved)
 
 	if len(resolved) > 0 {
 		// ── Media compositing path ─────────────────────────────────────────
@@ -196,10 +223,21 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 			args = append(args, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000")
 		}
 
-		filterStr, videoLabel, audioLabel := buildFilterComplexWithAudio(req.Timeline, resolved, width, height, req.Settings.IncludeAudio)
-		args = append(args, "-filter_complex", filterStr)
+		filterStr, videoLabel, audioLabel := "", "", ""
+		if req.Settings.DiagnosticAudio {
+			filterStr, audioLabel = buildAudioFilterComplex(req.Timeline, resolved)
+		} else {
+			filterStr, videoLabel, audioLabel = buildFilterComplexWithAudio(req.Timeline, resolved, width, height, req.Settings.IncludeAudio)
+		}
+		filterName := "filter-complex.txt"
+		if err := os.WriteFile(filepath.Join(workDir, filterName), []byte(filterStr), 0o600); err != nil {
+			return nil, fmt.Errorf("write FFmpeg filter graph: %w", err)
+		}
+		args = append(args, "-filter_complex_script", filterName)
 		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps))
-		args = append(args, "-map", videoLabel)
+		if !req.Settings.DiagnosticAudio {
+			args = append(args, "-map", videoLabel)
+		}
 		if req.Settings.IncludeAudio {
 			if audioLabel != "" {
 				args = append(args, "-map", audioLabel)
@@ -215,19 +253,39 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		if filters := ffmpegVideoFilters(req.Timeline, width, height); filters != "" {
 			args = append(args, "-vf", filters)
 		}
-		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps), "-map", "0:v:0")
+		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps))
+		if !req.Settings.DiagnosticAudio {
+			args = append(args, "-map", "0:v:0")
+		}
 		if req.Settings.IncludeAudio {
 			args = append(args, "-map", "1:a:0", "-shortest")
 		}
 	}
-	args = appendFFmpegCodecArgs(args, format, req.Settings)
-	args = append(args, outputPath)
+	if req.Settings.DiagnosticFrameIndex != nil {
+		// Output-side seeking keeps the full timeline clock intact for fades,
+		// transitions, keyframes, and scene camera evaluation, while encoding
+		// only the requested diagnostic frame.
+		args = append(args,
+			"-ss", fmt.Sprintf("%.9f", diagnosticFrameSeconds),
+			"-frames:v", "1",
+			"-an",
+		)
+	}
+	if req.Settings.DiagnosticFrameIndex != nil {
+		args = append(args, "-c:v", "png", "-threads", "1", "-f", "image2")
+	} else if req.Settings.DiagnosticAudio {
+		args = append(args, "-vn", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "s16le")
+	} else {
+		args = appendFFmpegCodecArgs(args, format, req.Settings)
+	}
+	args = append(args, outputName)
 
 	if progress != nil {
 		progress(RenderProgress{Stage: "encoding", Message: "Encoding video export with FFmpeg", Progress: 0.65})
 	}
 	commandStr := "ffmpeg " + strings.Join(args, " ")
 	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Dir = workDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, &RenderError{Command: commandStr, Stderr: string(output), Err: err}
@@ -246,23 +304,47 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 	if format == "webm" {
 		mimeType = "video/webm"
 	}
+	fileName := fmt.Sprintf("render-%s.%s", sanitizePathSegment(req.Project.ID), format)
+	if req.Settings.DiagnosticFrameIndex != nil {
+		mimeType = "image/png"
+		fileName = fmt.Sprintf("render-%s-frame-%d.png", sanitizePathSegment(req.Project.ID), *req.Settings.DiagnosticFrameIndex)
+	}
+	if req.Settings.DiagnosticAudio {
+		mimeType = "audio/pcm"
+		fileName = fmt.Sprintf("render-%s-audio-s16le.pcm", sanitizePathSegment(req.Project.ID))
+	}
+	resultDurationMS := int64(durationSeconds * 1000)
+	if req.Settings.DiagnosticFrameIndex != nil {
+		resultDurationMS = int64(math.Ceil(1000 / float64(fps)))
+	}
+	metadata := map[string]any{
+		"renderer":             "ffmpeg",
+		"format":               format,
+		"quality":              req.Settings.Quality,
+		"include_audio":        req.Settings.IncludeAudio,
+		"text_clips":           countTextClips(req.Timeline),
+		"ffmpeg_command":       commandStr,
+		"timeline_duration_ms": req.Timeline.DurationMS,
+	}
+	if req.Settings.DiagnosticFrameIndex != nil {
+		metadata["diagnostic_frame_index"] = *req.Settings.DiagnosticFrameIndex
+		metadata["diagnostic_frame_time_seconds"] = diagnosticFrameSeconds
+	}
+	if req.Settings.DiagnosticAudio {
+		metadata["diagnostic_audio"] = true
+		metadata["audio_sample_rate"] = 48000
+		metadata["audio_channels"] = 2
+		metadata["audio_sample_format"] = "s16le"
+	}
 	return &RenderResult{
 		MimeType:   mimeType,
-		FileName:   fmt.Sprintf("render-%s.%s", sanitizePathSegment(req.Project.ID), format),
+		FileName:   fileName,
 		Data:       data,
-		DurationMS: int64(durationSeconds * 1000),
+		DurationMS: resultDurationMS,
 		Width:      width,
 		Height:     height,
 		FPS:        float64(fps),
-		Metadata: map[string]any{
-			"renderer":             "ffmpeg",
-			"format":               format,
-			"quality":              req.Settings.Quality,
-			"include_audio":        req.Settings.IncludeAudio,
-			"text_clips":           countTextClips(req.Timeline),
-			"ffmpeg_command":       commandStr,
-			"timeline_duration_ms": req.Timeline.DurationMS,
-		},
+		Metadata:   metadata,
 	}, nil
 }
 
@@ -366,6 +448,13 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 		return nil
 	}
 	var result []resolvedClip
+	anySolo := false
+	for _, track := range req.Timeline.Tracks {
+		if track.Solo {
+			anySolo = true
+			break
+		}
+	}
 	// One audio-stream lookup per asset, not per clip.
 	audioProbeCache := map[string]bool{}
 	for trackIndex, track := range req.Timeline.Tracks {
@@ -377,7 +466,11 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 			if !ok || asset.FilePath == "" {
 				continue
 			}
-			fullPath := filepath.Join(req.AttachmentsDir, filepath.FromSlash(asset.FilePath))
+			assetPath := filepath.FromSlash(asset.FilePath)
+			fullPath := assetPath
+			if !filepath.IsAbs(assetPath) {
+				fullPath = filepath.Join(req.AttachmentsDir, assetPath)
+			}
 			if _, err := os.Stat(fullPath); err != nil {
 				continue // file not found on disk — skip silently
 			}
@@ -400,6 +493,9 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 					audioProbeCache[clip.AssetID] = rc.hasAudio
 				}
 			}
+			if rc.hasAudio {
+				rc.audioChannels = videoAssetAudioChannels(asset, fullPath)
+			}
 			// An audio-only clip turns a video asset into a detached audio clip.
 			if rc.clip.AudioOnly {
 				rc.isVideo, rc.isImage = false, false
@@ -410,7 +506,7 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 				// Video clips on hidden tracks still contribute their audio.
 				rc.isVideo, rc.isImage = false, false
 			}
-			if track.Muted || rc.clip.Muted {
+			if track.Muted || rc.clip.Muted || (anySolo && !track.Solo) {
 				rc.hasAudio = false
 			}
 			if rc.isVideo || rc.isImage || rc.hasAudio {
@@ -432,6 +528,40 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 		return result[i].clip.StartMS < result[j].clip.StartMS
 	})
 	return result
+}
+
+// aliasResolvedClipInputs gives repeated expanded clips a short, shared path
+// inside the renderer work directory. On Windows this keeps argv below the
+// CreateProcess limit; the filter graph itself is supplied via a script file.
+// Hard links avoid copying large immutable snapshot inputs. Symlinks are a
+// safe fallback because their targets have already passed snapshot containment
+// and content-hash verification; when neither is available the absolute source
+// remains valid on platforms with larger argv limits.
+func aliasResolvedClipInputs(workDir string, clips []resolvedClip) []resolvedClip {
+	aliases := map[string]string{}
+	for index := range clips {
+		if alias, ok := aliases[clips[index].filePath]; ok {
+			clips[index].filePath = alias
+			continue
+		}
+		extension := strings.ToLower(filepath.Ext(clips[index].filePath))
+		if len(extension) > 10 || strings.IndexFunc(extension, func(r rune) bool {
+			return r != '.' && (r < 'a' || r > 'z') && (r < '0' || r > '9')
+		}) >= 0 {
+			extension = ".media"
+		}
+		alias := fmt.Sprintf("input-%03d%s", len(aliases), extension)
+		aliasPath := filepath.Join(workDir, alias)
+		if err := os.Link(clips[index].filePath, aliasPath); err != nil {
+			if err := os.Symlink(clips[index].filePath, aliasPath); err != nil {
+				aliases[clips[index].filePath] = clips[index].filePath
+				continue
+			}
+		}
+		aliases[clips[index].filePath] = alias
+		clips[index].filePath = alias
+	}
+	return clips
 }
 
 func clipZIndex(clip TimelineClip) int {
@@ -459,6 +589,26 @@ func videoAssetHasAudio(asset models.VideoAsset, fullPath string) bool {
 		return false
 	}
 	return probe.HasAudio
+}
+
+// videoAssetAudioChannels returns frozen ingest metadata when available and
+// probes only as a compatibility fallback. The channel count lets the mix
+// graph reproduce Web Audio's mono-to-stereo duplication explicitly instead
+// of accepting FFmpeg's default -3 dB center-channel pan law.
+func videoAssetAudioChannels(asset models.VideoAsset, fullPath string) int {
+	if strings.TrimSpace(asset.MetadataJSON) != "" {
+		var meta struct {
+			AudioChannels int `json:"audio_channels"`
+		}
+		if err := json.Unmarshal([]byte(asset.MetadataJSON), &meta); err == nil && meta.AudioChannels > 0 {
+			return meta.AudioChannels
+		}
+	}
+	probe, err := ProbeMedia(context.Background(), fullPath)
+	if err != nil || probe == nil {
+		return 0
+	}
+	return probe.AudioChannels
 }
 
 // buildFilterComplex constructs an audio-enabled FFmpeg -filter_complex
@@ -572,8 +722,8 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 			chain = append(chain, fmt.Sprintf("crop=iw*%.4f:ih*%.4f:iw*%.4f:ih*%.4f",
 				1-tr.cropLeft-tr.cropRight, 1-tr.cropTop-tr.cropBottom, tr.cropLeft, tr.cropTop))
 		}
-		scaledW := maxInt(2, int(float64(width)*tr.scale+0.5))
-		scaledH := maxInt(2, int(float64(height)*tr.scale+0.5))
+		scaledW := maxInt(2, int(float64(width)*tr.scaleX+0.5))
+		scaledH := maxInt(2, int(float64(height)*tr.scaleY+0.5))
 		chain = append(chain, fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease", scaledW, scaledH))
 		chain = append(chain, effectFilters(rc.clip.Effects)...)
 		chain = append(chain, "format=rgba")
@@ -622,56 +772,83 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 		prevV = ovLabel
 	}
 
+	// Scene effects run once on the composited frame and are timeline-gated.
+	for sceneIndex, scene := range doc.Scenes {
+		for effectIndex, filter := range sceneEffectFilters(scene) {
+			outLabel := fmt.Sprintf("[scene%d_%d_v]", sceneIndex, effectIndex)
+			parts = append(parts, prevV+filter+outLabel)
+			prevV = outLabel
+		}
+	}
 	videoLabel = prevV
 
 	// ── Audio clips ─────────────────────────────────────────────────────────
 	// hasAudio covers audio assets and video assets with an audio stream;
 	// muted tracks/clips were already dropped in resolveMediaClips.
 	if includeAudio {
-		var aLabels []string
-		for _, rc := range clips {
-			if !rc.hasAudio {
-				continue
-			}
-			aLabel := fmt.Sprintf("[a%d]", rc.inputIdx)
-			trimInS := float64(rc.clip.TrimInMS) / 1000.0
-			durS := float64(rc.clip.DurationMS) / 1000.0
-			sourceDurS := float64(sourceDurationFor(rc.clip, rc.clip.DurationMS)) / 1000.0
-			startMS := rc.clip.StartMS
-			chain := []string{
-				fmt.Sprintf("atrim=start=%.3f:duration=%.3f", trimInS, sourceDurS),
-				"asetpts=PTS-STARTPTS",
-			}
-			chain = append(chain, atempoFilters(clipPlaybackRate(rc.clip))...)
-			chain = append(chain, timelineAudioProcessingFilters(doc.Metadata)...)
-			// Volume keyframes override the static volume (matching the preview).
-			// The retimed stream starts at 0, so keyframe time is `t` directly.
-			if expr := positionKeyframeExpr(rc.clip.Keyframes, "volume", 0); expr != "" {
-				chain = append(chain, fmt.Sprintf("volume=volume='%s':eval=frame", expr))
-			} else if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
-				chain = append(chain, fmt.Sprintf("volume=%.3f", clampFloat(*rc.clip.Volume, 0, 2)))
-			}
-			fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
-			if fadeInS > 0 {
-				chain = append(chain, fmt.Sprintf("afade=t=in:st=0:d=%.3f", fadeInS))
-			}
-			if fadeOutS > 0 {
-				chain = append(chain, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f", durS-fadeOutS, fadeOutS))
-			}
-			chain = append(chain, fmt.Sprintf("adelay=%d|%d", startMS, startMS))
-			parts = append(parts, fmt.Sprintf("[%d:a]%s%s", rc.inputIdx, strings.Join(chain, ","), aLabel))
-			aLabels = append(aLabels, aLabel)
-		}
-		if len(aLabels) > 1 {
-			audioLabel = "[final_audio]"
-			parts = append(parts, strings.Join(aLabels, "")+
-				fmt.Sprintf("amix=inputs=%d:normalize=0:dropout_transition=0[final_audio]", len(aLabels)))
-		} else if len(aLabels) == 1 {
-			audioLabel = aLabels[0]
-		}
+		audioParts, label := audioFilterParts(doc, clips)
+		parts = append(parts, audioParts...)
+		audioLabel = label
 	}
 
 	return strings.Join(parts, ";"), videoLabel, audioLabel
+}
+
+func buildAudioFilterComplex(doc TimelineDocument, clips []resolvedClip) (string, string) {
+	parts, label := audioFilterParts(doc, clips)
+	if label != "" {
+		durationSeconds := float64(maxInt64(doc.DurationMS, 1)) / 1000
+		// adelay can leave the first decoded frame with a non-zero timestamp even
+		// though it emitted leading silence. Rebuilding timestamps from the sample
+		// number before padding makes the diagnostic contract sample-exact: the
+		// raw PCM always contains timeline duration * 48 kHz * 2 channels samples,
+		// including leading and trailing silence.
+		parts = append(parts, fmt.Sprintf("%sasetpts=N/SR/TB,apad=pad_dur=%.3f,atrim=end=%.3f,asetpts=N/SR/TB[diagnostic_audio]", label, durationSeconds, durationSeconds))
+		label = "[diagnostic_audio]"
+	}
+	return strings.Join(parts, ";"), label
+}
+
+func audioFilterParts(doc TimelineDocument, clips []resolvedClip) ([]string, string) {
+	var parts, labels []string
+	for _, rc := range clips {
+		if !rc.hasAudio {
+			continue
+		}
+		label := fmt.Sprintf("[a%d]", rc.inputIdx)
+		trimInS := float64(rc.clip.TrimInMS) / 1000
+		durationS := float64(rc.clip.DurationMS) / 1000
+		sourceDurationS := float64(sourceDurationFor(rc.clip, rc.clip.DurationMS)) / 1000
+		chain := []string{fmt.Sprintf("atrim=start=%.3f:duration=%.3f", trimInS, sourceDurationS), "asetpts=PTS-STARTPTS"}
+		chain = append(chain, atempoFilters(clipPlaybackRate(rc.clip))...)
+		if rc.audioChannels == 1 {
+			chain = append(chain, "pan=stereo|c0=c0|c1=c0")
+		}
+		chain = append(chain, timelineAudioProcessingFilters(doc.Metadata)...)
+		if expr := positionKeyframeExpr(rc.clip.Keyframes, "volume", 0); expr != "" {
+			chain = append(chain, fmt.Sprintf("volume=volume='%s':eval=frame", expr))
+		} else if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
+			chain = append(chain, fmt.Sprintf("volume=%.3f", clampFloat(*rc.clip.Volume, 0, 2)))
+		}
+		fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
+		if fadeInS > 0 {
+			chain = append(chain, fmt.Sprintf("afade=t=in:st=0:d=%.3f", fadeInS))
+		}
+		if fadeOutS > 0 {
+			chain = append(chain, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f", durationS-fadeOutS, fadeOutS))
+		}
+		chain = append(chain, fmt.Sprintf("adelay=%d|%d", rc.clip.StartMS, rc.clip.StartMS))
+		parts = append(parts, fmt.Sprintf("[%d:a]%s%s", rc.inputIdx, strings.Join(chain, ","), label))
+		labels = append(labels, label)
+	}
+	if len(labels) > 1 {
+		parts = append(parts, strings.Join(labels, "")+fmt.Sprintf("amix=inputs=%d:normalize=0:dropout_transition=0[final_audio]", len(labels)))
+		return parts, "[final_audio]"
+	}
+	if len(labels) == 1 {
+		return parts, labels[0]
+	}
+	return parts, ""
 }
 
 func ffmpegVideoFilters(doc TimelineDocument, width, height int) string {
@@ -900,6 +1077,7 @@ func drawTextAlphaExpr(clip TimelineClip, startS, endS float64) string {
 type clipRenderTransform struct {
 	x, y                                     float64
 	scale                                    float64
+	scaleX, scaleY                           float64
 	rotation                                 float64
 	opacity                                  float64
 	cropTop, cropRight, cropBottom, cropLeft float64
@@ -909,7 +1087,7 @@ type clipRenderTransform struct {
 // parseClipTransform extracts renderable transform values with safe defaults.
 // Crop values are fractions of the source frame (0–0.95 per edge).
 func parseClipTransform(transform map[string]any) clipRenderTransform {
-	tr := clipRenderTransform{scale: 1, opacity: 1}
+	tr := clipRenderTransform{scale: 1, scaleX: 1, scaleY: 1, opacity: 1}
 	if transform == nil {
 		return tr
 	}
@@ -922,8 +1100,19 @@ func parseClipTransform(transform map[string]any) clipRenderTransform {
 	if v, ok := numericTransform(transform, "rotation"); ok {
 		tr.rotation = math.Mod(v, 360)
 	}
+	if v, ok := numericTransform(transform, "rotation_z"); ok {
+		tr.rotation = math.Mod(v, 360)
+	}
 	if v, ok := numericTransform(transform, "scale"); ok && v > 0 {
 		tr.scale = clampFloat(v, 0.05, 4)
+		tr.scaleX = tr.scale
+		tr.scaleY = tr.scale
+	}
+	if v, ok := numericTransform(transform, "scale_x"); ok && v > 0 {
+		tr.scaleX = clampFloat(v, 0.05, 4)
+	}
+	if v, ok := numericTransform(transform, "scale_y"); ok && v > 0 {
+		tr.scaleY = clampFloat(v, 0.05, 4)
 	}
 	if v, ok := numericTransform(transform, "opacity"); ok {
 		tr.opacity = clampFloat(v, 0, 1)
@@ -1096,16 +1285,69 @@ func effectFilters(effects []TimelineEffect) []string {
 			blend := numericOrZero(effect.Params, "blend")
 			filters = append(filters, fmt.Sprintf("chromakey=%s:%.3f:%.3f",
 				color, clampFloat(similarity, 0.01, 1), clampFloat(blend, 0, 0.5)))
+		case EffectTypeFilmGrain:
+			if !hasAmount {
+				amount = 8
+			}
+			filters = append(filters, fmt.Sprintf("noise=alls=%.2f:allf=t+u", clampFloat(amount, 0, 40)))
+		case EffectTypeBloom:
+			if !hasAmount {
+				amount = 0.25
+			}
+			filters = append(filters, fmt.Sprintf("gblur=sigma=%.2f", clampFloat(amount*8, 0.1, 20)))
+		case EffectTypeColorGrade:
+			if !hasAmount {
+				amount = 1.08
+			}
+			filters = append(filters, fmt.Sprintf("eq=contrast=%.3f:saturation=%.3f", clampFloat(amount, 0.5, 2), clampFloat(amount, 0.5, 2)))
+		case EffectTypeEdgeFade:
+			if !hasAmount {
+				amount = 0.35
+			}
+			filters = append(filters, fmt.Sprintf("vignette=a=%.4f", clampFloat(amount, 0, 1)*math.Pi/2))
+		case EffectTypeRGBSplit:
+			if !hasAmount {
+				amount = 3
+			}
+			shift := int(clampFloat(amount, 0, 20) + 0.5)
+			filters = append(filters, fmt.Sprintf("rgbashift=rh=%d:bh=-%d:edge=smear", shift, shift))
+		case EffectTypeGhostTrail:
+			filters = append(filters, "tmix=frames=3:weights='1 1 1'")
+		case EffectTypeMotionBlur:
+			filters = append(filters, "tmix=frames=3:weights='1 2 1'")
+		case EffectTypeDepthOfField, EffectTypeRackFocus:
+			if !hasAmount {
+				amount = 2
+			}
+			filters = append(filters, fmt.Sprintf("gblur=sigma=%.2f", clampFloat(amount, 0, 12)))
 		}
 	}
 	return filters
 }
 
-// positionKeyframeExpr builds a piecewise-linear FFmpeg time expression for a
-// keyframed position property. Keyframe time_ms is clip-relative; clipStartS
-// converts segment boundaries to output-timeline seconds (overlay expressions
-// evaluate `t` in output time). The value holds flat before the first and
-// after the last keyframe. Easing curves are approximated linearly at export.
+func sceneEffectFilters(scene TimelineScene) []string {
+	start := float64(scene.StartMS) / 1000
+	end := float64(scene.StartMS+scene.DurationMS) / 1000
+	enable := fmt.Sprintf(":enable='between(t\\,%.3f\\,%.3f)'", start, end)
+	filters := make([]string, 0)
+	for _, effect := range scene.Effects {
+		if !effect.Enabled {
+			continue
+		}
+		for _, filter := range effectFilters([]TimelineEffect{effect}) {
+			filters = append(filters, filter+enable)
+		}
+	}
+	return filters
+}
+
+// positionKeyframeExpr builds a piecewise FFmpeg time expression for a
+// keyframed property. Keyframe time_ms is clip-relative; clipStartS converts
+// segment boundaries to output-timeline seconds (overlay expressions evaluate
+// `t` in output time, while audio passes zero). The value holds flat before
+// the first and after the last keyframe. Built-in easing follows the preview's
+// later-keyframe semantics. Custom curves are normally expanded to static
+// visual segments; audio custom curves remain a declared parity limitation.
 // Returns "" when the property has no keyframes.
 func positionKeyframeExpr(keyframes []TimelineKeyframe, property string, clipStartS float64) string {
 	var points []TimelineKeyframe
@@ -1131,12 +1373,42 @@ func positionKeyframeExpr(keyframes []TimelineKeyframe, property string, clipSta
 		if span <= 0 {
 			segment = fmt.Sprintf("%.3f", next.Value)
 		} else {
-			segment = fmt.Sprintf("(%.3f+(%.3f)*(t-%.3f)/%.3f)", prev.Value, next.Value-prev.Value, t0, span)
+			progress := fmt.Sprintf("((t-%.3f)/%.3f)", t0, span)
+			if next.Curve == nil && strings.TrimSpace(next.Easing) == "" {
+				// Preserve the long-standing linear expression byte-for-byte; several
+				// renderer goldens intentionally assert the emitted filter contract.
+				segment = fmt.Sprintf("(%.3f+(%.3f)*(t-%.3f)/%.3f)", prev.Value, next.Value-prev.Value, t0, span)
+			} else {
+				eased := ffmpegEasingExpr(progress, next.Easing, next.Curve)
+				segment = fmt.Sprintf("(%.3f+(%.3f)*%s)", prev.Value, next.Value-prev.Value, eased)
+			}
 		}
 		expr = fmt.Sprintf("if(lt(t,%.3f),%s,%s)", t1, segment, expr)
 	}
 	expr = fmt.Sprintf("if(lt(t,%.3f),%.3f,%s)", clipStartS+float64(points[0].TimeMS)/1000.0, points[0].Value, expr)
 	return strings.ReplaceAll(expr, ",", "\\,")
+}
+
+// ffmpegEasingExpr mirrors frontend applyEasing for the built-in curves.
+// FFmpeg expressions cannot invert an arbitrary cubic-bezier curve without a
+// lookup table, so custom curves retain the linear fallback until AudioGraph
+// becomes the shared evaluator.
+func ffmpegEasingExpr(progress, easing string, curve *MotionCurve) string {
+	if curve != nil {
+		return progress
+	}
+	switch strings.ToLower(strings.TrimSpace(easing)) {
+	case rendererEasingEaseIn:
+		return fmt.Sprintf("(%s*%s)", progress, progress)
+	case rendererEasingEaseOut:
+		return fmt.Sprintf("(1-(1-%s)*(1-%s))", progress, progress)
+	case rendererEasingEaseInOut:
+		return fmt.Sprintf("if(lt(%s,0.5),2*%s*%s,1-(-2*%s+2)*(-2*%s+2)/2)", progress, progress, progress, progress, progress)
+	case rendererEasingStep:
+		return fmt.Sprintf("if(lt(%s,1),0,1)", progress)
+	default:
+		return progress
+	}
 }
 
 func numericTransform(transform map[string]any, key string) (float64, bool) {

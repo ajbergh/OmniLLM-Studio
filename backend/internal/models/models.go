@@ -976,27 +976,64 @@ type VideoAsset struct {
 }
 
 type VideoTimeline struct {
-	ID           string    `json:"id"`
-	ProjectID    string    `json:"project_id"`
-	Name         string    `json:"name"`
-	Active       bool      `json:"active"`
-	TimelineJSON string    `json:"timeline_json"`
-	DurationMS   int64     `json:"duration_ms"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	ProjectID     string    `json:"project_id"`
+	Name          string    `json:"name"`
+	Active        bool      `json:"active"`
+	TimelineJSON  string    `json:"timeline_json"`
+	DurationMS    int64     `json:"duration_ms"`
+	Revision      int64     `json:"revision"`
+	ContentSHA256 string    `json:"content_sha256"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type VideoRenderJob struct {
-	ID            string     `json:"id"`
-	ProjectID     string     `json:"project_id"`
-	TimelineID    string     `json:"timeline_id"`
-	Status        string     `json:"status"`
-	Progress      float64    `json:"progress"`
-	SettingsJSON  string     `json:"settings_json"`
-	OutputAssetID *string    `json:"output_asset_id,omitempty"`
-	Error         *string    `json:"error,omitempty"`
-	MetadataJSON  string     `json:"metadata_json,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+	ID                    string     `json:"id"`
+	ProjectID             string     `json:"project_id"`
+	TimelineID            string     `json:"timeline_id"`
+	SnapshotID            *string    `json:"snapshot_id,omitempty"`
+	TimelineRevision      int64      `json:"timeline_revision,omitempty"`
+	TimelineSHA256        string     `json:"timeline_sha256,omitempty"`
+	AssetManifestSHA256   string     `json:"asset_manifest_sha256,omitempty"`
+	Renderer              string     `json:"renderer,omitempty"`
+	RendererVersion       string     `json:"renderer_version,omitempty"`
+	RenderContractVersion int        `json:"render_contract_version,omitempty"`
+	RenderSourceMode      string     `json:"render_source_mode"`
+	ExactSourceAvailable  bool       `json:"exact_source_available"`
+	Status                string     `json:"status"`
+	Progress              float64    `json:"progress"`
+	SettingsJSON          string     `json:"settings_json"`
+	OutputAssetID         *string    `json:"output_asset_id,omitempty"`
+	Error                 *string    `json:"error,omitempty"`
+	MetadataJSON          string     `json:"metadata_json,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	StartedAt             *time.Time `json:"started_at,omitempty"`
+	CompletedAt           *time.Time `json:"completed_at,omitempty"`
+}
+
+// VideoRenderSnapshot is the immutable source material for one render job.
+// AssetManifestJSON contains the complete asset records and file hashes used
+// to reconstruct a RenderRequest without consulting mutable asset rows.
+type VideoRenderSnapshot struct {
+	ID                    string    `json:"id"`
+	ProjectID             string    `json:"project_id"`
+	TimelineID            string    `json:"timeline_id"`
+	TimelineRevision      int64     `json:"timeline_revision"`
+	TimelineJSON          string    `json:"timeline_json"`
+	TimelineSHA256        string    `json:"timeline_sha256"`
+	AssetManifestJSON     string    `json:"asset_manifest_json"`
+	AssetManifestSHA256   string    `json:"asset_manifest_sha256"`
+	SettingsJSON          string    `json:"settings_json"`
+	RenderContractVersion int       `json:"render_contract_version"`
+	Renderer              string    `json:"renderer"`
+	RendererVersion       string    `json:"renderer_version"`
+	CreatedAt             time.Time `json:"created_at"`
+}
+
+type VideoRenderSnapshotAsset struct {
+	SnapshotID string `json:"snapshot_id"`
+	AssetID    string `json:"asset_id"`
+	FileSHA256 string `json:"file_sha256"`
+	SizeBytes  int64  `json:"size_bytes"`
 }

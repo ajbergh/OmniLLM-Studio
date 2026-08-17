@@ -4,13 +4,14 @@
  * range). Render runs through the exportValidation checklist first — errors
  * block, warnings can be acknowledged ("Render anyway"). Shows the full job
  * history and a "timeline changed since last render" banner driven by the
- * store's save/render sequence counters.
+ * canonical timeline content hash used by the completed render.
  */
 import { useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Clapperboard, Loader2 } from 'lucide-react';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import { RenderJobStatus } from './RenderJobStatus';
 import { validateExport } from './exportValidation';
+import { newestCompletedTimelineSHA256 } from './renderIdentity';
 import type { ExportValidationResult } from './exportValidation';
 
 const EXPORT_PRESETS = [
@@ -38,8 +39,8 @@ export function VideoRenderPanel() {
   const cancelRenderJob = useVideoStudioStore((state) => state.cancelRenderJob);
   const deleteRenderJob = useVideoStudioStore((state) => state.deleteRenderJob);
   const downloadRender = useVideoStudioStore((state) => state.downloadRender);
-  const saveSeq = useVideoStudioStore((state) => state._saveSeq);
-  const renderedSaveSeq = useVideoStudioStore((state) => state.renderedSaveSeq);
+  const timelineRecord = useVideoStudioStore((state) => state.timelineRecord);
+  const saveStatus = useVideoStudioStore((state) => state.saveStatus);
   const selectedClipIds = useVideoStudioStore((state) => state.selectedClipIds);
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -70,8 +71,13 @@ export function VideoRenderPanel() {
   };
 
   const partialFeatures = (rendererCapabilities?.features || []).filter((f) => !f.supported || f.partial);
-  const hasRendered = renderedSaveSeq > 0;
-  const dirtySinceRender = hasRendered && saveSeq > renderedSaveSeq;
+  const renderedTimelineSHA256 = newestCompletedTimelineSHA256(renderJobs);
+  const hasRendered = Boolean(renderedTimelineSHA256);
+  const dirtySinceRender = hasRendered && (
+    saveStatus !== 'saved'
+    || !timelineRecord?.content_sha256
+    || timelineRecord.content_sha256 !== renderedTimelineSHA256
+  );
   const rangeActive = (exportSettings.range_end_ms || 0) > (exportSettings.range_start_ms || 0);
 
   const startRender = (skipChecklist = false) => {
@@ -197,7 +203,7 @@ export function VideoRenderPanel() {
         aria-expanded={advancedOpen}
       >
         {advancedOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-        Advanced — codec, captions, range
+        Advanced — codec, parity, captions, range
       </button>
       {advancedOpen && (
         <div className="mt-2 grid grid-cols-2 gap-2 rounded-md border border-border bg-surface-alt/50 p-2">
@@ -231,6 +237,17 @@ export function VideoRenderPanel() {
                 <option key={kbps} value={kbps}>{kbps} kbps</option>
               ))}
             </select>
+          </label>
+          <label className="col-span-2 flex items-center gap-2 text-xs text-text-secondary">
+            <input
+              type="checkbox"
+              checked={exportSettings.strict_parity === true}
+              onChange={(event) => setExportSetting('strict_parity', event.target.checked)}
+            />
+            <span>
+              Strict parity
+              <span className="ml-1 text-[10px] text-text-muted">Block known preview/export differences</span>
+            </span>
           </label>
           <label className="col-span-2 flex items-center gap-2 text-xs text-text-secondary">
             <input

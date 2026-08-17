@@ -20,6 +20,7 @@ import { KeyframeLane } from './KeyframeLane';
 import { TimelinePlayhead } from './TimelinePlayhead';
 import { TimelineRuler } from './TimelineRuler';
 import { TimelineToolbar } from './TimelineToolbar';
+import { SceneStrip } from './SceneStrip';
 import { TimelineTrack } from './TimelineTrack';
 import type { SnapPoint } from './TimelineTrack';
 
@@ -249,8 +250,8 @@ export function VideoTimeline() {
   }, [pxPerMs, timeline?.duration_ms]);
 
   // Snap targets, typed so the drop guide can say what it snapped to. When a
-  // position matches several targets, precedence is playhead > marker > clip
-  // edge > timeline start/end.
+  // position matches several targets, precedence is playhead > marker > scene
+  // boundary > clip edge > timeline start/end.
   const snapPoints = useMemo(() => {
     if (!timeline) return [] as SnapPoint[];
     const points = new Map<number, SnapPoint['kind']>();
@@ -260,6 +261,10 @@ export function VideoTimeline() {
     add(playheadMs, 'playhead');
     for (const marker of timeline.markers || []) {
       add(marker.time_ms, 'marker');
+    }
+    for (const scene of timeline.scenes || []) {
+      add(scene.start_ms, 'scene');
+      add(scene.start_ms + scene.duration_ms, 'scene');
     }
     for (const track of timeline.tracks) {
       for (const clip of track.clips) {
@@ -567,6 +572,7 @@ export function VideoTimeline() {
         timecode={`${formatTimecode(playheadMs, timeline.canvas.fps)} / ${formatTimecode(timeline.duration_ms, timeline.canvas.fps)}`}
         selectionSummary={selectionSummary}
       />
+      {editorModeFeatures(editorMode).sceneControls && <SceneStrip />}
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto" onPointerDown={beginMarquee}>
         <div className="grid grid-cols-[148px_minmax(0,1fr)]">
           <div ref={addTrackRef} className="sticky left-0 z-20 flex h-8 items-center border-b border-r border-border bg-surface-alt px-1">

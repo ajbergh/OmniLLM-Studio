@@ -163,3 +163,42 @@ func TestTimelineContextSummaryIncludesStructure(t *testing.T) {
 		}
 	}
 }
+
+func TestMotionDirectorOperationsAndRevisionBinding(t *testing.T) {
+	doc := planTestDoc()
+	doc.Scenes = []TimelineScene{{ID: "scene-a", Name: "Opening", StartMS: 0, DurationMS: 5000}}
+	z, rotationY, fov, value := 240.0, 12.0, 62.0, 180.0
+	plan := EditPlan{Operations: []EditOperation{
+		{Type: "set_transform", ClipID: "clip-a", Z: &z, RotationY: &rotationY},
+		{Type: "add_keyframe", ClipID: "clip-a", Property: "z", StartMS: 1000, Value: &value, Curve: &MotionCurve{Type: "spring", Stiffness: 170, Damping: 26, Mass: 1}},
+		{Type: "update_camera", SceneID: "scene-a", FieldOfView: &fov},
+		{Type: "apply_scene_effect", SceneID: "scene-a", EffectType: EffectTypeBloom, Params: map[string]any{"amount": 0.4}},
+		{Type: "add_scene", Text: "Closing", StartMS: 5000, DurationMS: 3000},
+	}}
+	valid, _, issues := ValidateEditPlanOperations(doc, plan)
+	if len(issues) != 0 || len(valid) != len(plan.Operations) {
+		t.Fatalf("motion operations rejected: valid=%d issues=%v", len(valid), issues)
+	}
+	before, err := TimelineRevision(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := ApplyEditPlanToTimeline(doc, EditPlan{Operations: valid})
+	if err != nil {
+		t.Fatalf("apply motion operations: %v", err)
+	}
+	after, err := TimelineRevision(updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after || !strings.HasPrefix(after, "sha256:") {
+		t.Fatalf("revision did not bind changed content: before=%s after=%s", before, after)
+	}
+	clip := updated.Tracks[0].Clips[0]
+	if clip.Transform["z"] != z || len(clip.Keyframes) != 1 || clip.Keyframes[0].Curve == nil {
+		t.Fatalf("spatial mutation not preserved: %+v", clip)
+	}
+	if len(updated.Scenes) != 2 || updated.Scenes[0].Camera == nil || updated.Scenes[0].Camera.FieldOfView != fov || len(updated.Scenes[0].Effects) != 1 {
+		t.Fatalf("scene mutations not preserved: %+v", updated.Scenes)
+	}
+}

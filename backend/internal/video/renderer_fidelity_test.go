@@ -139,9 +139,10 @@ func TestBuildFilterComplexVolumeKeyframesAndVideoAudio(t *testing.T) {
 	doc := NewEmptyTimeline(1920, 1080, 30)
 	volume := 0.8
 	clips := []resolvedClip{{
-		inputIdx: 1,
-		isVideo:  true,
-		hasAudio: true, // video asset with an audio stream joins the mixdown
+		inputIdx:      1,
+		isVideo:       true,
+		hasAudio:      true, // video asset with an audio stream joins the mixdown
+		audioChannels: 1,
 		clip: TimelineClip{
 			ID:         "clip-video",
 			AssetID:    "asset-video",
@@ -150,7 +151,7 @@ func TestBuildFilterComplexVolumeKeyframesAndVideoAudio(t *testing.T) {
 			Volume:     &volume,
 			Keyframes: []TimelineKeyframe{
 				{ID: "kf-1", Property: "volume", TimeMS: 0, Value: 0},
-				{ID: "kf-2", Property: "volume", TimeMS: 2000, Value: 1},
+				{ID: "kf-2", Property: "volume", TimeMS: 2000, Value: 1, Easing: rendererEasingEaseInOut},
 			},
 		},
 	}}
@@ -165,6 +166,12 @@ func TestBuildFilterComplexVolumeKeyframesAndVideoAudio(t *testing.T) {
 	}
 	if strings.Contains(filterStr, "volume=0.800") {
 		t.Errorf("static volume must not apply when volume keyframes exist: %s", filterStr)
+	}
+	if !strings.Contains(filterStr, "pan=stereo|c0=c0|c1=c0") {
+		t.Errorf("mono audio should duplicate into stereo without pan-law attenuation: %s", filterStr)
+	}
+	if !strings.Contains(filterStr, "if(lt(") {
+		t.Errorf("volume expression should preserve ease-in-out interpolation: %s", filterStr)
 	}
 	if !strings.Contains(filterStr, "adelay=1000|1000") {
 		t.Errorf("video audio should be delayed to the clip start: %s", filterStr)

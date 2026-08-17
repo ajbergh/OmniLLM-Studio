@@ -6,7 +6,7 @@ Video Edit Studio separates responsive interactive preview from final FFmpeg exp
 
 The frontend preview composites active visual clips at the current playhead, stacked by track order (later tracks on top) and per-clip `z_index`, with transforms, fades, effects, annotations, cursor overlays, and text styling applied. It uses muted visual `<video>` elements plus managed audio elements, so video soundtracks and audio assets both audition clip volume, volume keyframes, fades, track solo, constant 0.25×–4× speed, and the preview-only master volume.
 
-Preview is optimized for editing responsiveness rather than frame-perfect export. Track solo and master volume are monitoring controls; exports ignore both.
+Preview is optimized for editing responsiveness rather than frame-perfect export. The master volume is preview-only; persisted track solo is also honored by the export audio mix.
 
 Large projects use an interval index for active-clip lookup and a configurable decoder budget. Active videos outside the decoder budget display generated poster/thumbnail frames instead of mounting another decoder. The selected video is promoted into the budget so direct manipulation stays interactive. The local-storage key `omnillm-video-decoder-budget` accepts 1–12 mounted video decoders and defaults to 4.
 
@@ -70,13 +70,13 @@ Current export coverage includes:
 - Canvas size, background, duration, FPS, format, quality, codec, optional audio, range rendering, caption burn-in, and SRT/VTT sidecar captions.
 - Real video and image compositing with timeline placement, trim, layer ordering, `z_index`, scaling, position, fractional crop, rotation, opacity, and fades.
 - Constant 0.25×–4× video/audio retiming with pitch-preserving `atempo` filters.
-- Position, scale, rotation, opacity, volume, and effect-amount keyframes expanded into deterministic sampled segments. Linear, ease-in, ease-out, ease-in-out, and step interpolation are supported; continuous curves remain approximations.
+- Position, spatial transform, scale, rotation, opacity, volume, effect-amount, and scene-camera keyframes expanded into deterministic sampled segments. Linear, ease-in, ease-out, ease-in-out, step, cubic Bezier, and segment-local spring curves use matching preview/export semantics.
 - Fade, dip, slide, sampled zoom, and directional wipe transitions. Crossfade remains an alpha-fade approximation rather than a true two-input blend.
-- Brightness, contrast, saturation, blur, grayscale, sharpen, vignette, chroma key, and sampled effect-amount animation.
+- Brightness, contrast, saturation, blur, grayscale, sharpen, vignette, chroma key, sampled effect-amount animation, and timeline-gated cinematic scene effects (film grain, bloom, color grade, edge fade, RGB split, ghost trail, motion blur, depth of field, and rack focus).
 - Text/caption/callout styling including font, size, color, line height, stroke, shadow, background, transform, opacity, fades, and deterministic alignment/letter-spacing approximation.
 - Rectangle, highlight, pixelate, blur-region, and normalized fallback annotation output. Complex geometry such as ellipse, arrow, and speech bubble currently exports as simpler deterministic primitives.
 - Cursor paths, highlights, and click rings through sampled overlays. Click audio is not synthesized.
-- Multi-track audio mix with video soundtracks, per-clip volume/mute, volume keyframes, fades, timeline delay, constant speed, and `amix` mixdown.
+- Multi-track audio mix with video soundtracks, persisted track solo, per-clip volume/mute, volume keyframes, fades, timeline delay, constant speed, and `amix` mixdown.
 - Optional final audio processing: denoise, EQ preset, compression, LUFS normalization, limiting, and mono/stereo conversion.
 - Render diagnostics persisted in `video_render_jobs.metadata_json` and explicit failures when FFmpeg is unavailable or encoding fails.
 
@@ -88,10 +88,10 @@ The capability endpoint intentionally reports partial support where output is de
 - Rounded text-box corners remain preview-only.
 - Crossfade is an alpha-fade approximation.
 - Drop shadow and background-blur effects remain unsupported by export.
-- Keyframe curves are sampled rather than continuously evaluated.
+- Curves are deterministically sampled into static render segments rather than evaluated as a continuously changing FFmpeg expression.
 - Complex annotation geometry normalizes to simpler primitives.
 - Cursor click audio is not synthesized.
-- Track solo is preview-only; exports mix all unmuted tracks.
+- True X/Y tilt remains an explicitly partial 3D export approximation.
 - Chroma key is applied by FFmpeg but cannot be represented faithfully by the CSS preview.
 
 Renderer support is reported by `GET /v1/video/render/capabilities`. `backend/internal/video/renderer_capabilities.go` is the source of truth used by the inspector, assistant, and render panel. Upgrade a capability only after the corresponding renderer path and tests are complete.

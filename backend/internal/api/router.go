@@ -326,14 +326,21 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	videoHandler := NewVideoHandler(videoService, videoProjectRepo, videoGenerationRepo, videoAssetRepo, videoTimelineRepo, videoRenderJobRepo, convoRepo, attachRepo, fileLibrarySvc, cfg.AttachmentsDir)
 	videoTranscriptionService := video.NewVideoTranscriptionService(videoTranscriptRepo, providerRepo, videoProjectRepo, videoAssetRepo, cfg.AttachmentsDir)
 	videoTranscriptionHandler := NewVideoTranscriptionHandler(videoTranscriptionService)
-	// Resume any generation poll goroutines that were in-flight when the server last stopped.
-	go videoService.RecoverPendingGenerations()
-	go videoService.RecoverInterruptedRenderJobsDurable()
+	// Complete the startup scans before returning the router. Any work they
+	// resume is owned and drained by videoService.Shutdown.
+	videoService.RecoverPendingGenerations()
+	videoService.RecoverInterruptedRenderJobsDurable()
 	crossoverHandler := NewCrossoverHandler(llmService, providerRepo)
 
 	// Complete Agent Runtime composition after Studio services exist.
 	toolRegistry.MustRegister(tools.NewMusicGenerateJobTool(jobManager, musicService))
 	toolRegistry.MustRegister(tools.NewVideoGenerateJobTool(jobManager, videoService))
+	toolRegistry.MustRegister(tools.NewVideoProjectInspectTool(videoService))
+	toolRegistry.MustRegister(tools.NewVideoTimelineMutateTool(videoService))
+	toolRegistry.MustRegister(tools.NewVideoRenderFrameTool(videoService))
+	toolRegistry.MustRegister(tools.NewVideoRenderPreviewTool(videoService))
+	toolRegistry.MustRegister(tools.NewVideoRenderJobStatusTool(videoService))
+	toolRegistry.MustRegister(tools.NewVideoRenderJobCancelTool(videoService))
 	taskScheduler, err := tasks.NewScheduler(database, agentRunner, convoRepo, msgRepo)
 	if err != nil {
 		log.Fatalf("init scheduled agent tasks: %v", err)
@@ -578,6 +585,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Post("/video/generations/{generationId}/send-to-timeline", videoHandler.SendGenerationToTimeline)
 			r.Post("/video/generations/{generationId}/cancel", videoHandler.CancelGeneration)
 			r.Get("/video/render-jobs/{jobId}", videoHandler.GetRenderJob)
+			r.Get("/video/render-snapshots/{snapshotId}/frames/{frameIndex}", videoHandler.GetDiagnosticFrame)
+			r.Get("/video/render-snapshots/{snapshotId}/audio.pcm", videoHandler.GetDiagnosticAudio)
 			r.Post("/video/render-jobs/{jobId}/cancel", videoHandler.CancelRenderJob)
 			r.Delete("/video/render-jobs/{jobId}", videoHandler.DeleteRenderJob)
 			r.Get("/video/render/capabilities", videoHandler.RendererCapabilities)

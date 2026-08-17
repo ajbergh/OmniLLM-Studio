@@ -1,8 +1,9 @@
 /**
  * Video Edit Studio shell: header (editor modes, templates, text, record),
- * project strip + project media/favorites bin on the left, preview canvas over
- * the timeline in the center, and a mode-gated right rail for properties,
- * effects, transitions, captions, audio, assistant, and export. The footer
+ * project strip + project media/favorites bin and inspector workspace on the
+ * left, preview canvas over the timeline in the center. Properties, effects,
+ * transitions, captions, audio, assistant, and export share that one left
+ * workspace instead of occupying a separate right rail. The footer
  * owns the preview-only master volume; project export is unaffected by it.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -54,10 +55,12 @@ import { VideoRenderPanel } from './VideoRenderPanel';
 import { VideoTimeline } from './timeline/VideoTimeline';
 import { TIMELINE_TEMPLATES } from './templates/timelineTemplates';
 import { EDITOR_MODES, editorModeFeatures } from './editorModes';
+import type { EditorModeFeatures } from './editorModes';
 import type { EditorModeKey } from './editorModes';
 import type { LucideIcon } from 'lucide-react';
 
-type InspectorRailTab = 'properties' | 'effects' | 'transitions' | 'captions' | 'audio' | 'assistant' | 'export';
+type InspectorRailTab = 'properties' | 'design' | 'animate' | 'effects' | 'transitions' | 'captions' | 'audio' | 'assistant' | 'export';
+type LeftWorkspaceTab = 'media' | 'inspector';
 
 function formatStatusTime(ms: number, fps = 30): string {
   const total = Math.max(0, Math.round(ms));
@@ -101,10 +104,12 @@ export function VideoEditStudio() {
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
   const [railTab, setRailTab] = useState<InspectorRailTab>('properties');
+  const [leftWorkspaceTab, setLeftWorkspaceTab] = useState<LeftWorkspaceTab>('media');
   const templatesRef = useRef<HTMLDivElement | null>(null);
 
-  // The right rail tabs follow the editor mode's feature gates.
-  const railTabs = [
+  // Inspector tabs follow the editor mode's feature gates. They render in the
+  // shared left workspace alongside the Media Bin.
+  const standardRailTabs = [
     { key: 'properties' as const, label: 'Properties', enabled: true },
     { key: 'effects' as const, label: 'Effects', enabled: modeFeatures.effectControls },
     { key: 'transitions' as const, label: 'Transitions', enabled: modeFeatures.effectControls },
@@ -113,7 +118,14 @@ export function VideoEditStudio() {
     { key: 'assistant' as const, label: 'AI Assistant', enabled: modeFeatures.assistant },
     { key: 'export' as const, label: 'Export', enabled: true },
   ].filter((tab) => tab.enabled);
-  const activeRailTab = railTabs.some((tab) => tab.key === railTab) ? railTab : 'properties';
+  const railTabs = modeFeatures.designAnimateTabs ? [
+    { key: 'design' as const, label: 'Design', enabled: true },
+    { key: 'animate' as const, label: 'Animate', enabled: modeFeatures.animationBlocks },
+    { key: 'effects' as const, label: 'Effects', enabled: modeFeatures.effectControls },
+    { key: 'assistant' as const, label: 'AI', enabled: modeFeatures.assistant },
+    { key: 'export' as const, label: 'Export', enabled: true },
+  ].filter((tab) => tab.enabled) : standardRailTabs;
+  const activeRailTab = railTabs.some((tab) => tab.key === railTab) ? railTab : (modeFeatures.designAnimateTabs ? 'design' : 'properties');
 
   const openFileLibrary = () => {
     window.dispatchEvent(new CustomEvent('omnillm:open-file-library', { detail: { preferredScope: 'all' } }));
@@ -143,14 +155,13 @@ export function VideoEditStudio() {
     [assets, selectedAssetId],
   );
 
-  const { leftStyle, rightStyle, startLeft, startRight, resizeLeft, resizeRight } = useResizablePanels({
+  const { leftStyle, startLeft, resizeLeft } = useResizablePanels({
     defaultLeft: 320,
     defaultRight: 340,
     minWidth: 260,
-    storageKey: 'video-edit-studio-panels-v3',
+    storageKey: 'video-edit-studio-panels-v4',
   });
   const [collapsedLeft, setCollapsedLeft] = useState(false);
-  const [collapsedRight, setCollapsedRight] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<'preview' | 'timeline' | 'media' | 'inspector'>('preview');
   const isSavingTimeline = useVideoStudioStore((state) => state.isSavingTimeline);
   const saveStatus = useVideoStudioStore((state) => state.saveStatus);
@@ -196,7 +207,7 @@ export function VideoEditStudio() {
           </div>
           <div className="hidden flex-wrap items-center gap-1.5 xl:flex">
             <button
-              onClick={() => setRailTab('export')}
+              onClick={() => { setRailTab('export'); setLeftWorkspaceTab('inspector'); setCollapsedLeft(false); }}
               disabled={!timeline}
               className="inline-flex min-h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-black shadow-sm hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-45"
               title="Open export settings"
@@ -252,7 +263,7 @@ export function VideoEditStudio() {
             </div>
             )}
             {modeFeatures.addTextClip && (
-              <HeaderActionButton onClick={() => { void addTextClip(); }} icon={Type} label="Text" disabled={!timeline} />
+              <HeaderActionButton onClick={() => { void addTextClip(); setRailTab('properties'); setLeftWorkspaceTab('inspector'); }} icon={Type} label="Text" disabled={!timeline} />
             )}
             <button
               onClick={() => setRecordOpen(true)}
@@ -269,7 +280,7 @@ export function VideoEditStudio() {
           <button type="button" onClick={() => setAppMode('video')} className="min-h-11 rounded-lg border border-border bg-surface-alt text-xs text-text-secondary">Create</button>
           <button type="button" onClick={() => { void undoTimeline(); }} disabled={!canUndo} className="min-h-11 rounded-lg border border-border bg-surface-alt text-xs text-text-secondary disabled:opacity-40">Undo</button>
           <button type="button" onClick={() => { void redoTimeline(); }} disabled={!canRedo} className="min-h-11 rounded-lg border border-border bg-surface-alt text-xs text-text-secondary disabled:opacity-40">Redo</button>
-          <button type="button" onClick={() => { setRailTab('export'); setCollapsedRight(false); setMobilePanel('inspector'); }} disabled={!timeline} className="min-h-11 rounded-lg bg-primary text-xs font-semibold text-black disabled:opacity-40">Export</button>
+          <button type="button" onClick={() => { setRailTab('export'); setLeftWorkspaceTab('inspector'); setCollapsedLeft(false); setMobilePanel('inspector'); }} disabled={!timeline} className="min-h-11 rounded-lg bg-primary text-xs font-semibold text-black disabled:opacity-40">Export</button>
         </div>
       </div>
       {recordOpen && <RecordingModal onClose={() => setRecordOpen(false)} />}
@@ -282,8 +293,10 @@ export function VideoEditStudio() {
             role="tab"
             aria-selected={mobilePanel === panel}
             onClick={() => {
-              if (panel === 'media') setCollapsedLeft(false);
-              if (panel === 'inspector') setCollapsedRight(false);
+              if (panel === 'media' || panel === 'inspector') {
+                setLeftWorkspaceTab(panel);
+                setCollapsedLeft(false);
+              }
               setMobilePanel(panel);
             }}
             className={`min-h-11 rounded-lg px-1 text-[11px] font-medium capitalize transition-colors ${mobilePanel === panel ? 'bg-primary/15 text-primary' : 'text-text-muted hover:bg-surface-hover hover:text-text'}`}
@@ -298,43 +311,44 @@ export function VideoEditStudio() {
           <button
             onClick={() => setCollapsedLeft(false)}
             className="hidden w-6 shrink-0 items-center justify-center border-r border-border bg-surface text-text-muted hover:text-text xl:flex"
-            title="Expand media panel"
-            aria-label="Expand media panel"
+            title="Expand workspace panel"
+            aria-label="Expand workspace panel"
           >
             <ChevronRight size={14} />
           </button>
         ) : (
-          <aside className={`video-edit-panel relative min-h-0 w-full flex-1 border-b border-border bg-surface xl:w-auto xl:flex-none xl:border-b-0 xl:border-r ${mobilePanel === 'media' ? 'flex' : 'hidden xl:flex'}`} style={leftStyle}>
+          <aside className={`video-edit-panel relative min-h-0 w-full flex-1 border-b border-border bg-surface xl:w-auto xl:flex-none xl:border-b-0 xl:border-r ${(mobilePanel === 'media' || mobilePanel === 'inspector') ? 'flex' : 'hidden xl:flex'}`} style={leftStyle}>
             <button
               onClick={() => setCollapsedLeft(true)}
               className="absolute right-1 top-1 z-10 hidden rounded p-1 text-text-muted hover:text-text xl:block"
-              title="Collapse media panel"
-              aria-label="Collapse media panel"
+              title="Collapse workspace panel"
+              aria-label="Collapse workspace panel"
             >
               <ChevronLeft size={13} />
             </button>
             <div className="hidden xl:block">
             <StudioToolRail
-              activeTab={activeRailTab}
+              activeTab={leftWorkspaceTab === 'media' ? 'media' : activeRailTab}
               templatesEnabled={modeFeatures.templates}
               textEnabled={modeFeatures.addTextClip && Boolean(timeline)}
               effectsEnabled={modeFeatures.effectControls}
               captionsEnabled={modeFeatures.captionsPanel}
               assistantEnabled={modeFeatures.assistant}
-              onMedia={() => setCollapsedLeft(false)}
+              onMedia={() => { setLeftWorkspaceTab('media'); setCollapsedLeft(false); }}
               onLibrary={openFileLibrary}
               onTemplates={() => setTemplatesOpen((open) => !open)}
-              onText={() => { void addTextClip(); }}
-              onShapes={() => { void addShapeClip('rectangle'); setRailTab('properties'); }}
-              onEffects={() => setRailTab('effects')}
-              onTransitions={() => setRailTab('transitions')}
-              onCaptions={() => setRailTab('captions')}
-              onAudio={() => setRailTab('audio')}
-              onAssistant={() => setRailTab('assistant')}
+              onText={() => { void addTextClip(); setRailTab('properties'); setLeftWorkspaceTab('inspector'); }}
+              onShapes={() => { void addShapeClip('rectangle'); setRailTab('properties'); setLeftWorkspaceTab('inspector'); }}
+              onEffects={() => { setRailTab('effects'); setLeftWorkspaceTab('inspector'); }}
+              onTransitions={() => { setRailTab('transitions'); setLeftWorkspaceTab('inspector'); }}
+              onCaptions={() => { setRailTab('captions'); setLeftWorkspaceTab('inspector'); }}
+              onAudio={() => { setRailTab('audio'); setLeftWorkspaceTab('inspector'); }}
+              onAssistant={() => { setRailTab('assistant'); setLeftWorkspaceTab('inspector'); }}
               onSettings={toggleSettings}
             />
             </div>
             <div className="min-w-0 flex-1 overflow-y-auto">
+              {leftWorkspaceTab === 'media' ? (
               <div className="space-y-3 p-3">
               <AssetPanel
                 assets={assets}
@@ -354,6 +368,15 @@ export function VideoEditStudio() {
                 onSelect={(id) => { void selectProject(id); }}
               />
               </div>
+              ) : (
+                <InspectorWorkspace
+                  railTabs={railTabs}
+                  activeTab={activeRailTab}
+                  modeFeatures={modeFeatures}
+                  onSelectTab={setRailTab}
+                  onShowMedia={() => setLeftWorkspaceTab('media')}
+                />
+              )}
             </div>
           </aside>
         )}
@@ -369,66 +392,72 @@ export function VideoEditStudio() {
           </section>
         </main>
 
-        {!collapsedRight && <DragHandle onMouseDown={startRight} onKeyboardResize={resizeRight} />}
-
-        {collapsedRight ? (
-          <button
-            onClick={() => setCollapsedRight(false)}
-            className="hidden w-6 shrink-0 items-center justify-center border-l border-border bg-surface-raised text-text-muted hover:text-text xl:flex"
-            title="Expand inspector panel"
-            aria-label="Expand inspector panel"
-          >
-            <ChevronLeft size={14} />
-          </button>
-        ) : (
-          <aside className={`video-edit-panel relative min-h-0 w-full flex-1 flex-col border-t border-border bg-surface-raised xl:w-auto xl:flex-none xl:border-l xl:border-t-0 ${mobilePanel === 'inspector' ? 'flex' : 'hidden xl:flex'}`} style={rightStyle}>
-            <div className="flex items-center gap-0.5 overflow-x-auto border-b border-border px-1 pt-1.5" role="tablist" aria-label="Inspector panels">
-              <button
-                onClick={() => setCollapsedRight(true)}
-                className="hidden shrink-0 rounded p-0.5 text-text-muted hover:text-text xl:block"
-                title="Collapse inspector panel"
-                aria-label="Collapse inspector panel"
-              >
-                <ChevronRight size={12} />
-              </button>
-              {railTabs.map((tab) => (
-                <button
-                  key={tab.key}
-                  role="tab"
-                  aria-selected={activeRailTab === tab.key}
-                  onClick={() => setRailTab(tab.key)}
-                  className={`shrink-0 rounded-t-md border-b-2 px-1.5 py-1.5 text-[10px] transition-colors ${
-                    activeRailTab === tab.key
-                      ? 'border-primary font-medium text-text'
-                      : 'border-transparent text-text-muted hover:text-text'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {activeRailTab === 'properties' && <VideoInspector section="properties" focus="properties" />}
-              {activeRailTab === 'effects' && modeFeatures.effectControls && <VideoInspector section="properties" focus="effects" />}
-              {activeRailTab === 'transitions' && modeFeatures.effectControls && <VideoInspector section="properties" focus="transitions" />}
-              {activeRailTab === 'audio' && <VideoInspector section="properties" focus="audio" />}
-              {activeRailTab === 'assistant' && <VideoInspector section="assistant" />}
-              {activeRailTab === 'captions' && modeFeatures.captionsPanel && (
-                <div className="p-3">
-                  <VideoCaptionPanel />
-                </div>
-              )}
-              {activeRailTab === 'export' && (
-                <div className="p-3">
-                  <VideoRenderPanel />
-                </div>
-              )}
-            </div>
-          </aside>
-        )}
       </div>
       <div className="hidden xl:block">
         <StudioStatusBar timeline={timeline} snappingEnabled={snappingEnabled} />
+      </div>
+    </div>
+  );
+}
+
+function InspectorWorkspace({
+  railTabs,
+  activeTab,
+  modeFeatures,
+  onSelectTab,
+  onShowMedia,
+}: {
+  railTabs: Array<{ key: InspectorRailTab; label: string; enabled: boolean }>;
+  activeTab: InspectorRailTab;
+  modeFeatures: EditorModeFeatures;
+  onSelectTab: (tab: InspectorRailTab) => void;
+  onShowMedia: () => void;
+}) {
+  return (
+    <div className="flex min-h-full flex-col bg-surface-raised">
+      <div className="flex items-center gap-0.5 overflow-x-auto border-b border-border px-1 py-1.5" role="tablist" aria-label="Inspector panels">
+        <button
+          type="button"
+          onClick={onShowMedia}
+          className="shrink-0 rounded px-1.5 py-1.5 text-[10px] text-text-muted transition-colors hover:bg-surface-hover hover:text-text"
+          title="Show Media Bin"
+        >
+          Media
+        </button>
+        {railTabs.map((tab) => (
+          <button
+            key={tab.key}
+            role="tab"
+            aria-selected={activeTab === tab.key}
+            onClick={() => onSelectTab(tab.key)}
+            className={`shrink-0 rounded-t-md border-b-2 px-1.5 py-1.5 text-[10px] transition-colors ${
+              activeTab === tab.key
+                ? 'border-primary font-medium text-text'
+                : 'border-transparent text-text-muted hover:text-text'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {activeTab === 'properties' && <VideoInspector section="properties" focus="properties" />}
+        {activeTab === 'design' && <VideoInspector section="properties" focus="design" />}
+        {activeTab === 'animate' && <VideoInspector section="properties" focus="animate" />}
+        {activeTab === 'effects' && modeFeatures.effectControls && <VideoInspector section="properties" focus="effects" />}
+        {activeTab === 'transitions' && modeFeatures.effectControls && <VideoInspector section="properties" focus="transitions" />}
+        {activeTab === 'audio' && <VideoInspector section="properties" focus="audio" />}
+        {activeTab === 'assistant' && <VideoInspector section="assistant" />}
+        {activeTab === 'captions' && modeFeatures.captionsPanel && (
+          <div className="p-3">
+            <VideoCaptionPanel />
+          </div>
+        )}
+        {activeTab === 'export' && (
+          <div className="p-3">
+            <VideoRenderPanel />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -503,7 +532,7 @@ function StudioToolRail({
   onAssistant,
   onSettings,
 }: {
-  activeTab: InspectorRailTab;
+  activeTab: InspectorRailTab | 'media';
   templatesEnabled: boolean;
   textEnabled: boolean;
   effectsEnabled: boolean;
@@ -529,7 +558,7 @@ function StudioToolRail({
     disabled?: boolean;
     onClick: () => void;
   }> = [
-    { key: 'media', label: 'Media', Icon: Film, active: activeTab === 'properties', onClick: onMedia },
+    { key: 'media', label: 'Media', Icon: Film, active: activeTab === 'media', onClick: onMedia },
     { key: 'library', label: 'Library', Icon: Files, onClick: onLibrary },
     { key: 'templates', label: 'Templates', Icon: LayoutTemplate, disabled: !templatesEnabled, onClick: onTemplates },
     { key: 'text', label: 'Text', Icon: Type, disabled: !textEnabled, onClick: onText },

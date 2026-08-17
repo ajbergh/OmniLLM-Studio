@@ -16,7 +16,7 @@
 import { Check, Crop, Crosshair, Grid3x3, Maximize2, Minimize2, Pause, Play, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
-import { videoApi } from '../../api';
+import { getAuthToken, videoApi } from '../../api';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import { ContextMenu } from '../common/ContextMenu';
 import type { ContextMenuEntry } from '../common/ContextMenu';
@@ -25,6 +25,7 @@ import { sampleKeyframes } from './effects/keyframeUtils';
 import { ShapePreview } from './ShapePreview';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineTrack } from '../../types/video';
 import { applyDecoderBudget, buildTimelineIntervalIndex, queryActiveClips } from './pro/timelineIndex';
+import { renderPreviewPCM } from './parity/previewAudioRenderer';
 
 function formatTime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -159,12 +160,83 @@ export function VideoPreviewCanvas() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [editingTextClipId, setEditingTextClipId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const parityAudioURLRef = useRef<string | null>(null);
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
+
+  // Stable automation hook for the Phase 0 parity harness. The custom event
+  // seeks the canonical preview by frame index and emits readiness only after
+  // React has committed the frame and mounted media has had a chance to seek.
+  useEffect(() => {
+    const onParitySeek = (event: Event) => {
+      const detail = (event as CustomEvent<{ frameIndex?: number; requestId?: string }>).detail || {};
+      const fps = timeline?.canvas.fps || 30;
+      const frameIndex = Math.max(0, Math.floor(detail.frameIndex ?? 0));
+      const requestId = detail.requestId || `frame-${frameIndex}`;
+      setPlaying(false);
+      selectClip(null);
+      setPlayhead((frameIndex * 1000) / fps);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const deadline = performance.now() + 2000;
+        const signalWhenSettled = () => {
+          const mediaSettled = [...videoRefs.current.values()].every((media) => media.readyState >= 2 && !media.seeking);
+          if (!mediaSettled && performance.now() < deadline) {
+            requestAnimationFrame(signalWhenSettled);
+            return;
+          }
+          window.dispatchEvent(new CustomEvent('omnillm:video-parity-ready', {
+            detail: { frameIndex, requestId },
+          }));
+        };
+        signalWhenSettled();
+      }));
+    };
+    window.addEventListener('omnillm:video-parity-seek', onParitySeek);
+    return () => window.removeEventListener('omnillm:video-parity-seek', onParitySeek);
+  }, [selectClip, setPlayhead, setPlaying, timeline?.canvas.fps]);
+
+  // Independent browser/Web Audio reference for the Phase 0 parity harness.
+  // The response is a blob URL so multi-megabyte PCM does not travel through
+  // CustomEvent serialization; the capture runner reads and releases it.
+  useEffect(() => {
+    const onParityAudioRequest = async (event: Event) => {
+      const detail = (event as CustomEvent<{ requestId?: string }>).detail || {};
+      const requestId = detail.requestId || 'preview-audio';
+      try {
+        if (!timeline) throw new Error('timeline is not loaded');
+        const token = getAuthToken();
+        const result = await renderPreviewPCM(timeline, assets, async (asset) => {
+          const headers: Record<string, string> = {};
+          if (token) headers.Authorization = `Bearer ${token}`;
+          const response = await fetch(videoApi.downloadUrl(asset.id), { headers });
+          if (!response.ok) throw new Error(`asset ${asset.id}: HTTP ${response.status}`);
+          return response.arrayBuffer();
+        });
+        if (parityAudioURLRef.current) URL.revokeObjectURL(parityAudioURLRef.current);
+        const url = URL.createObjectURL(new Blob([result.pcm], { type: 'audio/pcm' }));
+        parityAudioURLRef.current = url;
+        const { pcm: _pcm, ...metadata } = result;
+        void _pcm;
+        window.dispatchEvent(new CustomEvent('omnillm:video-parity-audio-ready', {
+          detail: { requestId, url, metadata },
+        }));
+      } catch (reason) {
+        window.dispatchEvent(new CustomEvent('omnillm:video-parity-audio-ready', {
+          detail: { requestId, error: reason instanceof Error ? reason.message : String(reason) },
+        }));
+      }
+    };
+    window.addEventListener('omnillm:video-parity-audio-request', onParityAudioRequest);
+    return () => {
+      window.removeEventListener('omnillm:video-parity-audio-request', onParityAudioRequest);
+      if (parityAudioURLRef.current) URL.revokeObjectURL(parityAudioURLRef.current);
+      parityAudioURLRef.current = null;
+    };
+  }, [assets, timeline]);
 
   const toggleFullscreen = () => {
     if (document.fullscreenElement) {
@@ -196,6 +268,15 @@ export function VideoPreviewCanvas() {
   const canvasWidth = timeline?.canvas.width || 1920;
   const canvasHeight = timeline?.canvas.height || 1080;
   const stageScale = stageSize.width > 0 ? stageSize.width / canvasWidth : 0;
+  const activeScene = timeline?.scenes?.find((scene) => playheadMs >= scene.start_ms && playheadMs < scene.start_ms + scene.duration_ms);
+  const sceneTimeMs = activeScene ? playheadMs - activeScene.start_ms : 0;
+  const camera = { x: 0, y: 0, z: 0, rotation_x: 0, rotation_y: 0, rotation_z: 0, field_of_view: 50, focus_depth: 0, ...(activeScene?.camera || {}) };
+  if (activeScene?.camera?.keyframes) {
+    for (const property of ['x', 'y', 'z', 'rotation_x', 'rotation_y', 'rotation_z', 'field_of_view', 'focus_depth'] as const) {
+      const sampled = sampleKeyframes(activeScene.camera.keyframes, property, sceneTimeMs);
+      if (sampled !== null) camera[property] = sampled;
+    }
+  }
 
   const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
   const activeIndexed = queryActiveClips(intervalIndex, playheadMs)
@@ -611,7 +692,7 @@ export function VideoPreviewCanvas() {
     // Keyframes (clip-relative time) override static transform values; an
     // in-flight canvas drag overrides both.
     const clipTimeMs = playheadMs - clip.start_ms;
-    for (const property of ['x', 'y', 'scale', 'rotation', 'opacity'] as const) {
+    for (const property of ['x', 'y', 'z', 'scale', 'scale_x', 'scale_y', 'rotation', 'rotation_x', 'rotation_y', 'rotation_z', 'opacity'] as const) {
       const sampled = sampleKeyframes(clip.keyframes, property, clipTimeMs);
       if (sampled !== null) transform[property] = sampled;
     }
@@ -641,7 +722,9 @@ export function VideoPreviewCanvas() {
       width: isMedia ? stageSize.width : undefined,
       height: isMedia ? stageSize.height : undefined,
       maxWidth: stageSize.width,
-      transform: `translate(-50%, -50%) translate(${transform.x * stageScale}px, ${transform.y * stageScale}px) scale(${transform.scale}) rotate(${inCropEdit ? 0 : transform.rotation}deg)`,
+      transformOrigin: `${50 + ((transform.anchor_x || 0) / canvasWidth) * 100}% ${50 + ((transform.anchor_y || 0) / canvasHeight) * 100}%`,
+      transformStyle: 'preserve-3d',
+      transform: `translate(-50%, -50%) translate3d(${(transform.x - camera.x) * stageScale}px, ${(transform.y - camera.y) * stageScale}px, ${((transform.z || 0) - camera.z) * stageScale}px) rotateX(${inCropEdit ? 0 : (transform.rotation_x || 0) - camera.rotation_x}deg) rotateY(${inCropEdit ? 0 : (transform.rotation_y || 0) - camera.rotation_y}deg) rotateZ(${inCropEdit ? 0 : (transform.rotation_z ?? transform.rotation) - camera.rotation_z}deg) scale3d(${transform.scale_x || transform.scale}, ${transform.scale_y || transform.scale}, 1)`,
       opacity,
       filter: composePreviewFilter(clip.effects),
     };
@@ -985,11 +1068,18 @@ export function VideoPreviewCanvas() {
       <div ref={fitRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4">
         <div
           ref={stageRef}
+          data-testid="video-preview-program"
+          data-parity-frame-index={Math.floor((playheadMs * (timeline?.canvas.fps || 30)) / 1000)}
+          data-parity-time-ms={Math.round(playheadMs)}
           className="relative overflow-hidden border border-white/10"
           style={{
             width: stageSize.width || undefined,
             height: stageSize.height || undefined,
             background: timeline?.canvas.background || '#000000',
+            perspective: `${Math.max(100, activeScene?.camera ? (canvasHeight / (2 * Math.tan(Math.max(1, Math.min(179, camera.field_of_view)) * Math.PI / 360))) * stageScale : 1200 * stageScale)}px`,
+            perspectiveOrigin: '50% 50%',
+            transformStyle: 'preserve-3d',
+            filter: composePreviewFilter(activeScene?.effects),
           }}
           onPointerDown={(event) => {
             // Clicking empty stage space deselects.

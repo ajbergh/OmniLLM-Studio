@@ -212,13 +212,16 @@ type ExportSettings struct {
 	// (e.g. "youtube_16_9", "shorts_9_16", "square_1_1", "custom").
 	Preset string `json:"preset,omitempty"`
 	// Width/Height override Resolution when both are set (custom export size).
-	Width                 int    `json:"width,omitempty"`
-	Height                int    `json:"height,omitempty"`
-	FPS                   int    `json:"fps,omitempty"`
-	Quality               string `json:"quality,omitempty"`
-	IncludeAudio          bool   `json:"include_audio"`
-	RegisterInFileLibrary bool   `json:"register_in_file_library,omitempty"`
-	EstimatedDurationMS   int64  `json:"estimated_duration_ms,omitempty"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+	FPS          int    `json:"fps,omitempty"`
+	Quality      string `json:"quality,omitempty"`
+	IncludeAudio bool   `json:"include_audio"`
+	// StrictParity blocks submission when the current preview/export paths are
+	// known to interpret an authored feature differently.
+	StrictParity          bool  `json:"strict_parity,omitempty"`
+	RegisterInFileLibrary bool  `json:"register_in_file_library,omitempty"`
+	EstimatedDurationMS   int64 `json:"estimated_duration_ms,omitempty"`
 	// BurnInCaptions controls whether caption-track text draws into the frame.
 	// Nil preserves the historical always-on behavior.
 	BurnInCaptions *bool `json:"burn_in_captions,omitempty"`
@@ -234,4 +237,27 @@ type ExportSettings struct {
 	Priority int `json:"priority,omitempty"`
 	// WorkspaceID applies per-workspace render admission when supplied.
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	// DiagnosticFrameIndex is an internal-only request to stop the renderer
+	// after the named zero-based output frame. It is deliberately excluded
+	// from persisted/export API JSON so delivery settings remain stable.
+	DiagnosticFrameIndex *int64 `json:"-"`
+	// DiagnosticAudio emits the snapshot mix as headerless 48 kHz stereo
+	// signed-16 PCM instead of creating a delivery container.
+	DiagnosticAudio bool `json:"-"`
+}
+
+// RenderBinding identifies the exact saved timeline revision the caller saw.
+// Browser/API callers must provide it; trusted internal diagnostic renders may
+// omit it and bind atomically to the current saved revision in StartRender.
+type RenderBinding struct {
+	TimelineID       string `json:"timeline_id"`
+	TimelineRevision int64  `json:"timeline_revision"`
+	TimelineSHA256   string `json:"timeline_sha256"`
+}
+
+// StartRenderRequest keeps the existing flat export-settings JSON shape while
+// adding optimistic revision binding fields.
+type StartRenderRequest struct {
+	ExportSettings
+	RenderBinding
 }

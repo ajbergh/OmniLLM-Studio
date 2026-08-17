@@ -363,8 +363,8 @@ describe('audio cleanup', () => {
   });
 });
 
-describe('motion presets', () => {
-  it('generates editable keyframes and replaces previous pan/zoom motion', async () => {
+describe('semantic animation blocks', () => {
+  it('generates editable keyframes without deleting unrelated manual motion', async () => {
     useVideoStudioStore.setState({
       timeline: makeDoc([
         makeTrack('l1', [makeClip('c1', 0, 4000, {
@@ -377,18 +377,90 @@ describe('motion presets', () => {
     });
     await store().applyMotionPreset('c1', 'ken_burns');
     const clip = store().timeline!.tracks[0].clips[0];
-    expect(clip.keyframes.find((keyframe) => keyframe.id === 'old-scale')).toBeUndefined();
+    expect(clip.keyframes.find((keyframe) => keyframe.id === 'old-scale')).toBeDefined();
     // Volume keyframes survive motion presets.
     expect(clip.keyframes.find((keyframe) => keyframe.id === 'vol')).toBeDefined();
     const scaleKfs = clip.keyframes.filter((keyframe) => keyframe.property === 'scale');
-    expect(scaleKfs).toHaveLength(2);
-    expect(scaleKfs[1].time_ms).toBe(4000);
+    expect(scaleKfs).toHaveLength(3);
+    expect(scaleKfs[2].time_ms).toBe(4000);
+    expect(clip.animation_blocks).toHaveLength(1);
     expect(store().timelineUndoStack).toHaveLength(1);
 
     await store().applyMotionPreset('c1', 'restore');
     const restored = store().timeline!.tracks[0].clips[0];
-    expect(restored.keyframes.filter((keyframe) => ['x', 'y', 'scale'].includes(keyframe.property))).toHaveLength(0);
+    expect(restored.keyframes.filter((keyframe) => ['x', 'y', 'scale'].includes(keyframe.property))).toEqual([
+      expect.objectContaining({ id: 'old-scale' }),
+    ]);
     expect(restored.keyframes.find((keyframe) => keyframe.id === 'vol')).toBeDefined();
+  });
+});
+
+describe('motion-design mode, scenes, and template slots', () => {
+  it('changes editor mode without mutating the timeline', () => {
+    const before = JSON.stringify(store().timeline);
+    store().setEditorMode('motion_design');
+    expect(store().editorMode).toBe('motion_design');
+    expect(JSON.stringify(store().timeline)).toBe(before);
+    store().setEditorMode('full');
+    expect(JSON.stringify(store().timeline)).toBe(before);
+  });
+
+  it('rejects overlapping scenes and commits a valid scene in one undo step', async () => {
+    useVideoStudioStore.setState({ timeline: { ...makeDoc([makeTrack('l1')]), scenes: [{ id: 'scene-a', name: 'A', start_ms: 0, duration_ms: 5000 }] } });
+    await store().addScene({ name: 'Overlap', startMs: 4000, durationMs: 2000 });
+    expect(store().timeline!.scenes).toHaveLength(1);
+    expect(store().timelineUndoStack).toHaveLength(0);
+    await store().addScene({ name: 'B', startMs: 5000, durationMs: 3000 });
+    expect(store().timeline!.scenes?.map((scene) => scene.name)).toEqual(['A', 'B']);
+    expect(store().timelineUndoStack).toHaveLength(1);
+  });
+
+  it('reorders scenes and their contained clips deterministically with undo', async () => {
+    useVideoStudioStore.setState({
+      timeline: {
+        ...makeDoc([makeTrack('l1', [makeClip('a', 0, 1000), makeClip('b', 5000, 1000)])]),
+        scenes: [{ id: 'a', name: 'A', start_ms: 0, duration_ms: 5000 }, { id: 'b', name: 'B', start_ms: 5000, duration_ms: 5000 }],
+      },
+    });
+    await store().reorderScene('b', 0);
+    expect(store().timeline!.scenes?.map((scene) => [scene.id, scene.start_ms])).toEqual([['b', 0], ['a', 5000]]);
+    expect(store().timeline!.tracks[0].clips.map((clip) => [clip.id, clip.start_ms])).toEqual([['a', 5000], ['b', 0]]);
+    await store().undoTimeline();
+    expect(store().timeline!.scenes?.map((scene) => [scene.id, scene.start_ms])).toEqual([['a', 0], ['b', 5000]]);
+  });
+
+  it('duplicates and deletes a scene while preserving remapped animation provenance', async () => {
+    const source = makeClip('source', 0, 2000, {
+      keyframes: [{ id: 'generated-a', property: 'opacity', time_ms: 0, value: 0 }],
+      animation_blocks: [{ id: 'block-a', block_key: 'fade_in', family: 'in', start_ms: 0, duration_ms: 500, generated_keyframe_ids: ['generated-a'] }],
+    });
+    useVideoStudioStore.setState({ timeline: { ...makeDoc([makeTrack('l1', [source])]), scenes: [{ id: 'scene-a', name: 'A', start_ms: 0, duration_ms: 5000 }] } });
+    await store().duplicateScene('scene-a');
+    const duplicateScene = store().timeline!.scenes?.[1];
+    const duplicateClip = store().timeline!.tracks[0].clips.find((clip) => clip.id !== 'source');
+    expect(duplicateScene).toMatchObject({ name: 'A copy', start_ms: 5000, duration_ms: 5000 });
+    expect(duplicateClip?.start_ms).toBe(5000);
+    expect(duplicateClip?.animation_blocks?.[0].generated_keyframe_ids).toEqual([duplicateClip?.keyframes[0].id]);
+    expect(duplicateClip?.keyframes[0].id).not.toBe('generated-a');
+    await store().deleteScene(duplicateScene!.id);
+    expect(store().timeline!.scenes).toHaveLength(1);
+    expect(store().timeline!.tracks[0].clips.map((clip) => clip.id)).toEqual(['source']);
+  });
+
+  it('replaces template media while preserving timing, transforms, and motion', async () => {
+    const slotClip = makeClip('slot', 1200, 4000, {
+      template_slot: 'Hero Image',
+      transform: { x: 10, y: 20, scale: 0.8, rotation: 0, opacity: 1 },
+      keyframes: [{ id: 'motion', property: 'scale', time_ms: 0, value: 0.7 }],
+    });
+    useVideoStudioStore.setState({
+      timeline: makeDoc([makeTrack('l1', [slotClip])]),
+      assets: [{ id: 'asset-new', source_type: 'upload', kind: 'image', file_name: 'hero.png', file_path: '', mime_type: 'image/png', size_bytes: 1, created_at: '' }],
+    });
+    await store().replaceTemplateSlot('Hero Image', 'asset-new');
+    const replaced = store().timeline!.tracks[0].clips[0];
+    expect(replaced).toMatchObject({ asset_id: 'asset-new', start_ms: 1200, duration_ms: 4000, transform: slotClip.transform, keyframes: slotClip.keyframes });
+    expect(store().timelineUndoStack).toHaveLength(1);
   });
 });
 

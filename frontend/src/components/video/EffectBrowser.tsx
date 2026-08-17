@@ -5,6 +5,7 @@ import type { EffectCategory, EffectDefinition } from './effects/effectRegistry'
 import { TRANSITION_DEFINITIONS } from './effects/transitionRegistry';
 import { ANNOTATION_DEFINITIONS } from './effects/annotationRegistry';
 import type { VideoTimelineEffect, VideoTimelineShapeKind, VideoTimelineTransition } from '../../types/video';
+import { useVideoStudioStore } from '../../stores/videoStudio';
 
 function SupportBadge({ supported, note }: { supported: boolean; note?: string }) {
   if (supported) {
@@ -28,6 +29,7 @@ export function EffectBrowser({ onApply, disabled }: {
 }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<EffectCategory | 'all'>('all');
+  const rendererCapabilities = useVideoStudioStore((state) => state.rendererCapabilities);
 
   const matches = (definition: EffectDefinition) =>
     (category === 'all' || definition.category === category) &&
@@ -59,7 +61,11 @@ export function EffectBrowser({ onApply, disabled }: {
         </select>
       </div>
       <div className="grid grid-cols-2 gap-1">
-        {EFFECT_DEFINITIONS.filter(matches).map((definition) => (
+        {EFFECT_DEFINITIONS.filter(matches).map((definition) => {
+          const runtimeSupport = definition.exportFeature
+            ? rendererCapabilities?.features.find((feature) => feature.feature === definition.exportFeature)
+            : undefined;
+          return (
           <button
             key={definition.type}
             disabled={disabled}
@@ -68,9 +74,10 @@ export function EffectBrowser({ onApply, disabled }: {
             title={`Apply ${definition.label} to the selected clip`}
           >
             <span className="min-w-0 truncate">{definition.label}</span>
-            <SupportBadge supported={definition.exportSupported} />
+            <SupportBadge supported={runtimeSupport?.supported ?? definition.exportSupported} note={runtimeSupport?.partial ? runtimeSupport.notes : undefined} />
           </button>
-        ))}
+          );
+        })}
         {EFFECT_DEFINITIONS.filter(matches).length === 0 && (
           <p className="col-span-2 px-1 py-2 text-center text-[10px] text-text-muted">No effects match.</p>
         )}

@@ -165,6 +165,7 @@ func versionedMigrations() []Migration {
 		{Version: 49, Name: "mcp_oauth_registration_binding", SQL: migrationMCPOAuthRegistrationBinding},
 		{Version: 50, Name: "mcp_oauth_incremental_scope", SQL: migrationMCPOAuthIncrementalScope},
 		{Version: 51, Name: "foreign_key_admission", SQL: migrationForeignKeyAdmission},
+		{Version: 52, Name: "video_render_snapshots", SQL: migrationVideoRenderSnapshots},
 	}
 }
 
@@ -993,6 +994,48 @@ ALTER TABLE video_generations ADD COLUMN input_assets_json TEXT NOT NULL DEFAULT
 // V41: render job diagnostics metadata (FFmpeg command, stderr, probe info)
 const migrationVideoRenderJobMetadata = `
 ALTER TABLE video_render_jobs ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}';
+`
+
+// V52: Bind every new render job to an immutable timeline/asset snapshot.
+// Existing timeline rows receive their first canonical hash on the next save;
+// historical render jobs retain a NULL snapshot_id and remain readable.
+const migrationVideoRenderSnapshots = `
+ALTER TABLE video_timelines ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE video_timelines ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE video_render_snapshots (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	timeline_id TEXT NOT NULL,
+	timeline_revision INTEGER NOT NULL,
+	timeline_json TEXT NOT NULL,
+	timeline_sha256 TEXT NOT NULL,
+	asset_manifest_json TEXT NOT NULL DEFAULT '[]',
+	asset_manifest_sha256 TEXT NOT NULL,
+	settings_json TEXT NOT NULL DEFAULT '{}',
+	render_contract_version INTEGER NOT NULL DEFAULT 1,
+	renderer TEXT NOT NULL,
+	renderer_version TEXT NOT NULL,
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	FOREIGN KEY (project_id) REFERENCES video_projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_video_render_snapshots_project ON video_render_snapshots(project_id);
+CREATE INDEX idx_video_render_snapshots_timeline ON video_render_snapshots(timeline_id);
+
+CREATE TABLE video_render_snapshot_assets (
+	snapshot_id TEXT NOT NULL,
+	asset_id TEXT NOT NULL,
+	file_sha256 TEXT NOT NULL,
+	size_bytes INTEGER NOT NULL,
+	PRIMARY KEY (snapshot_id, asset_id),
+	FOREIGN KEY (snapshot_id) REFERENCES video_render_snapshots(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_video_render_snapshot_assets_asset ON video_render_snapshot_assets(asset_id);
+
+ALTER TABLE video_render_jobs ADD COLUMN snapshot_id TEXT REFERENCES video_render_snapshots(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX idx_video_render_jobs_snapshot ON video_render_jobs(snapshot_id) WHERE snapshot_id IS NOT NULL;
 `
 
 // V14: Add workspace_id to conversations

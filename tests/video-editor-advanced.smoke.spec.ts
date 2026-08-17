@@ -35,7 +35,8 @@ test('video edit studio converts pasted transcript into captions', async ({ page
   await page.getByRole('button', { name: 'Create captions' }).click();
 
   await page.getByRole('button', { name: 'Close advanced tools' }).click();
-  await page.getByRole('tab', { name: 'Captions' }).click();
+  await page.getByRole('button', { name: 'Captions', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Captions' })).toBeVisible();
   await expect(page.getByLabel('Caption 1 text')).toHaveValue('First caption line.');
   await expect(page.getByLabel('Caption 2 text')).toHaveValue('Second caption line.');
 });
