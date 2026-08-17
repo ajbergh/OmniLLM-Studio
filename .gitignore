@@ -47,6 +47,7 @@ node_modules/
 playright.config.ts
 
 output/*
+/.tmp/
 *.exe
 build/*
 backend/chromem/*

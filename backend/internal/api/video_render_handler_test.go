@@ -71,3 +71,17 @@ func TestVideoStartRenderReturnsConflictForStaleTimelineRevision(t *testing.T) {
 		t.Fatalf("stale request created jobs: %+v", jobs)
 	}
 }
+
+func TestVideoDiagnosticFrameRejectsInvalidIndex(t *testing.T) {
+	handler := &VideoHandler{}
+	request := httptest.NewRequest(http.MethodGet, "/v1/video/render-snapshots/snapshot/frames/not-a-number", nil)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("snapshotId", "snapshot")
+	routeContext.URLParams.Add("frameIndex", "not-a-number")
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	recorder := httptest.NewRecorder()
+	handler.GetDiagnosticFrame(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}

@@ -9,11 +9,11 @@
 
 **Started:** 2026-08-17  
 **Current milestone:** Phase 0 — reproducible parity baseline
-**Current status:** Phase 1 complete; the torture fixture and comparison harness are next
+**Current status:** Phase 1 complete; Phase 0 fixture, lossless frame/PCM endpoints, capture hooks, metrics, and report tooling are implemented. End-to-end seeded-project capture, a canonical preview-audio reference, and CI artifact wiring remain.
 
 | Phase | Status | Progress note |
 |---|---|---|
-| Phase 0 — Parity baseline | Next | Immutable-snapshot foundation is complete; implement the torture fixture, diagnostic frame/audio outputs, comparison metrics, and report artifact |
+| Phase 0 — Parity baseline | In progress | Deterministic torture fixture and named samples, immutable-snapshot PNG/PCM endpoints, browser capture hook, visual/audio metrics, and JSON/Markdown/image report tooling are implemented; full seeded-project capture, preview-audio reference, baseline evidence, and CI wiring remain |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, durable staged inputs, decode preflight, snapshot-only execution/recovery, identity metadata, legacy labeling, path-specific capability diagnostics, Strict Parity, and HTTP/frontend concurrency coverage are implemented |
 | Phase 2 — Canonical contract | Not started | — |
 | Phase 3 — Shared preview | Not started | — |
@@ -35,6 +35,13 @@
 - **2026-08-17:** Historical snapshot-less jobs are labeled `legacy_mutable_source`, report that exact source material is unavailable, fail closed on execution/recovery, and use explicit “render current timeline” retry copy.
 - **2026-08-17:** Corrected stale wipe, zoom, cursor, and annotation capability messages. Export preflight now reports exact timeline paths for authored limitations, and Strict Parity promotes those limitations to blocking errors in both the client and backend.
 - **2026-08-17:** Phase 1 verification passed for focused Go suites (`internal/db`, `internal/repository`, `internal/video`, `internal/api`), the frontend production build, and all 86 frontend unit tests. The full Go suite passed except for the pre-existing Windows symlink-privilege test `internal/gitrepo/TestCloneQuotaFilesystemCountsSymlinkTargetBytesAndEntry`.
+- **2026-08-17:** Phase 0 implementation started with `parity-torture-v1`: a deterministic 20-second, 640×360/30 fps timeline that covers source aspect ratios, all supported playback rates, trims/fades/gain, overlap and track state, every easing/curve, spatial transforms/camera motion, international text/font fallback, all registered shapes/effects/transitions, cursor behavior, captions/range metadata, and audio/channel metadata.
+- **2026-08-17:** Added deterministic named sampling for clip boundaries, keyframes, transition midpoints, scene boundaries, markers, and eight frames from seed `20260817`. The fixture emitter can also generate source media with FFmpeg; its default bundle currently contains 103 unique frame indices.
+- **2026-08-17:** Added `GET /v1/video/render-snapshots/{snapshotId}/frames/{frameIndex}`. It authorizes through the snapshot project, re-verifies immutable timeline/manifest/source hashes, preserves snapshot range/resolution/FPS/caption settings, and emits a single lossless PNG directly from FFmpeg without a delivery-codec round trip.
+- **2026-08-17:** Added canonical-preview seek/readiness hooks and Playwright capture support, plus a capture script that pairs program-monitor screenshots with immutable-snapshot PNGs by the generated sample names.
+- **2026-08-17:** Added parity metrics and artifacts: per-frame channel tolerance/pass rate, MAE, RMSE, max delta, global SSIM, changed bounds, zero-tolerance named regions, audio offset/correlation/peak/approximate-LUFS metrics, JSON and Markdown summaries, side-by-side images, and heat maps. Thresholds remain provisional until the first full baseline is reviewed.
+- **2026-08-17:** Added `GET /v1/video/render-snapshots/{snapshotId}/audio.pcm`, which preserves the submitted range and mix contract, verifies immutable inputs, and emits headerless 48 kHz stereo signed-16 PCM. The capture script retains this snapshot mix beside the named frame captures; a browser/shared-core preview-audio reference is still required for a genuine two-sided audio comparison.
+- **2026-08-17:** Phase 0 focused Go tests, immutable-snapshot frame/PCM integration, command compilation, the fixture emitter plus all four generated FFmpeg media inputs, script syntax checks, and the frontend production build pass. Full `internal/video` and `internal/api` suites still encounter pre-existing Windows sandbox `EvalSymlinks` access-denied failures in unrelated path-containment tests; the focused video/API suites pass when using workspace-local Go caches.
 
 ## Executive recommendation
 
@@ -304,6 +311,23 @@ No phase should be declared complete solely because code exists. Each phase has 
 ## Phase 0 — Define and measure the parity baseline
 
 **Objective:** Turn WYSIWYG into a measurable contract and capture the current divergence before changing engines.
+
+### Current implementation status
+
+| Work item | Status | Evidence / remaining work |
+|---|---|---|
+| Deterministic torture timeline | Implemented | `ParityTortureFixture` plus the checked-in manifest and fixture-emitter command cover the Phase 0 authoring matrix with stable IDs and values |
+| Deterministic source media | Implemented as generator | `video-parity-fixture --generate-media` creates landscape, portrait, square, and mono-audio inputs with FFmpeg; project upload/seeding automation remains |
+| Named frame selection | Implemented | Boundary/keyframe/transition/scene/marker samples plus seed `20260817`; duplicate frame indices merge their reasons |
+| Immutable-snapshot diagnostic PNG | Implemented | Authenticated frame endpoint emits one direct PNG while preserving snapshot render settings and verifying all hashes |
+| Canonical preview capture hook | Implemented | Program monitor exposes a stable locator and frame seek/readiness events; Playwright helper and capture script consume them |
+| Visual metrics and artifacts | Implemented | Tolerance pass rate, MAE/RMSE/max delta, SSIM, changed bounds, structural regions, side-by-side images, and heat maps |
+| Snapshot diagnostic audio | Implemented | Authenticated endpoint emits the immutable submitted mix as 48 kHz stereo signed-16 PCM and records format headers; snapshots submitted without audio reject the request |
+| Audio metrics | Implemented for supplied PCM | Offset/correlation/peak/approximate-LUFS comparison exists; canonical preview/shared-core reference PCM and true gated EBU R128 LUFS remain |
+| Machine/human report | Implemented | `video-parity-report` writes versioned JSON and Markdown and exits non-zero on threshold failure |
+| End-to-end baseline evidence | Pending | Seed a real project, submit its immutable snapshot, capture all named samples, and retain the first mismatch report |
+| CI artifact job | Pending | Run fixture generation, project seeding, browser/snapshot capture, comparison, and artifact upload on the pinned CI image |
+| Final threshold approval | Pending | Current 2-channel-value/99.9%/0.995/0.999/one-sample values are provisional until baseline review |
 
 ### Work
 
@@ -940,3 +964,11 @@ The first mergeable slice should be deliberately narrow and should not wait for 
 7. freeze new work in the legacy visual compositor except for critical correctness fixes.
 
 That slice immediately fixes “the render was not the timeline I submitted,” creates reliable evidence for later work, and gives the shared-renderer migration a safe rollback boundary.
+
+## Next recommended implementation slice
+
+1. Add a test-only project seeder that uploads the four generated media files, saves the emitted timeline, and submits an immutable render snapshot without requiring manual editor actions.
+2. Add canonical preview/shared-core PCM capture so the snapshot diagnostic mix has a genuine comparison reference rather than a self-generated control.
+3. Run `video-parity-capture.mjs` against the seeded project and all named samples, then run `video-parity-report` and retain the first known-mismatch report as the Phase 0 baseline.
+4. Replace approximate loudness with gated EBU R128 measurement and add explicit frame-count/PTS comparison against the delivery encode.
+5. Wire the reproducible flow into CI with FFmpeg/Chromium/font version metadata and artifact retention; only then review and freeze the proposed thresholds and structural regions.

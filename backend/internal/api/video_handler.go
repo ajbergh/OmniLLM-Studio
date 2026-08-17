@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -754,6 +755,59 @@ func (h *VideoHandler) GetRenderJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, job)
+}
+
+// GetDiagnosticFrame returns a lossless PNG for one frame of an immutable
+// render snapshot. It is intended for parity automation, not delivery export.
+func (h *VideoHandler) GetDiagnosticFrame(w http.ResponseWriter, r *http.Request) {
+	frameIndex, err := strconv.ParseInt(chi.URLParam(r, "frameIndex"), 10, 64)
+	if err != nil || frameIndex < 0 {
+		respondError(w, http.StatusBadRequest, "frameIndex must be a non-negative integer")
+		return
+	}
+	frame, err := h.service.RenderDiagnosticFrame(
+		r.Context(), auth.UserIDFromContext(r.Context()),
+		chi.URLParam(r, "snapshotId"), frameIndex,
+	)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		respondError(w, status, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "private, immutable, max-age=31536000")
+	w.Header().Set("X-Video-Snapshot-ID", frame.SnapshotID)
+	w.Header().Set("X-Video-Frame-Index", strconv.FormatInt(frame.FrameIndex, 10))
+	w.Header().Set("X-Video-Frame-Time-MS", strconv.FormatInt(frame.TimeMS, 10))
+	w.Header().Set("X-Video-Timeline-SHA256", frame.TimelineHash)
+	w.Header().Set("X-Video-Asset-Manifest-SHA256", frame.ManifestHash)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(frame.PNG)
+}
+
+func (h *VideoHandler) GetDiagnosticAudio(w http.ResponseWriter, r *http.Request) {
+	audio, err := h.service.RenderDiagnosticAudio(r.Context(), auth.UserIDFromContext(r.Context()), chi.URLParam(r, "snapshotId"))
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		respondError(w, status, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "audio/pcm")
+	w.Header().Set("Cache-Control", "private, immutable, max-age=31536000")
+	w.Header().Set("X-Video-Snapshot-ID", audio.SnapshotID)
+	w.Header().Set("X-Audio-Sample-Rate", strconv.Itoa(audio.SampleRate))
+	w.Header().Set("X-Audio-Channels", strconv.Itoa(audio.Channels))
+	w.Header().Set("X-Audio-Sample-Format", audio.SampleFormat)
+	w.Header().Set("X-Video-Timeline-SHA256", audio.TimelineHash)
+	w.Header().Set("X-Video-Asset-Manifest-SHA256", audio.ManifestHash)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(audio.PCM)
 }
 
 func (h *VideoHandler) CancelRenderJob(w http.ResponseWriter, r *http.Request) {

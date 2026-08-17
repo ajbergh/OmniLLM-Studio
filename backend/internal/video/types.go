@@ -237,6 +237,13 @@ type ExportSettings struct {
 	Priority int `json:"priority,omitempty"`
 	// WorkspaceID applies per-workspace render admission when supplied.
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	// DiagnosticFrameIndex is an internal-only request to stop the renderer
+	// after the named zero-based output frame. It is deliberately excluded
+	// from persisted/export API JSON so delivery settings remain stable.
+	DiagnosticFrameIndex *int64 `json:"-"`
+	// DiagnosticAudio emits the snapshot mix as headerless 48 kHz stereo
+	// signed-16 PCM instead of creating a delivery container.
+	DiagnosticAudio bool `json:"-"`
 }
 
 // RenderBinding identifies the exact saved timeline revision the caller saw.

@@ -584,6 +584,8 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Post("/video/generations/{generationId}/send-to-timeline", videoHandler.SendGenerationToTimeline)
 			r.Post("/video/generations/{generationId}/cancel", videoHandler.CancelGeneration)
 			r.Get("/video/render-jobs/{jobId}", videoHandler.GetRenderJob)
+			r.Get("/video/render-snapshots/{snapshotId}/frames/{frameIndex}", videoHandler.GetDiagnosticFrame)
+			r.Get("/video/render-snapshots/{snapshotId}/audio.pcm", videoHandler.GetDiagnosticAudio)
 			r.Post("/video/render-jobs/{jobId}/cancel", videoHandler.CancelRenderJob)
 			r.Delete("/video/render-jobs/{jobId}", videoHandler.DeleteRenderJob)
 			r.Get("/video/render/capabilities", videoHandler.RendererCapabilities)

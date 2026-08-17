@@ -98,6 +98,9 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 	if req.Project.ID == "" {
 		return nil, fmt.Errorf("project is required")
 	}
+	if req.Settings.DiagnosticFrameIndex != nil && req.Settings.DiagnosticAudio {
+		return nil, fmt.Errorf("diagnostic frame and audio outputs are mutually exclusive")
+	}
 	var err error
 	req.Timeline, err = ValidateTimelineDocument(req.Timeline)
 	if err != nil {
@@ -136,12 +139,25 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		fps = DefaultProjectFPS
 	}
 	durationSeconds := float64(maxInt64(req.Timeline.DurationMS, 1000)) / 1000.0
+	var diagnosticFrameSeconds float64
+	if req.Settings.DiagnosticFrameIndex != nil {
+		if *req.Settings.DiagnosticFrameIndex < 0 {
+			return nil, fmt.Errorf("diagnostic frame index must be non-negative")
+		}
+		diagnosticFrameSeconds = float64(*req.Settings.DiagnosticFrameIndex) / float64(fps)
+	}
 	background := ffmpegColor(req.Timeline.Canvas.Background, "0x000000")
 
 	if progress != nil {
 		progress(RenderProgress{Stage: "preparing", Message: "Preparing FFmpeg timeline composition", Progress: 0.15})
 	}
-	tmp, err := os.CreateTemp("", "omnillm-video-render-*."+format)
+	outputExtension := format
+	if req.Settings.DiagnosticFrameIndex != nil {
+		outputExtension = "png"
+	} else if req.Settings.DiagnosticAudio {
+		outputExtension = "pcm"
+	}
+	tmp, err := os.CreateTemp("", "omnillm-video-render-*."+outputExtension)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +215,9 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		filterStr, videoLabel, audioLabel := buildFilterComplexWithAudio(req.Timeline, resolved, width, height, req.Settings.IncludeAudio)
 		args = append(args, "-filter_complex", filterStr)
 		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps))
-		args = append(args, "-map", videoLabel)
+		if !req.Settings.DiagnosticAudio {
+			args = append(args, "-map", videoLabel)
+		}
 		if req.Settings.IncludeAudio {
 			if audioLabel != "" {
 				args = append(args, "-map", audioLabel)
@@ -215,12 +233,31 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		if filters := ffmpegVideoFilters(req.Timeline, width, height); filters != "" {
 			args = append(args, "-vf", filters)
 		}
-		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps), "-map", "0:v:0")
+		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps))
+		if !req.Settings.DiagnosticAudio {
+			args = append(args, "-map", "0:v:0")
+		}
 		if req.Settings.IncludeAudio {
 			args = append(args, "-map", "1:a:0", "-shortest")
 		}
 	}
-	args = appendFFmpegCodecArgs(args, format, req.Settings)
+	if req.Settings.DiagnosticFrameIndex != nil {
+		// Output-side seeking keeps the full timeline clock intact for fades,
+		// transitions, keyframes, and scene camera evaluation, while encoding
+		// only the requested diagnostic frame.
+		args = append(args,
+			"-ss", fmt.Sprintf("%.9f", diagnosticFrameSeconds),
+			"-frames:v", "1",
+			"-an",
+		)
+	}
+	if req.Settings.DiagnosticFrameIndex != nil {
+		args = append(args, "-c:v", "png", "-threads", "1", "-f", "image2")
+	} else if req.Settings.DiagnosticAudio {
+		args = append(args, "-vn", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "s16le")
+	} else {
+		args = appendFFmpegCodecArgs(args, format, req.Settings)
+	}
 	args = append(args, outputPath)
 
 	if progress != nil {
@@ -246,23 +283,47 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 	if format == "webm" {
 		mimeType = "video/webm"
 	}
+	fileName := fmt.Sprintf("render-%s.%s", sanitizePathSegment(req.Project.ID), format)
+	if req.Settings.DiagnosticFrameIndex != nil {
+		mimeType = "image/png"
+		fileName = fmt.Sprintf("render-%s-frame-%d.png", sanitizePathSegment(req.Project.ID), *req.Settings.DiagnosticFrameIndex)
+	}
+	if req.Settings.DiagnosticAudio {
+		mimeType = "audio/pcm"
+		fileName = fmt.Sprintf("render-%s-audio-s16le.pcm", sanitizePathSegment(req.Project.ID))
+	}
+	resultDurationMS := int64(durationSeconds * 1000)
+	if req.Settings.DiagnosticFrameIndex != nil {
+		resultDurationMS = int64(math.Ceil(1000 / float64(fps)))
+	}
+	metadata := map[string]any{
+		"renderer":             "ffmpeg",
+		"format":               format,
+		"quality":              req.Settings.Quality,
+		"include_audio":        req.Settings.IncludeAudio,
+		"text_clips":           countTextClips(req.Timeline),
+		"ffmpeg_command":       commandStr,
+		"timeline_duration_ms": req.Timeline.DurationMS,
+	}
+	if req.Settings.DiagnosticFrameIndex != nil {
+		metadata["diagnostic_frame_index"] = *req.Settings.DiagnosticFrameIndex
+		metadata["diagnostic_frame_time_seconds"] = diagnosticFrameSeconds
+	}
+	if req.Settings.DiagnosticAudio {
+		metadata["diagnostic_audio"] = true
+		metadata["audio_sample_rate"] = 48000
+		metadata["audio_channels"] = 2
+		metadata["audio_sample_format"] = "s16le"
+	}
 	return &RenderResult{
 		MimeType:   mimeType,
-		FileName:   fmt.Sprintf("render-%s.%s", sanitizePathSegment(req.Project.ID), format),
+		FileName:   fileName,
 		Data:       data,
-		DurationMS: int64(durationSeconds * 1000),
+		DurationMS: resultDurationMS,
 		Width:      width,
 		Height:     height,
 		FPS:        float64(fps),
-		Metadata: map[string]any{
-			"renderer":             "ffmpeg",
-			"format":               format,
-			"quality":              req.Settings.Quality,
-			"include_audio":        req.Settings.IncludeAudio,
-			"text_clips":           countTextClips(req.Timeline),
-			"ffmpeg_command":       commandStr,
-			"timeline_duration_ms": req.Timeline.DurationMS,
-		},
+		Metadata:   metadata,
 	}, nil
 }
 

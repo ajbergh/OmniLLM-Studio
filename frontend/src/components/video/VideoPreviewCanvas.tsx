@@ -166,6 +166,37 @@ export function VideoPreviewCanvas() {
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
+  // Stable automation hook for the Phase 0 parity harness. The custom event
+  // seeks the canonical preview by frame index and emits readiness only after
+  // React has committed the frame and mounted media has had a chance to seek.
+  useEffect(() => {
+    const onParitySeek = (event: Event) => {
+      const detail = (event as CustomEvent<{ frameIndex?: number; requestId?: string }>).detail || {};
+      const fps = timeline?.canvas.fps || 30;
+      const frameIndex = Math.max(0, Math.floor(detail.frameIndex ?? 0));
+      const requestId = detail.requestId || `frame-${frameIndex}`;
+      setPlaying(false);
+      selectClip(null);
+      setPlayhead((frameIndex * 1000) / fps);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const deadline = performance.now() + 2000;
+        const signalWhenSettled = () => {
+          const mediaSettled = [...videoRefs.current.values()].every((media) => media.readyState >= 2 && !media.seeking);
+          if (!mediaSettled && performance.now() < deadline) {
+            requestAnimationFrame(signalWhenSettled);
+            return;
+          }
+          window.dispatchEvent(new CustomEvent('omnillm:video-parity-ready', {
+            detail: { frameIndex, requestId },
+          }));
+        };
+        signalWhenSettled();
+      }));
+    };
+    window.addEventListener('omnillm:video-parity-seek', onParitySeek);
+    return () => window.removeEventListener('omnillm:video-parity-seek', onParitySeek);
+  }, [selectClip, setPlayhead, setPlaying, timeline?.canvas.fps]);
+
   const toggleFullscreen = () => {
     if (document.fullscreenElement) {
       void document.exitFullscreen();
@@ -996,6 +1027,9 @@ export function VideoPreviewCanvas() {
       <div ref={fitRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4">
         <div
           ref={stageRef}
+          data-testid="video-preview-program"
+          data-parity-frame-index={Math.floor((playheadMs * (timeline?.canvas.fps || 30)) / 1000)}
+          data-parity-time-ms={Math.round(playheadMs)}
           className="relative overflow-hidden border border-white/10"
           style={{
             width: stageSize.width || undefined,

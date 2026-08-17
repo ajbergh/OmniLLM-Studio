@@ -1,0 +1,31 @@
+{
+  "name": "parity-torture-v1",
+  "generator": "backend/cmd/video-parity-fixture",
+  "timeline_source": "backend/internal/video/parity_fixture.go",
+  "seed": 20260817,
+  "random_samples": 8,
+  "canvas": {
+    "width": 640,
+    "height": 360,
+    "fps": 30,
+    "duration_ms": 20000
+  },
+  "assets": [
+    "asset-landscape.mp4",
+    "asset-portrait.mp4",
+    "asset-square.png",
+    "asset-audio.wav"
+  ],
+  "thresholds": {
+    "channel_tolerance": 2,
+    "minimum_pixel_pass_rate": 0.999,
+    "minimum_ssim": 0.995,
+    "minimum_audio_correlation": 0.999,
+    "maximum_audio_offset_samples": 1
+  },
+  "zero_tolerance_regions": [
+    "text_bounds",
+    "cursor_center",
+    "crop_rectangle"
+  ]
+}
