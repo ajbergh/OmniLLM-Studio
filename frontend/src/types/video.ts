@@ -458,6 +458,8 @@ export interface VideoTimelineRecord {
   active: boolean;
   timeline_json: string;
   duration_ms: number;
+  revision: number;
+  content_sha256: string;
   created_at: string;
   updated_at: string;
 }
@@ -496,6 +498,13 @@ export interface VideoRenderJob {
   id: string;
   project_id: string;
   timeline_id: string;
+  snapshot_id?: string;
+  timeline_revision?: number;
+  timeline_sha256?: string;
+  asset_manifest_sha256?: string;
+  renderer?: string;
+  renderer_version?: string;
+  render_contract_version?: number;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
   progress: number;
   settings_json: string;

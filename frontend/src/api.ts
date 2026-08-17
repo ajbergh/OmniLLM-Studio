@@ -1546,7 +1546,7 @@ export const videoApi = {
       body: JSON.stringify(data),
     }),
 
-  renderTimeline: (projectId: string, data: VideoExportSettings) =>
+  renderTimeline: (projectId: string, data: VideoExportSettings & { timeline_id: string; timeline_revision: number; timeline_sha256: string }) =>
     apiFetch<VideoRenderJob>(`/video/projects/${encodeURIComponent(projectId)}/render`, {
       method: 'POST',
       body: JSON.stringify(data),

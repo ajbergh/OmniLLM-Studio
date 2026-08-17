@@ -35,11 +35,11 @@ func (r *VideoRenderJobRepo) Create(j *models.VideoRenderJob) error {
 	}
 	_, err := r.db.Exec(`
 		INSERT INTO video_render_jobs (
-			id, project_id, timeline_id, status, progress, settings_json,
+			id, project_id, timeline_id, snapshot_id, status, progress, settings_json,
 			output_asset_id, error, metadata_json, created_at, started_at, completed_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		j.ID, j.ProjectID, j.TimelineID, j.Status, j.Progress, j.SettingsJSON,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		j.ID, j.ProjectID, j.TimelineID, j.SnapshotID, j.Status, j.Progress, j.SettingsJSON,
 		j.OutputAssetID, j.Error, j.MetadataJSON, j.CreatedAt, j.StartedAt, j.CompletedAt,
 	)
 	if err != nil {
@@ -48,22 +48,147 @@ func (r *VideoRenderJobRepo) Create(j *models.VideoRenderJob) error {
 	return nil
 }
 
+// CreateWithSnapshot atomically persists an immutable render snapshot, its
+// asset lease rows, and the queued job that references it.
+func (r *VideoRenderJobRepo) CreateWithSnapshot(j *models.VideoRenderJob, snapshot *models.VideoRenderSnapshot, assets []models.VideoRenderSnapshotAsset) error {
+	if j == nil || snapshot == nil {
+		return fmt.Errorf("render job and snapshot are required")
+	}
+	if j.ID == "" {
+		j.ID = uuid.New().String()
+	}
+	if snapshot.ID == "" {
+		snapshot.ID = uuid.New().String()
+	}
+	if j.Status == "" {
+		j.Status = "queued"
+	}
+	if j.SettingsJSON == "" {
+		j.SettingsJSON = "{}"
+	}
+	if j.MetadataJSON == "" {
+		j.MetadataJSON = "{}"
+	}
+	now := time.Now().UTC()
+	if j.CreatedAt.IsZero() {
+		j.CreatedAt = now
+	}
+	if snapshot.CreatedAt.IsZero() {
+		snapshot.CreatedAt = now
+	}
+	j.SnapshotID = &snapshot.ID
+	j.TimelineRevision = snapshot.TimelineRevision
+	j.TimelineSHA256 = snapshot.TimelineSHA256
+	j.AssetManifestSHA256 = snapshot.AssetManifestSHA256
+	j.Renderer = snapshot.Renderer
+	j.RendererVersion = snapshot.RendererVersion
+	j.RenderContractVersion = snapshot.RenderContractVersion
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin create video render snapshot: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		INSERT INTO video_render_snapshots (
+			id, project_id, timeline_id, timeline_revision, timeline_json, timeline_sha256,
+			asset_manifest_json, asset_manifest_sha256, settings_json,
+			render_contract_version, renderer, renderer_version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		snapshot.ID, snapshot.ProjectID, snapshot.TimelineID, snapshot.TimelineRevision,
+		snapshot.TimelineJSON, snapshot.TimelineSHA256, snapshot.AssetManifestJSON,
+		snapshot.AssetManifestSHA256, snapshot.SettingsJSON, snapshot.RenderContractVersion,
+		snapshot.Renderer, snapshot.RendererVersion, snapshot.CreatedAt,
+	); err != nil {
+		return fmt.Errorf("create video render snapshot: %w", err)
+	}
+	for _, asset := range assets {
+		if _, err := tx.Exec(`
+			INSERT INTO video_render_snapshot_assets (snapshot_id, asset_id, file_sha256, size_bytes)
+			VALUES (?, ?, ?, ?)`, snapshot.ID, asset.AssetID, asset.FileSHA256, asset.SizeBytes); err != nil {
+			return fmt.Errorf("create video render snapshot asset: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO video_render_jobs (
+			id, project_id, timeline_id, snapshot_id, status, progress, settings_json,
+			output_asset_id, error, metadata_json, created_at, started_at, completed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		j.ID, j.ProjectID, j.TimelineID, j.SnapshotID, j.Status, j.Progress, j.SettingsJSON,
+		j.OutputAssetID, j.Error, j.MetadataJSON, j.CreatedAt, j.StartedAt, j.CompletedAt,
+	); err != nil {
+		return fmt.Errorf("create video render job: %w", err)
+	}
+	return tx.Commit()
+}
+
 func (r *VideoRenderJobRepo) GetByID(id string) (*models.VideoRenderJob, error) {
-	row := r.db.QueryRow(videoRenderJobSelectSQL+` WHERE id = ?`, id)
+	row := r.db.QueryRow(videoRenderJobSelectSQL+` WHERE j.id = ?`, id)
 	return scanVideoRenderJob(row)
+}
+
+func (r *VideoRenderJobRepo) GetSnapshot(id string) (*models.VideoRenderSnapshot, error) {
+	row := r.db.QueryRow(`
+		SELECT id, project_id, timeline_id, timeline_revision, timeline_json, timeline_sha256,
+		       asset_manifest_json, asset_manifest_sha256, settings_json,
+		       render_contract_version, renderer, renderer_version, created_at
+		FROM video_render_snapshots WHERE id = ?`, id)
+	var snapshot models.VideoRenderSnapshot
+	if err := row.Scan(
+		&snapshot.ID, &snapshot.ProjectID, &snapshot.TimelineID, &snapshot.TimelineRevision,
+		&snapshot.TimelineJSON, &snapshot.TimelineSHA256, &snapshot.AssetManifestJSON,
+		&snapshot.AssetManifestSHA256, &snapshot.SettingsJSON, &snapshot.RenderContractVersion,
+		&snapshot.Renderer, &snapshot.RendererVersion, &snapshot.CreatedAt,
+	); err == sql.ErrNoRows {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("get video render snapshot: %w", err)
+	}
+	return &snapshot, nil
+}
+
+// HasActiveAssetReference reports whether queued/running render snapshots are
+// leasing an asset's bytes. Deletion must check this before removing the file.
+func (r *VideoRenderJobRepo) HasActiveAssetReference(assetID string) (bool, error) {
+	var exists int
+	err := r.db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM video_render_snapshot_assets sa
+			JOIN video_render_jobs j ON j.snapshot_id = sa.snapshot_id
+			WHERE sa.asset_id = ? AND j.status IN ('queued','running')
+		)`, assetID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check active video render asset reference: %w", err)
+	}
+	return exists == 1, nil
 }
 
 // Delete removes a render job record. Output assets are independent rows and
 // survive the job's deletion.
 func (r *VideoRenderJobRepo) Delete(id string) error {
-	if _, err := r.db.Exec(`DELETE FROM video_render_jobs WHERE id = ?`, id); err != nil {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin delete video render job: %w", err)
+	}
+	defer tx.Rollback()
+	var snapshotID sql.NullString
+	if err := tx.QueryRow(`SELECT snapshot_id FROM video_render_jobs WHERE id = ?`, id).Scan(&snapshotID); err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("query video render snapshot for delete: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM video_render_jobs WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete video render job: %w", err)
 	}
-	return nil
+	if snapshotID.Valid {
+		if _, err := tx.Exec(`DELETE FROM video_render_snapshots WHERE id = ?`, snapshotID.String); err != nil {
+			return fmt.Errorf("delete video render snapshot: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 func (r *VideoRenderJobRepo) ListByProject(projectID string) ([]models.VideoRenderJob, error) {
-	rows, err := r.db.Query(videoRenderJobSelectSQL+` WHERE project_id = ? ORDER BY created_at DESC`, projectID)
+	rows, err := r.db.Query(videoRenderJobSelectSQL+` WHERE j.project_id = ? ORDER BY j.created_at DESC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list video render jobs: %w", err)
 	}
@@ -164,7 +289,7 @@ func (r *VideoRenderJobRepo) SetMetadata(id, metadataJSON string) error {
 
 // ListActive returns jobs still queued or running (used for restart recovery).
 func (r *VideoRenderJobRepo) ListActive() ([]models.VideoRenderJob, error) {
-	rows, err := r.db.Query(videoRenderJobSelectSQL + ` WHERE status IN ('queued','running') ORDER BY created_at ASC`)
+	rows, err := r.db.Query(videoRenderJobSelectSQL + ` WHERE j.status IN ('queued','running') ORDER BY j.created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list active video render jobs: %w", err)
 	}
@@ -182,16 +307,26 @@ func (r *VideoRenderJobRepo) ListActive() ([]models.VideoRenderJob, error) {
 }
 
 const videoRenderJobSelectSQL = `
-	SELECT id, project_id, timeline_id, status, progress, settings_json,
-	       output_asset_id, error, metadata_json, created_at, started_at, completed_at
-	FROM video_render_jobs`
+	SELECT j.id, j.project_id, j.timeline_id, j.snapshot_id,
+	       s.timeline_revision, s.timeline_sha256, s.asset_manifest_sha256,
+	       s.renderer, s.renderer_version, s.render_contract_version,
+	       j.status, j.progress, j.settings_json,
+	       j.output_asset_id, j.error, j.metadata_json, j.created_at, j.started_at, j.completed_at
+	FROM video_render_jobs j
+	LEFT JOIN video_render_snapshots s ON s.id = j.snapshot_id`
 
 func scanVideoRenderJob(row rowScanner) (*models.VideoRenderJob, error) {
 	var j models.VideoRenderJob
+	var snapshotID, timelineSHA256, assetManifestSHA256, renderer, rendererVersion sql.NullString
+	var timelineRevision sql.NullInt64
+	var renderContractVersion sql.NullInt64
 	var outputAssetID, errMsg sql.NullString
 	var startedAt, completedAt sql.NullTime
 	err := row.Scan(
-		&j.ID, &j.ProjectID, &j.TimelineID, &j.Status, &j.Progress, &j.SettingsJSON,
+		&j.ID, &j.ProjectID, &j.TimelineID, &snapshotID,
+		&timelineRevision, &timelineSHA256, &assetManifestSHA256,
+		&renderer, &rendererVersion, &renderContractVersion,
+		&j.Status, &j.Progress, &j.SettingsJSON,
 		&outputAssetID, &errMsg, &j.MetadataJSON, &j.CreatedAt, &startedAt, &completedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -199,6 +334,27 @@ func scanVideoRenderJob(row rowScanner) (*models.VideoRenderJob, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scan video render job: %w", err)
+	}
+	if snapshotID.Valid {
+		j.SnapshotID = &snapshotID.String
+	}
+	if timelineRevision.Valid {
+		j.TimelineRevision = timelineRevision.Int64
+	}
+	if timelineSHA256.Valid {
+		j.TimelineSHA256 = timelineSHA256.String
+	}
+	if assetManifestSHA256.Valid {
+		j.AssetManifestSHA256 = assetManifestSHA256.String
+	}
+	if renderer.Valid {
+		j.Renderer = renderer.String
+	}
+	if rendererVersion.Valid {
+		j.RendererVersion = rendererVersion.String
+	}
+	if renderContractVersion.Valid {
+		j.RenderContractVersion = int(renderContractVersion.Int64)
 	}
 	if outputAssetID.Valid {
 		j.OutputAssetID = &outputAssetID.String

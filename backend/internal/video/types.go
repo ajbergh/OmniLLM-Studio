@@ -235,3 +235,19 @@ type ExportSettings struct {
 	// WorkspaceID applies per-workspace render admission when supplied.
 	WorkspaceID string `json:"workspace_id,omitempty"`
 }
+
+// RenderBinding identifies the exact saved timeline revision the caller saw.
+// Browser/API callers must provide it; trusted internal diagnostic renders may
+// omit it and bind atomically to the current saved revision in StartRender.
+type RenderBinding struct {
+	TimelineID       string `json:"timeline_id"`
+	TimelineRevision int64  `json:"timeline_revision"`
+	TimelineSHA256   string `json:"timeline_sha256"`
+}
+
+// StartRenderRequest keeps the existing flat export-settings JSON shape while
+// adding optimistic revision binding fields.
+type StartRenderRequest struct {
+	ExportSettings
+	RenderBinding
+}

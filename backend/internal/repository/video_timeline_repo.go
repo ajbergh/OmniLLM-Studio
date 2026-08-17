@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -27,6 +29,10 @@ func (r *VideoTimelineRepo) Create(t *models.VideoTimeline) error {
 	if t.TimelineJSON == "" {
 		t.TimelineJSON = "{}"
 	}
+	t.ContentSHA256 = timelineContentSHA256(t.TimelineJSON)
+	if t.Revision <= 0 {
+		t.Revision = 1
+	}
 	now := time.Now().UTC()
 	if t.CreatedAt.IsZero() {
 		t.CreatedAt = now
@@ -51,10 +57,10 @@ func (r *VideoTimelineRepo) Create(t *models.VideoTimeline) error {
 	}
 	_, err = tx.Exec(`
 		INSERT INTO video_timelines (
-			id, project_id, name, active, timeline_json, duration_ms, created_at, updated_at
+			id, project_id, name, active, timeline_json, duration_ms, revision, content_sha256, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.ProjectID, t.Name, active, t.TimelineJSON, t.DurationMS, t.CreatedAt, t.UpdatedAt,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.ProjectID, t.Name, active, t.TimelineJSON, t.DurationMS, t.Revision, t.ContentSHA256, t.CreatedAt, t.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create video timeline: %w", err)
@@ -87,6 +93,7 @@ func (r *VideoTimelineRepo) Save(t *models.VideoTimeline) error {
 	if t.TimelineJSON == "" {
 		t.TimelineJSON = "{}"
 	}
+	t.ContentSHA256 = timelineContentSHA256(t.TimelineJSON)
 	t.UpdatedAt = time.Now().UTC()
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -102,12 +109,14 @@ func (r *VideoTimelineRepo) Save(t *models.VideoTimeline) error {
 	if t.Active {
 		active = 1
 	}
-	_, err = tx.Exec(`
+	err = tx.QueryRow(`
 		UPDATE video_timelines
-		SET name = ?, active = ?, timeline_json = ?, duration_ms = ?, updated_at = ?
-		WHERE id = ? AND project_id = ?`,
-		t.Name, active, t.TimelineJSON, t.DurationMS, t.UpdatedAt, t.ID, t.ProjectID,
-	)
+		SET name = ?, active = ?, timeline_json = ?, duration_ms = ?,
+		    revision = revision + 1, content_sha256 = ?, updated_at = ?
+		WHERE id = ? AND project_id = ?
+		RETURNING revision`,
+		t.Name, active, t.TimelineJSON, t.DurationMS, t.ContentSHA256, t.UpdatedAt, t.ID, t.ProjectID,
+	).Scan(&t.Revision)
 	if err != nil {
 		return fmt.Errorf("save video timeline: %w", err)
 	}
@@ -127,13 +136,13 @@ func (r *VideoTimelineRepo) Delete(id string) error {
 }
 
 const videoTimelineSelectSQL = `
-	SELECT id, project_id, name, active, timeline_json, duration_ms, created_at, updated_at
+	SELECT id, project_id, name, active, timeline_json, duration_ms, revision, content_sha256, created_at, updated_at
 	FROM video_timelines`
 
 func scanVideoTimeline(row rowScanner) (*models.VideoTimeline, error) {
 	var t models.VideoTimeline
 	var active int
-	err := row.Scan(&t.ID, &t.ProjectID, &t.Name, &active, &t.TimelineJSON, &t.DurationMS, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.ProjectID, &t.Name, &active, &t.TimelineJSON, &t.DurationMS, &t.Revision, &t.ContentSHA256, &t.CreatedAt, &t.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -142,4 +151,9 @@ func scanVideoTimeline(row rowScanner) (*models.VideoTimeline, error) {
 	}
 	t.Active = active == 1
 	return &t, nil
+}
+
+func timelineContentSHA256(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }

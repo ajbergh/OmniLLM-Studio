@@ -7,8 +7,8 @@
  * each user gesture is a single undo entry and a single save.
  *
  * The save queue preserves server write order; _saveSeq prevents an older
- * response from replacing newer local state. renderedSaveSeq (vs. _saveSeq)
- * drives the "timeline changed since last render" indicator.
+ * response from replacing newer local state. Completed-render dirtiness is
+ * bound to the immutable timeline content hash returned by each render job.
  */
 import { create } from 'zustand';
 import { toast } from 'sonner';
@@ -413,10 +413,6 @@ interface VideoStudioState {
   rendererCapabilities: VideoRendererCapabilities | null;
   renderJobs: VideoRenderJob[];
   activeRenderJobId: string | null;
-  // Dirty-render tracking: the save sequence captured when the last completed
-  // render started. 0 = nothing rendered yet this session.
-  _renderStartedSaveSeq: number;
-  renderedSaveSeq: number;
   exportSettings: VideoExportSettings;
   assistantInstruction: string;
   assistantPlan: VideoEditPlan | null;
@@ -632,8 +628,6 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
   rendererCapabilities: null,
   renderJobs: [],
   activeRenderJobId: null,
-  _renderStartedSaveSeq: 0,
-  renderedSaveSeq: 0,
   exportSettings: { ...DEFAULT_EXPORT },
   assistantInstruction: '',
   assistantPlan: null,
@@ -3461,15 +3455,20 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     set({ isRendering: true, error: null });
     try {
       await get().saveTimeline();
-      const startedSeq = get()._saveSeq;
+      const timelineRecord = get().timelineRecord;
+      if (get().saveStatus !== 'saved' || !timelineRecord?.content_sha256 || timelineRecord.revision <= 0) {
+        throw new Error('The timeline could not be saved to an immutable revision');
+      }
       const job = await videoApi.renderTimeline(projectId, {
         ...get().exportSettings,
         estimated_duration_ms: get().timeline?.duration_ms,
+        timeline_id: timelineRecord.id,
+        timeline_revision: timelineRecord.revision,
+        timeline_sha256: timelineRecord.content_sha256,
       });
       set((state) => ({
         renderJobs: upsertRenderJob(state.renderJobs, job),
         activeRenderJobId: job.id,
-        _renderStartedSaveSeq: startedSeq,
         isRendering: false,
       }));
       toast.success('Render started');
@@ -3502,8 +3501,6 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       if (get().activeProjectId !== job.project_id) return;
       set((state) => ({ renderJobs: upsertRenderJob(state.renderJobs, job), activeRenderJobId: job.id }));
       if (job.status === 'completed') {
-        // The render reflects the timeline as of when it started.
-        set((state) => ({ renderedSaveSeq: state._renderStartedSaveSeq }));
         if (get().activeProjectId === job.project_id) {
           const assets = await videoApi.listAssets(job.project_id);
           if (get().activeProjectId === job.project_id) {

@@ -726,13 +726,21 @@ func (h *VideoHandler) StartRender(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var settings video.ExportSettings
-	if err := decodeJSON(r, &settings); err != nil {
+	var req video.StartRenderRequest
+	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid render settings")
 		return
 	}
-	job, err := h.service.StartRender(r.Context(), auth.UserIDFromContext(r.Context()), project.ID, settings)
+	if strings.TrimSpace(req.TimelineID) == "" || req.TimelineRevision <= 0 || strings.TrimSpace(req.TimelineSHA256) == "" {
+		respondError(w, http.StatusBadRequest, "timeline_id, timeline_revision, and timeline_sha256 are required")
+		return
+	}
+	job, err := h.service.StartRender(r.Context(), auth.UserIDFromContext(r.Context()), project.ID, req.ExportSettings, req.RenderBinding)
 	if err != nil {
+		if errors.Is(err, video.ErrTimelineRevisionConflict) {
+			respondError(w, http.StatusConflict, err.Error())
+			return
+		}
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}

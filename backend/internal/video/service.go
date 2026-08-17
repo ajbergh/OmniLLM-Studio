@@ -19,8 +19,9 @@ import (
 )
 
 var (
-	ErrCapabilityUnsupported = errors.New("video capability unsupported")
-	ErrProviderUnavailable   = errors.New("video provider unavailable")
+	ErrCapabilityUnsupported    = errors.New("video capability unsupported")
+	ErrProviderUnavailable      = errors.New("video provider unavailable")
+	ErrTimelineRevisionConflict = errors.New("video timeline revision conflict")
 )
 
 // llmCompleter is a narrow interface for making non-streaming LLM completions.
@@ -1488,7 +1489,7 @@ func (s *Service) resolveAttachmentAsset(userID, sourceID string, req ExternalAs
 // StartRender validates the export settings against the project, persists a
 // queued render job, and launches the render in a background goroutine that
 // outlives the HTTP request. The returned job is immediately pollable.
-func (s *Service) StartRender(ctx context.Context, userID, projectID string, settings ExportSettings) (*models.VideoRenderJob, error) {
+func (s *Service) StartRender(ctx context.Context, userID, projectID string, settings ExportSettings, expected ...RenderBinding) (*models.VideoRenderJob, error) {
 	project, err := s.ensureProjectOwned(userID, projectID)
 	if err != nil {
 		return nil, err
@@ -1497,11 +1498,39 @@ func (s *Service) StartRender(ctx context.Context, userID, projectID string, set
 	if err != nil {
 		return nil, err
 	}
-	timeline, _, err := s.GetOrCreateTimeline(ctx, userID, project.ID)
+	timeline, doc, err := s.GetOrCreateTimeline(ctx, userID, project.ID)
+	if err != nil {
+		return nil, err
+	}
+	if timeline.ContentSHA256 == "" {
+		timeline.ContentSHA256 = contentSHA256([]byte(timeline.TimelineJSON))
+	}
+	if len(expected) > 0 {
+		binding := expected[0]
+		if binding.TimelineID != timeline.ID || binding.TimelineRevision != timeline.Revision || !strings.EqualFold(strings.TrimSpace(binding.TimelineSHA256), timeline.ContentSHA256) {
+			return nil, fmt.Errorf("%w: the timeline changed after the submitted revision; save and render again", ErrTimelineRevisionConflict)
+		}
+	}
+	snapshotID := uuid.New().String()
+	entries, assetManifestJSON, assetManifestSHA256, err := s.buildRenderAssetManifest(project.ID, snapshotID, doc)
 	if err != nil {
 		return nil, err
 	}
 	settingsJSON, _ := json.Marshal(settings)
+	snapshot := &models.VideoRenderSnapshot{
+		ID:                    snapshotID,
+		ProjectID:             project.ID,
+		TimelineID:            timeline.ID,
+		TimelineRevision:      timeline.Revision,
+		TimelineJSON:          timeline.TimelineJSON,
+		TimelineSHA256:        timeline.ContentSHA256,
+		AssetManifestJSON:     assetManifestJSON,
+		AssetManifestSHA256:   assetManifestSHA256,
+		SettingsJSON:          string(settingsJSON),
+		RenderContractVersion: doc.Version,
+		Renderer:              legacySnapshotRenderer,
+		RendererVersion:       legacySnapshotRendererVersion,
+	}
 	job := &models.VideoRenderJob{
 		ProjectID:    project.ID,
 		TimelineID:   timeline.ID,
@@ -1509,26 +1538,42 @@ func (s *Service) StartRender(ctx context.Context, userID, projectID string, set
 		Progress:     0,
 		SettingsJSON: string(settingsJSON),
 	}
-	if err := s.renderJobs.Create(job); err != nil {
+	snapshotAssets := make([]models.VideoRenderSnapshotAsset, 0, len(entries))
+	for _, entry := range entries {
+		snapshotAssets = append(snapshotAssets, models.VideoRenderSnapshotAsset{
+			AssetID: entry.Asset.ID, FileSHA256: entry.FileSHA256, SizeBytes: entry.SizeBytes,
+		})
+	}
+	if err := s.renderJobs.CreateWithSnapshot(job, snapshot, snapshotAssets); err != nil {
+		_ = removeRenderSnapshotStaging(s.attachmentsDir, snapshot.ID)
 		return nil, err
 	}
 	// A cancellable context lets CancelRenderJob kill the FFmpeg process; the
 	// job still survives request lifetimes (parent is Background, not the
 	// HTTP request context).
+	s.launchRenderJob(job.ID)
+	return job, nil
+}
+
+func (s *Service) launchRenderJob(jobID string) {
 	renderCtx, cancel := context.WithCancel(context.Background())
 	s.renderCancelsMu.Lock()
-	s.renderCancels[job.ID] = cancel
+	if _, exists := s.renderCancels[jobID]; exists {
+		s.renderCancelsMu.Unlock()
+		cancel()
+		return
+	}
+	s.renderCancels[jobID] = cancel
 	s.renderCancelsMu.Unlock()
 	go func() {
 		defer func() {
 			s.renderCancelsMu.Lock()
-			delete(s.renderCancels, job.ID)
+			delete(s.renderCancels, jobID)
 			s.renderCancelsMu.Unlock()
 			cancel()
 		}()
-		s.runRenderJob(renderCtx, job.ID)
+		s.runRenderJob(renderCtx, jobID)
 	}()
-	return job, nil
 }
 
 func (s *Service) GetRenderJob(userID, jobID string) (*models.VideoRenderJob, error) {
@@ -1576,7 +1621,13 @@ func (s *Service) DeleteRenderJob(userID, jobID string) error {
 	if job.Status == "queued" || job.Status == "running" {
 		return fmt.Errorf("cancel the render job before deleting it")
 	}
-	return s.renderJobs.Delete(job.ID)
+	if err := s.renderJobs.Delete(job.ID); err != nil {
+		return err
+	}
+	if job.SnapshotID != nil {
+		_ = removeRenderSnapshotStaging(s.attachmentsDir, *job.SnapshotID)
+	}
+	return nil
 }
 
 // runRenderJob executes one render job end-to-end: load the project/timeline/
@@ -1601,36 +1652,42 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 		_ = s.renderJobs.MarkFailed(job.ID, "video project not found")
 		return
 	}
-	timeline, err := s.timelines.GetByID(job.TimelineID)
-	if err != nil || timeline == nil {
-		_ = s.renderJobs.MarkFailed(job.ID, "timeline not found")
+	if job.SnapshotID == nil || *job.SnapshotID == "" {
+		_ = s.renderJobs.MarkFailed(job.ID, "render job has no immutable snapshot")
 		return
 	}
-	doc, err := TimelineFromJSON(timeline.TimelineJSON, NewEmptyTimeline(project.Width, project.Height, project.FPS))
+	snapshot, err := s.renderJobs.GetSnapshot(*job.SnapshotID)
+	if err != nil || snapshot == nil {
+		_ = s.renderJobs.MarkFailed(job.ID, "render snapshot not found")
+		return
+	}
+	if contentSHA256([]byte(snapshot.TimelineJSON)) != snapshot.TimelineSHA256 {
+		_ = s.renderJobs.MarkFailed(job.ID, "render snapshot timeline hash mismatch")
+		return
+	}
+	doc, err := TimelineFromJSON(snapshot.TimelineJSON, NewEmptyTimeline(project.Width, project.Height, project.FPS))
 	if err != nil {
 		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
 		return
 	}
 	var settings ExportSettings
-	if err := json.Unmarshal([]byte(job.SettingsJSON), &settings); err != nil {
+	if err := json.Unmarshal([]byte(snapshot.SettingsJSON), &settings); err != nil {
 		_ = s.renderJobs.MarkFailed(job.ID, "invalid render settings: "+err.Error())
 		return
 	}
 	settings, _ = validateExportSettings(settings, *project)
 
-	// Resolve asset map for media compositing.
-	assetList, _ := s.assets.ListByProject(project.ID)
-	assetMap := make(map[string]models.VideoAsset, len(assetList))
-	for _, a := range assetList {
-		assetMap[a.ID] = a
+	assetMap, err := s.assetsFromRenderSnapshot(snapshot)
+	if err != nil {
+		_ = s.renderJobs.MarkFailed(job.ID, err.Error())
+		return
 	}
-	attachmentsDir := filepath.Dir(s.storage.Root())
 
 	result, err := s.renderer.Render(ctx, RenderRequest{
 		Project:        *project,
 		Timeline:       doc,
 		Settings:       settings,
-		AttachmentsDir: attachmentsDir,
+		AttachmentsDir: s.attachmentsDir,
 		Assets:         assetMap,
 	}, func(p RenderProgress) {
 		_ = s.renderJobs.UpdateProgress(job.ID, p.Progress)
@@ -1665,6 +1722,13 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 	jobMeta["output_width"] = result.Width
 	jobMeta["output_height"] = result.Height
 	jobMeta["output_fps"] = result.FPS
+	jobMeta["snapshot_id"] = snapshot.ID
+	jobMeta["timeline_revision"] = snapshot.TimelineRevision
+	jobMeta["timeline_sha256"] = snapshot.TimelineSHA256
+	jobMeta["asset_manifest_sha256"] = snapshot.AssetManifestSHA256
+	jobMeta["render_contract_version"] = snapshot.RenderContractVersion
+	jobMeta["renderer"] = snapshot.Renderer
+	jobMeta["renderer_version"] = snapshot.RendererVersion
 	if settings.EstimatedDurationMS > 0 {
 		jobMeta["estimated_duration_ms"] = settings.EstimatedDurationMS
 		diff := result.DurationMS - settings.EstimatedDurationMS
@@ -1686,7 +1750,14 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 		meta = map[string]any{}
 	}
 	meta["render_job_id"] = job.ID
-	meta["timeline_id"] = timeline.ID
+	meta["timeline_id"] = snapshot.TimelineID
+	meta["timeline_revision"] = snapshot.TimelineRevision
+	meta["timeline_sha256"] = snapshot.TimelineSHA256
+	meta["asset_manifest_sha256"] = snapshot.AssetManifestSHA256
+	meta["snapshot_id"] = snapshot.ID
+	meta["render_contract_version"] = snapshot.RenderContractVersion
+	meta["renderer"] = snapshot.Renderer
+	meta["renderer_version"] = snapshot.RendererVersion
 	metaJSONBytes, _ := json.Marshal(meta)
 	metaJSON := string(metaJSONBytes)
 	projectID := project.ID
@@ -1773,16 +1844,19 @@ func (s *Service) RendererCapabilities() RendererCapabilities {
 	return FFmpegRendererCapabilities()
 }
 
-// RecoverInterruptedRenderJobs marks render jobs that were queued or running
-// when the process exited as failed, so they don't appear stuck forever.
-// Call once at startup.
+// RecoverInterruptedRenderJobs resumes snapshot-bound jobs from their durable
+// staged inputs. Historical jobs without a snapshot fail closed.
 func (s *Service) RecoverInterruptedRenderJobs() {
 	jobs, err := s.renderJobs.ListActive()
 	if err != nil {
 		return
 	}
 	for _, job := range jobs {
-		_ = s.renderJobs.MarkFailed(job.ID, "render interrupted by application restart — start a new export")
+		if job.SnapshotID == nil || *job.SnapshotID == "" {
+			_ = s.renderJobs.MarkFailed(job.ID, "render interrupted and has no immutable snapshot — start a new export")
+			continue
+		}
+		s.launchRenderJob(job.ID)
 	}
 }
 
