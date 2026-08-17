@@ -294,3 +294,30 @@ func TestRenderAssetManifestDetectsMissingAndChangedSources(t *testing.T) {
 		t.Fatalf("changed source error = %v", err)
 	}
 }
+
+func TestResolveRenderAssetPathWithoutSymlinksPreservesContainment(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "video", "asset.bin")
+	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+		t.Fatalf("create nested storage: %v", err)
+	}
+	if err := os.WriteFile(nested, []byte("asset"), 0o644); err != nil {
+		t.Fatalf("write nested asset: %v", err)
+	}
+	resolved, err := resolveRenderAssetPathWithoutSymlinks(root, nested)
+	if err != nil || resolved != nested {
+		t.Fatalf("resolve contained asset = %q, %v", resolved, err)
+	}
+
+	outside := filepath.Join(filepath.Dir(root), "outside.bin")
+	if _, err := resolveRenderAssetPathWithoutSymlinks(root, outside); err == nil || !strings.Contains(err.Error(), "escapes storage root") {
+		t.Fatalf("outside path error = %v", err)
+	}
+
+	link := filepath.Join(root, "linked.bin")
+	if err := os.Symlink(nested, link); err != nil {
+		t.Logf("symlink assertion skipped on this host: %v", err)
+	} else if _, err := resolveRenderAssetPathWithoutSymlinks(root, link); err == nil || !strings.Contains(err.Error(), "symlink or reparse point") {
+		t.Fatalf("symlink path error = %v", err)
+	}
+}

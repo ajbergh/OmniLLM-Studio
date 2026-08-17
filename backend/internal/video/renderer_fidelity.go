@@ -38,12 +38,49 @@ func (r *FidelityRenderer) Render(ctx context.Context, req RenderRequest, progre
 	if r == nil || r.delegate == nil {
 		return nil, fmt.Errorf("video renderer is not configured")
 	}
+	if req.Settings.DiagnosticAudio {
+		// The underlying audio graph evaluates rate, gain keyframes, fades,
+		// track mute/solo, and timeline processing directly. Visual fidelity
+		// expansion would split transform-animated video into hundreds of audio
+		// inputs and can exceed Windows' process command-line limit.
+		return r.delegate.Render(ctx, req, progress)
+	}
 	fps := req.Settings.FPS
 	if fps <= 0 {
 		fps = req.Timeline.Canvas.FPS
 	}
 	req.Timeline = ExpandTimelineForFidelity(req.Timeline, fps, r.maxSegmentsPerClip)
+	if req.Settings.DiagnosticFrameIndex != nil {
+		// Fidelity expansion can create hundreds of short sampled segments per
+		// clip. A one-frame diagnostic needs only the segments active at that
+		// output timestamp. Filtering after expansion preserves the exact
+		// legacy sampling result while keeping the FFmpeg graph bounded.
+		timeMS := int64(math.Floor(float64(*req.Settings.DiagnosticFrameIndex) * 1000 / float64(fps)))
+		if req.Settings.RangeEndMS > req.Settings.RangeStartMS {
+			timeMS += req.Settings.RangeStartMS
+		}
+		req.Timeline = FilterTimelineAtDiagnosticTime(req.Timeline, timeMS)
+	}
 	return r.delegate.Render(ctx, req, progress)
+}
+
+// FilterTimelineAtDiagnosticTime keeps the original timeline clock and only
+// the expanded clips active in the requested half-open frame interval. This
+// is render-only and never mutates the persisted document.
+func FilterTimelineAtDiagnosticTime(doc TimelineDocument, timeMS int64) TimelineDocument {
+	out := doc
+	out.Tracks = make([]TimelineTrack, len(doc.Tracks))
+	for ti, track := range doc.Tracks {
+		copied := track
+		copied.Clips = make([]TimelineClip, 0, len(track.Clips))
+		for _, clip := range track.Clips {
+			if timeMS >= clip.StartMS && timeMS < clip.StartMS+clip.DurationMS {
+				copied.Clips = append(copied.Clips, clip)
+			}
+		}
+		out.Tracks[ti] = copied
+	}
+	return out
 }
 
 // ExpandTimelineForFidelity returns a render-only timeline. It never mutates

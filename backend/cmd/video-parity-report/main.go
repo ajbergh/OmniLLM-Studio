@@ -28,6 +28,7 @@ func main() {
 	previewAudio := flag.String("preview-audio", "", "optional signed 16-bit little-endian PCM (interleaved channels are compared as a sample sequence)")
 	renderedAudio := flag.String("rendered-audio", "", "optional signed 16-bit little-endian PCM (interleaved channels are compared as a sample sequence)")
 	maxAudioOffset := flag.Int("max-audio-offset", 2400, "maximum offset searched when aligning PCM samples")
+	allowFail := flag.Bool("allow-fail", false, "write baseline artifacts without returning exit code 2 when parity thresholds fail")
 	flag.Parse()
 
 	if strings.TrimSpace(*previewDir) == "" || strings.TrimSpace(*renderedDir) == "" {
@@ -66,7 +67,7 @@ func main() {
 		exitf("write report: %v", err)
 	}
 	fmt.Printf("video parity report: %s (%d frames, pass=%t)\n", filepath.Join(*outputDir, "parity-report.json"), len(pairs), report.Pass)
-	if !report.Pass {
+	if !report.Pass && !*allowFail {
 		os.Exit(2)
 	}
 }

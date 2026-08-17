@@ -128,6 +128,81 @@ func TestRendererDiagnosticFrameEncodesSingleFrame(t *testing.T) {
 	}
 }
 
+func TestFilterTimelineAtDiagnosticTimeUsesHalfOpenBoundaries(t *testing.T) {
+	doc := NewEmptyTimeline(160, 90, 30)
+	doc.DurationMS = 2000
+	doc.Tracks = []TimelineTrack{{ID: "track", Type: TrackTypeLayer, Name: "Track", Visible: true, Clips: []TimelineClip{
+		{ID: "before", StartMS: 0, DurationMS: 1000, TrimOutMS: 1000, Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{}},
+		{ID: "at-boundary", StartMS: 1000, DurationMS: 1000, TrimOutMS: 1000, Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{}},
+	}}}
+	filtered := FilterTimelineAtDiagnosticTime(doc, 1000)
+	if len(filtered.Tracks[0].Clips) != 1 || filtered.Tracks[0].Clips[0].ID != "at-boundary" {
+		t.Fatalf("boundary clips = %+v", filtered.Tracks[0].Clips)
+	}
+	if filtered.DurationMS != doc.DurationMS {
+		t.Fatalf("diagnostic filter changed timeline clock: %d", filtered.DurationMS)
+	}
+}
+
+func TestDiagnosticAudioGraphExcludesVisualFilters(t *testing.T) {
+	volume := 1.25
+	doc := NewEmptyTimeline(160, 90, 30)
+	doc.Metadata = map[string]any{}
+	graph, label := buildAudioFilterComplex(doc, []resolvedClip{{inputIdx: 1, hasAudio: true, clip: TimelineClip{StartMS: 250, DurationMS: 1000, TrimOutMS: 1000, Volume: &volume, FadeInMS: 100, Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{}}}})
+	if label != "[diagnostic_audio]" || !strings.Contains(graph, "atrim=") || !strings.Contains(graph, "adelay=250|250") || !strings.Contains(graph, "asetpts=N/SR/TB,apad=pad_dur=") {
+		t.Fatalf("audio graph = %q label=%q", graph, label)
+	}
+	for _, visual := range []string{"overlay=", "drawtext=", "drawbox=", "scale="} {
+		if strings.Contains(graph, visual) {
+			t.Fatalf("audio graph contains visual filter %q: %s", visual, graph)
+		}
+	}
+}
+
+func TestRendererDiagnosticAudioPadsToExactTimelineSampleCount(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("FFmpeg is unavailable")
+	}
+	attachmentsDir := t.TempDir()
+	audioPath := filepath.Join(attachmentsDir, "short.wav")
+	cmd := exec.Command(ffmpeg,
+		"-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=0.5",
+		"-c:a", "pcm_s16le", audioPath,
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create short audio fixture: %v: %s", err, output)
+	}
+
+	doc := NewEmptyTimeline(160, 90, 30)
+	doc.DurationMS = 1500
+	doc.Tracks = []TimelineTrack{{
+		ID: "audio", Type: TrackTypeAudio, Name: "Audio", Visible: true,
+		Clips: []TimelineClip{{
+			ID: "short-audio", AssetID: "short", StartMS: 250, DurationMS: 1000,
+			TrimInMS: 0, TrimOutMS: 1000, PlaybackRate: 1,
+			Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{},
+		}},
+	}}
+	result, err := NewFFmpegRenderer(ffmpeg).Render(context.Background(), RenderRequest{
+		Project:  models.VideoProject{ID: "diagnostic-audio-padding", Width: 160, Height: 90, FPS: 30, DurationMS: doc.DurationMS},
+		Timeline: doc,
+		Settings: ExportSettings{Format: "mp4", Resolution: "project", FPS: 30, Quality: "high", IncludeAudio: true, DiagnosticAudio: true},
+		Assets: map[string]models.VideoAsset{
+			"short": {ID: "short", FilePath: audioPath, MimeType: "audio/wav"},
+		},
+		AttachmentsDir: attachmentsDir,
+	}, nil)
+	if err != nil {
+		t.Fatalf("render diagnostic audio: %v", err)
+	}
+	const expectedBytes = 1500 * 48 * 2 * 2
+	if len(result.Data) != expectedBytes {
+		t.Fatalf("diagnostic PCM bytes = %d, want %d", len(result.Data), expectedBytes)
+	}
+}
+
 func TestRenderDiagnosticFrameUsesImmutableSnapshot(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {

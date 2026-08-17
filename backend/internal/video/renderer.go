@@ -185,6 +185,15 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 			}
 		}
 		resolved = visualOnly
+	} else if req.Settings.DiagnosticAudio {
+		audioOnly := make([]resolvedClip, 0, len(resolved))
+		for _, rc := range resolved {
+			if rc.hasAudio {
+				rc.isVideo, rc.isImage, rc.isAudio = false, false, true
+				audioOnly = append(audioOnly, rc)
+			}
+		}
+		resolved = audioOnly
 	}
 
 	if len(resolved) > 0 {
@@ -212,7 +221,12 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 			args = append(args, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000")
 		}
 
-		filterStr, videoLabel, audioLabel := buildFilterComplexWithAudio(req.Timeline, resolved, width, height, req.Settings.IncludeAudio)
+		filterStr, videoLabel, audioLabel := "", "", ""
+		if req.Settings.DiagnosticAudio {
+			filterStr, audioLabel = buildAudioFilterComplex(req.Timeline, resolved)
+		} else {
+			filterStr, videoLabel, audioLabel = buildFilterComplexWithAudio(req.Timeline, resolved, width, height, req.Settings.IncludeAudio)
+		}
 		args = append(args, "-filter_complex", filterStr)
 		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps))
 		if !req.Settings.DiagnosticAudio {
@@ -708,50 +722,66 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 	// hasAudio covers audio assets and video assets with an audio stream;
 	// muted tracks/clips were already dropped in resolveMediaClips.
 	if includeAudio {
-		var aLabels []string
-		for _, rc := range clips {
-			if !rc.hasAudio {
-				continue
-			}
-			aLabel := fmt.Sprintf("[a%d]", rc.inputIdx)
-			trimInS := float64(rc.clip.TrimInMS) / 1000.0
-			durS := float64(rc.clip.DurationMS) / 1000.0
-			sourceDurS := float64(sourceDurationFor(rc.clip, rc.clip.DurationMS)) / 1000.0
-			startMS := rc.clip.StartMS
-			chain := []string{
-				fmt.Sprintf("atrim=start=%.3f:duration=%.3f", trimInS, sourceDurS),
-				"asetpts=PTS-STARTPTS",
-			}
-			chain = append(chain, atempoFilters(clipPlaybackRate(rc.clip))...)
-			chain = append(chain, timelineAudioProcessingFilters(doc.Metadata)...)
-			// Volume keyframes override the static volume (matching the preview).
-			// The retimed stream starts at 0, so keyframe time is `t` directly.
-			if expr := positionKeyframeExpr(rc.clip.Keyframes, "volume", 0); expr != "" {
-				chain = append(chain, fmt.Sprintf("volume=volume='%s':eval=frame", expr))
-			} else if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
-				chain = append(chain, fmt.Sprintf("volume=%.3f", clampFloat(*rc.clip.Volume, 0, 2)))
-			}
-			fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
-			if fadeInS > 0 {
-				chain = append(chain, fmt.Sprintf("afade=t=in:st=0:d=%.3f", fadeInS))
-			}
-			if fadeOutS > 0 {
-				chain = append(chain, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f", durS-fadeOutS, fadeOutS))
-			}
-			chain = append(chain, fmt.Sprintf("adelay=%d|%d", startMS, startMS))
-			parts = append(parts, fmt.Sprintf("[%d:a]%s%s", rc.inputIdx, strings.Join(chain, ","), aLabel))
-			aLabels = append(aLabels, aLabel)
-		}
-		if len(aLabels) > 1 {
-			audioLabel = "[final_audio]"
-			parts = append(parts, strings.Join(aLabels, "")+
-				fmt.Sprintf("amix=inputs=%d:normalize=0:dropout_transition=0[final_audio]", len(aLabels)))
-		} else if len(aLabels) == 1 {
-			audioLabel = aLabels[0]
-		}
+		audioParts, label := audioFilterParts(doc, clips)
+		parts = append(parts, audioParts...)
+		audioLabel = label
 	}
 
 	return strings.Join(parts, ";"), videoLabel, audioLabel
+}
+
+func buildAudioFilterComplex(doc TimelineDocument, clips []resolvedClip) (string, string) {
+	parts, label := audioFilterParts(doc, clips)
+	if label != "" {
+		durationSeconds := float64(maxInt64(doc.DurationMS, 1)) / 1000
+		// adelay can leave the first decoded frame with a non-zero timestamp even
+		// though it emitted leading silence. Rebuilding timestamps from the sample
+		// number before padding makes the diagnostic contract sample-exact: the
+		// raw PCM always contains timeline duration * 48 kHz * 2 channels samples,
+		// including leading and trailing silence.
+		parts = append(parts, fmt.Sprintf("%sasetpts=N/SR/TB,apad=pad_dur=%.3f,atrim=end=%.3f,asetpts=N/SR/TB[diagnostic_audio]", label, durationSeconds, durationSeconds))
+		label = "[diagnostic_audio]"
+	}
+	return strings.Join(parts, ";"), label
+}
+
+func audioFilterParts(doc TimelineDocument, clips []resolvedClip) ([]string, string) {
+	var parts, labels []string
+	for _, rc := range clips {
+		if !rc.hasAudio {
+			continue
+		}
+		label := fmt.Sprintf("[a%d]", rc.inputIdx)
+		trimInS := float64(rc.clip.TrimInMS) / 1000
+		durationS := float64(rc.clip.DurationMS) / 1000
+		sourceDurationS := float64(sourceDurationFor(rc.clip, rc.clip.DurationMS)) / 1000
+		chain := []string{fmt.Sprintf("atrim=start=%.3f:duration=%.3f", trimInS, sourceDurationS), "asetpts=PTS-STARTPTS"}
+		chain = append(chain, atempoFilters(clipPlaybackRate(rc.clip))...)
+		chain = append(chain, timelineAudioProcessingFilters(doc.Metadata)...)
+		if expr := positionKeyframeExpr(rc.clip.Keyframes, "volume", 0); expr != "" {
+			chain = append(chain, fmt.Sprintf("volume=volume='%s':eval=frame", expr))
+		} else if rc.clip.Volume != nil && *rc.clip.Volume >= 0 && *rc.clip.Volume != 1 {
+			chain = append(chain, fmt.Sprintf("volume=%.3f", clampFloat(*rc.clip.Volume, 0, 2)))
+		}
+		fadeInS, fadeOutS := clipFadeSeconds(rc.clip)
+		if fadeInS > 0 {
+			chain = append(chain, fmt.Sprintf("afade=t=in:st=0:d=%.3f", fadeInS))
+		}
+		if fadeOutS > 0 {
+			chain = append(chain, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f", durationS-fadeOutS, fadeOutS))
+		}
+		chain = append(chain, fmt.Sprintf("adelay=%d|%d", rc.clip.StartMS, rc.clip.StartMS))
+		parts = append(parts, fmt.Sprintf("[%d:a]%s%s", rc.inputIdx, strings.Join(chain, ","), label))
+		labels = append(labels, label)
+	}
+	if len(labels) > 1 {
+		parts = append(parts, strings.Join(labels, "")+fmt.Sprintf("amix=inputs=%d:normalize=0:dropout_transition=0[final_audio]", len(labels)))
+		return parts, "[final_audio]"
+	}
+	if len(labels) == 1 {
+		return parts, labels[0]
+	}
+	return parts, ""
 }
 
 func ffmpegVideoFilters(doc TimelineDocument, width, height int) string {

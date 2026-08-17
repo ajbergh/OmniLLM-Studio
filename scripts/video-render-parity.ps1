@@ -7,12 +7,15 @@ param(
   [string]$TimelineSHA256 = "",
   [string]$ManifestSHA256 = "",
   [string]$PreviewAudio = "",
-  [string]$RenderedAudio = ""
+  [string]$RenderedAudio = "",
+  [switch]$AllowFail
 )
 
 $ErrorActionPreference = "Stop"
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $backend = Join-Path $workspace "backend"
+$goCache = Join-Path $workspace ".tmp/go-build-cache"
+New-Item -ItemType Directory -Force -Path $goCache | Out-Null
 
 $arguments = @(
   "run", "./cmd/video-parity-report",
@@ -27,11 +30,17 @@ $arguments = @(
 if ($PreviewAudio -and $RenderedAudio) {
   $arguments += @("--preview-audio", (Resolve-Path $PreviewAudio).Path, "--rendered-audio", (Resolve-Path $RenderedAudio).Path)
 }
+if ($AllowFail) {
+  $arguments += "--allow-fail"
+}
 
 Push-Location $backend
 try {
+  $previousGoCache = $env:GOCACHE
+  $env:GOCACHE = $goCache
   & go @arguments
   exit $LASTEXITCODE
 } finally {
+  $env:GOCACHE = $previousGoCache
   Pop-Location
 }

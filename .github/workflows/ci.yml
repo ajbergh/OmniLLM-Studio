@@ -257,6 +257,103 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  video-parity-baseline:
+    name: Video renderer parity baseline
+    runs-on: ubuntu-24.04
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+      - working-directory: frontend
+        run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Generate deterministic fixture and media
+        working-directory: backend
+        run: go run ./cmd/video-parity-fixture --output-dir ../output/video-parity-ci/fixture --generate-media
+      - name: Capture immutable snapshot baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/output/video-parity-ci/runtime"
+          mkdir -p "$runtime/attachments"
+          export OMNILLM_PORT=18090
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          (
+            cd backend
+            go run ./cmd/server >"$runtime/backend.log" 2>"$runtime/backend.err.log"
+          ) &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18090 npm run dev -- --host 127.0.0.1 --port 14173 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18090/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14173/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "parity servers did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          node scripts/video-parity-capture.mjs \
+            --url http://127.0.0.1:14173 \
+            --fixture output/video-parity-ci/fixture/parity-torture-v1.json \
+            --media-dir output/video-parity-ci/fixture/media \
+            --output output/video-parity-ci/capture
+          timeline_hash="$(node -p "require('./output/video-parity-ci/capture/seed-result.json').timeline_sha256")"
+          (
+            cd backend
+            go run ./cmd/video-parity-report \
+              --preview-dir ../output/video-parity-ci/capture/preview \
+              --rendered-dir ../output/video-parity-ci/capture/rendered \
+              --output-dir ../output/video-parity-ci/capture/report \
+              --fps 30 \
+              --fixture parity-torture-v1 \
+              --timeline-sha256 "$timeline_hash" \
+              --allow-fail
+          )
+      - name: Record parity toolchain
+        if: always()
+        shell: bash
+        run: |
+          {
+            go version
+            node --version
+            npm --version
+            ffmpeg -version | head -n 1
+            ffprobe -version | head -n 1
+            fc-match Inter || true
+            node -e "console.log('playwright ' + require('playwright/package.json').version)"
+          } > output/video-parity-ci/toolchain.txt
+      - name: Upload parity evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-parity-baseline
+          path: output/video-parity-ci
+          if-no-files-found: error
+          retention-days: 14
+
   helm:
     name: Helm lint and render
     runs-on: ubuntu-24.04

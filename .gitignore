@@ -44,6 +44,8 @@ node_modules/
 /backend/test-results/
 *.exe
 *.db
+*.db-shm
+*.db-wal
 playright.config.ts
 
 output/*

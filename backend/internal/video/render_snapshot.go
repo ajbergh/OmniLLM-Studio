@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -72,6 +74,16 @@ func resolveRenderAssetPath(attachmentsDir, storedPath string) (string, error) {
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(attachmentsDir)
 	if err != nil {
+		// Windows application sandboxes can allow direct access to a workspace
+		// while denying metadata traversal on one of its user-profile ancestors.
+		// In that specific case EvalSymlinks fails even though root/candidate are
+		// accessible. Fall back to rejecting every symlink/reparse entry beneath
+		// the lexical root, which preserves the escape boundary without needing
+		// to resolve the inaccessible ancestor chain.
+		accessDenied := errors.Is(err, os.ErrPermission) || os.IsPermission(err) || strings.Contains(strings.ToLower(err.Error()), "access is denied")
+		if runtime.GOOS == "windows" && accessDenied {
+			return resolveRenderAssetPathWithoutSymlinks(attachmentsDir, candidate)
+		}
 		return "", fmt.Errorf("resolve storage root: %w", err)
 	}
 	resolvedPath, err := filepath.EvalSymlinks(candidate)
@@ -86,6 +98,42 @@ func resolveRenderAssetPath(attachmentsDir, storedPath string) (string, error) {
 		return "", fmt.Errorf("path escapes storage root")
 	}
 	return resolvedPath, nil
+}
+
+func resolveRenderAssetPathWithoutSymlinks(attachmentsDir, candidate string) (string, error) {
+	absRoot, err := filepath.Abs(attachmentsDir)
+	if err != nil {
+		return "", err
+	}
+	absCandidate, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(absRoot, absCandidate)
+	if err != nil {
+		return "", err
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return "", fmt.Errorf("path escapes storage root")
+	}
+	current := absRoot
+	parts := []string{"."}
+	if relative != "." {
+		parts = append(parts, strings.Split(relative, string(filepath.Separator))...)
+	}
+	for _, part := range parts {
+		if part != "." {
+			current = filepath.Join(current, part)
+		}
+		info, err := os.Lstat(current)
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("path contains a symlink or reparse point inside storage root")
+		}
+	}
+	return absCandidate, nil
 }
 
 func renderSnapshotStagingDir(attachmentsDir, snapshotID string) (string, error) {
