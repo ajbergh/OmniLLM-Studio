@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('music studio renders Lyria-only controls without console errors', async ({ page }) => {
+test('music studio renders music controls without console errors', async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
