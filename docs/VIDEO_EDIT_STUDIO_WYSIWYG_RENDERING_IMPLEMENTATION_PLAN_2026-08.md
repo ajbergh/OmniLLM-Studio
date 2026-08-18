@@ -12,11 +12,12 @@
 - PR #187, **Establish immutable video rendering and deterministic parity baseline**, merged to `main` on 2026-08-17 as `3cbe6ba81dde384ff1c6073537e3d9b71ed8d0b0`.
 - PR #191, **Start canonical Video Edit Studio render contract**, merged to `main` on 2026-08-18 as `aabbb31288277287673cbed8546c9eb3f38588e4` after fully green Quality Gate, Security Scan, and container validation.
 - PR #193, **Canonicalize Video Edit Studio motion curves**, merged to `main` on 2026-08-18 as `3bed9faf8a868b3a125c25cb141769bfcd7861d2` after fully green Quality Gate, Security Scan, and container validation.
+- PR #194, **Enforce Video Edit Studio render contract type drift**, merged to `main` on 2026-08-18 as `62e2180b5153be505fac650cd41b3a0e2d951783` after fully green Quality Gate, Security Scan, container, parity-baseline, and smoke validation.
 - Phase 1 immutable render submission is complete.
 - Phase 0 has reproducible hosted evidence and passing audio/delivery gates. Initial feature-family visual review is complete; production visual-threshold approval, unsupported-audio-boundary policy, and a second OS/FFmpeg evidence run remain open.
-- The 103-frame visual baseline remains a **known-mismatch baseline**. It proves the preview and legacy FFmpeg composition engines disagree; its mismatch distribution must never be used to relax production parity goals.
-- Phase 2 is active. Current branch: `feat/video-wysiwyg-phase2-contract-type-drift`.
-- The current slice adds mechanically verified Go and TypeScript projections for Timeline v2 and Render Manifest v1, with CI drift checks against the JSON Schemas and no new code-generation dependency.
+- The retained 103-frame visual baseline is a **known-mismatch baseline**. It proves the preview and legacy FFmpeg composition engines disagree; its mismatch distribution must never be used to relax production parity goals.
+- Phase 2 is active. Current branch: `feat/video-wysiwyg-phase2-v1-adapter`.
+- Current slice: translate normalized Timeline v1 into Timeline v2 with editor-preview-compatible defaults, shared Go/TypeScript fixtures, non-mutating behavior, and fail-closed diagnostics where v1 semantics are not explicit enough for the canonical contract.
 
 ## Implementation tracker
 
@@ -24,7 +25,7 @@
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Initial feature-family review confirms structural divergence, especially transitions and geometry/composition. Threshold policy, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots, staged source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale-request rejection, legacy labeling, Strict Parity diagnostics, and frontend dirty/concurrency behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | #191 merged schema/timing/source/built-in easing foundations. #193 merged canonical Bezier/spring evaluation and preview delegation. Current slice implements Go/TypeScript schema projections and drift enforcement. v1 adapter, canonical evaluators, FrameState/AudioGraph, and renderer adoption remain. |
+| Phase 2 — Canonical contract | In progress | #191 merged schema/timing/source/built-in easing foundations; #193 merged canonical Bezier/spring evaluation; #194 merged mechanically checked Go/TypeScript schema projections. Current slice implements the v1-to-Timeline-v2 adapter. Canonical active-clip/range/property/transform evaluation, FrameState, AudioGraph, and renderer adoption remain. |
 | Phase 3 — Shared preview composition | Not started | Replace preview-local composition decisions with canonical FrameState/AudioGraph consumption. |
 | Phase 4 — Shared Chromium render worker | Not started | Headless/browser renderer consumes the same canonical composition package behind a guarded rollout flag. |
 | Phase 5 — Visual parity closure | Not started | Close geometry, text, crop/fit, effects, transitions, cursor, camera, color, and deterministic asset-loading parity. |
@@ -57,9 +58,18 @@ The canonical core must be:
 
 - `video-renderer/contracts/timeline-v2.schema.json` is the source of truth for authorable Timeline v2 structure.
 - `video-renderer/contracts/render-manifest-v1.schema.json` is the source of truth for immutable render-manifest structure.
-- Go and TypeScript projections must be mechanically checked against these schemas.
+- Go and TypeScript projections are mechanically checked against these schemas.
 - CI must fail when schema properties, required fields, enum/const values, or supported structural projections drift without a corresponding language projection update.
-- Drift checks are not runtime validation. Runtime normalization/validation remains a separate Phase 2 responsibility.
+- Projection checks are not runtime validation. Runtime normalization/validation remains a separate Phase 2 responsibility.
+
+### v1 adapter boundary
+
+- Backend v1 validation/defaulting remains the normalization authority for persisted v1 timelines while Timeline v1 is current.
+- The canonical adapter translates normalized v1 semantics; it must not reinterpret the document to match legacy FFmpeg approximations.
+- Asset-backed visual clips currently materialize `media_fit: contain`, matching the existing editor preview default.
+- Existing v1 transitions fail closed until Timeline v2 transition placement/ownership/peer semantics are explicitly implemented. Guessing whether a transition belongs to an incoming or outgoing edge would create a new source of parity drift.
+- Unknown transform/crop fields fail closed with a path-addressed diagnostic instead of being silently ignored.
+- Adapter calls must not mutate the caller's v1 document, including nested metadata.
 
 ## Canonical timing, interpolation, and ordering rules
 
@@ -175,10 +185,13 @@ Centralize non-I/O render semantics so preview and export consume identical deci
 - `video-renderer/contracts/timeline-v2.schema.json`
 - `video-renderer/contracts/render-manifest-v1.schema.json`
 - `video-renderer/test/fixtures/render-contract-v1.json`
+- `video-renderer/test/fixtures/v1-canonical-adapter-v1.json` — current branch
 - `backend/internal/video/rendercontract/`
 - `frontend/src/video/renderContract.ts`
-- `backend/internal/video/rendercontract/types.go` — current branch
-- `frontend/src/video/renderContractTypes.ts` — current branch
+- `backend/internal/video/rendercontract/types.go`
+- `frontend/src/video/renderContractTypes.ts`
+- `backend/internal/video/canonical_adapter.go` — current branch
+- `frontend/src/video/renderContractAdapter.ts` — current branch
 
 ### Merged foundation — PR #191
 
@@ -198,27 +211,37 @@ Centralize non-I/O render semantics so preview and export consume identical deci
 - canonical segment-local spring evaluation matching underdamped, overdamped, and critically damped preview semantics;
 - shared fixture cases for Bezier, default spring, custom spring, and overshoot behavior;
 - Go and Vitest cross-runtime assertions against identical expected values;
-- frontend `keyframeUtils.ts` delegates built-in, Bezier, and spring interpolation semantics to `frontend/src/video/renderContract.ts` while retaining its sample cache;
-- fully green hosted Quality Gate, Security Scan, container builds, smoke suite, and parity-baseline capture before merge.
+- frontend `keyframeUtils.ts` delegates built-in, Bezier, and spring interpolation semantics to `frontend/src/video/renderContract.ts` while retaining its sample cache.
 
-### Current schema/type-drift slice
+### Merged schema/type drift enforcement — PR #194
 
-Branch: `feat/video-wysiwyg-phase2-contract-type-drift`
+- serializable Go projections of Timeline v2 and Render Manifest v1;
+- Go reflection tests comparing JSON tags, exact property sets, required/optional tags, primitive kinds, arrays, metadata maps, internal refs, and the external Timeline v2 manifest ref to source schemas;
+- serializable TypeScript projections and schema enum/const unions;
+- TypeScript compile-time exact-key and required-key projections;
+- Vitest schema comparisons for property sets, required fields, enums, motion-curve union requirements, and fixed manifest values;
+- schema-bound Go constants for Timeline v2, Render Manifest v1, contract version, sRGB, 48 kHz, and stereo;
+- no schema-codegen dependency or CI-time generator download.
+
+### Current v1-to-canonical adapter slice
+
+Branch: `feat/video-wysiwyg-phase2-v1-adapter`
 
 Implemented on the branch:
 
-- `backend/internal/video/rendercontract/types.go` contains serializable Go projections of Timeline v2 and Render Manifest v1.
-- `backend/internal/video/rendercontract/projection_test.go` mechanically compares Go JSON tags, exact property sets, required/optional tags, primitive kinds, arrays, metadata maps, internal refs, and the external Timeline v2 manifest ref against the source schemas.
-- `frontend/src/video/renderContractTypes.ts` contains serializable TypeScript projections, schema enum/const unions, and compile-time exact-key projection lists.
-- `frontend/src/video/renderContractProjection.ts` contains compile-time required-key projections so optionality drift produces a TypeScript build error.
-- `frontend/test/renderContractTypes.test.ts` compares TypeScript key/required projections, enums, motion-curve union requirements, manifest fixed values, and schema constants against the source JSON Schemas.
-- No schema-codegen dependency or CI-time generator download is introduced.
-- These checks guard structural drift; they do **not** replace runtime Timeline v2 normalization/validation.
+- Go adapter deep-copies and runs `ValidateTimelineDocument` before projection so persisted v1 normalization/defaults remain authoritative and the caller is not mutated.
+- Go adapter projects the normalized v1 JSON into the mechanically checked Timeline v2 type, sets canonical version/sRGB constants, materializes explicit camera zero/default values, and sets preview-compatible `media_fit: contain` for asset-backed visual clips.
+- TypeScript adapter mirrors editor-visible v1 defaults required for canonical projection, including 1x missing playback rate, canonical `trim_out_ms`, 30-second fallback duration for an otherwise empty/zero-duration timeline, cursor scale normalization, camera defaults, and `media_fit: contain`.
+- Both adapters preserve transforms/crop, effects, keyframes/curves, animation blocks, markers, scenes, and metadata without sharing mutable nested metadata with the caller.
+- Both adapters reject v1 transitions with `V1_TRANSITION_PLACEMENT_AMBIGUOUS` until Timeline v2 transition ownership/placement/peer semantics are defined.
+- Both adapters reject unknown transform/crop fields with `V1_TRANSFORM_FIELD_UNSUPPORTED`; invalid transform values produce a path-addressed diagnostic rather than being silently ignored.
+- `video-renderer/test/fixtures/v1-canonical-adapter-v1.json` is consumed by Go and Vitest tests and covers default visual projection, playback-rate/source-window normalization, crop/2.5D transform preservation, camera defaults, cursor defaults, curve preservation, nonmutation, ambiguous transitions, and unknown transform fields.
+- Hosted validation is pending for this branch; this slice is not complete until applicable Quality Gate, Security Scan, container, smoke, and parity jobs are green and the PR is merged.
 
 ### Remaining Phase 2 work
 
-1. Go and TypeScript schema/type drift enforcement: **implemented on current branch; complete when merged and green**.
-2. Add a v1-to-canonical adapter that preserves current editor-preview semantics, not legacy FFmpeg approximations.
+1. Go and TypeScript schema/type drift enforcement: **complete — merged in #194**.
+2. v1-to-canonical adapter: **implemented on current branch; complete when merged and green**.
 3. Complete explicit Timeline v2 semantics for:
    - media fit and mask-source crop;
    - deterministic content bounds;
@@ -227,7 +250,7 @@ Implemented on the branch:
    - working color space;
    - primitive composition behavior.
 4. Implement pure evaluators:
-   - `normalizeTimeline`;
+   - `normalizeTimeline` runtime validation/defaulting for Timeline v2;
    - canonical frame/range helpers;
    - `activeClips` with stable ordering;
    - keyframe/property evaluation using the canonical curve evaluator;
@@ -240,7 +263,7 @@ Implemented on the branch:
 5. Define serializable `FrameState` containing every visual decision required to paint one output frame.
 6. Define serializable `AudioGraph` containing every audio source, timing, rate, channel, gain, fade, mute/solo, and processing decision.
 7. Replace millisecond comparisons inside render paths with canonical frame/timebase helpers.
-8. Add structured diagnostics with severity, code, timeline path, relevant IDs, and remediation.
+8. Continue structured diagnostics with severity, code, timeline path, relevant IDs, and remediation.
 9. Fail closed when an authorable field has no canonical semantics.
 10. Migrate the legacy Go fidelity evaluator to canonical built-in/Bezier/spring/source-time/frame helpers while it remains in service; do not add new approximation semantics during that migration.
 
@@ -393,8 +416,10 @@ Run the parity fixture/report workflow whenever a change can affect frame select
 | Risk | Control |
 |---|---|
 | JSON Schema changes without language updates | Go reflection and TypeScript compile-time/Vitest schema projection checks fail CI |
-| Projection checks are mistaken for runtime validation | Explicitly separate structural drift guards from future normalization/runtime validation |
+| Projection checks are mistaken for runtime validation | Explicitly separate structural drift guards from runtime normalization/validation |
 | Canonical v2 accidentally codifies FFmpeg approximations | v1 compatibility target is editor preview; intentional changes require versioned semantics |
+| v1 adapter silently guesses ambiguous semantics | Fail closed on transitions and unknown transform/crop fields until canonical semantics are explicit |
+| v1 adapter drifts across Go and TypeScript | One versioned shared adapter fixture is asserted in both runtimes |
 | Millisecond rounding produces boundary flicker | Rational frame identity, floor-start/ceil-end, half-open activity |
 | Browser and Go curve behavior drifts | Shared built-in/Bezier/spring fixtures verified by both runtimes |
 | Spring overshoot is accidentally clamped | Contract clamps input progress only and fixtures include an overshoot sample |
@@ -423,12 +448,23 @@ Run the parity fixture/report workflow whenever a change can affect frame select
 - No unresolved review threads before merge.
 - Merged to `main` as `3bed9faf8a868b3a125c25cb141769bfcd7861d2`.
 
-### Current schema/type-drift slice
+### PR #194 — Schema/type drift enforcement
 
-- Branch `feat/video-wysiwyg-phase2-contract-type-drift` is based directly on `main` commit `3bed9faf8a868b3a125c25cb141769bfcd7861d2`.
-- Go and TypeScript schema projections and drift tests are implemented.
-- No new dependency is introduced.
-- Hosted validation is pending. Merge is blocked until applicable Quality Gate, Security Scan, and container checks are green.
+- Hosted validation identified formatting-only Go issues while the contract projections themselves passed frontend unit/build checks; exact `gofmt` output was applied.
+- A stalled Playwright runner was replaced by a substantive schema-bound constants hardening commit, causing GitHub concurrency cancellation and a clean rerun.
+- Final Quality Gate `32146367815`: **passed**, including frontend lint/unit/build/performance, backend format/vet/tests/race, Playwright smoke, parity-baseline capture, Windows/macOS sandbox/capture checks, and Helm validation.
+- Security Scan `32146367676`: **passed**.
+- Container workflow `32146367435`: **passed** for frontend, backend, and Helm.
+- No unresolved review threads before merge.
+- Merged to `main` as `62e2180b5153be505fac650cd41b3a0e2d951783`.
+
+### Current v1 adapter slice
+
+- Branch `feat/video-wysiwyg-phase2-v1-adapter` was reset directly onto merged #194/main before adapter commits so the eventual PR contains no duplicated #194 history.
+- Initial draft review caught and corrected two cross-runtime semantic differences before PR creation: frontend `trim_out_ms` now matches backend v1 source-window normalization, and zero-duration fallback now matches backend's 30-second minimum.
+- A second pre-PR review caught Go `map[string]any` numeric representation differences: JSON-authored transforms arrive as `float64`, while backend default transforms contain integers. Compatibility validation accepts both representations and still rejects non-finite/non-numeric values.
+- Shared Go/TypeScript adapter fixture and tests are implemented.
+- Hosted validation is pending. Merge is blocked until applicable repository gates are green.
 
 ## Implementation log
 
@@ -457,18 +493,28 @@ Run the parity fixture/report workflow whenever a change can affect frame select
 
 ### 2026-08-18 — Phase 2 schema/type drift enforcement
 
-- Created `feat/video-wysiwyg-phase2-contract-type-drift` from merged #193/main.
 - Added Go Timeline v2 / Render Manifest v1 serializable projections and reflection-based schema drift tests.
 - Added TypeScript serializable projections, compile-time exact-key/required-key projections, and Vitest schema comparisons.
-- Kept implementation dependency-free so repository CI provides the enforcement without external generator/toolchain drift.
-- Next step: open the focused PR, run hosted validation, remediate any failures, merge when green, then begin the v1-to-canonical adapter.
+- Added schema-bound render contract/version/color/audio constants.
+- Kept implementation dependency-free so repository CI provides enforcement without external generator/toolchain drift.
+- Final Quality Gate, Security Scan, containers, smoke, and parity evidence passed.
+- Merged PR #194 as `62e2180b5153be505fac650cd41b3a0e2d951783`.
+
+### 2026-08-18 — Phase 2 v1 canonical adapter
+
+- Created a clean adapter branch from merged #194/main.
+- Implemented Go and TypeScript v1-to-Timeline-v2 adapters around editor/backend v1 semantics rather than legacy FFmpeg approximations.
+- Added a shared fixture for visual defaults, playback-rate/source-window normalization, crop/2.5D transforms, camera/cursor defaults, curve preservation, nonmutation, and fail-closed transition/unknown-transform cases.
+- Corrected pre-PR cross-runtime differences in `trim_out_ms`, zero-duration fallback, and Go numeric transform representation.
+- Next step: run hosted validation, remediate any real failures, merge when green, then move directly to canonical active-clip/range ordering evaluation.
 
 ## Next recommended implementation slice
 
-After the schema/type-drift PR is validated and merged:
+After the v1 adapter PR is validated and merged:
 
-1. Implement the v1-to-canonical adapter with compatibility fixtures against current editor-preview behavior and explicit diagnostics for unsupported/ambiguous v1 semantics.
-2. Migrate the legacy Go fidelity evaluator to canonical built-in/Bezier/spring/source-time/frame helpers while it remains in service.
-3. Add canonical `activeClips`, stable ordering, source-time, export-range, and long/high-fps fixtures; migrate diagnostic/render frame selection away from ad hoc millisecond comparisons.
-4. Define the first serializable `FrameState` and `AudioGraph` structures before Phase 3 preview integration.
-5. In parallel, finalize Phase 0 visual threshold policy, unsupported-audio boundary, and second-platform evidence.
+1. Implement canonical `activeClips` and range evaluation with half-open frame activity and stable `(track index, z_index, clip index)` ordering; add overlapping/tie/boundary/long-120-fps shared fixtures in Go and TypeScript.
+2. Add Timeline v2 runtime `normalizeTimeline` validation/defaulting for the fields required by those evaluators, keeping structural schema checks separate from runtime semantic validation.
+3. Migrate legacy diagnostic/render frame-selection and source-time callers to the canonical frame/range/source helpers while the legacy renderer remains in service; do not add approximation semantics.
+4. Implement canonical keyframe/property evaluation on top of the merged curve evaluator, then define the first serializable `FrameState` structure.
+5. Begin `AudioGraph` structure/compilation once visual activity/order/source-time identity is canonical.
+6. In parallel, finalize Phase 0 visual threshold policy, unsupported-audio boundary, and second-platform evidence.
