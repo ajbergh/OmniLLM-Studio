@@ -59,6 +59,16 @@ jobs:
               'parity frame assignment',
           )
           replace_once(
+              "          const mediaSettled = [...videoRefs.current.values()].every((media) => media.readyState >= 2 && !media.seeking);",
+              "          const mediaSettled = [...document.querySelectorAll<HTMLVideoElement>('[data-video-preview-media=\"true\"]')].every((media) => media.readyState >= 2 && !media.seeking);",
+              'parity media readiness query',
+          )
+          replace_once(
+              "          key={asset.id}\n          src={videoApi.downloadUrl(asset.id)}",
+              "          key={asset.id}\n          data-video-preview-media=\"true\"\n          src={videoApi.downloadUrl(asset.id)}",
+              'preview video marker',
+          )
+          replace_once(
               "  }, [selectClip, setPlayhead, setPlaying, timeline?.canvas.fps]);",
               "  }, [selectClip, setPlayhead, setPlaying, timeline, timeline?.canvas.fps]);",
               'parity seek dependencies',
