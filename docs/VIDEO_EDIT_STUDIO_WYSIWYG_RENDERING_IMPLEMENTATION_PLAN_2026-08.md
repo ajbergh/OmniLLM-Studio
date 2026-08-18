@@ -19,6 +19,7 @@ Merged WYSIWYG foundations:
 - PR #196 — canonical frame activity, range mapping, source time, and stable clip ordering — `42dd64cda9feb75a637b622bf33ac1350a4febd9`.
 - PR #198 — evaluator-scoped Timeline v2 runtime normalization/defaulting — `67982f4fdd80062c9439c528362f75382e5c3268`.
 - PR #199 — canonical preview/index ordering adoption — `19a1a7b635afd33954bc56ed6023845f2c9e3fd1`.
+- PR #202 — deterministic frame-addressed preview/source selection — `02a1bbf4ec2b640a57d59fdd67f7906ae03eaa91`.
 
 Security unblock during this program:
 
@@ -39,20 +40,25 @@ PR #199 merge validation and infrastructure exception:
 - The final combined Quality Gate remained runner-queued, not code-failing. #199 was merged under an explicit queue-only exception using the already executed byte-identical frontend evidence plus the fresh security result; queued checks were not represented as green.
 - No unresolved review threads existed before merge.
 
-Current PR: **#202 — Use canonical frame addressing for deterministic Video Edit Studio preview**.  
-Current branch: `feat/video-wysiwyg-phase2-frame-source-selection`.
+PR #202 merge validation and infrastructure exception:
 
-Current slice: make explicit frame-addressed preview/capture use canonical output-frame activity and source time while preserving the existing millisecond interval-index and free-running source-time path for responsive interactive playback.
+- Exact production `VideoPreviewCanvas.tsx` implementation `5a45434cde410fd88e28cd434eeb0864ce638005` passed hosted lint with zero errors, 106/106 unit tests, Video Studio performance evidence, and production build.
+- Final production head passed frontend lint/unit/performance/build and Helm; the frontend container image also passed, and macOS auxiliary assurance checks passed.
+- Security/backend/platform jobs remained runner-queued at merge time and were explicitly documented as unexecuted rather than green; no unresolved review threads existed.
+- PR #202 merged as `02a1bbf4ec2b640a57d59fdd67f7906ae03eaa91`.
 
-Focused implementation validation for #202 before the final documentation commit:
+Current PR: **#204 — Use canonical frame helpers in backend Video Studio diagnostics**.  
+Current branch: `feat/video-wysiwyg-phase2-backend-frame-callers`.
 
-- temporary integration run `32170622398` successfully applied the production transform;
-- frontend lint: **0 errors** (existing unrelated warnings only);
-- unit tests: **106/106 passed**, including 6 timeline-index tests and 6 source-timing tests;
-- Video Studio performance fixture remained within review budgets during the unit suite;
-- production TypeScript/Vite build: **passed**;
-- only the workflow bot push was rejected by a concurrent branch update; another concurrent run landed the identical validated `VideoPreviewCanvas.tsx` commit as `5a45434cde410fd88e28cd434eeb0864ce638005`;
-- temporary integration workflow removed before final PR validation.
+Current slice: remove remaining duplicated backend output-frame math from diagnostic/parity callers while preserving the fidelity renderer's approximation model. Authored clip activity uses canonical frame overlap; renderer-generated sampled segments carry render-only parent provenance and collapse to exactly one synthetic sample per authored clip at the rational frame presentation time so high-FPS output frames cannot double-stack adjacent ~60-fps fidelity samples.
+
+Focused implementation validation for #204:
+
+- First observable macOS migration run `32174008428` applied the transform but stopped at `gofmt` because the new nested regression fixture had a composite-literal delimiter error; no production commit was accepted from that run.
+- Synthetic fidelity review identified a deeper correctness requirement: `ExpandTimelineForFidelity` caps sampling at 60 fps, so adjacent synthetic ~17 ms segments can both overlap one 120-fps output frame under canonical floor-start/ceil-end mapping.
+- The corrected implementation adds render-only sampled-parent provenance, uses canonical activity to determine participation, and chooses one synthetic sample per parent using exact rational frame presentation time; cursor-generated overlays retain their existing point-sampled semantics pending later cursor canonicalization.
+- Corrected macOS run `32174332876` passed transform, `gofmt`, `go test ./internal/video/... -count=1`, and `go vet ./internal/video/...`, then committed the validated backend implementation as `5dae8e22d8c44408725bf4c408a0ca66c8c2e764`.
+- After unrelated PR #203 advanced `main`, the validated four-file backend delta was rebuilt onto current `main` with no overlap and all temporary migration files removed from the production diff.
 
 ## Phase tracker
 
@@ -60,7 +66,7 @@ Focused implementation validation for #202 before the final documentation commit
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Initial feature-family review confirms structural visual divergence. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Schemas, projections, timing/easing/curves, v1 adapter, canonical frame activity/range/source/order evaluation, runtime v2 normalization, and indexed preview ordering are merged. PR #202 adopts canonical frame activity/source addressing for deterministic preview capture. Output-frame diagnostic/export caller migration, property/transform/transition/effect evaluation, FrameState, and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Schemas, projections, timing/easing/curves, v1 adapter, canonical frame activity/range/source/order evaluation, runtime v2 normalization, indexed preview ordering, and deterministic preview frame/source addressing are merged. PR #204 migrates backend diagnostic/parity frame callers. Canonical property/transform/transition/effect evaluation, FrameState, and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close geometry, text, crop/fit, effects, transitions, cursor, camera, color, and deterministic asset-loading parity. |
@@ -186,41 +192,46 @@ Remaining Phase 0 sign-off:
 - `frontend/src/components/video/VideoPreviewCanvas.tsx` uses the same canonical ordering after mounted-video/poster recombination so decoder budgeting cannot alter equal-z composition order.
 - Regression tests prove temporal index order can differ from authored composition order without semantic leakage.
 
-### Current PR #202 — deterministic frame-addressed preview source selection
+**PR #202 — deterministic frame-addressed preview source selection**
+
+- `frontend/src/components/video/pro/timelineIndex.ts` adds `queryActiveClipsAtFrame` using canonical `activeAtFrame` semantics; deterministic capture includes sub-frame-authored clips under floor-start/ceil-end mapping while interactive playback continues using the indexed millisecond query.
+- `frontend/src/components/video/sourceTiming.ts` introduces explicit frame versus time addresses. Frame addresses delegate to canonical `sourceTimeAtFrameMs`; time addresses retain sub-frame-responsive `sourceTimeMs` behavior.
+- `frontend/src/components/video/VideoPreviewCanvas.tsx` stores authoritative parity frame identity in React state, uses frame-overlap candidates and frame-derived source time only while an explicit paused frame address remains authoritative, and exposes that identity to the parity harness.
+- Parity readiness queries marked preview videos directly so media synchronization refs remain private to the mutation path and React immutability lint remains satisfied.
+- Deterministic paused seeks use a 0.5 ms tolerance while interactive scrubbing retains the 50 ms tolerance.
+- Focused tests cover 120-fps sub-frame clip activity, direct frame-derived source time, no integer-millisecond roundtrip, trim/rate behavior, frame-address validity, and seek tolerance.
+
+### Current PR #204 — backend diagnostic/parity frame caller migration
 
 Implemented:
 
-- `frontend/src/components/video/pro/timelineIndex.ts`
-  - adds `queryActiveClipsAtFrame` using canonical `activeAtFrame` semantics;
-  - deterministic capture therefore includes sub-frame-authored clips under floor-start/ceil-end frame mapping instead of relying on a point query at frame-start milliseconds;
-  - interactive playback continues using the indexed millisecond query.
-- `frontend/src/components/video/sourceTiming.ts`
-  - introduces an explicit `frame` versus `time` source address;
-  - frame addresses delegate to canonical `sourceTimeAtFrameMs`;
-  - time addresses retain sub-frame-responsive `sourceTimeMs` behavior;
-  - provides exact frame/playhead identity matching and a deterministic 0.5 ms paused-seek tolerance.
-- `frontend/src/components/video/VideoPreviewCanvas.tsx`
-  - stores authoritative parity frame identity in React state because it affects render-layer selection;
-  - uses frame-overlap candidates and frame-derived source time only while an explicit paused frame address remains authoritative;
-  - clears stale frame authority when timeline/playhead/playback semantics no longer match it;
-  - parity readiness queries marked preview videos directly, keeping media synchronization refs private to the mutation path and satisfying React immutability lint;
-  - exposes the authoritative frame index to the parity harness instead of reconstructing it from floating-point playhead math;
-  - uses the tighter deterministic seek tolerance while preserving the existing 50 ms interactive scrub tolerance.
-- Focused tests cover 120-fps sub-frame clip activity, direct frame-derived source time, no integer-millisecond roundtrip, trim/rate behavior, frame-address validity, and seek tolerance.
+- `backend/internal/video/diagnostic_frame.go`
+  - replaces duplicate floating-point `ceil(duration × fps / 1000)` bounds math with canonical `rendercontract.FrameCount`.
+- `backend/internal/video/parity_fixture.go`
+  - uses canonical `FrameCount`, `StartFrame`, and `FrameTime` for sample identity and presentation metadata;
+  - high-FPS sub-frame authored starts map to the same output frame identity as preview/canonical evaluation.
+- `backend/internal/video/renderer_fidelity.go`
+  - replaces diagnostic `floor(frameIndex × 1000 / fps)` point filtering with canonical frame-domain authored activity;
+  - keeps diagnostic frame indices relative to an export-range origin without integer-ms round-tripping;
+  - tags render-only sampled segments with parent provenance;
+  - collapses canonically overlapping synthetic samples to the single sample containing the exact rational frame presentation time, falling back to the earliest overlapping sample when an authored clip begins partway through the output frame;
+  - preserves cursor pointer/ring point-sampling until cursor semantics are explicitly canonicalized.
+- `backend/internal/video/renderer_parity_test.go`
+  - covers exact half-open boundaries, 120-fps sub-frame/range-relative starts, high-FPS parity sample mapping, and the synthetic-segment double-stack regression.
+- FFmpeg diagnostic seek remains direct `frameIndex / fps`; it was already rational-frame-derived and is intentionally unchanged.
 
-Scope boundary: PR #202 does not yet migrate other output-frame-driven diagnostic/export callers or canonicalize transforms/properties/transitions/effects. Those remain separate reviewable slices.
+Scope boundary: PR #204 does not canonicalize property/keyframe, transform/camera, transition/effect, cursor, or AudioGraph semantics.
 
 ### Remaining Phase 2 work
 
-1. Validate and merge PR #202 deterministic frame-addressed preview source selection.
-2. Audit and migrate remaining output-frame-driven diagnostic/export frame-selection and source-time callers to canonical frame/range/source helpers.
-3. Implement canonical keyframe/property evaluation on top of the merged curve evaluator.
-4. Implement canonical transform/anchor/camera state.
-5. Define transition placement/peer state and effect-stack ordering/animation.
-6. Define text/shape/cursor evaluated state.
-7. Define serializable `FrameState` containing every visual decision needed to paint one output frame.
-8. Define/compile serializable `AudioGraph` for timing/rate/channel/gain/fade/mute/solo/processing decisions.
-9. Fail closed whenever an authorable field lacks canonical semantics.
+1. Validate and merge PR #204 backend diagnostic/parity frame caller migration.
+2. Implement canonical keyframe/property evaluation on top of the merged curve evaluator, including base/default resolution and fail-closed unsupported properties.
+3. Implement canonical transform/anchor/camera state.
+4. Define transition placement/peer state and effect-stack ordering/animation.
+5. Define text/shape/cursor evaluated state.
+6. Define serializable `FrameState` containing every visual decision needed to paint one output frame.
+7. Define/compile serializable `AudioGraph` for timing/rate/channel/gain/fade/mute/solo/processing decisions.
+8. Fail closed whenever an authorable field lacks canonical semantics.
 
 ### Phase 2 exit gate
 
@@ -282,7 +293,8 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 | v1 adapter guesses ambiguous semantics | Transitions/unknown transform semantics fail closed. |
 | Cross-runtime normalizer/evaluator drift | Versioned shared fixtures asserted by Go and TypeScript. |
 | Interval index accidentally defines z-order | Original clip index is retained; queried candidates are restored with the canonical comparator after temporal lookup, and preview decoder/poster recombination uses the same comparator. |
-| Millisecond rounding creates boundary/source drift | Explicit deterministic frame addresses now drive preview frame-overlap activity and source time; remaining output-frame callers must migrate before Phase 2 exit. |
+| Millisecond rounding creates boundary/source drift | Deterministic preview and backend diagnostic/parity frame callers use canonical frame/range helpers; later FrameState/property evaluators must stay frame-addressed. |
+| Canonical overlap double-stacks renderer-generated samples | Fidelity samples carry render-only parent provenance and diagnostic selection collapses overlapping samples to one rational-presentation sample per authored parent. |
 | Deterministic frame state leaks into interactive playback | Frame authority is explicit state, valid only while paused at the exact addressed frame; free-running playback keeps the indexed time-addressed path. |
 | High-FPS deterministic seeks reuse stale frames | Frame-addressed paused seeks use a 0.5 ms tolerance instead of the interactive 50 ms scrub tolerance. |
 | Browser/Go curve drift | Shared built-in/Bezier/spring fixtures. |
@@ -306,13 +318,15 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 - PR #198 merged runtime Timeline v2 normalization as `67982f4fdd80062c9439c528362f75382e5c3268`; setup-only Playwright/Go-CodeQL stalls were explicitly documented.
 - An unrelated current-`main` dependency audit exposed reachable `GO-2026-6115` through `github.com/ledongthuc/pdf`; PR #201 replaced it with `github.com/tsawler/tabula v1.6.14` and merged as `57cb7764a73203fc1194dbe51992e7ee4779817f` after the normal vulnerability audit passed.
 - PR #199 was refreshed onto the repaired dependency graph, preserved the intended five-file ordering delta, and merged as `19a1a7b635afd33954bc56ed6023845f2c9e3fd1` with a documented queue-only final-head exception and prior executed byte-identical frontend evidence.
-- PR #202 implemented the deterministic frame-addressed preview/source slice. A staging lint failure exposed React cross-effect media-ref aliasing; parity readiness was moved to a dedicated DOM media marker, after which focused lint, all 106 unit tests, performance evidence, and production build passed. The validated implementation landed as `5a45434cde410fd88e28cd434eeb0864ce638005`, and temporary integration scaffolding was removed before final validation.
+- PR #202 implemented the deterministic frame-addressed preview/source slice. A staging lint failure exposed React cross-effect media-ref aliasing; parity readiness was moved to a dedicated DOM media marker, after which focused lint, all 106 unit tests, performance evidence, and production build passed. The validated implementation landed as `5a45434cde410fd88e28cd434eeb0864ce638005`, temporary integration scaffolding was removed, and PR #202 merged as `02a1bbf4ec2b640a57d59fdd67f7906ae03eaa91` under a documented queue-only final-head exception.
+- PR #204 audited backend output-frame callers. The first canonical-overlap design was strengthened after identifying possible double-stacking of adjacent synthetic fidelity samples at high output FPS. Parent provenance plus rational presentation-time selection fixed that renderer-specific ambiguity; macOS validation `32174332876` passed focused backend tests and vet on the corrected implementation.
 
 ## Next recommended slice
 
-After PR #202 is green and merged:
+After PR #204 is green and merged:
 
-1. Audit every remaining output-frame-driven diagnostic/export caller and migrate frame selection/source time/range boundaries to the canonical helpers, with shared high-FPS, trim/rate, and boundary fixtures.
-2. Implement canonical keyframe/property evaluation on top of the merged curve evaluator, including default/base-value resolution and fail-closed unsupported property handling.
-3. Begin canonical transform/anchor/camera evaluation and define the first serializable visual `FrameState` projection/fixture.
-4. Continue Phase 0 threshold policy, unsupported-audio boundary, and second-platform evidence in parallel.
+1. Implement canonical keyframe/property evaluation shared by Go and TypeScript, replacing preview `sampleKeyframes` and backend `evaluateTimelineKeyframes` duplication with one fixture-driven semantic contract.
+2. Define explicit base/default value resolution, duplicate-time behavior, pre-first/post-last hold behavior, later-keyframe curve ownership, and fail-closed unsupported property handling.
+3. Route preview and fidelity/export property sampling through the shared evaluator without yet changing transform composition order.
+4. Begin canonical transform/anchor/camera evaluation and the first serializable visual `FrameState` projection/fixture.
+5. Continue Phase 0 threshold policy, unsupported-audio boundary, and second-platform evidence in parallel.

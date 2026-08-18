@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ajbergh/omnillm-studio/internal/video/rendercontract"
 	"github.com/google/uuid"
 )
 
@@ -24,6 +25,12 @@ const (
 	rendererEasingEaseOut   = "ease-out"
 	rendererEasingEaseInOut = "ease-in-out"
 	rendererEasingStep      = "step"
+
+	rendererFidelityKindMetadataKey   = "_omnillm_renderer_fidelity_kind"
+	rendererFidelityParentMetadataKey = "_omnillm_renderer_fidelity_parent_clip_id"
+	rendererFidelityKindSample        = "sample"
+	rendererFidelityKindCursorPointer = "cursor_pointer"
+	rendererFidelityKindCursorRing    = "cursor_ring"
 )
 
 // NewFidelityRenderer adds eased transform/effect keyframes, wipe/zoom
@@ -52,35 +59,101 @@ func (r *FidelityRenderer) Render(ctx context.Context, req RenderRequest, progre
 	req.Timeline = ExpandTimelineForFidelity(req.Timeline, fps, r.maxSegmentsPerClip)
 	if req.Settings.DiagnosticFrameIndex != nil {
 		// Fidelity expansion can create hundreds of short sampled segments per
-		// clip. A one-frame diagnostic needs only the segments active at that
-		// output timestamp. Filtering after expansion preserves the exact
-		// legacy sampling result while keeping the FFmpeg graph bounded.
-		timeMS := int64(math.Floor(float64(*req.Settings.DiagnosticFrameIndex) * 1000 / float64(fps)))
+		// clip. Keep authored activity in the canonical frame domain, but select
+		// exactly one synthetic fidelity sample per authored clip at the exact
+		// rational frame presentation time so adjacent samples never double-stack.
+		timelineOffsetMS := int64(0)
 		if req.Settings.RangeEndMS > req.Settings.RangeStartMS {
-			timeMS += req.Settings.RangeStartMS
+			timelineOffsetMS = req.Settings.RangeStartMS
 		}
-		req.Timeline = FilterTimelineAtDiagnosticTime(req.Timeline, timeMS)
+		req.Timeline = FilterTimelineAtDiagnosticFrame(req.Timeline, *req.Settings.DiagnosticFrameIndex, fps, timelineOffsetMS)
 	}
 	return r.delegate.Render(ctx, req, progress)
 }
 
-// FilterTimelineAtDiagnosticTime keeps the original timeline clock and only
-// the expanded clips active in the requested half-open frame interval. This
-// is render-only and never mutates the persisted document.
-func FilterTimelineAtDiagnosticTime(doc TimelineDocument, timeMS int64) TimelineDocument {
+// FilterTimelineAtDiagnosticFrame keeps the original timeline clock while
+// applying canonical authored frame activity. Fidelity-generated sample
+// segments are a renderer approximation, not authored layers: overlapping
+// sample segments for one parent are collapsed to the segment containing the
+// exact frame presentation time, or the earliest overlapping sample when the
+// authored clip begins partway through the output frame. Cursor overlays keep
+// their existing point-sampled behavior until cursor semantics are canonical.
+func FilterTimelineAtDiagnosticFrame(doc TimelineDocument, frameIndex int64, fps int, timelineOffsetMS int64) TimelineDocument {
 	out := doc
 	out.Tracks = make([]TimelineTrack, len(doc.Tracks))
 	for ti, track := range doc.Tracks {
 		copied := track
+		keep := make([]bool, len(track.Clips))
+		selectedSample := map[string]int{}
+		selectedAtPresentation := map[string]bool{}
+		for ci, clip := range track.Clips {
+			kind, parentID := fidelityGeneratedIdentity(clip)
+			switch kind {
+			case rendererFidelityKindSample:
+				if !rendercontract.ActiveAtFrame(frameIndex, clip.StartMS-timelineOffsetMS, clip.DurationMS, fps) {
+					continue
+				}
+				if parentID == "" {
+					parentID = clip.ID
+				}
+				atPresentation := clipContainsFramePresentation(clip, frameIndex, fps, timelineOffsetMS)
+				previous, exists := selectedSample[parentID]
+				if exists {
+					previousAtPresentation := selectedAtPresentation[parentID]
+					prefer := atPresentation && !previousAtPresentation
+					if atPresentation == previousAtPresentation && clip.StartMS < track.Clips[previous].StartMS {
+						prefer = true
+					}
+					if !prefer {
+						continue
+					}
+					keep[previous] = false
+				}
+				selectedSample[parentID] = ci
+				selectedAtPresentation[parentID] = atPresentation
+				keep[ci] = true
+			case rendererFidelityKindCursorPointer, rendererFidelityKindCursorRing:
+				keep[ci] = clipContainsFramePresentation(clip, frameIndex, fps, timelineOffsetMS)
+			default:
+				keep[ci] = rendercontract.ActiveAtFrame(frameIndex, clip.StartMS-timelineOffsetMS, clip.DurationMS, fps)
+			}
+		}
 		copied.Clips = make([]TimelineClip, 0, len(track.Clips))
-		for _, clip := range track.Clips {
-			if timeMS >= clip.StartMS && timeMS < clip.StartMS+clip.DurationMS {
+		for ci, clip := range track.Clips {
+			if keep[ci] {
 				copied.Clips = append(copied.Clips, clip)
 			}
 		}
 		out.Tracks[ti] = copied
 	}
 	return out
+}
+
+func clipContainsFramePresentation(clip TimelineClip, frameIndex int64, fps int, timelineOffsetMS int64) bool {
+	if frameIndex < 0 || fps <= 0 || clip.DurationMS <= 0 {
+		return false
+	}
+	startMS := clip.StartMS - timelineOffsetMS
+	endMS := startMS + clip.DurationMS
+	presentation := frameIndex * 1000
+	return startMS*int64(fps) <= presentation && presentation < endMS*int64(fps)
+}
+
+func markFidelityGeneratedClip(clip *TimelineClip, kind, parentID string) {
+	if clip.Metadata == nil {
+		clip.Metadata = map[string]any{}
+	}
+	clip.Metadata[rendererFidelityKindMetadataKey] = kind
+	clip.Metadata[rendererFidelityParentMetadataKey] = parentID
+}
+
+func fidelityGeneratedIdentity(clip TimelineClip) (string, string) {
+	if clip.Metadata == nil {
+		return "", ""
+	}
+	kind, _ := clip.Metadata[rendererFidelityKindMetadataKey].(string)
+	parentID, _ := clip.Metadata[rendererFidelityParentMetadataKey].(string)
+	return kind, parentID
 }
 
 // ExpandTimelineForFidelity returns a render-only timeline. It never mutates
@@ -344,6 +417,7 @@ func sampleRenderClip(clip TimelineClip, scenes []TimelineScene, canvas Timeline
 		}
 		segment := cloneTimelineClip(clip)
 		segment.ID = uuid.NewString()
+		markFidelityGeneratedClip(&segment, rendererFidelityKindSample, clip.ID)
 		segment.StartMS = clip.StartMS + offset
 		segment.DurationMS = duration
 		sourceOffset := sourceDurationFor(clip, offset)
@@ -679,6 +753,7 @@ func cursorOverlayClips(clip TimelineClip, fps, maxSegments int) []TimelineClip 
 			Transform: map[string]any{"x": point.X, "y": point.Y, "scale": cursorScale, "rotation": 0.0, "opacity": 1.0},
 			Text:      &TimelineText{Text: "➤", FontSize: 34, Color: "#ffffff", Stroke: "#111827", StrokeWidth: 2, Shadow: true},
 		}
+		markFidelityGeneratedClip(&pointer, rendererFidelityKindCursorPointer, clip.ID)
 		overlays = append(overlays, pointer)
 		if point.Click && cursor.ClickRings {
 			size := int(68 * cursorScale)
@@ -689,6 +764,7 @@ func cursorOverlayClips(clip TimelineClip, fps, maxSegments int) []TimelineClip 
 				Shape:     &TimelineShape{Kind: ShapeKindRectangle, Width: size, Height: size, Stroke: "#f59e0b", StrokeWidth: 5},
 				Effects:   []TimelineEffect{}, Keyframes: []TimelineKeyframe{}, Transitions: []TimelineTransition{},
 			}
+			markFidelityGeneratedClip(&ring, rendererFidelityKindCursorRing, clip.ID)
 			overlays = append(overlays, ring)
 		}
 	}

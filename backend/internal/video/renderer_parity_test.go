@@ -55,6 +55,24 @@ func TestParityTortureFixtureValidatesAndSamplesDeterministically(t *testing.T) 
 	}
 }
 
+func TestParityFrameSamplesUseCanonicalHighFPSMapping(t *testing.T) {
+	doc := NewEmptyTimeline(160, 90, 120)
+	doc.DurationMS = 10
+	doc.Tracks = []TimelineTrack{{ID: "track", Type: TrackTypeLayer, Name: "Track", Visible: true, Clips: []TimelineClip{{
+		ID: "subframe", StartMS: 5, DurationMS: 5, TrimOutMS: 5, Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{},
+	}}}}
+	samples := ParityFrameSamples(doc, 1, 0)
+	if len(samples) != 2 {
+		t.Fatalf("high-FPS samples = %+v", samples)
+	}
+	if samples[0].FrameIndex != 0 || !strings.Contains(samples[0].Name, "clip-start-subframe") {
+		t.Fatalf("sub-frame clip start did not map to frame zero: %+v", samples)
+	}
+	if samples[1].FrameIndex != 1 {
+		t.Fatalf("last timeline sample frame = %d, want 1", samples[1].FrameIndex)
+	}
+}
+
 func TestParityMetricsAndArtifacts(t *testing.T) {
 	preview := image.NewRGBA(image.Rect(0, 0, 4, 3))
 	rendered := image.NewRGBA(image.Rect(0, 0, 4, 3))
@@ -181,19 +199,62 @@ func TestRendererDiagnosticFrameEncodesSingleFrame(t *testing.T) {
 	}
 }
 
-func TestFilterTimelineAtDiagnosticTimeUsesHalfOpenBoundaries(t *testing.T) {
+func TestFilterTimelineAtDiagnosticFrameUsesCanonicalBoundaries(t *testing.T) {
 	doc := NewEmptyTimeline(160, 90, 30)
 	doc.DurationMS = 2000
 	doc.Tracks = []TimelineTrack{{ID: "track", Type: TrackTypeLayer, Name: "Track", Visible: true, Clips: []TimelineClip{
 		{ID: "before", StartMS: 0, DurationMS: 1000, TrimOutMS: 1000, Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{}},
 		{ID: "at-boundary", StartMS: 1000, DurationMS: 1000, TrimOutMS: 1000, Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{}},
 	}}}
-	filtered := FilterTimelineAtDiagnosticTime(doc, 1000)
+	filtered := FilterTimelineAtDiagnosticFrame(doc, 30, 30, 0)
 	if len(filtered.Tracks[0].Clips) != 1 || filtered.Tracks[0].Clips[0].ID != "at-boundary" {
 		t.Fatalf("boundary clips = %+v", filtered.Tracks[0].Clips)
 	}
 	if filtered.DurationMS != doc.DurationMS {
 		t.Fatalf("diagnostic filter changed timeline clock: %d", filtered.DurationMS)
+	}
+}
+
+func TestFilterTimelineAtDiagnosticFrameIncludesSubFrameAndRangeRelativeStarts(t *testing.T) {
+	doc := NewEmptyTimeline(160, 90, 120)
+	doc.DurationMS = 2000
+	doc.Tracks = []TimelineTrack{{ID: "track", Type: TrackTypeLayer, Name: "Track", Visible: true, Clips: []TimelineClip{
+		{ID: "range-subframe", StartMS: 1005, DurationMS: 5, TrimOutMS: 5, Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{}},
+		{ID: "next-frame", StartMS: 1010, DurationMS: 5, TrimOutMS: 5, Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{}},
+	}}}
+	filtered := FilterTimelineAtDiagnosticFrame(doc, 0, 120, 1000)
+	if len(filtered.Tracks[0].Clips) != 1 || filtered.Tracks[0].Clips[0].ID != "range-subframe" {
+		t.Fatalf("range-relative frame zero clips = %+v", filtered.Tracks[0].Clips)
+	}
+}
+
+func TestFilterTimelineAtDiagnosticFrameSelectsOneSyntheticSamplePerParent(t *testing.T) {
+	doc := NewEmptyTimeline(160, 90, 120)
+	doc.DurationMS = 80
+	doc.Tracks = []TimelineTrack{{ID: "track", Type: TrackTypeLayer, Name: "Track", Visible: true, Clips: []TimelineClip{{
+		ID: "sampled", StartMS: 5, DurationMS: 50, TrimOutMS: 50,
+		Effects: []TimelineEffect{},
+		Keyframes: []TimelineKeyframe{
+			{ID: "x0", Property: "x", TimeMS: 0, Value: 0, Easing: "linear"},
+			{ID: "x1", Property: "x", TimeMS: 50, Value: 50, Easing: "linear"},
+		},
+	}},
+	}}
+	expanded := ExpandTimelineForFidelity(doc, 120, 300)
+	frameZero := FilterTimelineAtDiagnosticFrame(expanded, 0, 120, 0)
+	if len(frameZero.Tracks[0].Clips) != 1 {
+		t.Fatalf("frame zero synthetic samples = %+v", frameZero.Tracks[0].Clips)
+	}
+	kind, parentID := fidelityGeneratedIdentity(frameZero.Tracks[0].Clips[0])
+	if kind != rendererFidelityKindSample || parentID != "sampled" {
+		t.Fatalf("frame zero sample provenance kind=%q parent=%q", kind, parentID)
+	}
+	boundaryFrame := FilterTimelineAtDiagnosticFrame(expanded, 2, 120, 0)
+	if len(boundaryFrame.Tracks[0].Clips) != 1 {
+		t.Fatalf("overlapping synthetic samples double-stacked: %+v", boundaryFrame.Tracks[0].Clips)
+	}
+	if boundaryFrame.Tracks[0].Clips[0].StartMS != 5 {
+		t.Fatalf("frame presentation selected sample start=%d, want 5", boundaryFrame.Tracks[0].Clips[0].StartMS)
 	}
 }
 
