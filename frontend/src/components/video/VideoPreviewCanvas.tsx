@@ -21,7 +21,7 @@ import { useVideoStudioStore } from '../../stores/videoStudio';
 import { ContextMenu } from '../common/ContextMenu';
 import type { ContextMenuEntry } from '../common/ContextMenu';
 import { composePreviewFilter } from './effects/effectRegistry';
-import { sampleKeyframes } from './effects/keyframeUtils';
+import { evaluateCameraProperty, evaluateClipProperty } from '../../video/renderContractProperties';
 import { ShapePreview } from './ShapePreview';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineTrack } from '../../types/video';
 import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips, queryActiveClipsAtFrame } from './pro/timelineIndex';
@@ -279,11 +279,8 @@ export function VideoPreviewCanvas() {
   const activeScene = timeline?.scenes?.find((scene) => playheadMs >= scene.start_ms && playheadMs < scene.start_ms + scene.duration_ms);
   const sceneTimeMs = activeScene ? playheadMs - activeScene.start_ms : 0;
   const camera = { x: 0, y: 0, z: 0, rotation_x: 0, rotation_y: 0, rotation_z: 0, field_of_view: 50, focus_depth: 0, ...(activeScene?.camera || {}) };
-  if (activeScene?.camera?.keyframes) {
-    for (const property of ['x', 'y', 'z', 'rotation_x', 'rotation_y', 'rotation_z', 'field_of_view', 'focus_depth'] as const) {
-      const sampled = sampleKeyframes(activeScene.camera.keyframes, property, sceneTimeMs);
-      if (sampled !== null) camera[property] = sampled;
-    }
+  for (const property of ['x', 'y', 'z', 'rotation_x', 'rotation_y', 'rotation_z', 'field_of_view', 'focus_depth'] as const) {
+    camera[property] = evaluateCameraProperty(activeScene?.camera, property, sceneTimeMs);
   }
 
   const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
@@ -438,8 +435,7 @@ export function VideoPreviewCanvas() {
       const entry = audioLayersRef.current.find((layer) => layer.clip.id === clipId);
       if (!entry) continue;
       const clipTimeMs = Math.max(0, playheadMs - entry.clip.start_ms);
-      const keyedVolume = sampleKeyframes(entry.clip.keyframes, 'volume', clipTimeMs);
-      const clipVolume = keyedVolume ?? entry.clip.volume ?? 1;
+      const clipVolume = evaluateClipProperty(entry.clip, 'volume', clipTimeMs);
       // Element volume caps at 1; gains above unity remain export-only.
       audio.volume = Math.min(1, Math.max(0, clipVolume * fadeFactor(entry.clip, playheadMs) * previewVolume));
       syncElement(audio, entry.clip);
@@ -719,12 +715,11 @@ export function VideoPreviewCanvas() {
   const renderLayer = (entry: LayerEntry, poster = false) => {
     const { clip, track, asset } = entry;
     const transform = { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, ...(clip.transform || {}) };
-    // Keyframes (clip-relative time) override static transform values; an
-    // in-flight canvas drag overrides both.
+    // Canonical property evaluation owns static/default values and keyframe
+    // interpolation; an in-flight canvas drag still overrides both.
     const clipTimeMs = playheadMs - clip.start_ms;
     for (const property of ['x', 'y', 'z', 'scale', 'scale_x', 'scale_y', 'rotation', 'rotation_x', 'rotation_y', 'rotation_z', 'opacity'] as const) {
-      const sampled = sampleKeyframes(clip.keyframes, property, clipTimeMs);
-      if (sampled !== null) transform[property] = sampled;
+      transform[property] = evaluateClipProperty(clip, property, clipTimeMs);
     }
     let liveShapeWidth: number | undefined;
     let liveShapeHeight: number | undefined;
