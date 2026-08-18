@@ -11,7 +11,7 @@ import (
 
 type contractFixture struct {
 	Version int `json:"version"`
-	Easing []struct {
+	Easing  []struct {
 		Name string  `json:"name"`
 		T    float64 `json:"t"`
 		Want float64 `json:"want"`
