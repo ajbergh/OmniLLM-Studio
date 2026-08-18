@@ -133,47 +133,44 @@ For audio, use decoded 48 kHz PCM. The lossless reference and export must have t
 
 ## Current-state findings
 
-This table is the baseline captured when the plan was written. The Phase 1 tracker and implementation log above supersede the render-revision, missing-source, and dirty-tracking rows where noted; the preview/export composition mismatches remain open.
+This table captures the baseline architectural analysis alongside the current resolution status across Phases 0 through 6. The Phase 1 implementation resolved snapshot immutability, asset staging, and dirty-tracking; Phase 0 resolved mono pan-law audio attenuation, keyframe volume easing, and CFR delivery verification; Phase 2 established canonical timebase, curves, and ordering contracts in `@omnillm/video-renderer`; remaining visual and filter composition divergences are being unified under the shared React composition and Chromium worker.
 
-The current implementation has good validation, job scheduling, asset storage, and real FFmpeg coverage. The problem is that preview and export do not execute the same composition rules.
-
-| Area | Current preview | Current export | Parity consequence |
-|---|---|---|---|
-| Render revision (baseline; fixed in Phase 1 core) | Uses live Zustand state | A queued job reloaded the timeline row when the worker ran | Edits after Render could change queued output |
-| Clock | `requestAnimationFrame` and floating-point milliseconds | Output FPS plus FFmpeg timestamps | Boundaries and source-frame choice can differ |
-| Active interval | Half-open clip/scene checks | FFmpeg `between(t,start,end)` is end-inclusive | A clip/effect can survive one extra output frame |
-| Easing | Quadratic `ease-in-out` | Smoothstep `t*t*(3-2*t)` | The same keyframes follow different motion paths |
-| Animation sampling | Continuous at the editor playhead | Midpoint-sampled static segments, capped at 300 per clip and 60 fps | Long clips and high-FPS exports visibly step or drift |
-| Transitions | The preview does not apply clip transitions | Fade/dip/slide are applied; wipe/zoom are sampled; crossfade is an alpha fade | Export can show motion or fades the user never saw |
-| Effects | CSS subset, mostly static amounts | Different FFmpeg filters; several export-only or approximated effects | Color, blur, motion, keying, and animated amounts differ |
-| Crop | CSS `clip-path` masks a canvas-sized element | Source is cropped and then rescaled | Cropped subject size and placement change |
-| Transforms | CSS 3D, anchor, X/Y tilt, perspective | 2D transform plus sampled 2.5D projection; anchor and X/Y tilt are not fully honored | Rotation center, perspective, and parallax differ |
-| Media fit | Canvas-sized wrapper with `object-contain` | `scale=...:force_original_aspect_ratio=decrease` after crop | Letterboxing and cropped bounds can differ |
-| Text | Browser font/layout engine and CSS box model | FFmpeg `drawtext`, fontconfig fallback, spacing/alignment approximation | Fonts, wrapping, box size, rotation, spacing, and corners differ |
-| Shapes | CSS/SVG primitives | Several kinds normalize to rectangles or text glyphs | Ellipse, arrow, speech bubble, spotlight, rounded shapes, and marks differ |
-| Shape animation/fades | Wrapper transforms and fades apply | `drawbox` handles a smaller static subset | Shape rotation, non-uniform scale, effects, and fades can be lost |
-| Cursor | SVG cursor in clip-local canvas coordinates; 300 ms click window | Sampled `➤` text in center-offset coordinates; 160 ms click window | Cursor position, glyph, scale, and ring timing differ |
-| Audio gain | HTML media volume, capped at 1.0 | FFmpeg gain allows up to 2.0 | Over-unity clips cannot be auditioned accurately |
-| Audio finishing | Not previewed | FFmpeg filters run on each input before `amix` | The user cannot hear final processing; master processing is in the wrong graph position |
-| Output dimensions | Preview uses the timeline canvas | Custom export can change width/height without a canonical viewport transform | Position, text size, and shape size do not scale consistently |
-| Missing source file | Asset row may still make the preview/checklist look valid | `resolveMediaClips` silently skips a missing file | Export can complete with a missing layer |
-| Capability data | Frontend registries contain independent flags and copy | Backend exposes another capability matrix | Wipe/zoom/cursor warnings are already stale relative to the fidelity renderer |
-| Mixed clip content | Preview chooses media, else shape, else text | Export may composite media and then also draw shape/text from the same clip | An allowed document can mean different primitives on each side |
+| Area | Current preview | Current export | Parity consequence | Current Status |
+|---|---|---|---|---|
+| Render revision | Uses live Zustand state | A queued job reloaded the timeline row when the worker ran | Edits after Render could change queued output | **Resolved (Phase 1):** V52 migration, snapshot binding, and 409 rejection prevent mutation drift |
+| Missing source file | Asset row may still make the preview/checklist look valid | `resolveMediaClips` silently skips a missing file | Export can complete with a missing layer | **Resolved (Phase 1):** Staged copies, FFprobe preflight decode checks, and fail-closed manifest validation |
+| Dirty tracking | Single global sequence counter | No snapshot hash correlation | Overlapping render jobs could race completion UI | **Resolved (Phase 1):** Newest completed job `timeline_sha256` compared against saved timeline |
+| Capability data | Frontend registries contain independent flags and copy | Backend exposes another capability matrix | Wipe/zoom/cursor warnings were stale relative to renderer | **Resolved (Phase 1):** Synchronized capability matrices and backend/frontend Strict Parity mode |
+| Audio gain & mono pan-law | Web Audio unity duplication | FFmpeg mono pan-law attenuated mono assets | Audio loudness differed by ~2.5 dB | **Resolved (Phase 0/1):** Explicit unity duplication and shared volume easing keyframe curves (0.999993 correlation, passing EBU R128) |
+| Clock & interval | `requestAnimationFrame` and floating-point milliseconds | Output FPS plus FFmpeg timestamps | Boundaries and source-frame choice can differ | **Canonical in Phase 2:** Rational time and integer half-open intervals in `@omnillm/video-renderer/timebase.ts` |
+| Easing | Quadratic `ease-in-out` | Smoothstep `t*t*(3-2*t)` | The same keyframes followed different motion paths | **Canonical in Phase 2:** Piecewise quadratic `ease-in-out` unified in `@omnillm/video-renderer/curves.ts` |
+| Ordering & z-index | CSS stacking context | Track index ordering | Discrepancies on equal z-index | **Canonical in Phase 2:** Stable sorting by `(trackIndex, zIndex, clipIndex)` in `ordering.ts` |
+| Animation sampling | Continuous at the editor playhead | Midpoint-sampled static segments, capped at 300 per clip and 60 fps | Long clips and high-FPS exports visibly step or drift | **In Progress (Phase 3/4):** Continuous evaluation via canonical `evaluateFrame` and shared React worker |
+| Transitions | Preview did not render all clip transitions | Fade/dip/slide applied; wipe/zoom sampled | Export could show motion or fades the user never saw | **In Progress (Phase 3/5):** Shared React `VideoComposition` transitions |
+| Effects | CSS subset, mostly static amounts | Different FFmpeg filters; several approximated effects | Color, blur, motion, keying, and animated amounts differ | **In Progress (Phase 3/5):** Shared CSS/WebGL effect stack in `VideoComposition` |
+| Crop & Transforms | CSS 3D, anchor, X/Y tilt, perspective | 2D transform plus sampled 2.5D projection | Rotation center, perspective, and parallax differ | **In Progress (Phase 3/5):** Evaluated transform matrices in `evaluateFrame.ts` and `VideoComposition.tsx` |
+| Media fit | Canvas-sized wrapper with `object-contain` | `scale=...:force_original_aspect_ratio=decrease` after crop | Letterboxing and cropped bounds can differ | **In Progress (Phase 3/5):** Explicit fit modes (`contain`, `cover`, `fill`, `none`) in v2 schema and composition |
+| Text & Fonts | Browser font/layout engine and CSS box model | FFmpeg `drawtext`, fontconfig fallback | Fonts, wrapping, box size, rotation, spacing differ | **In Progress (Phase 3/5):** Browser layout engine used in both preview and headless Chromium worker |
+| Shapes & Annotations | CSS/SVG primitives | Normalized to rectangles or text glyphs | Shape geometry, rounded corners, and blur differ | **In Progress (Phase 3/5):** SVG/CSS shared shape primitives in `VideoComposition` |
+| Cursor | SVG cursor in canvas coordinates; 300 ms click window | Sampled `➤` text in center coordinates; 160 ms click window | Cursor position, glyph, scale, and ring timing differ | **In Progress (Phase 3/5):** Shared SVG cursor layer and point interpolation in `VideoComposition` |
+| Audio finishing | Not previewed | FFmpeg filters run on each input before `amix` | Master processing in wrong graph position | **In Progress (Phase 6):** Pure `compileAudioGraph` with post-mix master bus and cached stem preview |
 
 ### Relevant current files
 
-- `frontend/src/components/video/VideoPreviewCanvas.tsx`: DOM/CSS preview, media clock, direct manipulation, text, cursor, and shape hosting.
-- `frontend/src/components/video/ShapePreview.tsx`: preview-only CSS/SVG shape implementation.
-- `frontend/src/components/video/effects/keyframeUtils.ts`: frontend curve evaluation.
-- `frontend/src/components/video/effects/effectRegistry.ts`: frontend effect previews plus duplicated export flags.
-- `frontend/src/components/video/effects/transitionRegistry.ts`: transition metadata with export flags that no longer match the backend.
-- `frontend/src/components/video/exportValidation.ts`: client preflight with stale cursor/wipe/zoom warnings.
-- `backend/internal/video/renderer.go`: FFmpeg visual graph, text/shape drawing, audio mix, and encode.
-- `backend/internal/video/renderer_fidelity.go`: sampled animation, camera, wipe/zoom, annotation normalization, and cursor expansion.
-- `backend/internal/video/renderer_capabilities.go`: backend capability matrix.
-- `backend/internal/video/service.go`: render enqueue and execution; Phase 1 now binds new jobs to immutable render snapshots.
-- `backend/internal/repository/video_render_job_repo.go`: render-job persistence.
-- `backend/internal/video/probe.go`: best-effort media metadata that does not yet capture display rotation, sample aspect ratio, time base, or color metadata.
+- `schemas/video-timeline-v2.schema.json`: timeline v2 JSON schema specification.
+- `schemas/video-render-manifest-v1.schema.json`: immutable render manifest schema specification.
+- `video-renderer/src/core/timebase.ts`: canonical rational time and half-open frame interval evaluators.
+- `video-renderer/src/core/curves.ts`: canonical easing curves and keyframe interpolation.
+- `video-renderer/src/core/ordering.ts`: deterministic layer ordering evaluator.
+- `video-renderer/src/core/evaluateFrame.ts`: canonical frame state and transform evaluator.
+- `video-renderer/src/core/evaluateAudio.ts`: canonical AudioGraph compiler.
+- `video-renderer/src/core/normalizeTimeline.ts`: v1 to v2 bidirectional timeline normalization adapter.
+- `video-renderer/src/composition/VideoComposition.tsx`: shared React video composition component.
+- `video-renderer/src/worker/renderWorker.ts`: headless frame render worker.
+- `backend/internal/video/shared_renderer.go`: Go backend adapter for shared Chromium worker and FFmpeg encoding.
+- `backend/internal/video/render_snapshot.go`: immutable timeline & asset snapshot persistence and staging.
+- `backend/internal/video/parity_fixture.go` & `parity_report.go`: deterministic 103-frame parity torture harness and EBU R128 audio metrics.
+- `frontend/src/components/video/parity/previewAudioRenderer.ts`: browser Web Audio preview parity renderer.
 
 ## Target architecture
 
