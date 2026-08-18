@@ -7,6 +7,7 @@ import type {
 import {
   applyDecoderBudget,
   buildTimelineIntervalIndex,
+  compareIndexedTimelineClipOrder,
   queryActiveClips,
   visibleClips,
 } from './timelineIndex';
@@ -72,6 +73,82 @@ const document: VideoTimelineDocument = {
   }],
 };
 
+const orderingDocument: VideoTimelineDocument = {
+  version: 1,
+  canvas: { width: 100, height: 100, fps: 30, background: '#000' },
+  duration_ms: 5000,
+  markers: [],
+  metadata: {},
+  tracks: [
+    {
+      id: 'track-zero',
+      type: 'layer',
+      name: 'Track zero',
+      locked: false,
+      muted: false,
+      visible: true,
+      clips: [
+        {
+          id: 'authored-first',
+          start_ms: 1000,
+          duration_ms: 3000,
+          trim_in_ms: 0,
+          trim_out_ms: 3000,
+          z_index: 0,
+          transform: transform(),
+          effects: [],
+          keyframes: [],
+          transitions: [],
+        },
+        {
+          id: 'authored-second',
+          start_ms: 0,
+          duration_ms: 4000,
+          trim_in_ms: 0,
+          trim_out_ms: 4000,
+          z_index: 0,
+          transform: transform(),
+          effects: [],
+          keyframes: [],
+          transitions: [],
+        },
+        {
+          id: 'z-top',
+          start_ms: 0,
+          duration_ms: 4000,
+          trim_in_ms: 0,
+          trim_out_ms: 4000,
+          z_index: 5,
+          transform: transform(),
+          effects: [],
+          keyframes: [],
+          transitions: [],
+        },
+      ],
+    },
+    {
+      id: 'track-one',
+      type: 'layer',
+      name: 'Track one',
+      locked: false,
+      muted: false,
+      visible: true,
+      clips: [{
+        id: 'next-track-low-z',
+        start_ms: 0,
+        duration_ms: 4000,
+        trim_in_ms: 0,
+        trim_out_ms: 4000,
+        z_index: -10,
+        transform: transform(),
+        effects: [],
+        keyframes: [],
+        transitions: [],
+      }],
+    },
+  ],
+};
+
 const assets: VideoAsset[] = [
   {
     id: 'video-long',
@@ -103,6 +180,28 @@ describe('timeline interval index', () => {
     expect(queryActiveClips(index, 1500).map((item) => item.clip.id)).toEqual(['long', 'short']);
     expect(queryActiveClips(index, 5000).map((item) => item.clip.id)).toEqual(['long']);
     expect(queryActiveClips(index, 11_000)).toEqual([]);
+  });
+
+  it('returns canonical composition order after temporal lookup', () => {
+    const index = buildTimelineIntervalIndex(orderingDocument, []);
+    expect(index.clips.filter((item) => item.clip.start_ms <= 1500).map((item) => item.clip.id)).toEqual([
+      'authored-second',
+      'z-top',
+      'next-track-low-z',
+      'authored-first',
+    ]);
+
+    const active = queryActiveClips(index, 1500);
+    expect(active.map((item) => item.clip.id)).toEqual([
+      'authored-first',
+      'authored-second',
+      'z-top',
+      'next-track-low-z',
+    ]);
+    expect(active.map((item) => item.clipIndex)).toEqual([0, 1, 2, 0]);
+    expect([...active].reverse().sort(compareIndexedTimelineClipOrder).map((item) => item.clip.id)).toEqual(
+      active.map((item) => item.clip.id),
+    );
   });
 
   it('virtualizes clips intersecting the visible window', () => {

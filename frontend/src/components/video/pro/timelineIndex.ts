@@ -4,11 +4,14 @@ import type {
   VideoTimelineDocument,
   VideoTimelineTrack,
 } from '../../../types/video';
+import { compareCanonicalClipOrder } from '../../../video/renderContractEvaluation';
 
 export interface IndexedTimelineClip {
   clip: VideoTimelineClip;
   track: VideoTimelineTrack;
   trackIndex: number;
+  /** Original clip array index, retained independently of interval sorting. */
+  clipIndex: number;
   asset?: VideoAsset;
   /** Cached interval end. Optional so preview-layer projections remain assignable. */
   endMs?: number;
@@ -37,6 +40,16 @@ function clipEnd(item: IndexedTimelineClip): number {
   return item.endMs ?? item.clip.start_ms + item.clip.duration_ms;
 }
 
+export function compareIndexedTimelineClipOrder(
+  left: IndexedTimelineClip,
+  right: IndexedTimelineClip,
+): number {
+  return compareCanonicalClipOrder(
+    { track_index: left.trackIndex, clip_index: left.clipIndex, z_index: left.clip.z_index ?? 0 },
+    { track_index: right.trackIndex, clip_index: right.clipIndex, z_index: right.clip.z_index ?? 0 },
+  );
+}
+
 export function buildTimelineIntervalIndex(
   document: VideoTimelineDocument | null,
   assets: VideoAsset[],
@@ -45,21 +58,25 @@ export function buildTimelineIntervalIndex(
   const clips: IndexedTimelineClip[] = [];
 
   for (const [trackIndex, track] of (document?.tracks ?? []).entries()) {
-    for (const clip of track.clips) {
+    for (const [clipIndex, clip] of track.clips.entries()) {
       clips.push({
         clip,
         track,
         trackIndex,
+        clipIndex,
         asset: clip.asset_id ? assetById.get(clip.asset_id) : undefined,
         endMs: clip.start_ms + clip.duration_ms,
       });
     }
   }
 
+  // Temporal ordering powers interval lookup only. clipIndex is retained so
+  // query results can be restored to canonical composition order afterwards.
   clips.sort((left, right) => (
     left.clip.start_ms - right.clip.start_ms
     || clipEnd(left) - clipEnd(right)
     || left.trackIndex - right.trackIndex
+    || left.clipIndex - right.clipIndex
   ));
   const starts = clips.map((item) => item.clip.start_ms);
   const prefixMaxEnd: number[] = [];
@@ -75,7 +92,9 @@ export function buildTimelineIntervalIndex(
 /**
  * Return clips active at timeMs. The prefix maximum lets the backward scan stop
  * as soon as no earlier interval can overlap the query, avoiding a full scan on
- * long projects containing short clips.
+ * long projects containing short clips. Candidates are restored to canonical
+ * composition order after lookup so interval-index temporal sorting never leaks
+ * into preview layer semantics.
  */
 export function queryActiveClips(
   index: TimelineIntervalIndex,
@@ -90,7 +109,7 @@ export function queryActiveClips(
     if (clipEnd(item) > timeMs) result.push(item);
   }
 
-  return result.reverse();
+  return result.sort(compareIndexedTimelineClipOrder);
 }
 
 /** Return clips intersecting the visible timeline window, with overscan. */
@@ -117,7 +136,8 @@ export function visibleClips(
 /**
  * Limit simultaneously mounted video decoders. The selected video is promoted
  * ahead of ordinary z-order candidates so direct manipulation never degrades
- * into a non-interactive poster frame.
+ * into a non-interactive poster frame. Equal-priority candidates retain
+ * deterministic reverse-canonical order so visually higher clips win decoders.
  */
 export function applyDecoderBudget<T extends IndexedTimelineClip>(
   items: T[],
@@ -128,8 +148,7 @@ export function applyDecoderBudget<T extends IndexedTimelineClip>(
     .filter((item) => item.asset?.mime_type.startsWith('video/'))
     .sort((left, right) => (
       Number(right.clip.id === preferredClipId) - Number(left.clip.id === preferredClipId)
-      || right.trackIndex - left.trackIndex
-      || (right.clip.z_index ?? 0) - (left.clip.z_index ?? 0)
+      || -compareIndexedTimelineClipOrder(left, right)
     ));
   const mountedIds = new Set(
     videos.slice(0, Math.max(1, limit)).map((item) => item.clip.id),

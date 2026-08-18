@@ -6,15 +6,28 @@ export interface CanonicalFrameRange {
   end_frame: number;
 }
 
-export interface CanonicalActiveClip {
+export interface CanonicalClipOrderIdentity {
   track_index: number;
   clip_index: number;
+  z_index: number;
+}
+
+export interface CanonicalActiveClip extends CanonicalClipOrderIdentity {
   track_id: string;
   clip_id: string;
-  z_index: number;
   start_frame: number;
   end_frame: number;
   source_time_ms: number;
+}
+
+/** Canonical bottom-to-top stable clip order for composition. */
+export function compareCanonicalClipOrder(
+  left: CanonicalClipOrderIdentity,
+  right: CanonicalClipOrderIdentity,
+): number {
+  return left.track_index - right.track_index
+    || left.z_index - right.z_index
+    || left.clip_index - right.clip_index;
 }
 
 /** Map an explicit authored millisecond interval to a half-open frame range. */
@@ -83,9 +96,5 @@ export function activeClipsAtFrame(document: TimelineV2Document, frameIndex: num
       });
     }
   }
-  return result.sort((left, right) => (
-    left.track_index - right.track_index
-    || left.z_index - right.z_index
-    || left.clip_index - right.clip_index
-  ));
+  return result.sort(compareCanonicalClipOrder);
 }

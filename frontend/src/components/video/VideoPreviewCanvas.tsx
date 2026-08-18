@@ -24,7 +24,7 @@ import { composePreviewFilter } from './effects/effectRegistry';
 import { sampleKeyframes } from './effects/keyframeUtils';
 import { ShapePreview } from './ShapePreview';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineTrack } from '../../types/video';
-import { applyDecoderBudget, buildTimelineIntervalIndex, queryActiveClips } from './pro/timelineIndex';
+import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips } from './pro/timelineIndex';
 import { renderPreviewPCM } from './parity/previewAudioRenderer';
 
 function formatTime(ms: number): string {
@@ -61,6 +61,7 @@ const RESIZE_HANDLES: Array<{ id: HandleId; hx: -1 | 0 | 1; hy: -1 | 0 | 1; clas
 interface LayerEntry {
   track: VideoTimelineTrack;
   trackIndex: number;
+  clipIndex: number;
   clip: VideoTimelineClip;
   asset?: VideoAsset;
 }
@@ -281,7 +282,7 @@ export function VideoPreviewCanvas() {
   const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
   const activeIndexed = queryActiveClips(intervalIndex, playheadMs)
     .filter(({ track }) => track.visible)
-    .sort((a, b) => (a.trackIndex - b.trackIndex) || ((a.clip.z_index ?? 0) - (b.clip.z_index ?? 0)));
+    .sort(compareIndexedTimelineClipOrder);
   const visualIndexed = activeIndexed.filter(({ clip, asset }) => (
     !clip.audio_only && (Boolean(clip.text) || Boolean(clip.shape) || !asset || !asset.mime_type.startsWith('audio/'))
   ));
@@ -291,7 +292,7 @@ export function VideoPreviewCanvas() {
   const posterLayers: LayerEntry[] = budgeted.posters;
   const posterClipIds = new Set(posterLayers.map(({ clip }) => clip.id));
   const previewLayers = [...layers, ...posterLayers]
-    .sort((a, b) => (a.trackIndex - b.trackIndex) || ((a.clip.z_index ?? 0) - (b.clip.z_index ?? 0)));
+    .sort(compareIndexedTimelineClipOrder);
 
   // Audio uses the same interval index as visuals, eliminating full timeline
   // scans and repeated asset lookups on every playhead update.
