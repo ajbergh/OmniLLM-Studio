@@ -3,6 +3,8 @@ name: Temporary PDF parser security migration
 on:
   push:
     branches: [fix/pdf-parser-go-2026-6115]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
