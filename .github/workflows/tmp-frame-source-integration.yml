@@ -3,6 +3,8 @@ name: Temporary frame source integration
 on:
   push:
     branches: [feat/video-wysiwyg-phase2-frame-source-selection]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
