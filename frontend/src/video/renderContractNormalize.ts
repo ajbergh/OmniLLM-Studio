@@ -68,8 +68,11 @@ export function normalizeTimelineV2EvaluationInputs(document: TimelineV2Document
       clipIds.add(clip.id);
       if (!Number.isInteger(clip.start_ms) || clip.start_ms < 0) throw runtimeError(`${clipPath}.start_ms`, 'start_ms must be a non-negative integer', 'place the clip at or after timeline time zero');
       if (!Number.isInteger(clip.duration_ms) || clip.duration_ms < 1) throw runtimeError(`${clipPath}.duration_ms`, 'duration_ms must be an integer of at least 1', 'provide a positive output-timeline duration');
-      if (!Number.isInteger(clip.trim_in_ms) || !Number.isInteger(clip.trim_out_ms) || clip.trim_in_ms < 0 || clip.trim_out_ms < 0) {
-        throw runtimeError(`${clipPath}.trim_in_ms`, 'trim values must be non-negative integers', 'provide non-negative source trim points');
+      if (!Number.isInteger(clip.trim_in_ms) || clip.trim_in_ms < 0) {
+        throw runtimeError(`${clipPath}.trim_in_ms`, 'trim_in_ms must be a non-negative integer', 'provide a non-negative source trim-in point');
+      }
+      if (!Number.isInteger(clip.trim_out_ms) || clip.trim_out_ms < 0) {
+        throw runtimeError(`${clipPath}.trim_out_ms`, 'trim_out_ms must be a non-negative integer', 'provide a non-negative source trim-out point');
       }
 
       const playbackRate = clip.playback_rate ?? 1;

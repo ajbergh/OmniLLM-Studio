@@ -172,6 +172,23 @@
       "path": "tracks[0].clips[0].playback_rate"
     },
     {
+      "name": "negative-trim-out",
+      "input": {
+        "version": 2,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 1000,
+        "tracks": [
+          {
+            "id": "one", "type": "video", "name": "One", "locked": false, "muted": false, "visible": true,
+            "clips": [{ "id": "trim", "start_ms": 0, "duration_ms": 100, "trim_in_ms": 0, "trim_out_ms": -1, "effects": [], "keyframes": [] }]
+          }
+        ],
+        "markers": [],
+        "metadata": {}
+      },
+      "path": "tracks[0].clips[0].trim_out_ms"
+    },
+    {
       "name": "invalid-opacity",
       "input": {
         "version": 2,

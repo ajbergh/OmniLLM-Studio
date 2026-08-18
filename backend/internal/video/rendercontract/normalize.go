@@ -126,8 +126,11 @@ func NormalizeTimelineV2EvaluationInputs(doc TimelineV2Document) (TimelineV2Docu
 			if clip.DurationMS < 1 {
 				return TimelineV2Document{}, runtimeTimelineError(clipPath+".duration_ms", "duration_ms must be at least 1", "provide a positive output-timeline duration")
 			}
-			if clip.TrimInMS < 0 || clip.TrimOutMS < 0 {
-				return TimelineV2Document{}, runtimeTimelineError(clipPath+".trim_in_ms", "trim values cannot be negative", "provide non-negative source trim points")
+			if clip.TrimInMS < 0 {
+				return TimelineV2Document{}, runtimeTimelineError(clipPath+".trim_in_ms", "trim_in_ms cannot be negative", "provide a non-negative source trim-in point")
+			}
+			if clip.TrimOutMS < 0 {
+				return TimelineV2Document{}, runtimeTimelineError(clipPath+".trim_out_ms", "trim_out_ms cannot be negative", "provide a non-negative source trim-out point")
 			}
 
 			rate := 1.0
