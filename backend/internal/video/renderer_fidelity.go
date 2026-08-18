@@ -512,35 +512,23 @@ func sampleEffects(effects []TimelineEffect, keyframes []TimelineKeyframe, sampl
 }
 
 func evaluateTimelineKeyframes(keyframes []TimelineKeyframe, property string, timeMS int64) (float64, bool) {
-	points := make([]TimelineKeyframe, 0)
-	for _, keyframe := range keyframes {
-		if strings.EqualFold(strings.TrimSpace(keyframe.Property), property) {
-			points = append(points, keyframe)
-		}
-	}
-	if len(points) == 0 {
-		return 0, false
-	}
-	sort.Slice(points, func(i, j int) bool { return points[i].TimeMS < points[j].TimeMS })
-	if timeMS <= points[0].TimeMS {
-		return points[0].Value, true
-	}
-	for i := 1; i < len(points); i++ {
-		next := points[i]
-		if timeMS <= next.TimeMS {
-			prev := points[i-1]
-			span := next.TimeMS - prev.TimeMS
-			if span < 1 {
-				span = 1
+	points := make([]rendercontract.PropertyKeyframe, len(keyframes))
+	for i, keyframe := range keyframes {
+		var curve *rendercontract.MotionCurve
+		if keyframe.Curve != nil {
+			curve = &rendercontract.MotionCurve{
+				Type: keyframe.Curve.Type, X1: keyframe.Curve.X1, Y1: keyframe.Curve.Y1,
+				X2: keyframe.Curve.X2, Y2: keyframe.Curve.Y2,
+				Stiffness: keyframe.Curve.Stiffness, Damping: keyframe.Curve.Damping, Mass: keyframe.Curve.Mass,
 			}
-			progress := clamp01(float64(timeMS-prev.TimeMS) / float64(span))
-			eased := curveProgress(progress, next.Curve, next.Easing)
-			return prev.Value + (next.Value-prev.Value)*eased, true
+		}
+		points[i] = rendercontract.PropertyKeyframe{
+			Property: keyframe.Property, TimeMS: keyframe.TimeMS, Value: keyframe.Value,
+			Easing: keyframe.Easing, Curve: curve,
 		}
 	}
-	return points[len(points)-1].Value, true
+	return rendercontract.SamplePropertyKeyframes(points, property, timeMS)
 }
-
 func clipNeedsCameraSampling(scenes []TimelineScene, clip TimelineClip) bool {
 	for _, scene := range scenes {
 		if scene.Camera == nil || len(scene.Camera.Keyframes) == 0 {

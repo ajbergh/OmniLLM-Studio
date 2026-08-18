@@ -1,10 +1,12 @@
 /**
  * Keyframe sampling shared by the preview canvas, timeline clip envelopes,
- * and the keyframe lane. Built-in easing, cubic Bezier, and segment-local
- * spring semantics come from the renderer-independent render contract.
+ * and the keyframe lane. Canonical interpolation lives in the renderer-
+ * independent render contract; this module retains editor-facing property
+ * lists and the small curve cache used by interactive UI callers.
  */
 import type { VideoMotionCurve, VideoTimelineKeyframe } from '../../../types/video';
 import { curveProgress } from '../../../video/renderContract';
+import { samplePropertyKeyframes } from '../../../video/renderContractProperties';
 
 export type KeyframeProperty = VideoTimelineKeyframe['property'];
 
@@ -33,29 +35,14 @@ export function applyMotionCurve(t: number, curve?: VideoMotionCurve, easing?: s
 }
 
 /**
- * Samples one property's keyframes at a clip-relative time (`time_ms` is
- * measured from the clip start). Returns null when the property has no
- * keyframes. The value holds flat before the first and after the last
- * keyframe; each segment eases using the LATER keyframe's easing.
+ * Compatibility wrapper for editor callers. Sampling semantics are owned by
+ * the canonical render contract: flat holds outside the authored range and the
+ * LATER keyframe's curve/easing for each segment.
  */
 export function sampleKeyframes(
   keyframes: VideoTimelineKeyframe[] | undefined,
   property: KeyframeProperty,
   clipTimeMs: number,
 ): number | null {
-  const points = (keyframes || [])
-    .filter((keyframe) => keyframe.property === property)
-    .sort((a, b) => a.time_ms - b.time_ms);
-  if (points.length === 0) return null;
-  if (clipTimeMs <= points[0].time_ms) return points[0].value;
-  for (let i = 1; i < points.length; i += 1) {
-    if (clipTimeMs <= points[i].time_ms) {
-      const prev = points[i - 1];
-      const next = points[i];
-      const span = next.time_ms - prev.time_ms;
-      const t = span <= 0 ? 1 : (clipTimeMs - prev.time_ms) / span;
-      return prev.value + (next.value - prev.value) * applyMotionCurve(t, next.curve, next.easing);
-    }
-  }
-  return points[points.length - 1].value;
+  return samplePropertyKeyframes(keyframes, property, clipTimeMs);
 }

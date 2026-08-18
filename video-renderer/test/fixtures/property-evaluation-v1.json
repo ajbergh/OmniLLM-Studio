@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "description": "Cross-runtime canonical numeric property/keyframe evaluation samples.",
+  "keyframe_cases": [
+    {
+      "name": "linear-midpoint",
+      "property": "x",
+      "time_ms": 500,
+      "keyframes": [
+        { "property": "x", "time_ms": 0, "value": 0, "easing": "linear" },
+        { "property": "x", "time_ms": 1000, "value": 100, "easing": "linear" }
+      ],
+      "expected": 50
+    },
+    {
+      "name": "later-keyframe-ease-in",
+      "property": "x",
+      "time_ms": 500,
+      "keyframes": [
+        { "property": "x", "time_ms": 0, "value": 0, "easing": "linear" },
+        { "property": "x", "time_ms": 1000, "value": 100, "easing": "ease-in" }
+      ],
+      "expected": 25
+    },
+    {
+      "name": "later-keyframe-step-before-end",
+      "property": "opacity",
+      "time_ms": 999,
+      "keyframes": [
+        { "property": "opacity", "time_ms": 0, "value": 0.2, "easing": "linear" },
+        { "property": "opacity", "time_ms": 1000, "value": 1, "easing": "step" }
+      ],
+      "expected": 0.2
+    },
+    {
+      "name": "later-keyframe-step-at-end",
+      "property": "opacity",
+      "time_ms": 1000,
+      "keyframes": [
+        { "property": "opacity", "time_ms": 0, "value": 0.2, "easing": "linear" },
+        { "property": "opacity", "time_ms": 1000, "value": 1, "easing": "step" }
+      ],
+      "expected": 1
+    },
+    {
+      "name": "flat-before-first",
+      "property": "rotation",
+      "time_ms": 0,
+      "keyframes": [
+        { "property": "rotation", "time_ms": 200, "value": 10 },
+        { "property": "rotation", "time_ms": 800, "value": 50 }
+      ],
+      "expected": 10
+    },
+    {
+      "name": "flat-after-last",
+      "property": "rotation",
+      "time_ms": 1200,
+      "keyframes": [
+        { "property": "rotation", "time_ms": 200, "value": 10 },
+        { "property": "rotation", "time_ms": 800, "value": 50 }
+      ],
+      "expected": 50
+    },
+    {
+      "name": "property-normalization",
+      "property": "x",
+      "time_ms": 500,
+      "keyframes": [
+        { "property": " X ", "time_ms": 0, "value": 10 },
+        { "property": "x", "time_ms": 1000, "value": 30 }
+      ],
+      "expected": 20
+    },
+    {
+      "name": "effect-automation-remains-generic",
+      "property": "effect.blur.amount",
+      "time_ms": 500,
+      "keyframes": [
+        { "property": "effect.blur.amount", "time_ms": 0, "value": 0 },
+        { "property": "effect.blur.amount", "time_ms": 1000, "value": 1 }
+      ],
+      "expected": 0.5
+    },
+    {
+      "name": "bezier-segment",
+      "property": "scale",
+      "time_ms": 500,
+      "keyframes": [
+        { "property": "scale", "time_ms": 0, "value": 0 },
+        {
+          "property": "scale",
+          "time_ms": 1000,
+          "value": 100,
+          "curve": { "type": "bezier", "x1": 0.25, "y1": 0.1, "x2": 0.25, "y2": 1 }
+        }
+      ],
+      "expected": 80.24033875848571
+    },
+    {
+      "name": "no-matching-property",
+      "property": "y",
+      "time_ms": 500,
+      "keyframes": [
+        { "property": "x", "time_ms": 0, "value": 0 },
+        { "property": "x", "time_ms": 1000, "value": 1 }
+      ],
+      "found": false
+    }
+  ],
+  "clip_cases": [
+    { "name": "default-x", "property": "x", "time_ms": 500, "clip": { "keyframes": [] }, "expected": 0 },
+    { "name": "default-scale", "property": "scale", "time_ms": 500, "clip": { "keyframes": [] }, "expected": 1 },
+    { "name": "default-opacity", "property": "opacity", "time_ms": 500, "clip": { "keyframes": [] }, "expected": 1 },
+    { "name": "default-volume", "property": "volume", "time_ms": 500, "clip": { "keyframes": [] }, "expected": 1 },
+    {
+      "name": "scale-x-falls-back-to-uniform",
+      "property": "scale_x",
+      "time_ms": 500,
+      "clip": { "transform": { "scale": 1.5 }, "keyframes": [] },
+      "expected": 1.5
+    },
+    {
+      "name": "scale-x-explicit-wins",
+      "property": "scale_x",
+      "time_ms": 500,
+      "clip": { "transform": { "scale": 1.5, "scale_x": 0.75 }, "keyframes": [] },
+      "expected": 0.75
+    },
+    {
+      "name": "rotation-z-falls-back-to-2d-rotation",
+      "property": "rotation_z",
+      "time_ms": 500,
+      "clip": { "transform": { "rotation": 15 }, "keyframes": [] },
+      "expected": 15
+    },
+    {
+      "name": "static-volume",
+      "property": "volume",
+      "time_ms": 500,
+      "clip": { "volume": 0.4, "keyframes": [] },
+      "expected": 0.4
+    },
+    {
+      "name": "keyframe-overrides-static-x",
+      "property": "x",
+      "time_ms": 500,
+      "clip": {
+        "transform": { "x": 20 },
+        "keyframes": [
+          { "property": "x", "time_ms": 0, "value": 0 },
+          { "property": "x", "time_ms": 1000, "value": 100 }
+        ]
+      },
+      "expected": 50
+    }
+  ],
+  "camera_cases": [
+    { "name": "default-x", "property": "x", "time_ms": 500, "camera": {}, "expected": 0 },
+    { "name": "default-field-of-view", "property": "field_of_view", "time_ms": 500, "camera": {}, "expected": 50 },
+    { "name": "static-x", "property": "x", "time_ms": 500, "camera": { "x": 12 }, "expected": 12 },
+    {
+      "name": "keyframed-field-of-view",
+      "property": "field_of_view",
+      "time_ms": 500,
+      "camera": {
+        "field_of_view": 50,
+        "keyframes": [
+          { "property": "field_of_view", "time_ms": 0, "value": 50 },
+          { "property": "field_of_view", "time_ms": 1000, "value": 70 }
+        ]
+      },
+      "expected": 60
+    }
+  ],
+  "unsupported_cases": [
+    { "scope": "clip", "property": "field_of_view" },
+    { "scope": "camera", "property": "opacity" },
+    { "scope": "clip", "property": "effect.blur.amount" }
+  ]
+}

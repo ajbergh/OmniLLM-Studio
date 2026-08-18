@@ -1,5 +1,5 @@
 import type { VideoAsset, VideoTimelineClip, VideoTimelineDocument, VideoTimelineTrack } from '../../../types/video';
-import { sampleKeyframes } from '../effects/keyframeUtils';
+import { evaluateClipProperty } from '../../../video/renderContractProperties';
 
 export const PARITY_AUDIO_SAMPLE_RATE = 48_000;
 export const PARITY_AUDIO_CHANNELS = 2;
@@ -42,8 +42,7 @@ export function collectAudibleTimelineClips(
 
 export function sampleClipGain(clip: VideoTimelineClip, clipTimeMs: number): number {
   const boundedTime = Math.max(0, Math.min(clip.duration_ms, clipTimeMs));
-  const keyed = sampleKeyframes(clip.keyframes, 'volume', boundedTime);
-  const volume = Math.max(0, keyed ?? clip.volume ?? 1);
+  const volume = Math.max(0, evaluateClipProperty(clip, 'volume', boundedTime));
   let fade = 1;
   if ((clip.fade_in_ms ?? 0) > 0) fade = Math.min(fade, boundedTime / (clip.fade_in_ms as number));
   if ((clip.fade_out_ms ?? 0) > 0) fade = Math.min(fade, (clip.duration_ms - boundedTime) / (clip.fade_out_ms as number));
