@@ -23,14 +23,16 @@ const supportedCropKeys = new Set(['top', 'right', 'bottom', 'left']);
 const visualTransformDefaults: TimelineV2Transform = { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
 
 export class RenderContractAdapterError extends Error {
-  constructor(
-    public readonly code: string,
-    public readonly path: string,
-    message: string,
-    public readonly remediation: string,
-  ) {
+  readonly code: string;
+  readonly path: string;
+  readonly remediation: string;
+
+  constructor(code: string, path: string, message: string, remediation: string) {
     super(path ? `${path}: ${message}` : message);
     this.name = 'RenderContractAdapterError';
+    this.code = code;
+    this.path = path;
+    this.remediation = remediation;
   }
 }
 
