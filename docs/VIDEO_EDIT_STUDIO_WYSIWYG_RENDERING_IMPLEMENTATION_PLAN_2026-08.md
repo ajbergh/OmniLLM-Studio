@@ -14,7 +14,8 @@
 - Phase 0 has reproducible hosted evidence and passing audio/delivery gates, but remains open for visual threshold approval, unsupported-audio-boundary coverage, and a second OS/FFmpeg evidence run.
 - The 103-frame visual baseline is intentionally a **known-mismatch baseline**. It proves the current preview and FFmpeg composition engines disagree; its mismatch values must not be adopted as acceptable production thresholds.
 - The immediate implementation focus has moved to **Phase 2 — Canonical contract** while Phase 0 sign-off work remains in parallel.
-- Active branch: `feat/video-wysiwyg-phase2-contract-foundation`.
+- PR #191, **Start canonical Video Edit Studio render contract**, is the current Phase 2 foundation PR on branch `feat/video-wysiwyg-phase2-contract-foundation`.
+- PR #191's first hosted Quality Gate exposed two branch-local issues: a Node-only fixture loader located inside the browser TypeScript build tree and one non-gofmt Go test file. Both have been corrected on the branch; the PR must still satisfy a fresh hosted Quality Gate before merge.
 
 ## Implementation tracker
 
@@ -22,7 +23,7 @@
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic fixture, immutable snapshot capture, 103 exact 640×360 frame pairs, 206 unique diagnostics, independent PCM reference, EBU R128, delivery timing checks, reports, and hosted artifacts are implemented. Final visual threshold approval, unsupported-audio boundary, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots, staged source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale-request rejection, legacy labeling, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Contract foundation started 2026-08-18: strict Timeline v2 and Render Manifest v1 schemas, shared cross-runtime contract fixture, canonical rational frame/boundary/source-time/easing helpers in Go and TypeScript, and frontend keyframe sampling delegation. Full canonical FrameState/AudioGraph evaluation and renderer adoption remain. |
+| Phase 2 — Canonical contract | In progress | PR #191 establishes strict Timeline v2 and Render Manifest v1 schemas, a shared cross-runtime contract fixture, canonical rational frame/boundary/source-time/easing helpers in Go and TypeScript, and frontend keyframe sampling delegation. Full canonical FrameState/AudioGraph evaluation and renderer adoption remain. |
 | Phase 3 — Shared preview composition | Not started | Replace preview-local composition math with canonical FrameState/AudioGraph consumption. |
 | Phase 4 — Shared Chromium render worker | Not started | Headless/browser renderer consumes the same canonical composition package behind a guarded rollout flag. |
 | Phase 5 — Visual parity closure | Not started | Close geometry, text, crop/fit, effects, transitions, cursor, camera, color, and deterministic asset-loading parity. |
@@ -176,7 +177,7 @@ Canonical contract files live under `video-renderer/` even before the shared Chr
 
 Language adapters/evaluators are expected to prove conformance against the same fixtures until a single shared runtime can replace the duplicated language boundary.
 
-### Implemented in current Phase 2 foundation slice
+### Implemented in PR #191 foundation slice
 
 - Added strict JSON Schema draft 2020-12 Timeline v2 contract with `additionalProperties: false` at authorable semantic nodes and explicit extension points for metadata/effect parameter payloads.
 - Added Render Manifest v1 schema binding immutable snapshot/timeline/asset identity to explicit output settings.
@@ -184,6 +185,7 @@ Language adapters/evaluators are expected to prove conformance against the same 
 - Added `backend/internal/video/rendercontract` with pure rational frame-time, start/end frame, frame-count, activity, source-time, and v1-compatible easing helpers.
 - Added `frontend/src/video/renderContract.ts` with matching helpers.
 - Added Go and Vitest conformance tests against the same fixture.
+- Kept the Node-only frontend fixture loader outside the browser build tree at `frontend/test/renderContract.test.ts` so `tsc -b` remains browser-only.
 - Changed frontend `keyframeUtils.ts` so built-in easing delegates to the canonical frontend render contract while Bezier and segment-local spring behavior remains in the current curve implementation.
 
 ### Remaining Phase 2 work
@@ -381,6 +383,19 @@ Run the parity fixture/report workflow whenever a change can affect frame select
 | Audio rate/channel behavior differs by runtime | Explicit AudioGraph and unsupported-boundary policy before enabling shared export by default |
 | Legacy renderer receives new semantics during migration | Freeze approximation-only feature growth; route new semantics to canonical contract/shared worker |
 
+## Validation log
+
+### PR #191 — Phase 2 contract foundation
+
+- First hosted Quality Gate: `32138535606` — **failed**.
+- Frontend lint: passed with existing warnings.
+- Frontend unit tests: 25 files / 100 tests passed, including the new render-contract fixture tests.
+- Video Studio performance evidence: passed.
+- Frontend production build: failed because `frontend/src/video/renderContract.test.ts` imported Node built-ins and `tsc -b` intentionally compiles browser `src` without Node globals.
+- Backend formatting gate: failed because `backend/internal/video/rendercontract/contract_test.go` required `gofmt`.
+- Windows desktop capture, Windows plugin/sandbox, macOS sandbox, Linux workspace/quota/egress, and Helm checks reached by the first run were successful.
+- Fixes applied: moved the Node-only fixture loader to `frontend/test/renderContract.test.ts` and applied `gofmt` to the Go test. A fresh Quality Gate is required before merge.
+
 ## Implementation log
 
 ### 2026-08-17 — Phase 0/1 foundation
@@ -393,17 +408,17 @@ Run the parity fixture/report workflow whenever a change can affect frame select
 ### 2026-08-18 — Phase 2 contract foundation
 
 - Refreshed `main` after PR #187 and confirmed subsequent merges #188/#189 do not supersede the WYSIWYG plan.
-- Started branch `feat/video-wysiwyg-phase2-contract-foundation` from `main` commit `2443db2228187597df7e8d28cba01069f05ca629`.
+- Started branch `feat/video-wysiwyg-phase2-contract-foundation` from `main` commit `2443db2228187597df7e8d28cba01069f05ca629` and opened PR #191.
 - Added Timeline v2 and Render Manifest v1 JSON schemas under `video-renderer/contracts/`.
 - Added `video-renderer/test/fixtures/render-contract-v1.json` as a shared Go/TypeScript contract fixture.
 - Added pure Go `backend/internal/video/rendercontract` frame/time/source/easing primitives and fixture/schema tests.
 - Added matching frontend `frontend/src/video/renderContract.ts` primitives and Vitest fixture coverage.
 - Routed built-in frontend keyframe easing through the canonical frontend helper, preserving Bezier and segment-local spring behavior.
-- Next validation step: open the Phase 2 foundation PR, inspect repository Quality Gate results, fix any failures, and merge only when the applicable gates are green.
+- Corrected the two first-run Quality Gate failures without changing the contract semantics.
 
 ## Next recommended implementation slice
 
-After this foundation PR is validated and merged:
+After PR #191 is validated and merged:
 
 1. Add generated/mechanically verified Timeline v2 / Render Manifest v1 Go and TypeScript type projections and a CI drift check.
 2. Implement the v1-to-canonical adapter with explicit compatibility tests against current preview behavior.
