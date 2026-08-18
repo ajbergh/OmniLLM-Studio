@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestBuildGeminiStudioImageBodyUsesResponseFormatGeometry(t *testing.T) {
+func TestBuildGeminiStudioImageBodyUsesImageConfigGeometry(t *testing.T) {
 	req := ImageStudioRequest{
 		ImageRequest: ImageRequest{
 			Prompt: "edit the room",
@@ -39,25 +39,21 @@ func TestBuildGeminiStudioImageBodyUsesResponseFormatGeometry(t *testing.T) {
 	if !ok {
 		t.Fatalf("generationConfig = %#v", body["generationConfig"])
 	}
-	if _, exists := generationConfig["imageConfig"]; exists {
-		t.Fatalf("legacy imageConfig must not be serialized: %#v", generationConfig)
+	if _, exists := generationConfig["responseFormat"]; exists {
+		t.Fatalf("protobuf enum responseFormat must not be serialized: %#v", generationConfig)
 	}
 	if _, exists := generationConfig["candidateCount"]; exists {
 		t.Fatalf("candidateCount must not be serialized for Image Studio: %#v", generationConfig)
 	}
-	responseFormat, ok := generationConfig["responseFormat"].(map[string]interface{})
+	imageConfig, ok := generationConfig["imageConfig"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("responseFormat = %#v", generationConfig["responseFormat"])
+		t.Fatalf("generationConfig.imageConfig = %#v", generationConfig["imageConfig"])
 	}
-	imageFormat, ok := responseFormat["image"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("responseFormat.image = %#v", responseFormat["image"])
+	if imageConfig["aspectRatio"] != "3:2" {
+		t.Fatalf("aspectRatio = %#v, want 3:2", imageConfig["aspectRatio"])
 	}
-	if imageFormat["aspectRatio"] != "3:2" {
-		t.Fatalf("aspectRatio = %#v, want 3:2", imageFormat["aspectRatio"])
-	}
-	if _, exists := imageFormat["imageSize"]; exists {
-		t.Fatalf("pixel dimensions must not be sent as a Gemini imageSize tier: %#v", imageFormat)
+	if _, exists := imageConfig["imageSize"]; exists {
+		t.Fatalf("pixel dimensions must not be sent as a Gemini imageSize tier: %#v", imageConfig)
 	}
 
 	contents, ok := body["contents"].([]map[string]interface{})
@@ -82,7 +78,7 @@ func TestBuildGeminiStudioImageBodyUsesResponseFormatGeometry(t *testing.T) {
 	}
 }
 
-func TestBuildGeminiStudioImageBodyOmitsResponseFormatForInferredGeometry(t *testing.T) {
+func TestBuildGeminiStudioImageBodyOmitsImageConfigForInferredGeometry(t *testing.T) {
 	for _, mode := range []ImageGeometryMode{ImageGeometryProviderAuto, ImageGeometryPreserveSource} {
 		t.Run(string(mode), func(t *testing.T) {
 			body := buildGeminiStudioImageBody(
@@ -90,8 +86,8 @@ func TestBuildGeminiStudioImageBodyOmitsResponseFormatForInferredGeometry(t *tes
 				imageStudioGeometryResolution{Mode: mode},
 			)
 			generationConfig := body["generationConfig"].(map[string]interface{})
-			if _, exists := generationConfig["responseFormat"]; exists {
-				t.Fatalf("responseFormat must be omitted for %s: %#v", mode, generationConfig)
+			if _, exists := generationConfig["imageConfig"]; exists {
+				t.Fatalf("imageConfig must be omitted for %s: %#v", mode, generationConfig)
 			}
 		})
 	}
