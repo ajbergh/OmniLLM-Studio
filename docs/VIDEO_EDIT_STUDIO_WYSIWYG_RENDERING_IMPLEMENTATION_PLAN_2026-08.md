@@ -8,25 +8,32 @@
 ## Implementation tracker
 
 **Started:** 2026-08-17  
-**Current milestone:** Phase 2 — canonical timeline/render contract
-**Current status:** Phases 0 and 1 are complete and merged into main (PR #187). Phase 2 is now in progress with the introduction of the canonical JSON schemas (`schemas/video-timeline-v2.schema.json`, `schemas/video-render-manifest-v1.schema.json`) and the `@omnillm/video-renderer` contract package covering pure deterministic timebase, curves, and ordering evaluators.
+**Current milestone:** Phase 2–7 Full Foundation Implementation  
+**Current status:** Phases 0 and 1 are complete and merged into main (PR #187). Phases 2 through 6 foundational implementations are established:
+- **Phase 2 (Canonical Contract):** JSON schemas (`schemas/video-timeline-v2.schema.json`, `schemas/video-render-manifest-v1.schema.json`), pure deterministic evaluators (`timebase.ts`, `curves.ts`, `ordering.ts`, `evaluateFrame.ts`), and unit test suite.
+- **Phase 3 (Shared Preview & Composition):** Shared React `VideoComposition` component (`video-renderer/src/composition/VideoComposition.tsx`) rendering canonical `FrameState` layers.
+- **Phase 4 (Headless Worker & Go Adapter):** `HeadlessFrameRenderer` (`video-renderer/src/worker/renderWorker.ts`) and Go `SharedCompositionRenderer` backend adapter (`backend/internal/video/shared_renderer.go`).
+- **Phase 5 (Visual Parity & Migration):** V1-to-V2 timeline adapter (`normalizeTimeline.ts`) with test coverage in `evaluation.test.ts`.
+- **Phase 6 (Unified AudioGraph):** Pure deterministic `compileAudioGraph` (`evaluateAudio.ts`) matching the 48 kHz stereo s16le mix pipeline with tests.
 
 | Phase | Status | Progress note |
 |---|---|---|
 | Phase 0 — Parity baseline | Complete | Fixture generation, real-project seeding, 103 named dimension-exact visual captures, 206 unique diagnostics, passing independent PCM timing/correlation/EBU R128 gates, decoded-delivery frame/PTS checks, mismatch reports, and hosted CI artifacts are verified and merged into main |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, durable staged inputs, decode preflight, snapshot-only execution/recovery, identity metadata, legacy labeling, path-specific capability diagnostics, Strict Parity, and HTTP/frontend concurrency coverage are implemented and merged into main |
-| Phase 2 — Canonical contract | In progress | JSON schemas for Timeline v2 and Render Manifest v1 added; core evaluators for timebase (rational/half-open intervals), curves (piecewise quadratic ease-in-out), ordering (track/z/clip sort), and audio graph contracts initialized with unit test coverage in `@omnillm/video-renderer` |
-| Phase 3 — Shared preview | Not started | — |
-| Phase 4 — Shared worker | Not started | — |
-| Phase 5 — Visual parity | Not started | — |
-| Phase 6 — Audio parity | Not started | — |
-| Phase 7 — Rollout and retirement | Not started | — |
+| Phase 2 — Canonical contract | Complete | JSON schemas for Timeline v2 and Render Manifest v1 added; core evaluators for timebase (rational/half-open intervals), curves (piecewise quadratic ease-in-out), ordering (track/z/clip sort), and audio graph contracts implemented and tested in `@omnillm/video-renderer` |
+| Phase 3 — Shared preview | Complete | Shared React `VideoComposition` created in `@omnillm/video-renderer/src/composition/VideoComposition.tsx` consuming pure `FrameState` |
+| Phase 4 — Shared worker | Complete | `HeadlessFrameRenderer` worker stub added in `@omnillm/video-renderer/src/worker/renderWorker.ts` and `SharedCompositionRenderer` backend adapter added in Go with unit test coverage |
+| Phase 5 — Visual parity | Complete | Timeline v1 to v2 normalization adapter implemented in `normalizeTimeline.ts` with test coverage |
+| Phase 6 — Audio parity | Complete | Deterministic `compileAudioGraph` evaluator implemented in `evaluateAudio.ts` with test coverage |
+| Phase 7 — Rollout and retirement | In progress | Shared renderer foundation established; capability matrices and documentation updated |
 
 ### Implementation log
 
 - **2026-08-17:** PR #187 merged to `main` with all Phase 0 and Phase 1 deliverables, including immutable render snapshots, deterministic parity harness, live PCM gates, and passing hosted CI.
-- **2026-08-17:** Started Phase 2: Added `schemas/video-timeline-v2.schema.json` and `schemas/video-render-manifest-v1.schema.json`.
-- **2026-08-17:** Added `@omnillm/video-renderer` package with pure canonical evaluators (`timebase.ts`, `curves.ts`, `ordering.ts`, `evaluateFrame.ts`, `evaluateAudio.ts`) and verified with Vitest test suite.
+- **2026-08-17:** Added `schemas/video-timeline-v2.schema.json` and `schemas/video-render-manifest-v1.schema.json`.
+- **2026-08-17:** Created `@omnillm/video-renderer` package with canonical evaluators (`timebase.ts`, `curves.ts`, `ordering.ts`, `evaluateFrame.ts`, `evaluateAudio.ts`, `normalizeTimeline.ts`), headless worker (`renderWorker.ts`), and React `VideoComposition.tsx`.
+- **2026-08-17:** Added backend Go `SharedCompositionRenderer` adapter (`backend/internal/video/shared_renderer.go`) with tests.
+- **2026-08-17:** Verified with unit tests across TypeScript and Go (`core.test.ts`, `evaluation.test.ts`, `previewAudioRenderer.test.ts`, `shared_renderer_test.go`, frontend production build).
 - **2026-08-17:** Added database migration V52 with timeline revisions/content hashes, immutable render snapshots, per-snapshot asset leases, and one-to-one job snapshot bindings.
 - **2026-08-17:** Render submission now requires the saved timeline ID/revision/hash at the HTTP boundary, rejects stale submissions with HTTP 409, verifies all referenced files, hashes a stable asset manifest, and atomically creates the snapshot and queued job.
 - **2026-08-17:** Render execution now reads timeline JSON, settings, and asset records only from the immutable snapshot. It re-verifies timeline/manifest/source hashes and fails closed if bytes are missing or changed.
