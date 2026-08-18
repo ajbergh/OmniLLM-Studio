@@ -156,14 +156,46 @@ func validateV1Transform(transform map[string]any, path string) error {
 }
 
 func validateCanonicalNumber(raw any, path string) error {
-	value, ok := raw.(float64)
-	if !ok || math.IsNaN(value) || math.IsInf(value, 0) {
-		return &CanonicalAdapterError{
-			Code: canonicalAdapterTransformValueCode, Path: path,
-			Message: "v1 transform value must be a finite number", Remediation: "replace the value with a finite numeric transform parameter",
-		}
+	var value float64
+	switch typed := raw.(type) {
+	case float64:
+		value = typed
+	case float32:
+		value = float64(typed)
+	case int:
+		value = float64(typed)
+	case int8:
+		value = float64(typed)
+	case int16:
+		value = float64(typed)
+	case int32:
+		value = float64(typed)
+	case int64:
+		value = float64(typed)
+	case uint:
+		value = float64(typed)
+	case uint8:
+		value = float64(typed)
+	case uint16:
+		value = float64(typed)
+	case uint32:
+		value = float64(typed)
+	case uint64:
+		value = float64(typed)
+	default:
+		return invalidV1TransformValue(path)
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return invalidV1TransformValue(path)
 	}
 	return nil
+}
+
+func invalidV1TransformValue(path string) *CanonicalAdapterError {
+	return &CanonicalAdapterError{
+		Code: canonicalAdapterTransformValueCode, Path: path,
+		Message: "v1 transform value must be a finite number", Remediation: "replace the value with a finite numeric transform parameter",
+	}
 }
 
 func unsupportedV1Transform(path, key string) *CanonicalAdapterError {
