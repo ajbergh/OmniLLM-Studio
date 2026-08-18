@@ -182,22 +182,26 @@ describe('timeline interval index', () => {
     expect(queryActiveClips(index, 11_000)).toEqual([]);
   });
 
-  it('retains authored clip identity and restores canonical composition order after temporal lookup', () => {
+  it('returns canonical composition order after temporal lookup', () => {
     const index = buildTimelineIntervalIndex(orderingDocument, []);
-    const temporal = queryActiveClips(index, 1500);
-    expect(temporal.map((item) => item.clip.id)).toEqual([
+    expect(index.clips.filter((item) => item.clip.start_ms <= 1500).map((item) => item.clip.id)).toEqual([
       'authored-second',
       'z-top',
       'next-track-low-z',
       'authored-first',
     ]);
-    expect([...temporal].sort(compareIndexedTimelineClipOrder).map((item) => item.clip.id)).toEqual([
+
+    const active = queryActiveClips(index, 1500);
+    expect(active.map((item) => item.clip.id)).toEqual([
       'authored-first',
       'authored-second',
       'z-top',
       'next-track-low-z',
     ]);
-    expect([...temporal].sort(compareIndexedTimelineClipOrder).map((item) => item.clipIndex)).toEqual([0, 1, 2, 0]);
+    expect(active.map((item) => item.clipIndex)).toEqual([0, 1, 2, 0]);
+    expect([...active].reverse().sort(compareIndexedTimelineClipOrder).map((item) => item.clip.id)).toEqual(
+      active.map((item) => item.clip.id),
+    );
   });
 
   it('virtualizes clips intersecting the visible window', () => {
