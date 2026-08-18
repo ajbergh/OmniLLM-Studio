@@ -5,7 +5,32 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/go-pdf/fpdf"
 )
+
+func TestParsePDFExtractsTextWithPureGoParser(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sample.pdf")
+	doc := fpdf.New("P", "mm", "A4", "")
+	doc.AddPage()
+	doc.SetFont("Arial", "", 12)
+	doc.MultiCell(0, 8, "OmniLLM secure PDF parser migration", "", "L", false)
+	if err := doc.OutputFileAndClose(path); err != nil {
+		t.Fatalf("write test PDF: %v", err)
+	}
+
+	parsed, err := ParseFile(path, "application/pdf")
+	if err != nil {
+		t.Fatalf("ParseFile() error = %v", err)
+	}
+	markdown := strings.Join(strings.Fields(RenderMarkdown(parsed)), " ")
+	if !strings.Contains(markdown, "OmniLLM secure PDF parser migration") {
+		t.Fatalf("expected extracted PDF text, got %q", markdown)
+	}
+	if len(parsed.Nodes) == 0 || parsed.Nodes[0].Metadata["parser"] != "tsawler/tabula" {
+		t.Fatalf("expected tsawler/tabula parser metadata, got %#v", parsed.Nodes)
+	}
+}
 
 func TestParseHTMLPreservesHeadingsAndIgnoresNavigation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "page.html")
