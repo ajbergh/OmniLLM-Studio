@@ -329,8 +329,25 @@ export function formatModelOptionLabel(providerType: string, model: string): str
   return isFreeModel(providerType, model) ? `${model} (FREE)` : model;
 }
 
-export function getKnownChatModels(providerType: string): string[] {
-  return [...(PROVIDER_MODEL_CATALOG[providerType.toLowerCase()]?.chat || [])];
+export function getKnownChatModels(providerType: string, customModels?: string[]): string[] {
+  const base = [...(PROVIDER_MODEL_CATALOG[providerType.toLowerCase()]?.chat || [])];
+  if (!customModels || customModels.length === 0) {
+    return base;
+  }
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  // If custom models are provided, combine them with built-in models and sort alphabetically
+  for (const m of [...base, ...customModels]) {
+    if (m && typeof m === 'string' && !seen.has(m)) {
+      seen.add(m);
+      result.push(m);
+    }
+  }
+
+  // Sort case-insensitively alphabetically
+  result.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  return result;
 }
 
 export function getKnownImageModels(providerType: string): string[] {

@@ -135,17 +135,27 @@ export function ModelSelector({ conversationId }: Props) {
   const displayLabel = effectiveModel || effectiveProvider || 'Select model';
 
   // Get models for a provider, using dynamic Ollama models when available
-  const getModels = (providerType: string): string[] => {
-    const type = providerType.toLowerCase();
+  const getModels = (provider: (typeof enabledProviders)[0]): string[] => {
+    const type = provider.type.toLowerCase();
     if (type === 'ollama') {
       return ollamaModels.length > 0
         ? ollamaModels
         : KNOWN_MODELS.ollama;
     }
-    return getKnownChatModels(type).sort((left, right) => {
-      const provider = enabledProviders.find((item) => item.type.toLowerCase() === type);
-      const leftRank = recentModels.indexOf(`${provider?.id}:${left}`);
-      const rightRank = recentModels.indexOf(`${provider?.id}:${right}`);
+    let customModels: string[] | undefined;
+    if (provider.metadata_json) {
+      try {
+        const meta = JSON.parse(provider.metadata_json);
+        if (Array.isArray(meta.custom_models)) {
+          customModels = meta.custom_models;
+        }
+      } catch {
+        // ignore malformed metadata
+      }
+    }
+    return getKnownChatModels(type, customModels).sort((left, right) => {
+      const leftRank = recentModels.indexOf(`${provider.id}:${left}`);
+      const rightRank = recentModels.indexOf(`${provider.id}:${right}`);
       if (leftRank < 0 && rightRank < 0) return 0;
       if (leftRank < 0) return 1;
       if (rightRank < 0) return -1;
@@ -234,7 +244,7 @@ export function ModelSelector({ conversationId }: Props) {
                   </div>
                 ) : (
                   enabledProviders.map((provider) => {
-                    const models = getModels(provider.type);
+                    const models = getModels(provider);
                     const filtered = filterModels(models);
                     const isOllama = provider.type.toLowerCase() === 'ollama';
 

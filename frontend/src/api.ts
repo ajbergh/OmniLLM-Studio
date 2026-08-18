@@ -528,6 +528,14 @@ export const api = {
     }
   },
 
+  fetchGeminiModels: async (providerId: string): Promise<Array<{ id: string; name: string }>> => {
+    try {
+      return await apiFetch<Array<{ id: string; name: string }>>(`/providers/gemini/models?provider_id=${encodeURIComponent(providerId)}`);
+    } catch {
+      return [];
+    }
+  },
+
   // ---- Attachments ----
 
   listAttachments: (conversationId: string) =>
