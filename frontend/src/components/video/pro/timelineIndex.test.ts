@@ -9,6 +9,7 @@ import {
   buildTimelineIntervalIndex,
   compareIndexedTimelineClipOrder,
   queryActiveClips,
+  queryActiveClipsAtFrame,
   visibleClips,
 } from './timelineIndex';
 
@@ -202,6 +203,43 @@ describe('timeline interval index', () => {
     expect([...active].reverse().sort(compareIndexedTimelineClipOrder).map((item) => item.clip.id)).toEqual(
       active.map((item) => item.clip.id),
     );
+  });
+
+  it('uses frame-overlap activity for deterministic high-fps evaluation', () => {
+    const frameDocument: VideoTimelineDocument = {
+      version: 1,
+      canvas: { width: 100, height: 100, fps: 120, background: '#000' },
+      duration_ms: 20,
+      markers: [],
+      metadata: {},
+      tracks: [{
+        id: 'frame-track',
+        type: 'layer',
+        name: 'Frame track',
+        locked: false,
+        muted: false,
+        visible: true,
+        clips: [{
+          id: 'starts-inside-frame-zero',
+          start_ms: 5,
+          duration_ms: 5,
+          trim_in_ms: 0,
+          trim_out_ms: 5,
+          transform: transform(),
+          effects: [],
+          keyframes: [],
+          transitions: [],
+        }],
+      }],
+    };
+    const index = buildTimelineIntervalIndex(frameDocument, []);
+
+    expect(queryActiveClips(index, 0)).toEqual([]);
+    expect(queryActiveClipsAtFrame(index, 0, 120).map((item) => item.clip.id))
+      .toEqual(['starts-inside-frame-zero']);
+    expect(queryActiveClipsAtFrame(index, 1, 120).map((item) => item.clip.id))
+      .toEqual(['starts-inside-frame-zero']);
+    expect(queryActiveClipsAtFrame(index, 2, 120)).toEqual([]);
   });
 
   it('virtualizes clips intersecting the visible window', () => {

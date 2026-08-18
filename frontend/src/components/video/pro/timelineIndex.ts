@@ -4,6 +4,7 @@ import type {
   VideoTimelineDocument,
   VideoTimelineTrack,
 } from '../../../types/video';
+import { activeAtFrame } from '../../../video/renderContract';
 import { compareCanonicalClipOrder } from '../../../video/renderContractEvaluation';
 
 export interface IndexedTimelineClip {
@@ -110,6 +111,32 @@ export function queryActiveClips(
   }
 
   return result.sort(compareIndexedTimelineClipOrder);
+}
+
+/**
+ * Return clips overlapping one canonical output frame. Deterministic capture is
+ * intentionally frame-addressed: a clip authored partway into a frame belongs
+ * to that frame under floor-start/ceil-end semantics even when a millisecond
+ * point query at the frame's start would miss it. This path is reserved for
+ * explicit frame-addressed evaluation; interactive playback keeps the indexed
+ * point query above.
+ */
+export function queryActiveClipsAtFrame(
+  index: TimelineIntervalIndex,
+  frameIndex: number,
+  fps: number,
+): IndexedTimelineClip[] {
+  const normalizedFrame = Math.trunc(frameIndex);
+  const normalizedFPS = Math.trunc(fps);
+  if (normalizedFrame < 0 || normalizedFPS <= 0) return [];
+  return index.clips
+    .filter((item) => activeAtFrame(
+      normalizedFrame,
+      item.clip.start_ms,
+      item.clip.duration_ms,
+      normalizedFPS,
+    ))
+    .sort(compareIndexedTimelineClipOrder);
 }
 
 /** Return clips intersecting the visible timeline window, with overscan. */
