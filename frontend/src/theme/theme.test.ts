@@ -12,7 +12,7 @@ describe('Theme System', () => {
   });
 
   it('includes all expected themes in THEMES and THEME_MAP', () => {
-    const expectedIds = ['oled', 'aurora', 'ember', 'light', 'terminal'];
+    const expectedIds = ['oled', 'aurora', 'ember', 'synthwave', 'light', 'terminal'];
     expect(THEMES.map((t) => t.id)).toEqual(expectedIds);
     for (const id of expectedIds) {
       expect(THEME_MAP[id as keyof typeof THEME_MAP]).toBeDefined();

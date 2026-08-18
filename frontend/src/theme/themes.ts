@@ -161,6 +161,59 @@ const ember: ThemeDefinition = {
 };
 
 /**
+ * Synthwave — 80s cyberpunk retro-futuristic dark theme with neon cyan & hot magenta.
+ */
+const synthwave: ThemeDefinition = {
+  id: 'synthwave',
+  name: 'Synthwave',
+  isDark: true,
+  tokens: {
+    // Surfaces — deep neon midnight violet
+    surface: '#18122B',
+    background: '#18122B',
+    surfaceRaised: '#22183d',
+    surfaceAlt: '#2c1e4e',
+    surfaceLight: '#392864',
+    surfaceHover: '#392864',
+    surfaceGlass: 'rgba(34, 24, 61, 0.85)',
+
+    // Borders — vivid electric magenta/violet borders
+    border: '#493077',
+    borderSubtle: '#332057',
+    borderFocus: '#00f2fe',
+
+    // Text — soft lavender-white with pastel contrast
+    text: '#fdf2ff',
+    textSecondary: '#d8b4fe',
+    textMuted: '#9d7bb0',
+
+    // Brand — vibrant neon cyan and hot magenta
+    primary: '#00f2fe',
+    primaryHover: '#38f9d7',
+    primaryGlow: 'rgba(0, 242, 254, 0.22)',
+    primaryRgb: '0, 242, 254',
+    accent: '#ff007f',
+    accentGlow: 'rgba(255, 0, 127, 0.22)',
+    accentRgb: '255, 0, 127',
+
+    // Status
+    danger: '#ff3366',
+    dangerSoft: 'rgba(255, 51, 102, 0.18)',
+    success: '#05ffa1',
+    successSoft: 'rgba(5, 255, 161, 0.18)',
+    warning: '#ffe600',
+    warningSoft: 'rgba(255, 230, 0, 0.18)',
+
+    // Shadows — electric neon glow
+    shadowSm: '0 1px 3px rgba(10, 5, 20, 0.6)',
+    shadowMd: '0 4px 14px rgba(10, 5, 20, 0.7)',
+    shadowLg: '0 8px 32px rgba(10, 5, 20, 0.85)',
+    shadowGlow: '0 0 20px rgba(0, 242, 254, 0.2)',
+    shadowGlowLg: '0 0 60px rgba(0, 242, 254, 0.14), 0 0 24px rgba(255, 0, 127, 0.14)',
+  },
+};
+
+/**
  * Cloud — a clean light theme for daytime use.
  */
 const light: ThemeDefinition = {
@@ -270,13 +323,14 @@ const terminal: ThemeDefinition = {
 };
 
 /** All available themes. */
-export const THEMES: ThemeDefinition[] = [oled, aurora, ember, light, terminal];
+export const THEMES: ThemeDefinition[] = [oled, aurora, ember, synthwave, light, terminal];
 
 /** O(1) lookup by theme ID. */
 export const THEME_MAP: Record<ThemeId, ThemeDefinition> = {
   oled,
   aurora,
   ember,
+  synthwave,
   light,
   terminal,
 };
