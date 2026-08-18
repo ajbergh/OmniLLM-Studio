@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "description": "Canonical render-contract samples consumed by Go and frontend tests.",
+  "easing": [
+    { "name": "linear", "t": 0.0, "want": 0.0 },
+    { "name": "linear", "t": 0.25, "want": 0.25 },
+    { "name": "ease-in", "t": 0.5, "want": 0.25 },
+    { "name": "ease-out", "t": 0.5, "want": 0.75 },
+    { "name": "ease-in-out", "t": 0.25, "want": 0.125 },
+    { "name": "ease-in-out", "t": 0.5, "want": 0.5 },
+    { "name": "ease-in-out", "t": 0.75, "want": 0.875 },
+    { "name": "step", "t": 0.999, "want": 0.0 },
+    { "name": "step", "t": 1.0, "want": 1.0 },
+    { "name": "ease-in-out", "t": -0.25, "want": 0.0 },
+    { "name": "ease-in-out", "t": 1.25, "want": 1.0 }
+  ],
+  "frame_ranges": [
+    { "start_ms": 0, "duration_ms": 1000, "fps": 30, "start_frame": 0, "end_frame": 30 },
+    { "start_ms": 1001, "duration_ms": 1000, "fps": 30, "start_frame": 30, "end_frame": 61 },
+    { "start_ms": 33, "duration_ms": 34, "fps": 30, "start_frame": 0, "end_frame": 3 },
+    { "start_ms": 0, "duration_ms": 1001, "fps": 120, "start_frame": 0, "end_frame": 121 },
+    { "start_ms": 3600000, "duration_ms": 1000, "fps": 120, "start_frame": 432000, "end_frame": 432120 }
+  ],
+  "source_times": [
+    { "timeline_ms": 1000, "clip_start_ms": 1000, "trim_in_ms": 250, "playback_rate": 1.0, "want_ms": 250.0 },
+    { "timeline_ms": 1500, "clip_start_ms": 1000, "trim_in_ms": 250, "playback_rate": 0.5, "want_ms": 500.0 },
+    { "timeline_ms": 1500, "clip_start_ms": 1000, "trim_in_ms": 250, "playback_rate": 2.0, "want_ms": 1250.0 },
+    { "timeline_ms": 500, "clip_start_ms": 1000, "trim_in_ms": 250, "playback_rate": 4.0, "want_ms": 250.0 },
+    { "timeline_ms": 1500, "clip_start_ms": 1000, "trim_in_ms": 250, "playback_rate": 0.0, "want_ms": 750.0 }
+  ]
+}
