@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "description": "Cross-runtime exact-frame visual FrameState fixture for transform/camera/source/crop evaluation.",
+  "document": {
+    "version": 2,
+    "canvas": { "width": 200, "height": 100, "fps": 120, "background": "#000000" },
+    "duration_ms": 30,
+    "working_color_space": "srgb",
+    "metadata": {},
+    "markers": [],
+    "tracks": [
+      {
+        "id": "visible",
+        "type": "video",
+        "name": "Visible",
+        "locked": false,
+        "muted": false,
+        "visible": true,
+        "clips": [
+          {
+            "id": "media",
+            "asset_id": "asset-media",
+            "start_ms": 5,
+            "duration_ms": 20,
+            "trim_in_ms": 0,
+            "trim_out_ms": 20,
+            "playback_rate": 1,
+            "z_index": 2,
+            "transform": {
+              "x": 10,
+              "y": 0,
+              "scale": 2,
+              "anchor_x": 100,
+              "crop": { "top": 0.1, "right": 0.2, "bottom": 0, "left": 0 }
+            },
+            "media_fit": "contain",
+            "fade_in_ms": 10,
+            "effects": [],
+            "keyframes": [
+              { "id": "x0", "property": "x", "time_ms": 0, "value": 10, "easing": "linear" },
+              { "id": "x1", "property": "x", "time_ms": 10, "value": 20, "easing": "linear" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "hidden",
+        "type": "video",
+        "name": "Hidden",
+        "locked": false,
+        "muted": false,
+        "visible": false,
+        "clips": [
+          {
+            "id": "hidden-media",
+            "asset_id": "asset-hidden",
+            "start_ms": 0,
+            "duration_ms": 30,
+            "trim_in_ms": 0,
+            "trim_out_ms": 30,
+            "effects": [],
+            "keyframes": []
+          }
+        ]
+      }
+    ],
+    "scenes": [
+      {
+        "id": "scene",
+        "name": "Scene",
+        "start_ms": 5,
+        "duration_ms": 20,
+        "camera": {
+          "field_of_view": 60,
+          "keyframes": [
+            { "id": "cam0", "property": "x", "time_ms": 0, "value": 0, "easing": "linear" },
+            { "id": "cam1", "property": "x", "time_ms": 10, "value": 12, "easing": "linear" }
+          ]
+        },
+        "effects": []
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "subframe-active-before-authored-start",
+      "frame_index": 0,
+      "active_scene_id": "",
+      "expected_source_time_ms": 0,
+      "expected_transform_x": 10,
+      "expected_view_x": 10,
+      "expected_opacity": 0,
+      "expected_camera_x": 0,
+      "expected_camera_fov": 50,
+      "expected_perspective_distance": 107.22534602547793,
+      "expected_model_matrix": [2, 0, 0, -90, 0, 2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+    },
+    {
+      "name": "fractional-frame-property-and-camera-sampling",
+      "frame_index": 1,
+      "active_scene_id": "scene",
+      "expected_source_time_ms": 3.3333333333333335,
+      "expected_transform_x": 13.333333333333334,
+      "expected_view_x": 9.333333333333334,
+      "expected_opacity": 0.33333333333333337,
+      "expected_camera_x": 4,
+      "expected_camera_fov": 60,
+      "expected_perspective_distance": 86.60254037844388,
+      "expected_model_matrix": [2, 0, 0, -90.66666666666667, 0, 2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+    }
+  ],
+  "unresolved_document": {
+    "version": 2,
+    "canvas": { "width": 200, "height": 100, "fps": 30, "background": "#000000" },
+    "duration_ms": 1000,
+    "working_color_space": "srgb",
+    "metadata": {},
+    "markers": [],
+    "tracks": [
+      {
+        "id": "track",
+        "type": "video",
+        "name": "Track",
+        "locked": false,
+        "muted": false,
+        "visible": true,
+        "clips": [
+          {
+            "id": "unsupported",
+            "asset_id": "asset",
+            "start_ms": 0,
+            "duration_ms": 1000,
+            "trim_in_ms": 0,
+            "trim_out_ms": 1000,
+            "media_fit": "cover",
+            "transform": { "perspective": 500 },
+            "effects": [
+              { "id": "blur", "type": "blur", "enabled": true, "params": { "amount": 0.5 } }
+            ],
+            "keyframes": []
+          }
+        ]
+      }
+    ],
+    "scenes": []
+  },
+  "expected_unresolved": [
+    "unsupported:clip_perspective",
+    "unsupported:effects",
+    "unsupported:media_fit:cover"
+  ]
+}
