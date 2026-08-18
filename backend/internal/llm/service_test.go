@@ -1,6 +1,15 @@
 package llm
 
-import "testing"
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
 
 func TestOllamaAPIRoot(t *testing.T) {
 	tests := []struct {
@@ -214,5 +223,51 @@ func TestGeminiMusicRequestBodyForClipDoesNotForceResponseFormat(t *testing.T) {
 	}
 	if len(parts) != 1 || parts[0]["text"] != req.Prompt {
 		t.Fatalf("unexpected text payload: %#v", parts)
+	}
+}
+
+func TestOpenRouterMusicGenerateLargeStreamLine(t *testing.T) {
+	// Create simulated audio data larger than typical bufio.Scanner default/buffer limits (e.g., > 4MB chunk or long line)
+	largeAudioChunk := strings.Repeat("A", 5*1024*1024)
+	chunkJSON, err := json.Marshal(map[string]interface{}{
+		"id": "gen-test-large",
+		"choices": []map[string]interface{}{
+			{
+				"delta": map[string]interface{}{
+					"audio": map[string]interface{}{
+						"data": base64.StdEncoding.EncodeToString([]byte(largeAudioChunk)),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal chunk: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, ok := w.(http.Flusher)
+		fmt.Fprintf(w, "data: %s\n\n", chunkJSON)
+		if ok {
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		if ok {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	svc := NewService(nil, nil)
+	resp, err := svc.openrouterMusicGenerate(context.Background(), server.URL, "test-key", "google/lyria-3-pro-preview", MusicRequest{
+		Prompt: "Epic symphonic track",
+	})
+	if err != nil {
+		t.Fatalf("openrouterMusicGenerate failed on large stream chunk: %v", err)
+	}
+	if string(resp.AudioBytes) != largeAudioChunk {
+		t.Fatalf("audio bytes length = %d, want %d", len(resp.AudioBytes), len(largeAudioChunk))
 	}
 }

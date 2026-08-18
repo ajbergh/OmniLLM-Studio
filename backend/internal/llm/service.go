@@ -1431,71 +1431,72 @@ func (s *Service) openrouterMusicGenerate(ctx context.Context, baseURL, apiKey, 
 	var requestID string
 	var usage json.RawMessage
 	var cost *float64
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "[DONE]" {
-			break
-		}
-		var chunk struct {
-			ID      string `json:"id"`
-			Choices []struct {
-				Delta struct {
-					Content interface{} `json:"content"`
-					Audio   struct {
-						Data       string `json:"data"`
-						Transcript string `json:"transcript"`
-						Format     string `json:"format"`
-					} `json:"audio"`
-				} `json:"delta"`
-				Message struct {
-					Content interface{} `json:"content"`
-					Audio   struct {
-						Data       string `json:"data"`
-						Transcript string `json:"transcript"`
-						Format     string `json:"format"`
-					} `json:"audio"`
-				} `json:"message"`
-			} `json:"choices"`
-			Usage json.RawMessage `json:"usage"`
-			Cost  *float64        `json:"cost"`
-		}
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			continue
-		}
-		if requestID == "" {
-			requestID = chunk.ID
-		}
-		if len(chunk.Usage) > 0 && string(chunk.Usage) != "null" {
-			usage = chunk.Usage
-		}
-		if chunk.Cost != nil {
-			cost = chunk.Cost
-		}
-		for _, choice := range chunk.Choices {
-			collectOpenRouterContent(choice.Delta.Content, &textParts)
-			if choice.Delta.Audio.Transcript != "" {
-				textParts = append(textParts, choice.Delta.Audio.Transcript)
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		line = strings.TrimSpace(line)
+		if line != "" && strings.HasPrefix(line, "data:") {
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if payload == "[DONE]" {
+				break
 			}
-			if choice.Delta.Audio.Data != "" {
-				audioB64.WriteString(choice.Delta.Audio.Data)
+			var chunk struct {
+				ID      string `json:"id"`
+				Choices []struct {
+					Delta struct {
+						Content interface{} `json:"content"`
+						Audio   struct {
+							Data       string `json:"data"`
+							Transcript string `json:"transcript"`
+							Format     string `json:"format"`
+						} `json:"audio"`
+					} `json:"delta"`
+					Message struct {
+						Content interface{} `json:"content"`
+						Audio   struct {
+							Data       string `json:"data"`
+							Transcript string `json:"transcript"`
+							Format     string `json:"format"`
+						} `json:"audio"`
+					} `json:"message"`
+				} `json:"choices"`
+				Usage json.RawMessage `json:"usage"`
+				Cost  *float64        `json:"cost"`
 			}
-			collectOpenRouterContent(choice.Message.Content, &textParts)
-			if choice.Message.Audio.Transcript != "" {
-				textParts = append(textParts, choice.Message.Audio.Transcript)
-			}
-			if choice.Message.Audio.Data != "" {
-				audioB64.WriteString(choice.Message.Audio.Data)
+			if err := json.Unmarshal([]byte(payload), &chunk); err == nil {
+				if requestID == "" {
+					requestID = chunk.ID
+				}
+				if len(chunk.Usage) > 0 && string(chunk.Usage) != "null" {
+					usage = chunk.Usage
+				}
+				if chunk.Cost != nil {
+					cost = chunk.Cost
+				}
+				for _, choice := range chunk.Choices {
+					collectOpenRouterContent(choice.Delta.Content, &textParts)
+					if choice.Delta.Audio.Transcript != "" {
+						textParts = append(textParts, choice.Delta.Audio.Transcript)
+					}
+					if choice.Delta.Audio.Data != "" {
+						audioB64.WriteString(choice.Delta.Audio.Data)
+					}
+					collectOpenRouterContent(choice.Message.Content, &textParts)
+					if choice.Message.Audio.Transcript != "" {
+						textParts = append(textParts, choice.Message.Audio.Transcript)
+					}
+					if choice.Message.Audio.Data != "" {
+						audioB64.WriteString(choice.Message.Audio.Data)
+					}
+				}
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read stream: %w", err)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("read stream: %w", err)
+		}
 	}
 	if audioB64.Len() == 0 {
 		return nil, fmt.Errorf("no audio returned by OpenRouter")
