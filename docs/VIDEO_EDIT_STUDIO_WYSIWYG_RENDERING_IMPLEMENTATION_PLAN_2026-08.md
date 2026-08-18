@@ -21,6 +21,7 @@ Merged WYSIWYG foundations:
 - PR #199 — canonical preview/index ordering adoption — `19a1a7b635afd33954bc56ed6023845f2c9e3fd1`.
 - PR #202 — deterministic frame-addressed preview/source selection — `02a1bbf4ec2b640a57d59fdd67f7906ae03eaa91`.
 - PR #204 — canonical backend diagnostic/parity frame callers — `73fa7d78b5018eb19b88abc34790fd19e95a5a98`.
+- PR #205 — canonical numeric property/keyframe evaluation across Go/TypeScript and preview/fidelity callers — `8a93f9ff90eeda92c944085715856907747584f1`.
 
 Security unblock during this program:
 
@@ -48,17 +49,17 @@ PR #202 merge validation and infrastructure exception:
 - Security/backend/platform jobs remained runner-queued at merge time and were explicitly documented as unexecuted rather than green; no unresolved review threads existed.
 - PR #202 merged as `02a1bbf4ec2b640a57d59fdd67f7906ae03eaa91`.
 
-Current PR: **#205 — Canonicalize Video Studio property and keyframe evaluation**.
-Current branch: `feat/video-wysiwyg-phase2-property-evaluator`.
+Current PR: **#206 — Add exact-frame visual FrameState foundation**.
+Current branch: `feat/video-wysiwyg-phase2-transform-frame-state`.
 
-Current slice: move numeric keyframe interpolation and clip/camera base-value resolution into the renderer-independent Go/TypeScript contract, then route preview transform/camera/volume sampling and the legacy fidelity keyframe helper through that shared contract without changing transform composition order, effect-stack semantics, or camera projection math.
+Current slice: preserve exact output-frame presentation time through clip/camera property evaluation and introduce the first renderer-independent visual `FrameState` projection for active-layer identity/order, source time, evaluated transforms, camera state, crop/content bounds, and camera-relative model matrices. Unsupported paint/geometry families remain explicit `unresolved` entries rather than being silently approximated.
 
-Focused implementation validation for #205:
+Focused implementation validation for #206:
 
-- Shared fixture `video-renderer/test/fixtures/property-evaluation-v1.json` covers linear/eased/step/Bezier interpolation, flat pre/post holds, normalized property matching, generic effect-amount automation, clip defaults/fallbacks, camera defaults, and fail-closed unsupported semantic properties.
-- Hosted integration run `32190060388` structurally applied the large preview/fidelity caller edits and passed `gofmt`, `go test ./internal/video/rendercontract ./internal/video -count=1`, `go vet ./internal/video/...`, frontend `npm ci`, lint, the full unit suite, and production build.
-- The first integration attempt `32189945318` stopped before tests because an exact `VideoPreviewCanvas.tsx` replacement marker did not match; no production caller commit was accepted from that run. The transform was made structural before the passing run.
-- The validated caller integration landed as `b4652b779e2a9af5395d3712c968a5d57d5a8e4c`; temporary workflow scaffolding is removed before final PR validation.
+- Shared fixture `video-renderer/test/fixtures/visual-frame-state-v1.json` covers 120-fps sub-frame activity, exact fractional-millisecond clip/camera sampling, source time/fades, hidden-track exclusion, exact scene activation, anchor-aware matrices, crop/content-bounds serialization, and explicit authority/unresolved state.
+- Initial run `32194804878` correctly rejected the first Go draft because it referenced a non-existent `NormalizeTimelineV2` symbol; no repaired production commit was accepted from that failed run.
+- Hosted repair/validation run `32194929252` changed the call to `NormalizeTimelineV2EvaluationInputs`, formatted the Go files, passed `go test ./internal/video/rendercontract -count=1` and `go vet ./internal/video/rendercontract`, then passed frontend `npm ci`, lint, all 106 unit tests, and production build.
+- The validated implementation repair landed as `3bee778881a6d936000da8f7b1ad7a5bdb311e8f`; temporary workflow scaffolding is removed before final PR validation.
 
 ## Phase tracker
 
@@ -66,7 +67,7 @@ Focused implementation validation for #205:
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Initial feature-family review confirms structural visual divergence. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Schemas, projections, timing/easing/curves, v1 adapter, canonical frame activity/range/source/order evaluation, runtime v2 normalization, indexed preview ordering, deterministic preview frame/source addressing, and backend diagnostic/parity frame callers are merged. PR #205 canonicalizes numeric property/keyframe evaluation across Go/TypeScript and preview/fidelity callers. Transform/anchor/camera composition, transition/effect evaluation, FrameState, and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Schemas, projections, timing/easing/curves, v1 adapter, frame activity/range/source/order, runtime normalization, indexed preview ordering, deterministic frame/source addressing, backend frame callers, and #205 property/keyframe evaluation are merged. PR #206 adds exact-frame property/camera sampling plus the first visual FrameState with transform/camera matrices and explicit unresolved boundaries. Diagnostic adoption, full media fit/mask/perspective semantics, transitions/effects, text/shape/cursor state, and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close geometry, text, crop/fit, effects, transitions, cursor, camera, color, and deterministic asset-loading parity. |
@@ -222,7 +223,7 @@ Implemented:
 
 Scope boundary: PR #204 does not canonicalize property/keyframe, transform/camera, transition/effect, cursor, or AudioGraph semantics.
 
-### Current PR #205 — canonical numeric property/keyframe evaluation
+### Merged PR #205 — canonical numeric property/keyframe evaluation
 
 Implemented:
 
@@ -244,11 +245,23 @@ Implemented:
 
 Scope boundary: PR #205 does not yet define matrix/anchor/perspective/crop composition, camera projection state, transition peer semantics, effect-stack ordering, text/shape/cursor state, or AudioGraph semantics.
 
+### Current PR #206 — exact-frame transform/camera FrameState foundation
+
+Implemented:
+
+- `backend/internal/video/rendercontract/frame_property.go` keeps output-frame presentation time rational when sampling clip/camera keyframes, preventing high-FPS deterministic state from round-tripping through integer milliseconds.
+- `backend/internal/video/rendercontract/frame_state.go` evaluates visible active visual layers in canonical order, frame-derived source time, clip transforms/fades/crop/content bounds, exact scene camera state, stage perspective distance, camera-relative view transforms, and row-major model matrices.
+- `frontend/src/video/renderContractFrameState.ts` mirrors the Go evaluator so diagnostics and later preview/export consumers can share one serializable state contract.
+- `visual-frame-state-v1` deliberately marks effects, transitions, text, shapes, cursor state, mask-source crop, non-`contain` media fit, non-zero clip perspective, and anchors without known bounds as unresolved; a state is authoritative only when its unresolved set is empty.
+- Shared Go/TypeScript fixture verifies exact-frame semantics and cross-runtime output.
+
+Scope boundary: PR #206 establishes the pure state/evaluation foundation only. It does not yet replace preview composition, renderer composition, transition/effect/text/shape/cursor semantics, non-`contain` media geometry, clip-perspective projection, or AudioGraph behavior.
+
 ### Remaining Phase 2 work
 
-1. Validate and merge PR #205 canonical numeric property/keyframe evaluation.
-2. Implement canonical transform/anchor/perspective/crop and scene-camera evaluation, consuming the merged property evaluator rather than re-sampling keyframes.
-3. Define the first serializable visual `FrameState` projection/fixture containing active clip identity, source time, evaluated properties, matrices/bounds, crop/fit, and camera state.
+1. Validate and merge PR #206 exact-frame visual FrameState foundation.
+2. Route preview parity diagnostics and backend parity/strict diagnostics through canonical FrameState without replacing compositor behavior in the same slice.
+3. Canonicalize remaining media geometry: `cover`/`fill`/`none`, mask-source crop, clip perspective, and content-bounds provenance/anchor edge cases.
 4. Define transition placement/peer state and effect-stack ordering/animation.
 5. Define text/shape/cursor evaluated state.
 6. Define/compile serializable `AudioGraph` for timing/rate/channel/gain/fade/mute/solo/processing decisions.
@@ -320,6 +333,7 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 | High-FPS deterministic seeks reuse stale frames | Frame-addressed paused seeks use a 0.5 ms tolerance instead of the interactive 50 ms scrub tolerance. |
 | Browser/Go curve drift | Shared built-in/Bezier/spring fixtures. |
 | Browser/Go property sampling/default drift | Versioned property-evaluation fixture covers interpolation, property normalization, clip/camera bases, and fail-closed unsupported semantic requests; preview/fidelity callers delegate instead of reimplementing. |
+| FrameState claims authority before paint semantics are canonical | `visual-frame-state-v1` carries explicit layer/global unresolved sets; any unresolved feature makes the state non-authoritative until its dedicated evaluator lands. |
 | CI runner setup stalls hide code status | Record setup-only stalls explicitly, preserve successful code-level evidence, and never label an unexecuted check as green. |
 | Chromium packaging/resource cost | Managed worker, admission control, health checks, guarded rollout; FFmpeg retained for decode/encode/mux. |
 | Font/color platform drift | Explicit sRGB contract, declared font policy, retained toolchain metadata, multi-platform evidence. |
@@ -342,14 +356,14 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 - PR #199 was refreshed onto the repaired dependency graph, preserved the intended five-file ordering delta, and merged as `19a1a7b635afd33954bc56ed6023845f2c9e3fd1` with a documented queue-only final-head exception and prior executed byte-identical frontend evidence.
 - PR #202 implemented the deterministic frame-addressed preview/source slice. A staging lint failure exposed React cross-effect media-ref aliasing; parity readiness was moved to a dedicated DOM media marker, after which focused lint, all 106 unit tests, performance evidence, and production build passed. The validated implementation landed as `5a45434cde410fd88e28cd434eeb0864ce638005`, temporary integration scaffolding was removed, and PR #202 merged as `02a1bbf4ec2b640a57d59fdd67f7906ae03eaa91` under a documented queue-only final-head exception.
 - PR #204 audited backend output-frame callers. The first canonical-overlap design was strengthened after identifying possible double-stacking of adjacent synthetic fidelity samples at high output FPS. Parent provenance plus rational presentation-time selection fixed that renderer-specific ambiguity; macOS validation `32174332876` passed focused backend tests and vet, and PR #204 merged as `73fa7d78b5018eb19b88abc34790fd19e95a5a98`.
-- PR #205 introduced shared Go/TypeScript numeric property evaluation and migrated preview/fidelity sampling callers. Hosted integration run `32190060388` passed focused backend tests/vet plus frontend lint/unit/build before landing validated caller commit `b4652b779e2a9af5395d3712c968a5d57d5a8e4c`.
+- PR #205 introduced shared Go/TypeScript numeric property evaluation and migrated preview/fidelity sampling callers. Hosted integration run `32190060388` passed focused backend tests/vet plus frontend lint/unit/build before landing validated caller commit `b4652b779e2a9af5395d3712c968a5d57d5a8e4c`; #205 merged as `8a93f9ff90eeda92c944085715856907747584f1`.
+- PR #206 adds exact-frame clip/camera property sampling and the first visual FrameState foundation. Initial run `32194804878` exposed the stale normalizer symbol; repair/validation run `32194929252` then passed focused Go test/vet plus frontend lint, 106/106 unit tests, and production build, landing validated code as `3bee778881a6d936000da8f7b1ad7a5bdb311e8f`.
 
 ## Next recommended slice
 
-After PR #205 is green and merged:
+After PR #206 is green and merged:
 
-1. Implement canonical transform/anchor/perspective/crop evaluation shared by Go and TypeScript, consuming canonical property values instead of sampling keyframes again.
-2. Canonicalize scene-camera evaluation/projection inputs and establish exact ordering between layer transform, anchor, crop/fit, perspective, and camera state.
-3. Introduce the first serializable visual `FrameState` projection and shared fixture, initially covering active clip identity/order, source time, evaluated numeric properties, transform matrix/bounds/crop, and camera state.
-4. Route preview diagnostic state and renderer parity diagnostics through that `FrameState` incrementally without replacing the full compositor in one PR.
-5. Continue Phase 0 visual-threshold policy, unsupported-audio boundary, and second-platform evidence in parallel.
+1. Add a diagnostic-only FrameState bridge: preview parity capture emits the canonical TypeScript state while backend parity/Strict Parity diagnostics evaluate the Go state for the same immutable timeline/frame.
+2. Add stable FrameState comparison/hash diagnostics and mismatch reporting so cross-runtime semantic drift is visible before compositor replacement.
+3. Keep preview/export rendering behavior unchanged in that bridge PR; use the resulting diagnostics to drive the next media-geometry slice (`cover`/`fill`/`none`, mask-source crop, clip perspective, and bounds/anchor edge cases).
+4. Continue Phase 0 production visual-threshold policy, unsupported-audio boundary, and second-platform evidence in parallel.
