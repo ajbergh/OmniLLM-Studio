@@ -30,6 +30,8 @@ jobs:
 
           document = Path('backend/internal/document/document.go')
           text = document.read_text()
+          if 'github.com/ledongthuc/pdf' not in text:
+              raise SystemExit('vulnerable PDF import not found')
           text = text.replace('\t"bytes"\n', '')
           text = text.replace('\t"github.com/ledongthuc/pdf"\n', '\t"github.com/tsawler/tabula"\n')
           replacement = '''func parsePDF(path, mime string) (*ParsedDocument, error) {
@@ -55,9 +57,9 @@ jobs:
 
           test_file = Path('backend/internal/document/document_test.go')
           tests = test_file.read_text()
-          tests = tests.replace('import (\n\t"strings"', 'import (\n\t"path/filepath"\n\t"strings"')
-          tests = tests.replace('\t"testing"\n)', '\t"testing"\n\n\t"github.com/go-pdf/fpdf"\n)')
-          marker = 'func TestParseHTMLPreservesHeadingPath(t *testing.T)'
+          if '"github.com/go-pdf/fpdf"' not in tests:
+              tests = tests.replace('\t"testing"\n)', '\t"testing"\n\n\t"github.com/go-pdf/fpdf"\n)')
+          marker = 'func TestParseHTMLPreservesHeadingsAndIgnoresNavigation(t *testing.T)'
           pdf_test = '''func TestParsePDFExtractsTextWithPureGoParser(t *testing.T) {
           \tpath := filepath.Join(t.TempDir(), "sample.pdf")
           \tdoc := fpdf.New("P", "mm", "A4", "")
