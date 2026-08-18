@@ -1,0 +1,209 @@
+{
+  "version": 1,
+  "success_cases": [
+    {
+      "name": "evaluation-defaults",
+      "input": {
+        "version": 2,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 500,
+        "tracks": [
+          {
+            "id": " track-v ",
+            "type": " Layer ",
+            "name": "Layer",
+            "locked": false,
+            "muted": false,
+            "visible": true,
+            "clips": [
+              {
+                "id": " visual-1 ",
+                "asset_id": "asset-v",
+                "start_ms": 100,
+                "duration_ms": 1000,
+                "trim_in_ms": 50,
+                "trim_out_ms": 0,
+                "transform": { "x": 12 },
+                "effects": [],
+                "keyframes": []
+              }
+            ]
+          },
+          {
+            "id": "audio",
+            "type": "audio",
+            "name": "Audio",
+            "locked": false,
+            "muted": false,
+            "visible": true,
+            "clips": [
+              {
+                "id": "audio-1",
+                "asset_id": "asset-a",
+                "start_ms": 0,
+                "duration_ms": 500,
+                "trim_in_ms": 100,
+                "trim_out_ms": 0,
+                "playback_rate": 2,
+                "effects": [],
+                "keyframes": []
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "version": 2,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 1100,
+        "tracks": [
+          {
+            "id": "track-v",
+            "type": "layer",
+            "name": "Layer",
+            "locked": false,
+            "muted": false,
+            "visible": true,
+            "clips": [
+              {
+                "id": "visual-1",
+                "asset_id": "asset-v",
+                "start_ms": 100,
+                "duration_ms": 1000,
+                "trim_in_ms": 50,
+                "trim_out_ms": 1050,
+                "playback_rate": 1,
+                "transform": { "x": 12, "y": 0, "scale": 1, "rotation": 0, "opacity": 1 },
+                "media_fit": "contain",
+                "effects": [],
+                "keyframes": []
+              }
+            ]
+          },
+          {
+            "id": "audio",
+            "type": "audio",
+            "name": "Audio",
+            "locked": false,
+            "muted": false,
+            "visible": true,
+            "clips": [
+              {
+                "id": "audio-1",
+                "asset_id": "asset-a",
+                "start_ms": 0,
+                "duration_ms": 500,
+                "trim_in_ms": 100,
+                "trim_out_ms": 1100,
+                "playback_rate": 2,
+                "effects": [],
+                "keyframes": []
+              }
+            ]
+          }
+        ],
+        "markers": [],
+        "working_color_space": "srgb",
+        "metadata": {}
+      }
+    }
+  ],
+  "error_cases": [
+    {
+      "name": "wrong-version",
+      "input": {
+        "version": 1,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 0,
+        "tracks": [],
+        "markers": [],
+        "metadata": {}
+      },
+      "path": "version"
+    },
+    {
+      "name": "unsupported-fps",
+      "input": {
+        "version": 2,
+        "canvas": { "width": 640, "height": 360, "fps": 121, "background": "#000000" },
+        "duration_ms": 0,
+        "tracks": [],
+        "markers": [],
+        "metadata": {}
+      },
+      "path": "canvas.fps"
+    },
+    {
+      "name": "duplicate-clip-id",
+      "input": {
+        "version": 2,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 1000,
+        "tracks": [
+          {
+            "id": "one", "type": "layer", "name": "One", "locked": false, "muted": false, "visible": true,
+            "clips": [{ "id": "same", "start_ms": 0, "duration_ms": 100, "trim_in_ms": 0, "trim_out_ms": 100, "effects": [], "keyframes": [] }]
+          },
+          {
+            "id": "two", "type": "layer", "name": "Two", "locked": false, "muted": false, "visible": true,
+            "clips": [{ "id": "same", "start_ms": 100, "duration_ms": 100, "trim_in_ms": 0, "trim_out_ms": 100, "effects": [], "keyframes": [] }]
+          }
+        ],
+        "markers": [],
+        "metadata": {}
+      },
+      "path": "tracks[1].clips[0].id"
+    },
+    {
+      "name": "invalid-playback-rate",
+      "input": {
+        "version": 2,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 1000,
+        "tracks": [
+          {
+            "id": "one", "type": "video", "name": "One", "locked": false, "muted": false, "visible": true,
+            "clips": [{ "id": "rate", "start_ms": 0, "duration_ms": 100, "trim_in_ms": 0, "trim_out_ms": 100, "playback_rate": 5, "effects": [], "keyframes": [] }]
+          }
+        ],
+        "markers": [],
+        "metadata": {}
+      },
+      "path": "tracks[0].clips[0].playback_rate"
+    },
+    {
+      "name": "negative-trim-out",
+      "input": {
+        "version": 2,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 1000,
+        "tracks": [
+          {
+            "id": "one", "type": "video", "name": "One", "locked": false, "muted": false, "visible": true,
+            "clips": [{ "id": "trim", "start_ms": 0, "duration_ms": 100, "trim_in_ms": 0, "trim_out_ms": -1, "effects": [], "keyframes": [] }]
+          }
+        ],
+        "markers": [],
+        "metadata": {}
+      },
+      "path": "tracks[0].clips[0].trim_out_ms"
+    },
+    {
+      "name": "invalid-opacity",
+      "input": {
+        "version": 2,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 1000,
+        "tracks": [
+          {
+            "id": "one", "type": "video", "name": "One", "locked": false, "muted": false, "visible": true,
+            "clips": [{ "id": "opacity", "start_ms": 0, "duration_ms": 100, "trim_in_ms": 0, "trim_out_ms": 100, "transform": { "opacity": 2 }, "effects": [], "keyframes": [] }]
+          }
+        ],
+        "markers": [],
+        "metadata": {}
+      },
+      "path": "tracks[0].clips[0].transform.opacity"
+    }
+  ]
+}

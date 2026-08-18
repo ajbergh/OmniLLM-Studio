@@ -9,25 +9,26 @@
 
 ## Current handoff
 
-Merged foundations:
+Merged WYSIWYG foundations:
 
 - PR #187 — immutable render submission and deterministic parity baseline — `3cbe6ba81dde384ff1c6073537e3d9b71ed8d0b0`.
 - PR #191 — Timeline v2 / Render Manifest v1 plus canonical frame/source/easing primitives — `aabbb31288277287673cbed8546c9eb3f38588e4`.
 - PR #193 — canonical cubic-Bezier and spring evaluation — `3bed9faf8a868b3a125c25cb141769bfcd7861d2`.
 - PR #194 — mechanically checked Go/TypeScript schema projections and contract constants — `62e2180b5153be505fac650cd41b3a0e2d951783`.
 - PR #195 — Timeline v1 → canonical Timeline v2 compatibility adapter — `b5f76aa6328240a6b516d768756c34f68e6fdedb`.
+- PR #196 — canonical frame activity, range mapping, source time, and stable clip ordering — `42dd64cda9feb75a637b622bf33ac1350a4febd9`.
 
-PR #195 validation was fully green before merge:
+PR #196 final post-rebase validation:
 
-- Quality Gate `32149582984`, including frontend build/tests, backend format/vet/tests/race, Playwright smoke, and parity baseline.
-- Security Scan `32149582921`.
-- Container workflow `32149583029` for frontend/backend/Helm.
-- No unresolved review threads.
+- Quality Gate `32153989115`: **passed**, including frontend lint/unit/performance/build, backend format/vet/unit/integration/race, Playwright smoke, renderer parity baseline, Windows/macOS platform checks, and Helm validation.
+- Security Scan `32153989061`: **passed**.
+- Container workflow `32153989087`: **passed** for frontend, backend, and Helm.
+- Auxiliary sandbox/workspace/egress assurance workflows: **passed**.
+- Review threads: none unresolved before merge.
 
-Current PR: **#196 — Canonicalize Video Edit Studio frame activity and clip ordering**.  
-Current branch: `feat/video-wysiwyg-phase2-active-clips`.
+Current branch: `feat/video-wysiwyg-phase2-runtime-normalize`.
 
-`main` advanced through unrelated Music PR #197 while #196 was validating. To avoid an unnecessary merge commit and remove GitHub's conflict state, #196 was rebuilt on current `main` `1737ea29d335233f2bebb87ef7fe32d52a978a0d` with only its six intended files reapplied. The pre-rebase #196 head had already passed frontend build/unit/performance, backend format/vet/unit/integration/race, Playwright smoke, Security Scan, and all completed platform checks; final parity/container evidence was still completing. The rebased head must pass a fresh authoritative hosted run before merge.
+Current slice: add evaluator-scoped Timeline v2 runtime normalization/defaulting in Go and TypeScript, with one shared cross-runtime fixture. This is deliberately separate from schema/type projection checks and deliberately narrower than full feature validation: it normalizes and rejects only the semantics needed by the canonical frame/range/source evaluators that now exist.
 
 ## Phase tracker
 
@@ -35,7 +36,7 @@ Current branch: `feat/video-wysiwyg-phase2-active-clips`.
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Initial feature-family review confirms structural visual divergence. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Schemas, projections, timing/easing/curves, and v1 adapter are merged. PR #196 adds canonical range/source-time/active-clip ordering. Runtime v2 normalization, caller adoption, property/transform/transition/effect evaluation, FrameState, and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Schemas, projections, timing/easing/curves, v1 adapter, and canonical frame activity/range/source/order evaluation are merged. Runtime v2 normalization is current. Preview/index adoption, property/transform/transition/effect evaluation, FrameState, and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close geometry, text, crop/fit, effects, transitions, cursor, camera, color, and deterministic asset-loading parity. |
@@ -46,7 +47,7 @@ Current branch: `feat/video-wysiwyg-phase2-active-clips`.
 
 ### Preview is the Timeline v1 compatibility target
 
-Current editor preview semantics are the v1 compatibility target unless an intentional behavior correction is introduced through a versioned contract change. The legacy FFmpeg compositor is not semantic authority merely because it already exports media.
+Current editor preview semantics are the Timeline v1 compatibility target unless an intentional behavior correction is introduced through a versioned contract change. The legacy FFmpeg compositor is not semantic authority merely because it already exports media.
 
 ### Freeze legacy approximation growth
 
@@ -61,7 +62,8 @@ Canonical evaluators must be pure, deterministic, serializable, free of media/br
 - `video-renderer/contracts/timeline-v2.schema.json` is the structural authority for Timeline v2.
 - `video-renderer/contracts/render-manifest-v1.schema.json` is the structural authority for immutable render manifests.
 - Go and TypeScript projections are mechanically checked against those schemas.
-- Structural projection checks do **not** replace runtime semantic normalization/validation.
+- Projection checks prevent structural drift; they do **not** replace runtime semantic normalization/validation.
+- Runtime normalizers/evaluators must not silently validate feature families whose semantics have not yet been canonicalized.
 
 ### Canonical timing and ordering
 
@@ -73,7 +75,7 @@ Canonical evaluators must be pure, deterministic, serializable, free of media/br
 6. Stable clip order is `(track array index, z_index, clip array index)`; clip start time is not a z-order tie-breaker.
 7. Source time is derived from output-frame identity, clip start, trim-in, and playback rate in one canonical evaluator.
 8. A keyframe segment uses the later keyframe's easing/curve.
-9. Built-in easing is editor-compatible; Bezier and spring evaluation is shared and cross-runtime fixture-verified.
+9. Built-in easing is editor-compatible; Bezier and spring evaluation is shared and fixture-verified in Go and TypeScript.
 10. Composition matrices, anchors, crop/fit, camera, transitions, effects, text bounds, cursor state, and color-space assumptions must become explicit FrameState semantics rather than renderer inference.
 
 ## Phase 0 evidence and remaining sign-off
@@ -108,89 +110,89 @@ Remaining Phase 0 sign-off:
 
 ### Merged slices
 
-**PR #191**
+**PR #191 — contract/timing foundation**
 - Timeline v2 and Render Manifest v1 schemas.
 - Rational frame/start/end/count/activity and source-time helpers.
 - Shared Go/TypeScript built-in easing fixtures.
 
-**PR #193**
+**PR #193 — motion curves**
 - Canonical cubic-Bezier and segment-local spring evaluation in Go/TypeScript.
 - Shared overshoot/default/custom curve fixtures.
 - Preview keyframe utility delegates curve math to canonical helpers.
 
-**PR #194**
+**PR #194 — schema/type drift enforcement**
 - Serializable Go/TypeScript Timeline v2 and Render Manifest projections.
 - Go reflection schema checks plus TypeScript exact-key/required-key checks.
 - Schema-bound version/contract/sRGB/48-kHz/stereo constants.
 
-**PR #195**
+**PR #195 — v1 compatibility adapter**
 - Non-mutating Go/TypeScript v1→Timeline-v2 adapter.
 - Backend v1 validation/defaulting remains normalization authority.
 - Shared fixture covers defaults, source windows, crop/2.5D, camera/cursor, curves, metadata, and fail-closed boundaries.
 - v1 transitions and unknown/invalid transform semantics fail closed rather than being guessed.
 
-### Current PR #196 — active clip/range/source-time evaluation
+**PR #196 — frame activity/range/source/order**
+- `FrameRange` / `frameRangeFromMs` half-open output-frame range semantics.
+- Frame-derived source-time calculation without integer-ms round-tripping.
+- Serializable active clip identity containing track/clip indices, IDs, z-index, frame bounds, and source time.
+- Stable canonical ordering `(track index, z_index, clip index)`.
+- Shared Go/TypeScript fixture covering boundaries, equal-z ties, track precedence, hidden-track temporal activity, rate/trim source time, 120-fps sub-frame mapping, and one-hour timeline mapping.
+- Existing frontend interval index remains a performance structure; its temporal sorting is explicitly not semantic layer order.
 
-Implemented:
+### Current runtime Timeline v2 normalization slice
 
-- `backend/internal/video/rendercontract/evaluation.go`
-  - serializable half-open `FrameRange`;
-  - `FrameRangeFromMS` and range membership;
-  - `SourceTimeAtFrameMS`, derived directly from output-frame identity;
-  - `ActiveClipsAtFrame`, returning clip identity/frame/source state in canonical `(track index, z_index, clip index)` order.
-- `frontend/src/video/renderContractEvaluation.ts` mirrors the Go evaluator.
-- `video-renderer/test/fixtures/active-clips-v1.json` covers:
-  - exact half-open boundaries;
-  - equal-z clips whose authored array order differs from temporal start order;
-  - track-order precedence over z-index;
-  - hidden-track temporal activity, leaving visibility to later composition evaluation;
-  - playback-rate/trim source time;
-  - 120-fps sub-frame boundaries;
-  - one-hour timeline mapping.
-- Go and Vitest consume the same expected active/range/source-time results.
+Branch: `feat/video-wysiwyg-phase2-runtime-normalize`.
 
-Performance boundary: `frontend/src/components/video/pro/timelineIndex.ts` remains a performance/virtualization index. Its temporal sort must not define semantic layer order. Canonical ordering must be applied after candidate lookup or through an equivalent index-aware comparator; do not replace virtualization with full timeline scans in the program monitor.
+Implemented on the branch:
 
-Validation history for #196:
+- `backend/internal/video/rendercontract/normalize.go`
+  - JSON deep-copy/nonmutation before normalization;
+  - exact Timeline v2 version check;
+  - positive canvas width/height, 1–120 fps, non-empty background;
+  - nonnegative timeline duration;
+  - missing working color → canonical sRGB; non-sRGB fails closed until another working space is versioned;
+  - required root metadata/tracks/markers materialized when absent;
+  - trimmed, non-empty, unique track IDs;
+  - normalized/supported track type and optional 32–160 track-height validation;
+  - globally unique, non-empty clip IDs;
+  - nonnegative clip start/trims and positive duration;
+  - playback rate defaults to 1 and is constrained to the Timeline v2 contract range 0.25–4;
+  - canonical `trim_out_ms = trim_in_ms + round(duration_ms × playback_rate)`, minimum one source millisecond;
+  - visual transform defaults `x=0`, `y=0`, `scale=1`, `rotation=0`, `opacity=1`;
+  - finite transform checks, opacity 0–1, crop edges 0–1;
+  - asset-backed visual clips default to `media_fit: contain`; unsupported fit values fail closed;
+  - timeline duration expands to the maximum clip end when necessary;
+  - effects/keyframes are normalized to arrays because they are required by the Timeline v2 projection.
+- `frontend/src/video/renderContractNormalize.ts` mirrors these evaluator-critical semantics and emits the same path-addressed `TIMELINE_V2_RUNTIME_INVALID` failure contract.
+- `video-renderer/test/fixtures/timeline-v2-normalization-v1.json` is shared by Go and Vitest and covers:
+  - ID/type whitespace normalization;
+  - duration expansion;
+  - playback/source-window defaults;
+  - partial visual transform defaulting;
+  - visual media-fit default;
+  - audio clip behavior without visual transform defaulting;
+  - wrong version, unsupported fps, duplicate clip ID, invalid playback rate, and invalid opacity failures.
+- Go and TypeScript tests assert input nonmutation and exact normalized serialized output from the same fixture.
+- Clip-level metadata intentionally remains optional instead of being materialized as `{}`: it is not required by the current frame/range/source evaluators, and preserving omission avoids introducing a non-semantic cross-runtime shape difference. Root metadata remains required/defaulted.
 
-- Initial hosted run: frontend evaluator fixture/build passed; backend failed only `gofmt` in `evaluation_test.go`.
-- Formatting-only correction applied; no evaluator semantics changed.
-- Corrected pre-rebase run passed backend format/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright smoke, Security Scan, and completed platform assurance. `main` advanced during its final parity/container tail, requiring the clean rebase described above.
-- Fresh post-rebase validation is required before merge.
+Scope boundary:
 
-### Prepared next slice — runtime Timeline v2 normalization
+This slice is **not** a replacement JSON-Schema engine and does **not** claim canonical semantics for text layout, shapes, effects, transitions, camera projection, content bounds, masks, or other later feature evaluators. Those fields remain structurally projected but are validated/evaluated only when their canonical semantics are implemented. This prevents the normalizer from silently inventing behavior.
 
-A stacked branch `feat/video-wysiwyg-phase2-runtime-normalize` has an implementation prepared but must be rebuilt/reconciled onto #196 after #196 merges before opening its PR.
-
-Its intended scope:
-
-- evaluator-scoped Timeline v2 runtime normalization in Go and TypeScript;
-- deep-copy/nonmutation;
-- exact version/canvas/fps/working-color checks;
-- stable/unique track and clip IDs;
-- supported track types and optional height bounds;
-- nonnegative timeline/clip timing;
-- playback-rate default/range and canonical source-window normalization;
-- visual transform defaults and finite/opacity/crop validation;
-- asset-backed visual `media_fit: contain` default and enum validation;
-- timeline-duration expansion to the maximum clip end;
-- one shared Go/TypeScript fixture with fail-closed path assertions.
-
-This normalizer intentionally validates only semantics required by the current canonical evaluators; feature-specific text/shape/effect/transition/camera semantics remain owned by later evaluator slices.
+Hosted validation for this branch is pending. Merge is blocked until applicable Quality Gate, Security Scan, container, smoke, parity, and review-thread checks are green.
 
 ### Remaining Phase 2 work
 
-1. Complete and merge #196.
-2. Reconcile, validate, and merge Timeline v2 runtime semantic normalization/defaulting.
-3. Add canonical clip-index/order identity to interval-index candidates and migrate preview ordering without sacrificing virtualization.
-4. Migrate output-frame-driven preview/diagnostic/export source-time and frame-selection callers to canonical helpers.
-5. Implement canonical keyframe/property evaluation.
-6. Implement canonical transform/anchor/camera state.
-7. Define transition placement/peer state and effect-stack ordering/animation.
-8. Define text/shape/cursor evaluated state.
-9. Define serializable `FrameState` containing every visual decision needed to paint one output frame.
-10. Define/compile serializable `AudioGraph` for timing/rate/channel/gain/fade/mute/solo/processing decisions.
-11. Fail closed whenever an authorable field lacks canonical semantics.
+1. Validate and merge runtime Timeline v2 normalization/defaulting.
+2. Add canonical clip-index/order identity to interval-index candidates and migrate preview ordering without sacrificing virtualization.
+3. Migrate output-frame-driven preview/diagnostic/export source-time and frame-selection callers to canonical helpers.
+4. Implement canonical keyframe/property evaluation on top of the merged curve evaluator.
+5. Implement canonical transform/anchor/camera state.
+6. Define transition placement/peer state and effect-stack ordering/animation.
+7. Define text/shape/cursor evaluated state.
+8. Define serializable `FrameState` containing every visual decision needed to paint one output frame.
+9. Define/compile serializable `AudioGraph` for timing/rate/channel/gain/fade/mute/solo/processing decisions.
+10. Fail closed whenever an authorable field lacks canonical semantics.
 
 ### Phase 2 exit gate
 
@@ -246,10 +248,11 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 | Risk | Control |
 |---|---|
 | Schema changes without projections | Go reflection and TypeScript compile/Vitest drift checks fail CI. |
-| Projection checks mistaken for runtime validation | Runtime Timeline v2 normalization is a separate Phase 2 deliverable. |
+| Projection checks mistaken for runtime validation | Runtime normalization is explicit and evaluator-scoped; feature validation lands with each evaluator. |
+| Runtime normalizer silently invents later feature semantics | Text/shape/effect/transition/camera semantics remain outside this slice and fail closed in later evaluators. |
 | v2 codifies FFmpeg approximations | Editor preview remains v1 compatibility target; intentional changes require versioned semantics. |
 | v1 adapter guesses ambiguous semantics | Transitions/unknown transform semantics fail closed. |
-| Cross-runtime evaluator drift | Versioned shared fixtures asserted by Go and TypeScript. |
+| Cross-runtime normalizer/evaluator drift | Versioned shared fixtures asserted by Go and TypeScript. |
 | Interval index accidentally defines z-order | Canonical order explicitly uses track index, z-index, clip index; interval index is performance-only. |
 | Millisecond rounding creates boundary/source drift | Rational frame identity, floor-start/ceil-end, half-open activity, frame-derived source time. |
 | Browser/Go curve drift | Shared built-in/Bezier/spring fixtures. |
@@ -271,16 +274,16 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 - PR #195 merged v1→Timeline-v2 adapter after full Quality Gate/Security/container validation.
 - PR #196 implemented canonical frame range, frame-derived source time, and active-clip order with a shared Go/TypeScript fixture.
 - #196 first correction was formatting-only; its semantic fixture passed both runtimes.
-- Unrelated Music PR #197 advanced `main`; #196 was rebuilt cleanly on `1737ea29d335233f2bebb87ef7fe32d52a978a0d` and must complete a fresh hosted validation cycle.
-- Runtime Timeline v2 normalization is prepared as the next stacked slice and will be reconciled only after #196 merges.
+- Unrelated Music PR #197 advanced `main`; #196 was rebuilt cleanly on the new `main`, reopened after GitHub auto-closed the temporary zero-diff PR, and fully revalidated.
+- #196 final post-rebase Quality Gate `32153989115`, Security `32153989061`, and container `32153989087` all passed; PR #196 merged as `42dd64cda9feb75a637b622bf33ac1350a4febd9`.
+- Runtime Timeline v2 evaluator-scoped normalization was rebuilt directly on the #196 merge commit, with clip metadata intentionally left optional for cross-runtime serialization consistency.
 
 ## Next recommended slice
 
-After #196 is green and merged:
+After runtime normalization is green and merged:
 
-1. Rebuild/reconcile `feat/video-wysiwyg-phase2-runtime-normalize` onto the #196 merge commit.
-2. Validate and merge evaluator-scoped Timeline v2 runtime normalization/defaulting with the shared Go/TypeScript fixture.
-3. Add `clipIndex` canonical ordering identity to interval-index results and route preview candidate ordering through `(track index, z_index, clip index)` without replacing virtualization.
-4. Migrate output-frame-driven source-time/frame-selection callers to canonical helpers.
-5. Implement canonical keyframe/property evaluation, then the first serializable FrameState.
-6. Continue Phase 0 threshold policy, unsupported-audio boundary, and second-platform evidence in parallel.
+1. Add original `clipIndex` identity to `frontend/src/components/video/pro/timelineIndex.ts` candidates and route preview candidate ordering through canonical `(track index, z_index, clip index)` semantics without replacing virtualization.
+2. Convert the program monitor's media-source seek calculation from playhead millisecond math to canonical frame-derived source-time evaluation, with explicit frame quantization behavior during deterministic rendering/capture.
+3. Migrate output-frame-driven diagnostic/export frame-selection callers to canonical frame/range/source helpers where appropriate while keeping user-interaction playhead UX responsive.
+4. Implement canonical keyframe/property evaluation, then define the first serializable FrameState.
+5. Continue Phase 0 threshold policy, unsupported-audio boundary, and second-platform evidence in parallel.
