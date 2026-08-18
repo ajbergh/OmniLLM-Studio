@@ -3,17 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0a0a14" />
+    <meta name="theme-color" content="#000000" />
     <meta name="description" content="OmniLLM-Studio — Your unified AI chat interface" />
     <link rel="icon" type="image/svg+xml" href="/omnillm-studio-icon.svg" />
     <title>OmniLLM-Studio</title>
     <script>
       // Synchronous theme bootstrap — prevents flash of wrong background color
       (function() {
-        var BG = { aurora: '#0c0c16', ember: '#120e0a', light: '#f8f9fc', terminal: '#0a0a0a' };
+        var BG = { oled: '#000000', aurora: '#0c0c16', ember: '#120e0a', synthwave: '#18122B', light: '#f8f9fc', terminal: '#0a0a0a' };
         try {
-          var id = localStorage.getItem('omnillm.theme') || 'aurora';
-          if (!BG[id]) id = 'aurora';
+          var id = localStorage.getItem('omnillm.theme') || 'oled';
+          if (!BG[id]) id = 'oled';
           document.documentElement.dataset.theme = id;
           document.documentElement.style.setProperty('--color-surface', BG[id]);
           var meta = document.querySelector('meta[name="theme-color"]');

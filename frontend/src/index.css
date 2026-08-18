@@ -1,32 +1,32 @@
 @import "tailwindcss";
 
 @theme {
-  /* Deep dark palette with blue undertones — Aurora Ink (default) */
+  /* Deep dark palette with pure black — OLED Black (default) */
   --color-primary: #6366f1;
   --color-primary-hover: #818cf8;
-  --color-primary-glow: rgba(99, 102, 241, 0.15);
+  --color-primary-glow: rgba(99, 102, 241, 0.20);
   --color-accent: #a855f7;
-  --color-accent-glow: rgba(168, 85, 247, 0.15);
+  --color-accent-glow: rgba(168, 85, 247, 0.20);
 
   /* RGB triplets for composing rgba() at varying opacities */
   --primary-rgb: 99, 102, 241;
   --accent-rgb: 168, 85, 247;
 
-  --color-surface: #0c0c16;
-  --color-background: #0c0c16;
-  --color-surface-raised: #111122;
-  --color-surface-alt: #161628;
-  --color-surface-light: #1e1e38;
-  --color-surface-hover: #1e1e38;
-  --color-surface-glass: rgba(22, 22, 40, 0.8);
+  --color-surface: #000000;
+  --color-background: #000000;
+  --color-surface-raised: #080808;
+  --color-surface-alt: #0f0f0f;
+  --color-surface-light: #171717;
+  --color-surface-hover: #171717;
+  --color-surface-glass: rgba(0, 0, 0, 0.85);
 
-  --color-border: #232340;
-  --color-border-subtle: #1a1a30;
+  --color-border: #1f1f1f;
+  --color-border-subtle: #141414;
   --color-border-focus: #6366f1;
 
-  --color-text: #eaeaf0;
-  --color-text-secondary: #b8b8d0;
-  --color-text-muted: #8a8aa8;
+  --color-text: #f3f4f6;
+  --color-text-secondary: #9ca3af;
+  --color-text-muted: #6b7280;
 
   --color-danger: #ef4444;
   --color-danger-soft: rgba(239, 68, 68, 0.15);
@@ -36,11 +36,11 @@
   --color-warning-soft: rgba(245, 158, 11, 0.15);
 
   /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
-  --shadow-glow-lg: 0 0 60px rgba(99, 102, 241, 0.1), 0 0 20px rgba(168, 85, 247, 0.08);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.8);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.85);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.9);
+  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.18);
+  --shadow-glow-lg: 0 0 60px rgba(99, 102, 241, 0.12), 0 0 20px rgba(168, 85, 247, 0.10);
 }
 
 html, body, #root {

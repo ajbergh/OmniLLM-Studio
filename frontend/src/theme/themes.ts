@@ -1,6 +1,59 @@
 import type { ThemeDefinition, ThemeId } from './tokens';
 
 /**
+ * OLED Black — true pure black (#000000) theme optimized for OLED displays with crisp contrast.
+ */
+const oled: ThemeDefinition = {
+  id: 'oled',
+  name: 'OLED Black',
+  isDark: true,
+  tokens: {
+    // Surfaces — true pitch blacks and ultra-dark neutral layers
+    surface: '#000000',
+    background: '#000000',
+    surfaceRaised: '#080808',
+    surfaceAlt: '#0f0f0f',
+    surfaceLight: '#171717',
+    surfaceHover: '#171717',
+    surfaceGlass: 'rgba(0, 0, 0, 0.85)',
+
+    // Borders — subtle dark neutrals with high-contrast focus
+    border: '#1f1f1f',
+    borderSubtle: '#141414',
+    borderFocus: '#6366f1',
+
+    // Text — clean high-contrast neutrals
+    text: '#f3f4f6',
+    textSecondary: '#9ca3af',
+    textMuted: '#6b7280',
+
+    // Brand — vibrant indigo/purple accents tailored for deep black background
+    primary: '#6366f1',
+    primaryHover: '#818cf8',
+    primaryGlow: 'rgba(99, 102, 241, 0.20)',
+    primaryRgb: '99, 102, 241',
+    accent: '#a855f7',
+    accentGlow: 'rgba(168, 85, 247, 0.20)',
+    accentRgb: '168, 85, 247',
+
+    // Status
+    danger: '#ef4444',
+    dangerSoft: 'rgba(239, 68, 68, 0.15)',
+    success: '#10b981',
+    successSoft: 'rgba(16, 185, 129, 0.15)',
+    warning: '#f59e0b',
+    warningSoft: 'rgba(245, 158, 11, 0.15)',
+
+    // Shadows — deeper contrast on true black
+    shadowSm: '0 1px 2px rgba(0, 0, 0, 0.8)',
+    shadowMd: '0 4px 12px rgba(0, 0, 0, 0.85)',
+    shadowLg: '0 8px 32px rgba(0, 0, 0, 0.9)',
+    shadowGlow: '0 0 20px rgba(99, 102, 241, 0.18)',
+    shadowGlowLg: '0 0 60px rgba(99, 102, 241, 0.12), 0 0 20px rgba(168, 85, 247, 0.10)',
+  },
+};
+
+/**
  * Aurora Ink — default dark theme with indigo/purple tones.
  * Values extracted verbatim from the existing @theme block in index.css.
  */
@@ -104,6 +157,59 @@ const ember: ThemeDefinition = {
     shadowLg: '0 8px 32px rgba(0, 0, 0, 0.5)',
     shadowGlow: '0 0 20px rgba(245, 158, 11, 0.12)',
     shadowGlowLg: '0 0 60px rgba(245, 158, 11, 0.08), 0 0 20px rgba(234, 88, 12, 0.06)',
+  },
+};
+
+/**
+ * Synthwave — 80s cyberpunk retro-futuristic dark theme with neon cyan & hot magenta.
+ */
+const synthwave: ThemeDefinition = {
+  id: 'synthwave',
+  name: 'Synthwave',
+  isDark: true,
+  tokens: {
+    // Surfaces — deep neon midnight violet
+    surface: '#18122B',
+    background: '#18122B',
+    surfaceRaised: '#22183d',
+    surfaceAlt: '#2c1e4e',
+    surfaceLight: '#392864',
+    surfaceHover: '#392864',
+    surfaceGlass: 'rgba(34, 24, 61, 0.85)',
+
+    // Borders — vivid electric magenta/violet borders
+    border: '#493077',
+    borderSubtle: '#332057',
+    borderFocus: '#00f2fe',
+
+    // Text — soft lavender-white with pastel contrast
+    text: '#fdf2ff',
+    textSecondary: '#d8b4fe',
+    textMuted: '#9d7bb0',
+
+    // Brand — vibrant neon cyan and hot magenta
+    primary: '#00f2fe',
+    primaryHover: '#38f9d7',
+    primaryGlow: 'rgba(0, 242, 254, 0.22)',
+    primaryRgb: '0, 242, 254',
+    accent: '#ff007f',
+    accentGlow: 'rgba(255, 0, 127, 0.22)',
+    accentRgb: '255, 0, 127',
+
+    // Status
+    danger: '#ff3366',
+    dangerSoft: 'rgba(255, 51, 102, 0.18)',
+    success: '#05ffa1',
+    successSoft: 'rgba(5, 255, 161, 0.18)',
+    warning: '#ffe600',
+    warningSoft: 'rgba(255, 230, 0, 0.18)',
+
+    // Shadows — electric neon glow
+    shadowSm: '0 1px 3px rgba(10, 5, 20, 0.6)',
+    shadowMd: '0 4px 14px rgba(10, 5, 20, 0.7)',
+    shadowLg: '0 8px 32px rgba(10, 5, 20, 0.85)',
+    shadowGlow: '0 0 20px rgba(0, 242, 254, 0.2)',
+    shadowGlowLg: '0 0 60px rgba(0, 242, 254, 0.14), 0 0 24px rgba(255, 0, 127, 0.14)',
   },
 };
 
@@ -217,15 +323,17 @@ const terminal: ThemeDefinition = {
 };
 
 /** All available themes. */
-export const THEMES: ThemeDefinition[] = [aurora, ember, light, terminal];
+export const THEMES: ThemeDefinition[] = [oled, aurora, ember, synthwave, light, terminal];
 
 /** O(1) lookup by theme ID. */
 export const THEME_MAP: Record<ThemeId, ThemeDefinition> = {
+  oled,
   aurora,
   ember,
+  synthwave,
   light,
   terminal,
 };
 
 /** Default theme ID. */
-export const DEFAULT_THEME_ID: ThemeId = 'aurora';
+export const DEFAULT_THEME_ID: ThemeId = 'oled';
