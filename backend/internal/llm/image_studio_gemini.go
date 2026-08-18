@@ -24,10 +24,8 @@ func buildGeminiStudioImageBody(req ImageStudioRequest, geometry imageStudioGeom
 			aspectRatio = sizeToGeminiAspectRatio(geometry.Size)
 		}
 		if aspectRatio != "" {
-			generationConfig["responseFormat"] = map[string]interface{}{
-				"image": map[string]interface{}{
-					"aspectRatio": aspectRatio,
-				},
+			generationConfig["imageConfig"] = map[string]interface{}{
+				"aspectRatio": aspectRatio,
 			}
 		}
 	}
