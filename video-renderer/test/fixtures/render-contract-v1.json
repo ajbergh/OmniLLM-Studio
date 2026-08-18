@@ -14,6 +14,17 @@
     { "name": "ease-in-out", "t": -0.25, "want": 0.0 },
     { "name": "ease-in-out", "t": 1.25, "want": 1.0 }
   ],
+  "curves": [
+    { "type": "bezier", "t": 0.25, "x1": 0.25, "y1": 0.1, "x2": 0.25, "y2": 1.0, "want": 0.40851059135539586 },
+    { "type": "bezier", "t": 0.5, "x1": 0.25, "y1": 0.1, "x2": 0.25, "y2": 1.0, "want": 0.8024033875848571 },
+    { "type": "bezier", "t": 0.75, "x1": 0.25, "y1": 0.1, "x2": 0.25, "y2": 1.0, "want": 0.9604589783489741 },
+    { "type": "bezier", "t": 0.3, "x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0, "want": 0.3 },
+    { "type": "spring", "t": 0.25, "stiffness": 170.0, "damping": 26.0, "mass": 1.0, "want": 0.8377453226552745 },
+    { "type": "spring", "t": 0.5, "stiffness": 170.0, "damping": 26.0, "mass": 1.0, "want": 0.9893360456798213 },
+    { "type": "spring", "t": 0.5, "stiffness": 100.0, "damping": 10.0, "mass": 1.0, "want": 1.072263629344023 },
+    { "type": "spring", "t": 0.75, "stiffness": 100.0, "damping": 10.0, "mass": 1.0, "want": 0.9720422624752844 },
+    { "type": "spring", "t": 0.5, "stiffness": 300.0, "damping": 15.0, "mass": 1.5, "want": 0.918606741166759 }
+  ],
   "frame_ranges": [
     { "start_ms": 0, "duration_ms": 1000, "fps": 30, "start_frame": 0, "end_frame": 30 },
     { "start_ms": 1001, "duration_ms": 1000, "fps": 30, "start_frame": 30, "end_frame": 61 },

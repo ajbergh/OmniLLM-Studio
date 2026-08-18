@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   activeAtFrame,
+  curveProgress,
   easeProgress,
   endFrame,
   frameTime,
@@ -12,6 +13,18 @@ import {
 interface ContractFixture {
   version: number;
   easing: Array<{ name: string; t: number; want: number }>;
+  curves: Array<{
+    type: string;
+    t: number;
+    x1?: number;
+    y1?: number;
+    x2?: number;
+    y2?: number;
+    stiffness?: number;
+    damping?: number;
+    mass?: number;
+    want: number;
+  }>;
   frame_ranges: Array<{
     start_ms: number;
     duration_ms: number;
@@ -43,6 +56,21 @@ describe('canonical render contract', () => {
   it('matches canonical easing samples', () => {
     for (const sample of fixture.easing) {
       expect(easeProgress(sample.t, sample.name)).toBeCloseTo(sample.want, 12);
+    }
+  });
+
+  it('matches canonical Bezier and spring samples', () => {
+    for (const sample of fixture.curves) {
+      expect(curveProgress(sample.t, {
+        type: sample.type,
+        x1: sample.x1,
+        y1: sample.y1,
+        x2: sample.x2,
+        y2: sample.y2,
+        stiffness: sample.stiffness,
+        damping: sample.damping,
+        mass: sample.mass,
+      }, 'linear')).toBeCloseTo(sample.want, 12);
     }
   });
 

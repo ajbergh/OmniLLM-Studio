@@ -16,6 +16,18 @@ type contractFixture struct {
 		T    float64 `json:"t"`
 		Want float64 `json:"want"`
 	} `json:"easing"`
+	Curves []struct {
+		Type      string  `json:"type"`
+		T         float64 `json:"t"`
+		X1        float64 `json:"x1"`
+		Y1        float64 `json:"y1"`
+		X2        float64 `json:"x2"`
+		Y2        float64 `json:"y2"`
+		Stiffness float64 `json:"stiffness"`
+		Damping   float64 `json:"damping"`
+		Mass      float64 `json:"mass"`
+		Want      float64 `json:"want"`
+	} `json:"curves"`
 	FrameRanges []struct {
 		StartMS    int64 `json:"start_ms"`
 		DurationMS int64 `json:"duration_ms"`
@@ -59,6 +71,26 @@ func TestEaseProgressMatchesSharedFixture(t *testing.T) {
 		got := EaseProgress(sample.T, sample.Name)
 		if math.Abs(got-sample.Want) > 1e-12 {
 			t.Errorf("EaseProgress(%v, %q) = %.12f, want %.12f", sample.T, sample.Name, got, sample.Want)
+		}
+	}
+}
+
+func TestCurveProgressMatchesSharedFixture(t *testing.T) {
+	fixture := loadContractFixture(t)
+	for _, sample := range fixture.Curves {
+		curve := &MotionCurve{
+			Type:      sample.Type,
+			X1:        sample.X1,
+			Y1:        sample.Y1,
+			X2:        sample.X2,
+			Y2:        sample.Y2,
+			Stiffness: sample.Stiffness,
+			Damping:   sample.Damping,
+			Mass:      sample.Mass,
+		}
+		got := CurveProgress(sample.T, curve, EasingLinear)
+		if math.Abs(got-sample.Want) > 1e-12 {
+			t.Errorf("CurveProgress(%v, %+v) = %.12f, want %.12f", sample.T, curve, got, sample.Want)
 		}
 	}
 }
