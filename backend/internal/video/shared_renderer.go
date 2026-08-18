@@ -52,4 +52,3 @@ func (r *SharedCompositionRenderer) RenderVideo(
 
 	return nil
 }
-
