@@ -79,8 +79,14 @@ func TestCurveProgressMatchesSharedFixture(t *testing.T) {
 	fixture := loadContractFixture(t)
 	for _, sample := range fixture.Curves {
 		curve := &MotionCurve{
-			Type: sample.Type, X1: sample.X1, Y1: sample.Y1, X2: sample.X2, Y2: sample.Y2,
-			Stiffness: sample.Stiffness, Damping: sample.Damping, Mass: sample.Mass,
+			Type:      sample.Type,
+			X1:        sample.X1,
+			Y1:        sample.Y1,
+			X2:        sample.X2,
+			Y2:        sample.Y2,
+			Stiffness: sample.Stiffness,
+			Damping:   sample.Damping,
+			Mass:      sample.Mass,
 		}
 		got := CurveProgress(sample.T, curve, EasingLinear)
 		if math.Abs(got-sample.Want) > 1e-12 {
