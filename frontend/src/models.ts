@@ -334,14 +334,20 @@ export function getKnownChatModels(providerType: string, customModels?: string[]
   if (!customModels || customModels.length === 0) {
     return base;
   }
-  const set = new Set(base);
-  for (const m of customModels) {
-    if (m && typeof m === 'string' && !set.has(m)) {
-      set.add(m);
-      base.push(m);
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  // If custom models are provided, combine them with built-in models and sort alphabetically
+  for (const m of [...base, ...customModels]) {
+    if (m && typeof m === 'string' && !seen.has(m)) {
+      seen.add(m);
+      result.push(m);
     }
   }
-  return base;
+
+  // Sort case-insensitively alphabetically
+  result.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  return result;
 }
 
 export function getKnownImageModels(providerType: string): string[] {

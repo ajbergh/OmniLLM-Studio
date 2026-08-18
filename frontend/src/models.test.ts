@@ -19,10 +19,19 @@ describe('getKnownChatModels', () => {
     expect(gpt55Count).toBe(1);
   });
 
-  it('handles empty or undefined customModels array gracefully', () => {
-    const models1 = getKnownChatModels('openrouter', []);
-    const models2 = getKnownChatModels('openrouter', undefined);
-    expect(models1.length).toBeGreaterThan(0);
-    expect(models1).toEqual(models2);
+  it('sorts alphabetically when custom models are added', () => {
+    const custom = ['0-test-model', 'z-test-model'];
+    const models = getKnownChatModels('openrouter', custom);
+    expect(models[0]).toBe('0-test-model');
+    expect(models[models.length - 1]).toBe('z-test-model');
+  });
+
+  it('works for gemini provider with custom models', () => {
+    const custom = ['gemini-2.0-flash-exp', 'gemini-1.5-flash'];
+    const models = getKnownChatModels('gemini', custom);
+    expect(models).toContain('gemini-2.0-flash-exp');
+    expect(models).toContain('gemini-1.5-flash');
+    const flashCount = models.filter((m) => m === 'gemini-1.5-flash').length;
+    expect(flashCount).toBe(1);
   });
 });

@@ -272,6 +272,99 @@ func (h *ProviderHandler) FetchOpenRouterModels(w http.ResponseWriter, r *http.R
 	respondJSON(w, http.StatusOK, models)
 }
 
+// FetchGeminiModels fetches available models from Google Gemini models API
+// using the encrypted API key stored in the provider profile.
+func (h *ProviderHandler) FetchGeminiModels(w http.ResponseWriter, r *http.Request) {
+	providerID := strings.TrimSpace(r.URL.Query().Get("provider_id"))
+	if providerID == "" {
+		respondError(w, http.StatusBadRequest, "provider_id is required")
+		return
+	}
+	provider, err := h.repo.GetByID(providerID)
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	if provider == nil || !strings.EqualFold(provider.Type, "gemini") {
+		respondError(w, http.StatusNotFound, "Gemini provider not found")
+		return
+	}
+	apiKey, err := h.repo.GetAPIKey(providerID)
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		respondError(w, http.StatusBadRequest, "provider has no configured API key")
+		return
+	}
+
+	baseURL := "https://generativelanguage.googleapis.com/v1beta"
+	if provider.BaseURL != nil && strings.TrimSpace(*provider.BaseURL) != "" {
+		raw := strings.TrimSpace(*provider.BaseURL)
+		baseURL = strings.TrimSuffix(strings.TrimRight(raw, "/"), "/openai")
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	reqURL := baseURL + "/models?pageSize=100"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to create request")
+		return
+	}
+	req.Header.Set("x-goog-api-key", apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	client := tools.NewSSRFSafeClient(15 * time.Second)
+	resp, err := client.Do(req)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "cannot reach Gemini API")
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "error reading Gemini response")
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		respondError(w, http.StatusBadGateway, "Gemini returned status "+resp.Status)
+		return
+	}
+
+	var geminiResp struct {
+		Models []struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"displayName"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(body, &geminiResp); err != nil {
+		respondError(w, http.StatusBadGateway, "invalid response from Gemini")
+		return
+	}
+
+	type modelInfo struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	models := make([]modelInfo, 0, len(geminiResp.Models))
+	for _, m := range geminiResp.Models {
+		// Google Gemini returns names like "models/gemini-2.5-flash"
+		cleanID := strings.TrimPrefix(strings.TrimSpace(m.Name), "models/")
+		if cleanID != "" {
+			name := strings.TrimSpace(m.DisplayName)
+			if name == "" {
+				name = cleanID
+			}
+			models = append(models, modelInfo{ID: cleanID, Name: name})
+		}
+	}
+	respondJSON(w, http.StatusOK, models)
+}
+
 // GetImageCapabilities returns the image capabilities for a provider.
 func (h *ProviderHandler) GetImageCapabilities(w http.ResponseWriter, r *http.Request) {
 	providerID := chi.URLParam(r, "providerId")
