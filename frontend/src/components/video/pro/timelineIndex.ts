@@ -71,7 +71,7 @@ export function buildTimelineIntervalIndex(
   }
 
   // Temporal ordering powers interval lookup only. clipIndex is retained so
-  // consumers can restore canonical composition order after querying.
+  // query results can be restored to canonical composition order afterwards.
   clips.sort((left, right) => (
     left.clip.start_ms - right.clip.start_ms
     || clipEnd(left) - clipEnd(right)
@@ -92,8 +92,9 @@ export function buildTimelineIntervalIndex(
 /**
  * Return clips active at timeMs. The prefix maximum lets the backward scan stop
  * as soon as no earlier interval can overlap the query, avoiding a full scan on
- * long projects containing short clips. Returned order is temporal-index order;
- * composition callers must apply compareIndexedTimelineClipOrder.
+ * long projects containing short clips. Candidates are restored to canonical
+ * composition order after lookup so interval-index temporal sorting never leaks
+ * into preview layer semantics.
  */
 export function queryActiveClips(
   index: TimelineIntervalIndex,
@@ -108,7 +109,7 @@ export function queryActiveClips(
     if (clipEnd(item) > timeMs) result.push(item);
   }
 
-  return result.reverse();
+  return result.sort(compareIndexedTimelineClipOrder);
 }
 
 /** Return clips intersecting the visible timeline window, with overscan. */
