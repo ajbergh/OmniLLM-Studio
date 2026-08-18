@@ -1368,214 +1368,15 @@ func (s *Service) openrouterImageGenerate(ctx context.Context, baseURL, apiKey, 
 }
 
 // geminiImageGenerate uses the native Gemini generateContent API for image generation.
-// Gemini image models (gemini-2.5-flash-image, gemini-3.1-flash-image-preview, etc.)
+// Gemini image models (gemini-2.5-flash-image, gemini-3.1-flash-image, etc.)
 // do not support the OpenAI-compat /images/generations endpoint.
 func (s *Service) geminiImageGenerate(ctx context.Context, baseURL, apiKey, model string, req ImageRequest) (*ImageResponse, error) {
-	nativeBase := geminiNativeBaseURL(baseURL)
-	endpoint := fmt.Sprintf("%s/models/%s:generateContent", nativeBase, model)
-
-	// Build generationConfig
-	genConfig := map[string]interface{}{
-		"responseModalities": []string{"IMAGE", "TEXT"},
-	}
-
-	if req.N > 1 {
-		genConfig["candidateCount"] = req.N
-	}
-
-	imageConfig := map[string]interface{}{}
-	if req.Size != "" {
-		imageConfig["aspectRatio"] = sizeToGeminiAspectRatio(req.Size)
-	}
-	if len(imageConfig) > 0 {
-		genConfig["imageConfig"] = imageConfig
-	}
-
-	// Build parts: text prompt + optional reference/mask/style images
-	reqParts := []map[string]interface{}{
-		{"text": req.Prompt},
-	}
-	if req.ReferenceImage != nil && req.ReferenceImage.Data != "" {
-		reqParts = append(reqParts, map[string]interface{}{
-			"inlineData": map[string]interface{}{
-				"mimeType": req.ReferenceImage.MimeType,
-				"data":     req.ReferenceImage.Data,
-			},
-		})
-		log.Printf("[gemini-image] including reference image (%s, %d bytes b64) for editing",
-			req.ReferenceImage.MimeType, len(req.ReferenceImage.Data))
-	}
-
-	// Additional content references
-	for i, ref := range req.ReferenceImages {
-		if ref.Data == "" {
-			continue
-		}
-		reqParts = append(reqParts, map[string]interface{}{
-			"inlineData": map[string]interface{}{
-				"mimeType": ref.MimeType,
-				"data":     ref.Data,
-			},
-		})
-		log.Printf("[gemini-image] including additional reference image %d (%s)", i+1, ref.MimeType)
-	}
-
-	// Mask image
-	if req.MaskImage != nil && req.MaskImage.Data != "" {
-		reqParts = append(reqParts, map[string]interface{}{
-			"text": "Use this mask to identify the region to edit:",
-		})
-		reqParts = append(reqParts, map[string]interface{}{
-			"inlineData": map[string]interface{}{
-				"mimeType": req.MaskImage.MimeType,
-				"data":     req.MaskImage.Data,
-			},
-		})
-		log.Printf("[gemini-image] including mask image (%s)", req.MaskImage.MimeType)
-	}
-
-	// Style reference images
-	for i, ref := range req.StyleReferenceImages {
-		if ref.Data == "" {
-			continue
-		}
-		reqParts = append(reqParts, map[string]interface{}{
-			"text": "Use this as a style reference:",
-		})
-		reqParts = append(reqParts, map[string]interface{}{
-			"inlineData": map[string]interface{}{
-				"mimeType": ref.MimeType,
-				"data":     ref.Data,
-			},
-		})
-		log.Printf("[gemini-image] including style reference image %d (%s)", i+1, ref.MimeType)
-	}
-
-	body := map[string]interface{}{
-		"contents": []map[string]interface{}{
-			{
-				"parts": reqParts,
-			},
-		},
-		"generationConfig": genConfig,
-	}
-
-	jsonBody, err := json.Marshal(body)
+	geometry, err := resolveImageStudioGeometry("gemini", req.OperationType, req.Size, ImageGeometry{Mode: ImageGeometryExplicit, Size: req.Size})
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		geometry = imageStudioGeometryResolution{Mode: ImageGeometryProviderAuto}
 	}
-
-	log.Printf("[gemini-image] POST %s model=%s", endpoint, model)
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	if apiKey != "" {
-		httpReq.Header.Set("x-goog-api-key", apiKey)
-	}
-
-	// Use a longer timeout for image generation
-	imgClient := &http.Client{Timeout: 180 * time.Second}
-	resp, err := imgClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("provider returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	// Parse generically to handle both camelCase and snake_case JSON field names.
-	// The Gemini REST API documentation shows both conventions in different places.
-	var rawResp map[string]interface{}
-	if err := json.Unmarshal(respBody, &rawResp); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	candidates, _ := rawResp["candidates"].([]interface{})
-	if len(candidates) == 0 {
-		log.Printf("[gemini-image] no candidates in response: %s", string(respBody[:min(len(respBody), 500)]))
-		return nil, fmt.Errorf("no candidates returned by Gemini")
-	}
-
-	var images []ImageResult
-	var revisedPrompt string
-
-	for _, c := range candidates {
-		candidate, _ := c.(map[string]interface{})
-		content, _ := candidate["content"].(map[string]interface{})
-		parts, _ := content["parts"].([]interface{})
-
-		for _, p := range parts {
-			part, ok := p.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			// Skip thinking/thought parts
-			if thought, _ := part["thought"].(bool); thought {
-				continue
-			}
-
-			// Collect text for revised prompt
-			if text, ok := part["text"].(string); ok && text != "" && revisedPrompt == "" {
-				revisedPrompt = text
-			}
-
-			// Check for inline_data (snake_case) OR inlineData (camelCase)
-			var inlineData map[string]interface{}
-			if id, ok := part["inline_data"].(map[string]interface{}); ok {
-				inlineData = id
-			} else if id, ok := part["inlineData"].(map[string]interface{}); ok {
-				inlineData = id
-			}
-
-			if inlineData != nil {
-				mimeType := ""
-				if mt, ok := inlineData["mime_type"].(string); ok {
-					mimeType = mt
-				} else if mt, ok := inlineData["mimeType"].(string); ok {
-					mimeType = mt
-				}
-
-				data, _ := inlineData["data"].(string)
-
-				if strings.HasPrefix(mimeType, "image/") && data != "" {
-					images = append(images, ImageResult{
-						B64JSON:       data,
-						RevisedPrompt: revisedPrompt,
-					})
-				}
-			}
-		}
-	}
-
-	if len(images) == 0 {
-		// Log a snippet of the response for debugging
-		snippet := string(respBody)
-		if len(snippet) > 1000 {
-			snippet = snippet[:1000] + "..."
-		}
-		log.Printf("[gemini-image] no images found in response candidates (count=%d): %s", len(candidates), snippet)
-		return nil, fmt.Errorf("no images returned by Gemini")
-	}
-
-	log.Printf("[gemini-image] success: %d image(s) from model %s", len(images), model)
-
-	return &ImageResponse{
-		Images:   images,
-		Provider: "gemini",
-		Model:    model,
-	}, nil
+	studioReq := ImageStudioRequest{ImageRequest: req}
+	return s.geminiStudioImageGenerate(ctx, baseURL, apiKey, model, studioReq, geometry)
 }
 
 // openrouterMusicGenerate uses OpenRouter chat completions with audio output.
@@ -2145,6 +1946,16 @@ func (s *Service) ImageGenerate(ctx context.Context, req ImageRequest) (*ImageRe
 	// (OpenRouter does not support /images/generations — it returns 404)
 	if strings.EqualFold(providerType, "openrouter") {
 		return s.openrouterImageGenerate(ctx, baseURL, apiKey, model, req)
+	}
+
+	// Route Together to its dedicated image generation API
+	if strings.EqualFold(providerType, "together") {
+		geometry, err := resolveImageStudioGeometry(providerType, req.OperationType, req.Size, ImageGeometry{Mode: ImageGeometryExplicit, Size: req.Size})
+		if err != nil {
+			geometry = imageStudioGeometryResolution{Mode: ImageGeometryProviderAuto}
+		}
+		studioReq := ImageStudioRequest{ImageRequest: req}
+		return s.togetherStudioImageGenerate(ctx, baseURL, apiKey, model, studioReq, geometry)
 	}
 
 	// Route edit requests to the OpenAI /images/edits multipart endpoint
