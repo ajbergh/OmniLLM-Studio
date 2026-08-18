@@ -1,0 +1,159 @@
+name: Temporary frame source integration
+
+on:
+  push:
+    branches: [feat/video-wysiwyg-phase2-frame-source-selection]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/video-wysiwyg-phase2-frame-source-selection
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Wire deterministic frame activity and media seeks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/src/components/video/VideoPreviewCanvas.tsx')
+          text = path.read_text()
+
+          old = "import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips } from './pro/timelineIndex';"
+          new = "import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips, queryActiveClipsAtFrame } from './pro/timelineIndex';"
+          if old not in text:
+              raise SystemExit('timeline index import marker not found')
+          text = text.replace(old, new, 1)
+
+          old = "import { sourceTimeForAddressMs } from './sourceTiming';"
+          new = "import { frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForAddressMs } from './sourceTiming';"
+          if old not in text:
+              raise SystemExit('source timing import marker not found')
+          text = text.replace(old, new, 1)
+
+          old = '''  const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
+          const activeIndexed = queryActiveClips(intervalIndex, playheadMs)
+            .filter(({ track }) => track.visible)
+            .sort(compareIndexedTimelineClipOrder);'''
+          new = '''  const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
+          const fps = timeline?.canvas.fps || 30;
+          const addressedFrame = frameAddressRef.current;
+          const deterministicFrame = !isPlaying
+            && addressedFrame !== null
+            && frameAddressMatchesTimelineMs(addressedFrame, fps, playheadMs)
+            ? addressedFrame
+            : null;
+          const activeIndexed = (deterministicFrame !== null
+            ? queryActiveClipsAtFrame(intervalIndex, deterministicFrame, fps)
+            : queryActiveClips(intervalIndex, playheadMs))
+            .filter(({ track }) => track.visible)
+            .sort(compareIndexedTimelineClipOrder);'''
+          if old not in text:
+              raise SystemExit('active interval marker not found')
+          text = text.replace(old, new, 1)
+
+          old = '''  useEffect(() => {
+            const fps = timeline?.canvas.fps || 30;
+            const addressedFrame = frameAddressRef.current;
+            if (addressedFrame !== null) {
+              const addressedPlayheadMs = (addressedFrame * 1000) / fps;
+              if (Math.abs(addressedPlayheadMs - playheadMs) > 1e-6) {
+                frameAddressRef.current = null;
+              }
+            }
+
+            const syncElement = (element: HTMLMediaElement, clip: VideoTimelineClip) => {
+              const playbackRate = Math.min(4, Math.max(0.25, clip.playback_rate ?? 1));
+              const frameIndex = frameAddressRef.current;
+              const targetMs = frameIndex !== null
+                ? sourceTimeForAddressMs(
+                    { kind: 'frame', frameIndex, fps },
+                    clip.start_ms,
+                    clip.trim_in_ms ?? 0,
+                    playbackRate,
+                  )
+                : sourceTimeForAddressMs(
+                    { kind: 'time', timelineMs: playheadMs },
+                    clip.start_ms,
+                    clip.trim_in_ms ?? 0,
+                    playbackRate,
+                  );
+              const target = targetMs / 1000;'''
+          new = '''  useEffect(() => {
+            const address = deterministicFrame !== null
+              ? { kind: 'frame' as const, frameIndex: deterministicFrame, fps }
+              : { kind: 'time' as const, timelineMs: playheadMs };
+            if (frameAddressRef.current !== null && deterministicFrame === null) {
+              frameAddressRef.current = null;
+            }
+
+            const syncElement = (element: HTMLMediaElement, clip: VideoTimelineClip) => {
+              const playbackRate = Math.min(4, Math.max(0.25, clip.playback_rate ?? 1));
+              const targetMs = sourceTimeForAddressMs(
+                address,
+                clip.start_ms,
+                clip.trim_in_ms ?? 0,
+                playbackRate,
+              );
+              const target = targetMs / 1000;'''
+          if old not in text:
+              raise SystemExit('media sync source marker not found')
+          text = text.replace(old, new, 1)
+
+          old = '''      } else {
+                if (!element.paused) element.pause();
+                if (Math.abs(element.currentTime - target) > 0.05) {
+                  element.currentTime = target;
+                }
+              }'''
+          new = '''      } else {
+                if (!element.paused) element.pause();
+                if (Math.abs(element.currentTime - target) > mediaSeekToleranceSeconds(address)) {
+                  element.currentTime = target;
+                }
+              }'''
+          if old not in text:
+              raise SystemExit('paused seek tolerance marker not found')
+          text = text.replace(old, new, 1)
+
+          old = "  }, [playheadMs, isPlaying, previewVolume, timeline?.canvas.fps]);"
+          new = "  }, [deterministicFrame, fps, playheadMs, isPlaying, previewVolume]);"
+          if old not in text:
+              raise SystemExit('media sync dependency marker not found')
+          text = text.replace(old, new, 1)
+
+          old = "          data-parity-frame-index={Math.floor((playheadMs * (timeline?.canvas.fps || 30)) / 1000)}"
+          new = "          data-parity-frame-index={deterministicFrame ?? Math.floor((playheadMs * fps) / 1000)}"
+          if old not in text:
+              raise SystemExit('parity frame marker not found')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Validate focused frontend slice
+        working-directory: frontend
+        run: |
+          npm run lint
+          npm run test:unit
+          npm run build
+      - name: Commit integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/components/video/VideoPreviewCanvas.tsx
+          git diff --cached --check
+          git commit -m "feat(video): use canonical frame addressing for deterministic preview"
+          git push origin HEAD:feat/video-wysiwyg-phase2-frame-source-selection
