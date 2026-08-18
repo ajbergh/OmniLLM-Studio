@@ -1,0 +1,260 @@
+{
+  "version": 1,
+  "success_cases": [
+    {
+      "name": "visual-defaults",
+      "input": {
+        "version": 1,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 1000,
+        "tracks": [
+          {
+            "id": "track-video",
+            "type": "video",
+            "name": "Video",
+            "locked": false,
+            "muted": false,
+            "visible": true,
+            "clips": [
+              {
+                "id": "clip-video",
+                "asset_id": "asset-video",
+                "start_ms": 0,
+                "duration_ms": 1000,
+                "trim_in_ms": 0,
+                "trim_out_ms": 0,
+                "effects": [],
+                "keyframes": []
+              }
+            ]
+          }
+        ],
+        "markers": [],
+        "metadata": { "source": "adapter-fixture", "nested": { "value": 1 } }
+      },
+      "expected": {
+        "version": 2,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 1000,
+        "tracks": [
+          {
+            "id": "track-video",
+            "type": "video",
+            "name": "Video",
+            "locked": false,
+            "muted": false,
+            "visible": true,
+            "clips": [
+              {
+                "id": "clip-video",
+                "asset_id": "asset-video",
+                "start_ms": 0,
+                "duration_ms": 1000,
+                "trim_in_ms": 0,
+                "trim_out_ms": 1000,
+                "playback_rate": 1,
+                "transform": { "x": 0, "y": 0, "scale": 1, "rotation": 0, "opacity": 1 },
+                "media_fit": "contain",
+                "effects": [],
+                "keyframes": []
+              }
+            ]
+          }
+        ],
+        "markers": [],
+        "working_color_space": "srgb",
+        "metadata": { "source": "adapter-fixture", "nested": { "value": 1 } }
+      }
+    },
+    {
+      "name": "rate-camera-and-crop",
+      "input": {
+        "version": 1,
+        "canvas": { "width": 1920, "height": 1080, "fps": 60, "background": "#101010" },
+        "duration_ms": 0,
+        "tracks": [
+          {
+            "id": "track-layer",
+            "type": "layer",
+            "name": "Layer 1",
+            "locked": false,
+            "muted": false,
+            "visible": true,
+            "clips": [
+              {
+                "id": "clip-rate",
+                "asset_id": "asset-rate",
+                "start_ms": 1000,
+                "duration_ms": 800,
+                "trim_in_ms": 100,
+                "trim_out_ms": 0,
+                "playback_rate": 1.25,
+                "transform": {
+                  "x": 12,
+                  "y": -6,
+                  "z": 3,
+                  "scale": 1.2,
+                  "scale_x": 1.1,
+                  "scale_y": 0.9,
+                  "rotation": 5,
+                  "rotation_x": 2,
+                  "rotation_y": 3,
+                  "rotation_z": 4,
+                  "opacity": 0.8,
+                  "anchor_x": 0.5,
+                  "anchor_y": 0.5,
+                  "perspective": 800,
+                  "crop": { "top": 1, "right": 2, "bottom": 3, "left": 4 }
+                },
+                "cursor": { "visible": true, "scale": 0, "events": [{ "time_ms": 10, "x": 20, "y": 30 }] },
+                "effects": [],
+                "keyframes": [
+                  { "id": "kf-1", "property": "scale", "time_ms": 400, "value": 1.5, "easing": "linear", "curve": { "type": "bezier", "x1": 0.25, "y1": 0.1, "x2": 0.25, "y2": 1 } }
+                ]
+              }
+            ]
+          }
+        ],
+        "markers": [{ "id": "marker-1", "time_ms": 1200, "label": "Beat" }],
+        "scenes": [
+          { "id": "scene-1", "name": "Scene 1", "start_ms": 0, "duration_ms": 2000, "camera": {}, "metadata": { "role": "camera" } }
+        ],
+        "metadata": {}
+      },
+      "expected": {
+        "version": 2,
+        "canvas": { "width": 1920, "height": 1080, "fps": 60, "background": "#101010" },
+        "duration_ms": 30000,
+        "tracks": [
+          {
+            "id": "track-layer",
+            "type": "layer",
+            "name": "Layer 1",
+            "locked": false,
+            "muted": false,
+            "visible": true,
+            "clips": [
+              {
+                "id": "clip-rate",
+                "asset_id": "asset-rate",
+                "start_ms": 1000,
+                "duration_ms": 800,
+                "trim_in_ms": 100,
+                "trim_out_ms": 1100,
+                "playback_rate": 1.25,
+                "transform": {
+                  "x": 12,
+                  "y": -6,
+                  "z": 3,
+                  "scale": 1.2,
+                  "scale_x": 1.1,
+                  "scale_y": 0.9,
+                  "rotation": 5,
+                  "rotation_x": 2,
+                  "rotation_y": 3,
+                  "rotation_z": 4,
+                  "opacity": 0.8,
+                  "anchor_x": 0.5,
+                  "anchor_y": 0.5,
+                  "perspective": 800,
+                  "crop": { "top": 1, "right": 2, "bottom": 3, "left": 4 }
+                },
+                "media_fit": "contain",
+                "cursor": { "visible": true, "scale": 1, "events": [{ "time_ms": 10, "x": 20, "y": 30 }] },
+                "effects": [],
+                "keyframes": [
+                  { "id": "kf-1", "property": "scale", "time_ms": 400, "value": 1.5, "easing": "linear", "curve": { "type": "bezier", "x1": 0.25, "y1": 0.1, "x2": 0.25, "y2": 1 } }
+                ]
+              }
+            ]
+          }
+        ],
+        "markers": [{ "id": "marker-1", "time_ms": 1200, "label": "Beat" }],
+        "scenes": [
+          {
+            "id": "scene-1",
+            "name": "Scene 1",
+            "start_ms": 0,
+            "duration_ms": 2000,
+            "camera": { "x": 0, "y": 0, "z": 0, "rotation_x": 0, "rotation_y": 0, "rotation_z": 0, "field_of_view": 50, "focus_depth": 0 },
+            "metadata": { "role": "camera" }
+          }
+        ],
+        "working_color_space": "srgb",
+        "metadata": {}
+      }
+    }
+  ],
+  "error_cases": [
+    {
+      "name": "ambiguous-transition",
+      "input": {
+        "version": 1,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 1000,
+        "tracks": [
+          {
+            "id": "track-video",
+            "type": "video",
+            "name": "Video",
+            "locked": false,
+            "muted": false,
+            "visible": true,
+            "clips": [
+              {
+                "id": "clip-video",
+                "asset_id": "asset-video",
+                "start_ms": 0,
+                "duration_ms": 1000,
+                "trim_in_ms": 0,
+                "trim_out_ms": 1000,
+                "effects": [],
+                "transitions": [{ "id": "transition-1", "type": "fade", "duration_ms": 250 }],
+                "keyframes": []
+              }
+            ]
+          }
+        ],
+        "markers": [],
+        "metadata": {}
+      },
+      "code": "V1_TRANSITION_PLACEMENT_AMBIGUOUS",
+      "path": "tracks[0].clips[0].transitions[0]"
+    },
+    {
+      "name": "unknown-transform-field",
+      "input": {
+        "version": 1,
+        "canvas": { "width": 640, "height": 360, "fps": 30, "background": "#000000" },
+        "duration_ms": 1000,
+        "tracks": [
+          {
+            "id": "track-video",
+            "type": "video",
+            "name": "Video",
+            "locked": false,
+            "muted": false,
+            "visible": true,
+            "clips": [
+              {
+                "id": "clip-video",
+                "asset_id": "asset-video",
+                "start_ms": 0,
+                "duration_ms": 1000,
+                "trim_in_ms": 0,
+                "trim_out_ms": 1000,
+                "transform": { "x": 0, "y": 0, "scale": 1, "rotation": 0, "opacity": 1, "future_warp": 0.5 },
+                "effects": [],
+                "keyframes": []
+              }
+            ]
+          }
+        ],
+        "markers": [],
+        "metadata": {}
+      },
+      "code": "V1_TRANSFORM_FIELD_UNSUPPORTED",
+      "path": "tracks[0].clips[0].transform.future_warp"
+    }
+  ]
+}
