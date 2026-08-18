@@ -57,7 +57,7 @@ jobs:
           tests = test_file.read_text()
           tests = tests.replace('import (\n\t"strings"', 'import (\n\t"path/filepath"\n\t"strings"')
           tests = tests.replace('\t"testing"\n)', '\t"testing"\n\n\t"github.com/go-pdf/fpdf"\n)')
-          marker = 'func TestParseHTMLPreservesHeadingPath'
+          marker = 'func TestParseHTMLPreservesHeadingPath(t *testing.T)'
           pdf_test = '''func TestParsePDFExtractsTextWithPureGoParser(t *testing.T) {
           \tpath := filepath.Join(t.TempDir(), "sample.pdf")
           \tdoc := fpdf.New("P", "mm", "A4", "")
@@ -72,7 +72,7 @@ jobs:
           \tif err != nil {
           \t\tt.Fatalf("ParseFile() error = %v", err)
           \t}
-          \tmarkdown := RenderMarkdown(parsed)
+          \tmarkdown := strings.Join(strings.Fields(RenderMarkdown(parsed)), " ")
           \tif !strings.Contains(markdown, "OmniLLM secure PDF parser migration") {
           \t\tt.Fatalf("expected extracted PDF text, got %q", markdown)
           \t}
