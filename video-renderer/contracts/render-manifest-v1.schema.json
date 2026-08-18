@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnillm.studio/schemas/video/render-manifest-v1.schema.json",
+  "title": "OmniLLM Studio Render Manifest v1",
+  "description": "Immutable renderer input identity. The manifest binds a canonical timeline revision to staged media bytes and explicit output settings.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "contract_version",
+    "snapshot_id",
+    "timeline_id",
+    "timeline_revision",
+    "timeline_sha256",
+    "asset_manifest_sha256",
+    "timeline",
+    "assets",
+    "settings"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "contract_version": { "const": "timeline-v2" },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "timeline_id": { "type": "string", "minLength": 1 },
+    "timeline_revision": { "type": "integer", "minimum": 1 },
+    "timeline_sha256": { "$ref": "#/$defs/sha256" },
+    "asset_manifest_sha256": { "$ref": "#/$defs/sha256" },
+    "timeline": { "$ref": "timeline-v2.schema.json" },
+    "assets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset" }
+    },
+    "settings": { "$ref": "#/$defs/settings" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "clip_ids", "staged_path", "file_sha256", "size_bytes", "kind"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "clip_ids": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "staged_path": { "type": "string", "minLength": 1 },
+        "file_sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "kind": { "enum": ["video", "image", "audio", "music", "text", "caption", "export", "other"] },
+        "mime_type": { "type": "string" },
+        "media": { "$ref": "#/$defs/mediaProbe" }
+      }
+    },
+    "mediaProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "fps_num": { "type": "integer", "minimum": 0 },
+        "fps_den": { "type": "integer", "minimum": 1 },
+        "sample_rate": { "type": "integer", "minimum": 1 },
+        "channels": { "type": "integer", "minimum": 1 },
+        "channel_layout": { "type": "string" },
+        "pixel_format": { "type": "string" },
+        "color_space": { "type": "string" },
+        "color_primaries": { "type": "string" },
+        "color_transfer": { "type": "string" }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "fps", "range_start_frame", "range_end_frame", "burn_in_captions", "audio_sample_rate", "audio_channels"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "fps": { "type": "integer", "minimum": 1, "maximum": 120 },
+        "range_start_frame": { "type": "integer", "minimum": 0 },
+        "range_end_frame": { "type": "integer", "minimum": 0 },
+        "burn_in_captions": { "type": "boolean" },
+        "audio_sample_rate": { "const": 48000 },
+        "audio_channels": { "const": 2 },
+        "working_color_space": { "const": "srgb" },
+        "output_container": { "type": "string" },
+        "video_codec": { "type": "string" },
+        "audio_codec": { "type": "string" }
+      }
+    }
+  }
+}

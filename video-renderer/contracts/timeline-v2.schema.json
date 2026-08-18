@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnillm.studio/schemas/video/timeline-v2.schema.json",
+  "title": "OmniLLM Studio Video Timeline v2",
+  "description": "Canonical authorable timeline contract. Unknown authorable fields fail closed; metadata and effect parameter payloads remain explicit extension points.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "canvas", "duration_ms", "tracks", "markers", "metadata"],
+  "properties": {
+    "version": { "const": 2 },
+    "canvas": { "$ref": "#/$defs/canvas" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "tracks": { "type": "array", "items": { "$ref": "#/$defs/track" } },
+    "markers": { "type": "array", "items": { "$ref": "#/$defs/marker" } },
+    "scenes": { "type": "array", "items": { "$ref": "#/$defs/scene" } },
+    "working_color_space": { "enum": ["srgb"] },
+    "metadata": { "$ref": "#/$defs/metadata" }
+  },
+  "$defs": {
+    "metadata": { "type": "object", "additionalProperties": true },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "fps", "background"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "fps": { "type": "integer", "minimum": 1, "maximum": 120 },
+        "background": { "type": "string", "minLength": 1 }
+      }
+    },
+    "track": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "name", "locked", "muted", "visible", "clips"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["layer", "video", "image", "audio", "music", "text", "caption", "shape", "callout"] },
+        "name": { "type": "string" },
+        "locked": { "type": "boolean" },
+        "muted": { "type": "boolean" },
+        "solo": { "type": "boolean" },
+        "visible": { "type": "boolean" },
+        "height": { "type": "integer", "minimum": 32, "maximum": 160 },
+        "clips": { "type": "array", "items": { "$ref": "#/$defs/clip" } }
+      }
+    },
+    "clip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "start_ms", "duration_ms", "trim_in_ms", "trim_out_ms", "effects", "keyframes"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "asset_id": { "type": "string" },
+        "start_ms": { "type": "integer", "minimum": 0 },
+        "duration_ms": { "type": "integer", "minimum": 1 },
+        "trim_in_ms": { "type": "integer", "minimum": 0 },
+        "trim_out_ms": { "type": "integer", "minimum": 0 },
+        "playback_rate": { "type": "number", "minimum": 0.25, "maximum": 4 },
+        "z_index": { "type": "integer" },
+        "group_id": { "type": "string" },
+        "template_slot": { "type": "string" },
+        "muted": { "type": "boolean" },
+        "audio_only": { "type": "boolean" },
+        "transform": { "$ref": "#/$defs/transform" },
+        "media_fit": { "enum": ["contain", "cover", "fill", "none"] },
+        "mask_source_crop": { "$ref": "#/$defs/crop" },
+        "content_bounds": { "$ref": "#/$defs/contentBounds" },
+        "volume": { "type": "number", "minimum": 0 },
+        "fade_in_ms": { "type": "integer", "minimum": 0 },
+        "fade_out_ms": { "type": "integer", "minimum": 0 },
+        "text": { "$ref": "#/$defs/text" },
+        "shape": { "$ref": "#/$defs/shape" },
+        "cursor": { "$ref": "#/$defs/cursor" },
+        "effects": { "type": "array", "items": { "$ref": "#/$defs/effect" } },
+        "transitions": { "type": "array", "items": { "$ref": "#/$defs/transition" } },
+        "keyframes": { "type": "array", "items": { "$ref": "#/$defs/keyframe" } },
+        "animation_blocks": { "type": "array", "items": { "$ref": "#/$defs/animationBlock" } },
+        "metadata": { "$ref": "#/$defs/metadata" }
+      }
+    },
+    "transform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" },
+        "scale": { "type": "number" }, "scale_x": { "type": "number" }, "scale_y": { "type": "number" },
+        "rotation": { "type": "number" }, "rotation_x": { "type": "number" }, "rotation_y": { "type": "number" }, "rotation_z": { "type": "number" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "anchor_x": { "type": "number" }, "anchor_y": { "type": "number" },
+        "perspective": { "type": "number" },
+        "crop": { "$ref": "#/$defs/crop" }
+      }
+    },
+    "crop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["top", "right", "bottom", "left"],
+      "properties": {
+        "top": { "type": "number", "minimum": 0, "maximum": 1 },
+        "right": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bottom": { "type": "number", "minimum": 0, "maximum": 1 },
+        "left": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "contentBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" }, "y": { "type": "number" },
+        "width": { "type": "number", "minimum": 0 }, "height": { "type": "number", "minimum": 0 }
+      }
+    },
+    "text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string" },
+        "font_family": { "type": "string" }, "font_size": { "type": "integer", "minimum": 1 },
+        "font_weight": { "type": "string" }, "color": { "type": "string" }, "background": { "type": "string" },
+        "stroke": { "type": "string" }, "stroke_width": { "type": "number", "minimum": 0 }, "shadow": { "type": "boolean" },
+        "text_align": { "enum": ["left", "center", "right"] },
+        "vertical_align": { "enum": ["top", "middle", "bottom"] },
+        "line_height": { "type": "number", "minimum": 0 }, "letter_spacing": { "type": "number" },
+        "border_radius": { "type": "number", "minimum": 0 },
+        "box_width": { "type": "number", "minimum": 0 }, "box_height": { "type": "number", "minimum": 0 },
+        "padding_top": { "type": "number", "minimum": 0 }, "padding_right": { "type": "number", "minimum": 0 },
+        "padding_bottom": { "type": "number", "minimum": 0 }, "padding_left": { "type": "number", "minimum": 0 },
+        "params": { "$ref": "#/$defs/metadata" }
+      }
+    },
+    "shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["rectangle", "highlight", "blur", "rounded_rectangle", "ellipse", "arrow", "line", "speech_bubble", "spotlight", "pixelate", "checkmark", "x_mark", "step_marker", "label"] },
+        "width": { "type": "integer", "minimum": 0 }, "height": { "type": "integer", "minimum": 0 },
+        "fill": { "type": "string" }, "stroke": { "type": "string" }, "stroke_width": { "type": "number", "minimum": 0 },
+        "blur_radius": { "type": "number", "minimum": 0 }, "corner_radius": { "type": "number", "minimum": 0 }
+      }
+    },
+    "cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "visible": { "type": "boolean" }, "scale": { "type": "number", "minimum": 0 }, "highlight": { "type": "boolean" },
+        "click_rings": { "type": "boolean" }, "smoothing": { "type": "boolean" },
+        "events": { "type": "array", "items": { "$ref": "#/$defs/cursorEvent" } }
+      }
+    },
+    "cursorEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time_ms", "x", "y"],
+      "properties": { "time_ms": { "type": "integer", "minimum": 0 }, "x": { "type": "number" }, "y": { "type": "number" }, "click": { "type": "boolean" } }
+    },
+    "effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "enabled", "params"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["blur", "brightness", "contrast", "saturation", "grayscale", "shadow", "background_blur", "chroma_key", "sharpen", "vignette", "film_grain", "bloom", "color_grade", "edge_fade", "rgb_split", "ghost_trail", "motion_blur", "depth_of_field", "rack_focus"] },
+        "enabled": { "type": "boolean" }, "params": { "$ref": "#/$defs/metadata" }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "duration_ms", "placement"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }, "type": { "enum": ["fade", "crossfade", "dip_to_black", "slide", "wipe", "zoom"] },
+        "duration_ms": { "type": "integer", "minimum": 1 }, "direction": { "enum": ["left", "right", "up", "down"] },
+        "placement": { "enum": ["in", "out", "between"] }, "peer_clip_id": { "type": "string" }
+      }
+    },
+    "motionCurve": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["type"], "properties": { "type": { "enum": ["linear", "ease-in", "ease-out", "ease-in-out", "step"] } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "x1", "y1", "x2", "y2"], "properties": { "type": { "const": "bezier" }, "x1": { "type": "number" }, "y1": { "type": "number" }, "x2": { "type": "number" }, "y2": { "type": "number" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "stiffness", "damping", "mass"], "properties": { "type": { "const": "spring" }, "stiffness": { "type": "number", "exclusiveMinimum": 0 }, "damping": { "type": "number", "exclusiveMinimum": 0 }, "mass": { "type": "number", "exclusiveMinimum": 0 } } }
+      ]
+    },
+    "keyframe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "property", "time_ms", "value"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }, "property": { "type": "string", "minLength": 1 },
+        "time_ms": { "type": "integer", "minimum": 0 }, "value": { "type": "number" },
+        "easing": { "enum": ["linear", "ease-in", "ease-out", "ease-in-out", "step"] }, "curve": { "$ref": "#/$defs/motionCurve" }
+      }
+    },
+    "animationBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "block_key", "family", "start_ms", "duration_ms", "generated_keyframe_ids"],
+      "properties": {
+        "id": { "type": "string" }, "block_key": { "type": "string" }, "family": { "type": "string" },
+        "start_ms": { "type": "integer", "minimum": 0 }, "duration_ms": { "type": "integer", "minimum": 0 }, "delay_ms": { "type": "integer", "minimum": 0 },
+        "params": { "$ref": "#/$defs/metadata" }, "generated_keyframe_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" },
+        "rotation_x": { "type": "number" }, "rotation_y": { "type": "number" }, "rotation_z": { "type": "number" },
+        "field_of_view": { "type": "number", "exclusiveMinimum": 0, "maximum": 179 }, "focus_depth": { "type": "number" },
+        "keyframes": { "type": "array", "items": { "$ref": "#/$defs/keyframe" } }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "start_ms", "duration_ms"],
+      "properties": {
+        "id": { "type": "string" }, "name": { "type": "string" }, "start_ms": { "type": "integer", "minimum": 0 }, "duration_ms": { "type": "integer", "minimum": 1 },
+        "camera": { "$ref": "#/$defs/camera" }, "effects": { "type": "array", "items": { "$ref": "#/$defs/effect" } }, "metadata": { "$ref": "#/$defs/metadata" }
+      }
+    },
+    "marker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "time_ms", "label"],
+      "properties": { "id": { "type": "string" }, "time_ms": { "type": "integer", "minimum": 0 }, "label": { "type": "string" } }
+    }
+  }
+}
