@@ -11,6 +11,17 @@ export interface RationalTime {
   denominator: number;
 }
 
+export interface CanonicalMotionCurve {
+  type: string;
+  x1?: number;
+  y1?: number;
+  x2?: number;
+  y2?: number;
+  stiffness?: number;
+  damping?: number;
+  mass?: number;
+}
+
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
@@ -73,4 +84,76 @@ export function easeProgress(t: number, easing?: string): number {
     default:
       return normalized;
   }
+}
+
+/**
+ * Evaluates the canonical curve for one keyframe segment. Curve wins when
+ * present; fallback easing preserves v1 documents that only authored easing.
+ */
+export function curveProgress(t: number, curve?: CanonicalMotionCurve, fallback?: string): number {
+  const normalized = clamp01(t);
+  if (!curve) return easeProgress(normalized, fallback);
+  switch (curve.type.trim().toLowerCase()) {
+    case 'bezier':
+      return cubicBezierProgress(
+        normalized,
+        curve.x1 ?? 0,
+        curve.y1 ?? 0,
+        curve.x2 ?? 0,
+        curve.y2 ?? 0,
+      );
+    case 'spring':
+      return springProgress(
+        normalized,
+        curve.stiffness ?? 170,
+        curve.damping ?? 26,
+        curve.mass ?? 1,
+      );
+    default:
+      return easeProgress(normalized, curve.type);
+  }
+}
+
+function cubicBezierProgress(x: number, x1: number, y1: number, x2: number, y2: number): number {
+  const bezier = (t: number, a: number, b: number) => 3 * (1 - t) ** 2 * t * a + 3 * (1 - t) * t ** 2 * b + t ** 3;
+  const derivative = (t: number, a: number, b: number) => 3 * (1 - t) ** 2 * a + 6 * (1 - t) * t * (b - a) + 3 * t ** 2 * (1 - b);
+  let parameter = clamp01(x);
+  for (let index = 0; index < 8; index += 1) {
+    const slope = derivative(parameter, x1, x2);
+    if (Math.abs(slope) < 1e-7) break;
+    parameter = clamp01(parameter - (bezier(parameter, x1, x2) - x) / slope);
+  }
+  let low = 0;
+  let high = 1;
+  for (let index = 0; index < 12; index += 1) {
+    const value = bezier(parameter, x1, x2);
+    if (Math.abs(value - x) < 1e-7) break;
+    if (value < x) low = parameter;
+    else high = parameter;
+    parameter = (low + high) / 2;
+  }
+  return bezier(parameter, y1, y2);
+}
+
+function springProgress(t: number, stiffness: number, damping: number, mass: number): number {
+  const k = stiffness > 0 ? stiffness : 170;
+  const c = damping > 0 ? damping : 26;
+  const m = mass > 0 ? mass : 1;
+  const response = (at: number) => {
+    const omega0 = Math.sqrt(k / m);
+    const zeta = c / (2 * Math.sqrt(k * m));
+    if (zeta < 1 - 1e-6) {
+      const omegaD = omega0 * Math.sqrt(1 - zeta ** 2);
+      return 1 - Math.exp(-zeta * omega0 * at) * (Math.cos(omegaD * at) + (zeta * omega0 / omegaD) * Math.sin(omegaD * at));
+    }
+    if (zeta > 1 + 1e-6) {
+      const root = Math.sqrt(zeta ** 2 - 1);
+      const r1 = -omega0 * (zeta - root);
+      const r2 = -omega0 * (zeta + root);
+      return 1 - (r2 * Math.exp(r1 * at) - r1 * Math.exp(r2 * at)) / (r2 - r1);
+    }
+    return 1 - Math.exp(-omega0 * at) * (1 + omega0 * at);
+  };
+  const end = response(1);
+  return Math.abs(end) < 1e-9 ? t : response(t) / end;
 }
