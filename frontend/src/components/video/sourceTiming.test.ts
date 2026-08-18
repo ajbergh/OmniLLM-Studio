@@ -1,0 +1,65 @@
+import { describe, expect, it } from 'vitest';
+import {
+  frameAddressMatchesTimelineMs,
+  mediaSeekToleranceSeconds,
+  sourceTimeForAddressMs,
+} from './sourceTiming';
+
+describe('media source timing', () => {
+  it('keeps free-running playback sub-frame responsive', () => {
+    expect(sourceTimeForAddressMs(
+      { kind: 'time', timelineMs: 1000.5 },
+      500,
+      100,
+      1.25,
+    )).toBeCloseTo(725.625, 9);
+  });
+
+  it('derives deterministic source time directly from output-frame identity', () => {
+    expect(sourceTimeForAddressMs(
+      { kind: 'frame', frameIndex: 1, fps: 120 },
+      0,
+      10,
+      2,
+    )).toBeCloseTo(26.6666666667, 9);
+  });
+
+  it('does not round a deterministic frame through integer milliseconds', () => {
+    const frameAddressed = sourceTimeForAddressMs(
+      { kind: 'frame', frameIndex: 1, fps: 120 },
+      0,
+      0,
+      2,
+    );
+    const roundedMillisecond = sourceTimeForAddressMs(
+      { kind: 'time', timelineMs: 8 },
+      0,
+      0,
+      2,
+    );
+
+    expect(frameAddressed).toBeCloseTo(16.6666666667, 9);
+    expect(roundedMillisecond).toBe(16);
+    expect(frameAddressed).not.toBe(roundedMillisecond);
+  });
+
+  it('applies clip start, trim, and rate in the frame domain', () => {
+    expect(sourceTimeForAddressMs(
+      { kind: 'frame', frameIndex: 1, fps: 120 },
+      5,
+      40,
+      1.5,
+    )).toBeCloseTo(45, 9);
+  });
+
+  it('recognizes the exact playhead generated from a frame address', () => {
+    expect(frameAddressMatchesTimelineMs(1, 120, 1000 / 120)).toBe(true);
+    expect(frameAddressMatchesTimelineMs(1, 120, 8)).toBe(false);
+    expect(frameAddressMatchesTimelineMs(-1, 120, 0)).toBe(false);
+  });
+
+  it('uses a sub-millisecond deterministic seek tolerance', () => {
+    expect(mediaSeekToleranceSeconds({ kind: 'frame', frameIndex: 1, fps: 120 })).toBeLessThan(1 / 120);
+    expect(mediaSeekToleranceSeconds({ kind: 'time', timelineMs: 8 })).toBe(0.05);
+  });
+});

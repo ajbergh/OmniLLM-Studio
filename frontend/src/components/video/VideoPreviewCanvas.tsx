@@ -26,6 +26,7 @@ import { ShapePreview } from './ShapePreview';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineTrack } from '../../types/video';
 import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips } from './pro/timelineIndex';
 import { renderPreviewPCM } from './parity/previewAudioRenderer';
+import { sourceTimeForAddressMs } from './sourceTiming';
 
 function formatTime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -162,6 +163,7 @@ export function VideoPreviewCanvas() {
   const [editingTextClipId, setEditingTextClipId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const parityAudioURLRef = useRef<string | null>(null);
+  const frameAddressRef = useRef<number | null>(null);
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -178,6 +180,7 @@ export function VideoPreviewCanvas() {
       const fps = timeline?.canvas.fps || 30;
       const frameIndex = Math.max(0, Math.floor(detail.frameIndex ?? 0));
       const requestId = detail.requestId || `frame-${frameIndex}`;
+      frameAddressRef.current = frameIndex;
       setPlaying(false);
       selectClip(null);
       setPlayhead((frameIndex * 1000) / fps);
@@ -199,6 +202,14 @@ export function VideoPreviewCanvas() {
     window.addEventListener('omnillm:video-parity-seek', onParitySeek);
     return () => window.removeEventListener('omnillm:video-parity-seek', onParitySeek);
   }, [selectClip, setPlayhead, setPlaying, timeline?.canvas.fps]);
+
+  useEffect(() => {
+    frameAddressRef.current = null;
+  }, [timeline]);
+
+  useEffect(() => {
+    if (isPlaying) frameAddressRef.current = null;
+  }, [isPlaying]);
 
   // Independent browser/Web Audio reference for the Phase 0 parity harness.
   // The response is a blob URL so multi-megabyte PCM does not travel through
@@ -376,14 +387,37 @@ export function VideoPreviewCanvas() {
   }, [isPlaying, setPlayhead, setPlaying]);
 
   // Keep every mounted media element in sync with output-timeline time on every
-  // tick. The source seek point multiplies elapsed output time by the clip's
-  // constant playback rate. Visual videos are muted; managed <audio> elements
-  // apply volume keyframes, fades, solo, and preview master gain. While paused
-  // this same path is the scrub-seek path.
+  // tick. Deterministic frame-addressed capture derives source time directly
+  // from output-frame identity; free-running playback keeps sub-frame playhead
+  // timing for responsiveness. Visual videos are muted; managed <audio>
+  // elements apply volume keyframes, fades, solo, and preview master gain.
   useEffect(() => {
+    const fps = timeline?.canvas.fps || 30;
+    const addressedFrame = frameAddressRef.current;
+    if (addressedFrame !== null) {
+      const addressedPlayheadMs = (addressedFrame * 1000) / fps;
+      if (Math.abs(addressedPlayheadMs - playheadMs) > 1e-6) {
+        frameAddressRef.current = null;
+      }
+    }
+
     const syncElement = (element: HTMLMediaElement, clip: VideoTimelineClip) => {
       const playbackRate = Math.min(4, Math.max(0.25, clip.playback_rate ?? 1));
-      const target = ((clip.trim_in_ms ?? 0) + Math.max(0, playheadMs - clip.start_ms) * playbackRate) / 1000;
+      const frameIndex = frameAddressRef.current;
+      const targetMs = frameIndex !== null
+        ? sourceTimeForAddressMs(
+            { kind: 'frame', frameIndex, fps },
+            clip.start_ms,
+            clip.trim_in_ms ?? 0,
+            playbackRate,
+          )
+        : sourceTimeForAddressMs(
+            { kind: 'time', timelineMs: playheadMs },
+            clip.start_ms,
+            clip.trim_in_ms ?? 0,
+            playbackRate,
+          );
+      const target = targetMs / 1000;
       element.playbackRate = playbackRate;
       element.preservesPitch = true;
       if (isPlaying) {
@@ -415,7 +449,7 @@ export function VideoPreviewCanvas() {
       audio.volume = Math.min(1, Math.max(0, clipVolume * fadeFactor(entry.clip, playheadMs) * previewVolume));
       syncElement(audio, entry.clip);
     }
-  }, [playheadMs, isPlaying, previewVolume]);
+  }, [playheadMs, isPlaying, previewVolume, timeline?.canvas.fps]);
 
   /** Alignment candidates in client coordinates, captured once per drag. */
   const collectSnapCandidates = (excludeClipId: string) => {
