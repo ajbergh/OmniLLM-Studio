@@ -89,6 +89,7 @@ export const EFFECT_DEFINITIONS: EffectDefinition[] = [
     label: 'Grayscale',
     category: 'color',
     exportSupported: true,
+    exportFeature: 'color_grade',
     params: [],
     previewFilter: () => 'grayscale(1)',
   },
