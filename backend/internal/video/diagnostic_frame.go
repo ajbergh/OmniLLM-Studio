@@ -8,6 +8,8 @@ import (
 	"math"
 	"os/exec"
 	"strings"
+
+	"github.com/ajbergh/omnillm-studio/internal/video/rendercontract"
 )
 
 // DiagnosticFrame is a lossless PNG sampled from an immutable render
@@ -75,7 +77,7 @@ func (s *Service) RenderDiagnosticFrame(ctx context.Context, userID, snapshotID 
 	if settings.RangeEndMS > settings.RangeStartMS {
 		durationMS = minInt64(doc.DurationMS, settings.RangeEndMS) - settings.RangeStartMS
 	}
-	totalFrames := int64(math.Ceil(float64(durationMS) * float64(fps) / 1000))
+	totalFrames := rendercontract.FrameCount(durationMS, fps)
 	if frameIndex >= totalFrames {
 		return nil, fmt.Errorf("diagnostic frame index %d is outside [0,%d)", frameIndex, totalFrames)
 	}

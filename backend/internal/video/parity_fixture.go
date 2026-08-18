@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"sort"
 	"strings"
+
+	"github.com/ajbergh/omnillm-studio/internal/video/rendercontract"
 )
 
 const ParityTortureFixtureName = "parity-torture-v1"
@@ -129,18 +131,21 @@ func ParityTortureFixture() (TimelineDocument, []ParityFixtureAsset) {
 }
 
 // ParityFrameSamples selects boundary, keyframe, transition, scene, marker,
-// and seeded-random samples. Times map to frames using floor semantics, which
-// matches the browser playhead interval [frame/fps, (frame+1)/fps).
+// and seeded-random samples. Authored millisecond times map through the
+// canonical output-frame helpers used by preview and diagnostic rendering.
 func ParityFrameSamples(doc TimelineDocument, seed int64, randomCount int) []ParityFrameSample {
 	fps := doc.Canvas.FPS
 	if fps <= 0 {
 		fps = DefaultProjectFPS
 	}
-	totalFrames := int64(math.Ceil(float64(doc.DurationMS) * float64(fps) / 1000))
+	totalFrames := rendercontract.FrameCount(doc.DurationMS, fps)
 	if totalFrames < 1 {
 		totalFrames = 1
 	}
-	frameDurationMS := 1000 / float64(fps)
+	frameTimeMS := func(frameIndex int64) int64 {
+		frameTime := rendercontract.FrameTime(frameIndex, fps)
+		return int64(math.Round(float64(frameTime.Numerator) * 1000 / float64(frameTime.Denominator)))
+	}
 	samples := map[int64]ParityFrameSample{}
 	add := func(timeMS int64, name, reason string) {
 		if timeMS < 0 {
@@ -149,7 +154,7 @@ func ParityFrameSamples(doc TimelineDocument, seed int64, randomCount int) []Par
 		if timeMS >= doc.DurationMS {
 			timeMS = maxInt64(0, doc.DurationMS-1)
 		}
-		frame := int64(math.Floor(float64(timeMS) * float64(fps) / 1000))
+		frame := rendercontract.StartFrame(timeMS, fps)
 		if frame >= totalFrames {
 			frame = totalFrames - 1
 		}
@@ -163,7 +168,7 @@ func ParityFrameSamples(doc TimelineDocument, seed int64, randomCount int) []Par
 			samples[frame] = existing
 			return
 		}
-		samples[frame] = ParityFrameSample{Name: name, FrameIndex: frame, TimeMS: int64(math.Round(float64(frame) * frameDurationMS)), Reason: reason}
+		samples[frame] = ParityFrameSample{Name: name, FrameIndex: frame, TimeMS: frameTimeMS(frame), Reason: reason}
 	}
 	add(0, "timeline-start", "timeline boundary")
 	add(doc.DurationMS-1, "timeline-end", "last timeline frame")
@@ -195,7 +200,7 @@ func ParityFrameSamples(doc TimelineDocument, seed int64, randomCount int) []Par
 	rng := rand.New(rand.NewSource(seed))
 	for i := 0; i < randomCount; i++ {
 		frame := rng.Int63n(totalFrames)
-		add(int64(math.Round(float64(frame)*frameDurationMS)), fmt.Sprintf("seeded-random-%02d", i+1), "seeded random")
+		add(frameTimeMS(frame), fmt.Sprintf("seeded-random-%02d", i+1), "seeded random")
 	}
 	out := make([]ParityFrameSample, 0, len(samples))
 	for _, sample := range samples {
