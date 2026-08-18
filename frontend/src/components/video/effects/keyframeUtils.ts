@@ -4,6 +4,7 @@
  * cubic Bezier, and segment-local spring semantics for deterministic export.
  */
 import type { VideoMotionCurve, VideoTimelineKeyframe } from '../../../types/video';
+import { easeProgress } from '../../../video/renderContract';
 
 export type KeyframeProperty = VideoTimelineKeyframe['property'];
 
@@ -74,16 +75,7 @@ export function applyMotionCurve(t: number, curve?: VideoMotionCurve, easing?: s
   let value: number;
   if (curve?.type === 'bezier') value = cubicBezierProgress(normalized, curve.x1, curve.y1, curve.x2, curve.y2);
   else if (curve?.type === 'spring') value = springProgress(normalized, curve.stiffness, curve.damping, curve.mass);
-  else {
-    const selected = curve?.type || easing;
-    switch (selected) {
-      case 'ease-in': value = normalized * normalized; break;
-      case 'ease-out': value = 1 - (1 - normalized) * (1 - normalized); break;
-      case 'ease-in-out': value = normalized < 0.5 ? 2 * normalized * normalized : 1 - Math.pow(-2 * normalized + 2, 2) / 2; break;
-      case 'step': value = normalized >= 1 ? 1 : 0; break;
-      default: value = normalized;
-    }
-  }
+  else value = easeProgress(normalized, curve?.type || easing);
   if (cacheKey) {
     if (curveSampleCache.size >= 4096) curveSampleCache.clear();
     curveSampleCache.set(cacheKey, value);
@@ -93,18 +85,7 @@ export function applyMotionCurve(t: number, curve?: VideoMotionCurve, easing?: s
 
 function applyEasing(t: number, easing?: string, curve?: VideoMotionCurve): number {
   if (curve) return applyMotionCurve(t, curve, easing);
-  switch (easing) {
-    case 'ease-in':
-      return t * t;
-    case 'ease-out':
-      return 1 - (1 - t) * (1 - t);
-    case 'ease-in-out':
-      return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-    case 'step':
-      return t >= 1 ? 1 : 0;
-    default:
-      return t;
-  }
+  return easeProgress(t, easing);
 }
 
 /**
