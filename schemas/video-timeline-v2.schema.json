@@ -1,0 +1,308 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://omnillm.studio/schemas/video-timeline-v2.schema.json",
+  "title": "VideoTimelineDocumentV2",
+  "type": "object",
+  "required": [
+    "version",
+    "width",
+    "height",
+    "fps",
+    "duration_ms",
+    "aspect_ratio",
+    "tracks"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 2
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "fps": {
+      "type": "number",
+      "minimum": 1
+    },
+    "duration_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "aspect_ratio": {
+      "type": "string"
+    },
+    "background_color": {
+      "type": "string"
+    },
+    "color_space": {
+      "type": "string",
+      "enum": ["srgb", "rec709", "p3", "rec2020"],
+      "default": "srgb"
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/TimelineScene"
+      }
+    },
+    "tracks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/TimelineTrack"
+      }
+    },
+    "captions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/TimelineCaption"
+      }
+    },
+    "markers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/TimelineMarker"
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "definitions": {
+    "TimelineScene": {
+      "type": "object",
+      "required": ["id", "start_ms", "duration_ms"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "start_ms": { "type": "number", "minimum": 0 },
+        "duration_ms": { "type": "number", "minimum": 0 },
+        "color": { "type": "string" },
+        "camera": { "$ref": "#/definitions/TimelineCamera" },
+        "effects": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/TimelineEffect" }
+        }
+      }
+    },
+    "TimelineCamera": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" },
+        "rotation_x": { "type": "number" },
+        "rotation_y": { "type": "number" },
+        "rotation_z": { "type": "number" },
+        "field_of_view": { "type": "number" },
+        "focus_depth": { "type": "number" }
+      }
+    },
+    "TimelineTrack": {
+      "type": "object",
+      "required": ["id", "type", "clips"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["video", "audio", "text", "shape", "overlay"] },
+        "index": { "type": "integer" },
+        "muted": { "type": "boolean" },
+        "solo": { "type": "boolean" },
+        "locked": { "type": "boolean" },
+        "visible": { "type": "boolean" },
+        "volume": { "type": "number", "minimum": 0 },
+        "pan": { "type": "number", "minimum": -1, "maximum": 1 },
+        "clips": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/TimelineClip" }
+        }
+      }
+    },
+    "TimelineClip": {
+      "type": "object",
+      "required": ["id", "start_ms", "duration_ms"],
+      "properties": {
+        "id": { "type": "string" },
+        "asset_id": { "type": "string" },
+        "start_ms": { "type": "number", "minimum": 0 },
+        "duration_ms": { "type": "number", "minimum": 0 },
+        "trim_in_ms": { "type": "number", "minimum": 0 },
+        "trim_out_ms": { "type": "number", "minimum": 0 },
+        "playback_rate": { "type": "number", "minimum": 0.1 },
+        "volume": { "type": "number", "minimum": 0 },
+        "pan": { "type": "number", "minimum": -1, "maximum": 1 },
+        "fade_in_ms": { "type": "number", "minimum": 0 },
+        "fade_out_ms": { "type": "number", "minimum": 0 },
+        "muted": { "type": "boolean" },
+        "audio_only": { "type": "boolean" },
+        "z_index": { "type": "integer" },
+        "fit_mode": { "type": "string", "enum": ["contain", "cover", "fill", "none"], "default": "contain" },
+        "transform": { "$ref": "#/definitions/TimelineTransform" },
+        "crop": { "$ref": "#/definitions/TimelineCrop" },
+        "text": { "$ref": "#/definitions/TimelineText" },
+        "shape": { "$ref": "#/definitions/TimelineShape" },
+        "cursor": { "$ref": "#/definitions/TimelineCursor" },
+        "effects": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/TimelineEffect" }
+        },
+        "transitions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/TimelineTransition" }
+        },
+        "keyframes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/TimelineKeyframe" }
+        }
+      }
+    },
+    "TimelineTransform": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" },
+        "scale_x": { "type": "number" },
+        "scale_y": { "type": "number" },
+        "scale_z": { "type": "number" },
+        "rotation_x": { "type": "number" },
+        "rotation_y": { "type": "number" },
+        "rotation_z": { "type": "number" },
+        "anchor_x": { "type": "number" },
+        "anchor_y": { "type": "number" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "TimelineCrop": {
+      "type": "object",
+      "properties": {
+        "top": { "type": "number", "minimum": 0 },
+        "right": { "type": "number", "minimum": 0 },
+        "bottom": { "type": "number", "minimum": 0 },
+        "left": { "type": "number", "minimum": 0 },
+        "feather": { "type": "number", "minimum": 0 },
+        "shape": { "type": "string", "enum": ["rectangle", "ellipse", "rounded"] },
+        "corner_radius": { "type": "number", "minimum": 0 }
+      }
+    },
+    "TimelineText": {
+      "type": "object",
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string" },
+        "font_family": { "type": "string" },
+        "font_size": { "type": "number" },
+        "font_weight": { "type": "string" },
+        "font_style": { "type": "string" },
+        "color": { "type": "string" },
+        "background": { "type": "string" },
+        "stroke": { "type": "string" },
+        "stroke_width": { "type": "number" },
+        "shadow": { "type": "boolean" },
+        "text_align": { "type": "string", "enum": ["left", "center", "right", "justify"] },
+        "vertical_align": { "type": "string", "enum": ["top", "middle", "bottom"] },
+        "line_height": { "type": "number" },
+        "letter_spacing": { "type": "number" },
+        "border_radius": { "type": "number" },
+        "padding": { "type": "number" },
+        "wrap_width": { "type": "number" }
+      }
+    },
+    "TimelineShape": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string" },
+        "fill": { "type": "string" },
+        "stroke": { "type": "string" },
+        "stroke_width": { "type": "number" },
+        "corner_radius": { "type": "number" },
+        "opacity": { "type": "number" },
+        "blur_radius": { "type": "number" }
+      }
+    },
+    "TimelineCursor": {
+      "type": "object",
+      "properties": {
+        "glyph": { "type": "string" },
+        "size": { "type": "number" },
+        "color": { "type": "string" },
+        "highlight": { "type": "boolean" },
+        "smoothing": { "type": "number" },
+        "points": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/TimelineCursorPoint" }
+        }
+      }
+    },
+    "TimelineCursorPoint": {
+      "type": "object",
+      "required": ["time_ms", "x", "y"],
+      "properties": {
+        "time_ms": { "type": "number" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "click": { "type": "boolean" }
+      }
+    },
+    "TimelineEffect": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "amount": { "type": "number" },
+        "enabled": { "type": "boolean" },
+        "params": { "type": "object" }
+      }
+    },
+    "TimelineTransition": {
+      "type": "object",
+      "required": ["id", "type", "duration_ms"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "duration_ms": { "type": "number", "minimum": 0 },
+        "edge": { "type": "string", "enum": ["in", "out", "edit_point"], "default": "in" },
+        "direction": { "type": "string" },
+        "params": { "type": "object" }
+      }
+    },
+    "TimelineKeyframe": {
+      "type": "object",
+      "required": ["id", "property", "time_ms", "value"],
+      "properties": {
+        "id": { "type": "string" },
+        "property": { "type": "string" },
+        "time_ms": { "type": "number" },
+        "value": { "type": "number" },
+        "easing": { "type": "string" }
+      }
+    },
+    "TimelineCaption": {
+      "type": "object",
+      "required": ["id", "start_ms", "end_ms", "text"],
+      "properties": {
+        "id": { "type": "string" },
+        "start_ms": { "type": "number" },
+        "end_ms": { "type": "number" },
+        "text": { "type": "string" }
+      }
+    },
+    "TimelineMarker": {
+      "type": "object",
+      "required": ["id", "time_ms", "label"],
+      "properties": {
+        "id": { "type": "string" },
+        "time_ms": { "type": "number" },
+        "label": { "type": "string" },
+        "color": { "type": "string" }
+      }
+    }
+  }
+}

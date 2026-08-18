@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://omnillm.studio/schemas/video-render-manifest-v1.schema.json",
+  "title": "VideoRenderManifestV1",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "timeline_id",
+    "timeline_revision",
+    "timeline_sha256",
+    "output",
+    "assets",
+    "fonts"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "timeline_id": {
+      "type": "string"
+    },
+    "timeline_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "timeline_sha256": {
+      "type": "string"
+    },
+    "output": {
+      "type": "object",
+      "required": ["width", "height", "fps", "duration_ms", "frame_count"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "fps": { "type": "number", "minimum": 1 },
+        "duration_ms": { "type": "number", "minimum": 0 },
+        "frame_count": { "type": "integer", "minimum": 0 },
+        "format": { "type": "string" },
+        "codec": { "type": "string" },
+        "color_space": { "type": "string" }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RenderManifestAsset"
+      }
+    },
+    "fonts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RenderManifestFont"
+      }
+    }
+  },
+  "definitions": {
+    "RenderManifestAsset": {
+      "type": "object",
+      "required": ["id", "staged_path", "sha256", "size_bytes", "mime_type"],
+      "properties": {
+        "id": { "type": "string" },
+        "staged_path": { "type": "string" },
+        "sha256": { "type": "string" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "mime_type": { "type": "string" },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" },
+        "duration_ms": { "type": "number" },
+        "sample_rate": { "type": "integer" },
+        "channels": { "type": "integer" }
+      }
+    },
+    "RenderManifestFont": {
+      "type": "object",
+      "required": ["family", "weight", "staged_path", "sha256"],
+      "properties": {
+        "family": { "type": "string" },
+        "weight": { "type": "string" },
+        "style": { "type": "string" },
+        "staged_path": { "type": "string" },
+        "sha256": { "type": "string" }
+      }
+    }
+  }
+}

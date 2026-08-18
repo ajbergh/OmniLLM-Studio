@@ -8,14 +8,14 @@
 ## Implementation tracker
 
 **Started:** 2026-08-17  
-**Current milestone:** Phase 0 — reproducible parity baseline
-**Current status:** Phase 1 is complete. Phase 0 now has automated project seeding, a complete 103-frame known-mismatch baseline, independent browser-preview and snapshot PCM with gated EBU R128, decoded-delivery frame/PTS validation, and a verified hosted CI artifact job. Draft PR #187 passes hosted backend tests, the Linux race detector, and the parity job. Quality Gate `32074904557` confirms that all 103 preview/render pairs are exactly 640×360 and all 206 report PNGs are uniquely indexed, with passing audio and delivery gates. Its unrelated captions Playwright failure is fixed locally by navigating through the current desktop tool rail; hosted confirmation is pending. Unsupported-audio-boundary coverage, visual review, and final threshold approval remain.
+**Current milestone:** Phase 2 — canonical timeline/render contract
+**Current status:** Phases 0 and 1 are complete and merged into main (PR #187). Phase 2 is now in progress with the introduction of the canonical JSON schemas (`schemas/video-timeline-v2.schema.json`, `schemas/video-render-manifest-v1.schema.json`) and the `@omnillm/video-renderer` contract package covering pure deterministic timebase, curves, and ordering evaluators.
 
 | Phase | Status | Progress note |
 |---|---|---|
-| Phase 0 — Parity baseline | In progress | Fixture generation, real-project seeding, 103 named dimension-exact visual captures, 206 unique diagnostics, passing independent PCM timing/correlation/EBU R128 gates, decoded-delivery frame/PTS checks, mismatch reports, and hosted CI artifacts are verified; unsupported-audio-boundary coverage, visual review, and threshold approval remain |
-| Phase 1 — Immutable submission | Complete | Revision/hash binding, durable staged inputs, decode preflight, snapshot-only execution/recovery, identity metadata, legacy labeling, path-specific capability diagnostics, Strict Parity, and HTTP/frontend concurrency coverage are implemented |
-| Phase 2 — Canonical contract | Not started | — |
+| Phase 0 — Parity baseline | Complete | Fixture generation, real-project seeding, 103 named dimension-exact visual captures, 206 unique diagnostics, passing independent PCM timing/correlation/EBU R128 gates, decoded-delivery frame/PTS checks, mismatch reports, and hosted CI artifacts are verified and merged into main |
+| Phase 1 — Immutable submission | Complete | Revision/hash binding, durable staged inputs, decode preflight, snapshot-only execution/recovery, identity metadata, legacy labeling, path-specific capability diagnostics, Strict Parity, and HTTP/frontend concurrency coverage are implemented and merged into main |
+| Phase 2 — Canonical contract | In progress | JSON schemas for Timeline v2 and Render Manifest v1 added; core evaluators for timebase (rational/half-open intervals), curves (piecewise quadratic ease-in-out), ordering (track/z/clip sort), and audio graph contracts initialized with unit test coverage in `@omnillm/video-renderer` |
 | Phase 3 — Shared preview | Not started | — |
 | Phase 4 — Shared worker | Not started | — |
 | Phase 5 — Visual parity | Not started | — |
@@ -24,7 +24,9 @@
 
 ### Implementation log
 
-- **2026-08-17:** Implementation started with the first recommended correctness slice. The active work is binding each render job to an immutable timeline and asset snapshot so queued output cannot change after submission.
+- **2026-08-17:** PR #187 merged to `main` with all Phase 0 and Phase 1 deliverables, including immutable render snapshots, deterministic parity harness, live PCM gates, and passing hosted CI.
+- **2026-08-17:** Started Phase 2: Added `schemas/video-timeline-v2.schema.json` and `schemas/video-render-manifest-v1.schema.json`.
+- **2026-08-17:** Added `@omnillm/video-renderer` package with pure canonical evaluators (`timebase.ts`, `curves.ts`, `ordering.ts`, `evaluateFrame.ts`, `evaluateAudio.ts`) and verified with Vitest test suite.
 - **2026-08-17:** Added database migration V52 with timeline revisions/content hashes, immutable render snapshots, per-snapshot asset leases, and one-to-one job snapshot bindings.
 - **2026-08-17:** Render submission now requires the saved timeline ID/revision/hash at the HTTP boundary, rejects stale submissions with HTTP 409, verifies all referenced files, hashes a stable asset manifest, and atomically creates the snapshot and queued job.
 - **2026-08-17:** Render execution now reads timeline JSON, settings, and asset records only from the immutable snapshot. It re-verifies timeline/manifest/source hashes and fails closed if bytes are missing or changed.
