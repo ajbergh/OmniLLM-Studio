@@ -31,40 +31,39 @@ jobs:
           path = Path('frontend/src/components/video/VideoPreviewCanvas.tsx')
           text = path.read_text()
 
-          old = "import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips } from './pro/timelineIndex';"
-          new = "import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips, queryActiveClipsAtFrame } from './pro/timelineIndex';"
-          if old not in text:
-              raise SystemExit('timeline index import marker not found')
-          text = text.replace(old, new, 1)
+          replacements = [
+              (
+                  "import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips } from './pro/timelineIndex';",
+                  "import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips, queryActiveClipsAtFrame } from './pro/timelineIndex';",
+                  'timeline index import',
+              ),
+              (
+                  "import { sourceTimeForAddressMs } from './sourceTiming';",
+                  "import { frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForAddressMs } from './sourceTiming';",
+                  'source timing import',
+              ),
+              (
+                  "  const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);\n  const activeIndexed = queryActiveClips(intervalIndex, playheadMs)",
+                  "  const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);\n  const fps = timeline?.canvas.fps || 30;\n  const addressedFrame = frameAddressRef.current;\n  const deterministicFrame = !isPlaying\n    && addressedFrame !== null\n    && frameAddressMatchesTimelineMs(addressedFrame, fps, playheadMs)\n    ? addressedFrame\n    : null;\n  const activeIndexed = (deterministicFrame !== null\n    ? queryActiveClipsAtFrame(intervalIndex, deterministicFrame, fps)\n    : queryActiveClips(intervalIndex, playheadMs))",
+                  'active interval prefix',
+              ),
+              (
+                  "          data-parity-frame-index={Math.floor((playheadMs * (timeline?.canvas.fps || 30)) / 1000)}",
+                  "          data-parity-frame-index={deterministicFrame ?? Math.floor((playheadMs * fps) / 1000)}",
+                  'parity frame marker',
+              ),
+              (
+                  "  }, [playheadMs, isPlaying, previewVolume, timeline?.canvas.fps]);",
+                  "  }, [deterministicFrame, fps, playheadMs, isPlaying, previewVolume]);",
+                  'media sync dependencies',
+              ),
+          ]
+          for old, new, label in replacements:
+              if old not in text:
+                  raise SystemExit(f'{label} marker not found')
+              text = text.replace(old, new, 1)
 
-          old = "import { sourceTimeForAddressMs } from './sourceTiming';"
-          new = "import { frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForAddressMs } from './sourceTiming';"
-          if old not in text:
-              raise SystemExit('source timing import marker not found')
-          text = text.replace(old, new, 1)
-
-          old = '''  const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
-          const activeIndexed = queryActiveClips(intervalIndex, playheadMs)
-            .filter(({ track }) => track.visible)
-            .sort(compareIndexedTimelineClipOrder);'''
-          new = '''  const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
-          const fps = timeline?.canvas.fps || 30;
-          const addressedFrame = frameAddressRef.current;
-          const deterministicFrame = !isPlaying
-            && addressedFrame !== null
-            && frameAddressMatchesTimelineMs(addressedFrame, fps, playheadMs)
-            ? addressedFrame
-            : null;
-          const activeIndexed = (deterministicFrame !== null
-            ? queryActiveClipsAtFrame(intervalIndex, deterministicFrame, fps)
-            : queryActiveClips(intervalIndex, playheadMs))
-            .filter(({ track }) => track.visible)
-            .sort(compareIndexedTimelineClipOrder);'''
-          if old not in text:
-              raise SystemExit('active interval marker not found')
-          text = text.replace(old, new, 1)
-
-          old = '''  useEffect(() => {
+          old = """  useEffect(() => {
             const fps = timeline?.canvas.fps || 30;
             const addressedFrame = frameAddressRef.current;
             if (addressedFrame !== null) {
@@ -90,8 +89,8 @@ jobs:
                     clip.trim_in_ms ?? 0,
                     playbackRate,
                   );
-              const target = targetMs / 1000;'''
-          new = '''  useEffect(() => {
+              const target = targetMs / 1000;"""
+          new = """  useEffect(() => {
             const address = deterministicFrame !== null
               ? { kind: 'frame' as const, frameIndex: deterministicFrame, fps }
               : { kind: 'time' as const, timelineMs: playheadMs };
@@ -107,37 +106,25 @@ jobs:
                 clip.trim_in_ms ?? 0,
                 playbackRate,
               );
-              const target = targetMs / 1000;'''
+              const target = targetMs / 1000;"""
           if old not in text:
               raise SystemExit('media sync source marker not found')
           text = text.replace(old, new, 1)
 
-          old = '''      } else {
+          old = """      } else {
                 if (!element.paused) element.pause();
                 if (Math.abs(element.currentTime - target) > 0.05) {
                   element.currentTime = target;
                 }
-              }'''
-          new = '''      } else {
+              }"""
+          new = """      } else {
                 if (!element.paused) element.pause();
                 if (Math.abs(element.currentTime - target) > mediaSeekToleranceSeconds(address)) {
                   element.currentTime = target;
                 }
-              }'''
+              }"""
           if old not in text:
               raise SystemExit('paused seek tolerance marker not found')
-          text = text.replace(old, new, 1)
-
-          old = "  }, [playheadMs, isPlaying, previewVolume, timeline?.canvas.fps]);"
-          new = "  }, [deterministicFrame, fps, playheadMs, isPlaying, previewVolume]);"
-          if old not in text:
-              raise SystemExit('media sync dependency marker not found')
-          text = text.replace(old, new, 1)
-
-          old = "          data-parity-frame-index={Math.floor((playheadMs * (timeline?.canvas.fps || 30)) / 1000)}"
-          new = "          data-parity-frame-index={deterministicFrame ?? Math.floor((playheadMs * fps) / 1000)}"
-          if old not in text:
-              raise SystemExit('parity frame marker not found')
           text = text.replace(old, new, 1)
 
           path.write_text(text)
