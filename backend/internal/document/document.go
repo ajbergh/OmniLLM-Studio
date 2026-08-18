@@ -5,10 +5,9 @@ package document
 import (
 	"archive/zip"
 	"bufio"
-	"bytes"
 	"encoding/xml"
 	"fmt"
-	"github.com/ledongthuc/pdf"
+	"github.com/tsawler/tabula"
 	"github.com/xuri/excelize/v2"
 	"golang.org/x/net/html"
 	"io"
@@ -141,27 +140,18 @@ func parseTextFile(path, mime string) (*ParsedDocument, error) {
 }
 
 func parsePDF(path, mime string) (*ParsedDocument, error) {
-	file, reader, err := pdf.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open pdf: %w", err)
-	}
-	defer file.Close()
-	plainTextReader, err := reader.GetPlainText()
+	text, _, err := tabula.Open(path).Text()
 	if err != nil {
 		return nil, fmt.Errorf("extract pdf text: %w", err)
 	}
-	var buffer bytes.Buffer
-	if _, err := io.Copy(&buffer, plainTextReader); err != nil {
-		return nil, fmt.Errorf("read extracted pdf text: %w", err)
-	}
-	text := strings.TrimSpace(buffer.String())
+	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil, fmt.Errorf("pdf has no extractable text")
 	}
 	return &ParsedDocument{
 		MIMEType: mime,
 		Title:    filepath.Base(path),
-		Nodes:    paragraphNodes(text, map[string]string{"parser": "ledongthuc/pdf"}),
+		Nodes:    paragraphNodes(text, map[string]string{"parser": "tsawler/tabula"}),
 	}, nil
 }
 
