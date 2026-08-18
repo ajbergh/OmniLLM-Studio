@@ -18,28 +18,41 @@ Merged WYSIWYG foundations:
 - PR #195 — Timeline v1 → canonical Timeline v2 compatibility adapter — `b5f76aa6328240a6b516d768756c34f68e6fdedb`.
 - PR #196 — canonical frame activity, range mapping, source time, and stable clip ordering — `42dd64cda9feb75a637b622bf33ac1350a4febd9`.
 - PR #198 — evaluator-scoped Timeline v2 runtime normalization/defaulting — `67982f4fdd80062c9439c528362f75382e5c3268`.
+- PR #199 — canonical preview/index ordering adoption — `19a1a7b635afd33954bc56ed6023845f2c9e3fd1`.
 
-PR #196 final post-rebase validation:
+Security unblock during this program:
 
-- Quality Gate `32153989115`: **passed**, including frontend lint/unit/performance/build, backend format/vet/unit/integration/race, Playwright smoke, renderer parity baseline, Windows/macOS platform checks, and Helm validation.
-- Security Scan `32153989061`: **passed**.
-- Container workflow `32153989087`: **passed** for frontend, backend, and Helm.
-- Auxiliary sandbox/workspace/egress assurance workflows: **passed**.
-- Review threads: none unresolved before merge.
+- PR #201 — removed reachable `GO-2026-6115` by replacing `github.com/ledongthuc/pdf` with `github.com/tsawler/tabula v1.6.14` — `57cb7764a73203fc1194dbe51992e7ee4779817f`.
+- The production-only #201 head passed the repository dependency-vulnerability audit; the migration proof also passed the document parser regression and `govulncheck ./...` with no reachable vulnerabilities. Windows desktop compilation passed. Linux backend/Go-CodeQL runners were documented as setup-stalled rather than represented as green.
 
 PR #198 merge validation and infrastructure exception:
 
-- Final head `f3efbaeca241fa6dcb70cea5ac91fded72b3feda` passed frontend lint/unit/performance/build, backend format/vet/unit/integration/race, Helm, Windows/macOS platform checks, renderer parity baseline, dependency audit, and container workflow `32157611014`.
-- Quality Gate `32157611051` had every repository-code and parity job green; its Playwright smoke job remained infrastructure-stalled in `Install system dependencies` before browser tests started.
-- Final-head Security Scan `32157611045` passed dependency audit and TypeScript CodeQL; Go CodeQL remained infrastructure-stalled in `Install Go desktop build dependencies` before CodeQL initialization.
-- Immediately previous implementation head `b0d7e078dd81036e4228a90342d0487087ed98d9` passed complete Security Scan `32156645125`, including Go and TypeScript CodeQL. The only subsequent code changes were field-specific trim diagnostic routing (+5/-2 Go, +5/-2 TypeScript) plus one shared fixture case; those final changes were covered by the green final-head Go/TypeScript tests.
-- Review threads: none unresolved before merge.
-- PR #198 was merged under an explicit setup-only CI infrastructure exception; the stalled jobs were not represented as green checks.
+- Final head `f3efbaeca241fa6dcb70cea5ac91fded72b3feda` passed frontend lint/unit/performance/build, backend format/vet/unit/integration/race, Helm, Windows/macOS platform checks, renderer parity baseline, dependency audit, and container validation.
+- Its Playwright smoke job remained infrastructure-stalled in system-dependency installation, and final-head Go CodeQL remained infrastructure-stalled in desktop-dependency installation before CodeQL initialization.
+- Immediately previous implementation head `b0d7e078dd81036e4228a90342d0487087ed98d9` passed complete Go/TypeScript CodeQL. Subsequent code changes were limited to field-specific trim diagnostics and a shared fixture case, covered by the green final-head tests.
+- The exception was explicit; stalled/unexecuted jobs were not represented as passing.
 
-Current PR: **#199 — Preserve canonical Video Edit Studio preview clip ordering**.  
-Current branch: `feat/video-wysiwyg-phase2-preview-ordering`.
+PR #199 merge validation and infrastructure exception:
 
-Current slice: preserve the existing timeline interval-index/virtualization performance path while making canonical `(track array index, z_index, clip array index)` ordering explicit at every boundary where temporal lookup or decoder budgeting could otherwise reorder equal-z clips.
+- The canonical-ordering frontend implementation passed lint, unit tests, Video Studio performance evidence, and production build on the byte-identical implementation head before the final security-base refresh.
+- After PR #201 repaired the dependency graph, #199 was rebuilt onto the new `main`; its fresh normal dependency-vulnerability audit passed.
+- The final combined Quality Gate remained runner-queued, not code-failing. #199 was merged under an explicit queue-only exception using the already executed byte-identical frontend evidence plus the fresh security result; queued checks were not represented as green.
+- No unresolved review threads existed before merge.
+
+Current PR: **#202 — Use canonical frame addressing for deterministic Video Edit Studio preview**.  
+Current branch: `feat/video-wysiwyg-phase2-frame-source-selection`.
+
+Current slice: make explicit frame-addressed preview/capture use canonical output-frame activity and source time while preserving the existing millisecond interval-index and free-running source-time path for responsive interactive playback.
+
+Focused implementation validation for #202 before the final documentation commit:
+
+- temporary integration run `32170622398` successfully applied the production transform;
+- frontend lint: **0 errors** (existing unrelated warnings only);
+- unit tests: **106/106 passed**, including 6 timeline-index tests and 6 source-timing tests;
+- Video Studio performance fixture remained within review budgets during the unit suite;
+- production TypeScript/Vite build: **passed**;
+- only the workflow bot push was rejected by a concurrent branch update; another concurrent run landed the identical validated `VideoPreviewCanvas.tsx` commit as `5a45434cde410fd88e28cd434eeb0864ce638005`;
+- temporary integration workflow removed before final PR validation.
 
 ## Phase tracker
 
@@ -47,7 +60,7 @@ Current slice: preserve the existing timeline interval-index/virtualization perf
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Initial feature-family review confirms structural visual divergence. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Schemas, projections, timing/easing/curves, v1 adapter, canonical frame activity/range/source/order evaluation, and runtime v2 normalization are merged. PR #199 adopts canonical ordering in the indexed program-monitor path. Output-frame source selection, property/transform/transition/effect evaluation, FrameState, and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Schemas, projections, timing/easing/curves, v1 adapter, canonical frame activity/range/source/order evaluation, runtime v2 normalization, and indexed preview ordering are merged. PR #202 adopts canonical frame activity/source addressing for deterministic preview capture. Output-frame diagnostic/export caller migration, property/transform/transition/effect evaluation, FrameState, and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close geometry, text, crop/fit, effects, transitions, cursor, camera, color, and deterministic asset-loading parity. |
@@ -88,6 +101,13 @@ Canonical evaluators must be pure, deterministic, serializable, free of media/br
 8. A keyframe segment uses the later keyframe's easing/curve.
 9. Built-in easing is editor-compatible; Bezier and spring evaluation is shared and fixture-verified in Go and TypeScript.
 10. Composition matrices, anchors, crop/fit, camera, transitions, effects, text bounds, cursor state, and color-space assumptions must become explicit FrameState semantics rather than renderer inference.
+
+### Deterministic capture vs interactive playback
+
+- Explicit render/parity frame requests are frame-addressed and must use canonical frame-overlap activity plus `sourceTimeAtFrameMs` semantics.
+- Interactive playback/scrubbing may remain playhead-time-addressed for responsiveness until the shared FrameState path supersedes preview-local behavior.
+- A deterministic frame address is authoritative only while the playhead still represents that exact rational frame address and playback is paused.
+- Deterministic paused media seeks use a sub-frame tolerance; the legacy 50 ms scrub tolerance is too wide for high-frame-rate deterministic capture.
 
 ## Phase 0 evidence and remaining sign-off
 
@@ -151,44 +171,49 @@ Remaining Phase 0 sign-off:
 - Existing frontend interval index remains a performance structure; its temporal sorting is explicitly not semantic layer order.
 
 **PR #198 — runtime Timeline v2 normalization**
-- `backend/internal/video/rendercontract/normalize.go` and `frontend/src/video/renderContractNormalize.ts` implement matching evaluator-scoped, non-mutating normalization.
+- Go and TypeScript implement matching evaluator-scoped, non-mutating normalization.
 - Exact Timeline v2 version/canvas/FPS/background/working-color checks and canonical sRGB defaulting.
 - Stable unique track/clip IDs, supported track types/heights, nonnegative timing, positive duration, and playback-rate range/defaulting.
 - Canonical `trim_out_ms = trim_in_ms + round(duration_ms × playback_rate)` with exact path-addressed trim diagnostics.
 - Visual transform defaults plus finite/opacity/crop validation.
 - Asset-backed visual clips default to `media_fit: contain`; unsupported fit values fail closed.
 - Timeline duration expands to the maximum clip end.
-- Root metadata/tracks/markers and required effects/keyframes arrays are materialized; clip-level metadata intentionally remains optional.
-- Shared Go/TypeScript fixture verifies exact normalized serialization, caller nonmutation, and fail-closed diagnostic paths.
-- The normalizer remains intentionally narrower than full feature semantics: text/shape/effect/transition/camera/content-bounds/mask behavior is owned by later evaluators rather than guessed here.
+- The normalizer remains intentionally narrower than full feature semantics; text/shape/effect/transition/camera/content-bounds/mask behavior is owned by later evaluators.
 
-### Current PR #199 — indexed preview ordering adoption
+**PR #199 — indexed preview ordering adoption**
+- `frontend/src/video/renderContractEvaluation.ts` exposes the shared canonical clip comparator.
+- `frontend/src/components/video/pro/timelineIndex.ts` retains original `clipIndex` independently of temporal sorting, preserves prefix-max interval lookup, restores candidates to canonical order, and keeps deterministic selected-video decoder prioritization.
+- `frontend/src/components/video/VideoPreviewCanvas.tsx` uses the same canonical ordering after mounted-video/poster recombination so decoder budgeting cannot alter equal-z composition order.
+- Regression tests prove temporal index order can differ from authored composition order without semantic leakage.
+
+### Current PR #202 — deterministic frame-addressed preview source selection
 
 Implemented:
 
-- `frontend/src/video/renderContractEvaluation.ts`
-  - exposes `CanonicalClipOrderIdentity`;
-  - exposes `compareCanonicalClipOrder` as the shared `(track index, z_index, clip index)` comparator;
-  - `activeClipsAtFrame` delegates final ordering to that comparator.
 - `frontend/src/components/video/pro/timelineIndex.ts`
-  - retains original `clipIndex` separately from the interval index's temporal sort;
-  - keeps the prefix-maximum interval lookup and therefore preserves long-timeline virtualization/performance behavior;
-  - restores queried active candidates to canonical composition order after temporal lookup;
-  - applies deterministic reverse-canonical priority to otherwise equal decoder candidates while preserving selected-video promotion.
+  - adds `queryActiveClipsAtFrame` using canonical `activeAtFrame` semantics;
+  - deterministic capture therefore includes sub-frame-authored clips under floor-start/ceil-end frame mapping instead of relying on a point query at frame-start milliseconds;
+  - interactive playback continues using the indexed millisecond query.
+- `frontend/src/components/video/sourceTiming.ts`
+  - introduces an explicit `frame` versus `time` source address;
+  - frame addresses delegate to canonical `sourceTimeAtFrameMs`;
+  - time addresses retain sub-frame-responsive `sourceTimeMs` behavior;
+  - provides exact frame/playhead identity matching and a deterministic 0.5 ms paused-seek tolerance.
 - `frontend/src/components/video/VideoPreviewCanvas.tsx`
-  - uses the canonical indexed comparator for active layers;
-  - uses the same comparator after mounted-video/poster recombination so decoder budgeting cannot silently alter equal-z composition order.
-- `frontend/src/components/video/pro/timelineIndex.test.ts`
-  - includes an authored-order fixture whose clip-array order intentionally differs from temporal start order;
-  - proves the internal index can remain temporal while active results return canonical authored composition order;
-  - covers equal-z clip-index ties and track-order precedence.
+  - stores authoritative parity frame identity in React state because it affects render-layer selection;
+  - uses frame-overlap candidates and frame-derived source time only while an explicit paused frame address remains authoritative;
+  - clears stale frame authority when timeline/playhead/playback semantics no longer match it;
+  - parity readiness queries marked preview videos directly, keeping media synchronization refs private to the mutation path and satisfying React immutability lint;
+  - exposes the authoritative frame index to the parity harness instead of reconstructing it from floating-point playhead math;
+  - uses the tighter deterministic seek tolerance while preserving the existing 50 ms interactive scrub tolerance.
+- Focused tests cover 120-fps sub-frame clip activity, direct frame-derived source time, no integer-millisecond roundtrip, trim/rate behavior, frame-address validity, and seek tolerance.
 
-Scope boundary: PR #199 changes layer ordering only. Program-monitor media seeking still uses playhead-millisecond math; output-frame-derived source selection remains the next slice so its timing behavior can be reviewed and parity-tested independently.
+Scope boundary: PR #202 does not yet migrate other output-frame-driven diagnostic/export callers or canonicalize transforms/properties/transitions/effects. Those remain separate reviewable slices.
 
 ### Remaining Phase 2 work
 
-1. Validate and merge PR #199 canonical preview/index ordering adoption.
-2. Migrate output-frame-driven preview/diagnostic/export source-time and frame-selection callers to canonical helpers.
+1. Validate and merge PR #202 deterministic frame-addressed preview source selection.
+2. Audit and migrate remaining output-frame-driven diagnostic/export frame-selection and source-time callers to canonical frame/range/source helpers.
 3. Implement canonical keyframe/property evaluation on top of the merged curve evaluator.
 4. Implement canonical transform/anchor/camera state.
 5. Define transition placement/peer state and effect-stack ordering/animation.
@@ -257,7 +282,9 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 | v1 adapter guesses ambiguous semantics | Transitions/unknown transform semantics fail closed. |
 | Cross-runtime normalizer/evaluator drift | Versioned shared fixtures asserted by Go and TypeScript. |
 | Interval index accidentally defines z-order | Original clip index is retained; queried candidates are restored with the canonical comparator after temporal lookup, and preview decoder/poster recombination uses the same comparator. |
-| Millisecond rounding creates boundary/source drift | Rational frame identity, floor-start/ceil-end, half-open activity, frame-derived source time; output-frame caller adoption remains the next Phase 2 slice. |
+| Millisecond rounding creates boundary/source drift | Explicit deterministic frame addresses now drive preview frame-overlap activity and source time; remaining output-frame callers must migrate before Phase 2 exit. |
+| Deterministic frame state leaks into interactive playback | Frame authority is explicit state, valid only while paused at the exact addressed frame; free-running playback keeps the indexed time-addressed path. |
+| High-FPS deterministic seeks reuse stale frames | Frame-addressed paused seeks use a 0.5 ms tolerance instead of the interactive 50 ms scrub tolerance. |
 | Browser/Go curve drift | Shared built-in/Bezier/spring fixtures. |
 | CI runner setup stalls hide code status | Record setup-only stalls explicitly, preserve successful code-level evidence, and never label an unexecuted check as green. |
 | Chromium packaging/resource cost | Managed worker, admission control, health checks, guarded rollout; FFmpeg retained for decode/encode/mux. |
@@ -272,23 +299,20 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 
 ### 2026-08-18
 - PR #191 merged canonical schemas and timing/source/easing foundation.
-- Retained Phase 0 evidence reviewed by feature family; structural mismatch documented.
 - PR #193 merged canonical Bezier/spring evaluation.
 - PR #194 merged schema/type drift enforcement.
 - PR #195 merged v1→Timeline-v2 adapter after full Quality Gate/Security/container validation.
-- PR #196 implemented canonical frame range, frame-derived source time, and active-clip order with a shared Go/TypeScript fixture.
-- #196 first correction was formatting-only; its semantic fixture passed both runtimes.
-- Unrelated Music PR #197 advanced `main`; #196 was rebuilt cleanly on the new `main`, reopened after GitHub auto-closed the temporary zero-diff PR, and fully revalidated.
-- #196 final post-rebase Quality Gate `32153989115`, Security `32153989061`, and container `32153989087` all passed; PR #196 merged as `42dd64cda9feb75a637b622bf33ac1350a4febd9`.
-- Runtime Timeline v2 evaluator-scoped normalization was rebuilt directly on the #196 merge commit, with clip metadata intentionally left optional for cross-runtime serialization consistency.
-- PR #198 final head passed backend/frontend tests, race, parity, containers, and dependency audit. Playwright smoke and final-head Go CodeQL remained stalled before repository execution; the prior implementation head had full Go/TypeScript CodeQL coverage. The infrastructure exception was documented on the PR, which merged as `67982f4fdd80062c9439c528362f75382e5c3268`.
-- Draft PR #199 was opened as a stacked ordering slice, then brought onto the #198/main history with an exact four-file frontend diff before this plan update.
+- PR #196 merged canonical frame range, frame-derived source time, and active-clip order as `42dd64cda9feb75a637b622bf33ac1350a4febd9` after full post-rebase validation.
+- PR #198 merged runtime Timeline v2 normalization as `67982f4fdd80062c9439c528362f75382e5c3268`; setup-only Playwright/Go-CodeQL stalls were explicitly documented.
+- An unrelated current-`main` dependency audit exposed reachable `GO-2026-6115` through `github.com/ledongthuc/pdf`; PR #201 replaced it with `github.com/tsawler/tabula v1.6.14` and merged as `57cb7764a73203fc1194dbe51992e7ee4779817f` after the normal vulnerability audit passed.
+- PR #199 was refreshed onto the repaired dependency graph, preserved the intended five-file ordering delta, and merged as `19a1a7b635afd33954bc56ed6023845f2c9e3fd1` with a documented queue-only final-head exception and prior executed byte-identical frontend evidence.
+- PR #202 implemented the deterministic frame-addressed preview/source slice. A staging lint failure exposed React cross-effect media-ref aliasing; parity readiness was moved to a dedicated DOM media marker, after which focused lint, all 106 unit tests, performance evidence, and production build passed. The validated implementation landed as `5a45434cde410fd88e28cd434eeb0864ce638005`, and temporary integration scaffolding was removed before final validation.
 
 ## Next recommended slice
 
-After PR #199 is green and merged:
+After PR #202 is green and merged:
 
-1. Convert deterministic/program-monitor media-source seek calculation from playhead millisecond math to canonical frame-derived `sourceTimeAtFrameMs`, explicitly separating frame-quantized rendering/capture from responsive free-running playback.
-2. Migrate output-frame-driven diagnostic/export frame-selection callers to canonical frame/range/source helpers and add shared boundary/rate fixtures for caller behavior.
-3. Implement canonical keyframe/property evaluation, then define the first serializable FrameState.
+1. Audit every remaining output-frame-driven diagnostic/export caller and migrate frame selection/source time/range boundaries to the canonical helpers, with shared high-FPS, trim/rate, and boundary fixtures.
+2. Implement canonical keyframe/property evaluation on top of the merged curve evaluator, including default/base-value resolution and fail-closed unsupported property handling.
+3. Begin canonical transform/anchor/camera evaluation and define the first serializable visual `FrameState` projection/fixture.
 4. Continue Phase 0 threshold policy, unsupported-audio boundary, and second-platform evidence in parallel.
