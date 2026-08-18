@@ -169,7 +169,7 @@ export function MusicStudio() {
         <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
           <span className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-alt px-2 py-1">
             <Sparkles size={12} />
-            Lyria only
+            AI Music
           </span>
           <span className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-alt px-2 py-1">
             <PanelRight size={12} />

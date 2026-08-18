@@ -118,10 +118,10 @@ func (s *Service) Generate(ctx context.Context, userID string, req GenerateReque
 	}
 	availableModels, modelErr := s.ListModels(ctx, providerKey, false)
 	if modelErr != nil {
-		availableModels = cloneModels(KnownLyriaModels[providerKey])
+		availableModels = cloneModels(KnownMusicModels[providerKey])
 	}
 	if !ValidateModel(providerKey, modelID, availableModels) {
-		return nil, nil, nil, fmt.Errorf("%w: %s is not a supported Lyria model for %s", ErrCapabilityUnsupported, modelID, providerKey)
+		return nil, nil, nil, fmt.Errorf("%w: %s is not a supported music model for %s", ErrCapabilityUnsupported, modelID, providerKey)
 	}
 
 	session, err := s.ensureSession(userID, req, providerKey, modelID)

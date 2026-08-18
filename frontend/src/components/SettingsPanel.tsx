@@ -2493,7 +2493,7 @@ function MusicTab() {
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <ModelSelect
-              label="OpenRouter Lyria model"
+              label="OpenRouter music model"
               value={openRouterModel}
               models={models.openrouter}
               fallback="google/lyria-3-clip-preview"

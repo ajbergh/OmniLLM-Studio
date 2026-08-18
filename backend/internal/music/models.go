@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var KnownLyriaModels = map[string][]Model{
+var KnownMusicModels = map[string][]Model{
 	ProviderOpenRouter: {
 		{
 			ID: "google/lyria-3-clip-preview", Provider: ProviderOpenRouter, Name: "Lyria 3 Clip (Preview)",
@@ -51,6 +51,9 @@ var KnownLyriaModels = map[string][]Model{
 		},
 	},
 }
+
+// KnownLyriaModels is an alias for KnownMusicModels for backwards compatibility.
+var KnownLyriaModels = KnownMusicModels
 
 var geminiOverridePattern = regexp.MustCompile(`^lyria-[a-z0-9._:-]+$`)
 
@@ -250,6 +253,7 @@ func (r *ModelRegistry) discoverOpenRouter(ctx context.Context, baseURL, apiKey 
 		Data []struct {
 			ID           string            `json:"id"`
 			Name         string            `json:"name"`
+			Description  string            `json:"description"`
 			Pricing      map[string]string `json:"pricing"`
 			Architecture struct {
 				InputModalities  []string `json:"input_modalities"`
@@ -264,25 +268,67 @@ func (r *ModelRegistry) discoverOpenRouter(ctx context.Context, baseURL, apiKey 
 	var models []Model
 	for _, item := range parsed.Data {
 		id := strings.TrimSpace(item.ID)
-		if !strings.HasPrefix(strings.ToLower(id), "google/lyria") {
+		if !containsFold(item.Architecture.OutputModalities, "audio") {
 			continue
 		}
-		if !containsFold(item.Architecture.OutputModalities, "audio") {
+		if !IsOpenRouterMusicModel(id, item.Name, item.Description) {
 			continue
 		}
 		name := strings.TrimSpace(item.Name)
 		if name == "" {
 			name = id
 		}
+		notes := "Discovered from OpenRouter models API."
+		if desc := strings.TrimSpace(item.Description); desc != "" {
+			if len(desc) > 120 {
+				notes = desc[:120] + "..."
+			} else {
+				notes = desc
+			}
+		}
 		models = append(models, Model{
 			ID: id, Provider: ProviderOpenRouter, Name: name,
-			Capabilities:    []Capability{CapabilityTextToMusic},
-			InputModalities: item.Architecture.InputModalities, OutputModalities: item.Architecture.OutputModalities,
-			SupportedFormats: []string{"mp3"}, SupportsStreaming: true, DefaultOutputFormat: "audio/mpeg",
-			Pricing: item.Pricing,
+			Capabilities:        []Capability{CapabilityTextToMusic},
+			InputModalities:     item.Architecture.InputModalities,
+			OutputModalities:    item.Architecture.OutputModalities,
+			SupportedFormats:    []string{"mp3"},
+			SupportsStreaming:   true,
+			DefaultOutputFormat: "audio/mpeg",
+			Pricing:             item.Pricing,
+			Notes:               notes,
 		})
 	}
 	return models, nil
+}
+
+// IsOpenRouterMusicModel checks if an OpenRouter audio-output model is a music generation model.
+func IsOpenRouterMusicModel(id, name, description string) bool {
+	idLower := strings.ToLower(id)
+	nameLower := strings.ToLower(name)
+	descLower := strings.ToLower(description)
+
+	// Exclude voice/speech/transcription/dialogue models like gpt-audio
+	if strings.Contains(idLower, "gpt-audio") || strings.Contains(idLower, "voxtral") {
+		return false
+	}
+
+	// Explicit music/song generation indicators
+	musicKeywords := []string{
+		"lyria", "music", "song", "audioldm", "musicgen", "riffusion",
+		"stable-audio", "stable audio", "suno", "udio",
+	}
+	for _, kw := range musicKeywords {
+		if strings.Contains(idLower, kw) || strings.Contains(nameLower, kw) || strings.Contains(descLower, kw) {
+			return true
+		}
+	}
+
+	// Any Google Lyria model family
+	if strings.HasPrefix(idLower, "google/lyria") {
+		return true
+	}
+
+	return false
 }
 
 func (r *ModelRegistry) discoverGemini(ctx context.Context, baseURL, apiKey string) ([]Model, error) {
