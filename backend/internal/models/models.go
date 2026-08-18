@@ -120,6 +120,7 @@ type OpenRouterMetadata struct {
 	ModelFallbacks []string                 `json:"model_fallbacks,omitempty"`
 	Route          string                   `json:"route,omitempty"`
 	ShowCost       bool                     `json:"show_cost,omitempty"`
+	CustomModels   []string                 `json:"custom_models,omitempty"`
 }
 
 // OpenRouterProviderPrefs represents OpenRouter provider routing preferences.

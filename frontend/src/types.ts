@@ -157,6 +157,7 @@ export interface OpenRouterMetadata {
     id: string;
     enabled?: boolean;
   }>;
+  custom_models?: string[];
 }
 
 export interface SSEEvent {

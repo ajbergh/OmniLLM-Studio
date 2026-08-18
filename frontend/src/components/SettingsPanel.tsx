@@ -592,7 +592,17 @@ function ProviderCard({
   const [ollamaLoading, setOllamaLoading] = useState(false);
   const meta = getProviderMeta(provider.type);
   const isOllama = provider.type.toLowerCase() === 'ollama';
-  const chatModelOptions = isOllama ? ollamaModels : getKnownChatModels(provider.type);
+
+  const customModels: string[] = (() => {
+    try {
+      const parsed = JSON.parse(provider.metadata_json || '{}');
+      return Array.isArray(parsed.custom_models) ? parsed.custom_models : [];
+    } catch {
+      return [];
+    }
+  })();
+
+  const chatModelOptions = isOllama ? ollamaModels : getKnownChatModels(provider.type, customModels);
   const imageModelOptions = getKnownImageModels(provider.type);
 
   const fetchOllamaModelsForCard = useCallback(async () => {
@@ -798,7 +808,7 @@ function ProviderCard({
 
       {/* OpenRouter: Fetch models dynamically */}
       {provider.type === 'openrouter' && (
-        <OpenRouterModelsButton provider={provider} />
+        <OpenRouterModelsButton provider={provider} onUpdate={onUpdate} />
       )}
     </div>
   );
@@ -806,12 +816,28 @@ function ProviderCard({
 
 function OpenRouterModelsButton({
   provider,
+  onUpdate,
 }: {
   provider: ReturnType<typeof useProviderStore.getState>['providers'][0];
+  onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
 }) {
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
   const [expanded, setExpanded] = useState(false);
+  const [search, setSearch] = useState('');
+  const [savingModelId, setSavingModelId] = useState<string | null>(null);
+
+  const getSavedCustomModels = (): string[] => {
+    try {
+      const meta = JSON.parse(provider.metadata_json || '{}') as OpenRouterMetadata;
+      return Array.isArray(meta.custom_models) ? meta.custom_models : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const savedCustomModels = getSavedCustomModels();
+  const savedSet = new Set(savedCustomModels);
 
   const fetchModels = async () => {
     setLoading(true);
@@ -827,35 +853,159 @@ function OpenRouterModelsButton({
     }
   };
 
+  const handleToggleModel = async (modelId: string) => {
+    setSavingModelId(modelId);
+    try {
+      let meta: OpenRouterMetadata = {};
+      try {
+        meta = JSON.parse(provider.metadata_json || '{}') as OpenRouterMetadata;
+      } catch {
+        meta = {};
+      }
+      const currentList = Array.isArray(meta.custom_models) ? [...meta.custom_models] : [];
+      let nextList: string[];
+      if (currentList.includes(modelId)) {
+        nextList = currentList.filter((m) => m !== modelId);
+      } else {
+        nextList = [...currentList, modelId];
+      }
+      meta.custom_models = nextList;
+
+      const updatePayload: Record<string, unknown> = {
+        metadata_json: JSON.stringify(meta),
+      };
+      if (!nextList.includes(modelId) && provider.default_model === modelId) {
+        updatePayload.default_model = '';
+      }
+
+      await onUpdate(provider.id, updatePayload);
+      if (currentList.includes(modelId)) {
+        toast.success(`Removed model ${modelId}`);
+      } else {
+        toast.success(`Added model ${modelId}`);
+      }
+    } catch {
+      toast.error('Failed to update provider models');
+    } finally {
+      setSavingModelId(null);
+    }
+  };
+
+  const filteredModels = models.filter((m) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return m.id.toLowerCase().includes(q) || (m.name && m.name.toLowerCase().includes(q));
+  });
+
   return (
     <div className="border-t border-border pt-3 mt-3">
-      <button
-        type="button"
-        onClick={models.length === 0 ? fetchModels : () => setExpanded(!expanded)}
-        disabled={loading}
-        className="flex items-center gap-2 text-xs font-medium text-text-muted hover:text-text transition-colors"
-      >
-        <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-        <span>{loading ? 'Fetching...' : models.length > 0 ? 'OpenRouter Models' : 'Fetch OpenRouter Models'}</span>
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={models.length === 0 ? fetchModels : () => setExpanded(!expanded)}
+          disabled={loading}
+          className="flex items-center gap-2 text-xs font-medium text-text-muted hover:text-text transition-colors"
+        >
+          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+          <span>{loading ? 'Fetching...' : models.length > 0 ? 'OpenRouter Models' : 'Fetch OpenRouter Models'}</span>
+          {models.length > 0 && (
+            <ChevronDown
+              size={12}
+              className={`transition-transform ${expanded ? 'rotate-180' : ''}`}
+            />
+          )}
+        </button>
         {models.length > 0 && (
-          <ChevronDown
-            size={12}
-            className={`transition-transform ${expanded ? 'rotate-180' : ''}`}
-          />
+          <button
+            type="button"
+            onClick={fetchModels}
+            disabled={loading}
+            className="text-[11px] text-text-muted hover:text-primary transition-colors flex items-center gap-1"
+            title="Refresh models from OpenRouter"
+          >
+            <RefreshCw size={10} className={loading ? 'animate-spin' : ''} />
+            <span>Refresh</span>
+          </button>
         )}
-      </button>
+      </div>
+
+      {/* Show active saved custom models if any */}
+      {savedCustomModels.length > 0 && (
+        <div className="mt-2.5 space-y-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted/70 block">
+            Persisted Available Models ({savedCustomModels.length})
+          </span>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {savedCustomModels.map((sm) => (
+              <span
+                key={sm}
+                className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-text"
+              >
+                <span className="truncate max-w-[200px]">{sm}</span>
+                <button
+                  type="button"
+                  onClick={() => handleToggleModel(sm)}
+                  disabled={savingModelId === sm}
+                  className="hover:text-danger text-text-muted transition-colors ml-0.5"
+                  title={`Remove ${sm}`}
+                  aria-label={`Remove model ${sm}`}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {expanded && models.length > 0 && (
-        <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
-          {models.map((m) => (
-            <div
-              key={m.id}
-              className="flex items-center justify-between text-xs px-2 py-1.5 rounded-lg bg-surface-hover/50"
-            >
-              <span className="truncate flex-1">{m.name || m.id}</span>
-              <span className="text-text-muted/60 ml-2 font-mono text-[10px]">{m.id}</span>
-            </div>
-          ))}
+        <div className="mt-2 space-y-2">
+          <div className="relative">
+            <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+            <input
+              type="text"
+              placeholder="Search discovered models..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-7 pr-3 py-1 text-xs bg-surface border border-border rounded-lg
+                         text-text placeholder-text-muted focus:outline-none focus:border-primary/40
+                         transition-colors"
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+            {filteredModels.map((m) => {
+              const isSaved = savedSet.has(m.id);
+              const isSaving = savingModelId === m.id;
+              return (
+                <div
+                  key={m.id}
+                  className="flex items-center justify-between text-xs px-2 py-1.5 rounded-lg bg-surface-hover/50 gap-2 hover:bg-surface-hover transition-colors"
+                >
+                  <div className="min-w-0 flex-1">
+                    <span className="truncate block font-medium text-text">{m.name || m.id}</span>
+                    <span className="text-text-muted/60 font-mono text-[10px] truncate block">{m.id}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleModel(m.id)}
+                    disabled={isSaving}
+                    className={clsx(
+                      'shrink-0 text-[11px] font-medium px-2 py-1 rounded-md transition-all border',
+                      isSaved
+                        ? 'bg-danger/10 border-danger/20 text-danger hover:bg-danger/20'
+                        : 'bg-primary/10 border-primary/20 text-primary hover:bg-primary/20'
+                    )}
+                    title={isSaved ? 'Remove from selectable models' : 'Add to selectable models'}
+                  >
+                    {isSaving ? '...' : isSaved ? 'Remove' : 'Add'}
+                  </button>
+                </div>
+              );
+            })}
+            {filteredModels.length === 0 && (
+              <p className="text-[11px] text-text-muted text-center py-2">No matching models found</p>
+            )}
+          </div>
         </div>
       )}
     </div>
