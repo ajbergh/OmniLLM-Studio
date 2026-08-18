@@ -1,0 +1,115 @@
+name: Temporary PDF parser security migration
+
+on:
+  push:
+    branches: [fix/pdf-parser-go-2026-6115]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/pdf-parser-go-2026-6115
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.13'
+          cache-dependency-path: backend/go.sum
+      - name: Replace vulnerable PDF parser
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          document = Path('backend/internal/document/document.go')
+          text = document.read_text()
+          text = text.replace('\t"bytes"\n', '')
+          text = text.replace('\t"github.com/ledongthuc/pdf"\n', '\t"github.com/tsawler/tabula"\n')
+          replacement = '''func parsePDF(path, mime string) (*ParsedDocument, error) {
+          \ttext, _, err := tabula.Open(path).Text()
+          \tif err != nil {
+          \t\treturn nil, fmt.Errorf("extract pdf text: %w", err)
+          \t}
+          \ttext = strings.TrimSpace(text)
+          \tif text == "" {
+          \t\treturn nil, fmt.Errorf("pdf has no extractable text")
+          \t}
+          \treturn &ParsedDocument{
+          \t\tMIMEType: mime,
+          \t\tTitle:    filepath.Base(path),
+          \t\tNodes:    paragraphNodes(text, map[string]string{"parser": "tsawler/tabula"}),
+          \t}, nil
+          }
+          '''
+          text, count = re.subn(r'func parsePDF\(path, mime string\) \(\*ParsedDocument, error\) \{.*?\n\}\n\nfunc parseDOCX', replacement + '\nfunc parseDOCX', text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'expected one parsePDF function, replaced {count}')
+          document.write_text(text)
+
+          test_file = Path('backend/internal/document/document_test.go')
+          tests = test_file.read_text()
+          tests = tests.replace('import (\n\t"strings"', 'import (\n\t"path/filepath"\n\t"strings"')
+          tests = tests.replace('\t"testing"\n)', '\t"testing"\n\n\t"github.com/go-pdf/fpdf"\n)')
+          marker = 'func TestParseHTMLPreservesHeadingPath'
+          pdf_test = '''func TestParsePDFExtractsTextWithPureGoParser(t *testing.T) {
+          \tpath := filepath.Join(t.TempDir(), "sample.pdf")
+          \tdoc := fpdf.New("P", "mm", "A4", "")
+          \tdoc.AddPage()
+          \tdoc.SetFont("Arial", "", 12)
+          \tdoc.MultiCell(0, 8, "OmniLLM secure PDF parser migration", "", "L", false)
+          \tif err := doc.OutputFileAndClose(path); err != nil {
+          \t\tt.Fatalf("write test PDF: %v", err)
+          \t}
+
+          \tparsed, err := ParseFile(path, "application/pdf")
+          \tif err != nil {
+          \t\tt.Fatalf("ParseFile() error = %v", err)
+          \t}
+          \tmarkdown := RenderMarkdown(parsed)
+          \tif !strings.Contains(markdown, "OmniLLM secure PDF parser migration") {
+          \t\tt.Fatalf("expected extracted PDF text, got %q", markdown)
+          \t}
+          \tif len(parsed.Nodes) == 0 || parsed.Nodes[0].Metadata["parser"] != "tsawler/tabula" {
+          \t\tt.Fatalf("expected tsawler/tabula parser metadata, got %#v", parsed.Nodes)
+          \t}
+          }
+
+          '''
+          if marker not in tests:
+              raise SystemExit('document test insertion marker not found')
+          tests = tests.replace(marker, pdf_test + marker, 1)
+          test_file.write_text(tests)
+
+          gomod = Path('backend/go.mod')
+          mod = gomod.read_text()
+          old = 'github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728'
+          if old not in mod:
+              raise SystemExit('vulnerable PDF module entry not found')
+          gomod.write_text(mod.replace(old, 'github.com/tsawler/tabula v1.6.14', 1))
+          PY
+      - name: Canonicalize module files and formatting
+        working-directory: backend
+        run: |
+          go mod tidy
+          gofmt -w internal/document/document.go internal/document/document_test.go
+      - name: Verify document parser
+        working-directory: backend
+        run: go test ./internal/document -count=1
+      - name: Verify vulnerability remediation
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+      - name: Commit generated migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/internal/document/document.go backend/internal/document/document_test.go backend/go.mod backend/go.sum
+          git diff --cached --check
+          git commit -m "fix(security): replace vulnerable PDF parser"
+          git push origin HEAD:fix/pdf-parser-go-2026-6115
