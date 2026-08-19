@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !darwin
 
 package sandbox
 
@@ -8,9 +8,8 @@ import (
 	"strings"
 )
 
-// enumerateWorkspaceSearchCandidates preserves the existing pathname-based
-// search behavior on non-Linux platforms until native descriptor/identity
-// primitives are implemented and proven there.
+// enumerateWorkspaceSearchCandidates preserves pathname-based search on
+// platforms without a proven descriptor/identity implementation.
 func enumerateWorkspaceSearchCandidates(root, _ string, maxBytes int64, visit func(string, []byte) bool) error {
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
