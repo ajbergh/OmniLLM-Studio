@@ -117,7 +117,7 @@ func preferredChatToolNames(prompt string) []string {
 	if containsAny(prompt, "job", "generation status", "cancel generation") {
 		add("job_status", "job_cancel")
 	}
-	if containsAny(prompt, "connected app", "connect app", "mcp") {
+	if containsAny(prompt, "connected app", "connect app") {
 		add("app_catalog", "app_connections", "app_connect_mcp", "app_disconnect")
 	}
 	if containsAny(prompt, "find tool", "search tools", "available tools", "tool catalog", "which tool") {
@@ -226,6 +226,11 @@ func classifyToolError(content string) (code, message string, retryable bool) {
 	case strings.Contains(lower, "returned no result"):
 		return "TOOL_EMPTY_RESULT", "The tool completed without returning a result.", true
 	default:
+		// Preserve informative tool failure message if available, otherwise give a helpful default.
+		clean := strings.TrimSpace(content)
+		if clean != "" {
+			return "TOOL_EXECUTION_FAILED", clean, true
+		}
 		return "TOOL_EXECUTION_FAILED", "The tool failed before it could return a usable result.", true
 	}
 }

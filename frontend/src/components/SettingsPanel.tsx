@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
 import { api, authApi, browserApi, mcpApi, musicApi, videoApi, setAuthToken } from '../api';
-import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, GitBranch as Github, Calculator, Link2, Search, Music2, Film, Route as RouteIcon } from 'lucide-react';
+import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, GitBranch as Github, Calculator, Link2, Search, Music2, Film, Route as RouteIcon, Download } from 'lucide-react';
 import type { BrowserSession, BrowserStatus, CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, RAGHealthResponse, ToolPolicy, UpdateMCPServerRequest } from '../types';
 import type { MusicModel, MusicProviderKey } from '../types/music';
 import type { VideoModel, VideoProviderKey } from '../types/video';
@@ -14,6 +14,8 @@ import { toast } from 'sonner';
 import { AssistantProfilesPanel } from './AssistantProfilesPanel';
 import { OpenAPIServersPanel } from './OpenAPIServersPanel';
 import { MCPAuthorizationPanel } from './MCPAuthorizationPanel';
+import { MCPImportModal } from './MCPImportModal';
+import { formatEnvOrHeaders, type ParsedMCPServerConfig } from '../mcpImportParser';
 import { ScopedToolPermissionsPanel } from './ScopedToolPermissionsPanel';
 import { ToolDiagnosticsPanel } from './ToolDiagnosticsPanel';
 import { formatModelOptionLabel, getKnownChatModels, getKnownImageModels, isFreeModel } from '../models';
@@ -3259,6 +3261,7 @@ function MCPServersTab() {
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<MCPFormState>(emptyMCPForm);
   const [saving, setSaving] = useState(false);
@@ -3339,6 +3342,59 @@ function MCPServersTab() {
     }
   };
 
+  const handleImportConfigs = async (configs: ParsedMCPServerConfig[]) => {
+    if (configs.length === 0) return;
+
+    if (configs.length === 1) {
+      // Populate form for review and let user save or start editing immediately
+      const cfg = configs[0];
+      setEditingId(null);
+      setAdding(true);
+      setForm({
+        name: cfg.name,
+        transport: cfg.transport,
+        command: cfg.command || '',
+        argsText: (cfg.args || []).join('\n'),
+        url: cfg.url || '',
+        envText: formatEnvOrHeaders(cfg.env),
+        headersText: formatEnvOrHeaders(cfg.headers),
+        allowPrivateNetwork: cfg.allow_private_network ?? false,
+        enabled: false,
+      });
+      toast.success(`Loaded configuration for "${cfg.name}" into form`);
+      return;
+    }
+
+    // Multiple servers imported from a config file/block
+    setSaving(true);
+    let successCount = 0;
+    for (const cfg of configs) {
+      try {
+        const req: CreateMCPServerRequest = {
+          name: cfg.name,
+          transport: cfg.transport,
+          command: cfg.command,
+          args: cfg.args,
+          url: cfg.url,
+          env: cfg.env,
+          headers: cfg.headers,
+          allow_private_network: cfg.allow_private_network,
+          enabled: false,
+        };
+        const created = await mcpApi.createServer(req);
+        applyServer(created);
+        successCount++;
+      } catch (err) {
+        toast.error(`Failed to add "${cfg.name}": ${err instanceof Error ? err.message : 'Error'}`);
+      }
+    }
+    setSaving(false);
+    refreshAudit();
+    if (successCount > 0) {
+      toast.success(`Successfully imported ${successCount} MCP server${successCount === 1 ? '' : 's'}`);
+    }
+  };
+
   const handleLifecycle = async (
     serverId: string,
     label: string,
@@ -3407,6 +3463,20 @@ function MCPServersTab() {
     }
   };
 
+  const handleBulkPolicy = async (serverId: string, policy: ToolPolicy) => {
+    markBusy(serverId, `Setting all to ${policy}`);
+    try {
+      const updated = await mcpApi.updateAllToolsPolicy(serverId, policy);
+      applyServer(updated);
+      refreshAudit();
+      toast.success(`All tools set to ${policy}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Failed to update all tools to ${policy}`);
+    } finally {
+      markBusy(serverId);
+    }
+  };
+
   const startEditing = (server: MCPServer) => {
     setAdding(false);
     setEditingId(server.id);
@@ -3457,6 +3527,14 @@ function MCPServersTab() {
             </button>
             <button
               type="button"
+              onClick={() => setImporting(true)}
+              className="min-h-10 inline-flex items-center justify-center gap-1.5 px-3 rounded-xl border border-primary/30 bg-primary/10 hover:bg-primary/20 text-xs text-primary transition-colors font-medium"
+            >
+              <Download size={13} />
+              Import (npx / JSON)
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 setEditingId(null);
                 setAdding(true);
@@ -3497,6 +3575,7 @@ function MCPServersTab() {
               onCancel={resetForm}
               onSave={handleSave}
               onUseFilesystemTemplate={() => setForm(filesystemMCPTemplate)}
+              onOpenImport={() => setImporting(true)}
             />
           </motion.div>
         )}
@@ -3528,6 +3607,7 @@ function MCPServersTab() {
                 onRestart={() => handleLifecycle(server.id, 'Restarting', () => mcpApi.restartServer(server.id), 'MCP server restarted')}
                 onRefresh={() => handleRefreshTools(server)}
                 onPolicy={(toolName, policy) => handlePolicy(server.id, toolName, policy)}
+                onBulkPolicy={(policy) => handleBulkPolicy(server.id, policy)}
               />
               {server.transport === 'http' && <MCPAuthorizationPanel server={server} onChanged={fetchServers} />}
             </div>
@@ -3536,6 +3616,12 @@ function MCPServersTab() {
       )}
 
       <MCPAuditPanel events={auditEvents} servers={servers} onRefresh={refreshAudit} />
+
+      <MCPImportModal
+        isOpen={importing}
+        onClose={() => setImporting(false)}
+        onImport={handleImportConfigs}
+      />
     </div>
   );
 }
@@ -3621,6 +3707,7 @@ function MCPServerForm({
   onCancel,
   onSave,
   onUseFilesystemTemplate,
+  onOpenImport,
 }: {
   form: MCPFormState;
   editing: boolean;
@@ -3629,6 +3716,7 @@ function MCPServerForm({
   onCancel: () => void;
   onSave: () => void;
   onUseFilesystemTemplate: () => void;
+  onOpenImport: () => void;
 }) {
   return (
     <div className="p-5 rounded-2xl bg-surface-alt border border-border">
@@ -3643,14 +3731,24 @@ function MCPServerForm({
           </div>
         </div>
         {!editing && (
-          <button
-            type="button"
-            onClick={onUseFilesystemTemplate}
-            className="min-h-10 inline-flex items-center justify-center gap-1.5 px-3 rounded-xl border border-border hover:bg-surface-hover text-xs text-text transition-colors"
-          >
-            <ClipboardList size={13} />
-            Filesystem Template
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onOpenImport}
+              className="min-h-10 inline-flex items-center justify-center gap-1.5 px-3 rounded-xl border border-primary/30 bg-primary/10 hover:bg-primary/20 text-xs text-primary transition-colors font-medium"
+            >
+              <Download size={13} />
+              Paste Command / JSON
+            </button>
+            <button
+              type="button"
+              onClick={onUseFilesystemTemplate}
+              className="min-h-10 inline-flex items-center justify-center gap-1.5 px-3 rounded-xl border border-border hover:bg-surface-hover text-xs text-text transition-colors"
+            >
+              <ClipboardList size={13} />
+              Filesystem Template
+            </button>
+          </div>
         )}
       </div>
 
@@ -3807,6 +3905,7 @@ function MCPServerCard({
   onRestart,
   onRefresh,
   onPolicy,
+  onBulkPolicy,
 }: {
   server: MCPServer;
   busyLabel?: string;
@@ -3819,112 +3918,275 @@ function MCPServerCard({
   onRestart: () => void;
   onRefresh: () => void;
   onPolicy: (toolName: string, policy: ToolPolicy) => void;
+  onBulkPolicy: (policy: ToolPolicy) => void;
 }) {
+  const [toolFilter, setToolFilter] = useState('');
+  const [serverCollapsed, setServerCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const tools = server.tools || [];
   const commandLine = server.transport === 'http' 
     ? server.url || 'No URL configured'
     : [server.command, ...(server.args || [])].filter(Boolean).join(' ');
 
+  const filteredTools = tools.filter((t) => {
+    if (!toolFilter.trim()) return true;
+    const query = toolFilter.toLowerCase();
+    return (
+      t.internal_name.toLowerCase().includes(query) ||
+      t.name.toLowerCase().includes(query) ||
+      (t.title && t.title.toLowerCase().includes(query)) ||
+      (t.description && t.description.toLowerCase().includes(query))
+    );
+  });
+
+  const allowCount = tools.filter((t) => t.policy === 'allow').length;
+  const askCount = tools.filter((t) => t.policy === 'ask').length;
+  const denyCount = tools.filter((t) => t.policy === 'deny').length;
+
   return (
-    <div className="p-5 rounded-2xl bg-surface-alt border border-border">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-bold text-text">{server.name}</h3>
-            <span className={clsx('rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase', statusBadgeClass(server.status))}>
-              {server.status}
-            </span>
-            <span className="rounded-md border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold uppercase text-text-muted">
-              {server.transport}
+    <div className="rounded-2xl bg-surface-alt border border-border/80 shadow-xs overflow-hidden">
+      {/* Header section */}
+      <div className="p-5 border-b border-border/60 bg-gradient-to-b from-surface-hover/20 to-transparent">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0 flex-1 space-y-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setServerCollapsed(!serverCollapsed)}
+                className="flex items-center gap-2 text-left group cursor-pointer focus:outline-none"
+                title={serverCollapsed ? 'Expand server' : 'Collapse server'}
+              >
+                <ChevronDown
+                  size={16}
+                  className={clsx('text-text-muted group-hover:text-primary transition-transform duration-200', serverCollapsed && '-rotate-90')}
+                />
+                <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold text-xs uppercase shrink-0">
+                  {server.name.slice(0, 2)}
+                </div>
+                <h3 className="text-base font-bold text-text tracking-tight group-hover:text-primary transition-colors">{server.name}</h3>
+              </button>
+              <span className={clsx('rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider', statusBadgeClass(server.status))}>
+                {server.status}
+              </span>
+              <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-medium uppercase text-text-muted">
+                {server.transport}
+              </span>
+              {tools.length > 0 && (
+                <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                  {tools.length} tools
+                </span>
+              )}
+            </div>
+
+            {/* Server details */}
+            {!serverCollapsed && (
+              <div className="flex flex-col gap-1.5 text-xs text-text-muted pt-1">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[11px] font-medium text-text-muted shrink-0 w-16">
+                  {server.transport === 'http' ? 'Endpoint:' : 'Command:'}
+                </span>
+                <span className="font-mono text-[11px] text-text/90 truncate select-all bg-surface/90 px-2.5 py-1 rounded-lg border border-border/70 max-w-xl">
+                  {commandLine}
+                </span>
+              </div>
+
+              {server.header_keys && server.header_keys.length > 0 && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[11px] font-medium text-text-muted shrink-0 w-16">Headers:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {server.header_keys.map((k) => (
+                      <span key={k} className="text-[10px] font-mono bg-surface px-2 py-0.5 rounded-md border border-border text-text-muted">
+                        {k}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {server.env_keys && server.env_keys.length > 0 && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[11px] font-medium text-text-muted shrink-0 w-16">Env:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {server.env_keys.map((k) => (
+                      <span key={k} className="text-[10px] font-mono bg-surface px-2 py-0.5 rounded-md border border-border text-text-muted">
+                        {k}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              </div>
+            )}
+
+            {server.last_error && (
+              <div className="mt-2 flex gap-2 rounded-xl border border-danger/30 bg-danger-soft/50 p-2.5 text-xs text-danger">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                <span className="min-w-0 break-words">{server.last_error}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap items-center gap-1.5 shrink-0 lg:self-start">
+            <MCPActionButton label="Test" title="Test server connection & discover tools" busy={busyLabel === 'Testing'} onClick={onTest}>
+              <CheckCircle2 size={13} className="text-emerald-400" />
+            </MCPActionButton>
+            {server.status === 'connected' ? (
+              <MCPActionButton label="Stop" title="Stop MCP server" busy={busyLabel === 'Stopping'} onClick={onStop}>
+                <Square size={13} className="text-amber-400" />
+              </MCPActionButton>
+            ) : (
+              <MCPActionButton label="Start" title="Start MCP server" busy={busyLabel === 'Starting'} onClick={onStart}>
+                <Play size={13} className="text-primary" />
+              </MCPActionButton>
+            )}
+            <MCPActionButton label="Restart" title="Restart MCP server" busy={busyLabel === 'Restarting'} onClick={onRestart}>
+              <RefreshCw size={13} />
+            </MCPActionButton>
+            <MCPActionButton label="Refresh Tools" title="Reload tool definitions from server" busy={busyLabel === 'Refreshing'} onClick={onRefresh}>
+              <Wrench size={13} />
+            </MCPActionButton>
+            <MCPActionButton label="Edit" title="Edit server settings" onClick={onEdit}>
+              <Pencil size={13} />
+            </MCPActionButton>
+            <button
+              type="button"
+              onClick={onDelete}
+              title="Delete server"
+              className="min-h-9 px-2.5 inline-flex items-center justify-center rounded-xl border border-border/70 hover:border-danger/40 hover:bg-danger-soft text-text-muted hover:text-danger transition-colors text-xs"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </div>
+
+        {busyLabel && (
+          <div className="mt-3 flex items-center gap-2 text-xs text-primary font-medium">
+            <RefreshCw size={13} className="animate-spin" />
+            {busyLabel}...
+          </div>
+        )}
+
+        {testTools.length > 0 && (
+          <div className="mt-3 rounded-xl border border-success/30 bg-success/10 p-3 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={15} className="text-success shrink-0" />
+              <span className="font-medium text-success">
+                Test Passed: Discovered {testTools.length} tool{testTools.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <span className="text-[11px] text-text-muted truncate max-w-md">
+              {testTools.map((t) => t.name).join(', ')}
             </span>
           </div>
-          <p className="mt-1 truncate font-mono text-[11px] text-text-muted">{commandLine || 'No command configured'}</p>
-          {server.env_keys && server.env_keys.length > 0 && (
-            <p className="mt-1 text-[11px] text-text-muted">
-              Env: {server.env_keys.join(', ')}
-            </p>
-          )}
-          {server.header_keys && server.header_keys.length > 0 && (
-            <p className="mt-1 text-[11px] text-text-muted">
-              Headers: {server.header_keys.join(', ')}
-            </p>
-          )}
-          {server.last_error && (
-            <div className="mt-2 flex gap-2 rounded-xl border border-danger/20 bg-danger-soft/40 p-2 text-[11px] text-danger">
-              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <span className="min-w-0 break-words">{server.last_error}</span>
+        )}
+      </div>
+
+      {/* Discovered Tools Section */}
+      {!serverCollapsed && (
+        <div className="p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setCollapsed(!collapsed)}
+              className="flex items-center gap-2 text-xs font-bold text-text hover:text-primary transition-colors cursor-pointer"
+            >
+              <ChevronDown
+                size={14}
+                className={clsx('transition-transform duration-200 text-text-muted', collapsed && '-rotate-90')}
+              />
+              <span>Discovered Tools</span>
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-surface border border-border text-text-muted">
+                {tools.length}
+              </span>
+            </button>
+
+            {tools.length > 0 && (
+              <div className="flex items-center gap-2 text-[11px] bg-surface/60 border border-border/50 px-2.5 py-0.5 rounded-lg">
+                <span className="text-emerald-400 font-semibold">{allowCount} allowed</span>
+                <span className="text-text-muted/40">•</span>
+                <span className="text-amber-300 font-semibold">{askCount} ask</span>
+                {denyCount > 0 && (
+                  <>
+                    <span className="text-text-muted/40">•</span>
+                    <span className="text-danger font-semibold">{denyCount} denied</span>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {tools.length > 0 && !collapsed && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-full sm:w-56">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+                <input
+                  type="text"
+                  placeholder="Filter tools..."
+                  value={toolFilter}
+                  onChange={(e) => setToolFilter(e.target.value)}
+                  className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary transition-all input-glow"
+                />
+              </div>
+              <div className="flex items-center gap-1 bg-surface border border-border/80 rounded-xl p-1 shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => onBulkPolicy('allow')}
+                  title="Allow all discovered tools to run without prompting"
+                  className="px-2.5 py-1 text-xs font-semibold rounded-lg text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                >
+                  Allow All
+                </button>
+                <div className="w-[1px] h-3.5 bg-border" />
+                <button
+                  type="button"
+                  onClick={() => onBulkPolicy('ask')}
+                  title="Require confirmation before running any discovered tool"
+                  className="px-2.5 py-1 text-xs font-semibold rounded-lg text-amber-300 hover:bg-amber-500/10 transition-colors"
+                >
+                  Ask All
+                </button>
+                <div className="w-[1px] h-3.5 bg-border" />
+                <button
+                  type="button"
+                  onClick={() => onBulkPolicy('deny')}
+                  title="Disable execution of all discovered tools"
+                  className="px-2.5 py-1 text-xs font-semibold rounded-lg text-danger hover:bg-danger-soft transition-colors"
+                >
+                  Deny All
+                </button>
+              </div>
             </div>
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2 sm:justify-end">
-          <MCPActionButton label="Test" title="Test connection" busy={busyLabel === 'Testing'} onClick={onTest}>
-            <CheckCircle2 size={13} />
-          </MCPActionButton>
-          {server.status === 'connected' ? (
-            <MCPActionButton label="Stop" title="Stop server" busy={busyLabel === 'Stopping'} onClick={onStop}>
-              <Square size={13} />
-            </MCPActionButton>
-          ) : (
-            <MCPActionButton label="Start" title="Start server" busy={busyLabel === 'Starting'} onClick={onStart}>
-              <Play size={13} />
-            </MCPActionButton>
-          )}
-          <MCPActionButton label="Restart" title="Restart server" busy={busyLabel === 'Restarting'} onClick={onRestart}>
-            <RefreshCw size={13} />
-          </MCPActionButton>
-          <MCPActionButton label="Tools" title="Refresh tools" busy={busyLabel === 'Refreshing'} onClick={onRefresh}>
-            <Wrench size={13} />
-          </MCPActionButton>
-          <MCPActionButton label="Edit" title="Edit server" onClick={onEdit}>
-            <Pencil size={13} />
-          </MCPActionButton>
-          <button
-            type="button"
-            onClick={onDelete}
-            title="Delete server"
-            className="min-h-10 min-w-10 inline-flex items-center justify-center rounded-xl hover:bg-danger-soft text-text-muted hover:text-danger transition-colors"
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-      </div>
-
-      {busyLabel && (
-        <div className="mt-3 flex items-center gap-2 text-xs text-text-muted">
-          <RefreshCw size={13} className="animate-spin" />
-          {busyLabel}
-        </div>
-      )}
-
-      {testTools.length > 0 && (
-        <div className="mt-3 rounded-xl border border-success/20 bg-success/5 p-3">
-          <p className="text-[11px] font-semibold uppercase text-success">Last test discovered {testTools.length} tool{testTools.length === 1 ? '' : 's'}</p>
-          <p className="mt-1 truncate text-[11px] text-text-muted">{testTools.map((tool) => tool.name).join(', ')}</p>
-        </div>
-      )}
-
-      <div className="mt-4">
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-xs font-semibold text-text">Discovered Tools</p>
-          <span className="text-[11px] text-text-muted">{tools.length}</span>
-        </div>
-        {tools.length === 0 ? (
-          <p className="rounded-xl border border-border bg-surface p-3 text-xs text-text-muted">
-            Start or refresh this server to load tools.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {tools.map((tool) => (
-              <MCPToolRow
-                key={tool.internal_name}
-                tool={tool}
-                onPolicy={(policy) => onPolicy(tool.internal_name, policy)}
-              />
-            ))}
-          </div>
+        {!collapsed && (
+          <>
+            {tools.length === 0 ? (
+              <div className="rounded-xl border border-border/80 bg-surface p-6 text-center">
+                <p className="text-xs font-medium text-text">No tools discovered yet</p>
+                <p className="mt-1 text-[11px] text-text-muted">Start the server or click "Refresh Tools" to fetch capabilities.</p>
+              </div>
+            ) : filteredTools.length === 0 ? (
+              <div className="rounded-xl border border-border/80 bg-surface p-6 text-center text-xs text-text-muted">
+                No tools matching "{toolFilter}".
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 max-h-[520px] overflow-y-auto pr-1.5 custom-scrollbar">
+                {filteredTools.map((tool) => (
+                  <MCPToolRow
+                    key={tool.internal_name}
+                    tool={tool}
+                    onPolicy={(policy) => onPolicy(tool.internal_name, policy)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -3948,7 +4210,7 @@ function MCPActionButton({
       onClick={onClick}
       title={title}
       disabled={busy}
-      className="min-h-10 inline-flex items-center justify-center gap-1.5 rounded-xl border border-border px-3 text-xs text-text hover:bg-surface-hover disabled:opacity-50 transition-colors"
+      className="min-h-9 inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 text-xs text-text hover:bg-surface-hover disabled:opacity-50 transition-colors shadow-xs"
     >
       {busy ? <RefreshCw size={13} className="animate-spin" /> : children}
       {label}
@@ -3957,31 +4219,42 @@ function MCPActionButton({
 }
 
 function MCPToolRow({ tool, onPolicy }: { tool: MCPTool; onPolicy: (policy: ToolPolicy) => void }) {
+  const policyColors = {
+    allow: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+    ask: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+    deny: 'border-danger/30 bg-danger-soft text-danger',
+  };
+
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-surface/80 hover:bg-surface p-3.5 hover:border-border transition-all sm:flex-row sm:items-center sm:justify-between group">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-text">{tool.internal_name}</span>
+          <span className="text-xs font-semibold text-text font-mono tracking-tight">{tool.internal_name}</span>
           {tool.title && (
             <span className="rounded-md border border-border bg-surface-alt px-1.5 py-0.5 text-[10px] text-text-muted">
               {tool.title}
             </span>
           )}
+          <span className="text-[10px] text-text-muted/60 font-mono">({tool.name})</span>
         </div>
         {tool.description && (
-          <p className="mt-1 line-clamp-2 text-[11px] text-text-muted">{tool.description}</p>
+          <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-text-muted">{tool.description}</p>
         )}
-        <p className="mt-1 text-[11px] text-text-muted">MCP name: {tool.name}</p>
       </div>
-      <select
-        value={tool.policy}
-        onChange={(event) => onPolicy(event.target.value as ToolPolicy)}
-        className="min-h-10 px-2 py-1.5 text-xs bg-surface-alt border border-border rounded-lg text-text focus:outline-none focus:border-primary/50 transition-colors"
-      >
-        <option value="allow">Allow</option>
-        <option value="ask">Ask</option>
-        <option value="deny">Deny</option>
-      </select>
+      <div className="shrink-0 self-end sm:self-center">
+        <select
+          value={tool.policy}
+          onChange={(event) => onPolicy(event.target.value as ToolPolicy)}
+          className={clsx(
+            'min-h-8 px-2.5 py-1 text-xs rounded-lg border font-semibold focus:outline-none transition-colors cursor-pointer shadow-xs',
+            policyColors[tool.policy]
+          )}
+        >
+          <option value="allow" className="bg-surface text-text">Allow</option>
+          <option value="ask" className="bg-surface text-text">Ask</option>
+          <option value="deny" className="bg-surface text-text">Deny</option>
+        </select>
+      </div>
     </div>
   );
 }

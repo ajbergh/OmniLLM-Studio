@@ -1,4 +1,4 @@
-import type { ToolResult } from '../types';
+import type { ToolResult, ToolCall } from '../types';
 
 export function readStringField(source: unknown, key: string): string | undefined {
   if (!source || typeof source !== 'object') return undefined;
@@ -12,6 +12,23 @@ export function parseResultJSON(content: string): Record<string, unknown> | null
     return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
   } catch {
     return null;
+  }
+}
+
+export function getToolCallName(call: ToolCall): string {
+  return call.name || call.function?.name || 'tool';
+}
+
+export function getToolCallArgs(call: ToolCall): Record<string, unknown> | undefined {
+  if (call.arguments) return call.arguments;
+  const rawArgs = call.function?.arguments;
+  if (!rawArgs) return undefined;
+  if (typeof rawArgs === 'object') return rawArgs as Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(rawArgs);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : undefined;
+  } catch {
+    return { arguments: rawArgs };
   }
 }
 

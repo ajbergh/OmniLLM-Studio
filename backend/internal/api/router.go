@@ -758,6 +758,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 						r.Post("/oauth/reset-registration", mcpOAuthHandler.ResetDynamicRegistration)
 						r.Delete("/oauth", mcpOAuthHandler.Disconnect)
 						r.Get("/tools", mcpHandler.ListTools)
+						r.Patch("/tools", mcpHandler.UpdateAllToolsPolicy)
 						r.Patch("/tools/{toolName}", mcpHandler.UpdateToolPolicy)
 					})
 				})

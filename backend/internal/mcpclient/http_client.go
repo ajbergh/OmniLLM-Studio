@@ -447,6 +447,7 @@ func readJSONResponse(body io.Reader) (rpcResponse, error) {
 // skipped transparently.
 func readSSEResponse(body io.Reader, id int64) (rpcResponse, error) {
 	scanner := bufio.NewScanner(io.LimitReader(body, int64(maxRPCMessageBytes)))
+	scanner.Buffer(make([]byte, 0, 64*1024), maxRPCMessageBytes)
 	idStr := fmt.Sprintf("%d", id)
 	var dataLines []string
 

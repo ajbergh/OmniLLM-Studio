@@ -335,6 +335,44 @@ func TestHTTPClientSessionIDPropagation(t *testing.T) {
 	}
 }
 
+func TestHTTPClientLargeSSEResponse(t *testing.T) {
+	// Generate tools with large descriptions / schemas (exceeding standard 64KB bufio.Scanner default buffer)
+	largeDescription := strings.Repeat("A very long schema description for database query operations. ", 2000) // ~120KB
+	tools := []Tool{
+		{
+			Name:        "run_large_query",
+			Description: largeDescription,
+		},
+	}
+
+	srv := newSSETestHTTPServer(t, tools)
+	defer srv.Close()
+
+	client := NewHTTPClient(testMCPServer(srv.URL))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := client.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer client.Stop(context.Background())
+
+	discovered, err := client.ListTools(ctx)
+	if err != nil {
+		t.Fatalf("ListTools with large SSE payload: %v", err)
+	}
+
+	if len(discovered) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(discovered))
+	}
+	if discovered[0].Name != "run_large_query" {
+		t.Fatalf("expected tool name run_large_query, got %s", discovered[0].Name)
+	}
+	if discovered[0].Description != largeDescription {
+		t.Fatalf("tool description length mismatch: expected %d, got %d", len(largeDescription), len(discovered[0].Description))
+	}
+}
+
 func TestHTTPClientCustomHeaders(t *testing.T) {
 	var capturedAuth string
 

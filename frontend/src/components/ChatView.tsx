@@ -16,6 +16,7 @@ import { BranchSwitcher } from './BranchSwitcher';
 import { RAGSourcePanel } from './RAGSourcePanel';
 import { URLContextSourcePanel } from './URLContextSourcePanel';
 import { ToolCallCard } from './ToolCallCard';
+import { ToolCallsList } from './ToolCallsList';
 import { ToolPicker } from './ToolPicker';
 import { AgentRunView } from './AgentRunView';
 import { AttachmentPanel } from './AttachmentPanel';
@@ -99,23 +100,6 @@ function formatBrowserDetail(value: string): string {
     return new URL(value).hostname;
   } catch {
     return value;
-  }
-}
-
-function getToolCallName(call: ToolCall): string {
-  return call.name || call.function?.name || 'tool';
-}
-
-function getToolCallArgs(call: ToolCall): Record<string, unknown> | undefined {
-  if (call.arguments) return call.arguments;
-  const rawArgs = call.function?.arguments;
-  if (!rawArgs) return undefined;
-  if (typeof rawArgs === 'object') return rawArgs;
-  try {
-    const parsed = JSON.parse(rawArgs);
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : undefined;
-  } catch {
-    return { arguments: rawArgs };
   }
 }
 
@@ -2105,21 +2089,7 @@ function MessageBubble({
 
         {/* Tool Call Cards — shows inline tool execution results when available */}
         {!isUser && toolCalls.length > 0 && (
-          <div className="mt-2 space-y-1.5 border-t border-border/30 pt-2">
-            {toolCalls.map((call, index) => {
-              const result = toolResults.find((item) => item.tool_call_id && call.id && item.tool_call_id === call.id)
-                || toolResults[index];
-              return (
-                <ToolCallCard
-                  key={call.id || `${getToolCallName(call)}-${index}`}
-                  toolName={getToolCallName(call)}
-                  args={getToolCallArgs(call)}
-                  result={result}
-                  status={result ? (result.is_error ? 'error' : 'success') : 'error'}
-                />
-              );
-            })}
-          </div>
+          <ToolCallsList toolCalls={toolCalls} toolResults={toolResults} />
         )}
       </div>
 

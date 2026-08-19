@@ -284,6 +284,32 @@ func (m *Manager) SetToolPolicy(serverID, internalName, policy string) error {
 	return m.permRepo.Upsert(internalName, policy)
 }
 
+// SetAllToolsPolicy updates execution policies for all tools discovered on a server.
+func (m *Manager) SetAllToolsPolicy(serverID, policy string) error {
+	if policy != "allow" && policy != "deny" && policy != "ask" {
+		return fmt.Errorf("policy must be allow, deny, or ask")
+	}
+
+	m.mu.RLock()
+	state := m.servers[serverID]
+	if state == nil {
+		m.mu.RUnlock()
+		return sql.ErrNoRows
+	}
+	toolNames := make([]string, len(state.tools))
+	for i, t := range state.tools {
+		toolNames[i] = t.InternalName
+	}
+	m.mu.RUnlock()
+
+	for _, name := range toolNames {
+		if err := m.permRepo.Upsert(name, policy); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m *Manager) withStatus(server models.MCPServer) models.MCPServerWithStatus {
 	out := models.MCPServerWithStatus{MCPServer: server}
 	m.mu.RLock()
