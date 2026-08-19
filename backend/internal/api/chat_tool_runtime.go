@@ -117,7 +117,7 @@ func preferredChatToolNames(prompt string) []string {
 	if containsAny(prompt, "job", "generation status", "cancel generation") {
 		add("job_status", "job_cancel")
 	}
-	if containsAny(prompt, "connected app", "connect app", "mcp") {
+	if containsAny(prompt, "connected app", "connect app") {
 		add("app_catalog", "app_connections", "app_connect_mcp", "app_disconnect")
 	}
 	if containsAny(prompt, "find tool", "search tools", "available tools", "tool catalog", "which tool") {
