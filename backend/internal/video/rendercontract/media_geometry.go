@@ -14,15 +14,15 @@ const MediaGeometryContractV1 = "media-geometry-v1"
 // fitting, PaintedBounds is the centered destination rectangle produced by
 // media_fit, and ClipBounds applies transform.crop to the output canvas box.
 type EvaluatedMediaGeometry struct {
-	ContractVersion    string                  `json:"contract_version"`
-	Fit                string                  `json:"fit"`
-	ViewportBounds     TimelineV2ContentBounds `json:"viewport_bounds"`
-	SourceBounds       TimelineV2ContentBounds `json:"source_bounds"`
+	ContractVersion     string                  `json:"contract_version"`
+	Fit                 string                  `json:"fit"`
+	ViewportBounds      TimelineV2ContentBounds `json:"viewport_bounds"`
+	SourceBounds        TimelineV2ContentBounds `json:"source_bounds"`
 	VisibleSourceBounds TimelineV2ContentBounds `json:"visible_source_bounds"`
-	PaintedBounds      TimelineV2ContentBounds `json:"painted_bounds"`
-	ClipBounds         TimelineV2ContentBounds `json:"clip_bounds"`
-	ScaleX             float64                 `json:"scale_x"`
-	ScaleY             float64                 `json:"scale_y"`
+	PaintedBounds       TimelineV2ContentBounds `json:"painted_bounds"`
+	ClipBounds          TimelineV2ContentBounds `json:"clip_bounds"`
+	ScaleX              float64                 `json:"scale_x"`
+	ScaleY              float64                 `json:"scale_y"`
 }
 
 // EvaluateMediaGeometry resolves canonical contain/cover/fill/none placement.
@@ -85,7 +85,7 @@ func EvaluateMediaGeometry(canvas TimelineV2Canvas, clip TimelineV2Clip) (Evalua
 	}
 	return EvaluatedMediaGeometry{
 		ContractVersion: MediaGeometryContractV1,
-		Fit: fit, ViewportBounds: viewport, SourceBounds: source,
+		Fit:             fit, ViewportBounds: viewport, SourceBounds: source,
 		VisibleSourceBounds: visible, PaintedBounds: painted, ClipBounds: clipBounds,
 		ScaleX: sx, ScaleY: sy,
 	}, nil
