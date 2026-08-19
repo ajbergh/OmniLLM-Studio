@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Cross-runtime exact-frame visual FrameState fixture for transform/camera/source/crop evaluation.",
+  "description": "Cross-runtime exact-frame visual FrameState fixture for transform/camera/source/crop and canonical media geometry evaluation.",
   "document": {
     "version": 2,
     "canvas": { "width": 200, "height": 100, "fps": 120, "background": "#000000" },
@@ -26,6 +26,7 @@
             "trim_out_ms": 20,
             "playback_rate": 1,
             "z_index": 2,
+            "content_bounds": { "x": 0, "y": 0, "width": 200, "height": 100 },
             "transform": {
               "x": 10,
               "y": 0,
@@ -147,6 +148,6 @@
   "expected_unresolved": [
     "unsupported:clip_perspective",
     "unsupported:effects",
-    "unsupported:media_fit:cover"
+    "unsupported:media_geometry:content_bounds"
   ]
 }
