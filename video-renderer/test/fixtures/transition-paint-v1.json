@@ -1,0 +1,252 @@
+{
+  "version": 1,
+  "description": "Cross-runtime transition-paint-v1 fixture for one-sided fades, true two-input crossfades, dip-to-black weights, role reversal, and inactive state.",
+  "cases": [
+    {
+      "name": "inactive-transition-has-no-paint",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "fade-in",
+        "type": "fade",
+        "placement": "in",
+        "role": "incoming",
+        "start_frame": 10,
+        "end_frame": 20,
+        "progress": 0.5,
+        "active": false
+      },
+      "expected": null
+    },
+    {
+      "name": "fade-in-owner-opacity",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "fade-in",
+        "type": "fade",
+        "placement": "in",
+        "role": "incoming",
+        "start_frame": 10,
+        "end_frame": 20,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "fade-in",
+        "type": "fade",
+        "placement": "in",
+        "composition": "owner-opacity",
+        "owner_clip_id": "owner",
+        "progress": 0.25,
+        "owner_opacity": 0.25
+      }
+    },
+    {
+      "name": "fade-out-owner-opacity",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "fade-out",
+        "type": "fade",
+        "placement": "out",
+        "role": "outgoing",
+        "start_frame": 60,
+        "end_frame": 70,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "fade-out",
+        "type": "fade",
+        "placement": "out",
+        "composition": "owner-opacity",
+        "owner_clip_id": "owner",
+        "progress": 0.25,
+        "owner_opacity": 0.75
+      }
+    },
+    {
+      "name": "crossfade-owner-outgoing",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "crossfade",
+        "type": "crossfade",
+        "placement": "between",
+        "peer_clip_id": "peer",
+        "role": "outgoing",
+        "peer_role": "incoming",
+        "start_frame": 50,
+        "end_frame": 65,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "crossfade",
+        "type": "crossfade",
+        "placement": "between",
+        "composition": "pair-crossfade",
+        "owner_clip_id": "owner",
+        "peer_clip_id": "peer",
+        "progress": 0.25,
+        "outgoing_clip_id": "owner",
+        "incoming_clip_id": "peer",
+        "outgoing_weight": 0.75,
+        "incoming_weight": 0.25
+      }
+    },
+    {
+      "name": "crossfade-owner-incoming",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "crossfade-reversed",
+        "type": "crossfade",
+        "placement": "between",
+        "peer_clip_id": "peer",
+        "role": "incoming",
+        "peer_role": "outgoing",
+        "start_frame": 50,
+        "end_frame": 65,
+        "progress": 0.75,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "crossfade-reversed",
+        "type": "crossfade",
+        "placement": "between",
+        "composition": "pair-crossfade",
+        "owner_clip_id": "owner",
+        "peer_clip_id": "peer",
+        "progress": 0.75,
+        "outgoing_clip_id": "peer",
+        "incoming_clip_id": "owner",
+        "outgoing_weight": 0.25,
+        "incoming_weight": 0.75
+      }
+    },
+    {
+      "name": "dip-in-from-black",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "dip-in",
+        "type": "dip_to_black",
+        "placement": "in",
+        "role": "incoming",
+        "start_frame": 10,
+        "end_frame": 20,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "dip-in",
+        "type": "dip_to_black",
+        "placement": "in",
+        "composition": "dip-to-black",
+        "owner_clip_id": "owner",
+        "progress": 0.25,
+        "incoming_clip_id": "owner",
+        "incoming_weight": 0.25,
+        "black_weight": 0.75
+      }
+    },
+    {
+      "name": "dip-out-to-black",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "dip-out",
+        "type": "dip_to_black",
+        "placement": "out",
+        "role": "outgoing",
+        "start_frame": 60,
+        "end_frame": 70,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "dip-out",
+        "type": "dip_to_black",
+        "placement": "out",
+        "composition": "dip-to-black",
+        "owner_clip_id": "owner",
+        "progress": 0.25,
+        "outgoing_clip_id": "owner",
+        "outgoing_weight": 0.75,
+        "black_weight": 0.25
+      }
+    },
+    {
+      "name": "dip-between-first-half",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "dip-between",
+        "type": "dip_to_black",
+        "placement": "between",
+        "peer_clip_id": "peer",
+        "role": "outgoing",
+        "peer_role": "incoming",
+        "start_frame": 50,
+        "end_frame": 70,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "dip-between",
+        "type": "dip_to_black",
+        "placement": "between",
+        "composition": "dip-to-black",
+        "owner_clip_id": "owner",
+        "peer_clip_id": "peer",
+        "progress": 0.25,
+        "outgoing_clip_id": "owner",
+        "incoming_clip_id": "peer",
+        "outgoing_weight": 0.5,
+        "incoming_weight": 0,
+        "black_weight": 0.5
+      }
+    },
+    {
+      "name": "dip-between-second-half",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "dip-between",
+        "type": "dip_to_black",
+        "placement": "between",
+        "peer_clip_id": "peer",
+        "role": "outgoing",
+        "peer_role": "incoming",
+        "start_frame": 50,
+        "end_frame": 70,
+        "progress": 0.75,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "dip-between",
+        "type": "dip_to_black",
+        "placement": "between",
+        "composition": "dip-to-black",
+        "owner_clip_id": "owner",
+        "peer_clip_id": "peer",
+        "progress": 0.75,
+        "outgoing_clip_id": "owner",
+        "incoming_clip_id": "peer",
+        "outgoing_weight": 0,
+        "incoming_weight": 0.5,
+        "black_weight": 0.5
+      }
+    }
+  ]
+}
