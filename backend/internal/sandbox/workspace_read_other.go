@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !darwin
 
 package sandbox
 
@@ -12,8 +12,7 @@ import (
 )
 
 // readWorkspaceRegularFile preserves the existing pathname-based workspace read
-// behavior on non-Linux platforms. Descriptor-relative TOCTOU hardening is a
-// platform-specific follow-up and is not implied by the Linux implementation.
+// behavior on platforms without a proven descriptor-relative implementation.
 func readWorkspaceRegularFile(root, relativePath string, maxBytes int64) ([]byte, string, error) {
 	clean, err := cleanWorkspaceRelativePath(relativePath)
 	if err != nil {
