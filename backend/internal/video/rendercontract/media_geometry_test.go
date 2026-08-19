@@ -13,16 +13,16 @@ type mediaGeometryFixture struct {
 	Version int              `json:"version"`
 	Canvas  TimelineV2Canvas `json:"canvas"`
 	Cases   []struct {
-		Name                        string                   `json:"name"`
-		Fit                         string                   `json:"fit"`
-		ContentBounds               TimelineV2ContentBounds  `json:"content_bounds"`
-		MaskSourceCrop              *TimelineV2Crop           `json:"mask_source_crop"`
-		TransformCrop               *TimelineV2Crop           `json:"transform_crop"`
-		ExpectedScaleX              float64                   `json:"expected_scale_x"`
-		ExpectedScaleY              float64                   `json:"expected_scale_y"`
-		ExpectedVisibleSourceBounds TimelineV2ContentBounds  `json:"expected_visible_source_bounds"`
-		ExpectedPaintedBounds       TimelineV2ContentBounds  `json:"expected_painted_bounds"`
-		ExpectedClipBounds          TimelineV2ContentBounds  `json:"expected_clip_bounds"`
+		Name                        string                  `json:"name"`
+		Fit                         string                  `json:"fit"`
+		ContentBounds               TimelineV2ContentBounds `json:"content_bounds"`
+		MaskSourceCrop              *TimelineV2Crop         `json:"mask_source_crop"`
+		TransformCrop               *TimelineV2Crop         `json:"transform_crop"`
+		ExpectedScaleX              float64                 `json:"expected_scale_x"`
+		ExpectedScaleY              float64                 `json:"expected_scale_y"`
+		ExpectedVisibleSourceBounds TimelineV2ContentBounds `json:"expected_visible_source_bounds"`
+		ExpectedPaintedBounds       TimelineV2ContentBounds `json:"expected_painted_bounds"`
+		ExpectedClipBounds          TimelineV2ContentBounds `json:"expected_clip_bounds"`
 	} `json:"cases"`
 }
 
