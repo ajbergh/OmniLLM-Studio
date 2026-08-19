@@ -7,10 +7,13 @@ import (
 )
 
 const (
-	TransitionPaintContractV1 = "transition-paint-v1"
-	TransitionPaintOwnerAlpha = "owner-opacity"
-	TransitionPaintCrossfade  = "pair-crossfade"
-	TransitionPaintDipBlack   = "dip-to-black"
+	TransitionPaintContractV1                = "transition-paint-v1"
+	TransitionPaintOwnerAlpha                = "owner-opacity"
+	TransitionPaintCrossfade                 = "pair-crossfade"
+	TransitionPaintDipBlack                  = "dip-to-black"
+	TransitionPaintOwnerTranslate            = "owner-translate"
+	TransitionPaintPairSlide                 = "pair-slide"
+	TransitionPaintTranslationCanvasFraction = "canvas-fraction"
 )
 
 // SupportsTransitionPaint reports whether transition-paint-v1 defines paint
@@ -19,7 +22,7 @@ const (
 // valid transition family whose paint remains intentionally unresolved.
 func SupportsTransitionPaint(transitionType string) bool {
 	switch strings.ToLower(strings.TrimSpace(transitionType)) {
-	case "fade", "crossfade", "dip_to_black":
+	case "fade", "crossfade", "dip_to_black", "slide":
 		return true
 	default:
 		return false
@@ -27,31 +30,39 @@ func SupportsTransitionPaint(transitionType string) bool {
 }
 
 // EvaluatedTransitionPaint is the renderer-independent paint instruction for
-// one active fade-family transition. It deliberately describes contribution
-// weights instead of CSS/Canvas/FFmpeg operations so preview and export can
-// consume identical semantics. Unsupported transition families fail closed.
+// one active transition. Contribution weights and normalized canvas-fraction
+// translation are explicit so preview and export can consume identical state
+// without embedding CSS/Canvas/FFmpeg commands in the canonical contract.
 type EvaluatedTransitionPaint struct {
-	ContractVersion string   `json:"contract_version"`
-	TransitionID    string   `json:"transition_id"`
-	Type            string   `json:"type"`
-	Placement       string   `json:"placement"`
-	Composition     string   `json:"composition"`
-	OwnerClipID     string   `json:"owner_clip_id"`
-	PeerClipID      string   `json:"peer_clip_id,omitempty"`
-	Progress        float64  `json:"progress"`
-	OwnerOpacity    *float64 `json:"owner_opacity,omitempty"`
-	OutgoingClipID  string   `json:"outgoing_clip_id,omitempty"`
-	IncomingClipID  string   `json:"incoming_clip_id,omitempty"`
-	OutgoingWeight  *float64 `json:"outgoing_weight,omitempty"`
-	IncomingWeight  *float64 `json:"incoming_weight,omitempty"`
-	BlackWeight     *float64 `json:"black_weight,omitempty"`
+	ContractVersion  string   `json:"contract_version"`
+	TransitionID     string   `json:"transition_id"`
+	Type             string   `json:"type"`
+	Placement        string   `json:"placement"`
+	Composition      string   `json:"composition"`
+	OwnerClipID      string   `json:"owner_clip_id"`
+	PeerClipID       string   `json:"peer_clip_id,omitempty"`
+	Progress         float64  `json:"progress"`
+	OwnerOpacity     *float64 `json:"owner_opacity,omitempty"`
+	OutgoingClipID   string   `json:"outgoing_clip_id,omitempty"`
+	IncomingClipID   string   `json:"incoming_clip_id,omitempty"`
+	OutgoingWeight   *float64 `json:"outgoing_weight,omitempty"`
+	IncomingWeight   *float64 `json:"incoming_weight,omitempty"`
+	BlackWeight      *float64 `json:"black_weight,omitempty"`
+	TranslationSpace string   `json:"translation_space,omitempty"`
+	OwnerOffsetX     *float64 `json:"owner_offset_x,omitempty"`
+	OwnerOffsetY     *float64 `json:"owner_offset_y,omitempty"`
+	OutgoingOffsetX  *float64 `json:"outgoing_offset_x,omitempty"`
+	OutgoingOffsetY  *float64 `json:"outgoing_offset_y,omitempty"`
+	IncomingOffsetX  *float64 `json:"incoming_offset_x,omitempty"`
+	IncomingOffsetY  *float64 `json:"incoming_offset_y,omitempty"`
 }
 
 // EvaluateTransitionPaint converts canonical transition timing/ownership state
-// into canonical visual contribution weights. Inactive transitions produce no
-// paint. Fade is intentionally one-sided and valid only for in/out placement;
-// crossfade is a true two-input blend and therefore requires between placement;
-// dip_to_black supports in, out, and between with a black midpoint.
+// into canonical visual composition state. Inactive transitions produce no
+// paint. Fade is one-sided opacity; crossfade is a true two-input blend;
+// dip_to_black uses explicit black contribution; slide uses normalized
+// canvas-fraction translation where direction names the entry edge and out
+// placement exits through the opposite edge.
 func EvaluateTransitionPaint(ownerClipID string, state EvaluatedTransitionState) (*EvaluatedTransitionPaint, error) {
 	ownerClipID = strings.TrimSpace(ownerClipID)
 	if ownerClipID == "" {
@@ -159,6 +170,50 @@ func EvaluateTransitionPaint(ownerClipID string, state EvaluatedTransitionState)
 			return nil, invalidTransitionPaintState(state, "dip-to-black requires in, out, or between placement")
 		}
 
+	case "slide":
+		entryX, entryY, err := transitionSlideEntryVector(state.Direction)
+		if err != nil {
+			return nil, invalidTransitionPaintState(state, err.Error())
+		}
+		exitX, exitY := -entryX, -entryY
+		paint.TranslationSpace = TransitionPaintTranslationCanvasFraction
+		switch paint.Placement {
+		case "in":
+			if state.Role != "incoming" || paint.PeerClipID != "" {
+				return nil, invalidTransitionPaintState(state, "slide-in requires an incoming owner with no peer")
+			}
+			paint.Composition = TransitionPaintOwnerTranslate
+			paint.OwnerOffsetX = transitionPaintSignedFloat(entryX * (1 - state.Progress))
+			paint.OwnerOffsetY = transitionPaintSignedFloat(entryY * (1 - state.Progress))
+			return paint, nil
+		case "out":
+			if state.Role != "outgoing" || paint.PeerClipID != "" {
+				return nil, invalidTransitionPaintState(state, "slide-out requires an outgoing owner with no peer")
+			}
+			paint.Composition = TransitionPaintOwnerTranslate
+			paint.OwnerOffsetX = transitionPaintSignedFloat(exitX * state.Progress)
+			paint.OwnerOffsetY = transitionPaintSignedFloat(exitY * state.Progress)
+			return paint, nil
+		case "between":
+			if paint.PeerClipID == "" {
+				return nil, invalidTransitionPaintState(state, "slide between requires an explicit peer")
+			}
+			outgoingID, incomingID, err := transitionPaintPairRoles(ownerClipID, state)
+			if err != nil {
+				return nil, err
+			}
+			paint.Composition = TransitionPaintPairSlide
+			paint.OutgoingClipID = outgoingID
+			paint.IncomingClipID = incomingID
+			paint.OutgoingOffsetX = transitionPaintSignedFloat(exitX * state.Progress)
+			paint.OutgoingOffsetY = transitionPaintSignedFloat(exitY * state.Progress)
+			paint.IncomingOffsetX = transitionPaintSignedFloat(entryX * (1 - state.Progress))
+			paint.IncomingOffsetY = transitionPaintSignedFloat(entryY * (1 - state.Progress))
+			return paint, nil
+		default:
+			return nil, invalidTransitionPaintState(state, "slide requires in, out, or between placement")
+		}
+
 	default:
 		return nil, fmt.Errorf("transition %q type %q does not yet have canonical paint semantics", transitionID, state.Type)
 	}
@@ -179,11 +234,33 @@ func transitionPaintPairRoles(ownerClipID string, state EvaluatedTransitionState
 	}
 }
 
+func transitionSlideEntryVector(direction string) (float64, float64, error) {
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "left":
+		return -1, 0, nil
+	case "right":
+		return 1, 0, nil
+	case "up":
+		return 0, -1, nil
+	case "down":
+		return 0, 1, nil
+	default:
+		return 0, 0, fmt.Errorf("slide requires direction left, right, up, or down")
+	}
+}
+
 func invalidTransitionPaintState(state EvaluatedTransitionState, message string) error {
 	return fmt.Errorf("transition %q: %s", strings.TrimSpace(state.ID), message)
 }
 
 func transitionPaintFloat(value float64) *float64 {
 	value = math.Max(0, math.Min(1, value))
+	return &value
+}
+
+func transitionPaintSignedFloat(value float64) *float64 {
+	if value == 0 {
+		value = 0
+	}
 	return &value
 }

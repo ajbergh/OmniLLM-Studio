@@ -7,6 +7,9 @@ export const TRANSITION_PAINT_CONTRACT_V1 = 'transition-paint-v1' as const;
 export const TRANSITION_PAINT_OWNER_ALPHA = 'owner-opacity' as const;
 export const TRANSITION_PAINT_CROSSFADE = 'pair-crossfade' as const;
 export const TRANSITION_PAINT_DIP_BLACK = 'dip-to-black' as const;
+export const TRANSITION_PAINT_OWNER_TRANSLATE = 'owner-translate' as const;
+export const TRANSITION_PAINT_PAIR_SLIDE = 'pair-slide' as const;
+export const TRANSITION_PAINT_TRANSLATION_CANVAS_FRACTION = 'canvas-fraction' as const;
 
 /**
  * Report whether transition-paint-v1 defines paint semantics for this type.
@@ -18,6 +21,7 @@ export function supportsTransitionPaint(transitionType: string): boolean {
     case 'fade':
     case 'crossfade':
     case 'dip_to_black':
+    case 'slide':
       return true;
     default:
       return false;
@@ -32,7 +36,9 @@ export interface CanonicalTransitionPaint {
   composition:
     | typeof TRANSITION_PAINT_OWNER_ALPHA
     | typeof TRANSITION_PAINT_CROSSFADE
-    | typeof TRANSITION_PAINT_DIP_BLACK;
+    | typeof TRANSITION_PAINT_DIP_BLACK
+    | typeof TRANSITION_PAINT_OWNER_TRANSLATE
+    | typeof TRANSITION_PAINT_PAIR_SLIDE;
   owner_clip_id: string;
   peer_clip_id?: string;
   progress: number;
@@ -42,13 +48,20 @@ export interface CanonicalTransitionPaint {
   outgoing_weight?: number;
   incoming_weight?: number;
   black_weight?: number;
+  translation_space?: typeof TRANSITION_PAINT_TRANSLATION_CANVAS_FRACTION;
+  owner_offset_x?: number;
+  owner_offset_y?: number;
+  outgoing_offset_x?: number;
+  outgoing_offset_y?: number;
+  incoming_offset_x?: number;
+  incoming_offset_y?: number;
 }
 
 /**
  * Convert canonical transition timing/ownership state into renderer-neutral
- * paint weights. Inactive transitions produce no paint. Fade is one-sided
- * in/out opacity, crossfade is a true between-clip blend, and dip-to-black
- * uses outgoing/black/incoming weights around a black midpoint.
+ * paint state. Fade is one-sided opacity, crossfade is a true pair blend,
+ * dip-to-black has an explicit black contribution, and slide uses normalized
+ * canvas-fraction translation where direction names the entry edge.
  */
 export function evaluateTransitionPaint(
   ownerClipId: string,
@@ -169,6 +182,53 @@ export function evaluateTransitionPaint(
       }
       throw invalidTransitionPaintState(state, 'dip-to-black requires in, out, or between placement');
 
+    case 'slide': {
+      const [entryX, entryY] = transitionSlideEntryVector(state.direction);
+      const exitX = -entryX;
+      const exitY = -entryY;
+      const translation_space = TRANSITION_PAINT_TRANSLATION_CANVAS_FRACTION;
+      if (placement === 'in') {
+        if (state.role !== 'incoming' || peer) {
+          throw invalidTransitionPaintState(state, 'slide-in requires an incoming owner with no peer');
+        }
+        return {
+          ...base,
+          composition: TRANSITION_PAINT_OWNER_TRANSLATE,
+          translation_space,
+          owner_offset_x: signedZero(entryX * (1 - state.progress)),
+          owner_offset_y: signedZero(entryY * (1 - state.progress)),
+        };
+      }
+      if (placement === 'out') {
+        if (state.role !== 'outgoing' || peer) {
+          throw invalidTransitionPaintState(state, 'slide-out requires an outgoing owner with no peer');
+        }
+        return {
+          ...base,
+          composition: TRANSITION_PAINT_OWNER_TRANSLATE,
+          translation_space,
+          owner_offset_x: signedZero(exitX * state.progress),
+          owner_offset_y: signedZero(exitY * state.progress),
+        };
+      }
+      if (placement === 'between') {
+        if (!peer) throw invalidTransitionPaintState(state, 'slide between requires an explicit peer');
+        const pair = transitionPaintPairRoles(owner, state);
+        return {
+          ...base,
+          composition: TRANSITION_PAINT_PAIR_SLIDE,
+          translation_space,
+          outgoing_clip_id: pair.outgoingClipId,
+          incoming_clip_id: pair.incomingClipId,
+          outgoing_offset_x: signedZero(exitX * state.progress),
+          outgoing_offset_y: signedZero(exitY * state.progress),
+          incoming_offset_x: signedZero(entryX * (1 - state.progress)),
+          incoming_offset_y: signedZero(entryY * (1 - state.progress)),
+        };
+      }
+      throw invalidTransitionPaintState(state, 'slide requires in, out, or between placement');
+    }
+
     default:
       throw new Error(`transition ${JSON.stringify(transitionId)} type ${JSON.stringify(state.type)} does not yet have canonical paint semantics`);
   }
@@ -191,10 +251,24 @@ function transitionPaintPairRoles(
   throw invalidTransitionPaintState(state, 'between paint requires complementary outgoing/incoming roles');
 }
 
+function transitionSlideEntryVector(direction: string | undefined): [number, number] {
+  switch ((direction ?? '').trim().toLowerCase()) {
+    case 'left': return [-1, 0];
+    case 'right': return [1, 0];
+    case 'up': return [0, -1];
+    case 'down': return [0, 1];
+    default: throw new Error('slide requires direction left, right, up, or down');
+  }
+}
+
 function invalidTransitionPaintState(state: CanonicalTransitionState, message: string): Error {
   return new Error(`transition ${JSON.stringify(state.id.trim())}: ${message}`);
 }
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+function signedZero(value: number): number {
+  return Object.is(value, -0) ? 0 : value;
 }

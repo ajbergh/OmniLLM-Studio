@@ -73,7 +73,8 @@ func TestEvaluateTransitionPaintFailsClosedOnInvalidOrUnsupportedSemantics(t *te
 
 	t.Run("unsupported-paint-family", func(t *testing.T) {
 		state := base
-		state.Type = "slide"
+		state.Type = "wipe"
+		state.Direction = "left"
 		state.Placement = "out"
 		state.PeerClipID = ""
 		state.Role = "outgoing"
@@ -81,6 +82,20 @@ func TestEvaluateTransitionPaintFailsClosedOnInvalidOrUnsupportedSemantics(t *te
 		_, err := EvaluateTransitionPaint("owner", state)
 		if err == nil || !strings.Contains(err.Error(), "does not yet have canonical paint semantics") {
 			t.Fatalf("unsupported type error = %v", err)
+		}
+	})
+
+	t.Run("slide-direction-must-be-canonical", func(t *testing.T) {
+		state := base
+		state.Type = "slide"
+		state.Direction = "diagonal"
+		state.Placement = "in"
+		state.PeerClipID = ""
+		state.Role = "incoming"
+		state.PeerRole = ""
+		_, err := EvaluateTransitionPaint("owner", state)
+		if err == nil || !strings.Contains(err.Error(), "direction left, right, up, or down") {
+			t.Fatalf("slide direction error = %v", err)
 		}
 	})
 

@@ -3,7 +3,6 @@ package rendercontract
 import (
 	"encoding/json"
 	"math"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -50,18 +49,24 @@ func TestVisualFrameStateConsumesSupportedTransitionPaint(t *testing.T) {
 		}
 	})
 
-	t.Run("unsupported-slide-retains-debt", func(t *testing.T) {
+	t.Run("slide-out", func(t *testing.T) {
 		state, err := EvaluateVisualFrameState(fixture.Document, 65)
 		if err != nil {
 			t.Fatalf("EvaluateVisualFrameState: %v", err)
 		}
-		want := []string{"owner:transition_paint:slide-out"}
-		if state.Authoritative || !reflect.DeepEqual(state.Unresolved, want) {
-			t.Fatalf("state authoritative=%v unresolved=%v, want %v", state.Authoritative, state.Unresolved, want)
+		if !state.Authoritative || len(state.Unresolved) != 0 {
+			t.Fatalf("state authoritative=%v unresolved=%v", state.Authoritative, state.Unresolved)
 		}
 		owner := frameLayerByClipID(state.Layers, "owner")
-		if owner == nil || len(owner.TransitionPaint) != 0 {
+		if owner == nil || len(owner.TransitionPaint) != 1 {
 			t.Fatalf("owner transition paint = %+v", owner)
+		}
+		paint := owner.TransitionPaint[0]
+		if paint.Composition != TransitionPaintOwnerTranslate || paint.TranslationSpace != TransitionPaintTranslationCanvasFraction || paint.OwnerOffsetX == nil || paint.OwnerOffsetY == nil {
+			t.Fatalf("slide paint = %+v", paint)
+		}
+		if math.Abs(*paint.OwnerOffsetX-0.5) > 1e-9 || math.Abs(*paint.OwnerOffsetY) > 1e-9 {
+			t.Fatalf("slide offsets = x %.12f y %.12f", *paint.OwnerOffsetX, *paint.OwnerOffsetY)
 		}
 	})
 }
