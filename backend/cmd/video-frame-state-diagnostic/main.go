@@ -234,7 +234,7 @@ func compareJSONValue(path string, left, right any, mismatches *[]string) {
 			*mismatches = append(*mismatches, path)
 			return
 		}
-		keys := make(map[string]struct{}, len(l)+len(r))
+		keys := make(map[string]struct{})
 		for key := range l {
 			keys[key] = struct{}{}
 		}
