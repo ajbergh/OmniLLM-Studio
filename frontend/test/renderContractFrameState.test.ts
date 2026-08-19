@@ -6,6 +6,7 @@ import {
   VISUAL_FRAME_STATE_CONTRACT_V1,
   type Matrix4,
 } from '../src/video/renderContractFrameState';
+import { MEDIA_GEOMETRY_CONTRACT_V1 } from '../src/video/renderContractMediaGeometry';
 import { samplePropertyKeyframes } from '../src/video/renderContractProperties';
 import type { TimelineV2Document } from '../src/video/renderContractTypes';
 
@@ -60,16 +61,20 @@ describe('canonical visual FrameState', () => {
       expect(state.camera.perspective_distance).toBeCloseTo(sample.expected_perspective_distance, 9);
       layer.model_matrix.forEach((value, index) => expect(value).toBeCloseTo(sample.expected_model_matrix[index], 9));
       expect(layer.content_bounds).toEqual({ x: 0, y: 0, width: 200, height: 100 });
+      expect(layer.media_geometry?.contract_version).toBe(MEDIA_GEOMETRY_CONTRACT_V1);
+      expect(layer.media_geometry?.painted_bounds).toEqual({ x: 0, y: 0, width: 200, height: 100 });
       expect(layer.transform.crop).toEqual({ top: 0.1, right: 0.2, bottom: 0, left: 0 });
     });
   }
 
-  it('surfaces unresolved paint semantics instead of claiming authority', () => {
+  it('surfaces unresolved paint semantics and missing source provenance instead of claiming authority', () => {
     const state = evaluateVisualFrameState(fixture.unresolved_document, 0);
     expect(state.authoritative).toBe(false);
     expect(state.unresolved).toEqual(fixture.expected_unresolved);
     expect(state.layers).toHaveLength(1);
     expect(state.layers[0].authoritative).toBe(false);
+    expect(state.layers[0].content_bounds).toBeUndefined();
+    expect(state.layers[0].media_geometry).toBeUndefined();
   });
 
   it('keeps fractional frame presentation time for property sampling', () => {
