@@ -4,6 +4,15 @@ Status: ACTIVE IMPLEMENTATION CONTRACT
 
 This document resolves the semantic ambiguity that previously blocked truthful `cpu_limit` and `disk_limit` capability reporting. It does **not** enable either capability by itself. Runtime capability bits remain false until the platform implementation and native negative evidence described here are present.
 
+## Implementation progress — 2026-08-19
+
+- **Linux CPU primitives — IN PROGRESS:** the delegated cgroup manager now discovers/enables the `cpu` controller when available without regressing already-working PID/memory isolation, parses aggregate `cpu.stat` `usage_usec`, exposes execution-cgroup kill, and can configure a one-core `cpu.max` ceiling when a positive cumulative budget is requested. The rate ceiling exists only to bound sampling overshoot. `LocalRuntime.Exec`, quota-exceeded result semantics, descendant-pressure assurance, and capability advertisement are **not yet wired**, so `CPULimit` remains false.
+- **Windows CPU primitives — IN PROGRESS:** a Job Object accounting helper now queries `JobObjectBasicAccountingInformation` and derives aggregate `TotalUserTime + TotalKernelTime` CPU usage in application milliseconds. The execution monitor/termination path and descendant-pressure native assurance remain outstanding, so `CPULimit` remains false.
+- **Darwin CPU — NOT STARTED:** no capability change; the detached-descendant accounting problem remains unresolved.
+- **Disk — DESIGN CONTRACT ONLY:** no platform has a hard pre-write storage boundary yet and `DiskLimit` remains false everywhere.
+
+No staged primitive in this branch is sufficient by itself to satisfy Broker admission for a non-zero CPU or disk request. Capability bits may change only in the same reviewable slice that wires enforcement and proves the negative cases below.
+
 ## CPU contract
 
 `resources.cpu_time_ms` means **cumulative CPU time consumed by the complete sandbox execution process tree**, measured as user-mode plus kernel/system CPU time.
