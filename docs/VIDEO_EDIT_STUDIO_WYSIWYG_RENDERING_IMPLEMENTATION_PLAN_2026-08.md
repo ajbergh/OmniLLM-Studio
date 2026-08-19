@@ -20,7 +20,7 @@ PR #209 established `media-geometry-v1` in Go and TypeScript with a shared fixtu
 
 PR #212 integrated `media-geometry-v1` into `visual-frame-state-v1`. It removed the canvas-sized source-bounds fallback for asset-backed clips, attached canonical evaluated media geometry when explicit source bounds exist, used painted media bounds for anchor-space geometry, and reported `media_geometry:content_bounds` when source provenance is absent. Final-head backend formatting/vet/tests/race, frontend lint/unit/performance/build, deterministic renderer parity, Security Scan, container build, and platform assurance jobs passed. The repository-wide Playwright job never reached application setup/tests and remained in `Install system dependencies`; that setup-only incompleteness was explicitly documented before merge and was not represented as green. Preview and FFmpeg composition remained unchanged.
 
-PR #218 defines `perspective-projection-v1` and projects it into visual FrameState. Camera FOV-derived `perspective_distance` is the default; a positive per-clip `transform.perspective` overrides that distance, while zero/omitted clip perspective inherits the camera. The canonical projection is a homogeneous CSS-style matrix with `w = 1 - z/d` in the existing row-major/column-vector convention. `model_matrix` remains the camera-relative model transform and perspective is represented separately as `perspective_projection`, avoiding a silent reinterpretation of the existing matrix field. Go and TypeScript share a projection fixture and the visual FrameState fixture now verifies projection identity. Preview and FFmpeg composition are intentionally unchanged in this slice.
+PR #218 defines `perspective-projection-v1` and projects it into visual FrameState. It preserves the current preview's 1200-canvas-pixel projection distance when no scene camera is active and derives distance from evaluated FOV when an authored scene camera is active. A positive per-clip `transform.perspective` overrides the inherited projection distance, while zero/omitted clip perspective inherits it. The canonical projection is a homogeneous CSS-style matrix with `w = 1 - z/d` in the existing row-major/column-vector convention. `model_matrix` remains the camera-relative model transform and perspective is represented separately as `perspective_projection`, avoiding a silent reinterpretation of the existing matrix field. Go and TypeScript share a projection fixture and the visual FrameState fixture verifies the preview default, FOV projection, and clip override. Preview and FFmpeg composition are intentionally unchanged in this slice.
 
 ## Merged WYSIWYG foundations
 
@@ -87,7 +87,7 @@ For asset-backed media, source aspect ratio is semantic input. `content_bounds` 
 
 ### Perspective authority
 
-Perspective is projection state, not stacking state. `z_index`/track ordering remains authoritative for paint order; spatial `z` affects camera-relative projection only. `perspective-projection-v1` uses the evaluated camera FOV distance unless the clip supplies a positive `transform.perspective` override. Zero or an omitted clip perspective inherits camera projection. FrameState preserves the camera-relative `model_matrix` and serializes perspective separately so preview/export consumers can apply the same projection without inferring CSS or FFmpeg-specific behavior.
+Perspective is projection state, not stacking state. `z_index`/track ordering remains authoritative for paint order; spatial `z` affects camera-relative projection only. `perspective-projection-v1` inherits the preview-compatible 1200-canvas-pixel distance when no scene camera is active, uses the evaluated camera FOV distance when an authored scene camera is active, and permits a positive `transform.perspective` to override the inherited distance. Zero or omitted clip perspective inherits projection. FrameState preserves the camera-relative `model_matrix` and serializes perspective separately so preview/export consumers can apply the same projection without inferring CSS or FFmpeg-specific behavior.
 
 ## Phase 0 evidence and remaining sign-off
 
@@ -179,24 +179,24 @@ Preview and FFmpeg compositor behavior were unchanged.
 Implemented on the branch:
 
 - `backend/internal/video/rendercontract/perspective_projection.go` and `frontend/src/video/renderContractPerspectiveProjection.ts` define matching `perspective-projection-v1` evaluators;
-- camera `perspective_distance`, derived from evaluated FOV and canvas height, is the default projection distance;
-- a positive per-clip `transform.perspective` overrides the camera distance;
-- zero or omitted clip perspective inherits camera projection;
+- no-scene-camera state preserves the preview-compatible 1200-canvas-pixel projection distance;
+- an active authored scene camera uses its evaluated FOV and canvas height to derive projection distance;
+- a positive per-clip `transform.perspective` overrides the inherited projection distance;
+- zero or omitted clip perspective inherits projection;
 - non-finite or non-positive resolved projection distances fail closed;
 - projection uses a homogeneous matrix with `m[14] = -1 / distance` and records `origin_w = 1 - view_z / distance`;
 - `visual-frame-state-v1` now exposes `perspective_projection` for every visual layer while preserving the existing camera-relative `model_matrix` unchanged;
 - `clip_perspective` is no longer unresolved because its semantics are canonical;
-- `video-renderer/test/fixtures/perspective-projection-v1.json` is shared by Go and TypeScript and covers camera projection, clip override, and zero-value inheritance;
-- the shared visual FrameState fixture verifies projection matrix/source/distance and verifies that an explicit 500px clip perspective remains resolved even when another feature family keeps the state non-authoritative;
+- `video-renderer/test/fixtures/perspective-projection-v1.json` is shared by Go and TypeScript and covers inherited distance, clip override, and zero-value inheritance;
+- the shared visual FrameState fixture verifies the 1200px preview default, active scene-camera FOV projection, projection matrix/source/distance, and a resolved 500px per-clip override;
 - PR #218 was normalized onto merged `main` after #212 merged.
 
 Remaining before #218 merge:
 
 1. Complete final-head Quality Gate, Security Scan, and relevant assurance jobs.
 2. Fix any formatting, type, fixture, or cross-runtime diagnostic drift discovered by hosted validation.
-3. Update PR metadata to remove the temporary stacked-base wording.
-4. Mark ready and merge only after code validation is green or any infrastructure-only incompleteness is explicitly documented.
-5. Keep preview and FFmpeg compositor behavior unchanged.
+3. Mark ready and merge only after code validation is green or any infrastructure-only incompleteness is explicitly documented.
+4. Keep preview and FFmpeg compositor behavior unchanged.
 
 ### Remaining Phase 2 work after #218
 
@@ -266,7 +266,7 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 | Millisecond rounding creates boundary/source drift | Deterministic callers use canonical frame/range/source helpers. |
 | Source aspect ratio is guessed from the canvas | `media-geometry-v1` requires explicit `content_bounds`; FrameState reports `media_geometry:content_bounds` rather than fabricating source dimensions. |
 | Crop order differs between renderers | Source-mask crop occurs before fit; output transform crop is represented separately after fit. |
-| Perspective differs between preview/export | `perspective-projection-v1` resolves one distance/source/matrix and FrameState carries it separately from the model transform. |
+| Perspective differs between preview/export | `perspective-projection-v1` resolves one inherited/overridden distance, source, and matrix; FrameState carries it separately from the model transform. |
 | FrameState claims authority before feature semantics are canonical | Explicit unresolved sets keep noncanonical families non-authoritative. |
 | CI setup stalls hide code status | Record setup-only stalls separately; never label an unexecuted check green. |
 | Chromium packaging/resource cost | Managed worker, admission control, health checks, guarded rollout; FFmpeg retained for decode/encode/mux. |
@@ -293,7 +293,8 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 - PR #212 consumed `media-geometry-v1` in visual FrameState, removed canvas-sized source-bounds guessing, made missing source provenance explicit/non-authoritative, and passed all code-executing gates plus the deterministic renderer parity baseline.
 - PR #212's repository-wide Playwright job remained in `Install system dependencies` and never reached application tests; that infrastructure-only incompleteness was documented explicitly before merge.
 - PR #212 merged to `main` as `ae29d57e2e7d4e94e298bb155501583f4577e1ed`.
-- PR #218 opened on `feat/video-wysiwyg-phase2-perspective-projection`, was normalized onto merged `main`, defined cross-runtime `perspective-projection-v1`, integrated it into visual FrameState, and advanced the shared fixtures. Final-head validation is pending.
+- PR #218 opened on `feat/video-wysiwyg-phase2-perspective-projection`, was normalized onto merged `main`, defined cross-runtime `perspective-projection-v1`, integrated it into visual FrameState, and advanced the shared fixtures.
+- Manual semantic review of #218 caught a no-scene-camera compatibility mismatch before merge; FrameState was corrected to preserve the preview's 1200-canvas-pixel default rather than applying the default 50° FOV distance outside an authored scene camera. Final-head validation is pending.
 
 ## Next recommended slice
 
