@@ -92,6 +92,9 @@ jobs:
             --media-dir "$fixture/media" \
             --output "$capture" \
             --sample-limit 2
+
+          # Real saved timeline: transition ambiguity must remain fail-closed in
+          # both runtimes rather than being silently projected.
           node scripts/video-frame-state-diagnostics.mjs \
             --url http://127.0.0.1:14174 \
             --fixture "$fixture/parity-torture-v1.json" \
@@ -105,12 +108,39 @@ jobs:
               --preview "$capture/frame-state-preview.json" \
               --output "$capture/frame-state-report.json"
           )
+
+          # Positive control: remove only v1 transition records from a copy of
+          # the same saved timeline, then require actual browser/Go FrameState
+          # values to compare for all fixture samples.
+          node scripts/video-frame-state-diagnostics.mjs \
+            --url http://127.0.0.1:14174 \
+            --fixture "$fixture/parity-torture-v1.json" \
+            --seed-result "$capture/seed-result.json" \
+            --transition-free-control true \
+            --output "$capture/frame-state-preview-control.json"
+          (
+            cd backend
+            go run ./cmd/video-frame-state-diagnostic \
+              --timeline "$capture/timeline-v1-transition-free-control.json" \
+              --fixture "$fixture/parity-torture-v1.json" \
+              --preview "$capture/frame-state-preview-control.json" \
+              --output "$capture/frame-state-report-control.json"
+          )
           node - <<'NODE'
           const fs = require('fs');
-          const report = JSON.parse(fs.readFileSync('output/video-frame-state-diagnostic-validation/capture/frame-state-report.json', 'utf8'));
-          if (!report.all_diagnostics_matched) throw new Error('FrameState diagnostics did not match');
-          if (report.matched_unavailable < 1) throw new Error('expected transition ambiguity to remain fail-closed');
-          console.log(JSON.stringify({ available_compared: report.available_compared, matched_unavailable: report.matched_unavailable, mismatched: report.mismatched }));
+          const strict = JSON.parse(fs.readFileSync('output/video-frame-state-diagnostic-validation/capture/frame-state-report.json', 'utf8'));
+          const control = JSON.parse(fs.readFileSync('output/video-frame-state-diagnostic-validation/capture/frame-state-report-control.json', 'utf8'));
+          if (!strict.all_diagnostics_matched || strict.mismatched !== 0) throw new Error('strict FrameState diagnostics did not match');
+          if (strict.matched_unavailable < 1) throw new Error('expected transition ambiguity to remain fail-closed');
+          if (!control.all_diagnostics_matched || control.mismatched !== 0) throw new Error('control FrameState diagnostics did not match');
+          if (control.available_compared < 1) throw new Error('expected transition-free control to compare actual FrameState values');
+          console.log(JSON.stringify({
+            strict_available_compared: strict.available_compared,
+            strict_matched_unavailable: strict.matched_unavailable,
+            control_available_compared: control.available_compared,
+            control_matched_unavailable: control.matched_unavailable,
+            mismatched: strict.mismatched + control.mismatched,
+          }));
           NODE
       - name: Commit formatted Go files
         run: |
