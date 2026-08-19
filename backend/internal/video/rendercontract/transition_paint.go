@@ -13,6 +13,19 @@ const (
 	TransitionPaintDipBlack   = "dip-to-black"
 )
 
+// SupportsTransitionPaint reports whether transition-paint-v1 defines paint
+// semantics for the authored transition type. Consumers use this boundary to
+// distinguish a supported-but-invalid state (which must fail closed) from a
+// valid transition family whose paint remains intentionally unresolved.
+func SupportsTransitionPaint(transitionType string) bool {
+	switch strings.ToLower(strings.TrimSpace(transitionType)) {
+	case "fade", "crossfade", "dip_to_black":
+		return true
+	default:
+		return false
+	}
+}
+
 // EvaluatedTransitionPaint is the renderer-independent paint instruction for
 // one active fade-family transition. It deliberately describes contribution
 // weights instead of CSS/Canvas/FFmpeg operations so preview and export can
