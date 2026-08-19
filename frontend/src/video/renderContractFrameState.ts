@@ -111,7 +111,9 @@ function evaluateFrameCamera(scene: TimelineV2Scene | undefined, frameIndex: num
     rotation_z: evaluateCameraProperty(camera, 'rotation_z', sceneTimeMs),
     field_of_view: fieldOfView,
     focus_depth: evaluateCameraProperty(camera, 'focus_depth', sceneTimeMs),
-    perspective_distance: Math.max(1, canvasHeight) / (2 * Math.tan(fieldOfView * Math.PI / 360)),
+    perspective_distance: camera
+      ? Math.max(1, canvasHeight) / (2 * Math.tan(fieldOfView * Math.PI / 360))
+      : 1200,
   };
 }
 
