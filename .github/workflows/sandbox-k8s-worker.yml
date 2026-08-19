@@ -1,0 +1,66 @@
+name: Kubernetes Sandbox Worker Assurance
+
+on:
+  pull_request:
+    paths:
+      - "deploy/helm/omnillm-studio/**"
+      - ".github/workflows/sandbox-k8s-worker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox-worker-chart:
+    name: Render isolated sandbox worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+      - name: Lint enabled worker configuration
+        run: |
+          helm lint deploy/helm/omnillm-studio \
+            --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
+            --set sandboxWorker.enabled=true \
+            --set sandboxWorker.auth.existingSecret=sandbox-worker-auth
+      - name: Render enabled worker configuration
+        run: |
+          helm template test deploy/helm/omnillm-studio \
+            --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
+            --set sandboxWorker.enabled=true \
+            --set sandboxWorker.auth.existingSecret=sandbox-worker-auth \
+            > /tmp/sandbox-worker.yaml
+      - name: Prove workload separation and fail-closed defaults
+        run: |
+          set -euo pipefail
+          grep -q '^kind: Deployment$' /tmp/sandbox-worker.yaml
+          grep -q 'app.kubernetes.io/component: sandbox-worker' /tmp/sandbox-worker.yaml
+          grep -q '^kind: ServiceAccount$' /tmp/sandbox-worker.yaml
+          grep -q 'automountServiceAccountToken: false' /tmp/sandbox-worker.yaml
+          grep -q 'allowPrivilegeEscalation: false' /tmp/sandbox-worker.yaml
+          grep -q 'readOnlyRootFilesystem: true' /tmp/sandbox-worker.yaml
+          grep -q 'type: RuntimeDefault' /tmp/sandbox-worker.yaml
+          grep -q '^kind: NetworkPolicy$' /tmp/sandbox-worker.yaml
+          grep -q 'egress: \[\]' /tmp/sandbox-worker.yaml
+          if grep -q 'privileged: true' /tmp/sandbox-worker.yaml; then
+            echo 'sandbox worker unexpectedly renders privileged=true' >&2
+            exit 1
+          fi
+      - name: Prove backend is wired to the internal worker
+        run: |
+          set -euo pipefail
+          grep -q 'name: OMNILLM_CODE_SANDBOX_URL' /tmp/sandbox-worker.yaml
+          grep -q 'sandbox-worker:8090' /tmp/sandbox-worker.yaml
+          grep -q 'name: OMNILLM_SANDBOX_TOKEN' /tmp/sandbox-worker.yaml
+          grep -q 'name: sandbox-worker-auth' /tmp/sandbox-worker.yaml
+          grep -q 'key: OMNILLM_SANDBOX_TOKEN' /tmp/sandbox-worker.yaml
+      - name: Prove auth is mandatory when enabled
+        run: |
+          if helm template test deploy/helm/omnillm-studio \
+            --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
+            --set sandboxWorker.enabled=true >/tmp/missing-auth.yaml 2>/tmp/missing-auth.err; then
+            echo 'sandbox worker rendered without an auth Secret' >&2
+            exit 1
+          fi
+          grep -q 'sandboxWorker.auth.existingSecret is required' /tmp/missing-auth.err

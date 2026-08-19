@@ -1,0 +1,113 @@
+{{- if .Values.sandboxWorker.enabled }}
+{{- include "omnillm-studio.validate" . -}}
+{{- if not .Values.sandboxWorker.auth.existingSecret -}}
+{{- fail "omnillm-studio: sandboxWorker.auth.existingSecret is required when sandboxWorker.enabled=true" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omnillm-studio.fullname" . }}-sandbox-worker
+  labels:
+    {{- include "omnillm-studio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-worker
+spec:
+  replicas: {{ .Values.sandboxWorker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "omnillm-studio.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: sandbox-worker
+  template:
+    metadata:
+      labels:
+        {{- include "omnillm-studio.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: sandbox-worker
+        {{- with .Values.sandboxWorker.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.sandboxWorker.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "omnillm-studio.fullname" . }}-sandbox-worker
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.sandboxWorker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.sandboxWorker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.sandboxWorker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: sandboxd
+          image: "{{ .Values.image.registry }}/{{ .Values.sandboxWorker.image.repository }}:{{ default .Chart.AppVersion .Values.sandboxWorker.image.tag }}"
+          imagePullPolicy: {{ .Values.sandboxWorker.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: {{ .Values.sandboxWorker.service.port }}
+              protocol: TCP
+          env:
+            - name: OMNILLM_SANDBOX_BIND
+              value: "0.0.0.0:{{ .Values.sandboxWorker.service.port }}"
+            - name: OMNILLM_SANDBOX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.sandboxWorker.auth.existingSecret }}
+                  key: {{ .Values.sandboxWorker.auth.tokenKey }}
+            - name: OMNILLM_SANDBOX_ROOTFS
+              value: /opt/omnillm/rootfs
+            - name: OMNILLM_SANDBOX_SCRATCH_ROOT
+              value: /var/lib/omnillm-sandbox
+            {{- if .Values.sandboxWorker.cgroupRoot }}
+            - name: OMNILLM_SANDBOX_CGROUP_ROOT
+              value: {{ .Values.sandboxWorker.cgroupRoot | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.sandboxWorker.resources | nindent 12 }}
+          volumeMounts:
+            - name: scratch
+              mountPath: /var/lib/omnillm-sandbox
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: scratch
+          emptyDir:
+            sizeLimit: {{ .Values.sandboxWorker.scratch.sizeLimit }}
+{{- end }}

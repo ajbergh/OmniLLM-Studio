@@ -78,6 +78,42 @@ resources:
       cpu: 200m
       memory: 128Mi
 
+# Optional protocol-v2 sandbox worker. It is a separate pod and never runs
+# arbitrary model-directed processes in the API container. The backend must be
+# configured with OMNILLM_CODE_SANDBOX_URL/OMNILLM_SANDBOX_TOKEN that reference
+# this service and the same token Secret.
+sandboxWorker:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ajbergh/omnillm-sandboxd
+    tag: ""
+    pullPolicy: IfNotPresent
+  service:
+    port: 8090
+  auth:
+    # Required when enabled. The Secret key must contain a high-entropy bearer
+    # token shared only with the API control plane.
+    existingSecret: ""
+    tokenKey: OMNILLM_SANDBOX_TOKEN
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  scratch:
+    sizeLimit: 4Gi
+  # Leave empty unless the pod is deliberately given a delegated cgroup-v2
+  # subtree. Quota capabilities remain false when no delegation is supplied.
+  cgroupRoot: ""
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  podLabels: {}
+
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532
