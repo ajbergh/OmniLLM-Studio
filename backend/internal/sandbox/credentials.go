@@ -101,34 +101,43 @@ func (b *CredentialBroker) Issue(owner OwnerScope, service string, ttl time.Dura
 // Redeem resolves a credential only for the exact owner of a live handle. This
 // method is intentionally host-only; no generic Tool exposes it.
 func (b *CredentialBroker) Redeem(ctx context.Context, owner OwnerScope, handleID string) (string, error) {
+	_, secret, err := b.RedeemForService(ctx, owner, handleID)
+	return secret, err
+}
+
+// RedeemForService returns the normalized service identity together with the
+// resolved secret. The service identity lets a trusted consumer enforce its own
+// destination/protocol binding before injecting the secret. Neither value is
+// exposed through a generic model-facing tool.
+func (b *CredentialBroker) RedeemForService(ctx context.Context, owner OwnerScope, handleID string) (string, string, error) {
 	handleID = strings.TrimSpace(handleID)
 	if handleID == "" {
-		return "", fmt.Errorf("credential handle id is required")
+		return "", "", fmt.Errorf("credential handle id is required")
 	}
 	b.mu.RLock()
 	record, exists := b.handles[handleID]
 	source := b.sources[record.Service]
 	b.mu.RUnlock()
 	if !exists {
-		return "", fmt.Errorf("credential handle not found")
+		return "", "", fmt.Errorf("credential handle not found")
 	}
 	if !record.Owner.Equal(owner) {
-		return "", fmt.Errorf("credential handle is not owned by the current scope")
+		return "", "", fmt.Errorf("credential handle is not owned by the current scope")
 	}
 	if !b.now().UTC().Before(record.ExpiresAt) {
-		return "", fmt.Errorf("credential handle has expired")
+		return "", "", fmt.Errorf("credential handle has expired")
 	}
 	if source == nil {
-		return "", fmt.Errorf("credential source is unavailable")
+		return "", "", fmt.Errorf("credential source is unavailable")
 	}
 	secret, err := source(ctx, owner)
 	if err != nil {
-		return "", fmt.Errorf("resolve credential service %q: %w", record.Service, err)
+		return "", "", fmt.Errorf("resolve credential service %q: %w", record.Service, err)
 	}
 	if strings.TrimSpace(secret) == "" {
-		return "", fmt.Errorf("credential service %q returned an empty value", record.Service)
+		return "", "", fmt.Errorf("credential service %q returned an empty value", record.Service)
 	}
-	return secret, nil
+	return record.Service, secret, nil
 }
 
 // Revoke invalidates one exact owner-bound credential handle.

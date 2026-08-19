@@ -40,6 +40,7 @@ func NewRegistry() *Registry {
 	r.MustRegister(NewPythonAnalysisTool())
 	r.MustRegister(NewTerminalExecTool())
 	r.MustRegister(NewSandboxNetworkGrantTool())
+	r.MustRegister(NewSandboxHTTPRequestTool())
 	for _, tool := range NewWorkspaceTools() {
 		r.MustRegister(tool)
 	}
