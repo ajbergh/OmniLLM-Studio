@@ -3,11 +3,14 @@ package video
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -115,6 +118,62 @@ func (p *OpenRouterProvider) Generate(ctx context.Context, req GenerateRequest, 
 	if req.Seed != nil {
 		payload["seed"] = *req.Seed
 	}
+
+	// First / last frame images (image-to-video)
+	var frameImages []map[string]any
+	if strings.TrimSpace(req.StartImagePath) != "" {
+		imgBytes, imgMime, err := readImageFile(req.StartImagePath)
+		if err != nil {
+			return nil, fmt.Errorf("read start frame image: %w", err)
+		}
+		frameImages = append(frameImages, map[string]any{
+			"type": "image_url",
+			"image_url": map[string]any{
+				"url": fmt.Sprintf("data:%s;base64,%s", imgMime, base64.StdEncoding.EncodeToString(imgBytes)),
+			},
+			"frame_type": "first_frame",
+		})
+	}
+	if strings.TrimSpace(req.LastFramePath) != "" {
+		imgBytes, imgMime, err := readImageFile(req.LastFramePath)
+		if err != nil {
+			return nil, fmt.Errorf("read last frame image: %w", err)
+		}
+		frameImages = append(frameImages, map[string]any{
+			"type": "image_url",
+			"image_url": map[string]any{
+				"url": fmt.Sprintf("data:%s;base64,%s", imgMime, base64.StdEncoding.EncodeToString(imgBytes)),
+			},
+			"frame_type": "last_frame",
+		})
+	}
+	if len(frameImages) > 0 {
+		payload["frame_images"] = frameImages
+	}
+
+	// Reference images (style/content guidance)
+	if len(req.ReferenceAssetPaths) > 0 {
+		var inputRefs []map[string]any
+		for _, refPath := range req.ReferenceAssetPaths {
+			if strings.TrimSpace(refPath) == "" {
+				continue
+			}
+			imgBytes, imgMime, err := readImageFile(refPath)
+			if err != nil {
+				return nil, fmt.Errorf("read reference image: %w", err)
+			}
+			inputRefs = append(inputRefs, map[string]any{
+				"type": "image_url",
+				"image_url": map[string]any{
+					"url": fmt.Sprintf("data:%s;base64,%s", imgMime, base64.StdEncoding.EncodeToString(imgBytes)),
+				},
+			})
+		}
+		if len(inputRefs) > 0 {
+			payload["input_references"] = inputRefs
+		}
+	}
+
 	mergeAllowedVideoSettings(payload, req.Settings, map[string]bool{
 		"callback_url":     true,
 		"frame_images":     true,
@@ -125,6 +184,9 @@ func (p *OpenRouterProvider) Generate(ctx context.Context, req GenerateRequest, 
 	})
 	if strings.TrimSpace(req.NegativePrompt) != "" && strings.HasPrefix(strings.ToLower(req.Model), "google/") {
 		applyOpenRouterGoogleNegativePrompt(payload, req.NegativePrompt)
+	}
+	if strings.TrimSpace(req.PersonGeneration) != "" && strings.HasPrefix(strings.ToLower(req.Model), "google/") {
+		applyOpenRouterGooglePersonGeneration(payload, req.PersonGeneration)
 	}
 
 	body, _ := json.Marshal(payload)
@@ -321,7 +383,8 @@ func KnownOpenRouterVideoModels() []Model {
 		openRouterKnownModel("kwaivgi/kling-v3.0-pro", "Kling: Video v3.0 Pro", []string{"720p", "1080p"}, []string{"16:9", "9:16", "1:1"}, 3, 15, "OpenRouter Kling v3.0 Pro supports text-to-video, image-to-video, and optional native audio."),
 		openRouterKnownModel("kwaivgi/kling-v3.0-std", "Kling: Video v3.0 Standard", []string{"720p", "1080p"}, []string{"16:9", "9:16", "1:1"}, 3, 15, "OpenRouter Kling v3.0 Standard supports text-to-video, image-to-video, and optional native audio."),
 		openRouterKnownModel("kwaivgi/kling-video-o1", "Kling: Video O1", []string{"720p", "1080p"}, []string{"16:9", "9:16", "1:1"}, 5, 10, "OpenRouter Kling Video O1 supports text and image inputs."),
-		openRouterKnownModel("minimax/hailuo-2.3", "MiniMax: Hailuo 2.3", []string{"720p", "1080p"}, []string{"16:9", "9:16", "1:1"}, 3, 10, "OpenRouter Hailuo 2.3 supports text and reference image workflows."),
+		openRouterKnownModel("minimax/hailuo-2.3", "MiniMax: Hailuo 2.3", []string{"720p", "1080p", "2k"}, []string{"16:9", "9:16", "1:1"}, 3, 10, "OpenRouter Hailuo 2.3 supports text and reference image workflows."),
+		openRouterKnownModel("minimax/h3", "MiniMax: H3", []string{"720p", "2k"}, []string{"16:9", "9:16", "1:1"}, 5, 15, "OpenRouter MiniMax H3 video generation with audio."),
 		openRouterKnownModel("bytedance/seedance-2.0-fast", "ByteDance: Seedance 2.0 Fast", []string{"720p", "1080p"}, []string{"16:9", "9:16", "1:1"}, 3, 10, "OpenRouter Seedance 2.0 Fast supports text, first/last-frame, and reference workflows."),
 		openRouterKnownModel("bytedance/seedance-2.0", "ByteDance: Seedance 2.0", []string{"720p", "1080p"}, []string{"16:9", "9:16", "1:1"}, 3, 10, "OpenRouter Seedance 2.0 supports text, first/last-frame, and reference workflows."),
 		openRouterKnownModel("alibaba/wan-2.7", "Alibaba: Wan 2.7", []string{"720p", "1080p"}, []string{"16:9", "9:16", "1:1"}, 3, 10, "OpenRouter Wan 2.7 supports text-to-video, image-to-video, and reference-to-video."),
@@ -397,30 +460,112 @@ func openRouterCapabilitiesForID(id string) []Capability {
 	}
 	lower := strings.ToLower(id)
 	if strings.HasPrefix(lower, "google/") {
-		caps = append(caps, CapabilityNegativePrompt, CapabilityAudioGeneration)
+		caps = append(caps, CapabilityNegativePrompt, CapabilityAudioGeneration, CapabilityPersonGeneration, CapabilityFirstLastFrame)
 		if lower == "google/veo-3.1" || lower == "google/veo-3.1-fast" {
 			caps = append(caps, CapabilityVideoToVideo)
 		}
 	}
 	if strings.Contains(lower, "kling") {
+		caps = append(caps, CapabilityAudioGeneration, CapabilityFirstLastFrame)
+	}
+	if strings.Contains(lower, "hailuo") || strings.Contains(lower, "minimax") {
 		caps = append(caps, CapabilityAudioGeneration)
+	}
+	if strings.Contains(lower, "seedance") || strings.Contains(lower, "bytedance") {
+		caps = append(caps, CapabilityFirstLastFrame, CapabilityAudioGeneration)
+	}
+	if strings.Contains(lower, "wan") || strings.Contains(lower, "alibaba") {
+		caps = append(caps, CapabilityFirstLastFrame)
 	}
 	return caps
 }
 
 func applyOpenRouterGoogleNegativePrompt(payload map[string]any, negativePrompt string) {
-	if _, exists := payload["provider"]; exists {
-		return
-	}
-	payload["provider"] = map[string]any{
-		"options": map[string]any{
-			"google-vertex": map[string]any{
-				"parameters": map[string]any{
-					"negativePrompt": strings.TrimSpace(negativePrompt),
+	ensureGoogleVertexParam(payload, "negativePrompt", strings.TrimSpace(negativePrompt))
+}
+
+func applyOpenRouterGooglePersonGeneration(payload map[string]any, personGeneration string) {
+	ensureGoogleVertexParam(payload, "personGeneration", strings.TrimSpace(personGeneration))
+}
+
+func ensureGoogleVertexParam(payload map[string]any, key string, val any) {
+	providerRaw, ok := payload["provider"]
+	if !ok {
+		payload["provider"] = map[string]any{
+			"options": map[string]any{
+				"google-vertex": map[string]any{
+					"parameters": map[string]any{
+						key: val,
+					},
 				},
 			},
-		},
+		}
+		return
 	}
+	providerMap, ok := providerRaw.(map[string]any)
+	if !ok {
+		return
+	}
+	optionsRaw, ok := providerMap["options"]
+	if !ok {
+		providerMap["options"] = map[string]any{
+			"google-vertex": map[string]any{
+				"parameters": map[string]any{
+					key: val,
+				},
+			},
+		}
+		return
+	}
+	optionsMap, ok := optionsRaw.(map[string]any)
+	if !ok {
+		return
+	}
+	vertexRaw, ok := optionsMap["google-vertex"]
+	if !ok {
+		optionsMap["google-vertex"] = map[string]any{
+			"parameters": map[string]any{
+				key: val,
+			},
+		}
+		return
+	}
+	vertexMap, ok := vertexRaw.(map[string]any)
+	if !ok {
+		return
+	}
+	paramsRaw, ok := vertexMap["parameters"]
+	if !ok {
+		vertexMap["parameters"] = map[string]any{
+			key: val,
+		}
+		return
+	}
+	paramsMap, ok := paramsRaw.(map[string]any)
+	if !ok {
+		return
+	}
+	paramsMap[key] = val
+}
+
+func readImageFile(path string) ([]byte, string, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	mimeByExt := map[string]string{
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".png":  "image/png",
+		".webp": "image/webp",
+		".gif":  "image/gif",
+	}
+	mimeType, ok := mimeByExt[ext]
+	if !ok {
+		return nil, "", fmt.Errorf("unsupported image type: %s", ext)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("read image file: %w", err)
+	}
+	return data, mimeType, nil
 }
 
 func openRouterErrorMessage(value any, fallback any) string {

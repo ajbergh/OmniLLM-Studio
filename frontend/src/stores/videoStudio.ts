@@ -673,12 +673,35 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
       const selectedModel = currentModel && models.some((model) => model.id === currentModel)
         ? currentModel
         : models.find((model) => model.id === DEFAULT_MODELS[provider])?.id || models[0]?.id || null;
-      set((state) => ({
-        modelsByProvider: { ...state.modelsByProvider, [provider]: models },
-        selectedProvider: provider,
-        selectedModel,
-        generationValidation: null,
-      }));
+      set((state) => {
+        const modelObj = models.find((m) => m.id === selectedModel);
+        let nextForm = state.promptForm;
+        if (modelObj) {
+          nextForm = { ...nextForm };
+          if (modelObj.resolutions && modelObj.resolutions.length > 0 && !modelObj.resolutions.some((r) => r.toLowerCase() === nextForm.resolution.toLowerCase())) {
+            nextForm.resolution = modelObj.resolutions[0];
+          }
+          if (modelObj.aspect_ratios && modelObj.aspect_ratios.length > 0 && !modelObj.aspect_ratios.some((a) => a.toLowerCase() === nextForm.aspect_ratio.toLowerCase())) {
+            nextForm.aspect_ratio = modelObj.aspect_ratios[0];
+          }
+          if (modelObj.fps_options && modelObj.fps_options.length > 0 && !modelObj.fps_options.includes(nextForm.fps)) {
+            nextForm.fps = modelObj.fps_options[0];
+          }
+          if (modelObj.duration_min_seconds && nextForm.duration_seconds < modelObj.duration_min_seconds) {
+            nextForm.duration_seconds = modelObj.duration_min_seconds;
+          }
+          if (modelObj.duration_max_seconds && nextForm.duration_seconds > modelObj.duration_max_seconds) {
+            nextForm.duration_seconds = modelObj.duration_max_seconds;
+          }
+        }
+        return {
+          modelsByProvider: { ...state.modelsByProvider, [provider]: models },
+          selectedProvider: provider,
+          selectedModel,
+          promptForm: nextForm,
+          generationValidation: null,
+        };
+      });
     } catch (err) {
       set({ error: (err as Error).message });
       toast.error('Could not load video models');
@@ -806,7 +829,30 @@ export const useVideoStudioStore = create<VideoStudioState>((set, get) => ({
     await get().loadModels(provider);
   },
 
-  setModel: (model) => set({ selectedModel: model, generationValidation: null }),
+  setModel: (model) => set((state) => {
+    const models = state.modelsByProvider[state.selectedProvider] || [];
+    const modelObj = models.find((m) => m.id === model);
+    let nextForm = state.promptForm;
+    if (modelObj) {
+      nextForm = { ...nextForm };
+      if (modelObj.resolutions && modelObj.resolutions.length > 0 && !modelObj.resolutions.some((r) => r.toLowerCase() === nextForm.resolution.toLowerCase())) {
+        nextForm.resolution = modelObj.resolutions[0];
+      }
+      if (modelObj.aspect_ratios && modelObj.aspect_ratios.length > 0 && !modelObj.aspect_ratios.some((a) => a.toLowerCase() === nextForm.aspect_ratio.toLowerCase())) {
+        nextForm.aspect_ratio = modelObj.aspect_ratios[0];
+      }
+      if (modelObj.fps_options && modelObj.fps_options.length > 0 && !modelObj.fps_options.includes(nextForm.fps)) {
+        nextForm.fps = modelObj.fps_options[0];
+      }
+      if (modelObj.duration_min_seconds && nextForm.duration_seconds < modelObj.duration_min_seconds) {
+        nextForm.duration_seconds = modelObj.duration_min_seconds;
+      }
+      if (modelObj.duration_max_seconds && nextForm.duration_seconds > modelObj.duration_max_seconds) {
+        nextForm.duration_seconds = modelObj.duration_max_seconds;
+      }
+    }
+    return { selectedModel: model, promptForm: nextForm, generationValidation: null };
+  }),
 
   setPromptField: (key, value) => set((state) => ({
     promptForm: { ...state.promptForm, [key]: value },
