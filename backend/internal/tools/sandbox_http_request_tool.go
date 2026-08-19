@@ -32,7 +32,7 @@ func (t *SandboxHTTPRequestTool) Definition() ToolDefinition {
 		SupportsParallel: false,
 		DefaultTimeoutMS: 30000,
 		MaxResultBytes:   1 << 20,
-		Parameters: json.RawMessage(`{"type":"object","properties":{"network_grant_id":{"type":"string","minLength":1,"maxLength":128},"method":{"type":"string","enum":["GET","HEAD","POST","PUT","PATCH","DELETE"]},"url":{"type":"string","minLength":1,"maxLength":8192},"headers":{"type":"object","maxProperties":32,"additionalProperties":{"type":"string","maxLength":4096}},"body":{"type":"string","maxLength":1048576},"credential_handle_id":{"type":"string","maxLength":128,"description":"Optional opaque host-side credential handle. The registered service adapter must allow the exact destination."}},"required":["network_grant_id","url"],"additionalProperties":false}`),
+		Parameters:       json.RawMessage(`{"type":"object","properties":{"network_grant_id":{"type":"string","minLength":1,"maxLength":128},"method":{"type":"string","enum":["GET","HEAD","POST","PUT","PATCH","DELETE"]},"url":{"type":"string","minLength":1,"maxLength":8192},"headers":{"type":"object","maxProperties":32,"additionalProperties":{"type":"string","maxLength":4096}},"body":{"type":"string","maxLength":1048576},"credential_handle_id":{"type":"string","maxLength":128,"description":"Optional opaque host-side credential handle. The registered service adapter must allow the exact destination."}},"required":["network_grant_id","url"],"additionalProperties":false}`),
 	}
 }
 
