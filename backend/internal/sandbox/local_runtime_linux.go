@@ -127,6 +127,9 @@ func (r *LocalRuntime) Create(_ context.Context, request RuntimeCreateRequest) (
 	if request.Spec.Resources.MemoryBytes > 0 && !r.Capabilities().MemoryLimit {
 		return "", fmt.Errorf("linux sandbox cannot enforce requested memory quota")
 	}
+	if request.Spec.Resources.CPUTimeMS > 0 && !r.Capabilities().CPULimit {
+		return "", fmt.Errorf("linux sandbox cannot enforce requested CPU quota")
+	}
 	if request.Spec.Network.Mode != "" && request.Spec.Network.Mode != NetworkNone {
 		return "", fmt.Errorf("linux sandbox network access is not enabled in this runtime revision")
 	}
