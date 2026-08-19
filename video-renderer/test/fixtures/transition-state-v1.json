@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "description": "Cross-runtime transition-state-v1 fixture covering in/out frame windows, explicit between-peer overlap, roles, direction defaulting, and half-open activity.",
+  "document": {
+    "version": 2,
+    "canvas": { "width": 200, "height": 100, "fps": 100, "background": "#000000" },
+    "duration_ms": 1000,
+    "working_color_space": "srgb",
+    "metadata": {},
+    "markers": [],
+    "tracks": [
+      {
+        "id": "track-a",
+        "type": "video",
+        "name": "A",
+        "locked": false,
+        "muted": false,
+        "visible": true,
+        "clips": [
+          {
+            "id": "owner",
+            "start_ms": 100,
+            "duration_ms": 600,
+            "trim_in_ms": 0,
+            "trim_out_ms": 600,
+            "effects": [],
+            "keyframes": [],
+            "transitions": [
+              { "id": "fade-in", "type": "fade", "duration_ms": 100, "placement": "in" },
+              { "id": "between", "type": "crossfade", "duration_ms": 150, "placement": "between", "peer_clip_id": "peer" },
+              { "id": "slide-out", "type": "slide", "duration_ms": 100, "placement": "out" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "track-b",
+        "type": "video",
+        "name": "B",
+        "locked": false,
+        "muted": false,
+        "visible": true,
+        "clips": [
+          {
+            "id": "peer",
+            "start_ms": 500,
+            "duration_ms": 400,
+            "trim_in_ms": 0,
+            "trim_out_ms": 400,
+            "effects": [],
+            "keyframes": []
+          }
+        ]
+      }
+    ],
+    "scenes": []
+  },
+  "cases": [
+    {
+      "name": "inside-in-transition",
+      "frame_index": 15,
+      "expected": [
+        { "id": "fade-in", "placement": "in", "role": "incoming", "start_frame": 10, "end_frame": 20, "progress": 0.5, "active": true },
+        { "id": "between", "placement": "between", "role": "outgoing", "peer_role": "incoming", "peer_clip_id": "peer", "peer_track_index": 1, "peer_clip_index": 0, "start_frame": 50, "end_frame": 65, "progress": 0, "active": false },
+        { "id": "slide-out", "placement": "out", "role": "outgoing", "direction": "left", "start_frame": 60, "end_frame": 70, "progress": 0, "active": false }
+      ]
+    },
+    {
+      "name": "inside-between-transition",
+      "frame_index": 55,
+      "expected": [
+        { "id": "fade-in", "placement": "in", "role": "incoming", "start_frame": 10, "end_frame": 20, "progress": 1, "active": false },
+        { "id": "between", "placement": "between", "role": "outgoing", "peer_role": "incoming", "peer_clip_id": "peer", "peer_track_index": 1, "peer_clip_index": 0, "start_frame": 50, "end_frame": 65, "progress": 0.3333333333333333, "active": true },
+        { "id": "slide-out", "placement": "out", "role": "outgoing", "direction": "left", "start_frame": 60, "end_frame": 70, "progress": 0, "active": false }
+      ]
+    },
+    {
+      "name": "between-end-is-exclusive-and-out-is-active",
+      "frame_index": 65,
+      "expected": [
+        { "id": "fade-in", "placement": "in", "role": "incoming", "start_frame": 10, "end_frame": 20, "progress": 1, "active": false },
+        { "id": "between", "placement": "between", "role": "outgoing", "peer_role": "incoming", "peer_clip_id": "peer", "peer_track_index": 1, "peer_clip_index": 0, "start_frame": 50, "end_frame": 65, "progress": 1, "active": false },
+        { "id": "slide-out", "placement": "out", "role": "outgoing", "direction": "left", "start_frame": 60, "end_frame": 70, "progress": 0.5, "active": true }
+      ]
+    }
+  ]
+}
