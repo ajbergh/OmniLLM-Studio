@@ -59,6 +59,7 @@ type FrameLayerState struct {
 	ModelMatrix           Matrix4                        `json:"model_matrix"`
 	PerspectiveProjection EvaluatedPerspectiveProjection `json:"perspective_projection"`
 	Transitions           []EvaluatedTransitionState     `json:"transitions,omitempty"`
+	TransitionPaint       []EvaluatedTransitionPaint     `json:"transition_paint,omitempty"`
 	Unresolved            []string                       `json:"unresolved"`
 	Authoritative         bool                           `json:"authoritative"`
 }
@@ -77,9 +78,9 @@ type VisualFrameState struct {
 
 // EvaluateVisualFrameState produces the renderer-independent visual FrameState
 // projection. It evaluates exact-frame clip/camera properties, visibility/order,
-// source time, canonical media geometry, perspective projection, and transition
-// timing/peer state. Paint families not yet canonicalized are explicitly listed
-// in Unresolved and make only the affected frame state non-authoritative.
+// source time, canonical media geometry, perspective projection, transition
+// timing/peer state, and supported canonical transition paint. Paint families
+// not yet canonicalized remain explicit unresolved debt only on active frames.
 func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualFrameState, error) {
 	normalized, err := NormalizeTimelineV2EvaluationInputs(doc)
 	if err != nil {
@@ -202,9 +203,21 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 
 	bounds := effectiveContentBounds(clip)
 	unresolved := unresolvedLayerFeatures(clip, bounds)
+	paint := make([]EvaluatedTransitionPaint, 0)
 	for _, transition := range transitions {
-		if transition.Active {
+		if !transition.Active {
+			continue
+		}
+		if !SupportsTransitionPaint(transition.Type) {
 			unresolved = append(unresolved, "transition_paint:"+transition.ID)
+			continue
+		}
+		evaluated, err := EvaluateTransitionPaint(clip.ID, transition)
+		if err != nil {
+			return FrameLayerState{}, err
+		}
+		if evaluated != nil {
+			paint = append(paint, *evaluated)
 		}
 	}
 	var mediaGeometry *EvaluatedMediaGeometry
@@ -235,7 +248,8 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 		TrackIndex: active.TrackIndex, ClipIndex: active.ClipIndex, TrackID: track.ID, ClipID: clip.ID,
 		ZIndex: active.ZIndex, StartFrame: active.StartFrame, EndFrame: active.EndFrame, SourceTimeMS: active.SourceTimeMS,
 		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Transform: transform, ViewTransform: view,
-		ModelMatrix: matrix, PerspectiveProjection: projection, Transitions: transitions, Unresolved: unresolved, Authoritative: len(unresolved) == 0,
+		ModelMatrix: matrix, PerspectiveProjection: projection, Transitions: transitions, TransitionPaint: paint,
+		Unresolved: unresolved, Authoritative: len(unresolved) == 0,
 	}, nil
 }
 

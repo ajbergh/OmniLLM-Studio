@@ -8,6 +8,11 @@ import {
 } from './renderContractPerspectiveProjection';
 import { evaluateCameraProperty, evaluateClipProperty } from './renderContractProperties';
 import {
+  evaluateTransitionPaint,
+  supportsTransitionPaint,
+  type CanonicalTransitionPaint,
+} from './renderContractTransitionPaint';
+import {
   evaluateClipTransitionsAtFrameNormalized,
   type CanonicalTransitionState,
 } from './renderContractTransitions';
@@ -47,6 +52,7 @@ export interface CanonicalFrameLayerState {
   model_matrix: Matrix4;
   perspective_projection: CanonicalPerspectiveProjection;
   transitions?: CanonicalTransitionState[];
+  transition_paint?: CanonicalTransitionPaint[];
   unresolved: string[];
   authoritative: boolean;
 }
@@ -166,8 +172,15 @@ function evaluateFrameLayer(
   };
   const contentBounds = effectiveContentBounds(clip);
   const unresolved = unresolvedLayerFeatures(clip, contentBounds);
+  const transitionPaint: CanonicalTransitionPaint[] = [];
   for (const transition of transitions) {
-    if (transition.active) unresolved.push(`transition_paint:${transition.id}`);
+    if (!transition.active) continue;
+    if (!supportsTransitionPaint(transition.type)) {
+      unresolved.push(`transition_paint:${transition.id}`);
+      continue;
+    }
+    const paint = evaluateTransitionPaint(clip.id, transition);
+    if (paint) transitionPaint.push(paint);
   }
   const mediaGeometry = clip.asset_id && clip.content_bounds ? evaluateMediaGeometry(canvas, clip) : undefined;
   let anchorOffsetX = 0;
@@ -200,6 +213,7 @@ function evaluateFrameLayer(
     model_matrix: composeModelMatrix(view, anchorOffsetX, anchorOffsetY),
     perspective_projection: perspectiveProjection,
     ...(transitions.length > 0 ? { transitions } : {}),
+    ...(transitionPaint.length > 0 ? { transition_paint: transitionPaint } : {}),
     unresolved: normalizedUnresolved,
     authoritative: normalizedUnresolved.length === 0,
   };
