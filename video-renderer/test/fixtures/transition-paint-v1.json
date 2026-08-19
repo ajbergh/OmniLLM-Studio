@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Cross-runtime transition-paint-v1 fixture for one-sided fades, true two-input crossfades, dip-to-black weights, role reversal, and inactive state.",
+  "description": "Cross-runtime transition-paint-v1 fixture for one-sided fades, true two-input crossfades, dip-to-black weights, canonical slide translation, role reversal, and inactive state.",
   "cases": [
     {
       "name": "inactive-transition-has-no-paint",
@@ -246,6 +246,97 @@
         "outgoing_weight": 0,
         "incoming_weight": 0.5,
         "black_weight": 0.5
+      }
+    },
+    {
+      "name": "slide-in-from-left",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "slide-in",
+        "type": "slide",
+        "placement": "in",
+        "direction": "left",
+        "role": "incoming",
+        "start_frame": 10,
+        "end_frame": 20,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "slide-in",
+        "type": "slide",
+        "placement": "in",
+        "composition": "owner-translate",
+        "owner_clip_id": "owner",
+        "progress": 0.25,
+        "translation_space": "canvas-fraction",
+        "owner_offset_x": -0.75,
+        "owner_offset_y": 0
+      }
+    },
+    {
+      "name": "slide-out-opposite-left-entry-edge",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "slide-out",
+        "type": "slide",
+        "placement": "out",
+        "direction": "left",
+        "role": "outgoing",
+        "start_frame": 60,
+        "end_frame": 70,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "slide-out",
+        "type": "slide",
+        "placement": "out",
+        "composition": "owner-translate",
+        "owner_clip_id": "owner",
+        "progress": 0.25,
+        "translation_space": "canvas-fraction",
+        "owner_offset_x": 0.25,
+        "owner_offset_y": 0
+      }
+    },
+    {
+      "name": "slide-between-up-entry-edge",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "slide-between",
+        "type": "slide",
+        "placement": "between",
+        "direction": "up",
+        "peer_clip_id": "peer",
+        "role": "outgoing",
+        "peer_role": "incoming",
+        "start_frame": 50,
+        "end_frame": 70,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "slide-between",
+        "type": "slide",
+        "placement": "between",
+        "composition": "pair-slide",
+        "owner_clip_id": "owner",
+        "peer_clip_id": "peer",
+        "progress": 0.25,
+        "outgoing_clip_id": "owner",
+        "incoming_clip_id": "peer",
+        "translation_space": "canvas-fraction",
+        "outgoing_offset_x": 0,
+        "outgoing_offset_y": 0.25,
+        "incoming_offset_x": 0,
+        "incoming_offset_y": -0.75
       }
     }
   ]

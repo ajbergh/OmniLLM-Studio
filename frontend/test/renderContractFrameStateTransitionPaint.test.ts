@@ -47,12 +47,20 @@ describe('visual FrameState transition paint consumption', () => {
     expect(paint?.incoming_weight).toBeCloseTo(1 / 3, 12);
   });
 
-  it('retains unresolved debt for slide until slide paint is canonical', () => {
+  it('resolves slide-out translation and restores FrameState authority', () => {
     const state = evaluateVisualFrameState(fixture.document, 65);
     const owner = state.layers.find((layer) => layer.clip_id === 'owner');
-    expect(state.authoritative).toBe(false);
-    expect(state.unresolved).toEqual(['owner:transition_paint:slide-out']);
-    expect(owner?.transition_paint).toBeUndefined();
+    expect(state.authoritative).toBe(true);
+    expect(state.unresolved).toEqual([]);
+    expect(owner?.transition_paint).toEqual([
+      expect.objectContaining({
+        transition_id: 'slide-out',
+        composition: 'owner-translate',
+        translation_space: 'canvas-fraction',
+        owner_offset_x: 0.5,
+        owner_offset_y: 0,
+      }),
+    ]);
   });
 
   it('consumes dip-to-black paint when that supported family is authored', () => {
