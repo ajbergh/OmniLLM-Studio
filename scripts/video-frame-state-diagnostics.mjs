@@ -11,7 +11,7 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, value, inde
 }, []));
 
 if (!args.url || !args.fixture || !args['seed-result'] || !args.output) {
-  console.error('usage: node scripts/video-frame-state-diagnostics.mjs --url <app-url> --fixture <fixture-json> --seed-result <seed-result-json> --output <preview-diagnostic-json> [--storage-state <json>]');
+  console.error('usage: node scripts/video-frame-state-diagnostics.mjs --url <app-url> --fixture <fixture-json> --seed-result <seed-result-json> --output <preview-diagnostic-json> [--storage-state <json>] [--transition-free-control true] [--timeline-output <json>]');
   process.exit(1);
 }
 
@@ -22,7 +22,10 @@ if (!seedResult.project_id || !seedResult.timeline_sha256 || !seedResult.snapsho
 
 const outputPath = path.resolve(args.output);
 await fs.mkdir(path.dirname(outputPath), { recursive: true });
-const timelinePath = path.join(path.dirname(outputPath), 'timeline-v1.json');
+const transitionFreeControl = args['transition-free-control'] === 'true';
+const timelinePath = args['timeline-output']
+  ? path.resolve(args['timeline-output'])
+  : path.join(path.dirname(outputPath), transitionFreeControl ? 'timeline-v1-transition-free-control.json' : 'timeline-v1.json');
 
 const browser = await chromium.launch({ headless: true });
 try {
@@ -39,8 +42,21 @@ try {
     throw new Error(`timeline fetch: HTTP ${timelineResponse.status()} ${await timelineResponse.text()}`);
   }
   const timelinePayload = await timelineResponse.json();
-  const timeline = timelinePayload.document;
-  if (!timeline || timeline.version !== 1) throw new Error('timeline response did not contain a Timeline v1 document');
+  const savedTimeline = timelinePayload.document;
+  if (!savedTimeline || savedTimeline.version !== 1) throw new Error('timeline response did not contain a Timeline v1 document');
+
+  // The real saved timeline remains the first diagnostic input. A second,
+  // explicitly named control removes only transition records so the current
+  // v1→v2 adapter can produce actual FrameState values. This does not weaken
+  // production adapter semantics: it creates a diagnostic positive control
+  // beside the real fail-closed result.
+  const timeline = structuredClone(savedTimeline);
+  if (transitionFreeControl) {
+    for (const track of timeline.tracks || []) {
+      for (const clip of track.clips || []) clip.transitions = [];
+    }
+  }
+  await fs.mkdir(path.dirname(timelinePath), { recursive: true });
   await fs.writeFile(timelinePath, `${JSON.stringify(timeline, null, 2)}\n`);
 
   const diagnostics = await page.evaluate(async ({ document, samples }) => {
@@ -56,13 +72,14 @@ try {
     version: 1,
     source: 'browser-typescript',
     diagnostic_contract: 'visual-frame-state-diagnostic-v1',
+    mode: transitionFreeControl ? 'transition-free-control' : 'saved-timeline',
     timeline_sha256: seedResult.timeline_sha256,
     snapshot_id: seedResult.snapshot_id,
     timeline_path: timelinePath,
     samples: diagnostics,
   };
   await fs.writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`);
-  console.log(JSON.stringify({ output: outputPath, timeline: timelinePath, samples: diagnostics.length }));
+  console.log(JSON.stringify({ output: outputPath, timeline: timelinePath, mode: output.mode, samples: diagnostics.length }));
 } finally {
   await browser.close();
 }
