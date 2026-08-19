@@ -142,11 +142,9 @@ func evaluateFrameCamera(scene *TimelineV2Scene, frameIndex int64, fps, canvasHe
 		camera = scene.Camera
 		sceneStartMS = scene.StartMS
 	}
-	properties := []string{"x", "y", "z", "scale_x", "scale_y", "rotation_x", "rotation_y", "rotation_z", "opacity"}
-	_ = properties
-	cameraProperties := []string{"x", "y", "z", "rotation_x", "rotation_y", "rotation_z", "field_of_view", "focus_depth"}
-	values := make(map[string]float64, len(cameraProperties))
-	for _, property := range cameraProperties {
+	properties := []string{"x", "y", "z", "rotation_x", "rotation_y", "rotation_z", "field_of_view", "focus_depth"}
+	values := make(map[string]float64, len(properties))
+	for _, property := range properties {
 		value, err := EvaluateCameraPropertyAtFrame(camera, property, frameIndex, fps, sceneStartMS)
 		if err != nil {
 			return EvaluatedCamera{}, err
