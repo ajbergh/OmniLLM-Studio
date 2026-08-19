@@ -43,9 +43,11 @@ export function evaluateTransitionPaint(
   if (state.contract_version !== TRANSITION_STATE_CONTRACT_V1) {
     throw new Error(`transition paint requires ${TRANSITION_STATE_CONTRACT_V1} input`);
   }
+  const transitionId = state.id.trim();
+  if (!transitionId) throw new Error('transition paint transition id must not be empty');
   if (!state.active) return undefined;
   if (!Number.isFinite(state.progress) || state.progress < 0 || state.progress > 1) {
-    throw new Error(`transition ${JSON.stringify(state.id)} progress must be finite and within [0,1]`);
+    throw new Error(`transition ${JSON.stringify(transitionId)} progress must be finite and within [0,1]`);
   }
 
   const type = state.type.trim().toLowerCase();
@@ -53,7 +55,7 @@ export function evaluateTransitionPaint(
   const peer = state.peer_clip_id?.trim() ?? '';
   const base = {
     contract_version: TRANSITION_PAINT_CONTRACT_V1,
-    transition_id: state.id,
+    transition_id: transitionId,
     type,
     placement,
     owner_clip_id: owner,
@@ -152,7 +154,7 @@ export function evaluateTransitionPaint(
       throw invalidTransitionPaintState(state, 'dip-to-black requires in, out, or between placement');
 
     default:
-      throw new Error(`transition ${JSON.stringify(state.id)} type ${JSON.stringify(state.type)} does not yet have canonical paint semantics`);
+      throw new Error(`transition ${JSON.stringify(transitionId)} type ${JSON.stringify(state.type)} does not yet have canonical paint semantics`);
   }
 }
 
@@ -174,7 +176,7 @@ function transitionPaintPairRoles(
 }
 
 function invalidTransitionPaintState(state: CanonicalTransitionState, message: string): Error {
-  return new Error(`transition ${JSON.stringify(state.id)}: ${message}`);
+  return new Error(`transition ${JSON.stringify(state.id.trim())}: ${message}`);
 }
 
 function clamp01(value: number): number {
