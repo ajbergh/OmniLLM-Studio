@@ -35,10 +35,12 @@ func TestLinuxLocalRuntimeCPUQuotaNative(t *testing.T) {
 	}
 
 	rootFS := t.TempDir()
-	binDir := filepath.Join(rootFS, "bin")
-	if err := os.Mkdir(binDir, 0o755); err != nil {
-		t.Fatal(err)
+	for _, relative := range []string{"bin", "proc", "dev", "tmp/home", "workspace"} {
+		if err := os.MkdirAll(filepath.Join(rootFS, relative), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
+	binDir := filepath.Join(rootFS, "bin")
 	busyboxTarget := filepath.Join(binDir, "busybox")
 	if err := copyLinuxRuntimeTestFile(busybox, busyboxTarget); err != nil {
 		t.Fatal(err)
