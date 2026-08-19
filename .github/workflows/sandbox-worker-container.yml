@@ -1,0 +1,50 @@
+name: Sandbox Worker Container Assurance
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'deploy/docker/Dockerfile.sandboxd'
+      - '.github/workflows/sandbox-worker-container.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'deploy/docker/Dockerfile.sandboxd'
+      - '.github/workflows/sandbox-worker-container.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-worker-container-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build dedicated sandbox worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build sandboxd image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.sandboxd
+          push: false
+          platforms: linux/amd64
+          tags: omnillm-sandboxd:ci
+          load: true
+      - name: Verify image identity and runtime prerequisites
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /bin/sh omnillm-sandboxd:ci -c '
+            test "$(id -u)" = 65532
+            test -x /usr/local/bin/omnillm-sandboxd
+            test -x /usr/bin/bwrap
+            test -x /opt/omnillm/rootfs/usr/bin/python3
+            test -x /opt/omnillm/rootfs/usr/bin/node
+            test -x /opt/omnillm/rootfs/bin/sh
+          '

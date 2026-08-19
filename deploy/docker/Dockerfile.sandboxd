@@ -1,0 +1,75 @@
+# OmniLLM-Studio dedicated Linux sandbox worker image.
+#
+# This image intentionally does not contain the primary API server. It packages
+# protocol-v2 sandboxd, Bubblewrap, and a separate immutable execution rootfs.
+# The host/container runtime must permit unprivileged user namespaces for
+# Bubblewrap. cgroup-v2 quotas require an explicitly delegated subtree mounted at
+# OMNILLM_SANDBOX_CGROUP_ROOT; the image does not elevate itself to gain that
+# authority.
+#
+# Build context: repository root.
+
+FROM --platform=$TARGETPLATFORM golang:1.26-bookworm AS build
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+
+RUN CGO_ENABLED=1 go build -trimpath \
+      -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+      -o /out/sandboxd \
+      ./cmd/sandboxd
+
+# Build a deliberately small execution root. The sandbox runtime bind-mounts
+# this tree read-only as / and adds only ephemeral /tmp plus governed workspace
+# mounts. Python and Node are included because the protocol already supports
+# those language shortcuts on Linux.
+FROM debian:bookworm-slim AS execution-root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         ca-certificates \
+         dash \
+         coreutils \
+         python3-minimal \
+         nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /workspace /tmp/home
+
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         bubblewrap \
+         ca-certificates \
+         curl \
+    && groupadd --system --gid 65532 omnillm-sandbox \
+    && useradd --system --uid 65532 --gid 65532 \
+         --home-dir /var/lib/omnillm-sandbox --shell /usr/sbin/nologin \
+         omnillm-sandbox \
+    && mkdir -p /opt/omnillm/rootfs /var/lib/omnillm-sandbox \
+    && chown -R 65532:65532 /var/lib/omnillm-sandbox \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build --chown=65532:65532 /out/sandboxd /usr/local/bin/omnillm-sandboxd
+COPY --from=execution-root / /opt/omnillm/rootfs/
+
+ENV OMNILLM_SANDBOX_BIND=0.0.0.0:8090 \
+    OMNILLM_SANDBOX_ROOTFS=/opt/omnillm/rootfs \
+    OMNILLM_SANDBOX_SCRATCH_ROOT=/var/lib/omnillm-sandbox \
+    OMNILLM_SANDBOX_BWRAP=/usr/bin/bwrap
+
+EXPOSE 8090
+
+# Capabilities is authenticated, so a generic unauthenticated HTTP healthcheck
+# would be misleading. Deployment systems should use a TCP probe or inject the
+# worker token into an authenticated readiness probe.
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/omnillm-sandboxd"]
