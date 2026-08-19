@@ -3943,43 +3943,46 @@ function MCPServerCard({
   const denyCount = tools.filter((t) => t.policy === 'deny').length;
 
   return (
-    <div className="rounded-2xl bg-surface-alt border border-border overflow-hidden">
+    <div className="rounded-2xl bg-surface-alt border border-border/80 shadow-xs overflow-hidden">
       {/* Header section */}
-      <div className="p-5 border-b border-border/50">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 flex-1 space-y-2">
+      <div className="p-5 border-b border-border/60 bg-gradient-to-b from-surface-hover/20 to-transparent">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0 flex-1 space-y-2.5">
             <div className="flex flex-wrap items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold text-xs uppercase shrink-0">
+                {server.name.slice(0, 2)}
+              </div>
               <h3 className="text-base font-bold text-text tracking-tight">{server.name}</h3>
               <span className={clsx('rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider', statusBadgeClass(server.status))}>
                 {server.status}
               </span>
-              <span className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-[10px] font-semibold uppercase text-text-muted">
+              <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-medium uppercase text-text-muted">
                 {server.transport}
               </span>
               {tools.length > 0 && (
-                <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-0.5 text-[10px] font-medium text-primary">
-                  {tools.length} tool{tools.length === 1 ? '' : 's'}
+                <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                  {tools.length} tools
                 </span>
               )}
             </div>
 
             {/* Server details */}
-            <div className="space-y-1 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-medium text-text-muted shrink-0">
+            <div className="flex flex-col gap-1.5 text-xs text-text-muted">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[11px] font-medium text-text-muted shrink-0 w-16">
                   {server.transport === 'http' ? 'Endpoint:' : 'Command:'}
                 </span>
-                <span className="font-mono text-[11px] text-text truncate select-all bg-surface px-2 py-0.5 rounded-md border border-border/60 max-w-xl">
+                <span className="font-mono text-[11px] text-text/90 truncate select-all bg-surface/90 px-2.5 py-1 rounded-lg border border-border/70 max-w-xl">
                   {commandLine}
                 </span>
               </div>
 
               {server.header_keys && server.header_keys.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-medium text-text-muted shrink-0">Headers:</span>
-                  <div className="flex flex-wrap gap-1">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[11px] font-medium text-text-muted shrink-0 w-16">Headers:</span>
+                  <div className="flex flex-wrap gap-1.5">
                     {server.header_keys.map((k) => (
-                      <span key={k} className="text-[10px] font-mono bg-surface-hover px-1.5 py-0.5 rounded border border-border text-text-muted">
+                      <span key={k} className="text-[10px] font-mono bg-surface px-2 py-0.5 rounded-md border border-border text-text-muted">
                         {k}
                       </span>
                     ))}
@@ -3988,11 +3991,11 @@ function MCPServerCard({
               )}
 
               {server.env_keys && server.env_keys.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-medium text-text-muted shrink-0">Environment:</span>
-                  <div className="flex flex-wrap gap-1">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[11px] font-medium text-text-muted shrink-0 w-16">Env:</span>
+                  <div className="flex flex-wrap gap-1.5">
                     {server.env_keys.map((k) => (
-                      <span key={k} className="text-[10px] font-mono bg-surface-hover px-1.5 py-0.5 rounded border border-border text-text-muted">
+                      <span key={k} className="text-[10px] font-mono bg-surface px-2 py-0.5 rounded-md border border-border text-text-muted">
                         {k}
                       </span>
                     ))}
@@ -4010,7 +4013,7 @@ function MCPServerCard({
           </div>
 
           {/* Action buttons */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:justify-end shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5 shrink-0 lg:self-start">
             <MCPActionButton label="Test" title="Test server connection & discover tools" busy={busyLabel === 'Testing'} onClick={onTest}>
               <CheckCircle2 size={13} className="text-emerald-400" />
             </MCPActionButton>
@@ -4067,8 +4070,8 @@ function MCPServerCard({
 
       {/* Discovered Tools Section */}
       <div className="p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => setCollapsed(!collapsed)}
@@ -4079,20 +4082,20 @@ function MCPServerCard({
                 className={clsx('transition-transform duration-200 text-text-muted', collapsed && '-rotate-90')}
               />
               <span>Discovered Tools</span>
-              <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-surface border border-border text-text-muted">
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-surface border border-border text-text-muted">
                 {tools.length}
               </span>
             </button>
 
             {tools.length > 0 && (
-              <div className="flex items-center gap-1.5 ml-2 text-[10px]">
-                <span className="text-emerald-400 font-medium">{allowCount} allowed</span>
-                <span className="text-text-muted">•</span>
-                <span className="text-amber-300 font-medium">{askCount} ask</span>
+              <div className="flex items-center gap-2 text-[11px] bg-surface/60 border border-border/50 px-2.5 py-0.5 rounded-lg">
+                <span className="text-emerald-400 font-semibold">{allowCount} allowed</span>
+                <span className="text-text-muted/40">•</span>
+                <span className="text-amber-300 font-semibold">{askCount} ask</span>
                 {denyCount > 0 && (
                   <>
-                    <span className="text-text-muted">•</span>
-                    <span className="text-danger font-medium">{denyCount} denied</span>
+                    <span className="text-text-muted/40">•</span>
+                    <span className="text-danger font-semibold">{denyCount} denied</span>
                   </>
                 )}
               </div>
@@ -4101,40 +4104,40 @@ function MCPServerCard({
 
           {tools.length > 0 && !collapsed && (
             <div className="flex flex-wrap items-center gap-2">
-              <div className="relative min-w-[160px] sm:w-48">
-                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+              <div className="relative w-full sm:w-56">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
                 <input
                   type="text"
                   placeholder="Filter tools..."
                   value={toolFilter}
                   onChange={(e) => setToolFilter(e.target.value)}
-                  className="w-full pl-7 pr-2.5 py-1 text-xs bg-surface border border-border rounded-lg text-text focus:outline-none focus:border-primary transition-all"
+                  className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-surface border border-border rounded-xl text-text focus:outline-none focus:border-primary transition-all input-glow"
                 />
               </div>
-              <div className="flex items-center gap-1 bg-surface border border-border rounded-lg p-0.5">
+              <div className="flex items-center gap-1 bg-surface border border-border/80 rounded-xl p-1 shadow-xs">
                 <button
                   type="button"
                   onClick={() => onBulkPolicy('allow')}
                   title="Allow all discovered tools to run without prompting"
-                  className="px-2.5 py-1 text-[11px] font-medium rounded-md text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                  className="px-2.5 py-1 text-xs font-semibold rounded-lg text-emerald-400 hover:bg-emerald-500/10 transition-colors"
                 >
                   Allow All
                 </button>
-                <div className="w-[1px] h-3 bg-border" />
+                <div className="w-[1px] h-3.5 bg-border" />
                 <button
                   type="button"
                   onClick={() => onBulkPolicy('ask')}
                   title="Require confirmation before running any discovered tool"
-                  className="px-2.5 py-1 text-[11px] font-medium rounded-md text-amber-300 hover:bg-amber-500/10 transition-colors"
+                  className="px-2.5 py-1 text-xs font-semibold rounded-lg text-amber-300 hover:bg-amber-500/10 transition-colors"
                 >
                   Ask All
                 </button>
-                <div className="w-[1px] h-3 bg-border" />
+                <div className="w-[1px] h-3.5 bg-border" />
                 <button
                   type="button"
                   onClick={() => onBulkPolicy('deny')}
                   title="Disable execution of all discovered tools"
-                  className="px-2.5 py-1 text-[11px] font-medium rounded-md text-danger hover:bg-danger-soft transition-colors"
+                  className="px-2.5 py-1 text-xs font-semibold rounded-lg text-danger hover:bg-danger-soft transition-colors"
                 >
                   Deny All
                 </button>
@@ -4146,16 +4149,16 @@ function MCPServerCard({
         {!collapsed && (
           <>
             {tools.length === 0 ? (
-              <div className="rounded-xl border border-border/80 bg-surface p-4 text-center">
+              <div className="rounded-xl border border-border/80 bg-surface p-6 text-center">
                 <p className="text-xs font-medium text-text">No tools discovered yet</p>
                 <p className="mt-1 text-[11px] text-text-muted">Start the server or click "Refresh Tools" to fetch capabilities.</p>
               </div>
             ) : filteredTools.length === 0 ? (
-              <div className="rounded-xl border border-border/80 bg-surface p-4 text-center text-xs text-text-muted">
+              <div className="rounded-xl border border-border/80 bg-surface p-6 text-center text-xs text-text-muted">
                 No tools matching "{toolFilter}".
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-2.5 max-h-[500px] overflow-y-auto pr-1">
+              <div className="grid grid-cols-1 gap-2 max-h-[520px] overflow-y-auto pr-1.5 custom-scrollbar">
                 {filteredTools.map((tool) => (
                   <MCPToolRow
                     key={tool.internal_name}
@@ -4207,7 +4210,7 @@ function MCPToolRow({ tool, onPolicy }: { tool: MCPTool; onPolicy: (policy: Tool
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-surface p-3.5 hover:border-border transition-colors sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-surface/80 hover:bg-surface p-3.5 hover:border-border transition-all sm:flex-row sm:items-center sm:justify-between group">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold text-text font-mono tracking-tight">{tool.internal_name}</span>
@@ -4216,23 +4219,18 @@ function MCPToolRow({ tool, onPolicy }: { tool: MCPTool; onPolicy: (policy: Tool
               {tool.title}
             </span>
           )}
-          <span className={clsx('rounded px-1.5 py-0.2 text-[9px] font-semibold uppercase border', policyColors[tool.policy])}>
-            {tool.policy}
-          </span>
+          <span className="text-[10px] text-text-muted/60 font-mono">({tool.name})</span>
         </div>
         {tool.description && (
           <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-text-muted">{tool.description}</p>
         )}
-        <div className="mt-1 flex items-center gap-2 text-[10px] text-text-muted font-mono">
-          <span>MCP name: {tool.name}</span>
-        </div>
       </div>
       <div className="shrink-0 self-end sm:self-center">
         <select
           value={tool.policy}
           onChange={(event) => onPolicy(event.target.value as ToolPolicy)}
           className={clsx(
-            'min-h-8 px-2.5 py-1 text-xs rounded-lg border font-medium focus:outline-none transition-colors cursor-pointer',
+            'min-h-8 px-2.5 py-1 text-xs rounded-lg border font-semibold focus:outline-none transition-colors cursor-pointer shadow-xs',
             policyColors[tool.policy]
           )}
         >
