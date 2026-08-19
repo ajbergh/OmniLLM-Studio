@@ -7,6 +7,7 @@ import {
   type Matrix4,
 } from '../src/video/renderContractFrameState';
 import { MEDIA_GEOMETRY_CONTRACT_V1 } from '../src/video/renderContractMediaGeometry';
+import { PERSPECTIVE_PROJECTION_CONTRACT_V1 } from '../src/video/renderContractPerspectiveProjection';
 import { samplePropertyKeyframes } from '../src/video/renderContractProperties';
 import type { TimelineV2Document } from '../src/video/renderContractTypes';
 
@@ -24,6 +25,9 @@ interface VisualFrameStateFixture {
     expected_camera_x: number;
     expected_camera_fov: number;
     expected_perspective_distance: number;
+    expected_projection_source: 'camera' | 'clip';
+    expected_projection_origin_w: number;
+    expected_projection_matrix: Matrix4;
     expected_model_matrix: Matrix4;
   }>;
   unresolved_document: TimelineV2Document;
@@ -60,6 +64,13 @@ describe('canonical visual FrameState', () => {
       expect(state.camera.field_of_view).toBeCloseTo(sample.expected_camera_fov, 9);
       expect(state.camera.perspective_distance).toBeCloseTo(sample.expected_perspective_distance, 9);
       layer.model_matrix.forEach((value, index) => expect(value).toBeCloseTo(sample.expected_model_matrix[index], 9));
+      expect(layer.perspective_projection.contract_version).toBe(PERSPECTIVE_PROJECTION_CONTRACT_V1);
+      expect(layer.perspective_projection.source).toBe(sample.expected_projection_source);
+      expect(layer.perspective_projection.distance).toBeCloseTo(sample.expected_perspective_distance, 9);
+      expect(layer.perspective_projection.origin_w).toBeCloseTo(sample.expected_projection_origin_w, 9);
+      layer.perspective_projection.matrix.forEach((value, index) => {
+        expect(value).toBeCloseTo(sample.expected_projection_matrix[index], 9);
+      });
       expect(layer.content_bounds).toEqual({ x: 0, y: 0, width: 200, height: 100 });
       expect(layer.media_geometry?.contract_version).toBe(MEDIA_GEOMETRY_CONTRACT_V1);
       expect(layer.media_geometry?.painted_bounds).toEqual({ x: 0, y: 0, width: 200, height: 100 });
@@ -75,6 +86,8 @@ describe('canonical visual FrameState', () => {
     expect(state.layers[0].authoritative).toBe(false);
     expect(state.layers[0].content_bounds).toBeUndefined();
     expect(state.layers[0].media_geometry).toBeUndefined();
+    expect(state.layers[0].perspective_projection.source).toBe('clip');
+    expect(state.layers[0].perspective_projection.distance).toBe(500);
   });
 
   it('keeps fractional frame presentation time for property sampling', () => {
