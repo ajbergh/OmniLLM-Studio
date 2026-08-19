@@ -67,4 +67,14 @@ describe('canonical transition state', () => {
     doc.tracks[1].clips[0].start_ms = 650;
     expect(() => evaluateClipTransitionsAtFrame(doc, 0, 0, 65)).toThrow(/real owner\/peer overlap/);
   });
+
+  it('fails closed on unknown runtime transition semantics', () => {
+    const unknownType = structuredClone(fixture.document);
+    unknownType.tracks[0].clips[0].transitions![0].type = 'future-transition' as never;
+    expect(() => evaluateClipTransitionsAtFrame(unknownType, 0, 0, 15)).toThrow(/unsupported transition type/);
+
+    const unknownDirection = structuredClone(fixture.document);
+    unknownDirection.tracks[0].clips[0].transitions![2].direction = 'diagonal' as never;
+    expect(() => evaluateClipTransitionsAtFrame(unknownDirection, 0, 0, 65)).toThrow(/unsupported transition direction/);
+  });
 });
