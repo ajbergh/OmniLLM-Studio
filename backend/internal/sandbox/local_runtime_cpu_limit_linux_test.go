@@ -118,14 +118,18 @@ func TestLinuxLocalRuntimeCPUQuotaNative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute CPU-limited runtime: %v", err)
 	}
-	if result.ExitCode != 0 {
+	quotaExceeded, ok := result.Metadata["cpu_limit_exceeded"].(bool)
+	if !ok {
+		t.Fatalf("cpu_limit_exceeded type/value = %#v metadata=%#v", result.Metadata["cpu_limit_exceeded"], result.Metadata)
+	}
+	if !quotaExceeded && result.ExitCode != 0 {
 		t.Fatalf("CPU test workload exited before quota exhaustion: exit=%d stdout=%q stderr=%q metadata=%#v", result.ExitCode, result.Stdout, result.Stderr, result.Metadata)
 	}
 	if got, ok := result.Metadata["cpu_limit_enforced"].(bool); !ok || !got {
 		t.Fatalf("cpu_limit_enforced = %#v", result.Metadata["cpu_limit_enforced"])
 	}
-	if got, ok := result.Metadata["cpu_limit_exceeded"].(bool); !ok || !got {
-		t.Fatalf("cpu_limit_exceeded = %#v stdout=%q stderr=%q metadata=%#v", result.Metadata["cpu_limit_exceeded"], result.Stdout, result.Stderr, result.Metadata)
+	if !quotaExceeded {
+		t.Fatalf("cpu_limit_exceeded=false stdout=%q stderr=%q metadata=%#v", result.Stdout, result.Stderr, result.Metadata)
 	}
 	if got := result.Metadata["termination_reason"]; got != "cpu_quota_exceeded" {
 		t.Fatalf("termination_reason = %#v, want cpu_quota_exceeded", got)
