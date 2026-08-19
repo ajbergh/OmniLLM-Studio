@@ -93,10 +93,10 @@
       "expected_opacity": 0,
       "expected_camera_x": 0,
       "expected_camera_fov": 50,
-      "expected_perspective_distance": 107.22534602547793,
+      "expected_perspective_distance": 1200,
       "expected_projection_source": "camera",
       "expected_projection_origin_w": 1,
-      "expected_projection_matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -0.009326153163099971, 1],
+      "expected_projection_matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -0.0008333333333333334, 1],
       "expected_model_matrix": [2, 0, 0, -90, 0, 2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
     },
     {
