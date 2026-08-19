@@ -226,6 +226,11 @@ func classifyToolError(content string) (code, message string, retryable bool) {
 	case strings.Contains(lower, "returned no result"):
 		return "TOOL_EMPTY_RESULT", "The tool completed without returning a result.", true
 	default:
+		// Preserve informative tool failure message if available, otherwise give a helpful default.
+		clean := strings.TrimSpace(content)
+		if clean != "" {
+			return "TOOL_EXECUTION_FAILED", clean, true
+		}
 		return "TOOL_EXECUTION_FAILED", "The tool failed before it could return a usable result.", true
 	}
 }
