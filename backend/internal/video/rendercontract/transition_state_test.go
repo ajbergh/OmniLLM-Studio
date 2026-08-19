@@ -80,8 +80,8 @@ func TestEvaluateClipTransitionsAtFrameFailsClosedWithoutRequiredOverlap(t *test
 }
 
 func TestEvaluateClipTransitionsAtFrameFailsClosedOnUnknownRuntimeSemantics(t *testing.T) {
-	fixture := loadTransitionStateFixture(t)
 	t.Run("type", func(t *testing.T) {
+		fixture := loadTransitionStateFixture(t)
 		doc := fixture.Document
 		doc.Tracks[0].Clips[0].Transitions[0].Type = "future-transition"
 		_, err := EvaluateClipTransitionsAtFrame(doc, 0, 0, 15)
@@ -90,6 +90,7 @@ func TestEvaluateClipTransitionsAtFrameFailsClosedOnUnknownRuntimeSemantics(t *t
 		}
 	})
 	t.Run("direction", func(t *testing.T) {
+		fixture := loadTransitionStateFixture(t)
 		doc := fixture.Document
 		doc.Tracks[0].Clips[0].Transitions[2].Direction = "diagonal"
 		_, err := EvaluateClipTransitionsAtFrame(doc, 0, 0, 65)
