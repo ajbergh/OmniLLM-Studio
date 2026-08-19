@@ -9,8 +9,9 @@ import (
 const VisualFrameStateContractV1 = "visual-frame-state-v1"
 
 // Matrix4 is a row-major 4x4 matrix multiplied by column vectors. Layer local
-// coordinates are centered on the content box. Perspective projection is kept
-// separate in EvaluatedCamera, matching the preview's stage-level perspective.
+// coordinates are centered on the content box. Model and perspective matrices
+// remain separate so consumers can preserve the authored camera-relative model
+// transform while applying canonical projection explicitly.
 type Matrix4 [16]float64
 
 type EvaluatedCamera struct {
@@ -42,22 +43,23 @@ type EvaluatedTransform struct {
 }
 
 type FrameLayerState struct {
-	TrackIndex    int                      `json:"track_index"`
-	ClipIndex     int                      `json:"clip_index"`
-	TrackID       string                   `json:"track_id"`
-	ClipID        string                   `json:"clip_id"`
-	ZIndex        int                      `json:"z_index"`
-	StartFrame    int64                    `json:"start_frame"`
-	EndFrame      int64                    `json:"end_frame"`
-	SourceTimeMS  float64                  `json:"source_time_ms"`
-	MediaFit      string                   `json:"media_fit,omitempty"`
-	ContentBounds *TimelineV2ContentBounds `json:"content_bounds,omitempty"`
-	MediaGeometry *EvaluatedMediaGeometry  `json:"media_geometry,omitempty"`
-	Transform     EvaluatedTransform       `json:"transform"`
-	ViewTransform EvaluatedTransform       `json:"view_transform"`
-	ModelMatrix   Matrix4                  `json:"model_matrix"`
-	Unresolved    []string                 `json:"unresolved"`
-	Authoritative bool                     `json:"authoritative"`
+	TrackIndex            int                            `json:"track_index"`
+	ClipIndex             int                            `json:"clip_index"`
+	TrackID               string                         `json:"track_id"`
+	ClipID                string                         `json:"clip_id"`
+	ZIndex                int                            `json:"z_index"`
+	StartFrame            int64                          `json:"start_frame"`
+	EndFrame              int64                          `json:"end_frame"`
+	SourceTimeMS          float64                        `json:"source_time_ms"`
+	MediaFit              string                         `json:"media_fit,omitempty"`
+	ContentBounds         *TimelineV2ContentBounds       `json:"content_bounds,omitempty"`
+	MediaGeometry         *EvaluatedMediaGeometry        `json:"media_geometry,omitempty"`
+	Transform             EvaluatedTransform             `json:"transform"`
+	ViewTransform         EvaluatedTransform             `json:"view_transform"`
+	ModelMatrix           Matrix4                        `json:"model_matrix"`
+	PerspectiveProjection EvaluatedPerspectiveProjection `json:"perspective_projection"`
+	Unresolved            []string                       `json:"unresolved"`
+	Authoritative         bool                           `json:"authoritative"`
 }
 
 type VisualFrameState struct {
@@ -72,11 +74,11 @@ type VisualFrameState struct {
 	Authoritative   bool              `json:"authoritative"`
 }
 
-// EvaluateVisualFrameState produces the first renderer-independent visual
-// FrameState projection. It evaluates exact-frame clip/camera properties,
-// visibility/order/source time, canonical media geometry, and the camera-relative
-// model matrix. Feature families not yet canonicalized are explicitly listed
-// in Unresolved and make the state non-authoritative rather than being ignored.
+// EvaluateVisualFrameState produces the renderer-independent visual FrameState
+// projection. It evaluates exact-frame clip/camera properties, visibility/order,
+// source time, canonical media geometry, the camera-relative model matrix, and
+// canonical perspective projection. Feature families not yet canonicalized are
+// explicitly listed in Unresolved and make the state non-authoritative.
 func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualFrameState, error) {
 	normalized, err := NormalizeTimelineV2EvaluationInputs(doc)
 	if err != nil {
@@ -211,12 +213,16 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 		unresolved = append(unresolved, "content_bounds_for_anchor")
 	}
 	matrix := composeModelMatrix(view, anchorOffsetX, anchorOffsetY)
+	projection, err := EvaluatePerspectiveProjection(camera, view)
+	if err != nil {
+		return FrameLayerState{}, err
+	}
 	unresolved = uniqueStrings(unresolved)
 	return FrameLayerState{
 		TrackIndex: active.TrackIndex, ClipIndex: active.ClipIndex, TrackID: track.ID, ClipID: clip.ID,
 		ZIndex: active.ZIndex, StartFrame: active.StartFrame, EndFrame: active.EndFrame, SourceTimeMS: active.SourceTimeMS,
 		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Transform: transform, ViewTransform: view,
-		ModelMatrix: matrix, Unresolved: unresolved, Authoritative: len(unresolved) == 0,
+		ModelMatrix: matrix, PerspectiveProjection: projection, Unresolved: unresolved, Authoritative: len(unresolved) == 0,
 	}, nil
 }
 
@@ -272,9 +278,6 @@ func unresolvedLayerFeatures(clip TimelineV2Clip, bounds *TimelineV2ContentBound
 	}
 	if clip.AssetID != "" && bounds == nil {
 		unresolved = append(unresolved, "media_geometry:content_bounds")
-	}
-	if clip.Transform != nil && clip.Transform.Perspective != nil && *clip.Transform.Perspective != 0 {
-		unresolved = append(unresolved, "clip_perspective")
 	}
 	return unresolved
 }
