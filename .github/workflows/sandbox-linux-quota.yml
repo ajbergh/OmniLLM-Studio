@@ -30,6 +30,23 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y bubblewrap busybox-static
+      - name: Prepare non-root Bubblewrap namespace prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          # OmniLLM's Linux runtime intentionally depends on unprivileged user
+          # namespaces rather than running sandboxd/Bubblewrap as root. Ubuntu
+          # 24.04 runners may additionally gate unprivileged user namespaces
+          # through the AppArmor sysctl. Enable only the host prerequisite the
+          # deployment contract already requires; do not elevate the test
+          # Bubblewrap process itself.
+          if [ -e /proc/sys/kernel/unprivileged_userns_clone ]; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / /bin/true
       - name: Prepare delegated cgroup-v2 subtree
         shell: bash
         run: |
