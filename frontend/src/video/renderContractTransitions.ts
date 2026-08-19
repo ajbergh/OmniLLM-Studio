@@ -4,6 +4,9 @@ import type { TimelineV2Clip, TimelineV2Document, TimelineV2Transition } from '.
 
 export const TRANSITION_STATE_CONTRACT_V1 = 'transition-state-v1' as const;
 
+const CANONICAL_TRANSITION_TYPES = new Set(['fade', 'crossfade', 'dip_to_black', 'slide', 'wipe', 'zoom']);
+const CANONICAL_TRANSITION_DIRECTIONS = new Set(['left', 'right', 'up', 'down']);
+
 export interface CanonicalTransitionState {
   contract_version: typeof TRANSITION_STATE_CONTRACT_V1;
   id: string;
@@ -57,13 +60,18 @@ export function evaluateClipTransitionsAtFrameNormalized(
     if (seen.has(id)) throw new Error(`${path}.id: duplicate transition id ${JSON.stringify(id)}`);
     seen.add(id);
     if (transition.duration_ms < 1) throw new Error(`${path}.duration_ms: transition duration must be positive`);
+    const type = transition.type.trim().toLowerCase();
+    if (!CANONICAL_TRANSITION_TYPES.has(type)) {
+      throw new Error(`${path}.type: unsupported transition type ${JSON.stringify(transition.type)}`);
+    }
+    const direction = normalizedDirection(transition, path);
 
     const state: CanonicalTransitionState = {
       contract_version: TRANSITION_STATE_CONTRACT_V1,
       id,
-      type: transition.type.trim().toLowerCase(),
+      type,
       placement: transition.placement.trim().toLowerCase(),
-      ...(normalizedDirection(transition) ? { direction: normalizedDirection(transition) } : {}),
+      ...(direction ? { direction } : {}),
       role: 'incoming',
       start_frame: 0,
       end_frame: 0,
@@ -77,6 +85,9 @@ export function evaluateClipTransitionsAtFrameNormalized(
       case 'in':
         if (transition.peer_clip_id?.trim()) throw new Error(`${path}.peer_clip_id: in transitions must not declare a peer`);
         startMs = owner.start_ms;
+        // Clip boundaries are authoritative; an authored transition longer
+        // than the clip saturates across the full clip instead of implying
+        // hidden source handles.
         endMs = Math.min(owner.start_ms + transition.duration_ms, owner.start_ms + owner.duration_ms);
         state.role = 'incoming';
         break;
@@ -139,9 +150,12 @@ function findPeer(document: TimelineV2Document, peerId: string): { trackIndex: n
   return undefined;
 }
 
-function normalizedDirection(transition: TimelineV2Transition): string {
+function normalizedDirection(transition: TimelineV2Transition, path: string): string {
   const direction = transition.direction?.trim().toLowerCase() ?? '';
   if (!direction && (transition.type === 'slide' || transition.type === 'wipe')) return 'left';
+  if (direction && !CANONICAL_TRANSITION_DIRECTIONS.has(direction)) {
+    throw new Error(`${path}.direction: unsupported transition direction ${JSON.stringify(transition.direction)}`);
+  }
   return direction;
 }
 
