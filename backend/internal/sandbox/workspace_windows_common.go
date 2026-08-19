@@ -19,7 +19,7 @@ func openWindowsWorkspaceDirectory(path string) (windows.Handle, windows.ByHandl
 	}
 	handle, err := windows.CreateFile(
 		ptr,
-		windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE,
+		windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.FILE_TRAVERSE|windows.SYNCHRONIZE,
 		windowsWorkspaceShareMode,
 		nil,
 		windows.OPEN_EXISTING,
@@ -72,13 +72,26 @@ func captureWorkspaceRootIdentity(path string) (string, error) {
 
 func workspaceRootIdentityRequired() bool { return true }
 
+func windowsWorkspaceComparablePath(path string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if strings.HasPrefix(path, `\\?\UNC\`) {
+		return filepath.Clean(`\\` + strings.TrimPrefix(path, `\\?\UNC\`))
+	}
+	if strings.HasPrefix(path, `\\?\`) {
+		return filepath.Clean(strings.TrimPrefix(path, `\\?\`))
+	}
+	return path
+}
+
 func windowsWorkspacePathEqual(a, b string) bool {
-	a = filepath.Clean(a)
-	b = filepath.Clean(b)
+	a = windowsWorkspaceComparablePath(a)
+	b = windowsWorkspaceComparablePath(b)
 	return strings.EqualFold(a, b)
 }
 
 func windowsWorkspacePathWithin(root, candidate string) bool {
+	root = windowsWorkspaceComparablePath(root)
+	candidate = windowsWorkspaceComparablePath(candidate)
 	rel, err := filepath.Rel(root, candidate)
 	if err != nil {
 		return false
