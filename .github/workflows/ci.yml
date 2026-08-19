@@ -327,6 +327,55 @@ jobs:
             --media-dir output/video-parity-ci/fixture/media \
             --output output/video-parity-ci/capture \
             --capture-delivery true
+
+          # Canonical FrameState diagnostic parity bridge. The real saved v1
+          # timeline must fail closed identically while transition placement is
+          # ambiguous; the transition-free control proves actual state values
+          # remain numerically/structurally identical across browser and Go.
+          node scripts/video-frame-state-diagnostics.mjs \
+            --url http://127.0.0.1:14173 \
+            --fixture output/video-parity-ci/fixture/parity-torture-v1.json \
+            --seed-result output/video-parity-ci/capture/seed-result.json \
+            --output output/video-parity-ci/capture/frame-state-preview.json
+          (
+            cd backend
+            go run ./cmd/video-frame-state-diagnostic \
+              --timeline ../output/video-parity-ci/capture/timeline-v1.json \
+              --fixture ../output/video-parity-ci/fixture/parity-torture-v1.json \
+              --preview ../output/video-parity-ci/capture/frame-state-preview.json \
+              --output ../output/video-parity-ci/capture/frame-state-report.json
+          )
+          node scripts/video-frame-state-diagnostics.mjs \
+            --url http://127.0.0.1:14173 \
+            --fixture output/video-parity-ci/fixture/parity-torture-v1.json \
+            --seed-result output/video-parity-ci/capture/seed-result.json \
+            --transition-free-control true \
+            --output output/video-parity-ci/capture/frame-state-preview-control.json
+          (
+            cd backend
+            go run ./cmd/video-frame-state-diagnostic \
+              --timeline ../output/video-parity-ci/capture/timeline-v1-transition-free-control.json \
+              --fixture ../output/video-parity-ci/fixture/parity-torture-v1.json \
+              --preview ../output/video-parity-ci/capture/frame-state-preview-control.json \
+              --output ../output/video-parity-ci/capture/frame-state-report-control.json
+          )
+          node - <<'NODE'
+          const fs = require('fs');
+          const strict = JSON.parse(fs.readFileSync('output/video-parity-ci/capture/frame-state-report.json', 'utf8'));
+          const control = JSON.parse(fs.readFileSync('output/video-parity-ci/capture/frame-state-report-control.json', 'utf8'));
+          if (!strict.all_diagnostics_matched || strict.mismatched !== 0) throw new Error('strict FrameState diagnostics did not match');
+          if (strict.matched_unavailable < 1) throw new Error('expected transition ambiguity to remain fail-closed');
+          if (!control.all_diagnostics_matched || control.mismatched !== 0) throw new Error('control FrameState diagnostics did not match');
+          if (control.available_compared < 1) throw new Error('expected transition-free control to compare actual FrameState values');
+          console.log(JSON.stringify({
+            strict_available_compared: strict.available_compared,
+            strict_matched_unavailable: strict.matched_unavailable,
+            control_available_compared: control.available_compared,
+            control_matched_unavailable: control.matched_unavailable,
+            mismatched: strict.mismatched + control.mismatched,
+          }));
+          NODE
+
           timeline_hash="$(node -p "require('./output/video-parity-ci/capture/seed-result.json').timeline_sha256")"
           (
             cd backend
@@ -376,11 +425,6 @@ jobs:
       - run: helm lint deploy/helm/omnillm-studio --set secrets.encryptionKey=$(printf '0%.0s' {1..64})
       - run: |
           helm template test deploy/helm/omnillm-studio \
-            --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
-            > /tmp/rendered.yaml
-      - name: Enforce single-writer topology
-        run: |
-          if helm template test deploy/helm/omnillm-studio \
             --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
             --set replicaCount=2 >/dev/null 2>&1; then
             echo "replicaCount=2 must be rejected" >&2
