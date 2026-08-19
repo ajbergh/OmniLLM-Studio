@@ -266,9 +266,10 @@ func randomWindowsWorkspaceTempName() (string, error) {
 	return ".omnillm-write-" + hex.EncodeToString(random[:]), nil
 }
 
-// renameWindowsWorkspaceHandle uses FILE_RENAME_INFO with a pinned parent
-// directory handle. The destination name is therefore resolved relative to the
-// opened directory object, not a pathname that can be swapped after validation.
+// renameWindowsWorkspaceHandle uses FILE_RENAME_INFORMATION with a pinned
+// parent directory handle. NtSetInformationFile preserves RootDirectory-relative
+// resolution against the opened directory object instead of reopening a mutable
+// parent pathname between validation and replacement.
 func renameWindowsWorkspaceHandle(handle, parent windows.Handle, name string, replace bool) error {
 	encoded, err := windows.UTF16FromString(name)
 	if err != nil {
@@ -288,5 +289,6 @@ func renameWindowsWorkspaceHandle(handle, parent windows.Handle, name string, re
 	for i, value := range encoded {
 		*(*uint16)(unsafe.Pointer(&buffer[nameOffset+i*2])) = value
 	}
-	return windows.SetFileInformationByHandle(handle, windows.FileRenameInfo, &buffer[0], uint32(len(buffer)))
+	var ioStatus windows.IO_STATUS_BLOCK
+	return windows.NtSetInformationFile(handle, &ioStatus, &buffer[0], uint32(len(buffer)), windows.FileRenameInformation)
 }
