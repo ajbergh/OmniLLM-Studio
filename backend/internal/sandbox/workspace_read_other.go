@@ -1,4 +1,4 @@
-//go:build !linux && !darwin
+//go:build !linux && !darwin && !windows
 
 package sandbox
 
@@ -12,7 +12,7 @@ import (
 )
 
 // readWorkspaceRegularFile preserves the existing pathname-based workspace read
-// behavior on platforms without a proven descriptor-relative implementation.
+// behavior on platforms without a proven descriptor/handle-relative implementation.
 func readWorkspaceRegularFile(root, relativePath string, maxBytes int64) ([]byte, string, error) {
 	clean, err := cleanWorkspaceRelativePath(relativePath)
 	if err != nil {
