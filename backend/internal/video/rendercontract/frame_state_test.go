@@ -24,6 +24,9 @@ type visualFrameStateFixture struct {
 		ExpectedCameraX             float64 `json:"expected_camera_x"`
 		ExpectedCameraFOV           float64 `json:"expected_camera_fov"`
 		ExpectedPerspectiveDistance float64 `json:"expected_perspective_distance"`
+		ExpectedProjectionSource    string  `json:"expected_projection_source"`
+		ExpectedProjectionOriginW   float64 `json:"expected_projection_origin_w"`
+		ExpectedProjectionMatrix    Matrix4 `json:"expected_projection_matrix"`
 		ExpectedModelMatrix         Matrix4 `json:"expected_model_matrix"`
 	} `json:"cases"`
 	UnresolvedDocument TimelineV2Document `json:"unresolved_document"`
@@ -82,6 +85,15 @@ func TestEvaluateVisualFrameStateMatchesSharedFixture(t *testing.T) {
 			for index := range layer.ModelMatrix {
 				assertClose(t, "model_matrix", layer.ModelMatrix[index], sample.ExpectedModelMatrix[index])
 			}
+			projection := layer.PerspectiveProjection
+			if projection.ContractVersion != PerspectiveProjectionContractV1 || projection.Source != sample.ExpectedProjectionSource {
+				t.Fatalf("perspective projection contract/source = %q/%q", projection.ContractVersion, projection.Source)
+			}
+			assertClose(t, "perspective_projection.distance", projection.Distance, sample.ExpectedPerspectiveDistance)
+			assertClose(t, "perspective_projection.origin_w", projection.OriginW, sample.ExpectedProjectionOriginW)
+			for index := range projection.Matrix {
+				assertClose(t, "perspective_projection.matrix", projection.Matrix[index], sample.ExpectedProjectionMatrix[index])
+			}
 			if layer.ContentBounds == nil || layer.ContentBounds.Width != 200 || layer.ContentBounds.Height != 100 {
 				t.Fatalf("content bounds = %+v", layer.ContentBounds)
 			}
@@ -113,8 +125,12 @@ func TestVisualFrameStateSurfacesUnresolvedSemantics(t *testing.T) {
 	if len(state.Layers) != 1 || state.Layers[0].Authoritative {
 		t.Fatalf("layer authority = %+v", state.Layers)
 	}
-	if state.Layers[0].ContentBounds != nil || state.Layers[0].MediaGeometry != nil {
-		t.Fatalf("missing source provenance must not fabricate geometry: %+v", state.Layers[0])
+	layer := state.Layers[0]
+	if layer.ContentBounds != nil || layer.MediaGeometry != nil {
+		t.Fatalf("missing source provenance must not fabricate geometry: %+v", layer)
+	}
+	if layer.PerspectiveProjection.Source != "clip" || layer.PerspectiveProjection.Distance != 500 {
+		t.Fatalf("clip perspective projection = %+v", layer.PerspectiveProjection)
 	}
 }
 
