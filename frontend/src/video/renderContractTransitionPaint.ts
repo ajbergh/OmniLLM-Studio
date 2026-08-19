@@ -8,6 +8,22 @@ export const TRANSITION_PAINT_OWNER_ALPHA = 'owner-opacity' as const;
 export const TRANSITION_PAINT_CROSSFADE = 'pair-crossfade' as const;
 export const TRANSITION_PAINT_DIP_BLACK = 'dip-to-black' as const;
 
+/**
+ * Report whether transition-paint-v1 defines paint semantics for this type.
+ * FrameState callers use this to retain explicit unresolved debt for valid
+ * transition families whose paint is intentionally not canonical yet.
+ */
+export function supportsTransitionPaint(transitionType: string): boolean {
+  switch (transitionType.trim().toLowerCase()) {
+    case 'fade':
+    case 'crossfade':
+    case 'dip_to_black':
+      return true;
+    default:
+      return false;
+  }
+}
+
 export interface CanonicalTransitionPaint {
   contract_version: typeof TRANSITION_PAINT_CONTRACT_V1;
   transition_id: string;
