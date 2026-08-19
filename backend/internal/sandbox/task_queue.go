@@ -31,30 +31,32 @@ const (
 
 // SandboxTask is a durable execution intent. Create and Exec are persisted as
 // immutable JSON so a worker never reconstructs authority from ambient state.
-// RetryPolicy defaults to never: an interrupted side-effecting task therefore
-// fails closed instead of being silently replayed after a worker restart.
+// RetryPolicy defaults to never: interrupted side-effecting work therefore
+// fails closed rather than being silently replayed after a worker restart.
 type SandboxTask struct {
-	ID             string          `json:"id"`
-	Owner          OwnerScope      `json:"owner"`
-	Create         CreateRequest   `json:"create"`
-	Exec           ExecRequest     `json:"exec"`
-	RetryPolicy    string          `json:"retry_policy"`
-	Status         string          `json:"status"`
-	AttemptCount   int             `json:"attempt_count"`
-	LeaseOwner     string          `json:"lease_owner,omitempty"`
-	LeaseToken     string          `json:"lease_token,omitempty"`
-	LeaseExpiresAt *time.Time      `json:"lease_expires_at,omitempty"`
-	RuntimeID      string          `json:"runtime_id,omitempty"`
-	ExecutionID    string          `json:"execution_id,omitempty"`
-	Result         json.RawMessage `json:"result,omitempty"`
-	ErrorMessage   string          `json:"error_message,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
-	CompletedAt    *time.Time      `json:"completed_at,omitempty"`
+	ID               string          `json:"id"`
+	Owner            OwnerScope      `json:"owner"`
+	Create           CreateRequest   `json:"create"`
+	Exec             ExecRequest     `json:"exec"`
+	RetryPolicy      string          `json:"retry_policy"`
+	Status           string          `json:"status"`
+	AttemptCount     int             `json:"attempt_count"`
+	LeaseOwner       string          `json:"lease_owner,omitempty"`
+	LeaseToken       string          `json:"lease_token,omitempty"`
+	LeaseExpiresAt   *time.Time      `json:"lease_expires_at,omitempty"`
+	SandboxSessionID string          `json:"sandbox_session_id,omitempty"`
+	RuntimeID        string          `json:"runtime_id,omitempty"`
+	ExecutionID      string          `json:"execution_id,omitempty"`
+	Result           json.RawMessage `json:"result,omitempty"`
+	ErrorMessage     string          `json:"error_message,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+	CompletedAt      *time.Time      `json:"completed_at,omitempty"`
 }
 
 // SandboxTaskAttempt is immutable attempt evidence. Attempt records are created
-// before runtime execution and finalized once; they are not reused for retries.
+// before runtime execution and finalized once; they are never reused for a
+// subsequent retry.
 type SandboxTaskAttempt struct {
 	ID          string     `json:"id"`
 	TaskID      string     `json:"task_id"`
@@ -68,9 +70,9 @@ type SandboxTaskAttempt struct {
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
 }
 
-// SandboxTaskQueue stores durable execution intents and lease/attempt state.
-// It contains no goroutines and can be used by desktop, server, or a future
-// dedicated task coordinator without changing the persistence contract.
+// SandboxTaskQueue stores durable execution intents plus lease and attempt
+// state. It owns no goroutines and can be shared by desktop, server, or a future
+// dedicated coordinator without changing the persistence contract.
 type SandboxTaskQueue struct {
 	db  *sql.DB
 	now func() time.Time
@@ -86,10 +88,9 @@ func NewSandboxTaskQueue(db *sql.DB) (*SandboxTaskQueue, error) {
 	return &SandboxTaskQueue{db: db, now: time.Now}, nil
 }
 
-// EnsureSandboxTaskSchema installs additive durable task tables. It follows the
-// existing agent-runtime additive-schema pattern and is intentionally separate
-// from scheduled_tasks because scheduled agent prompts have different replay
-// semantics from arbitrary sandbox executions.
+// EnsureSandboxTaskSchema installs additive durable task tables. It is separate
+// from scheduled_tasks because scheduled prompts and arbitrary sandbox
+// executions have materially different restart/replay semantics.
 func EnsureSandboxTaskSchema(db *sql.DB) error {
 	if db == nil {
 		return fmt.Errorf("sandbox task database is required")
@@ -110,6 +111,7 @@ func EnsureSandboxTaskSchema(db *sql.DB) error {
 			lease_owner TEXT NOT NULL DEFAULT '',
 			lease_token TEXT NOT NULL DEFAULT '',
 			lease_expires_at DATETIME,
+			sandbox_session_id TEXT NOT NULL DEFAULT '',
 			runtime_id TEXT NOT NULL DEFAULT '',
 			execution_id TEXT NOT NULL DEFAULT '',
 			result_json TEXT NOT NULL DEFAULT '',
@@ -141,7 +143,7 @@ func EnsureSandboxTaskSchema(db *sql.DB) error {
 			return fmt.Errorf("ensure sandbox task schema: %w", err)
 		}
 	}
-	return nil
+	return ensureSandboxTaskAssociationSchema(db)
 }
 
 func (q *SandboxTaskQueue) Enqueue(_ context.Context, owner OwnerScope, create CreateRequest, execReq ExecRequest, retryPolicy string) (*SandboxTask, error) {
@@ -164,9 +166,8 @@ func (q *SandboxTaskQueue) Enqueue(_ context.Context, owner OwnerScope, create C
 	if retryPolicy != SandboxRetryNever && retryPolicy != SandboxRetryIdempotent {
 		return nil, fmt.Errorf("sandbox task retry_policy must be never or idempotent")
 	}
-	// Preallocate the execution ID before persistence. Every attempt gets its own
-	// ID at claim time; the template request must not smuggle a caller-selected
-	// execution identity across retries.
+	// Attempt execution IDs are allocated at claim time. A caller-selected ID on
+	// the immutable template must never be reused across retries.
 	execReq.ExecutionID = ""
 	createJSON, err := json.Marshal(create)
 	if err != nil {
@@ -200,10 +201,14 @@ func (q *SandboxTaskQueue) Enqueue(_ context.Context, owner OwnerScope, create C
 	return task, nil
 }
 
-// Claim leases one task for a worker. Expired leases are handled in the same
-// transaction. Non-retryable interrupted work is failed rather than replayed;
-// only tasks explicitly marked idempotent are returned to queued state.
+// Claim leases one task for a worker. Expired leases are reconciled in the same
+// transaction. The executor is responsible for calling
+// CleanupExpiredRuntimeAssociations first; therefore a task with a known old
+// runtime cannot be replayed until that runtime has been destroyed.
 func (q *SandboxTaskQueue) Claim(ctx context.Context, workerID string, lease time.Duration) (*SandboxTask, *SandboxTaskAttempt, error) {
+	if q == nil || q.db == nil {
+		return nil, nil, fmt.Errorf("sandbox task queue is unavailable")
+	}
 	workerID = strings.TrimSpace(workerID)
 	if workerID == "" || len(workerID) > 128 {
 		return nil, nil, fmt.Errorf("sandbox worker id is required")
@@ -215,18 +220,20 @@ func (q *SandboxTaskQueue) Claim(ctx context.Context, workerID string, lease tim
 		lease = maxSandboxTaskLease
 	}
 	now := q.now().UTC()
-	tx, err := q.db.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := q.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
 
-	// Recover expired leases deterministically before selecting fresh work.
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE sandbox_task_attempts
 		SET status = 'interrupted', error_message = 'worker lease expired', finished_at = ?
 		WHERE status = 'running' AND task_id IN (
-			SELECT id FROM sandbox_tasks WHERE status IN ('leased','running') AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+			SELECT id FROM sandbox_tasks
+			WHERE status IN ('leased','running')
+			  AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+			  AND sandbox_session_id = '' AND runtime_id = ''
 		)
 	`, now, now); err != nil {
 		return nil, nil, fmt.Errorf("record interrupted sandbox attempts: %w", err)
@@ -238,7 +245,9 @@ func (q *SandboxTaskQueue) Claim(ctx context.Context, workerID string, lease tim
 			error_message = CASE WHEN retry_policy = 'idempotent' THEN '' ELSE 'worker lease expired; automatic replay denied' END,
 			completed_at = CASE WHEN retry_policy = 'idempotent' THEN NULL ELSE ? END,
 			updated_at = ?
-		WHERE status IN ('leased','running') AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+		WHERE status IN ('leased','running')
+		  AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+		  AND sandbox_session_id = '' AND runtime_id = ''
 	`, now, now, now); err != nil {
 		return nil, nil, fmt.Errorf("recover expired sandbox tasks: %w", err)
 	}
@@ -261,16 +270,17 @@ func (q *SandboxTaskQueue) Claim(ctx context.Context, workerID string, lease tim
 
 	leaseToken := "sbl_" + uuid.NewString()
 	expires := now.Add(lease)
-	result, err := tx.ExecContext(ctx, `
+	claim, err := tx.ExecContext(ctx, `
 		UPDATE sandbox_tasks
 		SET status = 'leased', lease_owner = ?, lease_token = ?, lease_expires_at = ?,
-			attempt_count = attempt_count + 1, updated_at = ?
+			attempt_count = attempt_count + 1, updated_at = ?, sandbox_session_id = '',
+			runtime_id = '', execution_id = '', result_json = '', error_message = '', completed_at = NULL
 		WHERE id = ? AND status = 'queued'
 	`, workerID, leaseToken, expires, now, taskID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("lease sandbox task: %w", err)
 	}
-	rows, _ := result.RowsAffected()
+	rows, _ := claim.RowsAffected()
 	if rows != 1 {
 		return nil, nil, fmt.Errorf("sandbox task claim lost concurrent race")
 	}
@@ -278,10 +288,7 @@ func (q *SandboxTaskQueue) Claim(ctx context.Context, workerID string, lease tim
 	if err != nil {
 		return nil, nil, err
 	}
-	executionID, err := NewExecutionID()
-	if err != nil {
-		return nil, nil, err
-	}
+	executionID := NewExecutionID()
 	attempt := &SandboxTaskAttempt{
 		ID:          "sba_" + uuid.NewString(),
 		TaskID:      task.ID,
@@ -300,8 +307,8 @@ func (q *SandboxTaskQueue) Claim(ctx context.Context, workerID string, lease tim
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE sandbox_tasks SET status = 'running', execution_id = ?, updated_at = ?
-		WHERE id = ? AND lease_token = ?
-	`, executionID, now, task.ID, leaseToken); err != nil {
+		WHERE id = ? AND lease_owner = ? AND lease_token = ? AND status = 'leased'
+	`, executionID, now, task.ID, workerID, leaseToken); err != nil {
 		return nil, nil, fmt.Errorf("activate sandbox task attempt: %w", err)
 	}
 	task.Status = SandboxTaskRunning
@@ -323,11 +330,10 @@ func (q *SandboxTaskQueue) Renew(ctx context.Context, taskID, workerID, leaseTok
 		lease = maxSandboxTaskLease
 	}
 	now := q.now().UTC()
-	expires := now.Add(lease)
 	result, err := q.db.ExecContext(ctx, `
 		UPDATE sandbox_tasks SET lease_expires_at = ?, updated_at = ?
 		WHERE id = ? AND lease_owner = ? AND lease_token = ? AND status = 'running'
-	`, expires, now, strings.TrimSpace(taskID), strings.TrimSpace(workerID), strings.TrimSpace(leaseToken))
+	`, now.Add(lease), now, strings.TrimSpace(taskID), strings.TrimSpace(workerID), strings.TrimSpace(leaseToken))
 	if err != nil {
 		return err
 	}
@@ -338,11 +344,13 @@ func (q *SandboxTaskQueue) Renew(ctx context.Context, taskID, workerID, leaseTok
 	return nil
 }
 
-// BindRuntime records the runtime session before execution begins. A worker that
-// crashes after this point leaves enough evidence for an operator/recovery path
-// to destroy the known runtime rather than blindly creating another one.
+// BindRuntime is retained for compatibility with queue callers that only need
+// to bind an opaque runtime reference. New durable execution code should use
+// BindRuntimeAssociation so both Broker session and runtime identities survive
+// restart.
 func (q *SandboxTaskQueue) BindRuntime(ctx context.Context, taskID, workerID, leaseToken, attemptID, runtimeID string) error {
-	if strings.TrimSpace(runtimeID) == "" {
+	runtimeID = strings.TrimSpace(runtimeID)
+	if runtimeID == "" {
 		return fmt.Errorf("sandbox runtime id is required")
 	}
 	tx, err := q.db.BeginTx(ctx, nil)
@@ -362,8 +370,16 @@ func (q *SandboxTaskQueue) BindRuntime(ctx context.Context, taskID, workerID, le
 	if rows != 1 {
 		return fmt.Errorf("sandbox task lease is no longer owned by this worker")
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sandbox_task_attempts SET runtime_id = ? WHERE id = ? AND task_id = ? AND status = 'running'`, runtimeID, attemptID, taskID); err != nil {
+	result, err = tx.ExecContext(ctx, `
+		UPDATE sandbox_task_attempts SET runtime_id = ?
+		WHERE id = ? AND task_id = ? AND worker_id = ? AND status = 'running'
+	`, runtimeID, attemptID, taskID, workerID)
+	if err != nil {
 		return err
+	}
+	rows, _ = result.RowsAffected()
+	if rows != 1 {
+		return fmt.Errorf("sandbox task attempt is no longer active")
 	}
 	return tx.Commit()
 }
@@ -397,7 +413,7 @@ func (q *SandboxTaskQueue) Complete(ctx context.Context, taskID, workerID, lease
 	result, err := tx.ExecContext(ctx, `
 		UPDATE sandbox_tasks
 		SET status = ?, result_json = ?, error_message = ?, lease_owner = '', lease_token = '',
-			lease_expires_at = NULL, completed_at = ?, updated_at = ?
+			lease_expires_at = NULL, sandbox_session_id = '', runtime_id = '', completed_at = ?, updated_at = ?
 		WHERE id = ? AND lease_owner = ? AND lease_token = ? AND status = 'running'
 	`, status, resultJSON, errorMessage, now, now, taskID, workerID, leaseToken)
 	if err != nil {
@@ -407,24 +423,26 @@ func (q *SandboxTaskQueue) Complete(ctx context.Context, taskID, workerID, lease
 	if rows != 1 {
 		return fmt.Errorf("sandbox task completion rejected because lease ownership changed")
 	}
-	if _, err := tx.ExecContext(ctx, `
+	result, err = tx.ExecContext(ctx, `
 		UPDATE sandbox_task_attempts
 		SET status = ?, error_message = ?, finished_at = ?
 		WHERE id = ? AND task_id = ? AND worker_id = ? AND status = 'running'
-	`, status, errorMessage, now, attemptID, taskID, workerID); err != nil {
+	`, status, errorMessage, now, attemptID, taskID, workerID)
+	if err != nil {
 		return err
+	}
+	rows, _ = result.RowsAffected()
+	if rows != 1 {
+		return fmt.Errorf("sandbox task attempt completion changed concurrently")
 	}
 	return tx.Commit()
 }
 
 func (q *SandboxTaskQueue) Get(ctx context.Context, taskID string, owner OwnerScope) (*SandboxTask, error) {
-	row := q.db.QueryRowContext(ctx, `
-		SELECT id, user_id, workspace_id, conversation_id, agent_run_id, task_scope_id,
-			create_json, exec_json, retry_policy, status, attempt_count, lease_owner,
-			lease_token, lease_expires_at, runtime_id, execution_id, result_json,
-			error_message, created_at, updated_at, completed_at
-		FROM sandbox_tasks WHERE id = ? AND user_id = ?
-	`, strings.TrimSpace(taskID), owner.UserID)
+	if q == nil || q.db == nil {
+		return nil, fmt.Errorf("sandbox task queue is unavailable")
+	}
+	row := q.db.QueryRowContext(ctx, sandboxTaskSelect+` WHERE id = ? AND user_id = ?`, strings.TrimSpace(taskID), owner.UserID)
 	task, err := scanSandboxTaskRow(row)
 	if err != nil {
 		return nil, err
@@ -435,17 +453,20 @@ func (q *SandboxTaskQueue) Get(ctx context.Context, taskID string, owner OwnerSc
 	return task, nil
 }
 
+const sandboxTaskSelect = `
+	SELECT id, user_id, workspace_id, conversation_id, agent_run_id, task_scope_id,
+		create_json, exec_json, retry_policy, status, attempt_count, lease_owner,
+		lease_token, lease_expires_at, sandbox_session_id, runtime_id, execution_id,
+		result_json, error_message, created_at, updated_at, completed_at
+	FROM sandbox_tasks`
+
 func scanSandboxTaskTx(ctx context.Context, tx *sql.Tx, taskID string) (*SandboxTask, error) {
-	return scanSandboxTaskRow(tx.QueryRowContext(ctx, `
-		SELECT id, user_id, workspace_id, conversation_id, agent_run_id, task_scope_id,
-			create_json, exec_json, retry_policy, status, attempt_count, lease_owner,
-			lease_token, lease_expires_at, runtime_id, execution_id, result_json,
-			error_message, created_at, updated_at, completed_at
-		FROM sandbox_tasks WHERE id = ?
-	`, taskID))
+	return scanSandboxTaskRow(tx.QueryRowContext(ctx, sandboxTaskSelect+` WHERE id = ?`, taskID))
 }
 
-type rowScanner interface{ Scan(...any) error }
+type rowScanner interface {
+	Scan(...any) error
+}
 
 func scanSandboxTaskRow(row rowScanner) (*SandboxTask, error) {
 	var task SandboxTask
@@ -455,8 +476,9 @@ func scanSandboxTaskRow(row rowScanner) (*SandboxTask, error) {
 		&task.ID, &task.Owner.UserID, &task.Owner.WorkspaceID, &task.Owner.ConversationID,
 		&task.Owner.AgentRunID, &task.Owner.TaskID, &createJSON, &execJSON,
 		&task.RetryPolicy, &task.Status, &task.AttemptCount, &task.LeaseOwner,
-		&task.LeaseToken, &leaseExpires, &task.RuntimeID, &task.ExecutionID,
-		&resultJSON, &task.ErrorMessage, &task.CreatedAt, &task.UpdatedAt, &completed,
+		&task.LeaseToken, &leaseExpires, &task.SandboxSessionID, &task.RuntimeID,
+		&task.ExecutionID, &resultJSON, &task.ErrorMessage, &task.CreatedAt,
+		&task.UpdatedAt, &completed,
 	); err != nil {
 		return nil, err
 	}
