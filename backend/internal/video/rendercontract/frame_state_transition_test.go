@@ -16,11 +16,11 @@ func TestVisualFrameStateTransitionPaintDebtIsFrameScoped(t *testing.T) {
 		wantOwnerAuthority bool
 		wantLayerCount     int
 	}{
-		{name: "between-transition-windows", frameIndex: 30, wantOwnerPresent: true, wantOwnerAuthority: true, wantLayerCount: 1},
+		{name: "between-transition-windows", frameIndex: 30, wantUnresolved: []string{}, wantOwnerPresent: true, wantOwnerAuthority: true, wantLayerCount: 1},
 		{name: "in-transition-paint", frameIndex: 15, wantUnresolved: []string{"owner:transition_paint:fade-in"}, wantActiveID: "fade-in", wantOwnerPresent: true, wantLayerCount: 1},
 		{name: "between-transition-paint", frameIndex: 55, wantUnresolved: []string{"owner:transition_paint:between"}, wantActiveID: "between", wantOwnerPresent: true, wantLayerCount: 2},
 		{name: "out-transition-paint-after-between-end", frameIndex: 65, wantUnresolved: []string{"owner:transition_paint:slide-out"}, wantActiveID: "slide-out", wantOwnerPresent: true, wantLayerCount: 2},
-		{name: "owner-end-is-exclusive", frameIndex: 70, wantOwnerPresent: false, wantOwnerAuthority: true, wantLayerCount: 1},
+		{name: "owner-end-is-exclusive", frameIndex: 70, wantUnresolved: []string{}, wantOwnerPresent: false, wantOwnerAuthority: true, wantLayerCount: 1},
 	}
 
 	for _, sample := range cases {
