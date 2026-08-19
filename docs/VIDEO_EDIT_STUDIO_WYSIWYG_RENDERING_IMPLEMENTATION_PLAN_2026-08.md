@@ -1,7 +1,7 @@
 # Video Edit Studio WYSIWYG Rendering Implementation Plan
 
 **Status:** In progress  
-**Last updated:** 2026-08-18  
+**Last updated:** 2026-08-19  
 **Scope:** Video Edit Studio preview, timeline evaluation, render jobs, visual composition, audio mix, export, validation, packaging, and parity testing  
 **Primary goal:** The authoritative editor preview and final decoded export must represent the same immutable timeline revision with identical frame identity, active-layer ordering, timing, geometry, styling, effects, transitions, camera state, and audio decisions.
 
@@ -9,12 +9,15 @@
 
 ## Current handoff
 
-Current PR: **#209 — Canonicalize media fit and crop geometry**.  
-Current branch: `feat/video-wysiwyg-phase2-media-geometry`.
+Current foundation PR: **#209 — Canonicalize media fit and crop geometry**.  
+Current integration PR: **#212 — Consume canonical media geometry in FrameState**.  
+Current integration branch: `feat/video-wysiwyg-phase2-frame-media-geometry`.
 
 PR #208 merged as `52683e4d25b22f70e5c6c3b4a8cf3417240be4bc`. It added permanent browser/TypeScript ↔ Go visual FrameState diagnostics to the deterministic Video renderer parity baseline without changing compositor behavior. Focused hosted run `32200543950` passed Go tests/vet, frontend lint/unit/build, 103/103 matching fail-closed saved-timeline diagnostics, and 103/103 matching available transition-free control states. Final-head frontend, dependency audit, and JavaScript/TypeScript CodeQL passed. Go CodeQL/backend runners remained in system-package setup and were recorded as infrastructure-only incomplete checks rather than green.
 
-PR #209 is the next Phase 2 slice. The initial implementation establishes `media-geometry-v1` in Go and TypeScript with a shared fixture. It defines `contain`, `cover`, `fill`, and `none`; applies `mask_source_crop` in source coordinates before fit; applies `transform.crop` to the output viewport; and refuses to infer source aspect ratio from the canvas when `content_bounds` is absent. Preview and FFmpeg composition remain unchanged in this slice.
+PR #209 establishes `media-geometry-v1` in Go and TypeScript with a shared fixture. It defines `contain`, `cover`, `fill`, and `none`; applies `mask_source_crop` in source coordinates before fit; applies `transform.crop` to the output viewport; and refuses to infer source aspect ratio from the canvas when `content_bounds` is absent. A first Quality Gate run exposed only `gofmt` drift in the two new Go files; that formatting defect was corrected on head `3e11a21a1ea105060a8484de7ee98c2a60c9cc8d`, and fresh validation is queued/running. Preview and FFmpeg composition remain unchanged.
+
+PR #212 is stacked temporarily on #209 and consumes that contract in `visual-frame-state-v1`. It removes the canvas-sized source-bounds fallback for asset-backed clips, attaches canonical evaluated media geometry when explicit source bounds exist, uses painted media bounds for anchor-space geometry, and reports `media_geometry:content_bounds` when source provenance is absent. The shared visual FrameState fixture now authors source bounds for its authoritative asset and explicitly tests the missing-provenance failure path. Preview and FFmpeg composition remain unchanged.
 
 ## Merged WYSIWYG foundations
 
@@ -42,7 +45,7 @@ Security unblock during this program:
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame activity/range/source/order, runtime normalization, deterministic frame addressing, backend callers, property/keyframe evaluation, visual FrameState, and cross-runtime FrameState diagnostics are merged. PR #209 is canonicalizing media fit/source-mask/output-crop geometry and source-bounds provenance. Clip perspective, transitions/effects, text/shape/cursor state, and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame activity/range/source/order, runtime normalization, deterministic frame addressing, backend callers, property/keyframe evaluation, visual FrameState, and cross-runtime FrameState diagnostics are merged. PR #209 defines canonical media fit/source-mask/output-crop geometry; stacked PR #212 integrates it into FrameState and removes canvas-sized source-bound guessing. Clip perspective, transitions/effects, text/shape/cursor state, and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close geometry, text, crop/fit, effects, transitions, cursor, camera, color, and deterministic asset-loading parity. |
@@ -75,7 +78,7 @@ Canonical evaluators must be pure, deterministic, serializable, free of media/br
 
 ### Media-geometry authority
 
-For asset-backed media, source aspect ratio is semantic input. `content_bounds` (or a future explicitly versioned source-probe projection) must provide that source box. The canonical evaluator must not substitute output-canvas dimensions for missing source dimensions. `mask_source_crop` operates before fit; `transform.crop` is a separate output clip box. This ordering is now captured by `media-geometry-v1`.
+For asset-backed media, source aspect ratio is semantic input. `content_bounds` (or a future explicitly versioned source-probe projection) must provide that source box. The canonical evaluator must not substitute output-canvas dimensions for missing source dimensions. `mask_source_crop` operates before fit; `transform.crop` is a separate output clip box. This ordering is captured by `media-geometry-v1`, and PR #212 projects the evaluated geometry into visual FrameState rather than leaving fit/crop to renderer inference.
 
 ## Phase 0 evidence and remaining sign-off
 
@@ -118,9 +121,9 @@ Implemented:
 
 A CodeQL review finding on an overflow-prone `len(left)+len(right)` map-capacity hint was fixed before merge by removing the combined untrusted-capacity preallocation. No unresolved review threads remained at merge.
 
-### Current PR #209 — canonical media geometry
+### PR #209 — canonical media geometry foundation
 
-Implemented on the branch so far:
+Implemented:
 
 - `backend/internal/video/rendercontract/media_geometry.go` and `frontend/src/video/renderContractMediaGeometry.ts` define matching `media-geometry-v1` evaluators;
 - `contain`: uniform scale by the smaller viewport/source ratio;
@@ -131,18 +134,37 @@ Implemented on the branch so far:
 - `transform.crop` produces a distinct output clip box after fit;
 - collapsed/invalid crop regions fail closed;
 - missing explicit source/content bounds fail closed instead of guessing the source aspect ratio;
-- `video-renderer/test/fixtures/media-geometry-v1.json` is shared by Go and TypeScript tests and covers every fit mode plus source-mask/output-crop composition.
+- `video-renderer/test/fixtures/media-geometry-v1.json` is shared by Go and TypeScript tests and covers every fit mode plus source-mask/output-crop composition;
+- initial Quality Gate formatting failure was corrected before merge consideration.
 
-Still to finish in #209 before merge:
+Remaining before #209 merge:
 
-1. Fold evaluated media geometry into `visual-frame-state-v1` and replace the old `media_fit:*` / `mask_source_crop` unresolved flags when source bounds are explicit.
-2. Preserve `media_source_bounds` as unresolved when an asset clip lacks explicit source bounds.
-3. Run focused Go and TypeScript tests/lint plus repository gates.
-4. Keep preview and FFmpeg compositor behavior unchanged.
+1. Complete fresh repository validation on corrected head `3e11a21a1ea105060a8484de7ee98c2a60c9cc8d`.
+2. Mark ready and merge only after code-executing gates are green or any infrastructure-only incompleteness is explicitly documented.
+3. Keep preview and FFmpeg compositor behavior unchanged.
 
-### Remaining Phase 2 work after #209
+### Stacked PR #212 — FrameState media geometry integration
 
-1. Define per-clip perspective projection and finish content-bounds/anchor provenance edge cases.
+Implemented on the branch:
+
+- Go and TypeScript FrameState layers expose matching optional canonical `media_geometry` state;
+- asset-backed clips no longer receive fabricated canvas-sized `content_bounds`;
+- explicit source bounds are evaluated through the shared `media-geometry-v1` contract;
+- missing asset source bounds produce `media_geometry:content_bounds` and keep the layer/state non-authoritative;
+- supported `media_fit` and `mask_source_crop` semantics no longer remain unresolved once canonical geometry can evaluate them;
+- anchor-space dimensions use evaluated painted media bounds for asset-backed media;
+- the shared `visual-frame-state-v1` fixture now carries explicit source provenance for its authoritative media clip and a negative missing-provenance case;
+- Go and TypeScript tests assert geometry contract identity, painted bounds, and no fabricated geometry in the negative case.
+
+Remaining before #212 merge:
+
+1. Run stacked PR Quality Gate/security validation and fix any formatting, type, fixture, or cross-runtime diagnostic drift.
+2. After #209 merges, retarget #212 from `feat/video-wysiwyg-phase2-media-geometry` to `main` and revalidate the final head.
+3. Keep preview and FFmpeg compositor behavior unchanged.
+
+### Remaining Phase 2 work after #212
+
+1. Define per-clip perspective projection and finish remaining anchor provenance edge cases.
 2. Define transition placement/peer state and effect-stack ordering/animation.
 3. Define text/shape/cursor evaluated state.
 4. Define/compile serializable `AudioGraph` for timing/rate/channel/gain/fade/mute/solo/processing decisions.
@@ -206,7 +228,7 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 | v1 adapter guesses ambiguous behavior | Ambiguous transitions and unsupported transforms fail closed. |
 | Browser/Go evaluator drift | Shared fixtures plus permanent FrameState parity diagnostics. |
 | Millisecond rounding creates boundary/source drift | Deterministic callers use canonical frame/range/source helpers. |
-| Source aspect ratio is guessed from the canvas | `media-geometry-v1` requires explicit `content_bounds` and fails closed when source bounds are absent. |
+| Source aspect ratio is guessed from the canvas | `media-geometry-v1` requires explicit `content_bounds`; FrameState reports `media_geometry:content_bounds` rather than fabricating source dimensions. |
 | Crop order differs between renderers | Source-mask crop occurs before fit; output transform crop is represented separately after fit. |
 | FrameState claims authority before feature semantics are canonical | Explicit unresolved sets keep noncanonical families non-authoritative. |
 | CI setup stalls hide code status | Record setup-only stalls separately; never label an unexecuted check green. |
@@ -224,13 +246,20 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 - PRs #191, #193, #194, #195, #196, #198, #199, #202, #204, #205, and #206 advanced the canonical contract from schemas/timing through exact-frame visual FrameState.
 - PR #201 repaired the reachable PDF dependency vulnerability encountered during the program.
 - PR #208 added permanent cross-runtime visual FrameState diagnostics and merged as `52683e4d25b22f70e5c6c3b4a8cf3417240be4bc` after focused parity validation and remediation of the CodeQL allocation finding.
-- PR #209 opened on `feat/video-wysiwyg-phase2-media-geometry` and began canonical media fit/crop/source-bounds semantics with a shared Go/TypeScript fixture. Validation and FrameState integration remain in progress.
+- PR #209 opened on `feat/video-wysiwyg-phase2-media-geometry` and began canonical media fit/crop/source-bounds semantics with a shared Go/TypeScript fixture.
+
+### 2026-08-19
+
+- PR #209's first Quality Gate identified only Go formatting drift in the new geometry evaluator/tests; both files were corrected on head `3e11a21a1ea105060a8484de7ee98c2a60c9cc8d` and fresh validation was started.
+- Stacked PR #212 opened on `feat/video-wysiwyg-phase2-frame-media-geometry` to consume `media-geometry-v1` in visual FrameState, remove canvas-sized source-bounds guessing, and make missing source provenance explicit and non-authoritative.
 
 ## Next recommended slice
 
-Finish and validate PR #209 first. After it merges:
+Finish validation and merge ordering in dependency order:
 
-1. Canonicalize per-clip perspective projection and the remaining content-bounds/anchor provenance edge cases in Go and TypeScript.
-2. Keep preview/export compositor behavior unchanged until the full geometry state is cross-runtime validated.
-3. Then move to transition placement/peer state and effect-stack semantics as the next Phase 2 feature family.
-4. Continue Phase 0 production visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.
+1. Validate, ready, and merge PR #209.
+2. Retarget PR #212 to `main`, revalidate its final head, then ready and merge it.
+3. Canonicalize per-clip perspective projection and the remaining anchor provenance edge cases in Go and TypeScript.
+4. Keep preview/export compositor behavior unchanged until the full geometry state is cross-runtime validated.
+5. Then move to transition placement/peer state and effect-stack semantics as the next Phase 2 feature family.
+6. Continue Phase 0 production visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.
