@@ -58,6 +58,7 @@ type FrameLayerState struct {
 	ViewTransform         EvaluatedTransform             `json:"view_transform"`
 	ModelMatrix           Matrix4                        `json:"model_matrix"`
 	PerspectiveProjection EvaluatedPerspectiveProjection `json:"perspective_projection"`
+	Transitions           []EvaluatedTransitionState     `json:"transitions,omitempty"`
 	Unresolved            []string                       `json:"unresolved"`
 	Authoritative         bool                           `json:"authoritative"`
 }
@@ -76,9 +77,9 @@ type VisualFrameState struct {
 
 // EvaluateVisualFrameState produces the renderer-independent visual FrameState
 // projection. It evaluates exact-frame clip/camera properties, visibility/order,
-// source time, canonical media geometry, the camera-relative model matrix, and
-// canonical perspective projection. Feature families not yet canonicalized are
-// explicitly listed in Unresolved and make the state non-authoritative.
+// source time, canonical media geometry, perspective projection, and transition
+// timing/peer state. Paint families not yet canonicalized are explicitly listed
+// in Unresolved and make only the affected frame state non-authoritative.
 func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualFrameState, error) {
 	normalized, err := NormalizeTimelineV2EvaluationInputs(doc)
 	if err != nil {
@@ -116,7 +117,11 @@ func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualF
 		if !track.Visible || clip.AudioOnly || track.Type == "audio" || track.Type == "music" {
 			continue
 		}
-		layer, err := evaluateFrameLayer(normalized.Canvas, track, clip, active, camera, frameIndex)
+		transitions, err := evaluateClipTransitionsAtFrameNormalized(normalized, active.TrackIndex, active.ClipIndex, frameIndex)
+		if err != nil {
+			return VisualFrameState{}, err
+		}
+		layer, err := evaluateFrameLayer(normalized.Canvas, track, clip, active, camera, transitions, frameIndex)
 		if err != nil {
 			return VisualFrameState{}, err
 		}
@@ -158,7 +163,7 @@ func evaluateFrameCamera(scene *TimelineV2Scene, frameIndex int64, fps, canvasHe
 	}, nil
 }
 
-func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip TimelineV2Clip, active ActiveClip, camera EvaluatedCamera, frameIndex int64) (FrameLayerState, error) {
+func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip TimelineV2Clip, active ActiveClip, camera EvaluatedCamera, transitions []EvaluatedTransitionState, frameIndex int64) (FrameLayerState, error) {
 	properties := []string{"x", "y", "z", "scale_x", "scale_y", "rotation_x", "rotation_y", "rotation_z", "opacity"}
 	values := make(map[string]float64, len(properties))
 	for _, property := range properties {
@@ -197,6 +202,11 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 
 	bounds := effectiveContentBounds(clip)
 	unresolved := unresolvedLayerFeatures(clip, bounds)
+	for _, transition := range transitions {
+		if transition.Active {
+			unresolved = append(unresolved, "transition_paint:"+transition.ID)
+		}
+	}
 	var mediaGeometry *EvaluatedMediaGeometry
 	if clip.AssetID != "" && clip.ContentBounds != nil {
 		geometry, err := EvaluateMediaGeometry(canvas, clip)
@@ -225,7 +235,7 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 		TrackIndex: active.TrackIndex, ClipIndex: active.ClipIndex, TrackID: track.ID, ClipID: clip.ID,
 		ZIndex: active.ZIndex, StartFrame: active.StartFrame, EndFrame: active.EndFrame, SourceTimeMS: active.SourceTimeMS,
 		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Transform: transform, ViewTransform: view,
-		ModelMatrix: matrix, PerspectiveProjection: projection, Unresolved: unresolved, Authoritative: len(unresolved) == 0,
+		ModelMatrix: matrix, PerspectiveProjection: projection, Transitions: transitions, Unresolved: unresolved, Authoritative: len(unresolved) == 0,
 	}, nil
 }
 
@@ -266,9 +276,6 @@ func unresolvedLayerFeatures(clip TimelineV2Clip, bounds *TimelineV2ContentBound
 	unresolved := []string{}
 	if len(clip.Effects) > 0 {
 		unresolved = append(unresolved, "effects")
-	}
-	if len(clip.Transitions) > 0 {
-		unresolved = append(unresolved, "transitions")
 	}
 	if clip.Text != nil {
 		unresolved = append(unresolved, "text")

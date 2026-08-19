@@ -7,6 +7,10 @@ import {
   type CanonicalPerspectiveProjection,
 } from './renderContractPerspectiveProjection';
 import { evaluateCameraProperty, evaluateClipProperty } from './renderContractProperties';
+import {
+  evaluateClipTransitionsAtFrameNormalized,
+  type CanonicalTransitionState,
+} from './renderContractTransitions';
 import type {
   TimelineV2Canvas,
   TimelineV2Clip,
@@ -42,6 +46,7 @@ export interface CanonicalFrameLayerState {
   view_transform: CanonicalEvaluatedTransform;
   model_matrix: Matrix4;
   perspective_projection: CanonicalPerspectiveProjection;
+  transitions?: CanonicalTransitionState[];
   unresolved: string[];
   authoritative: boolean;
 }
@@ -89,7 +94,13 @@ export function evaluateVisualFrameState(document: TimelineV2Document, frameInde
     const track = normalized.tracks[active.track_index];
     const clip = track.clips[active.clip_index];
     if (!track.visible || clip.audio_only || track.type === 'audio' || track.type === 'music') continue;
-    const layer = evaluateFrameLayer(normalized.canvas, track, clip, active, camera, frame);
+    const transitions = evaluateClipTransitionsAtFrameNormalized(
+      normalized,
+      active.track_index,
+      active.clip_index,
+      frame,
+    );
+    const layer = evaluateFrameLayer(normalized.canvas, track, clip, active, camera, transitions, frame);
     state.layers.push(layer);
     state.unresolved.push(...layer.unresolved.map((entry) => `${clip.id}:${entry}`));
   }
@@ -125,6 +136,7 @@ function evaluateFrameLayer(
   clip: TimelineV2Clip,
   active: ActiveLayerIdentity,
   camera: CanonicalEvaluatedCamera,
+  transitions: CanonicalTransitionState[],
   frameIndex: number,
 ): CanonicalFrameLayerState {
   const clipTimeMs = frameRelativeMilliseconds(frameIndex, canvas.fps, clip.start_ms);
@@ -154,6 +166,9 @@ function evaluateFrameLayer(
   };
   const contentBounds = effectiveContentBounds(clip);
   const unresolved = unresolvedLayerFeatures(clip, contentBounds);
+  for (const transition of transitions) {
+    if (transition.active) unresolved.push(`transition_paint:${transition.id}`);
+  }
   const mediaGeometry = clip.asset_id && clip.content_bounds ? evaluateMediaGeometry(canvas, clip) : undefined;
   let anchorOffsetX = 0;
   let anchorOffsetY = 0;
@@ -184,6 +199,7 @@ function evaluateFrameLayer(
     view_transform: view,
     model_matrix: composeModelMatrix(view, anchorOffsetX, anchorOffsetY),
     perspective_projection: perspectiveProjection,
+    ...(transitions.length > 0 ? { transitions } : {}),
     unresolved: normalizedUnresolved,
     authoritative: normalizedUnresolved.length === 0,
   };
@@ -204,7 +220,6 @@ function effectiveContentBounds(clip: TimelineV2Clip): TimelineV2ContentBounds |
 function unresolvedLayerFeatures(clip: TimelineV2Clip, contentBounds: TimelineV2ContentBounds | undefined): string[] {
   const unresolved: string[] = [];
   if (clip.effects.length > 0) unresolved.push('effects');
-  if ((clip.transitions ?? []).length > 0) unresolved.push('transitions');
   if (clip.text) unresolved.push('text');
   if (clip.shape) unresolved.push('shape');
   if (clip.cursor) unresolved.push('cursor');
