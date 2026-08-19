@@ -1,6 +1,8 @@
 name: Temporary Video FrameState diagnostic validation
 
 on:
+  push:
+    branches: [feat/video-wysiwyg-phase2-frame-state-diagnostics]
   pull_request:
     branches: [main]
 
@@ -159,6 +161,7 @@ jobs:
           grep -q 'Current PR: \*\*#208' docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
           grep -q 'PR #206 — exact-frame visual FrameState foundation' docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
           git rm .github/workflows/tmp-frame-state-diagnostic-validation.yml
+          git rm .github/tmp-frame-state-finalizer-trigger
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/workflows/ci.yml docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
