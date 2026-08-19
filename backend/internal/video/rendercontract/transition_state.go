@@ -8,6 +8,15 @@ import (
 
 const TransitionStateContractV1 = "transition-state-v1"
 
+var canonicalTransitionTypes = map[string]bool{
+	"fade": true, "crossfade": true, "dip_to_black": true,
+	"slide": true, "wipe": true, "zoom": true,
+}
+
+var canonicalTransitionDirections = map[string]bool{
+	"left": true, "right": true, "up": true, "down": true,
+}
+
 // EvaluatedTransitionState describes one transition's exact output-frame window
 // and ownership relationship without defining renderer-specific paint. Between
 // transitions require a real temporal overlap and an explicit peer clip so a
@@ -62,12 +71,20 @@ func evaluateClipTransitionsAtFrameNormalized(doc TimelineV2Document, trackIndex
 		if transition.DurationMS < 1 {
 			return nil, fmt.Errorf("%s.duration_ms: transition duration must be positive", path)
 		}
+		typeName := strings.ToLower(strings.TrimSpace(transition.Type))
+		if !canonicalTransitionTypes[typeName] {
+			return nil, fmt.Errorf("%s.type: unsupported transition type %q", path, transition.Type)
+		}
+		direction, err := normalizedTransitionDirection(transition)
+		if err != nil {
+			return nil, fmt.Errorf("%s.direction: %w", path, err)
+		}
 		state := EvaluatedTransitionState{
 			ContractVersion: TransitionStateContractV1,
 			ID: id,
-			Type: strings.ToLower(strings.TrimSpace(transition.Type)),
+			Type: typeName,
 			Placement: strings.ToLower(strings.TrimSpace(transition.Placement)),
-			Direction: normalizedTransitionDirection(transition),
+			Direction: direction,
 		}
 		var startMS, endMS int64
 		switch state.Placement {
@@ -76,6 +93,9 @@ func evaluateClipTransitionsAtFrameNormalized(doc TimelineV2Document, trackIndex
 				return nil, fmt.Errorf("%s.peer_clip_id: in transitions must not declare a peer", path)
 			}
 			startMS = owner.StartMS
+			// Clip boundaries are authoritative; an authored transition longer
+			// than the clip saturates across the full clip rather than requiring
+			// hidden source handles.
 			endMS = minInt64Transition(owner.StartMS+transition.DurationMS, owner.StartMS+owner.DurationMS)
 			state.Role = "incoming"
 		case "out":
@@ -143,12 +163,15 @@ func findTransitionPeer(doc TimelineV2Document, peerID string) (int, int, Timeli
 	return 0, 0, TimelineV2Clip{}, false
 }
 
-func normalizedTransitionDirection(transition TimelineV2Transition) string {
+func normalizedTransitionDirection(transition TimelineV2Transition) (string, error) {
 	direction := strings.ToLower(strings.TrimSpace(transition.Direction))
 	if direction == "" && (strings.EqualFold(transition.Type, "slide") || strings.EqualFold(transition.Type, "wipe")) {
-		return "left"
+		return "left", nil
 	}
-	return direction
+	if direction != "" && !canonicalTransitionDirections[direction] {
+		return "", fmt.Errorf("unsupported transition direction %q", transition.Direction)
+	}
+	return direction, nil
 }
 
 func clampTransitionProgress(value float64) float64 {
