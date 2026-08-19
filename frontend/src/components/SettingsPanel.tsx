@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
 import { api, authApi, browserApi, mcpApi, musicApi, videoApi, setAuthToken } from '../api';
-import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, GitBranch as Github, Calculator, Link2, Search, Music2, Film, Route as RouteIcon } from 'lucide-react';
+import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, GitBranch as Github, Calculator, Link2, Search, Music2, Film, Route as RouteIcon, Download } from 'lucide-react';
 import type { BrowserSession, BrowserStatus, CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, RAGHealthResponse, ToolPolicy, UpdateMCPServerRequest } from '../types';
 import type { MusicModel, MusicProviderKey } from '../types/music';
 import type { VideoModel, VideoProviderKey } from '../types/video';
@@ -14,6 +14,8 @@ import { toast } from 'sonner';
 import { AssistantProfilesPanel } from './AssistantProfilesPanel';
 import { OpenAPIServersPanel } from './OpenAPIServersPanel';
 import { MCPAuthorizationPanel } from './MCPAuthorizationPanel';
+import { MCPImportModal } from './MCPImportModal';
+import { formatEnvOrHeaders, type ParsedMCPServerConfig } from '../mcpImportParser';
 import { ScopedToolPermissionsPanel } from './ScopedToolPermissionsPanel';
 import { ToolDiagnosticsPanel } from './ToolDiagnosticsPanel';
 import { formatModelOptionLabel, getKnownChatModels, getKnownImageModels, isFreeModel } from '../models';
@@ -3259,6 +3261,7 @@ function MCPServersTab() {
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<MCPFormState>(emptyMCPForm);
   const [saving, setSaving] = useState(false);
@@ -3336,6 +3339,59 @@ function MCPServersTab() {
       toast.error(err instanceof Error ? err.message : 'Failed to save MCP server');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleImportConfigs = async (configs: ParsedMCPServerConfig[]) => {
+    if (configs.length === 0) return;
+
+    if (configs.length === 1) {
+      // Populate form for review and let user save or start editing immediately
+      const cfg = configs[0];
+      setEditingId(null);
+      setAdding(true);
+      setForm({
+        name: cfg.name,
+        transport: cfg.transport,
+        command: cfg.command || '',
+        argsText: (cfg.args || []).join('\n'),
+        url: cfg.url || '',
+        envText: formatEnvOrHeaders(cfg.env),
+        headersText: formatEnvOrHeaders(cfg.headers),
+        allowPrivateNetwork: cfg.allow_private_network ?? false,
+        enabled: false,
+      });
+      toast.success(`Loaded configuration for "${cfg.name}" into form`);
+      return;
+    }
+
+    // Multiple servers imported from a config file/block
+    setSaving(true);
+    let successCount = 0;
+    for (const cfg of configs) {
+      try {
+        const req: CreateMCPServerRequest = {
+          name: cfg.name,
+          transport: cfg.transport,
+          command: cfg.command,
+          args: cfg.args,
+          url: cfg.url,
+          env: cfg.env,
+          headers: cfg.headers,
+          allow_private_network: cfg.allow_private_network,
+          enabled: false,
+        };
+        const created = await mcpApi.createServer(req);
+        applyServer(created);
+        successCount++;
+      } catch (err) {
+        toast.error(`Failed to add "${cfg.name}": ${err instanceof Error ? err.message : 'Error'}`);
+      }
+    }
+    setSaving(false);
+    refreshAudit();
+    if (successCount > 0) {
+      toast.success(`Successfully imported ${successCount} MCP server${successCount === 1 ? '' : 's'}`);
     }
   };
 
@@ -3457,6 +3513,14 @@ function MCPServersTab() {
             </button>
             <button
               type="button"
+              onClick={() => setImporting(true)}
+              className="min-h-10 inline-flex items-center justify-center gap-1.5 px-3 rounded-xl border border-primary/30 bg-primary/10 hover:bg-primary/20 text-xs text-primary transition-colors font-medium"
+            >
+              <Download size={13} />
+              Import (npx / JSON)
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 setEditingId(null);
                 setAdding(true);
@@ -3497,6 +3561,7 @@ function MCPServersTab() {
               onCancel={resetForm}
               onSave={handleSave}
               onUseFilesystemTemplate={() => setForm(filesystemMCPTemplate)}
+              onOpenImport={() => setImporting(true)}
             />
           </motion.div>
         )}
@@ -3536,6 +3601,12 @@ function MCPServersTab() {
       )}
 
       <MCPAuditPanel events={auditEvents} servers={servers} onRefresh={refreshAudit} />
+
+      <MCPImportModal
+        isOpen={importing}
+        onClose={() => setImporting(false)}
+        onImport={handleImportConfigs}
+      />
     </div>
   );
 }
@@ -3621,6 +3692,7 @@ function MCPServerForm({
   onCancel,
   onSave,
   onUseFilesystemTemplate,
+  onOpenImport,
 }: {
   form: MCPFormState;
   editing: boolean;
@@ -3629,6 +3701,7 @@ function MCPServerForm({
   onCancel: () => void;
   onSave: () => void;
   onUseFilesystemTemplate: () => void;
+  onOpenImport: () => void;
 }) {
   return (
     <div className="p-5 rounded-2xl bg-surface-alt border border-border">
@@ -3643,14 +3716,24 @@ function MCPServerForm({
           </div>
         </div>
         {!editing && (
-          <button
-            type="button"
-            onClick={onUseFilesystemTemplate}
-            className="min-h-10 inline-flex items-center justify-center gap-1.5 px-3 rounded-xl border border-border hover:bg-surface-hover text-xs text-text transition-colors"
-          >
-            <ClipboardList size={13} />
-            Filesystem Template
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onOpenImport}
+              className="min-h-10 inline-flex items-center justify-center gap-1.5 px-3 rounded-xl border border-primary/30 bg-primary/10 hover:bg-primary/20 text-xs text-primary transition-colors font-medium"
+            >
+              <Download size={13} />
+              Paste Command / JSON
+            </button>
+            <button
+              type="button"
+              onClick={onUseFilesystemTemplate}
+              className="min-h-10 inline-flex items-center justify-center gap-1.5 px-3 rounded-xl border border-border hover:bg-surface-hover text-xs text-text transition-colors"
+            >
+              <ClipboardList size={13} />
+              Filesystem Template
+            </button>
+          </div>
         )}
       </div>
 
