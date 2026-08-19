@@ -19,6 +19,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/config"
 	"github.com/ajbergh/omnillm-studio/internal/db"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
+	"github.com/ajbergh/omnillm-studio/internal/sandbox"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -106,6 +107,15 @@ func main() {
 	apiPort := ln.Addr().(*net.TCPAddr).Port
 	cfg.MCPOAuthRedirectURI = fmt.Sprintf("http://127.0.0.1:%d/v1/mcp/oauth/callback", apiPort)
 	router, shutdownAPI := api.NewRouterWithShutdown(database, cfg, version, commit)
+	sandboxTaskWorker, err := sandbox.NewConfiguredSandboxTaskWorker(database)
+	if err != nil {
+		log.Fatalf("initialize durable sandbox task worker: %v", err)
+	}
+	if sandboxTaskWorker != nil {
+		if err := sandboxTaskWorker.Start(context.Background()); err != nil {
+			log.Fatalf("recover/start durable sandbox task worker: %v", err)
+		}
+	}
 	desktopPrefix := "/__desktop/" + desktopSecret
 	apiBase := fmt.Sprintf("http://127.0.0.1:%d%s/v1", apiPort, desktopPrefix)
 	log.Printf("[desktop] protected API server listening on 127.0.0.1:%d", apiPort)
@@ -172,6 +182,11 @@ func main() {
 			if err := srv.Shutdown(ctx); err != nil {
 				log.Printf("[desktop] HTTP shutdown: %v", err)
 			}
+			if sandboxTaskWorker != nil {
+				if err := sandboxTaskWorker.Shutdown(ctx); err != nil {
+					log.Printf("[desktop] sandbox task worker shutdown: %v", err)
+				}
+			}
 			if err := shutdownAPI(ctx); err != nil {
 				log.Printf("[desktop] API runtime shutdown: %v", err)
 			}
@@ -183,8 +198,9 @@ func main() {
 }
 
 // desktopLoopbackHandler exposes next only beneath the per-launch secret path.
-// http.StripPrefix returns 404 before invoking next for unprefixed or
-// wrong-secret requests, keeping the capability path out of router logs.
+// http.StripPrefix returns 404 for every request that does not contain the random
+// per-launch path. The underlying router and request logger never see or log the
+// secret prefix.
 func desktopLoopbackHandler(prefix string, next http.Handler) http.Handler {
 	protected := http.StripPrefix(prefix, next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
