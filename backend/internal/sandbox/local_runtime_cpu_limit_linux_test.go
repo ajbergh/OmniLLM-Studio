@@ -14,6 +14,21 @@ import (
 
 const linuxRuntimeCPULimitMS = 150
 
+func TestLinuxLocalRuntimeRejectsCPURequestWhileCapabilityIsFalse(t *testing.T) {
+	runtime := &LocalRuntime{}
+	_, err := runtime.Create(context.Background(), RuntimeCreateRequest{
+		SessionID: "sbx_test_cpu_capability_gate",
+		Owner:     OwnerScope{UserID: "test-user"},
+		Spec: CreateRequest{
+			Network:   NetworkPolicy{Mode: NetworkNone},
+			Resources: ResourceLimits{CPUTimeMS: 1},
+		},
+	})
+	if err == nil {
+		t.Fatal("Linux runtime accepted CPUTimeMS while CPULimit=false")
+	}
+}
+
 // TestLinuxLocalRuntimeCPUQuotaNative exercises the actual Bubblewrap runtime,
 // not only the cgroup primitive. The tiny test rootfs contains a statically
 // linked BusyBox shell so no host-root bind is needed. Two background CPU
@@ -69,7 +84,6 @@ func TestLinuxLocalRuntimeCPUQuotaNative(t *testing.T) {
 		Spec: CreateRequest{
 			Network: NetworkPolicy{Mode: NetworkNone},
 			Resources: ResourceLimits{
-				CPUTimeMS:      linuxRuntimeCPULimitMS,
 				WallTimeMS:     5_000,
 				MaxStdoutBytes: 16 << 10,
 				MaxStderrBytes: 16 << 10,
@@ -80,6 +94,20 @@ func TestLinuxLocalRuntimeCPUQuotaNative(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer runtimeValue.Destroy(context.Background(), runtimeID)
+
+	// Native promotion must prove the exact Exec path before CPULimit is exposed.
+	// Inject the budget only inside this same-package test so the public runtime
+	// protocol continues to reject CPU requests while capability reporting is
+	// false.
+	local, ok := runtimeValue.(*LocalRuntime)
+	if !ok {
+		t.Fatalf("runtime type = %T, want *LocalRuntime", runtimeValue)
+	}
+	local.mu.Lock()
+	session := local.sessions[runtimeID]
+	session.spec.Resources.CPUTimeMS = linuxRuntimeCPULimitMS
+	local.sessions[runtimeID] = session
+	local.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
