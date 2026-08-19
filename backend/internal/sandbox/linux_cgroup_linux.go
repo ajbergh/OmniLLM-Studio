@@ -13,7 +13,14 @@ import (
 	"time"
 )
 
-const linuxCgroupCleanupTimeout = 2 * time.Second
+const (
+	linuxCgroupCleanupTimeout = 2 * time.Second
+	// A positive cumulative CPU budget uses a one-CPU bandwidth ceiling only to
+	// bound accounting overshoot between cpu.stat samples. The application
+	// contract remains cumulative process-tree CPU time, not this rate ceiling.
+	linuxCgroupCPUQuotaUS  = 100000
+	linuxCgroupCPUPeriodUS = 100000
+)
 
 // linuxCgroupManager owns one explicitly delegated cgroup-v2 subtree for
 // sandbox executions. Individual resource capabilities are enabled only when
@@ -24,6 +31,7 @@ type linuxCgroupManager struct {
 	root          string
 	pidsEnabled   bool
 	memoryEnabled bool
+	cpuEnabled    bool
 }
 
 type linuxExecutionCgroup struct {
@@ -58,8 +66,16 @@ func newLinuxCgroupManager(configuredRoot, probeExecutable string) (*linuxCgroup
 		}
 		manager.memoryEnabled = true
 	}
-	if !manager.pidsEnabled && !manager.memoryEnabled {
-		return nil, fmt.Errorf("sandbox cgroup root does not delegate pids or memory controllers")
+	// CPU is an additive capability. A delegated root that exposes cpu but does
+	// not permit enabling it must not regress already-working memory/PID sandbox
+	// isolation; in that case CPU remains truthfully unavailable.
+	if _, ok := controllers["cpu"]; ok {
+		if err := ensureLinuxCgroupController(root, "cpu"); err == nil {
+			manager.cpuEnabled = true
+		}
+	}
+	if !manager.pidsEnabled && !manager.memoryEnabled && !manager.cpuEnabled {
+		return nil, fmt.Errorf("sandbox cgroup root does not delegate pids, memory, or cpu controllers")
 	}
 
 	probe, err := manager.createExecution(0, 0)
@@ -112,6 +128,10 @@ func readLinuxCgroupTokens(path string) (map[string]struct{}, error) {
 }
 
 func (m *linuxCgroupManager) createExecution(maxProcesses int, memoryBytes int64) (*linuxExecutionCgroup, error) {
+	return m.createExecutionWithCPU(maxProcesses, memoryBytes, 0)
+}
+
+func (m *linuxCgroupManager) createExecutionWithCPU(maxProcesses int, memoryBytes int64, cpuTimeMS int) (*linuxExecutionCgroup, error) {
 	if m == nil {
 		return nil, fmt.Errorf("Linux cgroup manager is unavailable")
 	}
@@ -121,11 +141,17 @@ func (m *linuxCgroupManager) createExecution(maxProcesses int, memoryBytes int64
 	if memoryBytes < 0 {
 		return nil, fmt.Errorf("Linux sandbox memory limit cannot be negative")
 	}
+	if cpuTimeMS < 0 {
+		return nil, fmt.Errorf("Linux sandbox CPU time limit cannot be negative")
+	}
 	if maxProcesses > 0 && !m.pidsEnabled {
 		return nil, fmt.Errorf("Linux cgroup pids controller is unavailable")
 	}
 	if memoryBytes > 0 && !m.memoryEnabled {
 		return nil, fmt.Errorf("Linux cgroup memory controller is unavailable")
+	}
+	if cpuTimeMS > 0 && !m.cpuEnabled {
+		return nil, fmt.Errorf("Linux cgroup cpu controller is unavailable")
 	}
 
 	dir, err := os.MkdirTemp(m.root, "omnillm-exec-")
@@ -165,6 +191,15 @@ func (m *linuxCgroupManager) createExecution(maxProcesses int, memoryBytes int64
 			return nil, fmt.Errorf("configure execution memory.swap.max: %w", err)
 		}
 	}
+	if cpuTimeMS > 0 {
+		// cpu.max is deliberately only an overshoot-bounding mechanism: at most
+		// one CPU-second of aggregate work can accrue per wall second while the
+		// separate cpu.stat monitor enforces the cumulative CPUTimeMS contract.
+		value := fmt.Sprintf("%d %d", linuxCgroupCPUQuotaUS, linuxCgroupCPUPeriodUS)
+		if err := os.WriteFile(filepath.Join(dir, "cpu.max"), []byte(value), 0); err != nil {
+			return nil, fmt.Errorf("configure execution cpu.max overshoot bound: %w", err)
+		}
+	}
 
 	file, err := os.Open(dir)
 	if err != nil {
@@ -199,6 +234,48 @@ func (c *linuxExecutionCgroup) memoryEvents() (map[string]uint64, error) {
 		events[fields[0]] = value
 	}
 	return events, nil
+}
+
+func parseLinuxCPUStat(content []byte) (uint64, error) {
+	for _, line := range strings.Split(string(content), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if len(fields) != 2 {
+			return 0, fmt.Errorf("parse execution cpu.stat line %q", line)
+		}
+		if fields[0] != "usage_usec" {
+			continue
+		}
+		value, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parse execution cpu.stat usage_usec: %w", err)
+		}
+		return value, nil
+	}
+	return 0, fmt.Errorf("execution cpu.stat is missing usage_usec")
+}
+
+func (c *linuxExecutionCgroup) cpuUsageUS() (uint64, error) {
+	if c == nil || strings.TrimSpace(c.path) == "" {
+		return 0, fmt.Errorf("Linux execution cgroup is unavailable")
+	}
+	content, err := os.ReadFile(filepath.Join(c.path, "cpu.stat"))
+	if err != nil {
+		return 0, fmt.Errorf("read execution cpu.stat: %w", err)
+	}
+	return parseLinuxCPUStat(content)
+}
+
+func (c *linuxExecutionCgroup) kill() error {
+	if c == nil || strings.TrimSpace(c.path) == "" {
+		return fmt.Errorf("Linux execution cgroup is unavailable")
+	}
+	if err := os.WriteFile(filepath.Join(c.path, "cgroup.kill"), []byte("1"), 0); err != nil {
+		return fmt.Errorf("kill execution cgroup: %w", err)
+	}
+	return nil
 }
 
 func (c *linuxExecutionCgroup) attach(cmd *exec.Cmd) error {
