@@ -12,14 +12,14 @@ import (
 type perspectiveProjectionFixture struct {
 	Version int `json:"version"`
 	Cases   []struct {
-		Name                string   `json:"name"`
-		CameraDistance      float64  `json:"camera_distance"`
-		ClipPerspective     *float64 `json:"clip_perspective"`
-		ViewZ               float64  `json:"view_z"`
-		ExpectedSource      string   `json:"expected_source"`
-		ExpectedDistance    float64  `json:"expected_distance"`
-		ExpectedOriginW     float64  `json:"expected_origin_w"`
-		ExpectedMatrix      Matrix4  `json:"expected_matrix"`
+		Name             string   `json:"name"`
+		CameraDistance   float64  `json:"camera_distance"`
+		ClipPerspective  *float64 `json:"clip_perspective"`
+		ViewZ            float64  `json:"view_z"`
+		ExpectedSource   string   `json:"expected_source"`
+		ExpectedDistance float64  `json:"expected_distance"`
+		ExpectedOriginW  float64  `json:"expected_origin_w"`
+		ExpectedMatrix   Matrix4  `json:"expected_matrix"`
 	} `json:"cases"`
 }
 
