@@ -81,10 +81,10 @@ func evaluateClipTransitionsAtFrameNormalized(doc TimelineV2Document, trackIndex
 		}
 		state := EvaluatedTransitionState{
 			ContractVersion: TransitionStateContractV1,
-			ID: id,
-			Type: typeName,
-			Placement: strings.ToLower(strings.TrimSpace(transition.Placement)),
-			Direction: direction,
+			ID:              id,
+			Type:            typeName,
+			Placement:       strings.ToLower(strings.TrimSpace(transition.Placement)),
+			Direction:       direction,
 		}
 		var startMS, endMS int64
 		switch state.Placement {
