@@ -70,7 +70,7 @@ func (w *SandboxTaskWorker) Start(parent context.Context) error {
 	if err := w.Executor.Queue.CleanupExpiredRuntimeAssociations(workerCtx, w.Executor.Broker); err != nil {
 		cancel()
 		w.finish(fmt.Errorf("recover durable sandbox tasks at startup: %w", err))
-		return w.runError()
+		return w.Err()
 	}
 
 	go func() {
@@ -116,6 +116,30 @@ func (w *SandboxTaskWorker) run(ctx context.Context) error {
 	}
 }
 
+// Done is closed when the worker claim loop exits. A process composition root
+// should observe this channel so a fatal post-start recovery/claim failure does
+// not silently disable durable execution while the rest of the application
+// continues to advertise a configured sandbox runtime.
+func (w *SandboxTaskWorker) Done() <-chan struct{} {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.done
+}
+
+// Err returns the terminal worker error after Done closes. A nil error means the
+// worker stopped because its parent/shutdown context was cancelled.
+func (w *SandboxTaskWorker) Err() error {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.runErr
+}
+
 // Shutdown cancels in-flight Broker execution through the executor context and
 // waits for its cleanup path to finish. It is safe to call more than once.
 func (w *SandboxTaskWorker) Shutdown(ctx context.Context) error {
@@ -138,7 +162,7 @@ func (w *SandboxTaskWorker) Shutdown(ctx context.Context) error {
 	}
 	select {
 	case <-done:
-		return w.runError()
+		return w.Err()
 	case <-ctx.Done():
 		return fmt.Errorf("wait for sandbox task worker shutdown: %w", ctx.Err())
 	}
@@ -152,12 +176,6 @@ func (w *SandboxTaskWorker) finish(err error) {
 	if done != nil {
 		close(done)
 	}
-}
-
-func (w *SandboxTaskWorker) runError() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.runErr
 }
 
 func waitSandboxTaskWorker(ctx context.Context, delay time.Duration) bool {
