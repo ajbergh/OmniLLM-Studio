@@ -1,0 +1,87 @@
+//go:build windows
+
+package sandbox
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"golang.org/x/sys/windows"
+)
+
+const windowsWorkspaceShareMode = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
+
+func openWindowsWorkspaceDirectory(path string) (windows.Handle, windows.ByHandleFileInformation, string, error) {
+	ptr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return windows.InvalidHandle, windows.ByHandleFileInformation{}, "", err
+	}
+	handle, err := windows.CreateFile(
+		ptr,
+		windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE,
+		windowsWorkspaceShareMode,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT,
+		0,
+	)
+	if err != nil {
+		return windows.InvalidHandle, windows.ByHandleFileInformation{}, "", err
+	}
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(handle, &info); err != nil {
+		_ = windows.CloseHandle(handle)
+		return windows.InvalidHandle, windows.ByHandleFileInformation{}, "", err
+	}
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
+		_ = windows.CloseHandle(handle)
+		return windows.InvalidHandle, windows.ByHandleFileInformation{}, "", fmt.Errorf("workspace path is not a directory")
+	}
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		_ = windows.CloseHandle(handle)
+		return windows.InvalidHandle, windows.ByHandleFileInformation{}, "", fmt.Errorf("workspace directory is a reparse point")
+	}
+	finalPath, err := windowsFinalPathForHandle(handle)
+	if err != nil {
+		_ = windows.CloseHandle(handle)
+		return windows.InvalidHandle, windows.ByHandleFileInformation{}, "", err
+	}
+	return handle, info, finalPath, nil
+}
+
+func windowsWorkspaceIdentity(info windows.ByHandleFileInformation) string {
+	return fmt.Sprintf("windows:%08x:%08x%08x", info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow)
+}
+
+func captureWorkspaceRootIdentity(path string) (string, error) {
+	handle, info, finalPath, err := openWindowsWorkspaceDirectory(path)
+	if err != nil {
+		return "", fmt.Errorf("open workspace root identity: %w", err)
+	}
+	defer windows.CloseHandle(handle)
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if !windowsWorkspacePathEqual(absolute, finalPath) {
+		return "", fmt.Errorf("workspace root resolves to a different filesystem path")
+	}
+	return windowsWorkspaceIdentity(info), nil
+}
+
+func workspaceRootIdentityRequired() bool { return true }
+
+func windowsWorkspacePathEqual(a, b string) bool {
+	a = filepath.Clean(a)
+	b = filepath.Clean(b)
+	return strings.EqualFold(a, b)
+}
+
+func windowsWorkspacePathWithin(root, candidate string) bool {
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
