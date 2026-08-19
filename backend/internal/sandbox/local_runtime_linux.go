@@ -250,11 +250,11 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 
 	var executionCgroup *linuxExecutionCgroup
 	resources := session.spec.Resources
-	if resources.MaxProcesses > 0 || resources.MemoryBytes > 0 {
+	if resources.MaxProcesses > 0 || resources.MemoryBytes > 0 || resources.CPUTimeMS > 0 {
 		if r.cgroup == nil {
 			return nil, fmt.Errorf("linux sandbox cgroup quota boundary became unavailable")
 		}
-		executionCgroup, err = r.cgroup.createExecution(resources.MaxProcesses, resources.MemoryBytes)
+		executionCgroup, err = r.cgroup.createExecutionWithCPU(resources.MaxProcesses, resources.MemoryBytes, resources.CPUTimeMS)
 		if err != nil {
 			return nil, fmt.Errorf("create Linux sandbox execution cgroup: %w", err)
 		}
@@ -327,11 +327,15 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 	cmd.Stderr = stderr
 
 	started := time.Now()
-	runErr := cmd.Run()
+	outcome, runMonitorErr := runLinuxCommandWithCPUBudget(execCtx, cmd, executionCgroup, resources.CPUTimeMS)
 	duration := time.Since(started).Milliseconds()
+	if runMonitorErr != nil {
+		return nil, fmt.Errorf("enforce Linux sandbox CPU quota: %w", runMonitorErr)
+	}
 	if execCtx.Err() != nil {
 		return nil, fmt.Errorf("sandbox execution cancelled or timed out: %w", execCtx.Err())
 	}
+	runErr := outcome.runErr
 	exitCode := 0
 	if runErr != nil {
 		if exitErr, ok := runErr.(*exec.ExitError); ok {
@@ -354,6 +358,15 @@ func (r *LocalRuntime) Exec(ctx context.Context, runtimeID string, request ExecR
 		}
 		metadata["memory_events"] = events
 		metadata["memory_limit_enforced"] = events["oom"] > 0 || events["oom_kill"] > 0
+	}
+	if executionCgroup != nil && resources.CPUTimeMS > 0 {
+		metadata["cpu_limit_enforced"] = true
+		metadata["cpu_limit_exceeded"] = outcome.quotaExceeded
+		metadata["cpu_time_limit_ms"] = resources.CPUTimeMS
+		metadata["cpu_usage_us"] = outcome.usageUS
+		if outcome.quotaExceeded {
+			metadata["termination_reason"] = "cpu_quota_exceeded"
+		}
 	}
 	return &ExecResult{
 		ExecutionID: executionID,
