@@ -147,7 +147,10 @@ func evaluateFrameCamera(scene *TimelineV2Scene, frameIndex int64, fps, canvasHe
 		values[property] = value
 	}
 	fieldOfView := clampFloat64(values["field_of_view"], 1, 179)
-	perspectiveDistance := float64(maxIntValue(canvasHeight, 1)) / (2 * math.Tan(fieldOfView*math.Pi/360))
+	perspectiveDistance := 1200.0
+	if camera != nil {
+		perspectiveDistance = float64(maxIntValue(canvasHeight, 1)) / (2 * math.Tan(fieldOfView*math.Pi/360))
+	}
 	return EvaluatedCamera{
 		X: values["x"], Y: values["y"], Z: values["z"],
 		RotationX: values["rotation_x"], RotationY: values["rotation_y"], RotationZ: values["rotation_z"],
