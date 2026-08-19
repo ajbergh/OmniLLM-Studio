@@ -12,9 +12,9 @@ import (
 const linuxCPUAccountingPollInterval = 10 * time.Millisecond
 
 type linuxCPUExecutionOutcome struct {
-	runErr       error
+	runErr        error
 	quotaExceeded bool
-	usageUS      uint64
+	usageUS       uint64
 }
 
 type linuxCPUMonitorResult struct {
