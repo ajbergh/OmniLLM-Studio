@@ -2,6 +2,10 @@ import { endFrame } from './renderContract';
 import { activeClipsAtFrame } from './renderContractEvaluation';
 import { evaluateMediaGeometry, type CanonicalMediaGeometry } from './renderContractMediaGeometry';
 import { normalizeTimelineV2EvaluationInputs } from './renderContractNormalize';
+import {
+  evaluatePerspectiveProjection,
+  type CanonicalPerspectiveProjection,
+} from './renderContractPerspectiveProjection';
 import { evaluateCameraProperty, evaluateClipProperty } from './renderContractProperties';
 import type {
   TimelineV2Canvas,
@@ -37,6 +41,7 @@ export interface CanonicalFrameLayerState {
   transform: CanonicalEvaluatedTransform;
   view_transform: CanonicalEvaluatedTransform;
   model_matrix: Matrix4;
+  perspective_projection: CanonicalPerspectiveProjection;
   unresolved: string[];
   authoritative: boolean;
 }
@@ -59,7 +64,7 @@ export function frameRelativeMilliseconds(frameIndex: number, fps: number, origi
   return (frame * 1000 - originMs * rate) / rate;
 }
 
-/** First visual FrameState projection. Unimplemented paint families are explicit. */
+/** Renderer-independent visual FrameState. Unimplemented paint families are explicit. */
 export function evaluateVisualFrameState(document: TimelineV2Document, frameIndex: number): CanonicalVisualFrameState {
   const normalized = normalizeTimelineV2EvaluationInputs(document);
   const fps = normalized.canvas.fps;
@@ -159,6 +164,7 @@ function evaluateFrameLayer(
   } else if (transform.anchor_x !== 0 || transform.anchor_y !== 0) {
     unresolved.push('content_bounds_for_anchor');
   }
+  const perspectiveProjection = evaluatePerspectiveProjection(camera, view);
   const normalizedUnresolved = uniqueStrings(unresolved);
   return {
     track_index: active.track_index,
@@ -175,6 +181,7 @@ function evaluateFrameLayer(
     transform,
     view_transform: view,
     model_matrix: composeModelMatrix(view, anchorOffsetX, anchorOffsetY),
+    perspective_projection: perspectiveProjection,
     unresolved: normalizedUnresolved,
     authoritative: normalizedUnresolved.length === 0,
   };
@@ -200,7 +207,6 @@ function unresolvedLayerFeatures(clip: TimelineV2Clip, contentBounds: TimelineV2
   if (clip.shape) unresolved.push('shape');
   if (clip.cursor) unresolved.push('cursor');
   if (clip.asset_id && !contentBounds) unresolved.push('media_geometry:content_bounds');
-  if (clip.transform?.perspective && clip.transform.perspective !== 0) unresolved.push('clip_perspective');
   return unresolved;
 }
 
