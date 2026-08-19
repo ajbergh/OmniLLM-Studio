@@ -20,6 +20,10 @@ type SandboxTaskExecutor struct {
 }
 
 // RunOne executes at most one queued task and returns whether work was claimed.
+// Before claiming anything, recovery destroys every runtime attached to an
+// expired lease. A cleanup failure stops the worker instead of allowing a retry
+// to overlap an unproven prior process tree.
+//
 // Lease renewal runs independently of the sandbox wall timeout. If lease
 // ownership is lost, the known caller-provided execution ID is cancelled and the
 // task is not completed by the stale worker.
@@ -35,6 +39,9 @@ func (e *SandboxTaskExecutor) RunOne(ctx context.Context) (bool, error) {
 	if lease <= 0 {
 		lease = defaultSandboxTaskLease
 	}
+	if err := e.Queue.CleanupExpiredRuntimeAssociations(ctx, e.Broker); err != nil {
+		return false, fmt.Errorf("recover expired sandbox work: %w", err)
+	}
 	task, attempt, err := e.Queue.Claim(ctx, workerID, lease)
 	if err != nil || task == nil {
 		return task != nil, err
@@ -47,7 +54,15 @@ func (e *SandboxTaskExecutor) RunOne(ctx context.Context) (bool, error) {
 		_ = e.Queue.Complete(context.Background(), task.ID, workerID, task.LeaseToken, attempt.ID, nil, err)
 		return true, err
 	}
-	if err := e.Queue.BindRuntime(ctx, task.ID, workerID, task.LeaseToken, attempt.ID, session.ID); err != nil {
+	if err := e.Queue.BindRuntimeAssociation(
+		ctx,
+		task.ID,
+		workerID,
+		task.LeaseToken,
+		attempt.ID,
+		session.ID,
+		session.RuntimeID,
+	); err != nil {
 		_ = e.Broker.Destroy(context.Background(), owner, session.ID)
 		return true, err
 	}
