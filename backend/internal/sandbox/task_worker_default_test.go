@@ -54,10 +54,10 @@ func TestNewConfiguredSandboxTaskWorkerReusesDefaultBrokerAndDatabase(t *testing
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	if err := worker.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
+	cancel()
 	if err := worker.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
