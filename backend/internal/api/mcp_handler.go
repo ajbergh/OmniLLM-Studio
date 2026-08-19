@@ -278,6 +278,32 @@ func (h *MCPHandler) UpdateToolPolicy(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *MCPHandler) UpdateAllToolsPolicy(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverId")
+
+	var req struct {
+		Policy string `json:"policy"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.manager.SetAllToolsPolicy(serverID, req.Policy); err != nil {
+		if err == sql.ErrNoRows {
+			respondError(w, http.StatusNotFound, "MCP server not found")
+			return
+		}
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	payload, _ := json.Marshal(map[string]string{"policy": req.Policy, "all": "true"})
+	inputJSON := string(payload)
+	h.auditConfigChange(serverID, "bulk_policy_change", &modelsAuditPayload{
+		inputJSON: inputJSON,
+	})
+	h.respondServer(w, serverID)
+}
+
 func (h *MCPHandler) respondServer(w http.ResponseWriter, id string) {
 	server, err := h.manager.GetServer(id)
 	if err != nil {

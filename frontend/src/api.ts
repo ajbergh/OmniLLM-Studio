@@ -1126,6 +1126,12 @@ export const mcpApi = {
       method: 'PATCH',
       body: JSON.stringify({ policy }),
     }),
+
+  updateAllToolsPolicy: (serverId: string, policy: ToolPolicy) =>
+    apiFetch<MCPServer>(`/mcp/servers/${serverId}/tools`, {
+      method: 'PATCH',
+      body: JSON.stringify({ policy }),
+    }),
 };
 
 // ── Evaluation Harness ────────────────────────────────────────────────────
