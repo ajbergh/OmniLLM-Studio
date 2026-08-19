@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "canvas": { "width": 200, "height": 100, "fps": 30, "background": "#000000" },
+  "cases": [
+    {
+      "name": "contain-square",
+      "fit": "contain",
+      "content_bounds": { "x": 0, "y": 0, "width": 100, "height": 100 },
+      "expected_scale_x": 1,
+      "expected_scale_y": 1,
+      "expected_visible_source_bounds": { "x": 0, "y": 0, "width": 100, "height": 100 },
+      "expected_painted_bounds": { "x": 50, "y": 0, "width": 100, "height": 100 },
+      "expected_clip_bounds": { "x": 0, "y": 0, "width": 200, "height": 100 }
+    },
+    {
+      "name": "cover-square",
+      "fit": "cover",
+      "content_bounds": { "x": 0, "y": 0, "width": 100, "height": 100 },
+      "expected_scale_x": 2,
+      "expected_scale_y": 2,
+      "expected_visible_source_bounds": { "x": 0, "y": 0, "width": 100, "height": 100 },
+      "expected_painted_bounds": { "x": 0, "y": -50, "width": 200, "height": 200 },
+      "expected_clip_bounds": { "x": 0, "y": 0, "width": 200, "height": 100 }
+    },
+    {
+      "name": "fill-square",
+      "fit": "fill",
+      "content_bounds": { "x": 0, "y": 0, "width": 100, "height": 100 },
+      "expected_scale_x": 2,
+      "expected_scale_y": 1,
+      "expected_visible_source_bounds": { "x": 0, "y": 0, "width": 100, "height": 100 },
+      "expected_painted_bounds": { "x": 0, "y": 0, "width": 200, "height": 100 },
+      "expected_clip_bounds": { "x": 0, "y": 0, "width": 200, "height": 100 }
+    },
+    {
+      "name": "none-square",
+      "fit": "none",
+      "content_bounds": { "x": 0, "y": 0, "width": 100, "height": 100 },
+      "expected_scale_x": 1,
+      "expected_scale_y": 1,
+      "expected_visible_source_bounds": { "x": 0, "y": 0, "width": 100, "height": 100 },
+      "expected_painted_bounds": { "x": 50, "y": 0, "width": 100, "height": 100 },
+      "expected_clip_bounds": { "x": 0, "y": 0, "width": 200, "height": 100 }
+    },
+    {
+      "name": "mask-source-crop-before-contain-and-output-crop",
+      "fit": "contain",
+      "content_bounds": { "x": 0, "y": 0, "width": 400, "height": 200 },
+      "mask_source_crop": { "top": 0, "right": 0.25, "bottom": 0, "left": 0.25 },
+      "transform_crop": { "top": 0.1, "right": 0.2, "bottom": 0, "left": 0 },
+      "expected_scale_x": 0.5,
+      "expected_scale_y": 0.5,
+      "expected_visible_source_bounds": { "x": 100, "y": 0, "width": 200, "height": 200 },
+      "expected_painted_bounds": { "x": 50, "y": 0, "width": 100, "height": 100 },
+      "expected_clip_bounds": { "x": 0, "y": 10, "width": 160, "height": 90 }
+    }
+  ]
+}
