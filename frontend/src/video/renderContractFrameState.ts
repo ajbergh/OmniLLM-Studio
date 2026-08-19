@@ -1,5 +1,6 @@
 import { endFrame } from './renderContract';
 import { activeClipsAtFrame } from './renderContractEvaluation';
+import { evaluateMediaGeometry, type CanonicalMediaGeometry } from './renderContractMediaGeometry';
 import { normalizeTimelineV2EvaluationInputs } from './renderContractNormalize';
 import { evaluateCameraProperty, evaluateClipProperty } from './renderContractProperties';
 import type {
@@ -32,6 +33,7 @@ export interface CanonicalFrameLayerState {
   track_index: number; clip_index: number; track_id: string; clip_id: string; z_index: number;
   start_frame: number; end_frame: number; source_time_ms: number; media_fit?: string;
   content_bounds?: TimelineV2ContentBounds;
+  media_geometry?: CanonicalMediaGeometry;
   transform: CanonicalEvaluatedTransform;
   view_transform: CanonicalEvaluatedTransform;
   model_matrix: Matrix4;
@@ -143,11 +145,15 @@ function evaluateFrameLayer(
     rotation_y: transform.rotation_y - camera.rotation_y,
     rotation_z: transform.rotation_z - camera.rotation_z,
   };
-  const contentBounds = effectiveContentBounds(canvas, clip);
-  const unresolved = unresolvedLayerFeatures(clip);
+  const contentBounds = effectiveContentBounds(clip);
+  const unresolved = unresolvedLayerFeatures(clip, contentBounds);
+  const mediaGeometry = clip.asset_id && clip.content_bounds ? evaluateMediaGeometry(canvas, clip) : undefined;
   let anchorOffsetX = 0;
   let anchorOffsetY = 0;
-  if (contentBounds) {
+  if (mediaGeometry) {
+    anchorOffsetX = transform.anchor_x * mediaGeometry.painted_bounds.width / Math.max(1, canvas.width);
+    anchorOffsetY = transform.anchor_y * mediaGeometry.painted_bounds.height / Math.max(1, canvas.height);
+  } else if (contentBounds) {
     anchorOffsetX = transform.anchor_x * contentBounds.width / Math.max(1, canvas.width);
     anchorOffsetY = transform.anchor_y * contentBounds.height / Math.max(1, canvas.height);
   } else if (transform.anchor_x !== 0 || transform.anchor_y !== 0) {
@@ -165,6 +171,7 @@ function evaluateFrameLayer(
     source_time_ms: active.source_time_ms,
     ...(clip.media_fit ? { media_fit: clip.media_fit } : {}),
     ...(contentBounds ? { content_bounds: contentBounds } : {}),
+    ...(mediaGeometry ? { media_geometry: mediaGeometry } : {}),
     transform,
     view_transform: view,
     model_matrix: composeModelMatrix(view, anchorOffsetX, anchorOffsetY),
@@ -178,23 +185,21 @@ function sceneAtFramePresentation(scenes: TimelineV2Scene[], frameIndex: number,
   return scenes.find((scene) => scene.start_ms * fps <= presentation && presentation < (scene.start_ms + scene.duration_ms) * fps);
 }
 
-function effectiveContentBounds(canvas: TimelineV2Canvas, clip: TimelineV2Clip): TimelineV2ContentBounds | undefined {
+function effectiveContentBounds(clip: TimelineV2Clip): TimelineV2ContentBounds | undefined {
   if (clip.content_bounds) return { ...clip.content_bounds };
-  if (clip.asset_id) return { x: 0, y: 0, width: canvas.width, height: canvas.height };
   if (clip.shape) return { x: 0, y: 0, width: clip.shape.width && clip.shape.width > 0 ? clip.shape.width : 320, height: clip.shape.height && clip.shape.height > 0 ? clip.shape.height : 180 };
   if (clip.text?.box_width && clip.text.box_height) return { x: 0, y: 0, width: clip.text.box_width, height: clip.text.box_height };
   return undefined;
 }
 
-function unresolvedLayerFeatures(clip: TimelineV2Clip): string[] {
+function unresolvedLayerFeatures(clip: TimelineV2Clip, contentBounds: TimelineV2ContentBounds | undefined): string[] {
   const unresolved: string[] = [];
   if (clip.effects.length > 0) unresolved.push('effects');
   if ((clip.transitions ?? []).length > 0) unresolved.push('transitions');
   if (clip.text) unresolved.push('text');
   if (clip.shape) unresolved.push('shape');
   if (clip.cursor) unresolved.push('cursor');
-  if (clip.mask_source_crop) unresolved.push('mask_source_crop');
-  if (clip.media_fit && clip.media_fit !== 'contain') unresolved.push(`media_fit:${clip.media_fit}`);
+  if (clip.asset_id && !contentBounds) unresolved.push('media_geometry:content_bounds');
   if (clip.transform?.perspective && clip.transform.perspective !== 0) unresolved.push('clip_perspective');
   return unresolved;
 }
