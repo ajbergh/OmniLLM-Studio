@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 )
 
 func TestOpenRouterProviderGeneratePollsAndDownloads(t *testing.T) {
 	var submitSeen bool
+	var capturedPayload map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/download/job-1.mp4" && r.Header.Get("Authorization") != "Bearer test-key" {
 			t.Fatalf("missing bearer auth on %s", r.URL.Path)
@@ -17,12 +19,11 @@ func TestOpenRouterProviderGeneratePollsAndDownloads(t *testing.T) {
 		switch r.URL.Path {
 		case "/videos":
 			submitSeen = true
-			var payload map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			if err := json.NewDecoder(r.Body).Decode(&capturedPayload); err != nil {
 				t.Fatalf("decode payload: %v", err)
 			}
-			if payload["model"] != "google/veo-3.1" || payload["prompt"] == "" {
-				t.Fatalf("unexpected submit payload: %+v", payload)
+			if capturedPayload["model"] != "google/veo-3.1" || capturedPayload["prompt"] == "" {
+				t.Fatalf("unexpected submit payload: %+v", capturedPayload)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id":          "job-1",
@@ -63,6 +64,89 @@ func TestOpenRouterProviderGeneratePollsAndDownloads(t *testing.T) {
 	}
 	if result.CostUSD == nil || *result.CostUSD != 0.12 {
 		t.Fatalf("expected usage cost, got %+v", result.CostUSD)
+	}
+}
+
+func TestOpenRouterProviderFirstLastAndReferenceImages(t *testing.T) {
+	tempDir := t.TempDir()
+	startImg := tempDir + "/start.png"
+	lastImg := tempDir + "/last.png"
+	refImg := tempDir + "/ref.png"
+	if err := os.WriteFile(startImg, []byte("start-png-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lastImg, []byte("last-png-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(refImg, []byte("ref-png-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var capturedPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/videos":
+			if err := json.NewDecoder(r.Body).Decode(&capturedPayload); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":          "job-2",
+				"polling_url": serverURL(r, "/generation?id=job-2"),
+			})
+		case "/generation":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":            "job-2",
+				"status":        "completed",
+				"unsigned_urls": []string{serverURL(r, "/download/job-2.mp4")},
+			})
+		case "/download/job-2.mp4":
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = w.Write([]byte("video-2"))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := NewOpenRouterProvider(server.URL, "test-key")
+	_, err := provider.Generate(context.Background(), GenerateRequest{
+		Model:               "google/veo-3.1",
+		Prompt:              "Transition from morning to night",
+		StartImagePath:      startImg,
+		LastFramePath:       lastImg,
+		ReferenceAssetPaths: []string{refImg},
+		NegativePrompt:      "blurry",
+		PersonGeneration:    "allow",
+	}, nil)
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	frameImages, ok := capturedPayload["frame_images"].([]any)
+	if !ok || len(frameImages) != 2 {
+		t.Fatalf("expected 2 frame_images, got %+v", capturedPayload["frame_images"])
+	}
+	firstFrame := frameImages[0].(map[string]any)
+	if firstFrame["frame_type"] != "first_frame" {
+		t.Errorf("expected first_frame, got %v", firstFrame["frame_type"])
+	}
+	lastFrame := frameImages[1].(map[string]any)
+	if lastFrame["frame_type"] != "last_frame" {
+		t.Errorf("expected last_frame, got %v", lastFrame["frame_type"])
+	}
+
+	inputRefs, ok := capturedPayload["input_references"].([]any)
+	if !ok || len(inputRefs) != 1 {
+		t.Fatalf("expected 1 input_references, got %+v", capturedPayload["input_references"])
+	}
+
+	providerOpts, ok := capturedPayload["provider"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected provider options in payload: %+v", capturedPayload)
+	}
+	vertexOpts := providerOpts["options"].(map[string]any)["google-vertex"].(map[string]any)["parameters"].(map[string]any)
+	if vertexOpts["negativePrompt"] != "blurry" || vertexOpts["personGeneration"] != "allow" {
+		t.Errorf("unexpected vertex options: %+v", vertexOpts)
 	}
 }
 

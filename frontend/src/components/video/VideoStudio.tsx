@@ -947,7 +947,7 @@ export function VideoStudio() {
                           accept="image"
                           placeholder="None — requires a start frame"
                         />
-                        <p className="mt-1 text-[10px] text-text-muted">Veo 3.1 interpolates between start and last frame. Requires a start frame.</p>
+                        <p className="mt-1 text-[10px] text-text-muted">Interpolates motion between start and last frame. Requires a start frame.</p>
                       </ControlLabel>
                     )}
                     {selectedModelCapabilities.includes('extend_video') && (
