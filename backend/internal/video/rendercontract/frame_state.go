@@ -52,6 +52,7 @@ type FrameLayerState struct {
 	SourceTimeMS  float64                  `json:"source_time_ms"`
 	MediaFit      string                   `json:"media_fit,omitempty"`
 	ContentBounds *TimelineV2ContentBounds `json:"content_bounds,omitempty"`
+	MediaGeometry *EvaluatedMediaGeometry  `json:"media_geometry,omitempty"`
 	Transform     EvaluatedTransform       `json:"transform"`
 	ViewTransform EvaluatedTransform       `json:"view_transform"`
 	ModelMatrix   Matrix4                  `json:"model_matrix"`
@@ -73,7 +74,7 @@ type VisualFrameState struct {
 
 // EvaluateVisualFrameState produces the first renderer-independent visual
 // FrameState projection. It evaluates exact-frame clip/camera properties,
-// visibility/order/source time, crop/content bounds, and the camera-relative
+// visibility/order/source time, canonical media geometry, and the camera-relative
 // model matrix. Feature families not yet canonicalized are explicitly listed
 // in Unresolved and make the state non-authoritative rather than being ignored.
 func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualFrameState, error) {
@@ -189,10 +190,21 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 	view.RotationY -= camera.RotationY
 	view.RotationZ -= camera.RotationZ
 
-	bounds := effectiveContentBounds(canvas, clip)
+	bounds := effectiveContentBounds(clip)
 	unresolved := unresolvedLayerFeatures(clip, bounds)
+	var mediaGeometry *EvaluatedMediaGeometry
+	if clip.AssetID != "" && clip.ContentBounds != nil {
+		geometry, err := EvaluateMediaGeometry(canvas, clip)
+		if err != nil {
+			return FrameLayerState{}, err
+		}
+		mediaGeometry = &geometry
+	}
 	anchorOffsetX, anchorOffsetY := 0.0, 0.0
-	if bounds != nil {
+	if mediaGeometry != nil {
+		anchorOffsetX = transform.AnchorX * mediaGeometry.PaintedBounds.Width / float64(maxIntValue(canvas.Width, 1))
+		anchorOffsetY = transform.AnchorY * mediaGeometry.PaintedBounds.Height / float64(maxIntValue(canvas.Height, 1))
+	} else if bounds != nil {
 		anchorOffsetX = transform.AnchorX * bounds.Width / float64(maxIntValue(canvas.Width, 1))
 		anchorOffsetY = transform.AnchorY * bounds.Height / float64(maxIntValue(canvas.Height, 1))
 	} else if transform.AnchorX != 0 || transform.AnchorY != 0 {
@@ -203,7 +215,7 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 	return FrameLayerState{
 		TrackIndex: active.TrackIndex, ClipIndex: active.ClipIndex, TrackID: track.ID, ClipID: clip.ID,
 		ZIndex: active.ZIndex, StartFrame: active.StartFrame, EndFrame: active.EndFrame, SourceTimeMS: active.SourceTimeMS,
-		MediaFit: clip.MediaFit, ContentBounds: bounds, Transform: transform, ViewTransform: view,
+		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Transform: transform, ViewTransform: view,
 		ModelMatrix: matrix, Unresolved: unresolved, Authoritative: len(unresolved) == 0,
 	}, nil
 }
@@ -220,13 +232,10 @@ func sceneAtFramePresentation(scenes []TimelineV2Scene, frameIndex int64, fps in
 	return nil
 }
 
-func effectiveContentBounds(canvas TimelineV2Canvas, clip TimelineV2Clip) *TimelineV2ContentBounds {
+func effectiveContentBounds(clip TimelineV2Clip) *TimelineV2ContentBounds {
 	if clip.ContentBounds != nil {
 		bounds := *clip.ContentBounds
 		return &bounds
-	}
-	if clip.AssetID != "" {
-		return &TimelineV2ContentBounds{Width: float64(canvas.Width), Height: float64(canvas.Height)}
 	}
 	if clip.Shape != nil {
 		width, height := 320.0, 180.0
@@ -261,17 +270,11 @@ func unresolvedLayerFeatures(clip TimelineV2Clip, bounds *TimelineV2ContentBound
 	if clip.Cursor != nil {
 		unresolved = append(unresolved, "cursor")
 	}
-	if clip.MaskSourceCrop != nil {
-		unresolved = append(unresolved, "mask_source_crop")
-	}
-	if clip.MediaFit != "" && clip.MediaFit != "contain" {
-		unresolved = append(unresolved, "media_fit:"+clip.MediaFit)
+	if clip.AssetID != "" && bounds == nil {
+		unresolved = append(unresolved, "media_geometry:content_bounds")
 	}
 	if clip.Transform != nil && clip.Transform.Perspective != nil && *clip.Transform.Perspective != 0 {
 		unresolved = append(unresolved, "clip_perspective")
-	}
-	if bounds == nil && clip.ContentBounds != nil {
-		unresolved = append(unresolved, "content_bounds")
 	}
 	return unresolved
 }
