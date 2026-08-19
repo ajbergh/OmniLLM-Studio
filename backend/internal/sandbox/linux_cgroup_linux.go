@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -344,8 +345,17 @@ func (c *linuxExecutionCgroup) cleanup() error {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if err := os.Remove(c.path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove execution cgroup: %w", err)
+	for {
+		err := os.Remove(c.path)
+		if err == nil || os.IsNotExist(err) {
+			return nil
+		}
+		if !errors.Is(err, syscall.EBUSY) && !errors.Is(err, syscall.ENOTEMPTY) {
+			return fmt.Errorf("remove execution cgroup: %w", err)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("remove execution cgroup after task evacuation: %w", err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	return nil
 }
