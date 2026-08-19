@@ -14,8 +14,9 @@ Merged FrameState geometry integration: **PR #212 — Consume canonical media ge
 Merged perspective foundation: **PR #218 — Define canonical perspective projection contract** — `0bf0ffc897589d71d2f62d75e18b63319bd59fae`.  
 Merged transition-state foundation: **PR #220 — Define canonical transition placement and peer state** — `1bbbabed5185cbe44640426aad1ab141b59d50cc`.  
 Merged FrameState transition integration: **PR #222 — Consume canonical transition state in visual FrameState** — `73d7851cff9e0d7efce711f022659db60cc39dd2`.  
-Current canonical-contract PR: **#224 — Define canonical fade-family transition paint**.  
-Current branch: `feat/video-wysiwyg-phase2-transition-paint`.
+Merged fade-family paint foundation: **PR #224 — Define canonical fade-family transition paint** — `86bd0af3924bb10d6c49c411176f72bcdc07b453`.  
+Current canonical-contract PR: **#225 — Consume canonical fade-family transition paint in FrameState**.  
+Current branch: `feat/video-wysiwyg-phase2-frame-transition-paint`.
 
 PR #208 merged as `52683e4d25b22f70e5c6c3b4a8cf3417240be4bc`. It added permanent browser/TypeScript ↔ Go visual FrameState diagnostics to the deterministic Video renderer parity baseline without changing compositor behavior. Focused hosted run `32200543950` passed Go tests/vet, frontend lint/unit/build, 103/103 matching fail-closed saved-timeline diagnostics, and 103/103 matching available transition-free control states. Final-head frontend, dependency audit, and JavaScript/TypeScript CodeQL passed. Go CodeQL/backend runners remained in system-package setup and were recorded as infrastructure-only incomplete checks rather than green.
 
@@ -29,7 +30,9 @@ PR #220 established `transition-state-v1` as a renderer-independent transition t
 
 PR #222 consumes `transition-state-v1` in `visual-frame-state-v1`. Each visual layer carries its evaluated transition timing/peer state. The old clip-wide `transitions` unresolved marker is removed; only an active transition adds precise `transition_paint:<id>` debt for that sampled frame. Exact-head backend formatting/vet/tests/race and frontend lint/unit/performance/build passed, as did Windows/macOS contracts, Helm, Linux workspace/quota assurance, macOS runtime/extension/adversarial assurance, and browser-egress assurance. The deterministic parity lane had cleared setup and fixture generation and remained in immutable snapshot capture at merge; Playwright and Security Scan remained queued and the container build remained in progress. Those incomplete jobs were documented rather than represented as green. #222 merged as `73d7851cff9e0d7efce711f022659db60cc39dd2`.
 
-PR #224 defines renderer-independent fade-family paint semantics rather than inheriting current gaps or approximations. `VideoPreviewCanvas.tsx` currently does not evaluate authored transition records, and the legacy FFmpeg renderer approximates crossfade as alpha fade; neither behavior is sufficient semantic authority. `transition-paint-v1` therefore defines one-sided fade opacity, true two-input crossfade contribution weights, and dip-to-black contribution weights with a full-black midpoint. Slide/wipe/zoom remain explicitly unsupported until their own canonical paint slice. Preview, FrameState paint consumption, and FFmpeg composition are intentionally unchanged in this foundation PR.
+PR #224 established renderer-independent fade-family paint semantics instead of inheriting current gaps or legacy FFmpeg approximations. `transition-paint-v1` defines one-sided fade opacity, true two-input crossfade contribution weights, and dip-to-black contribution weights with a full-black midpoint. A shared paint-support predicate lets downstream evaluators distinguish unsupported families from invalid state inside a supported family. Exact head `3818625fbf97f79427a55675736a2be930360c40` passed Quality Gate, Security Scan, container build, Linux workspace/quota assurance, macOS runtime/extension/adversarial assurance, and browser-egress assurance with no review threads, then merged as `86bd0af3924bb10d6c49c411176f72bcdc07b453`. Preview and FFmpeg composition remained unchanged.
+
+PR #225 consumes supported fade-family paint in visual FrameState. Each visual layer can now serialize canonical `transition_paint` instructions. Active fade/crossfade/dip-to-black paint no longer creates unresolved debt; active slide/wipe/zoom still emits `transition_paint:<id>` until those families receive canonical paint semantics. Supported-but-invalid transition paint fails the frame evaluation rather than being relabeled unsupported. The branch was ancestry-aligned with merged #224/current `main` via merge head `3272e0f0f053bb0e147c7d0a02cff1d6f5ff8a44` without changing the four-file implementation diff.
 
 ## Merged WYSIWYG foundations
 
@@ -51,6 +54,7 @@ PR #224 defines renderer-independent fade-family paint semantics rather than inh
 - PR #218 — canonical perspective projection consumption in FrameState — `0bf0ffc897589d71d2f62d75e18b63319bd59fae`.
 - PR #220 — canonical transition placement/peer state — `1bbbabed5185cbe44640426aad1ab141b59d50cc`.
 - PR #222 — canonical transition-state consumption in FrameState — `73d7851cff9e0d7efce711f022659db60cc39dd2`.
+- PR #224 — canonical fade/crossfade/dip-to-black transition paint — `86bd0af3924bb10d6c49c411176f72bcdc07b453`.
 
 Security unblock during this program:
 
@@ -66,7 +70,7 @@ CI reliability unblock during this program:
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame activity/range/source/order, runtime normalization, deterministic frame addressing, backend callers, property/keyframe evaluation, visual FrameState, cross-runtime diagnostics, media geometry, perspective projection, transition placement/peer state, and FrameState transition-state consumption are merged. PR #224 defines fade/crossfade/dip-to-black paint. Slide/wipe/zoom paint, paint consumption, effects, text/shape/cursor state, and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame activity/range/source/order, runtime normalization, deterministic frame addressing, backend callers, property/keyframe evaluation, visual FrameState, cross-runtime diagnostics, media geometry, perspective projection, transition placement/peer state, FrameState transition-state consumption, and fade/crossfade/dip-to-black paint are merged. PR #225 consumes those supported paint instructions in FrameState. Slide/wipe/zoom paint, effects, text/shape/cursor state, and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close geometry, text, crop/fit, anchors/transforms/2.5D/camera/z-order, opacity/blending, effects, transitions, cursor, camera, color, and deterministic asset-loading parity. |
@@ -111,7 +115,7 @@ Transition placement is explicit canonical state rather than an inferred propert
 
 ### Transition paint authority
 
-Transition paint is composition state, not renderer-local shorthand. `transition-paint-v1` defines `fade` as one-sided owner opacity for `in`/`out`, `crossfade` as a true two-input linear blend requiring `between`, and `dip_to_black` as outgoing/black/incoming contribution weights with full black at progress `0.5`. Crossfade contribution weights must be consumed as a pair-composition operation; applying them as two ordinary stacked alpha opacities would produce a different image and is not canonical. Dip-to-black likewise carries an explicit black contribution rather than being approximated as a simple fade. Inactive transitions produce no paint. Unsupported paint families and invalid placement/role/progress combinations fail closed. Slide, wipe, and zoom remain unresolved until separately canonicalized.
+Transition paint is composition state, not renderer-local shorthand. `transition-paint-v1` defines `fade` as one-sided owner opacity for `in`/`out`, `crossfade` as a true two-input linear blend requiring `between`, and `dip_to_black` as outgoing/black/incoming contribution weights with full black at progress `0.5`. Crossfade contribution weights must be consumed as a pair-composition operation; applying them as two ordinary stacked alpha opacities would produce a different image and is not canonical. Dip-to-black likewise carries an explicit black contribution rather than being approximated as a simple fade. Inactive transitions produce no paint. FrameState consumes supported fade-family paint instructions directly and remains authoritative for those transition frames when no other unresolved feature is active. Unsupported slide/wipe/zoom paint remains explicit `transition_paint:<id>` debt. Invalid state within a supported paint family fails closed instead of being downgraded to unsupported.
 
 ## Phase 0 evidence and remaining sign-off
 
@@ -144,6 +148,7 @@ Remaining Phase 0 sign-off:
 - FrameState consumption of canonical media geometry with no canvas-sized source-bounds fallback.
 - `perspective-projection-v1` with preview-compatible no-camera projection, FOV-derived scene-camera projection, per-clip override, and FrameState consumption.
 - `transition-state-v1` with explicit in/out/between placement, peer ownership/roles, exact-frame progress, runtime fail-closed validation, and FrameState consumption with frame-scoped unresolved paint debt.
+- `transition-paint-v1` for fade/crossfade/dip-to-black with true pair-composition and explicit black contribution semantics.
 
 ### Merged PR #208 — FrameState parity diagnostics
 
@@ -255,9 +260,9 @@ Implemented:
 
 Preview and FFmpeg compositor behavior were unchanged.
 
-### Current PR #224 — canonical fade-family transition paint
+### Merged PR #224 — canonical fade-family transition paint
 
-Implemented on the branch:
+Implemented:
 
 - `backend/internal/video/rendercontract/transition_paint.go` and `frontend/src/video/renderContractTransitionPaint.ts` define matching `transition-paint-v1` evaluators;
 - `fade` is one-sided `owner-opacity`: `in` uses `progress`, `out` uses `1-progress`, and `between` is rejected;
@@ -265,29 +270,50 @@ Implemented on the branch:
 - `dip_to_black` supports `in`, `out`, and `between`; between uses a piecewise outgoing→black→incoming composition with full black at `progress=0.5`;
 - inactive transitions produce no paint;
 - owner/transition identity, input contract version, progress bounds, placement, peer, and role semantics fail closed;
-- slide/wipe/zoom explicitly fail with `does not yet have canonical paint semantics` rather than falling back to FFmpeg approximations;
+- a shared support predicate identifies the families with canonical paint without swallowing invalid state inside those families;
 - `video-renderer/test/fixtures/transition-paint-v1.json` is shared by Go and TypeScript and covers inactive state, fade in/out, crossfade owner-role reversal, dip-to-black in/out, and both halves of between;
 - mirrored negative tests cover invalid crossfade placement, noncomplementary pair roles, unsupported paint family, and noncanonical progress;
-- branch was ancestry-aligned with merged #222/current `main` at `6a047b43d43958eb6bb82b722fe0003ecf3f4c34` without changing implementation bytes.
+- exact head `3818625fbf97f79427a55675736a2be930360c40` passed Quality Gate, Security Scan, container build, Linux workspace/quota assurance, macOS runtime/extension/adversarial assurance, and browser-egress assurance;
+- no review threads remained and the PR merged as `86bd0af3924bb10d6c49c411176f72bcdc07b453`.
 
-Remaining before #224 merge:
+Preview and FFmpeg compositor behavior were unchanged.
 
-1. Complete exact-head backend formatting/vet/tests/race and frontend lint/unit/build.
-2. Review deterministic parity, Security Scan, and relevant platform/assurance jobs.
-3. Fix any code, formatting, fixture, type, or review finding.
-4. Confirm the final diff contains only the transition-paint contract/tests/fixture plus this tracker update.
-5. Mark ready and merge when validation is defensible.
-6. Keep FrameState paint consumption, preview, and FFmpeg behavior unchanged in this foundation slice.
+### Current PR #225 — FrameState fade-family transition-paint consumption
 
-### Remaining Phase 2 work after #224
+Implemented on the branch:
 
-1. Consume supported fade-family paint in FrameState so active fade/crossfade/dip-to-black no longer carry unresolved `transition_paint:<id>` debt; retain that debt for slide/wipe/zoom.
-2. Define slide/wipe/zoom paint geometry and compositing semantics, then consume them in FrameState.
-3. Define effect-stack ordering, enable windows, and animated effect parameters.
-4. Finish any remaining anchor/content-bound provenance edge cases surfaced by parity diagnostics.
-5. Define text/shape/cursor evaluated state.
-6. Define/compile serializable `AudioGraph` for timing/rate/channel/gain/fade/mute/solo/processing decisions.
-7. Fail closed whenever an authorable field lacks canonical semantics.
+- Go `FrameLayerState` and TypeScript `CanonicalFrameLayerState` expose optional `transition_paint` arrays;
+- active fade/crossfade/dip-to-black state is evaluated through `transition-paint-v1` and serialized into the owner layer;
+- those supported active transitions no longer add unresolved paint debt and therefore can remain authoritative when no other unresolved family is active;
+- active slide/wipe/zoom continue to emit `transition_paint:<id>` and remain non-authoritative until their paint semantics are canonical;
+- invalid state inside a supported paint family fails the FrameState evaluation instead of being downgraded to unsupported;
+- mirrored Go/TypeScript integration tests reuse `transition-state-v1.json` to verify 50% fade-in, one-third pair-crossfade weights, unresolved 50% slide-out, dip-to-black consumption, and fail-closed invalid supported crossfade;
+- the net implementation diff against merged #224 is four files: the two FrameState evaluators and two mirrored integration tests;
+- the branch is ancestry-aligned with current `main` via merge head `3272e0f0f053bb0e147c7d0a02cff1d6f5ff8a44`.
+
+Validation status on normalized exact head before this tracker commit:
+
+- frontend lint/unit/performance/build passed;
+- Helm, Windows sandbox, Windows plugin lifecycle, macOS confinement, Linux workspace, and completed macOS assurance lanes passed;
+- backend formatting/vet/tests/race, Security Scan, container build, Linux quota, and browser-egress were still executing and had not reported a failure;
+- no review threads were present.
+
+Remaining before #225 merge:
+
+1. Complete the exact-head backend code matrix and remaining Security/container/assurance jobs.
+2. Remediate any concrete failure or review finding.
+3. Confirm the final diff remains only FrameState paint consumption/tests plus this tracker update.
+4. Mark ready and merge when validation is green/defensible.
+5. Keep preview/FFmpeg compositor behavior unchanged in this canonical-state slice.
+
+### Remaining Phase 2 work after #225
+
+1. Define slide/wipe/zoom paint geometry and compositing semantics, then consume them in FrameState.
+2. Define effect-stack ordering, enable windows, and animated effect parameters.
+3. Finish any remaining anchor/content-bound provenance edge cases surfaced by parity diagnostics.
+4. Define text/shape/cursor evaluated state.
+5. Define/compile serializable `AudioGraph` for timing/rate/channel/gain/fade/mute/solo/processing decisions.
+6. Fail closed whenever an authorable field lacks canonical semantics.
 
 ### Phase 2 exit gate
 
@@ -353,6 +379,7 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 | Transition adjacency/handles are inferred differently | `transition-state-v1` requires explicit placement/peer semantics and real overlap; FrameState carries that state and scopes unresolved paint debt to active transition frames. |
 | Crossfade is implemented as two stacked alpha fades | `pair-crossfade` weights are one pair-composition instruction; consumers must blend the isolated outgoing/incoming surfaces using the canonical weights rather than applying independent layer opacity. |
 | Dip-to-black is flattened into a simple fade | Canonical paint carries an explicit black contribution and reaches full black at the transition midpoint. |
+| Unsupported spatial transition is silently approximated | FrameState retains precise `transition_paint:<id>` debt until slide/wipe/zoom semantics are explicitly canonicalized. |
 | FrameState claims authority before feature semantics are canonical | Explicit unresolved sets keep noncanonical families non-authoritative only where those semantics are active/relevant. |
 | CI setup stalls or queues hide code status | Record unstarted/setup-only infrastructure separately; never label an unexecuted check green. |
 | Chromium packaging/resource cost | Managed worker, admission control, health checks, guarded rollout; FFmpeg retained for decode/encode/mux. |
@@ -387,15 +414,17 @@ Hosted CI is authoritative for platform/toolchain cases not reproducible in the 
 - #220 exact-head repository workflows remained unstarted behind runner saturation; independent Go/TypeScript evaluator checks and final diff/review inspection were recorded explicitly, and #220 merged as `1bbbabed5185cbe44640426aad1ab141b59d50cc` without representing the queued checks as green.
 - PR #222 consumed transition state in visual FrameState, scoped unresolved paint debt to active transition windows, passed the exact-head backend/frontend code matrix and completed assurance lanes, and merged as `73d7851cff9e0d7efce711f022659db60cc39dd2`; long-running/queued parity, Playwright, Security, and container work was recorded explicitly at merge.
 - Source review confirmed `VideoPreviewCanvas.tsx` has no authored-transition evaluation path while the legacy renderer documents crossfade as an approximation, establishing the need for intentional canonical transition paint semantics rather than legacy copying.
-- PR #224 opened on `feat/video-wysiwyg-phase2-transition-paint`, defined cross-runtime fade/crossfade/dip-to-black paint weights and shared fixtures, and was ancestry-aligned with merged #222/current `main`.
+- PR #224 defined cross-runtime fade/crossfade/dip-to-black paint weights and shared fixtures, added a shared support predicate, passed its complete exact-head Quality/Security/container/platform assurance matrix, and merged as `86bd0af3924bb10d6c49c411176f72bcdc07b453`.
+- PR #225 opened on `feat/video-wysiwyg-phase2-frame-transition-paint`, consumed supported fade-family paint in visual FrameState, retained explicit slide/wipe/zoom paint debt, added mirrored integration tests, and was ancestry-aligned with merged #224/current `main` at `3272e0f0f053bb0e147c7d0a02cff1d6f5ff8a44`.
 
 ## Next recommended slice
 
-Finish PR #224 first, then continue immediately:
+Finish PR #225 first, then continue immediately:
 
-1. Complete exact-head Quality Gate/security/assurance validation and remediate any code, formatting, type, fixture, or review drift.
-2. Mark ready and merge #224 when validation is defensible, documenting any incomplete infrastructure separately.
-3. Start the FrameState transition-paint consumption slice: serialize supported paint instructions and remove `transition_paint:<id>` debt for fade/crossfade/dip-to-black while preserving debt for slide/wipe/zoom.
-4. Define slide/wipe/zoom paint geometry/composition next, then consume it in FrameState.
-5. Follow with effect-stack ordering/animation semantics and FrameState consumption.
-6. Continue Phase 0 production visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.
+1. Complete exact-head backend formatting/vet/tests/race and remaining Security/container/assurance validation; remediate any concrete failure.
+2. Mark ready and merge #225 when the normalized branch is clean, documenting only genuinely incomplete infrastructure if any remains.
+3. Define canonical slide paint first using the product's documented rule: slide in from the chosen edge and slide out through the opposite edge; specify one-sided and between-peer spatial offsets explicitly in canvas/content coordinates.
+4. Define wipe as a renderer-neutral reveal/clip geometry contract rather than inheriting sampled FFmpeg crop segments; define zoom as canonical scale/opacity paint rather than sampled segments.
+5. Consume slide/wipe/zoom paint in FrameState once each contract is explicit and cross-runtime tested.
+6. Follow with effect-stack ordering/animation semantics and FrameState consumption.
+7. Continue Phase 0 production visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.
