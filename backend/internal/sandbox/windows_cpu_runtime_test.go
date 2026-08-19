@@ -115,7 +115,7 @@ func TestWindowsJobCPUMonitorDescendantFanout(t *testing.T) {
 	if wait != windows.WAIT_OBJECT_0 {
 		t.Fatalf("CPU-limited root remained alive after Job termination: wait=%#x", wait)
 	}
-	info := windows.JOBOBJECT_BASIC_ACCOUNTING_INFORMATION{}
+	info := windowsJobBasicAccountingInformation{}
 	var returned uint32
 	if err := windows.QueryInformationJobObject(
 		job,
