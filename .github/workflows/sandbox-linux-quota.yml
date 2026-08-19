@@ -37,12 +37,16 @@ jobs:
           test -f /sys/fs/cgroup/cgroup.controllers
           grep -qw pids /sys/fs/cgroup/cgroup.controllers
           grep -qw memory /sys/fs/cgroup/cgroup.controllers
+          grep -qw cpu /sys/fs/cgroup/cgroup.controllers
           controllers=()
           if ! grep -qw pids /sys/fs/cgroup/cgroup.subtree_control; then
             controllers+=(+pids)
           fi
           if ! grep -qw memory /sys/fs/cgroup/cgroup.subtree_control; then
             controllers+=(+memory)
+          fi
+          if ! grep -qw cpu /sys/fs/cgroup/cgroup.subtree_control; then
+            controllers+=(+cpu)
           fi
           if [ "${#controllers[@]}" -gt 0 ]; then
             printf '%s ' "${controllers[@]}" | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null
@@ -55,7 +59,7 @@ jobs:
             "$root/cgroup.subtree_control" \
             "$root/cgroup.threads"
           printf 'OMNILLM_TEST_CGROUP_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
-      - name: Prove native Linux PID and memory quota boundaries
+      - name: Prove native Linux PID memory and CPU quota boundaries
         working-directory: backend
         shell: bash
         run: |
