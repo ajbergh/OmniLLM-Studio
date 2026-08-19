@@ -85,6 +85,12 @@ func TestEvaluateVisualFrameStateMatchesSharedFixture(t *testing.T) {
 			if layer.ContentBounds == nil || layer.ContentBounds.Width != 200 || layer.ContentBounds.Height != 100 {
 				t.Fatalf("content bounds = %+v", layer.ContentBounds)
 			}
+			if layer.MediaGeometry == nil || layer.MediaGeometry.ContractVersion != MediaGeometryContractV1 {
+				t.Fatalf("media geometry = %+v", layer.MediaGeometry)
+			}
+			if layer.MediaGeometry.PaintedBounds.Width != 200 || layer.MediaGeometry.PaintedBounds.Height != 100 {
+				t.Fatalf("painted bounds = %+v", layer.MediaGeometry.PaintedBounds)
+			}
 			if layer.Transform.Crop == nil || layer.Transform.Crop.Top != 0.1 || layer.Transform.Crop.Right != 0.2 {
 				t.Fatalf("crop = %+v", layer.Transform.Crop)
 			}
@@ -106,6 +112,9 @@ func TestVisualFrameStateSurfacesUnresolvedSemantics(t *testing.T) {
 	}
 	if len(state.Layers) != 1 || state.Layers[0].Authoritative {
 		t.Fatalf("layer authority = %+v", state.Layers)
+	}
+	if state.Layers[0].ContentBounds != nil || state.Layers[0].MediaGeometry != nil {
+		t.Fatalf("missing source provenance must not fabricate geometry: %+v", state.Layers[0])
 	}
 }
 
