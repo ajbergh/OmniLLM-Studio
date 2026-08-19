@@ -55,18 +55,16 @@ func windowsWorkspaceIdentity(info windows.ByHandleFileInformation) string {
 }
 
 func captureWorkspaceRootIdentity(path string) (string, error) {
-	handle, info, finalPath, err := openWindowsWorkspaceDirectory(path)
+	handle, info, _, err := openWindowsWorkspaceDirectory(path)
 	if err != nil {
 		return "", fmt.Errorf("open workspace root identity: %w", err)
 	}
 	defer windows.CloseHandle(handle)
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	if !windowsWorkspacePathEqual(absolute, finalPath) {
-		return "", fmt.Errorf("workspace root resolves to a different filesystem path")
-	}
+	// The persisted security boundary is the opened filesystem object identity,
+	// not the textual spelling of the path. Windows may expose the same object
+	// through an 8.3 alias, a long path, or another case-insensitive DOS spelling.
+	// openWindowsWorkspaceDirectory already rejects root reparse points before
+	// this identity is accepted.
 	return windowsWorkspaceIdentity(info), nil
 }
 
