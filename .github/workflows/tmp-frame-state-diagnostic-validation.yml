@@ -1,0 +1,126 @@
+name: Temporary Video FrameState diagnostic validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/video-wysiwyg-phase2-frame-state-diagnostics
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.13'
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - name: Format and test Go diagnostics
+        working-directory: backend
+        run: |
+          gofmt -w internal/video/frame_state_diagnostic.go internal/video/frame_state_diagnostic_test.go cmd/video-frame-state-diagnostic/main.go cmd/video-frame-state-diagnostic/main_test.go
+          go test ./internal/video ./cmd/video-frame-state-diagnostic -count=1
+          go vet ./internal/video ./cmd/video-frame-state-diagnostic
+      - name: Validate frontend diagnostics
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run test:unit
+          npm run build
+      - name: Install parity harness dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Exercise browser/Go diagnostic bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/output/video-frame-state-diagnostic-validation/runtime"
+          fixture="$GITHUB_WORKSPACE/output/video-frame-state-diagnostic-validation/fixture"
+          capture="$GITHUB_WORKSPACE/output/video-frame-state-diagnostic-validation/capture"
+          mkdir -p "$runtime/attachments" "$fixture" "$capture"
+          (
+            cd backend
+            go run ./cmd/video-parity-fixture --output-dir "$fixture" --generate-media
+          )
+          export OMNILLM_PORT=18091
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          (
+            cd backend
+            go run ./cmd/server >"$runtime/backend.log" 2>"$runtime/backend.err.log"
+          ) &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18091 npm run dev -- --host 127.0.0.1 --port 14174 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18091/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14174/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "diagnostic validation servers did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          node scripts/video-parity-capture.mjs \
+            --url http://127.0.0.1:14174 \
+            --fixture "$fixture/parity-torture-v1.json" \
+            --media-dir "$fixture/media" \
+            --output "$capture" \
+            --sample-limit 2
+          node scripts/video-frame-state-diagnostics.mjs \
+            --url http://127.0.0.1:14174 \
+            --fixture "$fixture/parity-torture-v1.json" \
+            --seed-result "$capture/seed-result.json" \
+            --output "$capture/frame-state-preview.json"
+          (
+            cd backend
+            go run ./cmd/video-frame-state-diagnostic \
+              --timeline "$capture/timeline-v1.json" \
+              --fixture "$fixture/parity-torture-v1.json" \
+              --preview "$capture/frame-state-preview.json" \
+              --output "$capture/frame-state-report.json"
+          )
+          node - <<'NODE'
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('output/video-frame-state-diagnostic-validation/capture/frame-state-report.json', 'utf8'));
+          if (!report.all_diagnostics_matched) throw new Error('FrameState diagnostics did not match');
+          if (report.matched_unavailable < 1) throw new Error('expected transition ambiguity to remain fail-closed');
+          console.log(JSON.stringify({ available_compared: report.available_compared, matched_unavailable: report.matched_unavailable, mismatched: report.mismatched }));
+          NODE
+      - name: Commit formatted Go files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/internal/video/frame_state_diagnostic.go backend/internal/video/frame_state_diagnostic_test.go backend/cmd/video-frame-state-diagnostic/main.go backend/cmd/video-frame-state-diagnostic/main_test.go
+          if git diff --cached --quiet; then
+            echo "No formatting changes to commit"
+            exit 0
+          fi
+          git diff --cached --check
+          git commit -m "style(video): format FrameState diagnostics"
+          git push origin HEAD:feat/video-wysiwyg-phase2-frame-state-diagnostics
