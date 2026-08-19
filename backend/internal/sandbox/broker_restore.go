@@ -50,3 +50,32 @@ func (b *Broker) RestoreSession(_ context.Context, session Session) error {
 	b.sessions[session.ID] = restored
 	return nil
 }
+
+// DestroyRecordedRuntime is the recovery-only cleanup path for a runtime whose
+// Broker mapping was lost during a control-plane restart. The durable task layer
+// supplies the exact owner/session/runtime association captured before Exec.
+// This method deliberately does not authorize by the in-memory session map: its
+// purpose is to destroy, never to execute in or widen authority to, a recovered
+// runtime.
+func (b *Broker) DestroyRecordedRuntime(ctx context.Context, owner OwnerScope, sessionID, runtimeID string) error {
+	if b == nil || b.runtime == nil {
+		return fmt.Errorf("sandbox broker is unavailable")
+	}
+	if owner.Empty() {
+		return fmt.Errorf("sandbox owner scope is required")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	runtimeID = strings.TrimSpace(runtimeID)
+	if sessionID == "" || runtimeID == "" || !strings.HasPrefix(sessionID, "sbx_") {
+		return fmt.Errorf("recorded sandbox session and runtime ids are required")
+	}
+	if err := b.runtime.Destroy(ctx, runtimeID); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	if existing, ok := b.sessions[sessionID]; ok && existing.Owner.Equal(owner) && existing.RuntimeID == runtimeID {
+		delete(b.sessions, sessionID)
+	}
+	b.mu.Unlock()
+	return nil
+}
