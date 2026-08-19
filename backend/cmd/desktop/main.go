@@ -115,6 +115,12 @@ func main() {
 		if err := sandboxTaskWorker.Start(context.Background()); err != nil {
 			log.Fatalf("recover/start durable sandbox task worker: %v", err)
 		}
+		go func() {
+			<-sandboxTaskWorker.Done()
+			if err := sandboxTaskWorker.Err(); err != nil {
+				log.Printf("[desktop] durable sandbox task worker stopped: %v", err)
+			}
+		}()
 	}
 	desktopPrefix := "/__desktop/" + desktopSecret
 	apiBase := fmt.Sprintf("http://127.0.0.1:%d%s/v1", apiPort, desktopPrefix)
