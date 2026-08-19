@@ -235,10 +235,16 @@ func compareJSONValue(path string, left, right any, mismatches *[]string) {
 			return
 		}
 		keys := make(map[string]struct{}, len(l)+len(r))
-		for key := range l { keys[key] = struct{}{} }
-		for key := range r { keys[key] = struct{}{} }
+		for key := range l {
+			keys[key] = struct{}{}
+		}
+		for key := range r {
+			keys[key] = struct{}{}
+		}
 		ordered := make([]string, 0, len(keys))
-		for key := range keys { ordered = append(ordered, key) }
+		for key := range keys {
+			ordered = append(ordered, key)
+		}
 		sort.Strings(ordered)
 		for _, key := range ordered {
 			lv, lok := l[key]
