@@ -37,6 +37,11 @@ jobs:
         run: |
           set -o pipefail
           go test ./internal/sandbox -run '^TestDarwinWorkspace(Grant|Legacy)' -count=10 -v 2>&1 | tee -a ../sandbox-macos-runtime.log
+      - name: Prove Darwin governed-workspace path-race resistance
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test ./internal/sandbox -run '^TestDarwinWorkspace(Read|Mutation|Search)' -count=10 -v 2>&1 | tee -a ../sandbox-macos-runtime.log
       - name: Upload macOS sandbox runtime diagnostics
         if: always()
         uses: actions/upload-artifact@v7
