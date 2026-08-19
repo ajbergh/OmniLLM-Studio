@@ -47,16 +47,20 @@ func EvaluateTransitionPaint(ownerClipID string, state EvaluatedTransitionState)
 	if state.ContractVersion != TransitionStateContractV1 {
 		return nil, fmt.Errorf("transition paint requires %s input", TransitionStateContractV1)
 	}
+	transitionID := strings.TrimSpace(state.ID)
+	if transitionID == "" {
+		return nil, fmt.Errorf("transition paint transition id must not be empty")
+	}
 	if !state.Active {
 		return nil, nil
 	}
 	if math.IsNaN(state.Progress) || math.IsInf(state.Progress, 0) || state.Progress < 0 || state.Progress > 1 {
-		return nil, fmt.Errorf("transition %q progress must be finite and within [0,1]", state.ID)
+		return nil, fmt.Errorf("transition %q progress must be finite and within [0,1]", transitionID)
 	}
 
 	paint := &EvaluatedTransitionPaint{
 		ContractVersion: TransitionPaintContractV1,
-		TransitionID:    state.ID,
+		TransitionID:    transitionID,
 		Type:            strings.ToLower(strings.TrimSpace(state.Type)),
 		Placement:       strings.ToLower(strings.TrimSpace(state.Placement)),
 		OwnerClipID:     ownerClipID,
@@ -143,7 +147,7 @@ func EvaluateTransitionPaint(ownerClipID string, state EvaluatedTransitionState)
 		}
 
 	default:
-		return nil, fmt.Errorf("transition %q type %q does not yet have canonical paint semantics", state.ID, state.Type)
+		return nil, fmt.Errorf("transition %q type %q does not yet have canonical paint semantics", transitionID, state.Type)
 	}
 }
 
@@ -163,7 +167,7 @@ func transitionPaintPairRoles(ownerClipID string, state EvaluatedTransitionState
 }
 
 func invalidTransitionPaintState(state EvaluatedTransitionState, message string) error {
-	return fmt.Errorf("transition %q: %s", state.ID, message)
+	return fmt.Errorf("transition %q: %s", strings.TrimSpace(state.ID), message)
 }
 
 func transitionPaintFloat(value float64) *float64 {
