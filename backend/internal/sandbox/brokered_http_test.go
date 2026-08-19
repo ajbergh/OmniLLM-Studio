@@ -145,10 +145,18 @@ func TestSafeBrokeredHTTPResponseHeadersDropsCredentialState(t *testing.T) {
 		"Etag":          []string{"abc"},
 	}
 	safe := safeBrokeredHTTPResponseHeaders(headers)
-	if got := safe.Get("Content-Type"); got != "application/json" {
+	if got := firstHeaderValue(safe, "Content-Type"); got != "application/json" {
 		t.Fatalf("Content-Type = %q", got)
 	}
-	if safe.Get("Set-Cookie") != "" || safe.Get("Authorization") != "" {
+	if firstHeaderValue(safe, "Set-Cookie") != "" || firstHeaderValue(safe, "Authorization") != "" {
 		t.Fatalf("unsafe response headers leaked: %#v", safe)
 	}
+}
+
+func firstHeaderValue(headers map[string][]string, key string) string {
+	values := headers[http.CanonicalHeaderKey(key)]
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
