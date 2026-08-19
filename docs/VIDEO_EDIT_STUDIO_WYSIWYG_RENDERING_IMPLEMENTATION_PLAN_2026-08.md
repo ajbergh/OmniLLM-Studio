@@ -2,348 +2,264 @@
 
 **Status:** In progress  
 **Last updated:** 2026-08-19  
-**Scope:** Video Edit Studio preview, timeline evaluation, render jobs, visual composition, audio mix, export, validation, packaging, and parity testing  
+**Scope:** Video Edit Studio preview, timeline evaluation, render jobs, visual composition, audio mix, export, validation, packaging, and parity testing.  
 **Primary goal:** The authoritative editor preview and final decoded export must represent the same immutable timeline revision with identical frame identity, active-layer ordering, timing, geometry, styling, effects, transitions, camera state, and audio decisions.
 
-> This is the durable execution tracker for WYSIWYG rendering. Every implementation PR in this program must update current status, validation evidence, risks, and the next recommended slice before merge.
+> This is the durable execution tracker for the WYSIWYG rendering program. Every implementation PR in this program must update current status, validation evidence, risks, and the next recommended slice before merge.
 
 ## Current handoff
 
-Merged geometry foundation: **PR #209 — Canonicalize media fit and crop geometry** — `6365b3dcc13fac0726e7407735c2a6b5664e0d1a`.  
-Merged FrameState geometry integration: **PR #212 — Consume canonical media geometry in FrameState** — `ae29d57e2e7d4e94e298bb155501583f4577e1ed`.  
-Merged perspective foundation: **PR #218 — Define canonical perspective projection contract** — `0bf0ffc897589d71d2f62d75e18b63319bd59fae`.  
-Merged transition-state foundation: **PR #220 — Define canonical transition placement and peer state** — `1bbbabed5185cbe44640426aad1ab141b59d50cc`.  
-Merged FrameState transition integration: **PR #222 — Consume canonical transition state in visual FrameState** — `73d7851cff9e0d7efce711f022659db60cc39dd2`.  
-Merged fade-family paint foundation: **PR #224 — Define canonical fade-family transition paint** — `86bd0af3924bb10d6c49c411176f72bcdc07b453`.  
-Current canonical-contract PR: **#225 — Consume canonical fade-family transition paint in FrameState**.  
-Current branch: `feat/video-wysiwyg-phase2-frame-transition-paint`.
+Latest merged WYSIWYG PR: **#225 — Consume canonical fade-family transition paint in FrameState** — `a6f9145f92e2342dfa70144a4058bf10f64625da`.
 
-PR #208 merged as `52683e4d25b22f70e5c6c3b4a8cf3417240be4bc`. It added permanent browser/TypeScript ↔ Go visual FrameState diagnostics to the deterministic Video renderer parity baseline without changing compositor behavior. Focused hosted run `32200543950` passed Go tests/vet, frontend lint/unit/build, 103/103 matching fail-closed saved-timeline diagnostics, and 103/103 matching available transition-free control states. Final-head frontend, dependency audit, and JavaScript/TypeScript CodeQL passed. Go CodeQL/backend runners remained in system-package setup and were recorded as infrastructure-only incomplete checks rather than green.
+Current PR: **#227 — Define and consume canonical slide transition paint**.  
+Current branch: `feat/video-wysiwyg-phase2-slide-transition-paint`.  
+Clean rebuild code head: `46e8f66ceb6bb079fdd51a26cf578a6d73fa0c88`.
 
-PR #209 established `media-geometry-v1` in Go and TypeScript with a shared fixture. It defines `contain`, `cover`, `fill`, and `none`; applies `mask_source_crop` in source coordinates before fit; applies `transform.crop` to the output viewport; and refuses to infer source aspect ratio from the canvas when `content_bounds` is absent. Its corrected head `3e11a21a1ea105060a8484de7ee98c2a60c9cc8d` passed formatting, Go vet, backend unit/integration tests, race detector, frontend lint/unit/build, Windows/macOS contract jobs, Security Scan, and relevant sandbox assurance before merge. Preview and FFmpeg composition were unchanged.
+PR #227 was rebuilt from the actual post-#225 `main` tree rather than retaining its original stacked ancestry. `compare main...branch` shows one commit ahead, zero behind, and exactly eight slide-specific files. The tracker update is the only additional intended file before merge.
 
-PR #212 integrated `media-geometry-v1` into `visual-frame-state-v1`. It removed the canvas-sized source-bounds fallback for asset-backed clips, attached canonical evaluated media geometry when explicit source bounds exist, used painted media bounds for anchor-space geometry, and reported `media_geometry:content_bounds` when source provenance is absent. Final-head backend formatting/vet/tests/race, frontend lint/unit/performance/build, deterministic renderer parity, Security Scan, container build, and platform assurance jobs passed. The repository-wide Playwright job never reached application setup/tests and remained in `Install system dependencies`; that setup-only incompleteness was explicitly documented before merge and was not represented as green. Preview and FFmpeg composition remained unchanged.
+The next two transition slices already exist as stacked draft PRs and must be normalized with the same safe replay method after each parent merges:
 
-PR #218 established `perspective-projection-v1` and projects it into visual FrameState. It preserves the current preview's 1200-canvas-pixel projection distance when no scene camera is active and derives distance from evaluated FOV when an authored scene camera is active. A positive per-clip `transform.perspective` overrides the inherited projection distance, while zero/omitted clip perspective inherits it. The canonical projection is a homogeneous CSS-style matrix with `w = 1 - z/d` in the existing row-major/column-vector convention. `model_matrix` remains the camera-relative model transform and perspective is represented separately as `perspective_projection`, avoiding a silent reinterpretation of the existing matrix field. The code-identical pre-normalization head completed backend formatting, vet, unit/integration tests, and race; the final merge head was ancestry-aligned with current `main` after PR #219's CI-only bounded-installer change. Exact-head repository jobs remained queued with zero steps started because several concurrent sandbox PRs saturated runner capacity, so that incompleteness was explicitly documented rather than represented as green. No review threads remained, the final diff was reviewed against current `main`, and preview/FFmpeg composition remained unchanged.
+- **#228 — Define and consume canonical wipe transition paint**.
+- **#229 — Define and consume canonical zoom transition paint**.
 
-PR #220 established `transition-state-v1` as a renderer-independent transition timing/ownership contract. It evaluates explicit `in`, `out`, and `between` placement, requires real overlap and an explicit peer for `between`, records owner/peer incoming/outgoing roles, uses canonical half-open output-frame windows and exact frame-presentation progress, defaults slide/wipe direction consistently with the current renderer, and fails closed on unknown runtime transition semantics. Its exact-head repository workflows remained queued with zero steps started behind the shared runner backlog; that was documented explicitly. The core evaluator was independently exercised in a minimal Go harness and strictly type-checked in a minimal TypeScript harness, the final diff/review state was clean, and #220 merged as `1bbbabed5185cbe44640426aad1ab141b59d50cc` without claiming unexecuted hosted checks were green.
-
-PR #222 consumes `transition-state-v1` in `visual-frame-state-v1`. Each visual layer carries its evaluated transition timing/peer state. The old clip-wide `transitions` unresolved marker is removed; only an active transition adds precise `transition_paint:<id>` debt for that sampled frame. Exact-head backend formatting/vet/tests/race and frontend lint/unit/performance/build passed, as did Windows/macOS contracts, Helm, Linux workspace/quota assurance, macOS runtime/extension/adversarial assurance, and browser-egress assurance. The deterministic parity lane had cleared setup and fixture generation and remained in immutable snapshot capture at merge; Playwright and Security Scan remained queued and the container build remained in progress. Those incomplete jobs were documented rather than represented as green. #222 merged as `73d7851cff9e0d7efce711f022659db60cc39dd2`.
-
-PR #224 established renderer-independent fade-family paint semantics instead of inheriting current gaps or legacy FFmpeg approximations. `transition-paint-v1` defines one-sided fade opacity, true two-input crossfade contribution weights, and dip-to-black contribution weights with a full-black midpoint. A shared paint-support predicate lets downstream evaluators distinguish unsupported families from invalid state inside a supported family. Exact head `3818625fbf97f79427a55675736a2be930360c40` passed Quality Gate, Security Scan, container build, Linux workspace/quota assurance, macOS runtime/extension/adversarial assurance, and browser-egress assurance with no review threads, then merged as `86bd0af3924bb10d6c49c411176f72bcdc07b453`. Preview and FFmpeg composition remained unchanged.
-
-PR #225 consumes supported fade-family paint in visual FrameState. Each visual layer can serialize canonical `transition_paint` instructions. Active fade/crossfade/dip-to-black paint no longer creates unresolved debt; active slide/wipe/zoom still emits `transition_paint:<id>` until those families receive canonical paint semantics. Supported-but-invalid transition paint fails the frame evaluation rather than being relabeled unsupported. Its first tracker-complete Quality Gate exposed one stale PR #222 regression assertion that still expected fade/crossfade paint debt; production behavior was correct and the obsolete test expectation was remediated. A subsequent branch-history audit then found that the earlier manual ancestry-alignment commit had made current `main` an ancestor without actually merging its tree, which would have reverted unrelated sandbox-worker files. The branch was therefore rebuilt safely from the real `main` tree, replaying only the six intended WYSIWYG files. Clean reconstruction head `ee3b582dd11d50f2d48cb305c067867b42de21a5` is one commit ahead of `main`, zero behind, and `compare main...branch` contains only those six intended files with no unrelated reversions.
-
-## Merged WYSIWYG foundations
-
-- PR #187 — immutable render submission and deterministic parity baseline — `3cbe6ba81dde384ff1c6073537e3d9b71ed8d0b0`.
-- PR #191 — Timeline v2 / Render Manifest v1 plus canonical frame/source/easing primitives — `aabbb31288277287673cbed8546c9eb3f38588e4`.
-- PR #193 — canonical cubic-Bezier and spring evaluation — `3bed9faf8a868b3a125c25cb141769bfcd7861d2`.
-- PR #194 — mechanically checked Go/TypeScript schema projections and contract constants — `62e2180b5153be505fac650cd41b3a0e2d951783`.
-- PR #195 — Timeline v1 → canonical Timeline v2 compatibility adapter — `b5f76aa6328240a6b516d768756c34f68e6fdedb`.
-- PR #196 — canonical frame activity, range mapping, source time, and stable clip ordering — `42dd64cda9feb75a637b622bf33ac1350a4febd9`.
-- PR #198 — evaluator-scoped Timeline v2 runtime normalization/defaulting — `67982f4fdd80062c9439c528362f75382e5c3268`.
-- PR #199 — canonical preview/index ordering adoption — `19a1a7b635afd33954bc56ed6023845f2c9e3fd1`.
-- PR #202 — deterministic frame-addressed preview/source selection — `02a1bbf4ec2b640a57d59fdd67f7906ae03eaa91`.
-- PR #204 — canonical backend diagnostic/parity frame callers — `73fa7d78b5018eb19b88abc34790fd19e95a5a98`.
-- PR #205 — canonical numeric property/keyframe evaluation — `8a93f9ff90eeda92c944085715856907747584f1`.
-- PR #206 — exact-frame visual FrameState foundation — `c37ba2ed8132133cc913531946d462c3b7b38911`.
-- PR #208 — canonical cross-runtime FrameState parity diagnostics — `52683e4d25b22f70e5c6c3b4a8cf3417240be4bc`.
-- PR #209 — canonical media fit/crop/source-bounds geometry — `6365b3dcc13fac0726e7407735c2a6b5664e0d1a`.
-- PR #212 — canonical media geometry consumption in FrameState — `ae29d57e2e7d4e94e298bb155501583f4577e1ed`.
-- PR #218 — canonical perspective projection consumption in FrameState — `0bf0ffc897589d71d2f62d75e18b63319bd59fae`.
-- PR #220 — canonical transition placement/peer state — `1bbbabed5185cbe44640426aad1ab141b59d50cc`.
-- PR #222 — canonical transition-state consumption in FrameState — `73d7851cff9e0d7efce711f022659db60cc39dd2`.
-- PR #224 — canonical fade/crossfade/dip-to-black transition paint — `86bd0af3924bb10d6c49c411176f72bcdc07b453`.
-
-Security unblock during this program:
-
-- PR #201 replaced reachable-vulnerable `github.com/ledongthuc/pdf` with `github.com/tsawler/tabula v1.6.14` — `57cb7764a73203fc1194dbe51992e7ee4779817f`.
-
-CI reliability unblock during this program:
-
-- PR #219 bounded/retried Linux dependency installation and Playwright bootstrap and added job-level timeouts — `a33b32697019b144c9a7d6c7fec277e1cde101b4`.
+No preview or FFmpeg compositor behavior changes are included in #225/#227/#228/#229. These are canonical-state slices preparing Phase 3 shared composition.
 
 ## Phase tracker
 
-| Phase | Status | Progress |
+| Phase | Status | Progress / exit work |
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame activity/range/source/order, runtime normalization, deterministic frame addressing, backend callers, property/keyframe evaluation, visual FrameState, cross-runtime diagnostics, media geometry, perspective projection, transition placement/peer state, FrameState transition-state consumption, and fade/crossfade/dip-to-black paint are merged. PR #225 consumes those supported paint instructions in FrameState. Slide/wipe/zoom paint is implemented in stacked PRs #227/#228/#229 and will be normalized safely onto `main` after each parent merges. Effects, text/shape/cursor state, and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, transition state, and fade/crossfade/dip-to-black paint are merged. #227 adds slide; #228 adds wipe; #229 adds zoom. Effects, text/shape/cursor state, remaining provenance edges, and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
-| Phase 5 — Visual parity closure | Not started | Close geometry, text, crop/fit, anchors/transforms/2.5D/camera/z-order, opacity/blending, effects, transitions, cursor, camera, color, and deterministic asset-loading parity. |
-| Phase 6 — Audio parity closure | Not started | Shared AudioGraph/processed-stem architecture, rate/pitch policy, gain/fades/channel mapping, and decoded-delivery verification. |
-| Phase 7 — Rollout and legacy retirement | Not started | Shadow comparison, staged default switch, rollback, telemetry, and eventual removal of legacy composition semantics. |
+| Phase 5 — Visual parity closure | Not started | Close text, shapes, effects, transitions, cursor, camera, color, asset loading, and decoded visual thresholds. |
+| Phase 6 — Audio parity closure | Not started | Shared AudioGraph/processed-stem architecture, rate/pitch policy, gain/fades/channel mapping, processing, and decoded-delivery verification. |
+| Phase 7 — Rollout and legacy retirement | Not started | Shadow comparison, staged default switch, rollback, telemetry, capability/docs updates, and eventual removal of legacy composition semantics. |
 
-## Architectural rules
+## Canonical architecture rules
 
-### Preview remains the Timeline v1 compatibility target
+### Immutable frame identity
 
-Current editor preview semantics are the Timeline v1 compatibility target unless an intentional behavior correction is introduced through a versioned contract change. The legacy FFmpeg compositor is not semantic authority merely because it already exports media. Where an authorable feature has no real preview implementation yet, the canonical contract must define the intended product behavior explicitly rather than treating absence as semantics.
-
-### Freeze legacy approximation growth
-
-Do not add approximation-only semantics to the legacy FFmpeg compositor during Phases 2–4 except for correctness/security regressions. New WYSIWYG behavior belongs in the canonical contract and shared composition path.
+1. `frameIndex` is integer output-frame identity.
+2. Frame time is rational `frameIndex / fps`; deterministic rendering does not round-trip through integer milliseconds.
+3. Authored starts map with `floor(ms × fps / 1000)`; authored ends are exclusive and map with `ceil(ms × fps / 1000)`.
+4. Active visual ordering is stable `(track array index, z_index, clip array index)`.
+5. Source time comes from one canonical evaluator using frame identity, clip start, trim-in, and playback rate.
+6. Keyframe segments use the later keyframe's easing/curve.
 
 ### Renderer-independent canonical core
 
-Canonical evaluators must be pure, deterministic, serializable, free of media/browser/FFmpeg/filesystem/network I/O, usable by preview and export, and fail closed on unknown authorable semantics.
+Canonical evaluators must be pure, deterministic, serializable, free of browser/FFmpeg/filesystem/network I/O, usable by preview and export, and fail closed whenever an authorable value does not have explicit canonical semantics.
 
-### Canonical timing and ordering
+The legacy FFmpeg compositor is implementation evidence, not semantic authority. Preview behavior is the Timeline v1 compatibility target where it is actually implemented. Where preview lacks an authorable feature, the canonical contract defines the intended behavior explicitly rather than treating absence as semantics.
 
-1. `frameIndex` is integer output-frame identity.
-2. Frame time is rational `frameIndex / fps`; deterministic rendering must not round-trip through integer milliseconds.
-3. Authored starts map with `floor(ms × fps / 1000)`; authored ends are exclusive and map with `ceil(ms × fps / 1000)`.
-4. Stable clip order is `(track array index, z_index, clip array index)`.
-5. Source time is derived from output-frame identity, clip start, trim-in, and playback rate in one canonical evaluator.
-6. A keyframe segment uses the later keyframe's easing/curve.
-7. Composition matrices, anchors, crop/fit, perspective, camera, transitions, effects, text bounds, cursor state, and color-space assumptions must become explicit FrameState semantics rather than renderer inference.
+### Media geometry
 
-### Media-geometry authority
+`media-geometry-v1` is authoritative for asset geometry:
 
-For asset-backed media, source aspect ratio is semantic input. `content_bounds` (or a future explicitly versioned source-probe projection) must provide that source box. The canonical evaluator must not substitute output-canvas dimensions for missing source dimensions. `mask_source_crop` operates before fit; `transform.crop` is a separate output clip box. This ordering is captured by `media-geometry-v1`, and PR #212 projects the evaluated geometry into visual FrameState rather than leaving fit/crop to renderer inference.
+- asset source aspect ratio requires explicit `content_bounds` or a future explicitly versioned source-probe projection;
+- source dimensions are never guessed from the output canvas;
+- `mask_source_crop` operates in source coordinates before fit;
+- `contain`, `cover`, `fill`, and `none` are canonical fit modes;
+- `transform.crop` is a separate post-fit output viewport clip;
+- FrameState carries evaluated painted bounds and source provenance;
+- missing source provenance remains explicit unresolved state.
 
-### Perspective authority
+### Perspective and stacking
 
-Perspective is projection state, not stacking state. `z_index`/track ordering remains authoritative for paint order; spatial `z` affects camera-relative projection only. `perspective-projection-v1` inherits the preview-compatible 1200-canvas-pixel distance when no scene camera is active, uses the evaluated camera FOV distance when an authored scene camera is active, and permits a positive `transform.perspective` to override the inherited distance. Zero or omitted clip perspective inherits projection. FrameState preserves the camera-relative `model_matrix` and serializes perspective separately so preview/export consumers can apply the same projection without inferring CSS or FFmpeg-specific behavior.
+Perspective is projection state, not paint order. Track/z-index order remains authoritative for stacking; spatial `z` affects projection.
 
-### Transition authority
+`perspective-projection-v1`:
 
-Transition placement is explicit canonical state rather than an inferred property of clip adjacency. `in` and `out` transitions are clipped to the authored owner boundary. `between` requires an explicit distinct `peer_clip_id` and enough real owner/peer temporal overlap for the authored transition duration; the canonical evaluator does not invent source handles or cross-clip adjacency. Transition windows use canonical half-open frame mapping, progress is sampled at exact output-frame presentation time, and owner/peer incoming/outgoing roles are serialized. FrameState carries the complete evaluated transition state for each visual layer, but unresolved visual debt is frame-scoped: only a transition whose `active` flag is true adds `transition_paint:<id>`. Inactive authored transitions do not make the whole clip non-authoritative.
+- preserves the preview-compatible 1200-canvas-pixel distance with no scene camera;
+- derives projection distance from evaluated scene-camera FOV when a camera is active;
+- allows a positive per-clip perspective override;
+- preserves `model_matrix` as camera-relative model transform and serializes projection separately.
 
-### Transition paint authority
+### Transition timing/ownership
 
-Transition paint is composition state, not renderer-local shorthand. `transition-paint-v1` defines `fade` as one-sided owner opacity for `in`/`out`, `crossfade` as a true two-input linear blend requiring `between`, and `dip_to_black` as outgoing/black/incoming contribution weights with full black at progress `0.5`. Crossfade contribution weights must be consumed as a pair-composition operation; applying them as two ordinary stacked alpha opacities would produce a different image and is not canonical. Dip-to-black likewise carries an explicit black contribution rather than being approximated as a simple fade. Inactive transitions produce no paint. FrameState consumes supported fade-family paint instructions directly and remains authoritative for those transition frames when no other unresolved feature is active. On PR #225, slide/wipe/zoom still remain explicit `transition_paint:<id>` debt; stacked PRs #227/#228/#229 define those families without changing the preview/FFmpeg compositor yet. Invalid state within a supported paint family fails closed instead of being downgraded to unsupported.
+`transition-state-v1` makes placement explicit:
+
+- `in` is bounded by the owner start;
+- `out` is bounded by the owner end;
+- `between` requires an explicit, distinct peer and sufficient real temporal overlap;
+- no hidden source handles or inferred adjacency are invented;
+- owner/peer incoming/outgoing roles are explicit;
+- windows use canonical half-open frame mapping;
+- progress is sampled at exact frame presentation time;
+- inactive authored transitions do not make unrelated frames non-authoritative.
+
+### Transition paint
+
+`transition-paint-v1` is composition state, never renderer-local shorthand.
+
+Merged semantics:
+
+- `fade`: one-sided owner opacity for `in`/`out`.
+- `crossfade`: true isolated-surface pair blend using outgoing `1-progress` and incoming `progress`; these are pair-composition weights, not two ordinary stacked alpha values.
+- `dip_to_black`: explicit outgoing/black/incoming contribution weights with full black at `progress=0.5`.
+
+Current #227 slide semantics:
+
+- direction names the **entry edge**;
+- translation space is `canvas-fraction`;
+- `left` slide-in moves X `-1 → 0`; `right` moves `+1 → 0`; `up` moves Y `-1 → 0`; `down` moves `+1 → 0`;
+- `out` exits through the opposite edge;
+- `between` moves outgoing toward the opposite edge while incoming enters from the chosen edge;
+- slide does not implicitly change opacity;
+- FrameState consumes the resulting paint through the same support/evaluation path and remains authoritative when no other unresolved family is active.
+
+Prepared #228 wipe semantics:
+
+- direction names the reveal/entry edge;
+- wipe clips the isolated layer surface in normalized `layer-fraction` space;
+- `in` reveals from the selected edge;
+- `out` shrinks toward the opposite edge;
+- `between` preserves outgoing as the underlying isolated surface while revealing the incoming peer over it;
+- all four clip insets are explicit, including zero values;
+- the legacy sampled FFmpeg crop segments are not semantic authority.
+
+Prepared #229 zoom semantics:
+
+- scale is a multiplier of the isolated layer's already-evaluated authored scale around its existing anchor;
+- scale space is `layer-multiplier`;
+- continuous scale envelope is `0.82 + 0.18 * ease-out(q)` using the shared canonical easing evaluator instead of sampled fidelity segments;
+- `in`: `q=progress`, owner opacity=`progress`;
+- `out`: `q=1-progress`, owner opacity=`1-progress`;
+- `between`: true pair weights plus outgoing scale at `q=1-progress` and incoming scale at `q=progress`;
+- zoom has no direction.
+
+Once #229 is merged, every currently authorable Timeline v2 transition type has canonical paint semantics and FrameState consumption. Phase 3 consumers must apply pair operations to isolated surfaces; they must not reinterpret pair paint as independent stacked layer opacity/transform.
 
 ### Safe stacked-branch normalization
 
-A stacked PR must be normalized by replaying only its intended file delta onto the actual current `main` tree after its parent merges. Do not manufacture ancestry by attaching `main` as a second parent while retaining a stale feature tree: that can silently revert unrelated files even when Git reports the branch as not behind. Before every merge, `compare main...branch` must show only the intended program files.
+A stacked PR must be rebuilt from the **actual current `main` tree** after its parent merges.
+
+Required procedure:
+
+1. Read current `main` commit and tree SHA from GitHub.
+2. Identify only the intended child-delta blobs/files.
+3. Create a new tree using current `main` as `base_tree_sha` plus those child blobs.
+4. Create a new commit whose only parent is current `main`.
+5. Force-update the child branch to the clean commit and retarget its PR to `main`.
+6. Run `compare main...branch` and verify there are no unrelated changes/deletions.
+7. Update this tracker on the clean branch.
+8. Validate the exact final head before merge.
+
+**Do not** manufacture ancestry by making a stale feature tree a merge commit with `main` as an additional parent. That mistake was caught on #225 before merge and would have silently reverted unrelated sandbox-worker files despite Git reporting current ancestry.
 
 ## Phase 0 evidence and remaining sign-off
 
 The deterministic `parity-torture-v1` fixture covers 20 seconds at 640×360/30 fps with 103 named frame samples spanning boundaries, rates, transforms, curves, text, shapes, effects, transitions, camera, captions, cursor, and audio.
 
-Retained evidence `32074904557` / artifact `9303432653` established exact frame/audio/delivery identity mechanics. The visual baseline remains intentionally a known-mismatch baseline; it is diagnostic evidence of architectural divergence, not a production visual threshold.
+Retained evidence `32074904557` / artifact `9303432653` established exact frame/audio/delivery identity mechanics. The visual baseline remains intentionally a known-mismatch diagnostic baseline, not a production threshold.
 
 Remaining Phase 0 sign-off:
 
 1. Freeze production visual threshold policy and zero-tolerance structural regions.
 2. Define unsupported-audio policy for pitch preservation, custom gain curves, and program processing until Phase 6.
 3. Run full evidence on a second supported OS/FFmpeg environment and record deltas.
-4. Keep the fixture runnable through Phases 2–7.
+4. Keep the fixture runnable throughout Phases 2–7.
 
 ## Phase 1 — Immutable submission
 
-**Complete.** A queued render is bound to one immutable timeline revision/hash and immutable source bytes. Snapshot identity, source staging, decode preflight, recovery, stale-request rejection, and Strict Parity diagnostics are production foundations for later parity work.
+**Complete.** A queued render is bound to one immutable timeline revision/hash and immutable source bytes. Snapshot identity, staged source bytes, decode preflight, recovery, stale-request rejection, Strict Parity diagnostics, and frontend dirty/concurrency behavior are production foundations for later parity work.
 
 ## Phase 2 — Canonical contract
 
-### Merged capabilities
+### Merged foundations
 
-- Timeline v2 / Render Manifest v1 schemas and mechanically checked Go/TypeScript projections.
-- Rational frame identity, half-open activity, source-time mapping, canonical ordering, and deterministic frame-addressed preview/backend callers.
-- Shared built-in easing, cubic-Bezier, spring, numeric property, and exact-frame clip/camera sampling.
-- Fail-closed Timeline v1 → v2 compatibility adapter and evaluator-scoped Timeline v2 normalization.
-- `visual-frame-state-v1` with explicit unresolved feature families.
-- Permanent `visual-frame-state-diagnostic-v1` browser/TypeScript ↔ Go comparison in the Video renderer parity baseline.
-- `media-geometry-v1` with explicit source-bounds provenance, contain/cover/fill/none fit, source masking, and output crop.
-- FrameState consumption of canonical media geometry with no canvas-sized source-bounds fallback.
-- `perspective-projection-v1` with preview-compatible no-camera projection, FOV-derived scene-camera projection, per-clip override, and FrameState consumption.
-- `transition-state-v1` with explicit in/out/between placement, peer ownership/roles, exact-frame progress, runtime fail-closed validation, and FrameState consumption with frame-scoped unresolved paint debt.
-- `transition-paint-v1` for fade/crossfade/dip-to-black with true pair-composition and explicit black contribution semantics.
+| PR | Capability | Merge SHA |
+|---|---|---|
+| #187 | Immutable render submission and deterministic parity baseline | `3cbe6ba81dde384ff1c6073537e3d9b71ed8d0b0` |
+| #191 | Timeline v2 / Render Manifest v1; canonical frame/source/easing primitives | `aabbb31288277287673cbed8546c9eb3f38588e4` |
+| #193 | Canonical cubic-Bezier and spring evaluation | `3bed9faf8a868b3a125c25cb141769bfcd7861d2` |
+| #194 | Mechanically checked Go/TypeScript schema projections/constants | `62e2180b5153be505fac650cd41b3a0e2d951783` |
+| #195 | Timeline v1 → canonical Timeline v2 adapter | `b5f76aa6328240a6b516d768756c34f68e6fdedb` |
+| #196 | Canonical frame activity, range, source time, ordering | `42dd64cda9feb75a637b622bf33ac1350a4febd9` |
+| #198 | Evaluator-scoped Timeline v2 runtime normalization | `67982f4fdd80062c9439c528362f75382e5c3268` |
+| #199 | Canonical preview/index ordering adoption | `19a1a7b635afd33954bc56ed6023845f2c9e3fd1` |
+| #202 | Deterministic frame-addressed preview/source selection | `02a1bbf4ec2b640a57d59fdd67f7906ae03eaa91` |
+| #204 | Canonical backend diagnostic/parity frame callers | `73fa7d78b5018eb19b88abc34790fd19e95a5a98` |
+| #205 | Canonical numeric property/keyframe evaluation | `8a93f9ff90eeda92c944085715856907747584f1` |
+| #206 | Exact-frame `visual-frame-state-v1` foundation | `c37ba2ed8132133cc913531946d462c3b7b38911` |
+| #208 | Permanent Go↔TypeScript FrameState parity diagnostics | `52683e4d25b22f70e5c6c3b4a8cf3417240be4bc` |
+| #209 | Canonical media fit/crop/source-bounds geometry | `6365b3dcc13fac0726e7407735c2a6b5664e0d1a` |
+| #212 | Media geometry consumption in FrameState | `ae29d57e2e7d4e94e298bb155501583f4577e1ed` |
+| #218 | Canonical perspective projection + FrameState consumption | `0bf0ffc897589d71d2f62d75e18b63319bd59fae` |
+| #220 | Canonical transition placement/peer state | `1bbbabed5185cbe44640426aad1ab141b59d50cc` |
+| #222 | Transition-state consumption and frame-scoped paint debt | `73d7851cff9e0d7efce711f022659db60cc39dd2` |
+| #224 | Canonical fade/crossfade/dip-to-black paint | `86bd0af3924bb10d6c49c411176f72bcdc07b453` |
+| #225 | Fade-family transition-paint consumption in FrameState | `a6f9145f92e2342dfa70144a4058bf10f64625da` |
 
-### Merged PR #208 — FrameState parity diagnostics
+Security unblock during the program:
 
-Implemented:
+- #201 replaced reachable-vulnerable `github.com/ledongthuc/pdf` with `github.com/tsawler/tabula v1.6.14` — `57cb7764a73203fc1194dbe51992e7ee4779817f`.
 
-- matching serializable browser/TypeScript and Go diagnostic envelopes around the fail-closed v1 adapter and visual FrameState evaluator;
-- exact saved-timeline/frame sample comparison with `1e-9` numeric tolerance for available state;
-- semantic code/path comparison for unavailable state;
-- stable quantized SHA-256 state fingerprints;
-- a transition-free diagnostic control so CI exercises actual representable FrameState values while v1 transition ambiguity remains fail closed;
-- permanent Quality Gate integration with diagnostic reports retained in the existing parity artifact.
+CI reliability unblock:
 
-A CodeQL review finding on an overflow-prone `len(left)+len(right)` map-capacity hint was fixed before merge by removing the combined untrusted-capacity preallocation. No unresolved review threads remained at merge.
+- #219 bounded/retried Linux dependency installation and Playwright bootstrap and added job-level timeouts — `a33b32697019b144c9a7d6c7fec277e1cde101b4`.
 
-### Merged PR #209 — canonical media geometry foundation
+### Current PR #227 — canonical slide paint
 
-Implemented:
+Implemented on clean branch head `46e8f66ceb6bb079fdd51a26cf578a6d73fa0c88` before this tracker commit:
 
-- `backend/internal/video/rendercontract/media_geometry.go` and `frontend/src/video/renderContractMediaGeometry.ts` define matching `media-geometry-v1` evaluators;
-- `contain`: uniform scale by the smaller viewport/source ratio;
-- `cover`: uniform scale by the larger ratio;
-- `fill`: independent X/Y scale to the viewport;
-- `none`: source pixels remain 1:1 and are centered;
-- `mask_source_crop` reduces the explicit source box before fit;
-- `transform.crop` produces a distinct output clip box after fit;
-- collapsed/invalid crop regions fail closed;
-- missing explicit source/content bounds fail closed instead of guessing the source aspect ratio;
-- `video-renderer/test/fixtures/media-geometry-v1.json` is shared by Go and TypeScript tests and covers every fit mode plus source-mask/output-crop composition;
-- initial Quality Gate formatting drift was corrected before merge;
-- corrected-head formatting, Go vet, backend unit/integration tests, race detector, frontend lint/unit/build, Security Scan, and relevant sandbox/desktop contract checks were green before merge.
+- Go/TypeScript `transition-paint-v1` adds `owner-translate`, `pair-slide`, and `canvas-fraction` translation space.
+- Explicit owner/outgoing/incoming X/Y offsets are serialized; zero axes are explicit rather than inferred.
+- The shared support predicate now includes slide.
+- `transition-paint-v1.json` includes slide-in from left, slide-out through the opposite edge, and between/up pair movement.
+- Invalid slide directions fail closed.
+- Existing FrameState paint-consumption tests now prove frame 65's 50% `slide-out` resolves to `(0.5, 0)` and restores authority.
+- The older frame-scoping regression test is updated so slide is no longer unresolved in this slice.
+- `compare main...branch` before this docs commit contained exactly eight intended slide files; no unrelated branch-history changes remained.
 
-Preview and FFmpeg compositor behavior were unchanged.
+Validation status before this tracker commit:
 
-### Merged PR #212 — FrameState media geometry integration
+- fresh hosted exact-head jobs were queued behind repository runner demand;
+- no code failure had been reported;
+- the branch had not yet been marked ready or merged.
 
-Implemented:
+Remaining before #227 merge:
 
-- Go and TypeScript FrameState layers expose matching optional canonical `media_geometry` state;
-- asset-backed clips no longer receive fabricated canvas-sized `content_bounds`;
-- explicit source bounds are evaluated through the shared `media-geometry-v1` contract;
-- missing asset source bounds produce `media_geometry:content_bounds` and keep the layer/state non-authoritative;
-- supported asset `media_fit` and `mask_source_crop` semantics no longer remain unresolved once canonical geometry can evaluate them;
-- anchor-space dimensions use evaluated painted media bounds for asset-backed media;
-- the shared `visual-frame-state-v1` fixture carries explicit source provenance for its authoritative media clip and a negative missing-provenance case;
-- Go and TypeScript tests assert geometry contract identity, painted bounds, and no fabricated geometry in the negative case.
+1. Validate the documentation-complete exact head.
+2. Remediate any formatting/type/test/security finding.
+3. Reconfirm `main...branch` contains only eight slide files plus this tracker.
+4. Confirm review-thread state.
+5. Mark ready and merge.
+6. Rebuild #228 from the resulting current `main` tree using only the wipe delta.
 
-Validation before merge:
+### Remaining Phase 2 work
 
-- backend formatting, vet, unit/integration tests, and race detector passed;
-- frontend lint, unit tests, Video Studio performance evidence, and production build passed;
-- deterministic Video renderer parity baseline passed;
-- Security Scan, container build, Linux/macOS sandbox assurance, browser-egress assurance, Windows desktop/sandbox contracts, plugin lifecycle, and Helm checks passed;
-- repository-wide Playwright remained in system-package installation and never reached application tests, so it was documented as infrastructure-only incomplete rather than green.
+After the transition stack:
 
-Preview and FFmpeg compositor behavior were unchanged.
-
-### Merged PR #218 — canonical perspective projection
-
-Implemented:
-
-- `backend/internal/video/rendercontract/perspective_projection.go` and `frontend/src/video/renderContractPerspectiveProjection.ts` define matching `perspective-projection-v1` evaluators;
-- no-scene-camera state preserves the preview-compatible 1200-canvas-pixel projection distance;
-- an active authored scene camera uses its evaluated FOV and canvas height to derive projection distance;
-- a positive per-clip `transform.perspective` overrides the inherited projection distance;
-- zero or omitted clip perspective inherits projection;
-- non-finite or non-positive resolved projection distances fail closed;
-- projection uses a homogeneous matrix with `m[14] = -1 / distance` and records `origin_w = 1 - view_z / distance`;
-- `visual-frame-state-v1` exposes `perspective_projection` for every visual layer while preserving the existing camera-relative `model_matrix` unchanged;
-- `clip_perspective` is no longer unresolved because its semantics are canonical;
-- `video-renderer/test/fixtures/perspective-projection-v1.json` is shared by Go and TypeScript and covers inherited distance, clip override, and zero-value inheritance;
-- the shared visual FrameState fixture verifies the 1200px preview default, active scene-camera FOV projection, projection matrix/source/distance, and a resolved 500px per-clip override;
-- manual semantic review caught and corrected the no-scene-camera compatibility mismatch before merge;
-- the branch was ancestry-aligned with current `main` after PR #219's CI-only reliability change and merged as `0bf0ffc897589d71d2f62d75e18b63319bd59fae` after exact-head runner-capacity incompleteness was explicitly documented rather than called green.
-
-Preview and FFmpeg compositor behavior were unchanged.
-
-### Merged PR #220 — canonical transition placement and peer state
-
-Implemented:
-
-- `backend/internal/video/rendercontract/transition_state.go` and `frontend/src/video/renderContractTransitions.ts` define matching `transition-state-v1` evaluators;
-- `in` transitions begin at the owner clip start; `out` transitions end at the owner clip end; authored duration is bounded by the owner clip rather than implying hidden source handles;
-- `between` requires an explicit, distinct `peer_clip_id` and real owner/peer overlap at least as long as the authored transition duration;
-- owner/peer incoming/outgoing roles and stable peer track/clip indices are explicit state;
-- transition start/end use canonical frame mapping, active state is half-open, and progress is evaluated at exact output-frame presentation time;
-- omitted slide/wipe direction defaults to `left`, matching current renderer behavior;
-- unknown transition types/directions/placements, duplicate or empty IDs, invalid peers, and insufficient overlap fail closed at runtime rather than assuming schema validation already occurred;
-- `video-renderer/test/fixtures/transition-state-v1.json` is shared by Go and TypeScript and covers in/between/out windows, peer roles, direction defaulting, progress, and exclusive end-frame behavior;
-- negative Go/TypeScript tests cover missing peers, insufficient overlap, and unknown runtime semantics;
-- exact-head repository workflows were queued with zero steps started behind shared runner saturation; that was recorded as infrastructure incompleteness, while independent Go/TypeScript evaluator checks and final diff/review inspection supported merge;
-- merged to `main` as `1bbbabed5185cbe44640426aad1ab141b59d50cc`.
-
-Preview and FFmpeg compositor behavior were unchanged.
-
-### Merged PR #222 — FrameState transition integration
-
-Implemented:
-
-- Go `FrameLayerState` and TypeScript `CanonicalFrameLayerState` expose evaluated transition state;
-- FrameState evaluates transitions from the already-normalized document at the same exact output frame used for clip/camera/property state;
-- the broad clip-duration `transitions` unresolved marker is removed;
-- each active transition contributes `transition_paint:<id>` to its owner layer only for the transition's canonical half-open frame window;
-- inactive authored transitions remain serialized for consumers but do not make unrelated frames non-authoritative;
-- mirrored Go/TypeScript integration tests reuse `video-renderer/test/fixtures/transition-state-v1.json` and cover inactive-between-window authority, in/between/out paint debt, peer overlap, and the owner's exclusive end frame;
-- permanent Go↔TypeScript diagnostics serialize the complete FrameState, so evaluated transitions participate automatically in cross-runtime state comparison;
-- exact-head backend formatting/vet/unit/integration/race and frontend lint/unit/performance/build passed, along with Windows/macOS contracts, Helm, Linux/macOS/browser assurance lanes;
-- deterministic parity had passed setup/toolchain/fixture-generation and remained in immutable snapshot capture at merge; Playwright/Security remained queued and container build was in progress, all recorded explicitly as incomplete rather than green;
-- merged to `main` as `73d7851cff9e0d7efce711f022659db60cc39dd2`.
-
-Preview and FFmpeg compositor behavior were unchanged.
-
-### Merged PR #224 — canonical fade-family transition paint
-
-Implemented:
-
-- `backend/internal/video/rendercontract/transition_paint.go` and `frontend/src/video/renderContractTransitionPaint.ts` define matching `transition-paint-v1` evaluators;
-- `fade` is one-sided `owner-opacity`: `in` uses `progress`, `out` uses `1-progress`, and `between` is rejected;
-- `crossfade` is `pair-crossfade`, requires `between`, an explicit peer, and complementary incoming/outgoing roles, with outgoing weight `1-progress` and incoming weight `progress`;
-- `dip_to_black` supports `in`, `out`, and `between`; between uses a piecewise outgoing→black→incoming composition with full black at `progress=0.5`;
-- inactive transitions produce no paint;
-- owner/transition identity, input contract version, progress bounds, placement, peer, and role semantics fail closed;
-- a shared support predicate identifies the families with canonical paint without swallowing invalid state inside those families;
-- `video-renderer/test/fixtures/transition-paint-v1.json` is shared by Go and TypeScript and covers inactive state, fade in/out, crossfade owner-role reversal, dip-to-black in/out, and both halves of between;
-- mirrored negative tests cover invalid crossfade placement, noncomplementary pair roles, unsupported paint family, and noncanonical progress;
-- exact head `3818625fbf97f79427a55675736a2be930360c40` passed Quality Gate, Security Scan, container build, Linux workspace/quota assurance, macOS runtime/extension/adversarial assurance, and browser-egress assurance;
-- no review threads remained and the PR merged as `86bd0af3924bb10d6c49c411176f72bcdc07b453`.
-
-Preview and FFmpeg compositor behavior were unchanged.
-
-### Current PR #225 — FrameState fade-family transition-paint consumption
-
-Implemented on the clean branch:
-
-- Go `FrameLayerState` and TypeScript `CanonicalFrameLayerState` expose optional `transition_paint` arrays;
-- active fade/crossfade/dip-to-black state is evaluated through `transition-paint-v1` and serialized into the owner layer;
-- those supported active transitions no longer add unresolved paint debt and therefore can remain authoritative when no other unresolved family is active;
-- active slide/wipe/zoom continue to emit `transition_paint:<id>` and remain non-authoritative until their paint semantics are canonical;
-- invalid state inside a supported paint family fails the FrameState evaluation instead of being downgraded to unsupported;
-- mirrored Go/TypeScript integration tests reuse `transition-state-v1.json` to verify 50% fade-in, one-third pair-crossfade weights, unresolved 50% slide-out, dip-to-black consumption, and fail-closed invalid supported crossfade;
-- the older PR #222 frame-scoping regression test was updated so fade/crossfade now expect authoritative state while slide remains unresolved on this branch;
-- the branch was reconstructed from current `main` rather than retaining the unsafe synthetic merge tree;
-- `compare main...feat/video-wysiwyg-phase2-frame-transition-paint` on reconstruction head `ee3b582dd11d50f2d48cb305c067867b42de21a5` showed exactly six intended changed files and zero unrelated reversions.
-
-Validation/remediation evidence:
-
-- the first tracker-complete Quality Gate failed only because `frame_state_transition_test.go` retained the obsolete PR #222 expectation that fade/crossfade paint remained unresolved;
-- production behavior was already correct; the stale test was remediated and the next code head passed Go formatting, Go vet, backend unit/integration tests, race detector, frontend lint/unit/performance/build, Windows/macOS contracts, Helm, Security Scan, container build, Linux workspace/quota, macOS runtime/extension/adversarial assurance, and browser-egress assurance;
-- at that validation point deterministic parity had cleared setup and fixture generation and was in immutable snapshot capture, while repository-wide Playwright remained in system-package installation; those jobs were not represented as green;
-- the unsafe branch-history tree was then detected by explicit `main...branch` diff review before merge and was rebuilt safely on current `main`;
-- fresh hosted validation is required on the clean documentation-complete head before merge; no review threads were present before the rebuild.
-
-Remaining before #225 merge:
-
-1. Complete fresh exact-head validation on the clean reconstructed branch and remediate any concrete failure.
-2. Reconfirm `main...branch` remains exactly the intended six-file WYSIWYG slice.
-3. Mark ready and merge #225 when validation is green/defensible.
-4. Normalize PR #227 from the new `main` tree by replaying only the slide delta; never reuse the unsafe ancestry technique.
-5. Keep preview/FFmpeg compositor behavior unchanged in this canonical-state slice.
-
-### Remaining Phase 2 work after #225
-
-1. Safely normalize and merge stacked PR #227 (slide), #228 (wipe), and #229 (zoom); together they provide canonical paint for every currently authorable Timeline v2 transition family.
-2. Define effect-stack ordering, enable windows, and animated effect parameters.
-3. Finish any remaining anchor/content-bound provenance edge cases surfaced by parity diagnostics.
-4. Define text/shape/cursor evaluated state.
-5. Define/compile serializable `AudioGraph` for timing/rate/channel/gain/fade/mute/solo/processing decisions.
-6. Fail closed whenever an authorable field lacks canonical semantics.
+1. **Effect stack** — define deterministic effect ordering, enable windows, parameter defaults, animated effect-property evaluation, failure policy, and FrameState projection.
+2. **Text / shape / cursor state** — remove those unresolved families by making all renderer-relevant evaluated state explicit.
+3. **Provenance edges** — close any remaining anchor/content-bounds/source-probe cases surfaced by parity diagnostics.
+4. **AudioGraph** — define serializable timing/rate/pitch/channel/gain/fade/mute/solo/processing/stem decisions and exact sample-count semantics.
+5. Keep all unknown authorable fields fail closed until canonical semantics exist.
 
 ### Phase 2 exit gate
 
-Preview and export callers consume identical FrameState/AudioGraph fixtures. No renderer owns separate curve, range, ordering, transform, geometry, projection, transition-placement, transition-activity, transition-paint, or source-time math, and CI detects schema/type/fixture drift.
+Preview and export callers consume identical FrameState/AudioGraph fixtures. No renderer owns separate curve, range, ordering, transform, geometry, projection, transition placement/activity/paint, effect, source-time, or audio semantic math. Go/TypeScript schema/type/fixture drift fails CI.
 
-## Phases 3–7
+## Phase 3 — Shared preview composition
 
-### Phase 3 — Shared preview composition
+Drive the Video Edit Studio program monitor from canonical FrameState/AudioGraph while preserving direct-manipulation UI state separately. Add diagnostics for frame identity, active clip IDs, source time, matrices/bounds/projection, transitions, effects, and audio graph identity.
 
-Drive the program monitor from canonical FrameState/AudioGraph while preserving direct-manipulation UI state separately. Add diagnostic overlays for frame identity, active clip IDs, matrices/bounds, source time, transitions, and effects.
+## Phase 4 — Shared Chromium render worker
 
-### Phase 4 — Shared Chromium render worker
+Build a deterministic browser composition entry point accepting immutable Render Manifest v1 + frame index. Package fonts/assets deterministically, manage browser health/concurrency/cancellation, and retain FFmpeg for decode/encode/mux behind a guarded rollout.
 
-Build a deterministic browser composition entry point accepting immutable Render Manifest v1 + frame index. Package fonts/assets, manage Chromium health/concurrency/cancellation, and retain FFmpeg for decode/encode/mux behind a guarded rollout.
+## Phase 5 — Visual parity closure
 
-### Phase 5 — Visual parity closure
+Close decoded output parity for media timing/fit/crop, transforms/anchors/2.5D/camera/z-order, opacity/blending, text metrics/fonts, shapes, transitions, effects, cursor, color space, and deterministic asset loading.
 
-Close media timing, fit/crop, anchors/transforms/2.5D/camera/z-order, opacity/blending, text metrics/fonts, shapes, transitions, effects, cursor state, and sRGB/browser/encoder color policy.
+## Phase 6 — Audio parity closure
 
-### Phase 6 — Audio parity closure
+Build canonical 48-kHz stereo AudioGraph behavior for source time, rate/pitch, channels, mute/solo, gain automation, fades, program processing, processed stems, exact sample counts, and decoded delivery.
 
-Build canonical 48-kHz stereo AudioGraph semantics for source time, rate/pitch, channels, mute/solo, gain automation, fades, program processing, processed stems, exact sample counts, and decoded delivery.
-
-### Phase 7 — Rollout and legacy retirement
+## Phase 7 — Rollout and legacy retirement
 
 Shadow-render, collect safe parity/performance/failure telemetry, stage opt-in → default-on → legacy opt-out, preserve rollback, update capabilities/docs, then retire legacy composition only when canonical coverage and rollback criteria are satisfied.
 
@@ -368,71 +284,66 @@ npm run build
 npm run test:smoke
 ```
 
-Hosted CI is authoritative for platform/toolchain cases not reproducible in the current execution environment. Setup-only stalls and runner-capacity queues are recorded explicitly and are never represented as passing.
+Hosted CI is authoritative for platform/toolchain cases that cannot be reproduced in the current execution environment. Setup-only stalls and runner-capacity queues are recorded explicitly and are never represented as passing.
+
+Before every merge:
+
+1. Verify the PR's exact final head.
+2. `compare main...branch` and inspect every changed path.
+3. Resolve all review threads or explain why a non-actionable thread is being dismissed.
+4. Record concrete validation evidence in this tracker/PR.
+5. Never call an unexecuted or setup-only job green.
 
 ## Risk register
 
 | Risk | Control |
 |---|---|
 | Schema/type drift | Go reflection and TypeScript compile/Vitest projection checks fail CI. |
-| v2 codifies legacy FFmpeg approximations | Canonical feature semantics are explicit; the legacy FFmpeg compositor is evidence but not authority. |
-| v1 adapter guesses ambiguous behavior | Ambiguous v1 transitions and unsupported transforms fail closed. |
-| Browser/Go evaluator drift | Shared fixtures plus permanent FrameState parity diagnostics. |
-| Millisecond rounding creates boundary/source drift | Deterministic callers use canonical frame/range/source helpers. |
-| Source aspect ratio is guessed from the canvas | `media-geometry-v1` requires explicit `content_bounds`; FrameState reports `media_geometry:content_bounds` rather than fabricating source dimensions. |
-| Crop order differs between renderers | Source-mask crop occurs before fit; output transform crop is represented separately after fit. |
-| Perspective differs between preview/export | `perspective-projection-v1` resolves one inherited/overridden distance, source, and matrix; FrameState carries it separately from the model transform. |
-| Transition adjacency/handles are inferred differently | `transition-state-v1` requires explicit placement/peer semantics and real overlap; FrameState carries that state and scopes unresolved paint debt to active transition frames. |
-| Crossfade is implemented as two stacked alpha fades | `pair-crossfade` weights are one pair-composition instruction; consumers must blend the isolated outgoing/incoming surfaces using the canonical weights rather than applying independent layer opacity. |
-| Dip-to-black is flattened into a simple fade | Canonical paint carries an explicit black contribution and reaches full black at the transition midpoint. |
-| Unsupported spatial transition is silently approximated | FrameState retains precise `transition_paint:<id>` debt until each spatial family is explicitly canonicalized. |
-| Stacked branch reports current ancestry but carries a stale tree | Rebuild each stacked slice from the actual current `main` tree with only its intended file delta; verify `compare main...branch` before every merge. |
-| FrameState claims authority before feature semantics are canonical | Explicit unresolved sets keep noncanonical families non-authoritative only where those semantics are active/relevant. |
-| CI setup stalls or queues hide code status | Record unstarted/setup-only infrastructure separately; never label an unexecuted check green. |
-| Chromium packaging/resource cost | Managed worker, admission control, health checks, guarded rollout; FFmpeg retained for decode/encode/mux. |
-| Audio runtime differences | Explicit AudioGraph and unsupported-boundary policy before shared export becomes default. |
+| Browser/Go evaluator drift | Shared fixtures plus permanent FrameState diagnostics. |
+| Legacy FFmpeg approximations become de facto contract | Canonical semantics are explicit; legacy renderer is evidence only. |
+| v1 adapter guesses ambiguous behavior | Ambiguous state fails closed. |
+| Millisecond rounding creates frame/source drift | Canonical rational frame/range/source helpers. |
+| Source aspect ratio is guessed from canvas | Explicit source `content_bounds`; missing provenance stays unresolved. |
+| Crop ordering diverges | Source mask before fit; output crop after fit. |
+| Perspective differs between preview/export | One canonical projection contract carried in FrameState. |
+| Transition peer/handle inference differs | Explicit placement/peer/real-overlap semantics. |
+| Pair transitions are misapplied as independent alpha layers | Pair paint instructions operate on isolated surfaces using canonical weights/transforms. |
+| Spatial transition silently inherits sampled FFmpeg approximation | Slide/wipe/zoom use explicit renderer-neutral normalized geometry/scale contracts. |
+| Stacked branch appears current but carries stale tree | Rebuild from actual current `main`; compare every path before merge. |
+| FrameState claims authority too early | Explicit unresolved sets until canonical family semantics exist. |
+| CI setup/runner saturation hides code state | Distinguish setup/queue from executed code checks. |
+| Browser worker resource cost | Admission control, health checks, cancellation, guarded rollout, FFmpeg retained for media I/O. |
+| Audio runtime differences | Explicit AudioGraph and unsupported-boundary policy before default shared export. |
 
 ## Implementation log
 
 ### 2026-08-17
 
-- PR #187 established immutable submission and deterministic parity evidence.
+- #187 established immutable submission and deterministic parity evidence.
 
 ### 2026-08-18
 
-- PRs #191, #193, #194, #195, #196, #198, #199, #202, #204, #205, and #206 advanced the canonical contract from schemas/timing through exact-frame visual FrameState.
-- PR #201 repaired the reachable PDF dependency vulnerability encountered during the program.
-- PR #208 added permanent cross-runtime visual FrameState diagnostics and merged as `52683e4d25b22f70e5c6c3b4a8cf3417240be4bc` after focused parity validation and remediation of the CodeQL allocation finding.
-- PR #209 opened on `feat/video-wysiwyg-phase2-media-geometry` and began canonical media fit/crop/source-bounds semantics with a shared Go/TypeScript fixture.
+- #191–#206 advanced the canonical contract from schema/timing through exact-frame visual FrameState.
+- #201 repaired the reachable PDF dependency vulnerability.
+- #208 added permanent cross-runtime FrameState diagnostics and fixed the CodeQL allocation finding before merge.
 
 ### 2026-08-19
 
-- PR #209's first Quality Gate identified only Go formatting drift in the new geometry evaluator/tests; both files were corrected on head `3e11a21a1ea105060a8484de7ee98c2a60c9cc8d`.
-- Corrected #209 code-executing Quality Gate steps passed formatting, Go vet, backend unit/integration tests, race detector, frontend lint/unit/build, and Windows/macOS contract checks; Security Scan and sandbox assurances were green.
-- PR #209 merged to `main` as `6365b3dcc13fac0726e7407735c2a6b5664e0d1a`.
-- PR #212 consumed `media-geometry-v1` in visual FrameState, removed canvas-sized source-bounds guessing, made missing source provenance explicit/non-authoritative, and passed all code-executing gates plus the deterministic renderer parity baseline.
-- PR #212's repository-wide Playwright job remained in `Install system dependencies` and never reached application tests; that infrastructure-only incompleteness was documented explicitly before merge.
-- PR #212 merged to `main` as `ae29d57e2e7d4e94e298bb155501583f4577e1ed`.
-- PR #218 opened on `feat/video-wysiwyg-phase2-perspective-projection`, defined cross-runtime `perspective-projection-v1`, integrated it into visual FrameState, and advanced the shared fixtures.
-- Manual semantic review of #218 caught a no-scene-camera compatibility mismatch before merge; FrameState was corrected to preserve the preview's 1200-canvas-pixel default rather than applying the default 50° FOV distance outside an authored scene camera.
-- PR #219 merged CI-only bounded/retried Linux dependency/Playwright installers and job timeouts as `a33b32697019b144c9a7d6c7fec277e1cde101b4`.
-- #218 was normalized onto that current `main`; the exact merge head remained queued with zero runner steps started while several sandbox PRs saturated repository runner capacity. That incompleteness was explicitly documented, the final diff/review state was clean, and #218 merged as `0bf0ffc897589d71d2f62d75e18b63319bd59fae`.
-- PR #220 defined matching transition placement/peer evaluators and shared fixtures, tightened runtime fail-closed validation, and was normalized directly onto merged #218/current `main`.
-- #220 exact-head repository workflows remained unstarted behind runner saturation; independent Go/TypeScript evaluator checks and final diff/review inspection were recorded explicitly, and #220 merged as `1bbbabed5185cbe44640426aad1ab141b59d50cc` without representing the queued checks as green.
-- PR #222 consumed transition state in visual FrameState, scoped unresolved paint debt to active transition windows, passed the exact-head backend/frontend code matrix and completed assurance lanes, and merged as `73d7851cff9e0d7efce711f022659db60cc39dd2`; long-running/queued parity, Playwright, Security, and container work was recorded explicitly at merge.
-- Source review confirmed `VideoPreviewCanvas.tsx` has no authored-transition evaluation path while the legacy renderer documents crossfade as an approximation, establishing the need for intentional canonical transition paint semantics rather than legacy copying.
-- PR #224 defined cross-runtime fade/crossfade/dip-to-black paint weights and shared fixtures, added a shared support predicate, passed its complete exact-head Quality/Security/container/platform assurance matrix, and merged as `86bd0af3924bb10d6c49c411176f72bcdc07b453`.
-- PR #225 consumed supported fade-family paint in visual FrameState. Its first tracker-complete Quality Gate exposed one obsolete PR #222 regression expectation; that test was corrected and the code matrix subsequently passed.
-- A pre-merge diff audit then caught an unsafe synthetic ancestry commit that would have reverted unrelated sandbox-worker changes. #225 was rebuilt from the actual `main` tree with only the six intended WYSIWYG files; clean reconstruction head `ee3b582dd11d50f2d48cb305c067867b42de21a5` compares one commit ahead/zero behind with no unrelated file changes.
-- PR #227 defines canonical slide paint in `canvas-fraction` translation space; PR #228 defines canonical wipe paint in `layer-fraction` clip space; PR #229 defines continuous canonical zoom paint using the existing ease-out envelope. These stacked branches will be safely replayed onto current `main` after each parent merges.
+- #209 canonicalized media geometry and corrected an initial Go formatting-only Quality Gate failure before merge.
+- #212 consumed media geometry in FrameState and removed canvas-sized source-bounds guessing.
+- #218 canonicalized perspective projection; manual review caught and corrected the no-camera 1200px compatibility behavior before merge.
+- #219 added bounded/retried Linux dependency/Playwright bootstrap and CI timeouts.
+- #220 canonicalized transition placement/peer/role/progress state.
+- #222 consumed transition state in FrameState and changed paint debt from clip-wide to active-frame scoped.
+- #224 defined true fade/crossfade/dip-to-black paint and passed the complete exact-head Quality/Security/container/assurance matrix before merge.
+- #225 consumed fade-family paint in FrameState. Its first Quality Gate found a stale #222 test expectation, which was fixed. A pre-merge diff audit then caught an unsafe synthetic ancestry/tree merge that would have reverted unrelated sandbox-worker changes. The branch was rebuilt cleanly from current `main`, verified to contain only six intended files, and merged as `a6f9145f92e2342dfa70144a4058bf10f64625da` after documenting exact validation state.
+- #227 was rebuilt from the actual post-#225 `main` tree with only eight slide-specific file deltas. The original stacked history is no longer used for merge.
+- Draft #228 defines wipe through normalized isolated-layer clipping; draft #229 defines continuous zoom through canonical scale multipliers/easing. Both require the same safe replay onto `main` after their parent merges.
 
 ## Next recommended slice
 
-Finish PR #225 first, then continue immediately:
-
-1. Complete clean exact-head validation and merge #225 after confirming the six-file diff remains isolated.
-2. Rebuild PR #227 on the new `main` tree using only the slide delta, update this tracker, validate, and merge.
-3. Rebuild PR #228 on the next `main` tree using only the wipe delta, update this tracker, validate, and merge.
-4. Rebuild PR #229 on the next `main` tree using only the zoom delta, update this tracker, validate, and merge. At that point every currently authorable Timeline v2 transition family has canonical paint semantics and FrameState consumption.
-5. Begin effect-stack ordering/enable-window/animated-parameter semantics and FrameState consumption.
-6. Continue Phase 0 production visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.
+1. Finish exact-head validation and merge #227.
+2. Safely replay/update/validate/merge #228.
+3. Safely replay/update/validate/merge #229. This completes canonical paint for every current Timeline v2 transition family.
+4. Start effect-stack semantics immediately after the transition stack: ordering, enabled windows, parameter defaults, animated effect properties, unresolved/fail-close policy, and FrameState consumption.
+5. Continue Phase 0 visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.
