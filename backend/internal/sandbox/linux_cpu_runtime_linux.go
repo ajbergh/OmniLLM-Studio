@@ -57,7 +57,8 @@ func runLinuxCommandWithCPUBudget(
 
 	monitorCtx, cancelMonitor := context.WithCancel(ctx)
 	monitorDone := make(chan linuxCPUMonitorResult, 1)
-	go monitorLinuxCPUUsage(monitorCtx, executionCgroup, baselineUS, uint64(cpuTimeMS)*1000, monitorDone)
+	budgetUS := uint64(cpuTimeMS) * 1000
+	go monitorLinuxCPUUsage(monitorCtx, executionCgroup, baselineUS, budgetUS, monitorDone)
 
 	runErr := cmd.Wait()
 	cancelMonitor()
@@ -101,7 +102,10 @@ func monitorLinuxCPUUsage(
 				done <- linuxCPUMonitorResult{err: fmt.Errorf("read final Linux CPU usage: %w", err)}
 				return
 			}
-			done <- linuxCPUMonitorResult{usageUS: usageUS}
+			// A command can finish naturally between samples after crossing the
+			// cumulative budget. Final accounting must still classify it as quota
+			// exceeded; otherwise a short CPU burst could bypass the contract.
+			done <- linuxCPUMonitorResult{quotaExceeded: usageUS >= budgetUS, usageUS: usageUS}
 			return
 		case <-ticker.C:
 			usageUS, err := readUsage()
