@@ -26,10 +26,10 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
-      - name: Install Bubblewrap
+      - name: Install Bubblewrap and static test shell
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y bubblewrap
+          sudo apt-get install -y bubblewrap busybox-static
       - name: Prepare delegated cgroup-v2 subtree
         shell: bash
         run: |
@@ -59,7 +59,7 @@ jobs:
             "$root/cgroup.subtree_control" \
             "$root/cgroup.threads"
           printf 'OMNILLM_TEST_CGROUP_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
-      - name: Prove native Linux PID memory and CPU quota boundaries
+      - name: Prove native Linux PID memory and cumulative CPU quota boundaries
         working-directory: backend
         shell: bash
         run: |
@@ -78,7 +78,7 @@ jobs:
           cat "$root/cgroup.controllers"
           printf '%s\n' 'worker-child:'
           stat -c '%u:%g %a %n' "$worker" "$worker/cgroup.procs"
-          go test ./internal/sandbox -run '^TestLinuxCgroup' -count=1 -v 2>&1 | tee ../sandbox-linux-quota.log
+          go test ./internal/sandbox -run '^(TestLinuxCgroup|TestLinuxLocalRuntimeCPUQuotaNative)' -count=1 -v 2>&1 | tee ../sandbox-linux-quota.log
       - name: Upload Linux quota diagnostics
         if: always()
         uses: actions/upload-artifact@v7
