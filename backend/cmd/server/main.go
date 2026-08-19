@@ -92,7 +92,19 @@ func main() {
 		}
 	}()
 
-	<-done
+	if sandboxTaskWorker == nil {
+		<-done
+	} else {
+		select {
+		case <-done:
+		case <-sandboxTaskWorker.Done():
+			if err := sandboxTaskWorker.Err(); err != nil {
+				log.Printf("durable sandbox task worker stopped: %v", err)
+			} else {
+				log.Printf("durable sandbox task worker stopped unexpectedly")
+			}
+		}
+	}
 	log.Println("shutting down server...")
 	close(stopCleanup)
 
