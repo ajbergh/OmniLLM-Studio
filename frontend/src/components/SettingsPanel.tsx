@@ -3921,6 +3921,7 @@ function MCPServerCard({
   onBulkPolicy: (policy: ToolPolicy) => void;
 }) {
   const [toolFilter, setToolFilter] = useState('');
+  const [serverCollapsed, setServerCollapsed] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const tools = server.tools || [];
   const commandLine = server.transport === 'http' 
@@ -3949,10 +3950,21 @@ function MCPServerCard({
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0 flex-1 space-y-2.5">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold text-xs uppercase shrink-0">
-                {server.name.slice(0, 2)}
-              </div>
-              <h3 className="text-base font-bold text-text tracking-tight">{server.name}</h3>
+              <button
+                type="button"
+                onClick={() => setServerCollapsed(!serverCollapsed)}
+                className="flex items-center gap-2 text-left group cursor-pointer focus:outline-none"
+                title={serverCollapsed ? 'Expand server' : 'Collapse server'}
+              >
+                <ChevronDown
+                  size={16}
+                  className={clsx('text-text-muted group-hover:text-primary transition-transform duration-200', serverCollapsed && '-rotate-90')}
+                />
+                <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold text-xs uppercase shrink-0">
+                  {server.name.slice(0, 2)}
+                </div>
+                <h3 className="text-base font-bold text-text tracking-tight group-hover:text-primary transition-colors">{server.name}</h3>
+              </button>
               <span className={clsx('rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider', statusBadgeClass(server.status))}>
                 {server.status}
               </span>
@@ -3967,7 +3979,8 @@ function MCPServerCard({
             </div>
 
             {/* Server details */}
-            <div className="flex flex-col gap-1.5 text-xs text-text-muted">
+            {!serverCollapsed && (
+              <div className="flex flex-col gap-1.5 text-xs text-text-muted pt-1">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-[11px] font-medium text-text-muted shrink-0 w-16">
                   {server.transport === 'http' ? 'Endpoint:' : 'Command:'}
@@ -4002,7 +4015,8 @@ function MCPServerCard({
                   </div>
                 </div>
               )}
-            </div>
+              </div>
+            )}
 
             {server.last_error && (
               <div className="mt-2 flex gap-2 rounded-xl border border-danger/30 bg-danger-soft/50 p-2.5 text-xs text-danger">
@@ -4069,7 +4083,8 @@ function MCPServerCard({
       </div>
 
       {/* Discovered Tools Section */}
-      <div className="p-5">
+      {!serverCollapsed && (
+        <div className="p-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
           <div className="flex items-center gap-3">
             <button
@@ -4171,6 +4186,7 @@ function MCPServerCard({
           </>
         )}
       </div>
+      )}
     </div>
   );
 }
