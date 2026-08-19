@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "description": "Cross-runtime perspective-projection-v1 fixture. Positive clip perspective overrides camera perspective distance; zero/omitted clip perspective inherits the camera projection.",
+  "cases": [
+    {
+      "name": "camera-distance",
+      "camera_distance": 1000,
+      "view_z": 250,
+      "expected_source": "camera",
+      "expected_distance": 1000,
+      "expected_origin_w": 0.75,
+      "expected_matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -0.001, 1]
+    },
+    {
+      "name": "clip-distance-override",
+      "camera_distance": 1000,
+      "clip_perspective": 500,
+      "view_z": -100,
+      "expected_source": "clip",
+      "expected_distance": 500,
+      "expected_origin_w": 1.2,
+      "expected_matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -0.002, 1]
+    },
+    {
+      "name": "zero-clip-distance-inherits-camera",
+      "camera_distance": 800,
+      "clip_perspective": 0,
+      "view_z": 0,
+      "expected_source": "camera",
+      "expected_distance": 800,
+      "expected_origin_w": 1,
+      "expected_matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -0.00125, 1]
+    }
+  ]
+}

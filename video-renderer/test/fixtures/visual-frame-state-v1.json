@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Cross-runtime exact-frame visual FrameState fixture for transform/camera/source/crop and canonical media geometry evaluation.",
+  "description": "Cross-runtime exact-frame visual FrameState fixture for transform/camera/source/crop, canonical media geometry, and perspective projection evaluation.",
   "document": {
     "version": 2,
     "canvas": { "width": 200, "height": 100, "fps": 120, "background": "#000000" },
@@ -93,7 +93,10 @@
       "expected_opacity": 0,
       "expected_camera_x": 0,
       "expected_camera_fov": 50,
-      "expected_perspective_distance": 107.22534602547793,
+      "expected_perspective_distance": 1200,
+      "expected_projection_source": "camera",
+      "expected_projection_origin_w": 1,
+      "expected_projection_matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -0.0008333333333333334, 1],
       "expected_model_matrix": [2, 0, 0, -90, 0, 2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
     },
     {
@@ -107,6 +110,9 @@
       "expected_camera_x": 4,
       "expected_camera_fov": 60,
       "expected_perspective_distance": 86.60254037844388,
+      "expected_projection_source": "camera",
+      "expected_projection_origin_w": 1,
+      "expected_projection_matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -0.011547005383792514, 1],
       "expected_model_matrix": [2, 0, 0, -90.66666666666667, 0, 2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
     }
   ],
@@ -146,7 +152,6 @@
     "scenes": []
   },
   "expected_unresolved": [
-    "unsupported:clip_perspective",
     "unsupported:effects",
     "unsupported:media_geometry:content_bounds"
   ]
