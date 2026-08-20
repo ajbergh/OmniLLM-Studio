@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Cross-runtime exact-frame visual FrameState fixture for transform/camera/source/crop, canonical media geometry, and perspective projection evaluation.",
+  "description": "Cross-runtime exact-frame visual FrameState fixture for transform/camera/source/crop, canonical media geometry, perspective projection, and effect-stack evaluation.",
   "document": {
     "version": 2,
     "canvas": { "width": 200, "height": 100, "fps": 120, "background": "#000000" },
@@ -152,7 +152,6 @@
     "scenes": []
   },
   "expected_unresolved": [
-    "unsupported:effects",
     "unsupported:media_geometry:content_bounds"
   ]
 }

@@ -9,17 +9,17 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG PR: **#228 — Define and consume canonical wipe transition paint** — `3007be763dacde820b8b494f62b6a82bb9af5324`.
+Latest merged WYSIWYG PR: **#229 — Define and consume canonical zoom transition paint** — `a8e2a0964e1e49232be08bf2fe7091ce3d9403e6`.
 
-Current PR: **#229 — Define and consume canonical zoom transition paint**.  
-Current branch: `feat/video-wysiwyg-phase2-zoom-transition-paint`.  
-Clean replay code head before this tracker update: `248755a782c1d220ee0d7fd41bffe6811721dc0f`.
+Current PR: **#237 — Define canonical effect stack state**.  
+Current branch: `feat/video-wysiwyg-phase2-effect-stack`.  
+Code head before this tracker update: `d6e5fda2de31cb1998719bdc68051f7514750012`.
 
-PR #229 was rebuilt from the actual post-#228 `main` tree (`3007be763dacde820b8b494f62b6a82bb9af5324`) using only the intended zoom delta. The old 34-commit stacked history was discarded, and unrelated TypeScript formatting churn in `frontend/src/video/renderContractTransitionPaint.ts` was removed before replay. `compare main...branch` shows one commit ahead, zero behind, and exactly nine zoom-specific code/fixture files before this tracker update.
+PR #229 merged only after its documentation-complete exact head `8178c250327e6a8d668faea908f169bb6cfc6354` passed the complete hosted assurance matrix: Go formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright smoke, deterministic video-renderer parity baseline, both CodeQL languages, dependency vulnerability audit, Helm/platform assurance, and frontend/backend container builds. Its ten-path final diff was clean and had no unresolved review threads.
 
-PR #228 was merged only after its exact head passed the complete hosted assurance matrix: Go formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright smoke, deterministic video-renderer parity baseline, both CodeQL languages, dependency vulnerability audit, Helm/platform assurance, and frontend/backend container builds. Its first normalized CI run found one real `gofmt` defect in `backend/internal/video/rendercontract/transition_wipe_paint_test.go`; that defect was fixed and the branch was replayed again from the then-current `main` before final validation and merge.
+After #229 merged, `main` advanced independently through sandbox PR #231 to `c5adbe417b105d9fd3ce0f2229cca30ad8ec4a91`. PR #237 was therefore replayed from that actual current `main` tree using only the intended effect-stack files. This preserved #231's Windows sandbox changes and avoided stale stacked ancestry.
 
-No preview or FFmpeg compositor behavior changes are included in #225/#227/#228/#229. These are canonical-state slices preparing Phase 3 shared composition.
+No preview or FFmpeg compositor behavior changes are included in #225/#227/#228/#229/#237. These are canonical-state slices preparing Phase 3 shared composition.
 
 ## Phase tracker
 
@@ -27,7 +27,7 @@ No preview or FFmpeg compositor behavior changes are included in #225/#227/#228/
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, transition state, and fade/crossfade/dip-to-black/slide/wipe paint are merged. #229 completes current transition paint with zoom. Effects, text/shape/cursor state, remaining provenance edges, and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, transition state, and all current transition paint families are merged. #237 adds canonical effect-stack state. Text/shape/cursor state, remaining provenance edges, and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close text, shapes, effects, transitions, cursor, camera, color, asset loading, and decoded visual thresholds. |
@@ -98,18 +98,31 @@ Merged semantics:
 - `dip_to_black`: explicit outgoing/black/incoming contribution weights with full black at `progress=0.5`.
 - `slide`: direction names the entry edge; translation is normalized `canvas-fraction`; `out` exits through the opposite edge; `between` moves outgoing toward the opposite edge while incoming enters from the chosen edge; slide does not implicitly change opacity.
 - `wipe`: direction names the reveal/entry edge; the isolated layer surface is clipped in normalized `layer-fraction` space; `in` reveals from the selected edge, `out` shrinks toward the opposite edge, and `between` preserves outgoing under the incoming reveal. All four clip insets are explicit, including zero values.
+- `zoom`: scale is a `layer-multiplier` of the isolated layer's already-evaluated authored scale around its existing anchor. The continuous envelope is `0.82 + 0.18 * ease-out(q)` using the shared canonical easing evaluator. One-sided zoom carries canonical opacity; between zoom carries pair weights and outgoing/incoming scale multipliers. Zoom has no direction.
 
-Current #229 zoom semantics:
+Every currently authorable Timeline v2 transition type now has canonical paint semantics and FrameState consumption. Phase 3 consumers must apply pair operations to isolated surfaces; they must not reinterpret pair paint as independent stacked layer opacity/transform.
 
-- scale is a multiplier of the isolated layer's already-evaluated authored scale around its existing anchor;
-- scale space is `layer-multiplier`;
-- continuous scale envelope is `0.82 + 0.18 * ease-out(q)` using the shared canonical easing evaluator instead of sampled fidelity segments;
-- `in`: `q=progress`, owner opacity=`progress`;
-- `out`: `q=1-progress`, owner opacity=`1-progress`;
-- `between`: true pair weights plus outgoing scale at `q=1-progress` and incoming scale at `q=progress`;
-- zoom has no direction.
+### Effect stack
 
-Once #229 is merged, every currently authorable Timeline v2 transition type has canonical paint semantics and FrameState consumption. Phase 3 consumers must apply pair operations to isolated surfaces; they must not reinterpret pair paint as independent stacked layer opacity/transform.
+`effect-state-v1` is the renderer-independent evaluated effect operation carried by FrameState.
+
+Current #237 semantics:
+
+- only enabled effects enter the evaluated stack;
+- authored effect-array order is preserved; `order` is the original array index, so disabled entries can be omitted without silently changing surviving effect identity/order;
+- scope is explicit as `clip` or `scene`;
+- effect type and parameter semantics are grounded in the existing Video Edit Studio effect registry and current renderer behavior rather than invented by FrameState;
+- current authoring-registry defaults and numeric bounds are normalized canonically;
+- chroma-key color defaults to the current renderer-compatible `#00FF00` when not authored;
+- clip `amount` automation is sampled at exact output-frame presentation time;
+- `effect.<id>.amount` is authoritative when present; the existing `effect.<type>.amount` form remains a fallback compatibility alias;
+- scene effects are static because Timeline v2 currently has no scene-effect keyframe collection;
+- unknown effect types, unsupported parameters, non-finite values, or amount automation on a type that has no canonical amount parameter fail closed;
+- the existing Timeline v1 adapter clones effect metadata into Timeline v2 without reinterpretation;
+- the inspector exposes effect parameter edits from the registry definitions, and `updateClipEffect` merges parameter patches into the existing parameter map rather than replacing unrelated parameters;
+- FrameState now carries clip and active-scene effect stacks and no longer marks otherwise-supported effects as generic unresolved debt.
+
+This PR deliberately does not change preview CSS composition or FFmpeg filters. Phase 3/4 consumers will consume `effect-state-v1`; the legacy renderer remains implementation evidence during parity closure.
 
 ### Safe stacked-branch normalization
 
@@ -173,6 +186,7 @@ Remaining Phase 0 sign-off:
 | #225 | Fade-family transition-paint consumption in FrameState | `a6f9145f92e2342dfa70144a4058bf10f64625da` |
 | #227 | Canonical slide transition paint + FrameState consumption | `28639ec4fee09635de39764b33021bb6d9aa418c` |
 | #228 | Canonical wipe transition paint + FrameState consumption | `3007be763dacde820b8b494f62b6a82bb9af5324` |
+| #229 | Canonical zoom transition paint + FrameState consumption | `a8e2a0964e1e49232be08bf2fe7091ce3d9403e6` |
 
 Security unblock during the program:
 
@@ -183,46 +197,51 @@ CI reliability unblocks:
 - #219 bounded/retried Linux dependency installation and Playwright bootstrap and added job-level timeouts — `a33b32697019b144c9a7d6c7fec277e1cde101b4`.
 - #226 quiesced competing apt activity before Playwright retry setup — `ffbf797108c291c927fc7b67f6154b29c1351496`.
 
-### Current PR #229 — canonical zoom paint
+### Current PR #237 — canonical effect stack
 
-Implemented on clean replay code head `248755a782c1d220ee0d7fd41bffe6811721dc0f` before this tracker commit:
+Implemented on code head `d6e5fda2de31cb1998719bdc68051f7514750012` before this tracker commit:
 
-- Go/TypeScript `transition-paint-v1` adds `owner-zoom`, `pair-zoom`, and `layer-multiplier` scale space.
-- Owner, outgoing, and incoming scale multipliers are explicit renderer-neutral state.
-- One-sided zoom also carries canonical opacity; between zoom carries canonical outgoing/incoming pair weights.
-- Zoom uses the shared canonical ease-out evaluator with the continuous 0.82→1 envelope rather than sampled legacy segments.
-- The shared support predicate includes zoom, completing canonical paint support for every current Timeline v2 transition family.
-- `transition-zoom-paint-v1.json` covers zoom-in, zoom-out, and between behavior.
-- Mirrored Go/TypeScript FrameState integration coverage proves zoom paint is consumed canonically and restores FrameState authority when no other unresolved family exists.
-- The original stale 34-commit branch history was discarded.
-- The production TypeScript diff was reduced from 235 changed lines to 66 by removing unrelated formatting churn while preserving zoom semantics.
-- The clean replay has exactly one parent: merged #228 `main` (`3007be763dacde820b8b494f62b6a82bb9af5324`).
-- `compare main...branch` before this tracker commit contained exactly nine intended zoom files, one commit ahead, and zero behind.
+- Go/TypeScript `effect-state-v1` mirrors the existing effect registry's current defaults and parameter bounds.
+- Enabled clip effects are evaluated at exact frame-relative time and retain authored array ordering.
+- ID-specific `effect.<id>.amount` automation takes precedence over the type-keyed compatibility alias.
+- Active scene effects are projected with explicit scene scope and current static semantics.
+- Unknown effect types/parameters and undefined amount automation fail closed instead of becoming renderer-specific guesses.
+- `visual-frame-state-v1` carries clip effects and active-scene effects and removes generic effect unresolved debt.
+- `visual-frame-state-v1.json` now exercises effects in the permanent Go↔TypeScript FrameState parity path.
+- Mirrored focused Go/TypeScript tests cover disabled-effect omission/order identity, automation precedence, scene defaults, failure policy, and authoritative FrameState projection.
+- The branch was replayed from current `main` after sandbox #231 merged; the stale base was discarded rather than merged synthetically.
 
-Validation status before this tracker commit:
+Validation on code head `d6e5fda2de31cb1998719bdc68051f7514750012` before this tracker commit:
 
-- branch structure and nine-file code scope are confirmed clean against current `main`;
-- no hosted workflow run was visible for clean code head `248755a782c1d220ee0d7fd41bffe6811721dc0f` before this tracker update;
-- exact-head hosted validation must run again after this tracker commit before merge.
+- Go formatting: PASS.
+- Go vet: PASS.
+- Go unit/integration tests: PASS.
+- Go race detector: PASS.
+- Frontend lint: PASS.
+- Frontend unit tests: PASS.
+- Video Studio performance evidence: PASS.
+- Frontend production build: PASS.
+- Helm lint/render, macOS sandbox primitive, Windows plugin lifecycle, Windows desktop capture contract, and Windows sandbox confinement: PASS.
+- Playwright smoke and deterministic renderer-parity jobs had spawned but were still queued when this tracker update was authored.
+- This tracker update changes the PR head, so all required hosted gates must be evaluated on the new exact documentation-complete head before merge.
 
-Remaining before #229 merge:
+Remaining before #237 merge:
 
-1. Reconfirm `main...branch` contains only the nine zoom files plus this tracker.
-2. Mark #229 ready for review so repository gates execute on the documentation-complete exact head.
+1. Reconfirm `main...branch` contains only the seven effect code/test/fixture files plus this tracker.
+2. Mark #237 ready for review so repository gates execute on the documentation-complete exact head.
 3. Validate formatting, type/build, tests, race, smoke/parity, Security Scan, container builds, and platform assurance on the exact final head.
 4. Resolve or dismiss any actionable review thread only after inspection.
-5. Merge #229 only when the exact head is clean and mergeable.
-6. Create the next Phase 2 branch for canonical effect-stack semantics from the resulting current `main`.
+5. Merge #237 only when the exact head is clean, current, and mergeable.
+6. Create the next Phase 2 branch for canonical text/shape/cursor renderer state from the resulting current `main`.
 
 ### Remaining Phase 2 work
 
-After #229:
+After #237:
 
-1. **Effect stack** — define deterministic effect ordering, scope, parameter defaults, animated effect-property evaluation, failure policy, and FrameState projection.
-2. **Text / shape / cursor state** — remove those unresolved families by making all renderer-relevant evaluated state explicit.
-3. **Provenance edges** — close any remaining anchor/content-bounds/source-probe cases surfaced by parity diagnostics.
-4. **AudioGraph** — define serializable timing/rate/pitch/channel/gain/fade/mute/solo/processing/stem decisions and exact sample-count semantics.
-5. Keep all unknown authorable fields fail closed until canonical semantics exist.
+1. **Text / shape / cursor state** — remove those unresolved families by making all renderer-relevant evaluated state explicit. Prefer small reviewable slices if one family requires substantially different paint semantics.
+2. **Provenance edges** — close any remaining anchor/content-bounds/source-probe cases surfaced by parity diagnostics.
+3. **AudioGraph** — define serializable timing/rate/pitch/channel/gain/fade/mute/solo/processing/stem decisions and exact sample-count semantics.
+4. Keep all unknown authorable fields fail closed until canonical semantics exist.
 
 ### Phase 2 exit gate
 
@@ -294,6 +313,8 @@ Before every merge:
 | Transition peer/handle inference differs | Explicit placement/peer/real-overlap semantics. |
 | Pair transitions are misapplied as independent alpha layers | Pair paint instructions operate on isolated surfaces using canonical weights/transforms. |
 | Spatial transition silently inherits sampled FFmpeg approximation | Slide/wipe/zoom use explicit renderer-neutral normalized geometry/scale contracts. |
+| Effect ordering/defaults diverge between authoring, preview, and export | `effect-state-v1` preserves authored order and registry-grounded normalized parameters. |
+| Unsupported effect metadata is silently ignored | Canonical effect evaluation fails closed for unknown types/parameters or undefined automation. |
 | Stacked branch appears current but carries stale tree | Rebuild from actual current `main`; compare every path before merge. |
 | FrameState claims authority too early | Explicit unresolved sets until canonical family semantics exist. |
 | CI setup/runner saturation hides code state | Distinguish setup/queue from executed code checks. |
@@ -324,11 +345,12 @@ Before every merge:
 - #225 consumed fade-family paint in FrameState. Its first Quality Gate found a stale #222 test expectation, which was fixed. A pre-merge diff audit then caught an unsafe synthetic ancestry/tree merge that would have reverted unrelated sandbox-worker changes. The branch was rebuilt cleanly from current `main`, verified to contain only six intended files, and merged as `a6f9145f92e2342dfa70144a4058bf10f64625da` after documenting exact validation state.
 - #227 was rebuilt from the actual post-#225 `main` tree with only eight slide-specific file deltas and merged as `28639ec4fee09635de39764b33021bb6d9aa418c`.
 - #228 was repeatedly normalized as `main` advanced. The first clean hosted Quality Gate found one `gofmt` defect, which was fixed. The final exact head passed Quality Gate including Playwright and deterministic renderer parity, Security Scan/CodeQL, container builds, and platform assurance, then merged as `3007be763dacde820b8b494f62b6a82bb9af5324`.
-- #229 was rebuilt from the actual post-#228 `main` tree with only nine zoom-specific file deltas. The original stale ancestry was discarded and production TypeScript formatting churn was removed before the clean replay.
+- #229 was rebuilt from the actual post-#228 `main` tree with only nine zoom-specific file deltas, validated on exact head `8178c250327e6a8d668faea908f169bb6cfc6354`, and merged as `a8e2a0964e1e49232be08bf2fe7091ce3d9403e6`.
+- #237 defines `effect-state-v1`, projects clip/scene effects into FrameState, and extends permanent cross-runtime parity coverage. After sandbox #231 advanced `main`, the branch was replayed cleanly from `c5adbe417b105d9fd3ce0f2229cca30ad8ec4a91`. Hosted CI caught an initial missing brace and then two `gofmt` differences; both were corrected before the code head passed formatting, vet, unit/integration, race, and the complete frontend pipeline.
 
 ## Next recommended slice
 
-1. Validate and merge #229 from its documentation-complete exact head. This completes canonical paint for every current Timeline v2 transition family.
-2. Start effect-stack semantics immediately after #229: deterministic ordering/scope, parameter defaults, animated effect properties, fail-close policy, and FrameState consumption.
-3. Then canonicalize text / shape / cursor renderer state, close remaining provenance edges, and define AudioGraph.
+1. Validate and merge #237 from its documentation-complete exact head.
+2. Start canonical text renderer state immediately after #237, keeping shape and cursor as separate follow-on slices if their paint/state contracts differ materially.
+3. Then canonicalize shape/cursor renderer state, close remaining provenance edges, and define AudioGraph.
 4. Continue Phase 0 visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.

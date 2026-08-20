@@ -1,4 +1,9 @@
 import { endFrame } from './renderContract';
+import {
+  evaluateClipEffectStackAtTime,
+  evaluateSceneEffectStack,
+  type CanonicalEvaluatedEffectState,
+} from './renderContractEffects';
 import { activeClipsAtFrame } from './renderContractEvaluation';
 import { evaluateMediaGeometry, type CanonicalMediaGeometry } from './renderContractMediaGeometry';
 import { normalizeTimelineV2EvaluationInputs } from './renderContractNormalize';
@@ -51,6 +56,7 @@ export interface CanonicalFrameLayerState {
   view_transform: CanonicalEvaluatedTransform;
   model_matrix: Matrix4;
   perspective_projection: CanonicalPerspectiveProjection;
+  effects?: CanonicalEvaluatedEffectState[];
   transitions?: CanonicalTransitionState[];
   transition_paint?: CanonicalTransitionPaint[];
   unresolved: string[];
@@ -63,6 +69,7 @@ export interface CanonicalVisualFrameState {
   canvas: TimelineV2Canvas;
   active_scene_id?: string;
   camera: CanonicalEvaluatedCamera;
+  scene_effects?: CanonicalEvaluatedEffectState[];
   layers: CanonicalFrameLayerState[];
   unresolved: string[];
   authoritative: boolean;
@@ -85,6 +92,7 @@ export function evaluateVisualFrameState(document: TimelineV2Document, frameInde
   }
   const scene = sceneAtFramePresentation(normalized.scenes ?? [], frame, fps);
   const camera = evaluateFrameCamera(scene, frame, fps, normalized.canvas.height);
+  const sceneEffects = evaluateSceneEffectStack(scene);
   const state: CanonicalVisualFrameState = {
     contract_version: VISUAL_FRAME_STATE_CONTRACT_V1,
     frame_index: frame,
@@ -92,8 +100,9 @@ export function evaluateVisualFrameState(document: TimelineV2Document, frameInde
     canvas: normalized.canvas,
     ...(scene ? { active_scene_id: scene.id } : {}),
     camera,
+    ...(sceneEffects.length > 0 ? { scene_effects: sceneEffects } : {}),
     layers: [],
-    unresolved: scene?.effects?.length ? ['scene_effects'] : [],
+    unresolved: [],
     authoritative: false,
   };
   for (const active of activeClipsAtFrame(normalized, frame)) {
@@ -172,6 +181,7 @@ function evaluateFrameLayer(
   };
   const contentBounds = effectiveContentBounds(clip);
   const unresolved = unresolvedLayerFeatures(clip, contentBounds);
+  const effects = evaluateClipEffectStackAtTime(clip, clipTimeMs);
   const transitionPaint: CanonicalTransitionPaint[] = [];
   for (const transition of transitions) {
     if (!transition.active) continue;
@@ -212,6 +222,7 @@ function evaluateFrameLayer(
     view_transform: view,
     model_matrix: composeModelMatrix(view, anchorOffsetX, anchorOffsetY),
     perspective_projection: perspectiveProjection,
+    ...(effects.length > 0 ? { effects } : {}),
     ...(transitions.length > 0 ? { transitions } : {}),
     ...(transitionPaint.length > 0 ? { transition_paint: transitionPaint } : {}),
     unresolved: normalizedUnresolved,
@@ -233,7 +244,6 @@ function effectiveContentBounds(clip: TimelineV2Clip): TimelineV2ContentBounds |
 
 function unresolvedLayerFeatures(clip: TimelineV2Clip, contentBounds: TimelineV2ContentBounds | undefined): string[] {
   const unresolved: string[] = [];
-  if (clip.effects.length > 0) unresolved.push('effects');
   if (clip.text) unresolved.push('text');
   if (clip.shape) unresolved.push('shape');
   if (clip.cursor) unresolved.push('cursor');
