@@ -15,7 +15,6 @@ import { MarkdownContent } from './MarkdownContent';
 import { BranchSwitcher } from './BranchSwitcher';
 import { RAGSourcePanel } from './RAGSourcePanel';
 import { URLContextSourcePanel } from './URLContextSourcePanel';
-import { ToolCallCard } from './ToolCallCard';
 import { ToolCallsList } from './ToolCallsList';
 import { ToolPicker } from './ToolPicker';
 import { AgentRunView } from './AgentRunView';
@@ -948,18 +947,20 @@ export function ChatView() {
             </motion.div>
           )}
 
-          {/* Generic tool lifecycle */}
+          {/* Generic tool lifecycle — render the same compact summary as the
+              finalized message so tool activity stays visually consistent */}
           {streaming && Object.keys(streamingTools).length > 0 && (
             <div className="space-y-1.5">
-              {Object.values(streamingTools).map((tool) => (
-                <ToolCallCard
-                  key={tool.tool_call_id}
-                  toolName={tool.tool_name}
-                  args={tool.args}
-                  result={tool.result}
-                  status={tool.status}
-                />
-              ))}
+              <ToolCallsList
+                toolCalls={Object.values(streamingTools).map((tool) => ({
+                  id: tool.tool_call_id,
+                  name: tool.tool_name,
+                  arguments: tool.args,
+                }))}
+                toolResults={Object.values(streamingTools).flatMap((tool) =>
+                  tool.result ? [tool.result] : []
+                )}
+              />
               {waitingForToolApproval && (
                 <p className="text-xs text-amber-400" role="status" aria-live="polite">
                   Waiting for tool approval…
