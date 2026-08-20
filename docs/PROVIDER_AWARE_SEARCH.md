@@ -155,6 +155,38 @@ Requests that ask for current data *and* a follow-up action (calculate, export, 
 
 Native grounding is deliberately not used for a preflight: it is inseparable from generation and cannot supply evidence to a later tool round.
 
+### One mechanism per turn
+
+`searchMechanism` is resolved once per turn and recorded as `search_mechanism` in
+message metadata: `native` when the provider grounded its own answer, `local` when
+the Brave/DuckDuckGo provider ran, `failed` when retrieval produced nothing.
+
+Once a turn has a mechanism, the local `web_search` tool is removed from the model's
+catalog. Offering a second, weaker search alongside an existing one invites the model
+to use it — an observed Gemini turn spent five `web_search` calls re-searching a
+question whose evidence was already in context, two of them refused by the provider,
+and answered from training data anyway.
+
+`browser_*` and `fetch_url` are kept. They read a specific URL rather than querying
+an index, so they complement grounding rather than duplicating it.
+
+If a local preflight fails on a provider that can ground itself, the turn escalates to
+native grounding rather than degrading. The follow-up tool is lost, which is the
+better trade: a grounded answer without the calculation beats a stale answer with one.
+
+### Why the preflight exists at all
+
+`transformGeminiGroundedRequest` builds `tools: [{google_search: {}}]` and discards
+any function declarations, so one Gemini request cannot carry both native grounding
+and our tools. The same is true of the Anthropic adapter. That mutual exclusion is
+what forces the choice between owning a turn and running a tool loop.
+
+Removing the constraint means teaching each adapter to emit the provider's function-
+declaration format alongside its search tool, and to map function-call response parts
+back to OpenAI `tool_calls` in both converters. Confirm the provider accepts both tool
+types together for the target model family first — a rejection breaks every grounded
+turn, and the failure degrades to local search rather than erroring visibly.
+
 A verified one-event schedule answer should resemble:
 
 ```text

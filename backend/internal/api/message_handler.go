@@ -420,6 +420,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	syncCatalog := filterOutBrowserTools(
 		selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, syncToolSelection),
 	)
+	syncMechanism := searchMechanismNone
 	syncOwnershipProviderType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
 	syncOwnership := turnOwnershipInputs{
 		NativeGrounding:       websearch.SupportsNativeSearch(syncOwnershipProviderType, llmReq.Model),
@@ -442,18 +443,37 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if !retrievalMayOwnTurn(syncRetrievalPlan, req.Content, syncOwnership) {
 			var preflightErr error
 			syncPreflight, _, preflightErr = h.orchestrator.Preflight(r.Context(), retrievalText, syncSearchRoute.forcesRetrieval())
-			if preflightErr != nil || syncPreflight == nil {
+			if (preflightErr != nil || syncPreflight == nil) && syncOwnership.NativeGrounding {
+				// The local provider failed but this model grounds itself. A
+				// grounded answer that skips the follow-up tool beats a
+				// training-data answer that includes one.
+				log.Printf("[websearch] preflight failed (%v); escalating to native grounding", preflightErr)
+				syncPreflight = nil
+				if nativeResult, nativeErr := h.orchestrator.Process(
+					r.Context(), retrievalText, llmReq.Messages, providerName, modelName, true,
+				); nativeErr == nil && nativeResult != nil && !nativeResult.SearchFailed {
+					orchResult = nativeResult
+					syncMechanism = searchMechanismNative
+					preflightErr = nil
+				}
+			}
+			if orchResult != nil {
+				// Escalation produced a grounded answer; fall through to the
+				// orchestrator-owned branch below.
+			} else if preflightErr != nil || syncPreflight == nil {
 				syncSearchStatus = searchStatus{
 					Attempted: true,
 					Failed:    true,
 					Reason:    classifySearchFailure(preflightErr),
 				}
+				syncMechanism = searchMechanismFailed
 				llmReq.Messages = append([]llm.ChatMessage{{
 					Role:    "system",
 					Content: degradedAnswerDirective,
 				}}, llmReq.Messages...)
 			} else {
 				syncSearchStatus = searchStatus{Attempted: true}
+				syncMechanism = searchMechanismLocal
 				llmReq.Messages = append(
 					[]llm.ChatMessage{syncPreflight.EvidenceSystemMessage(turncontext.FromContext(r.Context()))},
 					llmReq.Messages...,
@@ -465,6 +485,11 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 				log.Printf("ERROR: orchestrator: %v", err)
 				respondError(w, http.StatusBadGateway, "orchestrator error")
 				return
+			}
+			if syncOwnership.NativeGrounding {
+				syncMechanism = searchMechanismNative
+			} else {
+				syncMechanism = searchMechanismLocal
 			}
 		}
 	}
@@ -492,6 +517,9 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 				"tool":              "web_search",
 				metaSources:         orchResult.Sources,
 				metaSearchAttempted: true,
+			}
+			if syncMechanism != searchMechanismNone {
+				metadata[metaSearchMechanism] = string(syncMechanism)
 			}
 			auditAnswerEvidence(
 				websearch.SearchPlan{TimeRange: orchestratorTimeRange(orchResult)},
@@ -546,6 +574,10 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// URL cache, and result sanitization. Running them through the generic round
 	// here would bypass all of that.
 	llmReq.Tools = syncCatalog
+	if syncPreflight != nil || syncOwnership.NativeGrounding {
+		// The turn already has a search mechanism; see withoutLocalWebSearch.
+		llmReq.Tools = withoutLocalWebSearch(llmReq.Tools)
+	}
 	syncEnforcement := newToolEnforcement(syncToolSelection)
 
 	syncWorkspaceID := ""
@@ -686,6 +718,9 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		if syncSearchRoute.NeedsWeb {
 			metaMap["search_route"] = syncSearchRoute.Source
+		}
+		if syncMechanism != searchMechanismNone {
+			metaMap[metaSearchMechanism] = string(syncMechanism)
 		}
 		if resp.Thinking != "" {
 			metaMap["thinking"] = resp.Thinking
@@ -1077,6 +1112,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var streamSearchStatus searchStatus
 	var streamToolEnforcement toolEnforcement
 	var streamCitations []llm.Citation
+	streamMechanism := searchMechanismNone
 	var preflight *websearch.PreflightEvidence
 	var searchRoute searchRouteDecision
 	var searchRouterTelemetry *intentrouter.RouterTelemetry
@@ -1126,13 +1162,43 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
 				r.Context(), retrievalText, providerName, modelName, searchRoute.forcesRetrieval(),
 			)
+			if wsErr == nil && streamOwnership.NativeGrounding {
+				streamMechanism = searchMechanismNative
+			} else if wsErr == nil {
+				streamMechanism = searchMechanismLocal
+			}
 		} else {
 			sendSSE(w, flusher, "web_search", map[string]interface{}{
 				"status": "searching",
 				"query":  retrievalText,
 			})
 			preflight, toolCall, wsErr = h.orchestrator.Preflight(r.Context(), retrievalText, searchRoute.forcesRetrieval())
+			if wsErr == nil {
+				streamMechanism = searchMechanismLocal
+			} else if streamOwnership.NativeGrounding {
+				// The local provider failed, but this model can ground itself.
+				// Answering from training data would be strictly worse than a
+				// grounded answer that skips the follow-up tool, and nothing has
+				// been streamed yet, so switching the turn's shape here is safe.
+				log.Printf("[websearch] preflight failed (%v); escalating to native grounding", wsErr)
+				sendSSE(w, flusher, "web_search", map[string]interface{}{
+					"status": "fallback",
+					"query":  retrievalText,
+				})
+				preflight = nil
+				nativeResp, nativeReq, nativeToolCall, nativeErr := h.orchestrator.ProcessStream(
+					r.Context(), retrievalText, providerName, modelName, true,
+				)
+				if nativeErr == nil && nativeResp != nil && nativeReq != nil {
+					searchResp, wsLLMReq, toolCall, wsErr = nativeResp, nativeReq, nativeToolCall, nil
+					streamMechanism = searchMechanismNative
+				}
+			}
 		}
+		if wsErr != nil {
+			streamMechanism = searchMechanismFailed
+		}
+		logSearchMechanism(streamMechanism, providerName, modelName, wsLLMReq != nil)
 	}
 
 	// A preflight supplies evidence to the tool loop rather than answering, so it
@@ -1274,6 +1340,14 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 		providerType := streamProviderType
 		llmTools := streamLLMTools
+		if preflight != nil || streamOwnership.NativeGrounding {
+			// This turn already has a search mechanism: either evidence is in
+			// context from the preflight, or the provider grounds itself. Leaving
+			// the local web_search tool on the table invites the model to reach
+			// for the weaker one — one observed turn spent five tool calls
+			// re-searching, two refused outright by the provider.
+			llmTools = withoutLocalWebSearch(llmTools)
+		}
 		streamToolEnforcement = newToolEnforcement(turnSelection)
 		const maxToolLoops = 10
 		const maxBrowserNavsPerTurn = 3
@@ -1669,6 +1743,9 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if searchRoute.NeedsWeb {
 		metaMap["search_route"] = searchRoute.Source
 	}
+	if streamMechanism != searchMechanismNone {
+		metaMap[metaSearchMechanism] = string(streamMechanism)
+	}
 	if len(ragSources) > 0 {
 		metaMap["rag_sources"] = ragSources
 	}
@@ -1770,6 +1847,9 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	if searchRoute.NeedsWeb {
 		donePayload["search_route"] = searchRoute.Source
+	}
+	if streamMechanism != searchMechanismNone {
+		donePayload[metaSearchMechanism] = string(streamMechanism)
 	}
 	if len(ragSources) > 0 {
 		donePayload["rag_sources"] = ragSources

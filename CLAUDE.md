@@ -149,6 +149,14 @@ This decision is two-sided, and both sides have been observed failing in product
 
 Neither "always own the turn" nor "never own the turn" is right. Keep both guards.
 
+**One search mechanism per turn.** `searchMechanism` (`native` / `local` / `failed` / `none`) is resolved once, logged, and written to metadata as `search_mechanism`. Once a turn has a mechanism — evidence from a preflight, or a provider that grounds itself — `withoutLocalWebSearch` drops the local `web_search` tool from the catalog. Leaving it available invites the model to use the weaker path; one observed turn spent five tool calls re-searching a question whose evidence was already in context, two of them refused outright by the provider.
+
+Page-level tools stay: `browser_*` and `fetch_url` read a specific URL rather than querying an index, so they compose with grounding instead of competing with it.
+
+**A failed local preflight escalates to native grounding when the provider has it.** A grounded answer that skips the follow-up tool beats a training-data answer that includes one, and nothing has been streamed at that point, so changing the turn's shape is safe.
+
+**Native grounding and our tool calling are mutually exclusive for Gemini, and that is an adapter limitation, not a law.** `transformGeminiGroundedRequest` builds `tools: [{google_search: {}}]` and discards any function declarations, so a grounded Gemini request cannot also carry our tools — which is the whole reason the preflight exists. Unifying them means teaching the adapter to emit `functionDeclarations` alongside `google_search` and to map `functionCall` response parts back to OpenAI `tool_calls`, in both the streaming and non-streaming converters. Verify that Gemini accepts both tool types together for the target model family before relying on it; a rejection would break every grounded turn.
+
 **Do not force a tool retry after a failed retrieval.** It runs the same plan against the provider that just failed, and consumes the one round where the model could reach the tool that can actually answer.
 
 **Providers declare their own limits; the planner must respect them.** `Provider.Capabilities()` reports `MaxQueriesPerTurn`, `SupportsFreshnessFilter`, and `ProvidesPublicationDates`, and `searchWithPlan` clamps its iteration count to the first. This is not decoration: Brave is an API with a quota, while DuckDuckGo is a scraped HTML endpoint that serves an anti-bot challenge after roughly one request per source address. Issuing an expanded three-query plan against DuckDuckGo guarantees that queries two and three come back empty, turning a deliberate breadth increase into a reliability loss. Report a new provider's limits honestly, including when that means reporting it as weak.

@@ -264,6 +264,12 @@ export interface MessageMetadata {
    * succeeded with no usable sources, and the UI must not present those the
    * same way it presents a grounded answer.
    */
+  /**
+   * How the turn actually obtained current information: `native` means the
+   * provider grounded its own answer, `local` means the Brave/DuckDuckGo
+   * provider ran, `failed` means retrieval produced nothing.
+   */
+  search_mechanism?: 'none' | 'native' | 'local' | 'failed';
   search_attempted?: boolean;
   search_failed?: boolean;
   search_failure_reason?: SearchFailureReason;

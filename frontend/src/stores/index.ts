@@ -406,6 +406,9 @@ export const useMessageStore = create<MessageState>((set, get) => ({
               ? data.sources
               : get().webSearchResults ?? [];
           }
+          if (data.search_mechanism) {
+            metadata.search_mechanism = data.search_mechanism;
+          }
           if (data.search_attempted) {
             metadata.search_attempted = true;
           }
