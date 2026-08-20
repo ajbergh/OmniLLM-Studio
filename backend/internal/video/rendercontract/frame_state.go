@@ -58,6 +58,7 @@ type FrameLayerState struct {
 	ViewTransform         EvaluatedTransform             `json:"view_transform"`
 	ModelMatrix           Matrix4                        `json:"model_matrix"`
 	PerspectiveProjection EvaluatedPerspectiveProjection `json:"perspective_projection"`
+	Effects               []EvaluatedEffectState         `json:"effects,omitempty"`
 	Transitions           []EvaluatedTransitionState     `json:"transitions,omitempty"`
 	TransitionPaint       []EvaluatedTransitionPaint     `json:"transition_paint,omitempty"`
 	Unresolved            []string                       `json:"unresolved"`
@@ -65,22 +66,23 @@ type FrameLayerState struct {
 }
 
 type VisualFrameState struct {
-	ContractVersion string            `json:"contract_version"`
-	FrameIndex      int64             `json:"frame_index"`
-	FrameTime       RationalTime      `json:"frame_time"`
-	Canvas          TimelineV2Canvas  `json:"canvas"`
-	ActiveSceneID   string            `json:"active_scene_id,omitempty"`
-	Camera          EvaluatedCamera   `json:"camera"`
-	Layers          []FrameLayerState `json:"layers"`
-	Unresolved      []string          `json:"unresolved"`
-	Authoritative   bool              `json:"authoritative"`
+	ContractVersion string                 `json:"contract_version"`
+	FrameIndex      int64                  `json:"frame_index"`
+	FrameTime       RationalTime           `json:"frame_time"`
+	Canvas          TimelineV2Canvas       `json:"canvas"`
+	ActiveSceneID   string                 `json:"active_scene_id,omitempty"`
+	Camera          EvaluatedCamera        `json:"camera"`
+	SceneEffects    []EvaluatedEffectState `json:"scene_effects,omitempty"`
+	Layers          []FrameLayerState      `json:"layers"`
+	Unresolved      []string               `json:"unresolved"`
+	Authoritative   bool                   `json:"authoritative"`
 }
 
 // EvaluateVisualFrameState produces the renderer-independent visual FrameState
 // projection. It evaluates exact-frame clip/camera properties, visibility/order,
-// source time, canonical media geometry, perspective projection, transition
-// timing/peer state, and supported canonical transition paint. Paint families
-// not yet canonicalized remain explicit unresolved debt only on active frames.
+// source time, canonical media geometry, perspective projection, ordered effect
+// stacks, transition timing/peer state, and supported canonical transition paint.
+// Visual families not yet canonicalized remain explicit unresolved debt.
 func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualFrameState, error) {
 	normalized, err := NormalizeTimelineV2EvaluationInputs(doc)
 	if err != nil {
@@ -107,8 +109,9 @@ func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualF
 	}
 	if scene != nil {
 		state.ActiveSceneID = scene.ID
-		if len(scene.Effects) > 0 {
-			state.Unresolved = append(state.Unresolved, "scene_effects")
+		state.SceneEffects, err = EvaluateSceneEffectStack(scene)
+		if err != nil {
+			return VisualFrameState{}, err
 		}
 	}
 
@@ -203,6 +206,10 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 
 	bounds := effectiveContentBounds(clip)
 	unresolved := unresolvedLayerFeatures(clip, bounds)
+	effects, err := EvaluateClipEffectStackAtFrame(clip, frameIndex, canvas.FPS)
+	if err != nil {
+		return FrameLayerState{}, err
+	}
 	paint := make([]EvaluatedTransitionPaint, 0)
 	for _, transition := range transitions {
 		if !transition.Active {
@@ -248,7 +255,7 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 		TrackIndex: active.TrackIndex, ClipIndex: active.ClipIndex, TrackID: track.ID, ClipID: clip.ID,
 		ZIndex: active.ZIndex, StartFrame: active.StartFrame, EndFrame: active.EndFrame, SourceTimeMS: active.SourceTimeMS,
 		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Transform: transform, ViewTransform: view,
-		ModelMatrix: matrix, PerspectiveProjection: projection, Transitions: transitions, TransitionPaint: paint,
+		ModelMatrix: matrix, PerspectiveProjection: projection, Effects: effects, Transitions: transitions, TransitionPaint: paint,
 		Unresolved: unresolved, Authoritative: len(unresolved) == 0,
 	}, nil
 }
@@ -288,9 +295,6 @@ func effectiveContentBounds(clip TimelineV2Clip) *TimelineV2ContentBounds {
 
 func unresolvedLayerFeatures(clip TimelineV2Clip, bounds *TimelineV2ContentBounds) []string {
 	unresolved := []string{}
-	if len(clip.Effects) > 0 {
-		unresolved = append(unresolved, "effects")
-	}
 	if clip.Text != nil {
 		unresolved = append(unresolved, "text")
 	}
