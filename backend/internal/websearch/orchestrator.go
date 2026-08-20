@@ -3,6 +3,7 @@ package websearch
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -224,6 +225,11 @@ func (o *Orchestrator) searchWithPlan(ctx context.Context, plan SearchPlan, tc t
 			MaxResults: plan.MaxResults,
 		})
 		if err != nil {
+			// A local search failure previously vanished into a soft fallback that
+			// told the model to answer from training data. Log it loudly: this is
+			// the signal that a provider is misconfigured or broken.
+			log.Printf("ERROR: websearch provider %q failed for query %d/%d: %v",
+				provider.Name(), i+1, iterations, err)
 			if len(combined) == 0 && i == iterations-1 {
 				return nil, err
 			}

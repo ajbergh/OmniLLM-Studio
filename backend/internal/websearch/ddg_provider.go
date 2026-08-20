@@ -1,6 +1,7 @@
 package websearch
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -19,9 +20,12 @@ import (
 // This is the default fallback when no Brave API key is configured.
 // ---------------------------------------------------------------------------
 
+const ddgSearchEndpoint = "https://html.duckduckgo.com/html/"
+
 // DuckDuckGoProvider performs web searches via DuckDuckGo HTML.
 type DuckDuckGoProvider struct {
 	httpClient *http.Client
+	endpoint   string
 }
 
 // NewDuckDuckGoProvider creates a new DuckDuckGoProvider.
@@ -30,7 +34,20 @@ func NewDuckDuckGoProvider() *DuckDuckGoProvider {
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
+		endpoint: ddgSearchEndpoint,
 	}
+}
+
+// Name identifies the provider in logs.
+func (d *DuckDuckGoProvider) Name() string { return "duckduckgo" }
+
+// searchEndpoint returns the configured endpoint, falling back to the public
+// DuckDuckGo HTML endpoint. Tests override it; production never does.
+func (d *DuckDuckGoProvider) searchEndpoint() string {
+	if strings.TrimSpace(d.endpoint) == "" {
+		return ddgSearchEndpoint
+	}
+	return d.endpoint
 }
 
 type ddgResult struct {
@@ -40,18 +57,23 @@ type ddgResult struct {
 }
 
 func (d *DuckDuckGoProvider) Search(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
-	// Build query: append time-related terms for freshness
+	// Build query: append time-related terms for freshness.
+	// DuckDuckGo HTML has no freshness parameter, so temporal terms are the only
+	// available signal. An empty TimeRange means the caller deliberately wants no
+	// recency bias (schedule lookups, pricing pages, reference material).
 	q := req.Query
 	switch req.TimeRange {
 	case "24h":
-		// DuckDuckGo HTML doesn't support freshness directly,
-		// so we add temporal terms if not already present
 		if !containsAny(strings.ToLower(q), "today", "latest", "breaking", "now") {
 			q = q + " latest today"
 		}
 	case "7d":
 		if !containsAny(strings.ToLower(q), "this week", "recent", "latest") {
 			q = q + " this week"
+		}
+	case "30d":
+		if !containsAny(strings.ToLower(q), "this month", "recent", "latest") {
+			q = q + " this month"
 		}
 	}
 
@@ -63,7 +85,7 @@ func (d *DuckDuckGoProvider) Search(ctx context.Context, req SearchRequest) (*Se
 		params.Set("kl", strings.ToLower(req.Region)+"-en")
 	}
 
-	endpoint := "https://html.duckduckgo.com/html/?" + params.Encode()
+	endpoint := d.searchEndpoint() + "?" + params.Encode()
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
@@ -79,13 +101,24 @@ func (d *DuckDuckGoProvider) Search(ctx context.Context, req SearchRequest) (*Se
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("ddg returned status %d: %s", resp.StatusCode, string(bodyBytes))
+		bodyBytes, _ := readResponseBody(resp)
+		return nil, fmt.Errorf("ddg returned status %d: %s", resp.StatusCode, truncateProviderError(string(bodyBytes)))
 	}
 
-	raw, err := parseDDGHTML(resp.Body)
+	bodyBytes, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("read ddg response: %w", err)
+	}
+
+	raw, err := parseDDGHTML(bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("parse ddg html: %w", err)
+	}
+	if len(raw) == 0 {
+		// DuckDuckGo HTML is scraped, not an API. A markup change yields a 200
+		// with zero parsable results, which must surface as a provider failure
+		// rather than a successful empty search.
+		return nil, fmt.Errorf("ddg returned no parsable results (markup may have changed)")
 	}
 
 	// Convert to normalized results

@@ -11,6 +11,9 @@ import (
 // by satisfying this interface.
 type Provider interface {
 	Search(ctx context.Context, req SearchRequest) (*SearchResponse, error)
+	// Name identifies the provider in logs and telemetry. It must never include
+	// credentials.
+	Name() string
 }
 
 // ---------------------------------------------------------------------------
@@ -23,6 +26,9 @@ type FakeProvider struct{}
 func NewFakeProvider() *FakeProvider {
 	return &FakeProvider{}
 }
+
+// Name identifies the provider in logs.
+func (f *FakeProvider) Name() string { return "fake" }
 
 func (f *FakeProvider) Search(_ context.Context, req SearchRequest) (*SearchResponse, error) {
 	now := time.Now().UTC()

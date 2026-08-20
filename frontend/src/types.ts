@@ -176,6 +176,15 @@ export interface WebSearchResult {
   snippet: string;
 }
 
+/** Client-safe retrieval failure codes emitted by the backend. */
+export type SearchFailureReason = 'no_results' | 'provider_error' | 'provider_disabled';
+
+export const SEARCH_FAILURE_LABELS: Record<SearchFailureReason, string> = {
+  no_results: 'The search returned no usable results.',
+  provider_error: 'The search provider could not be reached.',
+  provider_disabled: 'Web search is not configured.',
+};
+
 export interface WebSearchResponse {
   query: string;
   timeRange: string;
@@ -237,6 +246,21 @@ export interface MessageMetadata {
   file_search?: boolean;
   tool?: string;
   sources?: WebSearchResult[];
+  /**
+   * Current-information retrieval status. These four signals are deliberately
+   * separate: an answer can have had retrieval attempted but failed, or have
+   * succeeded with no usable sources, and the UI must not present those the
+   * same way it presents a grounded answer.
+   */
+  search_attempted?: boolean;
+  search_failed?: boolean;
+  search_failure_reason?: SearchFailureReason;
+  /** True when every cited source carried a parsable date inside the plan's window. */
+  freshness_verified?: boolean;
+  /** Human-readable age of the newest cited source, e.g. "2 hours ago". */
+  answer_freshness?: string;
+  /** Set when the answer makes numeric claims that no source supports. */
+  unsupported_claims?: string[];
   file_sources?: FileSearchResult[];
   tool_call?: ToolCall;
   rag_sources?: RAGSourceRef[];

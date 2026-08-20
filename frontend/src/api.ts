@@ -15,6 +15,7 @@ import type {
   UpdateProviderRequest,
   WebSearchRequest,
   WebSearchResponse,
+  SearchFailureReason,
   WebSearchResult,
   FileSearchResult,
   FileSearchResponse,
@@ -308,12 +309,12 @@ export const api = {
       onToken: (content: string) => void;
       onThinking?: (content: string) => void;
       onStart?: (data: { message_id: string; user_message_id: string }) => void;
-      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; content?: string; web_search?: boolean; sources?: WebSearchResult[]; file_search?: boolean; file_sources?: FileSearchResult[]; browser_tool?: boolean; browser_navigated_urls?: string[]; tool_calls?: ToolCall[]; tool_results?: ToolResult[]; browser_tool_results?: ToolResult[]; thinking?: string; cost?: number; image_generation?: boolean; router?: RouterTelemetry }) => void;
+      onDone?: (data: { message_id: string; provider: string; model: string; latency_ms: number; content?: string; web_search?: boolean; sources?: WebSearchResult[]; search_attempted?: boolean; search_failed?: boolean; search_failure_reason?: SearchFailureReason; file_search?: boolean; file_sources?: FileSearchResult[]; browser_tool?: boolean; browser_navigated_urls?: string[]; tool_calls?: ToolCall[]; tool_results?: ToolResult[]; browser_tool_results?: ToolResult[]; thinking?: string; cost?: number; image_generation?: boolean; router?: RouterTelemetry }) => void;
       onError?: (error: string, details?: { code?: string; retryable?: boolean }) => void;
       onToolEvent?: (data: import('./types').ToolLifecycleEvent) => void;
       onToolResult?: (data: { tool_call_id: string; tool_name: string; result: ToolResult }) => void;
       onHeartbeat?: () => void;
-      onWebSearch?: (data: { tool_call: ToolCall; status: string }) => void;
+      onWebSearch?: (data: { tool_call: ToolCall; status: string; reason?: SearchFailureReason }) => void;
       onWebSearchResults?: (data: { query: string; results: WebSearchResult[] }) => void;
       onFileSearch?: (data: { status: string; scope?: string; query?: string; count?: number }) => void;
       onFileSearchResults?: (data: { results: FileSearchResult[] }) => void;

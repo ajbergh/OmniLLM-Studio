@@ -145,6 +145,9 @@ interface MessageState {
   webSearching: boolean;
   webSearchResults: WebSearchResult[] | null;
   webSearchQuery: string | null;
+  /** Live retrieval-failure state for the in-flight turn. */
+  searchFailed: boolean;
+  searchFailureReason: SearchFailureReason | null;
   urlContextStatus: string | null;
   urlContextKind: string | null;
   browserStatus: string | null;
@@ -180,6 +183,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   webSearching: false,
   webSearchResults: null,
   webSearchQuery: null,
+  searchFailed: false,
+  searchFailureReason: null,
   urlContextStatus: null,
   urlContextKind: null,
   browserStatus: null,
@@ -219,7 +224,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   },
 
   sendMessage: (conversationId: string, content: string, override?: { provider?: string; model?: string }, attachmentIds?: string[], webSearch?: boolean, think?: boolean, reasoningEffort?: string, openRouterOptions?: { provider_prefs?: SendMessageRequest['provider_prefs']; model_fallbacks?: string[]; route?: string; plugins?: SendMessageRequest['plugins'] }, toolOptions?: { tool_mode?: SendMessageRequest['tool_mode']; allowed_tools?: string[]; required_tool?: string }) => {
-    set({ loadedConversationId: conversationId, streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, ragIndexingStatus: null, ragIndexingDetail: null, imageGenerating: false, streamingTools: {}, waitingForToolApproval: false });
+    set({ loadedConversationId: conversationId, streaming: true, streamingContent: '', streamingThinking: '', streamingConversationId: conversationId, error: null, webSearching: false, webSearchResults: null, webSearchQuery: null, searchFailed: false, searchFailureReason: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, ragIndexingStatus: null, ragIndexingDetail: null, imageGenerating: false, streamingTools: {}, waitingForToolApproval: false });
 
     const reqBody: SendMessageRequest = { content };
     if (override) reqBody.override = override;
@@ -320,7 +325,23 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           }));
         },
         onWebSearch: (data) => {
-          set({ webSearching: true, webSearchQuery: data?.tool_call?.arguments?.query || null });
+          // status "failed" previously left the spinner running and set no
+          // failure state at all, so a failed retrieval looked identical to a
+          // successful one once the first token arrived.
+          if (data.status === 'failed') {
+            set({
+              webSearching: false,
+              searchFailed: true,
+              searchFailureReason: data.reason ?? 'provider_error',
+            });
+            return;
+          }
+          set({
+            webSearching: true,
+            webSearchQuery: data?.tool_call?.arguments?.query || null,
+            searchFailed: false,
+            searchFailureReason: null,
+          });
         },
         onWebSearchResults: (data) => {
           set({ webSearchResults: data.results, webSearching: false, webSearchQuery: data.query || null });
@@ -371,14 +392,26 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         onDone: (data) => {
           // Guard: skip if no valid message_id (phantom prevention)
           if (!data.message_id) {
-            set({ streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null });
+            set({ streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false, searchFailed: false, searchFailureReason: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null });
             return;
           }
           const metadata: Record<string, unknown> = {};
           if (data.web_search) {
             metadata.web_search = true;
             metadata.tool = 'web_search';
-            metadata.sources = data.sources || get().webSearchResults;
+            // `data.sources` can be a present-but-empty array (native grounding
+            // returns no local results), and `[] || fallback` yields `[]` because
+            // an empty array is truthy. Check length explicitly.
+            metadata.sources = data.sources && data.sources.length > 0
+              ? data.sources
+              : get().webSearchResults ?? [];
+          }
+          if (data.search_attempted) {
+            metadata.search_attempted = true;
+          }
+          if (data.search_failed) {
+            metadata.search_failed = true;
+            metadata.search_failure_reason = data.search_failure_reason ?? 'provider_error';
           }
           if (data.file_search) {
             metadata.file_search = true;
@@ -435,6 +468,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             streamingConversationId: null,
             abortStream: null,
             webSearching: false,
+            searchFailed: false,
+            searchFailureReason: null,
             urlContextStatus: null,
             urlContextKind: null,
             browserStatus: null,
@@ -461,7 +496,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             };
             set((current) => ({ messages: dedupeMessages([...current.messages, partialMsg]) }));
           }
-          set({ error, streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false, webSearchResults: null, webSearchQuery: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, imageGenerating: false, streamingTools: {}, waitingForToolApproval: false });
+          set({ error, streaming: false, streamingContent: '', streamingThinking: '', streamingConversationId: null, abortStream: null, webSearching: false, webSearchResults: null, webSearchQuery: null, searchFailed: false, searchFailureReason: null, urlContextStatus: null, urlContextKind: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, imageGenerating: false, streamingTools: {}, waitingForToolApproval: false });
         },
       }
     );
@@ -471,7 +506,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   clearMessages: (conversationId?: string) => {
     ++fetchMessageCounter;
-    set({ messages: [], loadedConversationId: conversationId ?? null, loading: false, error: null, streamingContent: '', streamingThinking: '', streaming: false, streamingConversationId: null, webSearching: false, webSearchResults: null, webSearchQuery: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, streamingTools: {}, waitingForToolApproval: false });
+    set({ messages: [], loadedConversationId: conversationId ?? null, loading: false, error: null, streamingContent: '', streamingThinking: '', streaming: false, streamingConversationId: null, webSearching: false, webSearchResults: null, webSearchQuery: null, searchFailed: false, searchFailureReason: null, browserStatus: null, browserStatusDetail: null, browserProgress: null, streamingTools: {}, waitingForToolApproval: false });
   },
 
   stopStreaming: () => {
@@ -495,12 +530,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         webSearching: false,
         webSearchResults: null,
         webSearchQuery: null,
+        searchFailed: false,
+        searchFailureReason: null,
         browserStatus: null,
         browserStatusDetail: null,
         browserProgress: null,
       }));
     } else {
-      set({ streaming: false, streamingContent: '', streamingConversationId: null, abortStream: null, webSearching: false, webSearchResults: null, webSearchQuery: null, browserStatus: null, browserStatusDetail: null, browserProgress: null });
+      set({ streaming: false, streamingContent: '', streamingConversationId: null, abortStream: null, webSearching: false, webSearchResults: null, webSearchQuery: null, searchFailed: false, searchFailureReason: null, browserStatus: null, browserStatusDetail: null, browserProgress: null });
     }
   },
 

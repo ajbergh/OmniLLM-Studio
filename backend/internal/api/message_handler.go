@@ -411,6 +411,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass && h.chatPreflightAllowedForTurn(r.Context(), "web_search")
 
 	var orchResult *websearch.OrchestratorResult
+	var syncSearchStatus searchStatus
 	if webSearchEnabled {
 		orchResult, err = h.orchestrator.Process(r.Context(), req.Content, llmReq.Messages, providerName, modelName)
 		if err != nil {
@@ -423,18 +424,26 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if orchResult != nil {
 		// If web search was attempted but failed, fall through to normal LLM path
 		if orchResult.SearchFailed {
-			// Prepend a note to the system context about failed search
+			// Record the failure so the saved message is marked unverified. The
+			// directive constrains the answer; the metadata is what the UI trusts,
+			// because models do not reliably self-report stale data.
+			syncSearchStatus = searchStatus{
+				Attempted: true,
+				Failed:    true,
+				Reason:    classifySearchFailure(nil),
+			}
 			llmReq.Messages = append([]llm.ChatMessage{{
 				Role:    "system",
-				Content: "Note: A web search was attempted for this query but returned no results. Answer from your training data and mention that the information may not be current.",
+				Content: degradedAnswerDirective,
 			}}, llmReq.Messages...)
 			// Fall through to normal LLM path below
 		} else {
 			// Web search was triggered – use orchestrator result
 			metadata := map[string]interface{}{
-				"web_search": true,
-				"tool":       "web_search",
-				"sources":    orchResult.Sources,
+				metaWebSearch:       true,
+				"tool":              "web_search",
+				metaSources:         orchResult.Sources,
+				metaSearchAttempted: true,
 			}
 			if orchResult.ToolCall != nil {
 				metadata["tool_call"] = orchResult.ToolCall
@@ -563,6 +572,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 				metaMap[k] = v
 			}
 		}
+		syncSearchStatus.applyTo(metaMap)
 		if len(metaMap) > 0 {
 			metaBytes, _ := json.Marshal(metaMap)
 			assistantMsg.MetadataJSON = string(metaBytes)
@@ -941,6 +951,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var toolResults []tools.ToolResult
 	var browserToolResults []tools.ToolResult
 	var browserNavigatedURLs []string
+	var streamSearchStatus searchStatus
 	if webSearchEnabled && !requiresComposableToolLoop(req.Content) {
 		searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
 			r.Context(), req.Content, providerName, modelName,
@@ -1023,14 +1034,22 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Normal LLM streaming (no web search, or search failed — fall through)
 		if wsErr != nil && toolCall != nil {
-			// Web search was attempted but failed — notify UI and add context
+			// Retrieval was attempted and failed. Record it so the answer is
+			// marked unverified in metadata and in the UI, rather than relying
+			// on the model to volunteer that its data may be stale.
+			streamSearchStatus = searchStatus{
+				Attempted: true,
+				Failed:    true,
+				Reason:    classifySearchFailure(wsErr),
+			}
 			sendSSE(w, flusher, "web_search", map[string]interface{}{
 				"tool_call": toolCall,
 				"status":    "failed",
+				"reason":    streamSearchStatus.Reason,
 			})
 			llmReq.Messages = append([]llm.ChatMessage{{
 				Role:    "system",
-				Content: "Note: A web search was attempted for this query but returned no results. Answer from your training data and mention that the information may not be current.",
+				Content: degradedAnswerDirective,
 			}}, llmReq.Messages...)
 		}
 
@@ -1378,13 +1397,14 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Build metadata for the saved message
 	metaMap := map[string]interface{}{}
 	if searchResp != nil {
-		metaMap["web_search"] = true
+		metaMap[metaWebSearch] = true
 		metaMap["tool"] = "web_search"
-		metaMap["sources"] = searchResp.Results
+		metaMap[metaSources] = searchResp.Results
 		if toolCall != nil {
 			metaMap["tool_call"] = toolCall
 		}
 	}
+	streamSearchStatus.applyTo(metaMap)
 	if len(ragSources) > 0 {
 		metaMap["rag_sources"] = ragSources
 	}
@@ -1466,9 +1486,10 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		"latency_ms": latency,
 	}
 	if searchResp != nil {
-		donePayload["web_search"] = true
-		donePayload["sources"] = searchResp.Results
+		donePayload[metaWebSearch] = true
+		donePayload[metaSources] = searchResp.Results
 	}
+	streamSearchStatus.applyTo(donePayload)
 	if len(ragSources) > 0 {
 		donePayload["rag_sources"] = ragSources
 	}

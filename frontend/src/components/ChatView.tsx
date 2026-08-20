@@ -24,6 +24,7 @@ import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi, a
 import { useImageEditorStore } from '../stores/imageEditor';
 import { useMusicStudioStore } from '../stores/musicStudio';
 import { matchesShortcut } from '../shortcuts';
+import { RetrievalStatus, FreshnessBadge } from './RetrievalStatus';
 import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult, Attachment, RouterTelemetry, ChatTurnToolSelection } from '../types';
 import { AgentEventType } from '../types';
 import { getKnownImageModels, getModelReasoningLevels, getModelToolCallingSupport, isFreeModel, type ReasoningEffortLevel } from '../models';
@@ -1956,6 +1957,9 @@ function MessageBubble({
           </div>
         )}
 
+        {/* Retrieval outcome: failed lookups and grounded-but-uncitable answers */}
+        {!isUser && <RetrievalStatus metadata={metadata} />}
+
         {/* Collapsible Sources panel */}
         {!isUser && sources.length > 0 && (
           <div className="mt-2">
@@ -1965,6 +1969,7 @@ function MessageBubble({
             >
               <Globe size={10} className="text-blue-400" />
               <span>{sources.length} source{sources.length !== 1 ? 's' : ''} cited</span>
+              <FreshnessBadge metadata={metadata} />
               {sourcesOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
             </button>
 
