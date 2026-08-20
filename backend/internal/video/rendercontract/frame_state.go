@@ -55,6 +55,7 @@ type FrameLayerState struct {
 	ContentBounds         *TimelineV2ContentBounds       `json:"content_bounds,omitempty"`
 	MediaGeometry         *EvaluatedMediaGeometry        `json:"media_geometry,omitempty"`
 	Text                  *EvaluatedTextState            `json:"text,omitempty"`
+	Shape                 *EvaluatedShapeState           `json:"shape,omitempty"`
 	Transform             EvaluatedTransform             `json:"transform"`
 	ViewTransform         EvaluatedTransform             `json:"view_transform"`
 	ModelMatrix           Matrix4                        `json:"model_matrix"`
@@ -81,7 +82,7 @@ type VisualFrameState struct {
 
 // EvaluateVisualFrameState produces the renderer-independent visual FrameState
 // projection. It evaluates exact-frame clip/camera properties, visibility/order,
-// source time, canonical media geometry, text state, perspective projection,
+// source time, canonical media geometry, text/shape state, perspective projection,
 // ordered effect stacks, transition timing/peer state, and supported canonical
 // transition paint. Visual families not yet canonicalized remain explicit debt.
 func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualFrameState, error) {
@@ -205,7 +206,11 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 	view.RotationY -= camera.RotationY
 	view.RotationZ -= camera.RotationZ
 
-	bounds := effectiveContentBounds(clip)
+	shape, err := EvaluateShapeState(clip.Shape)
+	if err != nil {
+		return FrameLayerState{}, fmt.Errorf("canonical shape state for clip %q: %w", clip.ID, err)
+	}
+	bounds := effectiveContentBounds(clip, shape)
 	unresolved := unresolvedLayerFeatures(clip, bounds)
 	text, err := EvaluateTextState(clip.Text, canvas.Height)
 	if err != nil {
@@ -259,7 +264,7 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 	return FrameLayerState{
 		TrackIndex: active.TrackIndex, ClipIndex: active.ClipIndex, TrackID: track.ID, ClipID: clip.ID,
 		ZIndex: active.ZIndex, StartFrame: active.StartFrame, EndFrame: active.EndFrame, SourceTimeMS: active.SourceTimeMS,
-		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Text: text, Transform: transform, ViewTransform: view,
+		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Text: text, Shape: shape, Transform: transform, ViewTransform: view,
 		ModelMatrix: matrix, PerspectiveProjection: projection, Effects: effects, Transitions: transitions, TransitionPaint: paint,
 		Unresolved: unresolved, Authoritative: len(unresolved) == 0,
 	}, nil
@@ -277,20 +282,13 @@ func sceneAtFramePresentation(scenes []TimelineV2Scene, frameIndex int64, fps in
 	return nil
 }
 
-func effectiveContentBounds(clip TimelineV2Clip) *TimelineV2ContentBounds {
+func effectiveContentBounds(clip TimelineV2Clip, shape *EvaluatedShapeState) *TimelineV2ContentBounds {
 	if clip.ContentBounds != nil {
 		bounds := *clip.ContentBounds
 		return &bounds
 	}
-	if clip.Shape != nil {
-		width, height := 320.0, 180.0
-		if clip.Shape.Width != nil && *clip.Shape.Width > 0 {
-			width = float64(*clip.Shape.Width)
-		}
-		if clip.Shape.Height != nil && *clip.Shape.Height > 0 {
-			height = float64(*clip.Shape.Height)
-		}
-		return &TimelineV2ContentBounds{Width: width, Height: height}
+	if shape != nil {
+		return &TimelineV2ContentBounds{Width: shape.Width, Height: shape.Height}
 	}
 	if clip.Text != nil && clip.Text.BoxWidth != nil && clip.Text.BoxHeight != nil && *clip.Text.BoxWidth > 0 && *clip.Text.BoxHeight > 0 {
 		return &TimelineV2ContentBounds{Width: *clip.Text.BoxWidth, Height: *clip.Text.BoxHeight}
@@ -300,9 +298,6 @@ func effectiveContentBounds(clip TimelineV2Clip) *TimelineV2ContentBounds {
 
 func unresolvedLayerFeatures(clip TimelineV2Clip, bounds *TimelineV2ContentBounds) []string {
 	unresolved := []string{}
-	if clip.Shape != nil {
-		unresolved = append(unresolved, "shape")
-	}
 	if clip.Cursor != nil {
 		unresolved = append(unresolved, "cursor")
 	}
