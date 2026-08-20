@@ -15,6 +15,9 @@ const (
 	TransitionPaintPairSlide                 = "pair-slide"
 	TransitionPaintOwnerWipe                 = "owner-wipe"
 	TransitionPaintPairWipe                  = "pair-wipe"
+	TransitionPaintOwnerZoom                 = "owner-zoom"
+	TransitionPaintPairZoom                  = "pair-zoom"
+	TransitionPaintScaleLayerMultiplier      = "layer-multiplier"
 	TransitionPaintTranslationCanvasFraction = "canvas-fraction"
 	TransitionPaintClipLayerFraction         = "layer-fraction"
 )
@@ -25,7 +28,7 @@ const (
 // valid transition family whose paint remains intentionally unresolved.
 func SupportsTransitionPaint(transitionType string) bool {
 	switch strings.ToLower(strings.TrimSpace(transitionType)) {
-	case "fade", "crossfade", "dip_to_black", "slide", "wipe":
+	case "fade", "crossfade", "dip_to_black", "slide", "wipe", "zoom":
 		return true
 	default:
 		return false
@@ -67,6 +70,10 @@ type EvaluatedTransitionPaint struct {
 	IncomingClipRight  *float64 `json:"incoming_clip_right,omitempty"`
 	IncomingClipBottom *float64 `json:"incoming_clip_bottom,omitempty"`
 	IncomingClipLeft   *float64 `json:"incoming_clip_left,omitempty"`
+	ScaleSpace         string   `json:"scale_space,omitempty"`
+	OwnerScale         *float64 `json:"owner_scale,omitempty"`
+	OutgoingScale      *float64 `json:"outgoing_scale,omitempty"`
+	IncomingScale      *float64 `json:"incoming_scale,omitempty"`
 }
 
 // EvaluateTransitionPaint converts canonical transition timing/ownership state
@@ -281,6 +288,45 @@ func EvaluateTransitionPaint(ownerClipID string, state EvaluatedTransitionState)
 			return nil, invalidTransitionPaintState(state, "wipe requires in, out, or between placement")
 		}
 
+	case "zoom":
+		paint.ScaleSpace = TransitionPaintScaleLayerMultiplier
+		switch paint.Placement {
+		case "in":
+			if state.Role != "incoming" || paint.PeerClipID != "" {
+				return nil, invalidTransitionPaintState(state, "zoom-in requires an incoming owner with no peer")
+			}
+			paint.Composition = TransitionPaintOwnerZoom
+			paint.OwnerOpacity = transitionPaintFloat(state.Progress)
+			paint.OwnerScale = transitionPaintScale(state.Progress)
+			return paint, nil
+		case "out":
+			if state.Role != "outgoing" || paint.PeerClipID != "" {
+				return nil, invalidTransitionPaintState(state, "zoom-out requires an outgoing owner with no peer")
+			}
+			paint.Composition = TransitionPaintOwnerZoom
+			paint.OwnerOpacity = transitionPaintFloat(1 - state.Progress)
+			paint.OwnerScale = transitionPaintScale(1 - state.Progress)
+			return paint, nil
+		case "between":
+			if paint.PeerClipID == "" {
+				return nil, invalidTransitionPaintState(state, "zoom between requires an explicit peer")
+			}
+			outgoingID, incomingID, err := transitionPaintPairRoles(ownerClipID, state)
+			if err != nil {
+				return nil, err
+			}
+			paint.Composition = TransitionPaintPairZoom
+			paint.OutgoingClipID = outgoingID
+			paint.IncomingClipID = incomingID
+			paint.OutgoingWeight = transitionPaintFloat(1 - state.Progress)
+			paint.IncomingWeight = transitionPaintFloat(state.Progress)
+			paint.OutgoingScale = transitionPaintScale(1 - state.Progress)
+			paint.IncomingScale = transitionPaintScale(state.Progress)
+			return paint, nil
+		default:
+			return nil, invalidTransitionPaintState(state, "zoom requires in, out, or between placement")
+		}
+
 	default:
 		return nil, fmt.Errorf("transition %q type %q does not yet have canonical paint semantics", transitionID, state.Type)
 	}
@@ -350,6 +396,11 @@ func transitionWipeInsets(direction string, progress float64, outgoing bool) (to
 		return 0, 0, 0, 0, fmt.Errorf("wipe requires direction left, right, up, or down")
 	}
 	return top, right, bottom, left, nil
+}
+
+func transitionPaintScale(progress float64) *float64 {
+	scale := 0.82 + 0.18*EaseProgress(progress, EasingEaseOut)
+	return &scale
 }
 
 func invalidTransitionPaintState(state EvaluatedTransitionState, message string) error {
