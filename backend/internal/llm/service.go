@@ -441,8 +441,13 @@ func (s *Service) extractProviderDetails(p models.ProviderProfile) (baseURL, api
 }
 
 func getBaseURL(providerType string, customURL *string) string {
-	if customURL != nil && *customURL != "" {
-		return *customURL
+	if customURL != nil && strings.TrimSpace(*customURL) != "" {
+		// Normalize a user-entered URL. Every call site appends a path
+		// ("/chat/completions", "/models/..."), so a trailing slash produced a
+		// double slash on the wire. Some providers tolerate that; the Gemini
+		// native-search rewrite did not, and a pasted URL ending in "/" silently
+		// broke grounding.
+		return strings.TrimRight(strings.TrimSpace(*customURL), "/")
 	}
 
 	switch strings.ToLower(providerType) {

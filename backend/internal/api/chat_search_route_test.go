@@ -97,7 +97,7 @@ func TestStreamingPreflightWiring(t *testing.T) {
 		"h.classifyCurrentInformation(r.Context(), req.Content)": "the turn must be classified before retrieval is chosen",
 		"h.orchestrator.Preflight(r.Context(), retrievalText,":   "compound turns must retrieve through the preflight",
 		"preflight.EvidenceSystemMessage(":                       "preflight evidence must be injected into the generation request",
-		"requiresPostRetrievalTools(req.Content)":                "the compound test selects preflight-vs-orchestrator",
+		"retrievalMayOwnTurn(":                                   "turn ownership must be gated so the tool loop is not starved",
 	}
 	for marker, why := range required {
 		if !strings.Contains(text, marker) {
@@ -112,6 +112,11 @@ func TestStreamingPreflightWiring(t *testing.T) {
 	}
 	if strings.Contains(text, "webSearchEnabled && !requiresPostRetrievalTools(req.Content)") {
 		t.Error("compound requests must no longer bypass retrieval")
+	}
+	// Both handler paths must consult the same ownership rule, or one of them
+	// will keep capturing turns that need tools.
+	if strings.Count(text, "retrievalMayOwnTurn(") < 2 {
+		t.Error("streaming and non-streaming must both gate turn ownership")
 	}
 }
 

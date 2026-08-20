@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -155,6 +156,15 @@ func (t *nativeSearchTransport) RoundTrip(req *http.Request) (*http.Response, er
 
 	resp, err := t.base.RoundTrip(req)
 	if err != nil || resp == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// A grounded request that fails here degrades to local search, which
+		// looks like a working-but-stale answer rather than an error. Log enough
+		// to tell a rewrite mistake from a provider rejection.
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		log.Printf("ERROR: native grounding request failed provider=%s url=%s status=%d err=%v",
+			provider, req.URL.Redacted(), status, err)
 		return resp, err
 	}
 	switch provider {
@@ -173,6 +183,22 @@ func (t *nativeSearchTransport) RoundTrip(req *http.Request) (*http.Response, er
 		return wrapAnnotationStream(resp), nil
 	}
 	return appendAnnotationsToResponse(resp)
+}
+
+// nativeGeminiRootPath derives the Gemini native API root from whatever
+// OpenAI-compatible path the provider profile produced.
+//
+// This used to trim a single fixed "/openai/chat/completions" suffix, which only
+// matched the documented base URL exactly. A trailing slash on the configured
+// URL produced ".../openai//chat/completions", the trim missed, and the rewrite
+// appended the native path onto the compat path — a 404 that fell back to local
+// search, so grounding silently stopped working with no visible error.
+func nativeGeminiRootPath(path string) string {
+	path = strings.TrimSuffix(path, "/")
+	path = strings.TrimSuffix(path, "/chat/completions")
+	path = strings.TrimRight(path, "/")
+	path = strings.TrimSuffix(path, "/openai")
+	return strings.TrimRight(path, "/")
 }
 
 func nativeProviderForURL(value *url.URL) string {
@@ -328,7 +354,7 @@ func transformGeminiGroundedRequest(req *http.Request, source map[string]interfa
 		return err
 	}
 
-	path := strings.TrimSuffix(req.URL.Path, "/openai/chat/completions")
+	path := nativeGeminiRootPath(req.URL.Path)
 	method := "generateContent"
 	if stream {
 		method = "streamGenerateContent"

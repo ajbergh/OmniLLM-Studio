@@ -165,60 +165,18 @@ func TestToolEnforcementMetadataRecordsViolation(t *testing.T) {
 	}
 }
 
-func TestToolEnforcementRequireToolEscalation(t *testing.T) {
-	selection, _ := parseTurnToolSelection("auto", nil, "")
-	e := newToolEnforcement(selection).requireTool("web_search")
-	if !e.active || e.requiredTool != "web_search" {
-		t.Fatalf("escalation must activate the requirement, got %#v", e)
-	}
-
-	// A client-specified requirement wins: silently substituting a different tool
-	// would be worse than not escalating.
-	clientSelection, _ := parseTurnToolSelection("specific", []string{"calculator"}, "calculator")
-	kept := newToolEnforcement(clientSelection).requireTool("web_search")
-	if kept.requiredTool != "calculator" {
-		t.Errorf("client requirement must win, got %q", kept.requiredTool)
-	}
-
-	// A blank name is a no-op rather than an accidental "any tool" requirement.
-	unchanged := newToolEnforcement(selection).requireTool("  ")
-	if unchanged.active {
-		t.Error("escalating with a blank name must do nothing")
-	}
-}
-
-// TestRequireToolEscalationIsWired guards against the hook being built and never
-// called, which is what the review found: the documented invariant "a
-// current-information turn cannot answer without evidence" was unimplemented
-// because requireTool had no non-test caller.
-func TestRequireToolEscalationIsWired(t *testing.T) {
+// TestRetrievalFailureDoesNotForceASearchRetry pins the reasoning behind
+// removing the escalation: after a preflight fails, forcing web_search would run
+// the same plan against the same provider that just failed, while consuming the
+// one round where the model could reach for the tool that can actually answer.
+func TestRetrievalFailureDoesNotForceASearchRetry(t *testing.T) {
 	text := readMessageHandlerSource(t)
-	if !strings.Contains(text, `streamToolEnforcement.requireTool("web_search")`) {
-		t.Error("a failed preflight must escalate the turn to require web_search")
+	if strings.Contains(text, `requireTool("web_search")`) {
+		t.Error("a failed retrieval must not force a web_search retry; it starves MCP and plugin tools")
 	}
-	// Requiring a tool the catalog never advertised would send tool_choice for a
-	// tool the provider cannot see.
-	if !strings.Contains(text, `toolAdvertised(llmTools, "web_search")`) {
-		t.Error("escalation must confirm the tool is actually advertised")
-	}
-}
-
-func TestToolAdvertised(t *testing.T) {
-	catalog := []llm.Tool{}
-	var webSearch llm.Tool
-	webSearch.Function.Name = "web_search"
-	var calculator llm.Tool
-	calculator.Function.Name = "calculator"
-	catalog = append(catalog, calculator, webSearch)
-
-	if !toolAdvertised(catalog, "web_search") {
-		t.Error("web_search should be found")
-	}
-	if toolAdvertised(catalog, "browser_navigate") {
-		t.Error("an absent tool must not be reported as advertised")
-	}
-	if toolAdvertised(nil, "web_search") {
-		t.Error("an empty catalog advertises nothing")
+	// The honest hedge must still be applied.
+	if !strings.Contains(text, "degradedAnswerDirective") {
+		t.Error("a failed retrieval must still constrain the answer")
 	}
 }
 

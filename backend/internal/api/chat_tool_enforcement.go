@@ -54,25 +54,6 @@ func newToolEnforcement(selection turnToolSelection) toolEnforcement {
 	}
 }
 
-// requireTool escalates an otherwise-auto turn into a required one. Phase 3's
-// retrieval preflight uses this so a current-information turn cannot answer
-// without evidence.
-func (e toolEnforcement) requireTool(name string) toolEnforcement {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return e
-	}
-	if e.active && e.requiredTool != "" && e.requiredTool != name {
-		// A client-specified requirement wins: the caller asked for a particular
-		// tool and silently substituting another would be worse than not
-		// escalating at all.
-		return e
-	}
-	e.active = true
-	e.requiredTool = name
-	return e
-}
-
 // toolChoiceForRound returns the provider-level constraint for one loop round.
 //
 // Only the first round is forced. Later rounds must be free to produce the final

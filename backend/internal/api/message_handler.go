@@ -416,6 +416,12 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var syncSearchRoute searchRouteDecision
 	var syncRouterTelemetry *intentrouter.RouterTelemetry
 
+	syncToolSelection := turnToolSelectionFromContext(r.Context())
+	syncCatalog := filterOutBrowserTools(
+		selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, syncToolSelection),
+	)
+	syncHasIntegrations := integrationToolsConnected(syncCatalog)
+
 	if webSearchEnabled {
 		syncSearchRoute = h.classifyCurrentInformation(r.Context(), req.Content)
 		syncRouterTelemetry = syncSearchRoute.Telemetry
@@ -426,7 +432,10 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// let the orchestrator own the turn, which is cheaper.
 	if webSearchEnabled && syncSearchRoute.NeedsWeb {
 		retrievalText := syncSearchRoute.retrievalQuery(req.Content)
-		if requiresPostRetrievalTools(req.Content) {
+		syncRetrievalPlan := websearch.BuildSearchPlan(
+			retrievalText, turncontext.FromContext(r.Context()).Now, turncontext.FromContext(r.Context()).Timezone,
+		)
+		if !retrievalMayOwnTurn(syncRetrievalPlan, req.Content, syncHasIntegrations) {
 			var preflightErr error
 			syncPreflight, _, preflightErr = h.orchestrator.Preflight(r.Context(), retrievalText, syncSearchRoute.forcesRetrieval())
 			if preflightErr != nil || syncPreflight == nil {
@@ -523,20 +532,16 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// only called from the streaming handler, so llmReq.Tools was never set and
 	// ChatComplete could not produce a tool call. A compound current-information
 	// request therefore got retrieval or an action, never both.
-	syncToolSelection := turnToolSelectionFromContext(r.Context())
 	if directive := syncToolSelection.directive(); directive != "" {
 		appendToBaseSystemPrompt(&llmReq, directive)
 	}
 	syncProviderType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
-	// Browser tools are excluded from the non-streaming catalog. They are
-	// long-running and progress-driven, and the streaming loop routes them
-	// through a browser-aware sequential path that owns the per-turn navigation
-	// cap, the URL cache, and result sanitization. Running them through the
-	// generic round here would bypass all of that, so they stay on the streaming
-	// path rather than getting a second, weaker implementation.
-	llmReq.Tools = filterOutBrowserTools(
-		selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, syncToolSelection),
-	)
+	// syncCatalog already excludes browser tools. They are long-running and
+	// progress-driven, and the streaming loop routes them through a
+	// browser-aware sequential path that owns the per-turn navigation cap, the
+	// URL cache, and result sanitization. Running them through the generic round
+	// here would bypass all of that.
+	llmReq.Tools = syncCatalog
 	syncEnforcement := newToolEnforcement(syncToolSelection)
 
 	syncWorkspaceID := ""
@@ -1068,10 +1073,18 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var streamSearchStatus searchStatus
 	var streamToolEnforcement toolEnforcement
 	var streamCitations []llm.Citation
-	var preflightRetrievalFailed bool
 	var preflight *websearch.PreflightEvidence
 	var searchRoute searchRouteDecision
 	var searchRouterTelemetry *intentrouter.RouterTelemetry
+
+	// The tool catalog is resolved before the retrieval decision, because turn
+	// ownership depends on it: letting the search orchestrator answer a turn
+	// means the tool loop never runs, so a turn with connected integrations must
+	// not be given away on a keyword match.
+	streamTurnSelection := turnToolSelectionFromContext(r.Context())
+	streamProviderType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
+	streamLLMTools := selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, streamTurnSelection)
+	streamHasIntegrations := integrationToolsConnected(streamLLMTools)
 
 	if webSearchEnabled {
 		searchRoute = h.classifyCurrentInformation(r.Context(), req.Content)
@@ -1096,16 +1109,22 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// made evidence optional for exactly the requests most likely to need it.
 	if webSearchEnabled && searchRoute.NeedsWeb {
 		retrievalText := searchRoute.retrievalQuery(req.Content)
-		if requiresPostRetrievalTools(req.Content) {
+		// Turn ownership and tool calling are mutually exclusive: the
+		// orchestrator paths answer and return, so the tool loop never runs.
+		// Only a single-fact lookup may take that path.
+		streamRetrievalPlan := websearch.BuildSearchPlan(
+			retrievalText, turncontext.FromContext(r.Context()).Now, turncontext.FromContext(r.Context()).Timezone,
+		)
+		if retrievalMayOwnTurn(streamRetrievalPlan, req.Content, streamHasIntegrations) {
+			searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
+				r.Context(), retrievalText, providerName, modelName, searchRoute.forcesRetrieval(),
+			)
+		} else {
 			sendSSE(w, flusher, "web_search", map[string]interface{}{
 				"status": "searching",
 				"query":  retrievalText,
 			})
 			preflight, toolCall, wsErr = h.orchestrator.Preflight(r.Context(), retrievalText, searchRoute.forcesRetrieval())
-		} else {
-			searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
-				r.Context(), retrievalText, providerName, modelName, searchRoute.forcesRetrieval(),
-			)
 		}
 	}
 
@@ -1231,26 +1250,24 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				Role:    "system",
 				Content: degradedAnswerDirective,
 			}}, llmReq.Messages...)
-			// The backend's own retrieval failed, but web_search is still in the
-			// model's catalog. Require it: a second attempt through the tool is
-			// better than going straight to a training-data answer, and if the
-			// model refuses, the enforcement check marks the answer unverified.
-			preflightRetrievalFailed = true
+			// Deliberately NOT forcing a web_search retry here. The tool would run
+			// the same plan against the same provider that just failed, and
+			// forcing it consumes the one round where the model could instead
+			// reach for the tool that can actually answer — an MCP, plugin, or app
+			// tool. web_search stays in the catalog; the model may retry if it
+			// judges that useful. The honest hedge is the directive above.
 		}
 
 		// Inject a policy-aware, intent-selected tool catalog. Gemini thought
 		// signatures are preserved in llm.ToolCall.extra_content and returned with
 		// assistant tool-call history.
-		turnSelection := turnToolSelectionFromContext(r.Context())
+		turnSelection := streamTurnSelection
 		if directive := turnSelection.directive(); directive != "" {
 			appendToBaseSystemPrompt(&llmReq, directive)
 		}
-		providerType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
-		llmTools := selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, turnSelection)
+		providerType := streamProviderType
+		llmTools := streamLLMTools
 		streamToolEnforcement = newToolEnforcement(turnSelection)
-		if preflightRetrievalFailed && toolAdvertised(llmTools, "web_search") {
-			streamToolEnforcement = streamToolEnforcement.requireTool("web_search")
-		}
 		const maxToolLoops = 10
 		const maxBrowserNavsPerTurn = 3
 		const maxToolResultCharsPerTurn = 150000

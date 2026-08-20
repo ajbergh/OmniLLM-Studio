@@ -33,18 +33,6 @@ func filterOutBrowserTools(toolsList []llm.Tool) []llm.Tool {
 	return filtered
 }
 
-// toolAdvertised reports whether a named tool is in the catalog. Requiring a
-// tool that was never advertised would send tool_choice for a tool the provider
-// cannot see.
-func toolAdvertised(toolsList []llm.Tool, name string) bool {
-	for _, tool := range toolsList {
-		if tool.Function.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
 // syncToolLoopOutcome carries everything the non-streaming handler needs to
 // finish a turn after tool rounds have run.
 type syncToolLoopOutcome struct {

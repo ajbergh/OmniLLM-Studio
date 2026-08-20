@@ -5,6 +5,8 @@ import (
 	"log"
 	"strings"
 
+	"github.com/ajbergh/omnillm-studio/internal/llm"
+
 	intentrouter "github.com/ajbergh/omnillm-studio/internal/router"
 	"github.com/ajbergh/omnillm-studio/internal/turncontext"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
@@ -131,4 +133,108 @@ func (d searchRouteDecision) retrievalQuery(userText string) string {
 		return d.RewrittenQuery
 	}
 	return userText
+}
+
+// retrievalMayOwnTurn reports whether the search orchestrator may answer a turn
+// by itself, instead of retrieving as a preflight and handing off to the tool
+// loop.
+//
+// This exists because turn ownership and tool calling are mutually exclusive:
+// the orchestrator paths (Process / ProcessStream) generate an answer and
+// return, so the tool loop never runs and no MCP, plugin, or app tool can be
+// invoked. That was survivable while the gate was narrow. Once it correctly
+// started triggering on "latest", "current <noun>", "search for", and "find", it
+// began capturing the exact phrasings people use to ask for tool-backed data —
+// "the latest open PRs", "search my Notion", "current sprint status" — and
+// silently answered them from the public web instead.
+//
+// The rule: retrieval may own a turn only when there is plausibly nothing else
+// to run. That is true for single-fact lookups, which is also where owning the
+// turn pays for itself, because a native-grounding provider answers them in one
+// call instead of a search plus a summarization.
+//
+// Everything else retrieves as a preflight. The model still gets fresh evidence
+// in context; it also keeps its tools.
+func retrievalMayOwnTurn(plan websearch.SearchPlan, prompt string, integrationsConnected bool) bool {
+	if !plan.NeedsWeb {
+		return false
+	}
+	// An explicit follow-up action always needs the tool loop.
+	if requiresPostRetrievalTools(prompt) {
+		return false
+	}
+	// A prompt that names a private or account-scoped source is asking for a
+	// tool, not the public web, even when it also reads as current-information.
+	if referencesPrivateSource(prompt) {
+		return false
+	}
+	// Single-fact shapes only. Standard and Research answers are the ones most
+	// likely to benefit from tools alongside evidence.
+	switch plan.AnswerShape {
+	case websearch.AnswerShapeDirect:
+		// A direct lookup is a single fact with a strongly-typed shape (a
+		// kickoff time, a score). Safe to own even with integrations connected.
+		return true
+	case websearch.AnswerShapeBrief:
+		// Brief covers scores, weather, and market data — but also anything the
+		// planner could not classify more precisely. When the user has connected
+		// integrations, the phrase-matching above is not a good enough filter:
+		// "what did Alice say about the launch" names no source and no action,
+		// yet clearly wants a tool. Prefer the preflight and let the model choose.
+		return !integrationsConnected
+	default:
+		return false
+	}
+}
+
+// integrationToolsConnected reports whether this turn's catalog contains a tool
+// from an actually-connected integration.
+//
+// MCP tools are named "mcp_<server>_<tool>" by mcpclient.BuildToolName, so the
+// prefix only appears once a server is configured and its tools are discovered.
+// Plugin tools follow the same convention.
+//
+// The app_* tools are deliberately NOT counted: app_catalog, app_connections,
+// app_connect_mcp, and app_disconnect are connection *management* tools
+// registered unconditionally at startup. Treating them as evidence of an
+// integration would make this always true and disable the cheap turn-owning path
+// for everyone.
+//
+// This is a deliberate thumb on the scale. Someone who has connected an
+// integration expects it to be used, and the cost of wrongly starving it — the
+// feature looks broken — is far higher than the cost of wrongly running a
+// preflight, which is one extra search call.
+func integrationToolsConnected(catalog []llm.Tool) bool {
+	for _, tool := range catalog {
+		name := tool.Function.Name
+		if strings.HasPrefix(name, "mcp_") || strings.HasPrefix(name, "plugin_") {
+			return true
+		}
+	}
+	return false
+}
+
+// referencesPrivateSource reports whether a prompt points at data the public web
+// cannot answer for: the user's own accounts, repositories, documents, or
+// systems. These are tool territory regardless of how current the question is.
+//
+// Possessive framing ("my", "our") is the strongest signal, and named
+// integrations are the second. The list is deliberately about *sources* rather
+// than actions, so it does not overlap requiresPostRetrievalTools.
+func referencesPrivateSource(prompt string) bool {
+	if containsAny(prompt,
+		" my ", " our ", "my repo", "my prs", "my pull requests",
+		"my calendar", "my inbox", "my email", "my tickets", "my issues",
+		"my workspace", "my project", "my deployment", "my notes",
+	) {
+		return true
+	}
+	return containsAny(prompt,
+		"notion", "jira", "confluence", "linear", "asana", "trello",
+		"slack", "salesforce", "hubspot", "zendesk", "servicenow",
+		"github", "gitlab", "bitbucket", "sharepoint", "onedrive",
+		"google drive", "gdrive", "dropbox", "airtable", "snowflake",
+		"bigquery", "databricks", "grafana", "datadog", "pagerduty",
+		"crm", "mcp server",
+	)
 }

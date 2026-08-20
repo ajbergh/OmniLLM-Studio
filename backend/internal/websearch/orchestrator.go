@@ -149,7 +149,13 @@ func (o *Orchestrator) ProcessStream(
 	toolCall := toolCallForPlan(plan, tc)
 
 	providerType, _ := o.llmSvc.ResolveProviderType(provider)
-	if SupportsNativeSearch(providerType, model) {
+	native := SupportsNativeSearch(providerType, model)
+	// This decision was previously invisible. When grounding silently stopped
+	// working there was no way to tell "the provider was never asked" from "the
+	// provider was asked and ignored it".
+	log.Printf("[websearch] stream plan: provider_type=%q model=%q native=%v intent=%q shape=%q freshness=%q queries=%d",
+		providerType, model, native, plan.Intent, plan.AnswerShape, plan.TimeRange, len(plan.Queries))
+	if native {
 		req := buildNativeSearchRequest(ctx, provider, model, nil, userText, plan, tc)
 		return &SearchResponse{
 			Query:     toolCall.Arguments.Query,
