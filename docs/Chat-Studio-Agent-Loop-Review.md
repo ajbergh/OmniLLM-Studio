@@ -67,7 +67,7 @@ Tracing "Research the best LLM available via API and compare benchmark versus co
 | `npm run lint` | 0 errors, 9 pre-existing warnings |
 | `npm run test:unit` | 52 files, 256 tests pass |
 | `npm run build` | pass |
-| Playwright Chromium | see the note below |
+| Playwright Chromium | 29/30. The one failure (`video-editor.smoke.spec.ts`, a pointer-interception race on the workspace-panel collapse button) **also fails on `main`** — verified by checking out `main` and running the spec in isolation. Unrelated to this branch. |
 
 Roughly 90 new tests across `internal/websearch`, `internal/llm`, `internal/api`, `internal/tools`, `internal/eval`, and the frontend.
 
