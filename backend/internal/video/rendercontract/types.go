@@ -123,7 +123,7 @@ type TimelineV2Shape struct {
 	CornerRadius *float64 `json:"corner_radius,omitempty"`
 }
 type TimelineV2Cursor struct {
-	Visible    bool                    `json:"visible,omitempty"`
+	Visible    *bool                   `json:"visible,omitempty"`
 	Scale      *float64                `json:"scale,omitempty"`
 	Highlight  bool                    `json:"highlight,omitempty"`
 	ClickRings bool                    `json:"click_rings,omitempty"`
