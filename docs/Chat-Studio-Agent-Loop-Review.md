@@ -20,6 +20,43 @@ in code were corrected or removed.
 | 4 | Evidence contract and citations | ✅ Complete |
 | 5 | Provider strategy and measurement | ✅ Complete |
 
+### What changed for the reviewed prompt
+
+Tracing "Research the best LLM available via API and compare benchmark versus cost" through the new code:
+
+| Stage | Before | After |
+|---|---|---|
+| Classification | Gate fired; `AnswerShapeStandard` | Gate fires; `SearchIntentBenchmark`, `AnswerShapeResearch` |
+| Freshness | `24h` — excluded vendor pricing pages | none — reference material is not filtered by recency |
+| Queries | 1, unexpanded (`MaxIterations: 2` was dead) | 3 expanded, iterations clamped to match |
+| Retrieval | Brave failed on the gzip defect; DDG returned undated snippets | Brave decodes; DDG markup drift is an error, not an empty success |
+| Composition | Retrieval **or** a follow-up tool, never both | Preflight evidence injected, then the tool loop runs |
+| Source policy | First-party pages ranked wherever the provider put them | `anthropic.com`, `openai.com`, `swebench.com`… promoted; 2 distinct hosts required |
+| Page content | Snippets only | Top 5 results fetched in full (claims plan) |
+| Validation | `ValidateAnswer` accepted any non-empty string | Freshness measured; uncited numeric claims flagged |
+| Sources shown | Empty panel | Source chips, freshness badge |
+| On failure | "answer from your training data…" and a normal-looking answer | Amber "could not verify current information" banner from metadata |
+
+### Verification
+
+| Gate | Status |
+|---|---|
+| `gofmt` (LF-normalized) | clean |
+| `go vet ./...` | clean |
+| `go test ./internal/...` | pass, except a pre-existing Windows symlink-privilege failure in `internal/gitrepo` (unrelated; fails on `main` too) |
+| `go test -race` | **not run locally** — no C compiler in this environment; CI must confirm |
+| `npm run lint` | 0 errors, 9 pre-existing warnings |
+| `npm run test:unit` | 52 files, 256 tests pass |
+| `npm run build` | pass |
+| Playwright Chromium | see the note below |
+
+Roughly 90 new tests across `internal/websearch`, `internal/llm`, `internal/api`, `internal/tools`, `internal/eval`, and the frontend.
+
+**Two things a reviewer should not take on trust:**
+
+1. **`go test -race` has not run.** There is no C compiler here, so the race detector could not execute. The new concurrent code is limited — the `wrapAnthropicStream` goroutine follows the existing Gemini pattern, and `streamCitations` is written only from the single-threaded SSE callback — but CI is the confirmation, not this report.
+2. **The Anthropic adapter has not touched the live API.** It is unit-tested end to end against the documented request, response, and stream shapes, but the first real Claude current-information turn is worth watching.
+
 ### Phase 0 — complete
 
 | # | Change | Result |
