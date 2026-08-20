@@ -16,7 +16,7 @@ in code were corrected or removed.
 | 0 | Stop the silent failure | ✅ Complete |
 | 1 | Fix classification, then breadth | ✅ Complete |
 | 2 | Make retrieval enforceable | ✅ Complete |
-| 3 | Backend-owned preflight | ⏳ Not started |
+| 3 | Backend-owned preflight | ✅ Complete |
 | 4 | Evidence contract and citations | ⏳ Not started |
 | 5 | Provider strategy and measurement | ⏳ Not started |
 
@@ -98,6 +98,26 @@ Design notes worth recording, because each is a deliberate trade-off:
   because the phrasing lacked a keyword would be wrong.
 
 **Also found:** the non-streaming `Send` handler has **no tool loop at all**. `selectChatToolsForContext` is called only in the streaming path, so `llmReq.Tools` is never set for non-streaming requests. The review described this as an "asymmetry"; it is more accurate to say non-streaming chat has no tool support whatsoever. Phase 3.5 addresses it.
+
+### Phase 3 — complete
+
+| # | Change | Result |
+|---|---|---|
+| 3.1 | Router route | `RouteWebSearch` is now selectable. The router prompt describes it (including "a question about software can still be a question about the present state of the world"), and `ValidateDecision` accepts it under `tools_only` / `all_preflight` — modes that were declared but unreachable. |
+| 3.2 | Two-stage classification | New `classifyCurrentInformation`: the deterministic gate runs first and is authoritative when it fires; the semantic router is consulted **only** when the gate declined, and only under the opt-in modes. Mirrors the existing sports precedent where a probabilistic decision cannot suppress a deterministic signal. |
+| 3.3 | Preflight → tools | New `Orchestrator.Preflight` retrieves without generating. Compound turns get `EvidenceSystemMessage` injected, then enter the tool loop. Simple lookups keep the orchestrator path, which is cheaper — native grounding folds retrieval and generation into one call. |
+| 3.4 | Bypass removed | `requiresComposableToolLoop` → `requiresPostRetrievalTools`. It no longer means "skip retrieval"; it selects *how* retrieval runs. Follow-up verbs widened with `compare`, `rank`, `summarize`, `chart`, `table`, `plot` — `compare` was the exact word the reviewed prompt used. |
+| 3.5 | Non-streaming parity | New `runSyncToolLoop`, plus the same classify-and-preflight sequence. |
+| 3.6 | Tests | 8 preflight tests (reusable evidence, skip-when-not-current, tool call survives failure, empty results are a failure, evidence-message content, insufficient-evidence hedging, nil safety, expanded query set actually issues multiple provider calls) and 6 handler tests covering the three compound prompts plus wiring assertions. |
+
+**Non-streaming was worse than "asymmetric".** The review said `Process` terminates the turn so no follow-up tool can run. Verifying it turned up something stronger: `selectChatToolsForContext` was only ever called from the streaming handler, so `llmReq.Tools` was never set on the non-streaming path and `ChatComplete` could not produce a tool call at all. Non-streaming chat had **no tool support whatsoever**. `runSyncToolLoop` adds it, deliberately smaller than the streaming loop (no SSE progress, no browser-navigation budget, 6 rounds instead of 10) because a non-streaming caller is blocked on one response.
+
+Two design decisions worth recording:
+
+- **The semantic router is opt-in.** Consulting it on every turn the gate declined would add an LLM call to most conversations. It runs only under `tools_only` / `all_preflight`, so the default configuration pays nothing. The cost of that choice is that regex-resistant phrasing still misses by default — an honest limit, not a hidden one.
+- **`Preflight` returns its `ToolCall` even on failure.** The handler keys its "attempted and failed" branch on a non-nil tool call, so returning nil there would have made preflight failures invisible — reintroducing the Phase 0 bug through a new path. `TestPreflightReturnsToolCallOnFailure` pins it.
+
+**Testing limit, stated plainly:** this package has no HTTP harness for `MessageHandler` (it would need a live DB plus a mock LLM), so the compound-request tests assert the decision layer — planner wants retrieval **and** the turn is classified as needing follow-up tools — plus source-level wiring assertions in the style of the existing `message_handler_tool_runtime_wiring_test.go`. That verifies the composition, not a real end-to-end turn.
 
 ## Investigation summary
 

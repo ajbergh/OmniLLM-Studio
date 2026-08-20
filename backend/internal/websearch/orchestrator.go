@@ -205,6 +205,114 @@ func (o *Orchestrator) DirectSearch(ctx context.Context, req SearchRequest) (*Se
 	return provider.Search(ctx, req)
 }
 
+// PreflightEvidence is the result of a backend-owned retrieval pass that runs
+// *before* generation, leaving the turn free to call other tools afterwards.
+//
+// Process and ProcessStream both take ownership of the whole turn: they return a
+// generation request that answers from the evidence, and nothing can run after
+// it. That is cheaper for a simple lookup — native grounding folds retrieval and
+// summarization into one call — but it cannot compose. A request that needs
+// current data *and* a calculation had to pick one, which is why compound
+// prompts were routed away from retrieval entirely.
+type PreflightEvidence struct {
+	Plan      SearchPlan
+	ToolCall  *ToolCall
+	Results   []SearchResult
+	Query     string
+	TimeRange string
+	FetchedAt time.Time
+	// Sufficient reports whether the evidence met the plan's corroboration and
+	// source-class requirements.
+	Sufficient bool
+}
+
+// Preflight retrieves current-information evidence without generating an answer.
+//
+// Native grounding is deliberately not used here: it is inseparable from
+// generation, so it cannot supply evidence to a later tool round. The local
+// provider path is the only one that yields reusable results.
+//
+// The ToolCall is returned even on failure, mirroring ProcessStream, so the
+// caller can report an attempted-and-failed retrieval instead of a silent one.
+func (o *Orchestrator) Preflight(
+	ctx context.Context,
+	userText string,
+) (*PreflightEvidence, *ToolCall, error) {
+	tc := turncontext.FromContext(ctx)
+	plan := BuildSearchPlan(userText, tc.Now, tc.Timezone)
+	if !plan.NeedsWeb {
+		return nil, nil, nil
+	}
+	toolCall := toolCallForPlan(plan, tc)
+
+	searchResp, err := o.searchWithPlan(ctx, plan, tc)
+	if err != nil {
+		return nil, toolCall, err
+	}
+	if searchResp == nil || len(searchResp.Results) == 0 {
+		return nil, toolCall, fmt.Errorf("web search returned no results")
+	}
+
+	return &PreflightEvidence{
+		Plan:       plan,
+		ToolCall:   toolCall,
+		Results:    searchResp.Results,
+		Query:      searchResp.Query,
+		TimeRange:  plan.TimeRange,
+		FetchedAt:  searchResp.FetchedAt,
+		Sufficient: ResultsLikelyAnswerable(plan, searchResp.Results),
+	}, toolCall, nil
+}
+
+// EvidenceSystemMessage renders preflight evidence as a system message for the
+// generation step.
+//
+// It reuses the same evidence-block format the local summarizer already sends,
+// so a model sees one consistent shape whether retrieval owned the turn or ran
+// as a preflight.
+func (e *PreflightEvidence) EvidenceSystemMessage(tc turncontext.TurnContext) llm.ChatMessage {
+	if e == nil {
+		return llm.ChatMessage{}
+	}
+	freshness := "none (results are not restricted by recency)"
+	if e.TimeRange != "" {
+		freshness = e.TimeRange
+	}
+	content := fmt.Sprintf(`%s
+
+Retrieved at: %s
+Freshness filter: %s
+Search query: %s
+%s
+
+WEB EVIDENCE:
+%s`,
+		evidenceDirective(e.Plan, e.Sufficient),
+		e.FetchedAt.UTC().Format(time.RFC3339),
+		freshness,
+		e.Query,
+		localContextLine(tc),
+		formatResultsForPrompt(e.Results),
+	)
+	return llm.ChatMessage{Role: "system", Content: content}
+}
+
+// evidenceDirective states what the evidence supports, and what it does not.
+func evidenceDirective(plan SearchPlan, sufficient bool) string {
+	base := "WEB EVIDENCE: the numbered results below were retrieved from the live web for this turn. " +
+		"Use them for every current claim. Cite them by index. A result with no publication date is not " +
+		"proof of currency: say so rather than presenting it as up to date. Do not substitute your training " +
+		"data for a value that is absent from the evidence — say the evidence does not cover it."
+	if !sufficient {
+		base += " The retrieved evidence did NOT meet this question's corroboration requirement. " +
+			"Name the claims you could not verify instead of presenting them as established."
+	}
+	if plan.RequiresCitations {
+		base += " Every numeric claim (price, score, version, date) must name the source index it came from."
+	}
+	return base
+}
+
 // PlannedSearchResult carries retrieved evidence plus the retrieval metadata a
 // model needs in order to describe it honestly.
 type PlannedSearchResult struct {

@@ -275,11 +275,28 @@ func sendStreamFailure(w http.ResponseWriter, flusher http.Flusher, code, messag
 	})
 }
 
-func requiresComposableToolLoop(prompt string) bool {
+// requiresPostRetrievalTools reports whether a current-information turn also
+// asks for an action after the lookup.
+//
+// This used to be named requiresComposableToolLoop and meant "skip retrieval":
+// a matching prompt bypassed the orchestrator entirely and hoped the model would
+// call web_search of its own accord. That was the only way to get a follow-up
+// tool at all, because the orchestrator path answers and terminates the turn —
+// but it made evidence optional for exactly the requests most likely to need it.
+//
+// It now selects *how* retrieval runs: as a backend-owned preflight whose
+// evidence is injected before the tool loop, rather than as a path that owns the
+// whole turn. Retrieval happens either way.
+//
+// The keyword list stays intentionally narrow. A false negative is cheap — the
+// turn gets the orchestrator path, which still retrieves and still answers, just
+// without a follow-up tool.
+func requiresPostRetrievalTools(prompt string) bool {
 	currentInformation := containsAny(prompt, "latest", "current", "today", "news", "search", "look up", "find online", "research")
 	followUpAction := containsAny(prompt,
 		"calculate", "convert", "save", "remember", "schedule", "remind", "create", "generate",
 		"export", "download", "click", "screenshot", "interact", "open the page", "send to",
+		"compare", "rank", "summarize", "chart", "table", "plot",
 	)
 	return currentInformation && followUpAction
 }
