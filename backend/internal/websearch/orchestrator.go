@@ -452,8 +452,12 @@ func (o *Orchestrator) searchWithPlan(ctx context.Context, plan SearchPlan, tc t
 			newResults = append(newResults, result)
 		}
 		if jinaReader != nil && len(newResults) > 0 {
+			// Snippets are not enough to verify a number. Any plan that requires
+			// citations gets full page text for its top results, not just the
+			// research shape: a pricing or release lookup is exactly the case
+			// where the figure lives in a table the snippet truncates.
 			enrichCount := 2
-			if plan.AnswerShape == AnswerShapeResearch {
+			if plan.AnswerShape == AnswerShapeResearch || plan.RequiresCitations {
 				enrichCount = 5
 			}
 			newResults = jinaReader.EnrichResults(ctx, newResults, enrichCount)

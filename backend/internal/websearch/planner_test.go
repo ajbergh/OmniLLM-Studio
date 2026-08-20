@@ -274,20 +274,43 @@ func TestValidateDirectScheduleAnswer(t *testing.T) {
 
 func TestProviderNativeSearchCapabilities(t *testing.T) {
 	cases := []struct {
+		name     string
 		provider string
 		model    string
 		want     bool
 	}{
-		{"openai", "gpt-5.2", true},
-		{"gemini", "gemini-3.1-flash-lite", true},
-		{"openrouter", "anthropic/claude-sonnet-4.5", true},
-		{"ollama", "llama3.2", false},
-		{"anthropic", "claude-opus-4-7", false},
-		{"openai-compatible", "custom-model", false},
+		{"openai gpt-5", "openai", "gpt-5.2", true},
+		{"gemini 3", "gemini", "gemini-3.1-flash-lite", true},
+		{"openrouter claude", "openrouter", "anthropic/claude-sonnet-4.5", true},
+		{"ollama local", "ollama", "llama3.2", false},
+		{"generic compatible endpoint", "openai-compatible", "custom-model", false},
+
+		// Anthropic direct now grounds natively via the Messages API server
+		// tool. Previously this returned false for every Claude model, forcing
+		// them all onto the local fallback.
+		{"anthropic opus 4.7", "anthropic", "claude-opus-4-7", true},
+		{"anthropic opus 5", "anthropic", "claude-opus-5", true},
+		{"anthropic sonnet 5", "anthropic", "claude-sonnet-5", true},
+		{"anthropic haiku 4.5", "anthropic", "claude-haiku-4-5", true},
+		{"anthropic fable", "anthropic", "claude-fable-5", true},
+		// Claude 3.x predates server tools; sending one is a request error
+		// rather than a graceful degradation.
+		{"anthropic claude 3", "anthropic", "claude-3-5-sonnet-20241022", false},
+		{"anthropic unknown", "anthropic", "", false},
+
+		// OpenRouter is no longer an unconditional yes. A route that ignores the
+		// server tool returns 200 with an ungrounded answer, which the
+		// orchestrator would have accepted as a successful search.
+		{"openrouter gpt-5", "openrouter", "openai/gpt-5", true},
+		{"openrouter gemini", "openrouter", "google/gemini-3-pro", true},
+		{"openrouter local llama", "openrouter", "meta-llama/llama-3.3-70b-instruct", false},
+		{"openrouter unknown vendor", "openrouter", "some-vendor/some-model", false},
 	}
 	for _, tc := range cases {
-		if got := SupportsNativeSearch(tc.provider, tc.model); got != tc.want {
-			t.Errorf("SupportsNativeSearch(%q, %q)=%v want %v", tc.provider, tc.model, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SupportsNativeSearch(tc.provider, tc.model); got != tc.want {
+				t.Errorf("SupportsNativeSearch(%q, %q)=%v want %v", tc.provider, tc.model, got, tc.want)
+			}
+		})
 	}
 }

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { api } from '../api';
-import type { Conversation, Message, ProviderProfile, SendMessageRequest, WebSearchResult, FeatureFlag, ToolLifecycleEvent, ToolResult } from '../types';
+import type { Conversation, Message, ProviderProfile, SearchFailureReason, SendMessageRequest, WebSearchResult, FeatureFlag, ToolLifecycleEvent, ToolResult } from '../types';
 
 function getInitialConversationId(): string | null {
   if (typeof window === 'undefined') return null;

@@ -127,9 +127,16 @@ func (t *nativeSearchTransport) RoundTrip(req *http.Request) (*http.Response, er
 
 	provider := nativeProviderForURL(req.URL)
 	stream, _ := payload["stream"].(bool)
+	// gemini and anthropic are rewritten to their native endpoints, so their
+	// bodies are set by the transform rather than re-marshalled below.
+	nativeEndpoint := provider == "gemini" || provider == "anthropic"
 	switch provider {
 	case "gemini":
 		if err := transformGeminiGroundedRequest(req, payload, cfg, stream); err != nil {
+			return nil, err
+		}
+	case "anthropic":
+		if err := transformAnthropicGroundedRequest(req, payload, cfg, stream); err != nil {
 			return nil, err
 		}
 	case "openrouter":
@@ -138,7 +145,7 @@ func (t *nativeSearchTransport) RoundTrip(req *http.Request) (*http.Response, er
 		applyOpenAIWebSearch(payload, cfg)
 	}
 
-	if provider != "gemini" {
+	if !nativeEndpoint {
 		encoded, err := json.Marshal(payload)
 		if err != nil {
 			return nil, err
@@ -150,11 +157,17 @@ func (t *nativeSearchTransport) RoundTrip(req *http.Request) (*http.Response, er
 	if err != nil || resp == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return resp, err
 	}
-	if provider == "gemini" {
+	switch provider {
+	case "gemini":
 		if stream {
 			return wrapGeminiStream(resp), nil
 		}
 		return transformGeminiResponse(resp)
+	case "anthropic":
+		if stream {
+			return wrapAnthropicStream(resp), nil
+		}
+		return transformAnthropicResponse(resp)
 	}
 	if stream {
 		return wrapAnnotationStream(resp), nil
@@ -172,6 +185,8 @@ func nativeProviderForURL(value *url.URL) string {
 		return "gemini"
 	case strings.Contains(host, "openrouter.ai"):
 		return "openrouter"
+	case strings.Contains(host, "api.anthropic.com"):
+		return "anthropic"
 	default:
 		return "openai"
 	}
@@ -420,9 +435,13 @@ func transformGeminiResponse(resp *http.Response) (*http.Response, error) {
 	}
 	content, sources := result.textAndSources()
 	content = appendSourceMap(content, sources)
+	message := map[string]interface{}{"role": "assistant", "content": content}
+	if annotations := annotationsFromSourceMap(sources); annotations != nil {
+		message["annotations"] = annotations
+	}
 	converted := map[string]interface{}{
 		"choices": []interface{}{map[string]interface{}{
-			"message":       map[string]interface{}{"role": "assistant", "content": content},
+			"message":       message,
 			"finish_reason": "stop",
 		}},
 		"usage": map[string]interface{}{
@@ -477,7 +496,7 @@ func wrapGeminiStream(resp *http.Response) *http.Response {
 			}
 		}
 		if sourceText := appendSourceMap("", sources); sourceText != "" {
-			writeOpenAIStreamChunk(writer, sourceText, nil)
+			writeOpenAIStreamChunkWithAnnotations(writer, sourceText, nil, annotationsFromSourceMap(sources))
 		}
 		_, _ = io.WriteString(writer, "data: [DONE]\n\n")
 	}()
@@ -485,10 +504,23 @@ func wrapGeminiStream(resp *http.Response) *http.Response {
 }
 
 func writeOpenAIStreamChunk(writer io.Writer, content string, usage map[string]interface{}) {
+	writeOpenAIStreamChunkWithAnnotations(writer, content, usage, nil)
+}
+
+// writeOpenAIStreamChunkWithAnnotations emits a converted chunk carrying
+// structured grounding sources alongside the content.
+func writeOpenAIStreamChunkWithAnnotations(
+	writer io.Writer,
+	content string,
+	usage map[string]interface{},
+	annotations []interface{},
+) {
+	delta := map[string]interface{}{"content": content}
+	if len(annotations) > 0 {
+		delta["annotations"] = annotations
+	}
 	chunk := map[string]interface{}{
-		"choices": []interface{}{map[string]interface{}{
-			"delta": map[string]interface{}{"content": content},
-		}},
+		"choices": []interface{}{map[string]interface{}{"delta": delta}},
 	}
 	if usage != nil {
 		chunk["usage"] = usage
@@ -630,6 +662,43 @@ func appendSourceMap(content string, sources map[string]string) string {
 		prefix += "\n\n"
 	}
 	return prefix + "**Sources:**\n" + strings.Join(lines, "\n")
+}
+
+// annotationsFromSourceMap converts Gemini grounding chunks into the same
+// url_citation annotation shape OpenAI and OpenRouter emit.
+//
+// Gemini sources previously reached the caller only as a markdown "**Sources:**"
+// block appended to the content, so the backend could not count or validate
+// them and metadata.sources stayed empty for every natively-grounded answer.
+// Synthesizing annotations means one parser in service.go handles every grounded
+// provider, and the markdown block remains for readability.
+func annotationsFromSourceMap(sources map[string]string) []interface{} {
+	if len(sources) == 0 {
+		return nil
+	}
+	urls := make([]string, 0, len(sources))
+	for sourceURL := range sources {
+		urls = append(urls, sourceURL)
+	}
+	// Deterministic order: Go map iteration is randomized and citation order is
+	// user-visible.
+	sort.Strings(urls)
+
+	annotations := make([]interface{}, 0, len(urls))
+	for _, sourceURL := range urls {
+		title := strings.TrimSpace(sources[sourceURL])
+		if title == "" {
+			title = sourceURL
+		}
+		annotations = append(annotations, map[string]interface{}{
+			"type": "url_citation",
+			"url_citation": map[string]interface{}{
+				"url":   sourceURL,
+				"title": title,
+			},
+		})
+	}
+	return annotations
 }
 
 func setResponseBody(resp *http.Response, body []byte, contentType string) {

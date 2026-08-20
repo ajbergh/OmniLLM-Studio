@@ -18,7 +18,7 @@ in code were corrected or removed.
 | 2 | Make retrieval enforceable | ✅ Complete |
 | 3 | Backend-owned preflight | ✅ Complete |
 | 4 | Evidence contract and citations | ✅ Complete |
-| 5 | Provider strategy and measurement | ⏳ Not started |
+| 5 | Provider strategy and measurement | ✅ Complete |
 
 ### Phase 0 — complete
 
@@ -137,6 +137,28 @@ Three deliberate conservatism choices in the freshness logic:
 - **No window means nothing to verify.** Pricing and release intents apply no recency filter by design (Phase 1.3), so absence of a filter must not be read as evidence of freshness.
 
 **4.4 shipped as a warning, exactly as the plan required.** `metaClaimWarning` is set only in the high-confidence case — the answer states prices, percentages, or versions and names **no** source at all, and does not hedge. It does not attempt to judge whether a *named* source actually supports a figure, because that is not decidable by string matching. Nothing gates or rewrites an answer on this signal; `TestAuditClaimWarningIsAWarning` asserts that. Promoting it to a hard rejection needs the Phase 5.6 eval set to measure the false-positive rate first.
+
+### Phase 5 — complete
+
+| # | Change | Result |
+|---|---|---|
+| 5.1 | Anthropic native search | New `internal/llm/anthropic_search.go`: a full Messages API adapter (request, response, and SSE stream), because web search is a Messages API **server tool** and is not available through the OpenAI-compatibility endpoint the rest of the Anthropic integration uses. Tool type is version-selected per model — `web_search_20260209` on Opus 4.6+/Sonnet 4.6+, `web_search_20250305` on older families; Claude 3.x stays on the fallback. |
+| 5.2 | OpenRouter narrowed | `case "openrouter": return true` replaced with a vendor-prefix allowlist. A route that ignores the server tool returns HTTP 200 with an ungrounded answer, which the orchestrator accepted as a successful search. |
+| 5.3 | Official-source ranking | Landed in Phase 1.5 as `rankByPreferredDomains`. `PreferredDomains` is deliberately **not** forwarded to native grounding: providers offer only an allow/block list, and turning a preference into a restriction would drop the authoritative source for any unlisted vendor. |
+| 5.4 | Fetch pages, not snippets | Jina enrichment raised from 2 to 5 results for **any** plan requiring citations, not just the research shape — a pricing figure often lives in a table the snippet truncates. |
+| 5.5 | Two-source rule | `MinSources: 2` on pricing, benchmark, and research plans, enforced by `ResultsLikelyAnswerable` counting distinct **hosts**. |
+| 5.6 | Eval suite | New `internal/eval/retrieval_eval.go`: a 24-scenario tracked corpus reporting trigger recall, false negatives/positives, intent accuracy, freshness-policy accuracy, and query-expansion rate. Deterministic — no network, no model — so it runs in CI on every change. Current: **24/24, recall 1.00, intent 1.00, freshness 1.00, expansion 1.00, 0 FN, 0 FP**. |
+| 5.7 | Design doc corrected | `docs/PROVIDER_AWARE_SEARCH.md` capability matrix, iteration claims, freshness-by-intent table, evidence contract, preflight section, and troubleshooting entries. |
+
+**The Anthropic adapter was larger than "add a prefix to a list".** The review's finding 11 said `default: return false` covered Anthropic despite it offering native search. That was right, but the fix was not a one-liner: Anthropic's web search is a Messages API server tool, and this repository talks to Anthropic through `/chat/completions` with `x-api-key`. Making it work required the same shape of adapter Gemini has. Five details the tests pin, each of which would be a silent or hard failure:
+
+- `max_tokens` is **required** by the Messages API, unlike Chat Completions.
+- `allowed_domains` and `blocked_domains` are mutually exclusive.
+- The conversation must start with a user turn; history trimming can produce a leading assistant message.
+- Server-tool errors arrive as HTTP 200 with an error **object** where success returns a **list**.
+- A payload with no `content` array must pass through untouched. My first version converted it anyway, producing an empty but apparently successful answer and discarding the error — caught by `TestTransformAnthropicResponseUnknownShapePassesThrough`.
+
+**Honest limit on the adapter:** it is verified against the documented request/response/stream shapes and unit-tested end to end with fixtures, but it has not been exercised against the live Anthropic API in this environment. The failure mode is contained — the orchestrator retries locally when a native streaming request is rejected before content is emitted, and falls through to local search on a non-streaming error — but the first real Claude-model current-information turn is worth watching.
 
 ## Investigation summary
 

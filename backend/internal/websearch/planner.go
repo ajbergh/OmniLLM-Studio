@@ -368,6 +368,10 @@ func NativeSearchConfigForPlan(plan SearchPlan, tc turncontext.TurnContext) *llm
 	if plan.AnswerShape == AnswerShapeDirect || plan.AnswerShape == AnswerShapeBrief {
 		verbosity = "low"
 	}
+	// Only AllowedDomains is forwarded as a hard restriction. PreferredDomains is
+	// deliberately *not* sent: provider-native search offers no ranking hint, only
+	// an allow/block list, and turning a preference into a restriction would drop
+	// the authoritative source for any vendor missing from the list.
 	return &llm.NativeSearchConfig{
 		Enabled:         true,
 		ContextSize:     plan.SearchContextSize,
@@ -385,12 +389,45 @@ func NativeSearchConfigForPlan(plan SearchPlan, tc turncontext.TurnContext) *llm
 	}
 }
 
+// openRouterNativeSearchPrefixes lists the model families known to support
+// OpenRouter's openrouter:web_search server tool.
+//
+// This used to be an unconditional `return true` for the whole provider, which
+// assumed every model behind an OpenRouter profile supports server-side search.
+// A successful HTTP response is not evidence that grounding happened: a route
+// that ignores the tool returns 200 with an ungrounded answer, and the
+// orchestrator then treated it as a successful web search. Being wrong in this
+// direction produces a confident stale answer; being wrong the other way costs
+// one local search, so the list is deliberately conservative.
+var openRouterNativeSearchPrefixes = []string{
+	"anthropic/claude-",
+	"openai/gpt-4.1", "openai/gpt-5", "openai/o3", "openai/o4",
+	"google/gemini-2", "google/gemini-3",
+	"perplexity/",
+	"x-ai/grok-3", "x-ai/grok-4",
+}
+
+// SupportsNativeSearch reports whether a provider/model pair can ground its own
+// answer, removing the need for a separate local search and summarization pass.
+//
+// A false result is not a failure: it routes the turn to the local
+// Brave/DuckDuckGo path, which every provider can use.
 func SupportsNativeSearch(providerType, model string) bool {
 	providerType = strings.ToLower(strings.TrimSpace(providerType))
 	model = strings.ToLower(strings.TrimSpace(model))
 	switch providerType {
 	case "openrouter":
-		return true
+		for _, prefix := range openRouterNativeSearchPrefixes {
+			if strings.HasPrefix(model, prefix) {
+				return true
+			}
+		}
+		return false
+	case "anthropic":
+		// Anthropic runs web search as a Messages API server tool. It is not
+		// available through the OpenAI-compatibility endpoint, so the LLM
+		// transport rewrites the request; see llm/anthropic_search.go.
+		return llm.SupportsAnthropicNativeSearch(model)
 	case "gemini":
 		return strings.HasPrefix(model, "gemini-2") || strings.HasPrefix(model, "gemini-3")
 	case "openai":
