@@ -26,13 +26,15 @@ import {
 } from 'lucide-react';
 import { AppIcon } from './AppIcon';
 import { clsx } from 'clsx';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import type { Conversation, ImageSession } from '../types';
 import type { MusicSession } from '../types/music';
 import type { VideoProject } from '../types/video';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { api, authApi, setAuthToken, imageSessionApi } from '../api';
+import { ContextMenu } from './common/ContextMenu';
+import type { ContextMenuEntry } from './common/ContextMenu';
 
 function groupConversationsByDate(conversations: Conversation[]) {
   const now = new Date();
@@ -147,7 +149,10 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const [contextMenuId, setContextMenuId] = useState<string | null>(null);
+  const [chatContextMenu, setChatContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [imageContextMenu, setImageContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [musicContextMenu, setMusicContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [videoContextMenu, setVideoContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [searchFocused, setSearchFocused] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [authEnabled, setAuthEnabled] = useState(false);
@@ -211,19 +216,11 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
     window.location.reload();
   };
 
-  // Close context menu on outside click
-  useEffect(() => {
-    if (!contextMenuId) return;
-    const handler = () => setContextMenuId(null);
-    window.addEventListener('click', handler);
-    return () => window.removeEventListener('click', handler);
-  }, [contextMenuId]);
-
   const handleSelect = useCallback(
     (id: string) => {
       selectConversation(id);
       fetchMessages(id);
-      setContextMenuId(null);
+      setChatContextMenu(null);
       // Auto-close sidebar on mobile
       if (window.innerWidth < 768 && sidebarOpen) {
         toggleSidebar();
@@ -259,7 +256,7 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
   const handleRename = (id: string, currentTitle: string) => {
     setEditingId(id);
     setEditTitle(currentTitle);
-    setContextMenuId(null);
+    setChatContextMenu(null);
   };
 
   const commitRename = async () => {
@@ -273,23 +270,23 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
   const handlePin = async (id: string, pinned: boolean) => {
     await updateConversation(id, { pinned: !pinned });
     toast.success(pinned ? 'Unpinned' : 'Pinned');
-    setContextMenuId(null);
+    setChatContextMenu(null);
   };
 
   const handleArchive = async (id: string) => {
     await updateConversation(id, { archived: true });
     toast.success('Archived');
-    setContextMenuId(null);
+    setChatContextMenu(null);
   };
 
   const handleUnarchive = async (id: string) => {
     await updateConversation(id, { archived: false });
     toast.success('Unarchived');
-    setContextMenuId(null);
+    setChatContextMenu(null);
   };
 
   const handleDelete = (id: string) => {
-    setContextMenuId(null);
+    setChatContextMenu(null);
     toast('Delete this conversation?', {
       action: {
         label: 'Delete',
@@ -307,14 +304,14 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
     if (!activeWorkspaceId) return;
     await updateConversation(id, { workspace_id: activeWorkspaceId });
     toast.success('Conversation moved to selected project');
-    setContextMenuId(null);
+    setChatContextMenu(null);
     await fetchConversations(undefined, activeWorkspaceId);
   };
 
   const handleRemoveFromProject = async (id: string) => {
     await updateConversation(id, { workspace_id: null } as never);
     toast.success('Moved to one-off chats');
-    setContextMenuId(null);
+    setChatContextMenu(null);
     await fetchConversations();
   };
 
@@ -376,7 +373,7 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
   const handleSelectSession = useCallback(
     async (session: ImageSession) => {
       await loadSession(session.conversation_id, session.id);
-      setContextMenuId(null);
+      setImageContextMenu(null);
       if (window.innerWidth < 768 && sidebarOpen) {
         toggleSidebar();
       }
@@ -387,7 +384,7 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
   const handleSelectMusicSession = useCallback(
     async (session: MusicSession) => {
       await selectMusicSession(session.id);
-      setContextMenuId(null);
+      setMusicContextMenu(null);
       if (window.innerWidth < 768 && sidebarOpen) {
         toggleSidebar();
       }
@@ -398,7 +395,7 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
   const handleSelectVideoProject = useCallback(
     async (project: VideoProject) => {
       await selectVideoProject(project.id);
-      setContextMenuId(null);
+      setVideoContextMenu(null);
       if (window.innerWidth < 768 && sidebarOpen) {
         toggleSidebar();
       }
@@ -407,7 +404,7 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
   );
 
   const handleDeleteSession = (session: ImageSession) => {
-    setContextMenuId(null);
+    setImageContextMenu(null);
     toast('Delete this session?', {
       action: {
         label: 'Delete',
@@ -430,7 +427,7 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
   };
 
   const handleDeleteMusicSession = (session: MusicSession) => {
-    setContextMenuId(null);
+    setMusicContextMenu(null);
     toast('Delete this music session?', {
       action: {
         label: 'Delete',
@@ -444,7 +441,7 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
   };
 
   const handleDeleteVideoProject = (project: VideoProject) => {
-    setContextMenuId(null);
+    setVideoContextMenu(null);
     toast('Delete this video project?', {
       action: {
         label: 'Delete',
@@ -460,7 +457,7 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
   const handleRenameSession = (id: string, currentTitle: string) => {
     setEditingId(id);
     setEditTitle(currentTitle);
-    setContextMenuId(null);
+    setImageContextMenu(null);
   };
 
   const commitSessionRename = async () => {
@@ -704,11 +701,8 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
                     setEditTitle={setEditTitle}
                     commitRename={commitSessionRename}
                     setEditingId={setEditingId}
-                    contextMenuId={contextMenuId}
-                    setContextMenuId={setContextMenuId}
+                    onOpenMenu={(id, x, y) => setImageContextMenu({ id, x, y })}
                     onSelect={handleSelectSession}
-                    onRename={handleRenameSession}
-                    onDelete={handleDeleteSession}
                     index={i}
                   />
                 ))}
@@ -745,10 +739,8 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
                     key={session.id}
                     session={session}
                     isActive={session.id === activeMusicSessionId}
-                    contextMenuId={contextMenuId}
-                    setContextMenuId={setContextMenuId}
+                    onOpenMenu={(id, x, y) => setMusicContextMenu({ id, x, y })}
                     onSelect={handleSelectMusicSession}
-                    onDelete={handleDeleteMusicSession}
                     index={i}
                   />
                 ))}
@@ -785,10 +777,8 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
                     key={project.id}
                     project={project}
                     isActive={project.id === activeProjectId}
-                    contextMenuId={contextMenuId}
-                    setContextMenuId={setContextMenuId}
+                    onOpenMenu={(id, x, y) => setVideoContextMenu({ id, x, y })}
                     onSelect={handleSelectVideoProject}
-                    onDelete={handleDeleteVideoProject}
                     index={i}
                   />
                 ))}
@@ -838,17 +828,8 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
                 setEditTitle={setEditTitle}
                 commitRename={commitRename}
                 setEditingId={setEditingId}
-                contextMenuId={contextMenuId}
-                setContextMenuId={setContextMenuId}
+                onOpenMenu={(id, x, y) => setChatContextMenu({ id, x, y })}
                 onSelect={handleSelect}
-                onRename={handleRename}
-                onPin={handlePin}
-                onArchive={handleArchive}
-                onUnarchive={handleUnarchive}
-                onDelete={handleDelete}
-                onMoveToActiveProject={handleMoveToActiveProject}
-                onRemoveFromProject={handleRemoveFromProject}
-                activeWorkspaceId={activeWorkspaceId}
                 index={i}
               />
             ))
@@ -868,17 +849,8 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
                     setEditTitle={setEditTitle}
                     commitRename={commitRename}
                     setEditingId={setEditingId}
-                    contextMenuId={contextMenuId}
-                    setContextMenuId={setContextMenuId}
+                    onOpenMenu={(id, x, y) => setChatContextMenu({ id, x, y })}
                     onSelect={handleSelect}
-                    onRename={handleRename}
-                    onPin={handlePin}
-                    onArchive={handleArchive}
-                    onUnarchive={handleUnarchive}
-                    onDelete={handleDelete}
-                    onMoveToActiveProject={handleMoveToActiveProject}
-                    onRemoveFromProject={handleRemoveFromProject}
-                    activeWorkspaceId={activeWorkspaceId}
                     index={i}
                   />
                 ))}
@@ -929,6 +901,128 @@ export function Sidebar({ forceOpen = false }: { forceOpen?: boolean } = {}) {
           <span>OmniLLM-Studio</span>
         </div>
       </div>
+
+      {/* Context Menus */}
+      {chatContextMenu && (() => {
+        const convo = conversations.find((c) => c.id === chatContextMenu.id);
+        if (!convo) return null;
+        const items: ContextMenuEntry[] = [
+          {
+            label: 'Rename',
+            icon: <Pencil size={13} />,
+            action: () => handleRename(convo.id, convo.title),
+          },
+          {
+            label: convo.pinned ? 'Unpin' : 'Pin',
+            icon: <Pin size={13} />,
+            action: () => { void handlePin(convo.id, convo.pinned); },
+          },
+          convo.archived
+            ? {
+                label: 'Unarchive chat',
+                icon: <ArchiveRestore size={13} />,
+                action: () => { void handleUnarchive(convo.id); },
+              }
+            : {
+                label: 'Archive chat',
+                icon: <Archive size={13} />,
+                action: () => { void handleArchive(convo.id); },
+              },
+        ];
+        if (activeWorkspaceId && convo.workspace_id !== activeWorkspaceId) {
+          items.push({
+            label: 'Move to this project',
+            icon: <Files size={13} />,
+            action: () => { void handleMoveToActiveProject(convo.id); },
+          });
+        }
+        if (convo.workspace_id) {
+          items.push({
+            label: 'Remove from project',
+            icon: <Files size={13} />,
+            action: () => { void handleRemoveFromProject(convo.id); },
+          });
+        }
+        items.push('divider', {
+          label: 'Delete chat',
+          icon: <Trash2 size={13} />,
+          danger: true,
+          action: () => handleDelete(convo.id),
+        });
+        return (
+          <ContextMenu
+            position={{ x: chatContextMenu.x, y: chatContextMenu.y }}
+            items={items}
+            onClose={() => setChatContextMenu(null)}
+          />
+        );
+      })()}
+
+      {imageContextMenu && (() => {
+        const session = imageSessions.find((s) => s.id === imageContextMenu.id);
+        if (!session) return null;
+        const items: ContextMenuEntry[] = [
+          {
+            label: 'Rename',
+            icon: <Pencil size={13} />,
+            action: () => handleRenameSession(session.id, session.title),
+          },
+          'divider',
+          {
+            label: 'Delete session',
+            icon: <Trash2 size={13} />,
+            danger: true,
+            action: () => handleDeleteSession(session),
+          },
+        ];
+        return (
+          <ContextMenu
+            position={{ x: imageContextMenu.x, y: imageContextMenu.y }}
+            items={items}
+            onClose={() => setImageContextMenu(null)}
+          />
+        );
+      })()}
+
+      {musicContextMenu && (() => {
+        const session = musicSessions.find((s) => s.id === musicContextMenu.id);
+        if (!session) return null;
+        const items: ContextMenuEntry[] = [
+          {
+            label: 'Delete session',
+            icon: <Trash2 size={13} />,
+            danger: true,
+            action: () => handleDeleteMusicSession(session),
+          },
+        ];
+        return (
+          <ContextMenu
+            position={{ x: musicContextMenu.x, y: musicContextMenu.y }}
+            items={items}
+            onClose={() => setMusicContextMenu(null)}
+          />
+        );
+      })()}
+
+      {videoContextMenu && (() => {
+        const project = videoProjects.find((p) => p.id === videoContextMenu.id);
+        if (!project) return null;
+        const items: ContextMenuEntry[] = [
+          {
+            label: 'Delete project',
+            icon: <Trash2 size={13} />,
+            danger: true,
+            action: () => handleDeleteVideoProject(project),
+          },
+        ];
+        return (
+          <ContextMenu
+            position={{ x: videoContextMenu.x, y: videoContextMenu.y }}
+            items={items}
+            onClose={() => setVideoContextMenu(null)}
+          />
+        );
+      })()}
     </aside>
   );
 }
@@ -941,17 +1035,8 @@ function ConversationItem({
   setEditTitle,
   commitRename,
   setEditingId,
-  contextMenuId,
-  setContextMenuId,
+  onOpenMenu,
   onSelect,
-  onRename,
-  onPin,
-  onArchive,
-  onUnarchive,
-  onDelete,
-  onMoveToActiveProject,
-  onRemoveFromProject,
-  activeWorkspaceId,
   index,
 }: {
   convo: Conversation;
@@ -961,17 +1046,8 @@ function ConversationItem({
   setEditTitle: (t: string) => void;
   commitRename: () => void;
   setEditingId: (id: string | null) => void;
-  contextMenuId: string | null;
-  setContextMenuId: (id: string | null) => void;
+  onOpenMenu: (id: string, x: number, y: number) => void;
   onSelect: (id: string) => void;
-  onRename: (id: string, title: string) => void;
-  onPin: (id: string, pinned: boolean) => void;
-  onArchive: (id: string) => void;
-  onUnarchive: (id: string) => void;
-  onDelete: (id: string) => void;
-  onMoveToActiveProject: (id: string) => void;
-  onRemoveFromProject: (id: string) => void;
-  activeWorkspaceId: string | null;
   index: number;
 }) {
   return (
@@ -980,6 +1056,11 @@ function ConversationItem({
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.03, duration: 0.3 }}
       onClick={() => onSelect(convo.id)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpenMenu(convo.id, e.clientX, e.clientY);
+      }}
       role="button"
       tabIndex={0}
       aria-current={isActive ? 'page' : undefined}
@@ -987,6 +1068,10 @@ function ConversationItem({
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onSelect(convo.id);
+        } else if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          onOpenMenu(convo.id, rect.right, rect.top + rect.height / 2);
         }
       }}
       className={clsx(
@@ -1039,60 +1124,14 @@ function ConversationItem({
       <button
         onClick={(e) => {
           e.stopPropagation();
-          setContextMenuId(contextMenuId === convo.id ? null : convo.id);
+          const rect = e.currentTarget.getBoundingClientRect();
+          onOpenMenu(convo.id, rect.right, rect.bottom);
         }}
-        className={clsx(
-          'p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all',
-          contextMenuId === convo.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
-        )}
+        className="p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100"
         aria-label={`Conversation actions for ${convo.title}`}
       >
         <MoreHorizontal size={14} />
       </button>
-
-      {/* Context menu */}
-      <AnimatePresence>
-        {contextMenuId === convo.id && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -4 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -4 }}
-            transition={{ duration: 0.15 }}
-            className="absolute right-0 top-full mt-1 z-50 glass-strong rounded-xl shadow-lg py-1.5 min-w-[150px]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ContextMenuItem onClick={() => onRename(convo.id, convo.title)}>
-              Rename
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onPin(convo.id, convo.pinned)}>
-              {convo.pinned ? 'Unpin' : 'Pin'}
-            </ContextMenuItem>
-            {convo.archived ? (
-              <ContextMenuItem onClick={() => onUnarchive(convo.id)} icon={<ArchiveRestore size={12} />}>
-                Unarchive
-              </ContextMenuItem>
-            ) : (
-              <ContextMenuItem onClick={() => onArchive(convo.id)} icon={<Archive size={12} />}>
-                Archive
-              </ContextMenuItem>
-            )}
-            {activeWorkspaceId && convo.workspace_id !== activeWorkspaceId && (
-              <ContextMenuItem onClick={() => onMoveToActiveProject(convo.id)} icon={<Files size={12} />}>
-                Move To This Project
-              </ContextMenuItem>
-            )}
-            {convo.workspace_id && (
-              <ContextMenuItem onClick={() => onRemoveFromProject(convo.id)} icon={<Files size={12} />}>
-                Remove From Project
-              </ContextMenuItem>
-            )}
-            <div className="my-1 mx-2 border-t border-border" />
-            <ContextMenuItem onClick={() => onDelete(convo.id)} icon={<Trash2 size={12} />} danger>
-              Delete
-            </ContextMenuItem>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 }
@@ -1105,11 +1144,8 @@ function SessionItem({
   setEditTitle,
   commitRename,
   setEditingId,
-  contextMenuId,
-  setContextMenuId,
+  onOpenMenu,
   onSelect,
-  onRename,
-  onDelete,
   index,
 }: {
   session: ImageSession;
@@ -1119,11 +1155,8 @@ function SessionItem({
   setEditTitle: (t: string) => void;
   commitRename: () => void;
   setEditingId: (id: string | null) => void;
-  contextMenuId: string | null;
-  setContextMenuId: (id: string | null) => void;
+  onOpenMenu: (id: string, x: number, y: number) => void;
   onSelect: (session: ImageSession) => void;
-  onRename: (id: string, title: string) => void;
-  onDelete: (session: ImageSession) => void;
   index: number;
 }) {
   return (
@@ -1132,6 +1165,11 @@ function SessionItem({
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.03, duration: 0.3 }}
       onClick={() => onSelect(session)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpenMenu(session.id, e.clientX, e.clientY);
+      }}
       role="button"
       tabIndex={0}
       aria-current={isActive ? 'page' : undefined}
@@ -1139,6 +1177,10 @@ function SessionItem({
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onSelect(session);
+        } else if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          onOpenMenu(session.id, rect.right, rect.top + rect.height / 2);
         }
       }}
       className={clsx(
@@ -1182,43 +1224,14 @@ function SessionItem({
       <button
         onClick={(e) => {
           e.stopPropagation();
-          setContextMenuId(contextMenuId === session.id ? null : session.id);
+          const rect = e.currentTarget.getBoundingClientRect();
+          onOpenMenu(session.id, rect.right, rect.bottom);
         }}
-        className={clsx(
-          'p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all',
-          contextMenuId === session.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
-        )}
+        className="p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100"
         aria-label={`Image session actions for ${session.title}`}
       >
         <MoreHorizontal size={14} />
       </button>
-
-      <AnimatePresence>
-        {contextMenuId === session.id && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -4 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -4 }}
-            transition={{ duration: 0.15 }}
-            className="absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1.5 bg-surface-raised border border-border rounded-xl shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ContextMenuItem
-              icon={<Pencil size={13} />}
-              onClick={() => onRename(session.id, session.title)}
-            >
-              Rename
-            </ContextMenuItem>
-            <ContextMenuItem
-              icon={<Trash2 size={13} />}
-              onClick={() => onDelete(session)}
-              danger
-            >
-              Delete
-            </ContextMenuItem>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 }
@@ -1226,18 +1239,14 @@ function SessionItem({
 function MusicSessionItem({
   session,
   isActive,
-  contextMenuId,
-  setContextMenuId,
+  onOpenMenu,
   onSelect,
-  onDelete,
   index,
 }: {
   session: MusicSession;
   isActive: boolean;
-  contextMenuId: string | null;
-  setContextMenuId: (id: string | null) => void;
+  onOpenMenu: (id: string, x: number, y: number) => void;
   onSelect: (session: MusicSession) => void;
-  onDelete: (session: MusicSession) => void;
   index: number;
 }) {
   return (
@@ -1246,6 +1255,11 @@ function MusicSessionItem({
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.03, duration: 0.3 }}
       onClick={() => onSelect(session)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpenMenu(session.id, e.clientX, e.clientY);
+      }}
       role="button"
       tabIndex={0}
       aria-current={isActive ? 'page' : undefined}
@@ -1253,6 +1267,10 @@ function MusicSessionItem({
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onSelect(session);
+        } else if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          onOpenMenu(session.id, rect.right, rect.top + rect.height / 2);
         }
       }}
       className={clsx(
@@ -1281,37 +1299,14 @@ function MusicSessionItem({
       <button
         onClick={(e) => {
           e.stopPropagation();
-          setContextMenuId(contextMenuId === session.id ? null : session.id);
+          const rect = e.currentTarget.getBoundingClientRect();
+          onOpenMenu(session.id, rect.right, rect.bottom);
         }}
-        className={clsx(
-          'p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all',
-          contextMenuId === session.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
-        )}
+        className="p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100"
         aria-label={`Music session actions for ${session.title}`}
       >
         <MoreHorizontal size={14} />
       </button>
-
-      <AnimatePresence>
-        {contextMenuId === session.id && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -4 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -4 }}
-            transition={{ duration: 0.15 }}
-            className="absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1.5 bg-surface-raised border border-border rounded-xl shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ContextMenuItem
-              icon={<Trash2 size={13} />}
-              onClick={() => onDelete(session)}
-              danger
-            >
-              Delete
-            </ContextMenuItem>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 }
@@ -1319,18 +1314,14 @@ function MusicSessionItem({
 function VideoProjectItem({
   project,
   isActive,
-  contextMenuId,
-  setContextMenuId,
+  onOpenMenu,
   onSelect,
-  onDelete,
   index,
 }: {
   project: VideoProject;
   isActive: boolean;
-  contextMenuId: string | null;
-  setContextMenuId: (id: string | null) => void;
+  onOpenMenu: (id: string, x: number, y: number) => void;
   onSelect: (project: VideoProject) => void;
-  onDelete: (project: VideoProject) => void;
   index: number;
 }) {
   return (
@@ -1339,6 +1330,11 @@ function VideoProjectItem({
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.03, duration: 0.3 }}
       onClick={() => onSelect(project)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpenMenu(project.id, e.clientX, e.clientY);
+      }}
       role="button"
       tabIndex={0}
       aria-current={isActive ? 'page' : undefined}
@@ -1346,6 +1342,10 @@ function VideoProjectItem({
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onSelect(project);
+        } else if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          onOpenMenu(project.id, rect.right, rect.top + rect.height / 2);
         }
       }}
       className={clsx(
@@ -1374,63 +1374,14 @@ function VideoProjectItem({
       <button
         onClick={(e) => {
           e.stopPropagation();
-          setContextMenuId(contextMenuId === project.id ? null : project.id);
+          const rect = e.currentTarget.getBoundingClientRect();
+          onOpenMenu(project.id, rect.right, rect.bottom);
         }}
-        className={clsx(
-          'p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all',
-          contextMenuId === project.id ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
-        )}
+        className="p-1 rounded-lg hover:bg-surface-alt text-text-muted transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100"
         aria-label={`Video project actions for ${project.title}`}
       >
         <MoreHorizontal size={14} />
       </button>
-
-      <AnimatePresence>
-        {contextMenuId === project.id && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -4 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -4 }}
-            transition={{ duration: 0.15 }}
-            className="absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1.5 bg-surface-raised border border-border rounded-xl shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ContextMenuItem
-              icon={<Trash2 size={13} />}
-              onClick={() => onDelete(project)}
-              danger
-            >
-              Delete
-            </ContextMenuItem>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </motion.div>
-  );
-}
-
-function ContextMenuItem({
-  children,
-  onClick,
-  icon,
-  danger,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  icon?: React.ReactNode;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={clsx(
-        'w-full text-left px-3 py-2 text-sm hover:bg-surface-hover transition-colors flex items-center gap-2 rounded-lg mx-0.5',
-        danger ? 'text-danger hover:text-danger' : 'text-text-secondary hover:text-text'
-      )}
-      style={{ width: 'calc(100% - 4px)' }}
-    >
-      {icon}
-      {children}
-    </button>
   );
 }
