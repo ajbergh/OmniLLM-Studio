@@ -26,10 +26,27 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
-      - name: Install Bubblewrap
+      - name: Install Bubblewrap and static test shell
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y bubblewrap
+          sudo apt-get install -y bubblewrap busybox-static
+      - name: Prepare non-root Bubblewrap namespace prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          # OmniLLM's Linux runtime intentionally depends on unprivileged user
+          # namespaces rather than running sandboxd/Bubblewrap as root. Ubuntu
+          # 24.04 runners may additionally gate unprivileged user namespaces
+          # through the AppArmor sysctl. Enable only the host prerequisite the
+          # deployment contract already requires; do not elevate the test
+          # Bubblewrap process itself.
+          if [ -e /proc/sys/kernel/unprivileged_userns_clone ]; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / /bin/true
       - name: Prepare delegated cgroup-v2 subtree
         shell: bash
         run: |
@@ -37,12 +54,16 @@ jobs:
           test -f /sys/fs/cgroup/cgroup.controllers
           grep -qw pids /sys/fs/cgroup/cgroup.controllers
           grep -qw memory /sys/fs/cgroup/cgroup.controllers
+          grep -qw cpu /sys/fs/cgroup/cgroup.controllers
           controllers=()
           if ! grep -qw pids /sys/fs/cgroup/cgroup.subtree_control; then
             controllers+=(+pids)
           fi
           if ! grep -qw memory /sys/fs/cgroup/cgroup.subtree_control; then
             controllers+=(+memory)
+          fi
+          if ! grep -qw cpu /sys/fs/cgroup/cgroup.subtree_control; then
+            controllers+=(+cpu)
           fi
           if [ "${#controllers[@]}" -gt 0 ]; then
             printf '%s ' "${controllers[@]}" | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null
@@ -55,7 +76,7 @@ jobs:
             "$root/cgroup.subtree_control" \
             "$root/cgroup.threads"
           printf 'OMNILLM_TEST_CGROUP_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
-      - name: Prove native Linux PID and memory quota boundaries
+      - name: Prove native Linux PID memory and cumulative CPU quota boundaries
         working-directory: backend
         shell: bash
         run: |
@@ -74,7 +95,7 @@ jobs:
           cat "$root/cgroup.controllers"
           printf '%s\n' 'worker-child:'
           stat -c '%u:%g %a %n' "$worker" "$worker/cgroup.procs"
-          go test ./internal/sandbox -run '^TestLinuxCgroup' -count=1 -v 2>&1 | tee ../sandbox-linux-quota.log
+          go test ./internal/sandbox -run '^(TestLinuxCgroup|TestLinuxLocalRuntimeCPUQuotaNative)' -count=1 -v 2>&1 | tee ../sandbox-linux-quota.log
       - name: Upload Linux quota diagnostics
         if: always()
         uses: actions/upload-artifact@v7
