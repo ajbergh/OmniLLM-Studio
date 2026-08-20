@@ -1,0 +1,133 @@
+{
+  "cases": [
+    {
+      "name": "rectangle defaults",
+      "input": { "kind": "rectangle" },
+      "expected": {
+        "contract_version": "shape-state-v1",
+        "kind": "rectangle",
+        "width": 320,
+        "height": 180,
+        "fill": "transparent",
+        "stroke": "#f59e0b",
+        "stroke_width": 6,
+        "blur_radius": 12,
+        "corner_radius": 0
+      }
+    },
+    {
+      "name": "zero stroke and blur use preview fallbacks",
+      "input": { "kind": "rectangle", "stroke_width": 0, "blur_radius": 0 },
+      "expected": {
+        "contract_version": "shape-state-v1",
+        "kind": "rectangle",
+        "width": 320,
+        "height": 180,
+        "fill": "transparent",
+        "stroke": "#f59e0b",
+        "stroke_width": 6,
+        "blur_radius": 12,
+        "corner_radius": 0
+      }
+    },
+    {
+      "name": "highlight defaults",
+      "input": { "kind": "highlight", "width": 640, "height": 90 },
+      "expected": {
+        "contract_version": "shape-state-v1",
+        "kind": "highlight",
+        "width": 640,
+        "height": 90,
+        "fill": "#facc15",
+        "stroke": "#f59e0b",
+        "stroke_width": 6,
+        "blur_radius": 12,
+        "corner_radius": 0
+      }
+    },
+    {
+      "name": "speech bubble defaults without border",
+      "input": { "kind": "speech_bubble" },
+      "expected": {
+        "contract_version": "shape-state-v1",
+        "kind": "speech_bubble",
+        "width": 320,
+        "height": 180,
+        "fill": "#ffffff",
+        "stroke": "",
+        "stroke_width": 6,
+        "blur_radius": 12,
+        "corner_radius": 18
+      }
+    },
+    {
+      "name": "label defaults without border",
+      "input": { "kind": "label" },
+      "expected": {
+        "contract_version": "shape-state-v1",
+        "kind": "label",
+        "width": 320,
+        "height": 180,
+        "fill": "#1e293b",
+        "stroke": "",
+        "stroke_width": 6,
+        "blur_radius": 12,
+        "corner_radius": 10
+      }
+    },
+    {
+      "name": "rounded rectangle zero radius falls back",
+      "input": { "kind": "rounded_rectangle", "corner_radius": 0 },
+      "expected": {
+        "contract_version": "shape-state-v1",
+        "kind": "rounded_rectangle",
+        "width": 320,
+        "height": 180,
+        "fill": "transparent",
+        "stroke": "#f59e0b",
+        "stroke_width": 6,
+        "blur_radius": 12,
+        "corner_radius": 12
+      }
+    },
+    {
+      "name": "authored callout border overrides none",
+      "input": { "kind": "speech_bubble", "stroke": "#123456", "stroke_width": 3 },
+      "expected": {
+        "contract_version": "shape-state-v1",
+        "kind": "speech_bubble",
+        "width": 320,
+        "height": 180,
+        "fill": "#ffffff",
+        "stroke": "#123456",
+        "stroke_width": 3,
+        "blur_radius": 12,
+        "corner_radius": 18
+      }
+    },
+    {
+      "name": "authored values",
+      "input": {
+        "kind": "pixelate",
+        "width": 240,
+        "height": 120,
+        "fill": "rgba(1,2,3,0.4)",
+        "stroke": "#123456",
+        "stroke_width": 2.5,
+        "blur_radius": 20,
+        "corner_radius": 7
+      },
+      "expected": {
+        "contract_version": "shape-state-v1",
+        "kind": "pixelate",
+        "width": 240,
+        "height": 120,
+        "fill": "rgba(1,2,3,0.4)",
+        "stroke": "#123456",
+        "stroke_width": 2.5,
+        "blur_radius": 20,
+        "corner_radius": 7
+      }
+    }
+  ]
+}
