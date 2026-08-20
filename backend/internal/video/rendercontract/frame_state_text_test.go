@@ -50,7 +50,7 @@ func TestVisualFrameStateTextShapeProjectionLeavesOnlyCursorDebt(t *testing.T) {
 				ID: "mixed", StartMS: 0, DurationMS: 1000, TrimInMS: 0, TrimOutMS: 1000,
 				Text:    &TimelineV2Text{Text: "Text"},
 				Shape:   &TimelineV2Shape{Kind: ShapeKindRectangle},
-				Cursor:  &TimelineV2Cursor{Visible: true},
+				Cursor:  &TimelineV2Cursor{},
 				Effects: []TimelineV2Effect{}, Keyframes: []TimelineV2Keyframe{},
 			}},
 		}},

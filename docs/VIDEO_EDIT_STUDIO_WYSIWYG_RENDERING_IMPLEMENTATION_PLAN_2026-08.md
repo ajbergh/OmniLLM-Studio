@@ -9,19 +9,21 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG PR: **#242 — Define canonical shape renderer state** — `1a25ac0fef217731197169b229bde19aff158c8b`.
+Latest merged WYSIWYG feature PR: **#243 — Consume canonical shape state in FrameState** — merge `111fba5fd7ea73740aee1d92fc1038ee72fda30b`.
 
-Current PR: **#243 — Consume canonical shape state in FrameState**.  
-Current branch: `feat/video-wysiwyg-phase2-shape-framestate`.  
-Corrected code-only validation head before final normalization: `aebffaa049e2090a0d50c63df5db106e16fdfd78`.
+CI coverage prerequisite merged immediately afterward: **#246 — Run canonical render-contract suite in Vitest** — merge `ad7ec51596807293ebb1206ce873088a0ad07da7`.
 
-PR #242 merged only after exact final head `b8db59304664f220cd0699d385598426b84ae52e` was one intended commit ahead/zero behind current `main`, had no review submissions or inline threads, and passed the complete hosted assurance matrix: Go formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright smoke, deterministic renderer parity, Security Scan including CodeQL and dependency audit, all platform/sandbox assurances, and frontend/backend container builds.
+Current PR: **#245 — Define canonical cursor renderer state**.  
+Current branch: `feat/video-wysiwyg-phase2-cursor-state`.  
+Normalized code-only head before this tracker update: `e36cf18f03f8079424c9db8368a71e67ac2cff25`.
 
-PR #243 starts directly from post-#242 `main` merge `1a25ac0fef217731197169b229bde19aff158c8b`. It is deliberately a consumption-only slice: `shape-state-v1` is projected into `visual-frame-state-v1`, evaluated shape dimensions become the single shape-derived content-bounds source, and generic `shape` unresolved debt is removed while cursor debt remains explicit.
+PR #243 is complete. `shape-state-v1` is now projected into `visual-frame-state-v1`, evaluated shape dimensions are the single shape-derived content-bounds source, generic `shape` unresolved debt is removed, and cursor debt remains explicit.
 
-The first #243 code-only Quality Gate correctly exposed one stale pre-#243 regression assertion: `frame_state_text_test.go` still expected generic `shape` debt alongside `cursor`. The actual evaluated state was the intended `[mixed:cursor]`. The Go interaction test and its TypeScript counterpart were updated to require text+shape projection with only cursor debt. No implementation rollback was needed.
+PR #246 fixed a test-discovery gap that had excluded the canonical TypeScript render-contract suite under `frontend/test/` from `npm run test:unit` and the hosted Quality Gate. The normal frontend unit gate now executes 51 files / 248 tests instead of 28 files / 131 tests, so every Phase 2 TypeScript contract mirror added under `frontend/test/` is exercised in CI.
 
-No preview CSS compositor or FFmpeg composition behavior changes are included in #243. The canonical state is being made consumable before Phase 3 shared composition changes any painter.
+PR #245 defines `cursor-state-v1` only. It does **not** consume cursor state in FrameState and does not change preview painting or legacy FFmpeg cursor composition. The immediate follow-on slice is cursor FrameState consumption.
+
+No Phase 3 preview compositor or Phase 4 Chromium renderer behavior is being changed in #245.
 
 ## Phase tracker
 
@@ -29,7 +31,7 @@ No preview CSS compositor or FFmpeg composition behavior changes are included in
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, all current transition state/paint families, effect stack state, canonical text state, and canonical shape-state definition are merged. #243 consumes canonical shape state in FrameState. Cursor state, remaining provenance edges, and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, all current transition state/paint families, effect stack state, canonical text state, canonical shape state, and shape FrameState consumption are merged. #245 defines cursor state. Cursor FrameState consumption, remaining provenance edges, and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close text metrics/fonts, shapes, effects, transitions, cursor, camera, color, asset loading, and decoded visual thresholds. |
@@ -127,9 +129,9 @@ Compatibility boundary for #241:
 
 ### Shape renderer state
 
-`shape-state-v1` is the renderer-independent static annotation contract merged in #242.
+`shape-state-v1` is the renderer-independent static annotation contract merged in #242 and consumed by FrameState in #243.
 
-Merged #242 semantics:
+Merged shape semantics:
 
 - all 14 currently authorable shape kinds are explicit: rectangle, highlight, blur, rounded rectangle, ellipse, arrow, line, speech bubble, spotlight, pixelate, checkmark, x mark, step marker, and label;
 - dimensions are canvas pixels and default to current preview-compatible 320×180 when not authored;
@@ -143,20 +145,41 @@ Merged #242 semantics:
 - embedded callout text remains the separate `text-state-v1` projection and is not duplicated into shape state;
 - legacy FFmpeg square-corner/vector omissions and pixelate implementation differences are explicitly not contract semantics.
 
-Compatibility boundary for #242:
-
-- current preview supports all authored shape kinds, but several legacy FFmpeg paths are approximations or preview-only;
-- #242 defines authored/preview semantic intent so shared Phase 3/4 composition can close export parity without preserving legacy approximations.
-
-Current #243 FrameState consumption rules:
+Merged #243 FrameState consumption rules:
 
 - `FrameLayerState.shape` carries the evaluated `shape-state-v1` object in both Go and TypeScript;
-- shape-derived `content_bounds` come from the evaluated canonical shape dimensions rather than a second 320×180/defaulting implementation;
-- invalid shape dimensions/kinds therefore fail through FrameState instead of being silently replaced by local bounds defaults;
-- explicit clip `content_bounds` still take precedence over shape-derived bounds, preserving the existing content-bounds precedence rule;
+- shape-derived `content_bounds` come from evaluated canonical shape dimensions rather than a second 320×180/defaulting implementation;
+- invalid shape dimensions/kinds fail through FrameState instead of being silently replaced by local bounds defaults;
+- explicit clip `content_bounds` still take precedence over shape-derived bounds;
 - generic `shape` unresolved debt is removed once evaluation succeeds;
-- `cursor` remains unresolved and continues to prevent FrameState from claiming authority until canonical cursor semantics exist;
-- no preview/export painter consumes the new shape field in #243; that remains Phase 3/4 work.
+- no preview/export painter consumes the new shape field yet; that remains Phase 3/4 work.
+
+### Cursor renderer state
+
+`cursor-state-v1` is the renderer-independent sampled cursor contract currently defined by #245.
+
+Current #245 semantics:
+
+- Timeline v2 `visible` preserves presence in Go: omitted means visible, explicit `false` means hidden;
+- cursor position is sampled at exact clip-relative rational presentation time;
+- event interpolation is linear and endpoint-held to match the current editor preview;
+- event coordinates remain canvas pixels from the top-left;
+- click proximity is the preview-compatible strict `<300ms` window around authored click events;
+- `click` is sampled press proximity, while a consumer renders a ring only when both sampled `click` and authored `click_rings` are true;
+- scale defaults to 1 and is constrained to the established preview-compatible 0.25–4 range;
+- highlight and click-ring enablement remain explicit booleans;
+- `smoothing:true` fails closed because the current editor has no defined canonical smoothing algorithm;
+- negative event times, unordered event streams, non-finite coordinates, non-finite scale, invalid scale, and invalid rational denominator fail closed;
+- empty events or explicit hidden visibility yield no evaluated cursor state;
+- no custom cursor asset/resource contract is invented in v1.
+
+Compatibility boundary for #245:
+
+- this is definition-only; `visual-frame-state-v1` still carries cursor as unresolved debt until the next slice consumes `cursor-state-v1`;
+- the TypeScript Timeline v2 projection already preserved optional `visible`; the Go projection changes from `bool` to `*bool` so omission is no longer collapsed into explicit false;
+- two existing Go FrameState tests use an empty cursor object after the pointer change; this preserves their intended generic cursor-debt fixture without asserting an explicit visibility value;
+- legacy Timeline v1 cursor visibility remains plain-bool and therefore cannot distinguish omission from explicit false. That compatibility limitation is retained as implementation debt rather than promoted into canonical v2 semantics;
+- preview painter and FFmpeg cursor overlay behavior are unchanged in #245.
 
 ### Safe stacked-branch normalization
 
@@ -224,6 +247,7 @@ Remaining Phase 0 sign-off:
 | #237 | Canonical effect stack state + FrameState consumption | `22e73cc291a4f8723a99ad123c963aedf0fd0d8a` |
 | #241 | Canonical text renderer state + FrameState consumption | `9b072685b689cdb74e0a5590a26478f6a3ef12b4` |
 | #242 | Canonical shape renderer state definition | `1a25ac0fef217731197169b229bde19aff158c8b` |
+| #243 | Canonical shape state consumption in FrameState | `111fba5fd7ea73740aee1d92fc1038ee72fda30b` |
 
 Security unblock during the program:
 
@@ -234,44 +258,48 @@ CI reliability unblocks:
 - #219 bounded/retried Linux dependency installation and Playwright bootstrap and added job-level timeouts — `a33b32697019b144c9a7d6c7fec277e1cde101b4`.
 - #226 quiesced competing apt activity before Playwright retry setup — `ffbf797108c291c927fc7b67f6154b29c1351496`.
 - #239 aligned the durable sandbox-worker test SQLite helper with production WAL/busy-timeout behavior, eliminating a false `SQLITE_BUSY` blocker encountered while #237 was being replayed over concurrent sandbox work.
+- #246 expanded `frontend/vitest.config.ts` to execute canonical contract tests under `frontend/test/`; the normal frontend unit gate increased from 28 files / 131 tests to 51 files / 248 tests. Its first expanded run exposed and corrected three stale pre-paint transition assertions plus one bit-exact floating-point fixture assertion before merge as `ad7ec51596807293ebb1206ce873088a0ad07da7`.
 
-### Current PR #243 — canonical shape FrameState consumption
+### Current PR #245 — canonical cursor renderer state definition
 
-Implemented before final normalization:
+Implemented before this tracker update:
 
-- Go `FrameLayerState.Shape` and TypeScript `CanonicalFrameLayerState.shape` projections;
-- shape evaluation during exact-frame layer evaluation;
-- shape-derived bounds sourced from evaluated `shape-state-v1` dimensions;
-- removal of generic `shape` unresolved debt without touching cursor debt;
-- fail-closed propagation of invalid shape state through FrameState;
-- mirrored Go/TypeScript tests for authoritative shape-only layers, shape+cursor debt, and invalid dimensions;
-- updated preexisting text+shape interaction tests to require shape projection and only cursor debt.
+- Go `EvaluatedCursorState` and TypeScript `CanonicalEvaluatedCursorState` projections with contract version `cursor-state-v1`;
+- exact rational cursor sampling in both runtimes;
+- preview-compatible linear interpolation and endpoint hold;
+- strict `<300ms` click-proximity semantics;
+- omitted-visible versus explicit-hidden presence semantics in the Go Timeline v2 projection;
+- preview-compatible default/range behavior for cursor scale;
+- explicit highlight/click-ring state;
+- fail-closed smoothing policy until a canonical algorithm exists;
+- malformed-event validation for negative time, ordering, finite coordinates, scale, and rational denominator;
+- mirrored Go/TypeScript unit coverage;
+- two minimal existing Go fixture updates required by `Visible bool` → `*bool`.
 
-Validation history before final normalization:
+Normalization history:
 
-- initial code-only head `82329ce5ec7b35657c6a740209ae2808d9482d08`: Go formatting/vet PASS; complete frontend lint/unit/performance/build PASS; backend unit/integration FAIL only because `frame_state_text_test.go` still asserted the pre-#243 unresolved set `[mixed:cursor, mixed:shape]`; smoke/parity were skipped behind that backend failure;
-- the stale Go assertion and matching TypeScript interaction assertion were corrected without changing FrameState implementation semantics;
-- corrected code-only head `aebffaa049e2090a0d50c63df5db106e16fdfd78`: Go formatting PASS; Go vet PASS; Go unit/integration PASS; Go race detector was still running when this tracker revision was authored;
-- corrected-head frontend lint/unit/performance/build PASS;
-- corrected-head Security Scan PASS and all completed standalone Linux/macOS/browser/sandbox assurances PASS;
-- corrected-head container build and remaining Quality Gate work were still completing at tracker authoring time;
-- this tracker revision changes the branch head, so none of those superseded-head results replace the required exact final documentation-complete validation.
+- the earlier cursor implementation was validated before #246, but that evidence did not include the then-dormant `frontend/test/` contract suite;
+- #246 merged first so cursor work could not be merged with its TypeScript contract test excluded from the normal gate;
+- after #246 merge `ad7ec51596807293ebb1206ce873088a0ad07da7`, the exact seven-file cursor delta was rebuilt as one commit directly on current `main`;
+- normalized code-only head `e36cf18f03f8079424c9db8368a71e67ac2cff25` was exactly one commit ahead / zero behind and contained only the seven intended cursor-contract paths;
+- hosted Quality/Security/container/platform/sandbox validation was running on that code-only head when this tracker update was authored;
+- this tracker update changes the branch head, so the documentation-complete intended tree must be normalized again and the full hosted matrix must pass on that exact final head before merge.
 
-Remaining before #243 merge:
+Remaining before #245 merge:
 
-1. Rebuild/squash the documentation-complete intended tree as one commit directly on current `main`.
-2. Reconfirm `main...branch` contains only the two FrameState implementation paths, two focused shape test paths, two updated text+shape interaction test paths, and this tracker.
-3. Refresh #243 body with final head and exact scope; mark ready for review.
-4. Validate formatting, vet, unit/integration, race, frontend lint/unit/performance/build, Playwright smoke, deterministic renderer parity, Security Scan, container builds, and all platform/sandbox assurances on the exact final head.
-5. Inspect and resolve any actionable review thread.
-6. Merge only when the exact head is current, one intended commit ahead, zero behind, mergeable, and clean.
-7. Create the next Phase 2 branch for canonical cursor renderer state from resulting current `main`.
+1. Normalize the documentation-complete eight-file intended tree as one commit directly on current `main`.
+2. Reconfirm `main...branch` is one intended commit ahead / zero behind with only seven cursor-contract paths plus this tracker.
+3. Refresh #245 body with the exact final head and validation scope; mark ready for review.
+4. Validate formatting, vet, unit/integration, race, frontend lint/unit/performance/build including all 51 Vitest files / 248+ tests, Playwright smoke, deterministic renderer parity, Security Scan, container builds, and all platform/sandbox assurances on the exact final head.
+5. Inspect review submissions and inline threads; resolve any actionable finding.
+6. Merge only while the exact final head is current, mergeable, one intended commit ahead, zero behind, and fully green.
+7. Start the cursor FrameState-consumption slice immediately from resulting `main`.
 
 ### Remaining Phase 2 work
 
-After #243:
+After #245:
 
-1. **Cursor state** — canonicalize sampled cursor position, visibility, scale, highlight/click-ring semantics, smoothing policy, and any asset/provenance needs.
+1. **Cursor FrameState consumption** — project `cursor-state-v1` into `FrameLayerState`, evaluate it at exact clip-relative presentation time, remove generic cursor debt only when canonical evaluation succeeds, and extend permanent Go↔TypeScript FrameState parity fixtures.
 2. **Provenance edges** — close remaining anchor/content-bounds/source-probe/font-resource cases surfaced by parity diagnostics.
 3. **AudioGraph** — define serializable timing/rate/pitch/channel/gain/fade/mute/solo/processing/stem decisions and exact sample-count semantics.
 4. Keep all unknown authorable fields fail closed until canonical semantics exist.
@@ -335,7 +363,7 @@ Before every merge:
 
 | Risk | Control |
 |---|---|
-| Schema/type drift | Go reflection and TypeScript compile/Vitest projection checks fail CI. |
+| Schema/type drift | Go reflection and TypeScript compile/Vitest projection checks fail CI. Canonical `frontend/test/` suites are now included by #246. |
 | Browser/Go evaluator drift | Shared fixtures plus permanent FrameState diagnostics. |
 | Legacy FFmpeg approximations become de facto contract | Canonical semantics are explicit; legacy renderer is evidence only. |
 | v1 adapter guesses ambiguous behavior | Ambiguous state fails closed. |
@@ -355,10 +383,11 @@ Before every merge:
 | Shape defaults drift between preview and export | Shared Go/TypeScript fixture serializes dimensions/style defaults once before FrameState consumption. |
 | Shape bounds are defaulted twice | #243 derives shape `content_bounds` from evaluated `shape-state-v1`; FrameState does not independently reinterpret width/height defaults. |
 | Invalid shape state is hidden by fallback bounds | Shape evaluation occurs before shape-derived bounds, so invalid authoring fails closed through FrameState. |
-| Falsy authored shape defaults drift from preview | Zero stroke/blur/radius values follow current preview truthy-fallback rules and are covered by shared fixtures. |
-| Optional callout borders are invented | Speech bubble/label serialize empty default stroke; only an authored non-empty stroke enables their border. |
+| Cursor omission collapses into hidden state | Timeline v2 Go `visible` is optional in #245; omission and explicit false are distinct. |
+| Cursor smoothing diverges by renderer | `smoothing:true` fails closed until one versioned canonical algorithm exists. |
+| Cursor click-ring timing drifts | `cursor-state-v1` serializes exact sampled click proximity using strict `<300ms` semantics. |
+| Cursor FrameState claims authority too early | #245 remains definition-only; generic cursor debt is retained until the next consumption slice. |
 | Stacked branch appears current but carries stale tree | Rebuild from actual current `main`; compare every path before merge. |
-| FrameState claims authority too early | Explicit unresolved sets until canonical family semantics exist; cursor remains debt after #243. |
 | CI setup/runner saturation hides code state | Distinguish setup/queue from executed code checks. |
 | Browser worker resource cost | Admission control, health checks, cancellation, guarded rollout, FFmpeg retained for media I/O. |
 | Audio runtime differences | Explicit AudioGraph and unsupported-boundary policy before default shared export. |
@@ -392,11 +421,14 @@ Before every merge:
 ### 2026-08-20
 
 - #242 defined renderer-neutral `shape-state-v1` for all currently authored annotation kinds. Manual review caught and corrected preview-compatible falsy radius behavior and optional speech-bubble/label borders; the final exact head passed the complete Quality/Security/container/platform/parity matrix and merged as `1a25ac0fef217731197169b229bde19aff158c8b`.
-- #243 consumes `shape-state-v1` in FrameState, centralizes shape-derived bounds on evaluated canonical dimensions, removes generic shape debt, preserves cursor debt, and adds mirrored fail-closed/projection coverage. Its first code-only backend run found one stale text-state regression assertion still expecting generic shape debt; the assertion and its TypeScript counterpart were corrected, and the corrected code-only head passed formatting, vet, unit/integration, and the complete frontend pipeline before final normalization (race still running when this tracker revision was authored).
+- #243 consumed `shape-state-v1` in FrameState, centralized shape-derived bounds on evaluated canonical dimensions, removed generic shape debt, preserved cursor debt, and added mirrored fail-closed/projection coverage. Its first code-only backend run found one stale text-state regression assertion still expecting generic shape debt; the assertion and its TypeScript counterpart were corrected. The final normalized head passed the complete hosted matrix and merged as `111fba5fd7ea73740aee1d92fc1038ee72fda30b`.
+- #246 repaired frontend Vitest discovery before cursor work could merge. Activating `frontend/test/` raised the normal unit gate to 51 files / 248 tests and exposed four latent test-only issues: three transition assertions still encoded pre-paint debt, and one zoom fixture used bit-exact floating-point equality. Those assertions were corrected without product-runtime changes; the exact normalized head passed Quality Gate, Security Scan, containers, and all platform/sandbox assurances before merge as `ad7ec51596807293ebb1206ce873088a0ad07da7`.
+- #245 defines `cursor-state-v1` in Go and TypeScript, preserves optional visibility semantics, samples exact rational cursor position/click state, validates malformed authoring, and fails closed on undefined smoothing. After #246 merged, its seven-file code delta was rebuilt directly on current `main` as normalized head `e36cf18f03f8079424c9db8368a71e67ac2cff25`; documentation-complete normalization and exact-head validation remain before merge.
 
 ## Next recommended slice
 
-1. Normalize, validate, and merge #243 from its documentation-complete exact head.
-2. Start canonical cursor renderer state immediately after #243.
-3. Follow with remaining provenance/font-resource edges and AudioGraph.
-4. Continue Phase 0 visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.
+1. Normalize, validate, and merge #245 from its documentation-complete exact head.
+2. Consume canonical cursor state in FrameState and extend permanent cross-runtime FrameState parity coverage.
+3. Close remaining provenance/font-resource/source-probe edges surfaced by parity diagnostics.
+4. Define and consume canonical AudioGraph to complete Phase 2 semantic ownership.
+5. Continue Phase 0 visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.
