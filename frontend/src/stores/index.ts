@@ -267,6 +267,18 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           }
           const failed = event.type === 'tool_failed' || event.type === 'tool_timed_out';
           const completed = event.type === 'tool_completed';
+
+          if (event.type === 'tool_started' || event.type === 'tool_queued') {
+            const toolLabel = event.tool_name || 'tool';
+            toast.loading(`Running ${toolLabel}…`, { id: `tool-${callId}`, duration: 8000 });
+          } else if (completed) {
+            const toolLabel = event.tool_name || 'tool';
+            toast.success(`Completed ${toolLabel}`, { id: `tool-${callId}`, duration: 3000 });
+          } else if (failed) {
+            const toolLabel = event.tool_name || 'tool';
+            toast.error(`Failed ${toolLabel}`, { id: `tool-${callId}`, duration: 4000 });
+          }
+
           set((state) => ({
             waitingForToolApproval: event.type === 'tool_approval_required'
               ? true
@@ -286,6 +298,14 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           }));
         },
         onToolResult: (data) => {
+          const callId = data.tool_call_id;
+          const toolLabel = data.tool_name || 'tool';
+          if (data.result.is_error) {
+            toast.error(`Failed ${toolLabel}`, { id: `tool-${callId}`, duration: 4000 });
+          } else {
+            toast.success(`Completed ${toolLabel}`, { id: `tool-${callId}`, duration: 3000 });
+          }
+
           set((state) => ({
             streamingTools: {
               ...state.streamingTools,
