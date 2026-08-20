@@ -47,7 +47,7 @@ Start with a rough idea. Research it against the web and your own files. Turn it
 | **04** | **Generate cinematic video** | Move from text, images, audio, or reference video to generated scenes with guided camera, composition, lighting, continuity, and native-audio controls. |
 | **05** | **Edit and animate on a production timeline** | Combine video, images, audio, music, captions, shapes, effects, transitions, fades, 2.5D camera motion, semantic animation blocks, scenes, and editable curves; record on Windows, transcribe through configured providers, and export through a durable FFmpeg render queue. |
 | **06** | **Work from your own knowledge** | Search a durable File Library with hybrid keyword + vector retrieval, bring citations into the conversation, and keep private files ahead of web results. |
-| **07** | **Research and automate** | Search the web, read full pages, operate a headless browser, pull live sports data, call MCP servers, and extend the system with plugins. |
+| **07** | **Research and automate** | Search the web with sources, retrieval timestamps, and a clear signal when an answer could *not* be verified; read full pages, operate a headless browser, pull live sports data, call MCP servers, and extend the system with plugins. |
 | **08** | **Compare, measure, and deliver** | Run model evaluations, track usage and cost, organize workspaces, and export polished Word, Excel, CSV, PDF, Markdown, HTML, JSON, and YAML artifacts. |
 
 ## One idea can travel through the whole studio

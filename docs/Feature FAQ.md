@@ -8,6 +8,7 @@ A comprehensive guide to all features in OmniLLM-Studio, covering what each feat
 
 1. [RAG (Retrieval-Augmented Generation)](#1-rag-retrieval-augmented-generation)
 2. [Tool Calling Framework](#2-tool-calling-framework)
+2b. [Current Information & Web Search](#2b-current-information--web-search)
 3. [Usage & Cost Dashboard](#3-usage--cost-dashboard)
 4. [Import/Export (Workspace Portability)](#4-importexport-workspace-portability)
 5. [Prompt Templates & Presets](#5-prompt-templates--presets)
@@ -167,7 +168,7 @@ The Tool Calling Framework provides a generic, extensible system for the AI to i
 
 | Tool | Description |
 |---|---|
-| **Web Search** | Searches the web using Brave Search API or DuckDuckGo fallback, with Jina Reader for content extraction. |
+| **Web Search** | Searches the web for current information. The server chooses the freshness window, region, locale, and query set from the question's intent, and returns results with a retrieval timestamp so the model can tell dated results from undated ones. See [Current Information & Web Search](#2b-current-information--web-search). |
 | **Sports Lookup** | Fetches ESPN-backed sports scores, schedules, standings, betting odds, news, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards, including IPL cricket, then returns a Markdown table. |
 | **Headless Browser** | Loads URLs in a real Chromium browser (via go-rod) to render JS-heavy pages, capture screenshots, interact with forms, export PDFs, and maintain stateful sessions across multi-step tasks. Auto-downloads Chromium on first use. Stealth mode bypasses common anti-bot measures. |
 | **Calculator** | Evaluates mathematical expressions safely using Go's AST parser. |
@@ -181,6 +182,10 @@ The Tool Calling Framework provides a generic, extensible system for the AI to i
 2. OmniLLM-Studio's **Executor** validates permissions, then runs the tool with a configurable timeout.
 3. The tool result is fed back into the LLM to generate the final response.
 4. **SSE events** (`tool_start`, `tool_result`, `tool_error`) stream tool activity to the frontend in real time.
+
+Tool calling works on both streaming and non-streaming chat. Browser tools are streaming-only, because they need the progress channel and the per-turn navigation limits that only the streaming path provides.
+
+Where a provider supports it, the backend can *require* a tool call rather than merely asking for one, so the model cannot answer from memory when a tool would give the real answer. Providers that do not accept that instruction fall back to asking, and the answer is marked unverified if the tool never ran — the message shows which of the two happened.
 
 ### How do I use it?
 
@@ -304,6 +309,103 @@ A: Yes — the `POST /v1/tools/execute` endpoint allows direct tool invocation w
 
 **Q: How do tool calls affect token usage?**
 A: Tool results are injected back into the conversation context, so they consume tokens in subsequent LLM calls.
+
+---
+
+## 2b. Current Information & Web Search
+
+**Availability:** Built in. Enable a search provider in Settings; the per-turn web-search toggle and the `web_search` tool permission both apply.
+
+### What problem does this solve?
+
+A model only knows what was in its training data. Ask it about today's prices, the newest release, or a current benchmark score and it will usually answer anyway — fluently, confidently, and wrong. The job of this subsystem is to decide when a question needs live data, go get it, and then be honest about whether it succeeded.
+
+### How does OmniLLM-Studio decide a question needs live data?
+
+Two classifiers, cheapest first.
+
+1. **A deterministic keyword gate.** Free, instant, and authoritative when it fires. It weighs temporal signals ("latest", "today", "current pricing") against signals that a question is about *how code works* rather than the state of the world.
+2. **A semantic router.** An optional small-model classification, consulted only when the gate declines. It catches phrasing that keyword rules cannot ("how do the available options compare these days?"). It costs an extra model call per turn, so it is opt-in: set **Settings → Router → Mode** to *Tools only* or *All preflight routes*. The default (*Sports only*) leaves the keyword gate as the sole classifier and adds no cost.
+
+Subject matter never vetoes retrieval on its own. "What is the latest React version?" is a question about the present state of the world that happens to mention software, and it searches. "How do I write a retry loop with the latest Go stdlib?" is a request for code, and it does not.
+
+### Why does it sometimes not filter by recency?
+
+Because a recency filter is the wrong tool for a lot of current-information questions.
+
+Vendor pricing pages, model cards, and release notes are stable documents. They may not have been re-published in months. Filtering those questions to "the last 24 hours" removes the authoritative source and leaves only blog posts *about* the page — which are frequently out of date. So freshness is chosen per question type:
+
+| Question type | Recency filter |
+|---|---|
+| Pricing, benchmarks, versions and releases | None — go find the canonical page |
+| News, market data | Last 24 hours by default; an explicit period in your question wins ("this week's news" → last week) |
+| Weather, scores | Follows the phrasing ("today" → last 24 hours, "last night" → last week) |
+| Sports schedules | None — the exact date is already in the query |
+| Anything else | Follows the phrasing; no filter when there is no temporal signal |
+
+### Which providers search natively?
+
+Where a provider can ground its own answer, that path is preferred: it removes a separate search call and a separate summarization call.
+
+| Provider | Native grounding |
+|---|---|
+| OpenAI (GPT-4.1, GPT-5, o3, o4 families) | Yes |
+| Anthropic (Claude 4.x, 5.x, Fable, Mythos) | Yes, via the Messages API web-search tool |
+| Google Gemini (2.x, 3.x) | Yes |
+| OpenRouter | Only for routes known to support it |
+| Ollama and other local models | No — uses the fallback |
+| Claude 3.x, Groq, Together, Mistral, generic OpenAI-compatible endpoints | No — uses the fallback |
+
+The fallback is Brave Search or DuckDuckGo, with optional Jina Reader page extraction. It always exists, so no provider is ever left without current information.
+
+### Can it search *and* then do something with the result?
+
+Yes. Asking for "the latest API prices, and calculate my monthly total" runs retrieval as a **preflight**: the evidence is gathered and injected into the conversation first, and the calculator (or export, or table generation) runs afterwards on real data.
+
+A plain lookup skips the preflight and lets the search path answer directly, which is cheaper.
+
+### What do the badges under an answer mean?
+
+| What you see | What it means |
+|---|---|
+| **N sources cited** | Retrieval succeeded and the sources are listed. Expand to see them |
+| **freshness verified** | A recency window applied, and every source with a known date fell inside it |
+| **newest 2 hours ago** | The newest source's date is known, but this question type requested no recency window, so there is nothing to verify against |
+| **dates unknown** | Sources came back with no publication dates. Not proof they are old, but not proof they are current either |
+| **Web search ran, but returned no citable sources** | The answer was grounded, but individual claims cannot be traced to a source |
+| **Current information could not be verified** (amber) | Retrieval was attempted and failed. The answer comes from training data and may be out of date. While the answer is still streaming, the same state appears as a "Could not verify current information" notice |
+| **This answer states figures without citing a source** | The answer contains prices, percentages, or version numbers that no listed source backs up. A prompt to double-check, not a claim that the numbers are wrong |
+
+### Configuration
+
+Open **Settings** and either:
+
+- enter a **Brave Search API key** (free tier available at [brave.com/search/api](https://brave.com/search/api/)) — recommended, because Brave supports real recency filters and returns publication dates; or
+- leave it unconfigured to use **DuckDuckGo**, which needs no key.
+
+Optional: a **Jina Reader** key raises rate limits for full-page extraction. Page extraction runs without a key too.
+
+You can turn web search off for a single message with the per-turn toggle, or deny the `web_search` tool entirely in the Tools settings.
+
+### FAQ
+
+**Q: Why did it search when I only wanted the model's opinion?**
+A: Turn web search off for that message with the per-turn toggle. If a whole category of your questions triggers it wrongly, that is a tuning bug worth reporting — the classifier is measured against a tracked corpus and over-triggering counts as a failure.
+
+**Q: Why didn't it search when I wanted it to?**
+A: Explicit recency words ("latest", "current release", "right now") reliably trigger retrieval. Conversationally phrased questions may not unless the semantic router is enabled. Asking to "look up" or "search for" something always triggers it.
+
+**Q: It said it could not verify current information. What now?**
+A: Retrieval was attempted and the provider returned nothing usable. Check that a search provider is configured in Settings; if you use Brave, check that the key is valid and within quota. The answer you received came from training data.
+
+**Q: DuckDuckGo results seem weaker than Brave.**
+A: They are. DuckDuckGo has no recency filter and returns no publication dates, so freshness cannot be verified and the recency signal is only a hint added to the query text. Brave is worth configuring for anything price-, version-, or benchmark-related.
+
+**Q: Does searching send my whole conversation to the search provider?**
+A: No. Only a generated search query is sent. Full-page extraction sends the URL of a search result to Jina Reader.
+
+**Q: Do private files take priority over the web?**
+A: Yes. File Library search runs before web search, and private evidence is preserved in the grounded request.
 
 ---
 

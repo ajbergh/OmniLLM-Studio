@@ -14,18 +14,37 @@ A simple schedule question should not pay for broad research and a long summariz
 Chat request
   ├─ File Library / RAG preflight (private knowledge first)
   ├─ deterministic sports preflight (structured ESPN data)
-  └─ current-information planner
-       ├─ OpenAI web_search_options
-       ├─ Gemini google_search
-       ├─ OpenRouter openrouter:web_search
-       └─ Brave or DuckDuckGo + selective Jina fallback
+  └─ current-information classification
+       ├─ deterministic gate  (free; authoritative when it fires)
+       └─ semantic router     (only if the gate declines, and only when configured)
               ↓
-       constrained generation
+       search planner  →  intent, answer shape, freshness, query set, source policy
               ↓
-       answerability and citation normalization
+       ┌─ simple lookup ─────────────────────────────────────────────┐
+       │  orchestrator owns the turn                                 │
+       │    ├─ OpenAI web_search_options                             │
+       │    ├─ Anthropic Messages API web_search                     │
+       │    ├─ Gemini google_search                                  │
+       │    ├─ OpenRouter openrouter:web_search                      │
+       │    └─ Brave or DuckDuckGo + selective Jina fallback         │
+       │         ↓                                                   │
+       │       constrained generation                                │
+       └─────────────────────────────────────────────────────────────┘
+       ┌─ compound request ──────────────────────────────────────────┐
+       │  preflight retrieves without generating (local providers)   │
+       │         ↓                                                   │
+       │  evidence injected as a system message                      │
+       │         ↓                                                   │
+       │  tool loop: calculate, export, format …                     │
+       └─────────────────────────────────────────────────────────────┘
               ↓
-       existing SSE stream
+       answerability + citation normalization + freshness/claim audit
+              ↓
+       existing SSE stream  (sources, retrieval status, freshness badge)
 ```
+
+Native grounding can only take the left branch: it is inseparable from
+generation, so it cannot supply evidence to a later tool round.
 
 ## Provider capability matrix
 
@@ -65,10 +84,15 @@ A freshness window is chosen per intent rather than applied globally. `inferTime
 
 | Intent | Freshness window | Why |
 |---|---|---|
-| `pricing`, `benchmark`, `release` | none | Vendor documents, not news. A recency filter removes the authoritative page. |
-| `news`, `price` (markets), `weather` | 24h | Genuinely time-boxed. |
-| `score` | inherits the temporal signal (e.g. 7d for "last night") | |
-| `schedule` | none | An exact-date query already pins the event. |
+| `pricing`, `benchmark`, `release` | Forced to none | Vendor documents, not news. A recency filter removes the authoritative page. |
+| `news`, `price` (markets) | 24h *unless the prompt names a period* | Genuinely time-boxed, but "this week's news" must still mean a week. |
+| `weather`, `score`, `general` | Whatever `inferTimeRange` derived | "today" → 24h, "last night" → 7d, no temporal word → no filter. |
+| `schedule` | Forced to none | An exact-date query already pins the event. |
+
+The distinction between *forced* and *inherited* matters: a forced empty window
+overrides an explicit signal in the prompt, which is correct for reference
+material (a pricing page is the pricing page regardless of the word "today"),
+while news and market data only supply a default.
 
 Native grounding is preferred because it usually removes one network search call and one separate summarization call. Local fallback remains mandatory for portability and provider independence.
 
@@ -247,12 +271,16 @@ Inspect the request URL for `omnillm_timezone`, confirm it is a valid IANA zone,
 
 ## Documentation impact
 
-Canonical documentation updated by this feature:
+Canonical documentation that must be updated when this behavior changes:
 
-- `README.md`
-- `CLAUDE.md`
-- `.github/copilot-instructions.md`
-- `docs/Feature FAQ.md`
-- `docs/TECHNICAL_REFERENCE.md`
-- `docs/CHAT_STUDIO_AGENT_RUNTIME_IMPLEMENTATION_2026-07-18.md`
-- this document
+| Document | What it owns |
+|---|---|
+| this document | The design: capability matrix, planning and freshness policy, adapters, evidence contract |
+| `CLAUDE.md` | Contributor rules and the invariants that must not be collapsed |
+| `.github/copilot-instructions.md` | The same rules in short form |
+| [`TECHNICAL_REFERENCE.md`](TECHNICAL_REFERENCE.md) | Request lifecycle, API surface, and the assistant message metadata contract |
+| [`Feature FAQ.md`](Feature%20FAQ.md) § 2b | The user-facing explanation: what the badges mean, how to configure a provider |
+| [`Chat-Studio-Agent-Loop-Review.md`](Chat-Studio-Agent-Loop-Review.md) | The review that produced the current design, with the defect history |
+| `README.md` | One capability line only |
+
+The predecessor of this list referenced `docs/CHAT_STUDIO_AGENT_RUNTIME_IMPLEMENTATION_2026-07-18.md`, which now lives under `docs/archive/completed/`. Point at live documents.
