@@ -28,18 +28,20 @@ describe('visual FrameState transition integration', () => {
   });
 
   it.each([
-    [15, 'fade-in', ['owner:transition_paint:fade-in'], 1],
-    [55, 'between', ['owner:transition_paint:between'], 2],
-    [65, 'slide-out', ['owner:transition_paint:slide-out'], 2],
-  ] as const)('surfaces only active transition paint debt at frame %i', (frameIndex, activeID, unresolved, layerCount) => {
+    [15, 'fade-in', 1],
+    [55, 'between', 2],
+    [65, 'slide-out', 2],
+  ] as const)('keeps active transition timing authoritative at frame %i', (frameIndex, activeID, layerCount) => {
     const state = evaluateVisualFrameState(fixture.document, frameIndex);
     const owner = state.layers.find((layer) => layer.clip_id === 'owner');
-    expect(state.authoritative).toBe(false);
-    expect(state.unresolved).toEqual(unresolved);
+    expect(state.authoritative).toBe(true);
+    expect(state.unresolved).toEqual([]);
     expect(state.layers).toHaveLength(layerCount);
-    expect(owner?.authoritative).toBe(false);
+    expect(owner?.authoritative).toBe(true);
     expect(owner?.transitions).toHaveLength(3);
     expect(owner?.transitions?.filter((transition) => transition.active).map((transition) => transition.id)).toEqual([activeID]);
+    expect(owner?.transition_paint).toHaveLength(1);
+    expect(owner?.transition_paint?.[0].transition_id).toBe(activeID);
   });
 
   it('honors the owner exclusive end frame and leaves the peer authoritative', () => {
