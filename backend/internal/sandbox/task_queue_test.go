@@ -13,10 +13,17 @@ import (
 
 func newSandboxTaskQueueForTest(t *testing.T) *SandboxTaskQueue {
 	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "sandbox-task-test.db")+"?_pragma=foreign_keys(1)")
+	// Match the production SQLite concurrency contract. Worker tests exercise a
+	// writer (Claim/Complete) concurrently with polling reads, which requires WAL
+	// plus a busy timeout rather than SQLite's rollback-journal fail-fast default.
+	dsn := filepath.Join(t.TempDir(), "sandbox-task-test.db") +
+		"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 	t.Cleanup(func() { _ = db.Close() })
 	queue, err := NewSandboxTaskQueue(db)
 	if err != nil {
