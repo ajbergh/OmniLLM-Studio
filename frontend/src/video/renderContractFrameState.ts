@@ -11,7 +11,8 @@ import {
   evaluatePerspectiveProjection,
   type CanonicalPerspectiveProjection,
 } from './renderContractPerspectiveProjection';
-import { evaluateCameraProperty, evaluateClipProperty } from './renderContractProperties';
+import { evaluateClipProperty, evaluateCameraProperty } from './renderContractProperties';
+import { evaluateTextState, type CanonicalEvaluatedTextState } from './renderContractText';
 import {
   evaluateTransitionPaint,
   supportsTransitionPaint,
@@ -52,6 +53,7 @@ export interface CanonicalFrameLayerState {
   start_frame: number; end_frame: number; source_time_ms: number; media_fit?: string;
   content_bounds?: TimelineV2ContentBounds;
   media_geometry?: CanonicalMediaGeometry;
+  text?: CanonicalEvaluatedTextState;
   transform: CanonicalEvaluatedTransform;
   view_transform: CanonicalEvaluatedTransform;
   model_matrix: Matrix4;
@@ -181,6 +183,7 @@ function evaluateFrameLayer(
   };
   const contentBounds = effectiveContentBounds(clip);
   const unresolved = unresolvedLayerFeatures(clip, contentBounds);
+  const text = evaluateTextState(clip.text, canvas.height);
   const effects = evaluateClipEffectStackAtTime(clip, clipTimeMs);
   const transitionPaint: CanonicalTransitionPaint[] = [];
   for (const transition of transitions) {
@@ -218,6 +221,7 @@ function evaluateFrameLayer(
     ...(clip.media_fit ? { media_fit: clip.media_fit } : {}),
     ...(contentBounds ? { content_bounds: contentBounds } : {}),
     ...(mediaGeometry ? { media_geometry: mediaGeometry } : {}),
+    ...(text ? { text } : {}),
     transform,
     view_transform: view,
     model_matrix: composeModelMatrix(view, anchorOffsetX, anchorOffsetY),
@@ -244,7 +248,6 @@ function effectiveContentBounds(clip: TimelineV2Clip): TimelineV2ContentBounds |
 
 function unresolvedLayerFeatures(clip: TimelineV2Clip, contentBounds: TimelineV2ContentBounds | undefined): string[] {
   const unresolved: string[] = [];
-  if (clip.text) unresolved.push('text');
   if (clip.shape) unresolved.push('shape');
   if (clip.cursor) unresolved.push('cursor');
   if (clip.asset_id && !contentBounds) unresolved.push('media_geometry:content_bounds');
