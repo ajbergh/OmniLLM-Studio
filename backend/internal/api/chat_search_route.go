@@ -179,11 +179,14 @@ func retrievalMayOwnTurn(plan websearch.SearchPlan, prompt string, in turnOwners
 		return plan.AnswerShape == websearch.AnswerShapeDirect
 	}
 
-	// No integrations are connected, so there is no tool to starve beyond the
-	// built-ins. Native grounding is materially better than the local fallback
-	// and cannot serve a preflight, so prefer it whenever it exists.
+	// Native grounding no longer requires giving up the tool loop: the Gemini and
+	// Anthropic adapters emit their search tool alongside the caller's function
+	// declarations, so one request can ground itself *and* call tools. Owning the
+	// turn is therefore only worth it for the Direct shape, where the constrained
+	// summarizer prompt and the clock-time answer validation genuinely help and no
+	// tool is plausible anyway.
 	if in.NativeGrounding {
-		return true
+		return plan.AnswerShape == websearch.AnswerShapeDirect
 	}
 
 	// Local-only provider: owning the turn buys nothing over a preflight, since

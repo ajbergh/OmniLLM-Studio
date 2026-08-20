@@ -74,14 +74,14 @@ func TestSimpleLookupsMayStillOwnTheTurn(t *testing.T) {
 func TestConnectedIntegrationsNarrowTurnOwnership(t *testing.T) {
 	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
 
-	// Brief shape: safe to own with no integrations, handed to the tool loop when
-	// integrations exist.
+	// Brief shape on a local-only provider: safe to own with no integrations,
+	// handed to the tool loop when integrations exist.
 	brief := websearch.BuildSearchPlan("What's the weather today?", now, "UTC")
 	if brief.AnswerShape != websearch.AnswerShapeBrief {
 		t.Fatalf("expected a brief plan, got %q", brief.AnswerShape)
 	}
 	if !retrievalMayOwnTurn(brief, "What's the weather today?", turnOwnershipInputs{}) {
-		t.Error("with no integrations a brief lookup should keep the cheap path")
+		t.Error("with no integrations and no grounding, a brief lookup should keep the cheap path")
 	}
 	if retrievalMayOwnTurn(brief, "What's the weather today?", turnOwnershipInputs{IntegrationsConnected: true}) {
 		t.Error("with integrations connected a brief lookup must not take the whole turn")
@@ -123,9 +123,13 @@ func TestNativeGroundingKeepsResearchTurns(t *testing.T) {
 		t.Fatalf("expected retrieval to be planned for %q", plainResearch)
 	}
 
+	// Grounding now travels with the tool catalog, so a research turn should NOT
+	// own the turn: it goes to the tool loop *with* grounding attached, which is
+	// strictly better than either half alone. The handler skips the local
+	// preflight entirely in that case.
 	native := turnOwnershipInputs{NativeGrounding: true}
-	if !retrievalMayOwnTurn(plainPlan, plainResearch, native) {
-		t.Error("with native grounding available and no integrations, retrieval should own the turn rather than fall back to local search")
+	if retrievalMayOwnTurn(plainPlan, plainResearch, native) {
+		t.Error("a research turn should use the grounded tool loop, not give up its tools to own the turn")
 	}
 
 	localOnly := turnOwnershipInputs{}
@@ -133,11 +137,14 @@ func TestNativeGroundingKeepsResearchTurns(t *testing.T) {
 		t.Error("without native grounding, owning the turn buys nothing over a preflight, so keep the tool loop")
 	}
 
-	// A connected integration still outranks native grounding for non-direct
-	// shapes: starving a configured tool reads as the feature being broken.
-	both := turnOwnershipInputs{NativeGrounding: true, IntegrationsConnected: true}
-	if retrievalMayOwnTurn(plainPlan, plainResearch, both) {
-		t.Error("connected integrations must keep non-direct turns on the tool loop")
+	// Direct shape is the one case still worth owning: the constrained prompt and
+	// the clock-time answer validation matter, and no tool is plausible.
+	directPlan := websearch.BuildSearchPlan("what time does the world cup game start today", now, "UTC")
+	if directPlan.AnswerShape != websearch.AnswerShapeDirect {
+		t.Fatalf("expected a direct plan, got %q", directPlan.AnswerShape)
+	}
+	if !retrievalMayOwnTurn(directPlan, "what time does the world cup game start today", native) {
+		t.Error("a direct single-fact lookup should keep the constrained turn-owning path")
 	}
 }
 

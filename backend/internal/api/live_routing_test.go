@@ -27,29 +27,40 @@ func TestLiveConfigRoutingForGeminiResearch(t *testing.T) {
 	}
 
 	cases := []struct {
-		prompt  string
-		wantOwn bool
-		why     string
+		prompt       string
+		wantOwn      bool
+		wantGrounded bool
+		why          string
 	}{
 		{
-			prompt:  "which llm has the best coding benchmark scores and pricing right now",
-			wantOwn: true,
-			why:     "a public-web research question must use Gemini's own grounding, not a rate-limited scraper",
+			prompt:       "which llm has the best coding benchmark scores and pricing right now",
+			wantOwn:      false,
+			wantGrounded: true,
+			why:          "grounding now rides along with the tool catalog, so this gets Gemini's index AND its tools — not DuckDuckGo",
 		},
 		{
-			prompt:  "what is the current Anthropic API pricing",
-			wantOwn: true,
-			why:     "pricing lookups are public-web and native grounding is the better source",
+			prompt:       "what is the current Anthropic API pricing",
+			wantOwn:      false,
+			wantGrounded: true,
+			why:          "a pricing lookup should be grounded by the provider, never routed to a rate-limited scraper",
 		},
 		{
-			prompt:  "what are the latest open PRs on my repo",
-			wantOwn: false,
-			why:     "a private source needs the tool loop regardless of provider capability",
+			prompt:       "what are the latest open PRs on my repo",
+			wantOwn:      false,
+			wantGrounded: false,
+			why:          "a private source needs the tool loop; the public web cannot answer it, so grounding is not the point",
 		},
 		{
-			prompt:  "find the latest exchange rate and calculate my total",
-			wantOwn: false,
-			why:     "a follow-up action needs the tool loop",
+			prompt:       "find the latest exchange rate and calculate my total",
+			wantOwn:      false,
+			wantGrounded: true,
+			why:          "grounding supplies the rate while the tool loop stays available for the calculation",
+		},
+		{
+			prompt:       "what time does the world cup game start today",
+			wantOwn:      true,
+			wantGrounded: true,
+			why:          "a direct single-fact lookup keeps the constrained prompt and clock-time validation",
 		},
 	}
 
@@ -59,9 +70,19 @@ func TestLiveConfigRoutingForGeminiResearch(t *testing.T) {
 			if !plan.NeedsWeb {
 				t.Fatalf("expected retrieval to be planned (shape would be %q)", plan.AnswerShape)
 			}
-			got := retrievalMayOwnTurn(plan, tc.prompt, live)
-			if got != tc.wantOwn {
-				t.Errorf("ownsTurn = %v, want %v (shape=%q): %s", got, tc.wantOwn, plan.AnswerShape, tc.why)
+			ownsTurn := retrievalMayOwnTurn(plan, tc.prompt, live)
+			if ownsTurn != tc.wantOwn {
+				t.Errorf("ownsTurn = %v, want %v (shape=%q): %s", ownsTurn, tc.wantOwn, plan.AnswerShape, tc.why)
+			}
+
+			// The property that actually matters: this turn must never fall back
+			// to the local provider on a model that can ground itself.
+			usesLocalPreflight := !ownsTurn && !live.NativeGrounding
+			if usesLocalPreflight {
+				t.Errorf("turn would run a local preflight on a native-capable model: %s", tc.why)
+			}
+			if tc.wantGrounded && !live.NativeGrounding {
+				t.Error("test setup error: expected a native-capable provider")
 			}
 		})
 	}

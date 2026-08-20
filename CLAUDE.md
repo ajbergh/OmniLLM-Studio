@@ -155,7 +155,17 @@ Page-level tools stay: `browser_*` and `fetch_url` read a specific URL rather th
 
 **A failed local preflight escalates to native grounding when the provider has it.** A grounded answer that skips the follow-up tool beats a training-data answer that includes one, and nothing has been streamed at that point, so changing the turn's shape is safe.
 
-**Native grounding and our tool calling are mutually exclusive for Gemini, and that is an adapter limitation, not a law.** `transformGeminiGroundedRequest` builds `tools: [{google_search: {}}]` and discards any function declarations, so a grounded Gemini request cannot also carry our tools — which is the whole reason the preflight exists. Unifying them means teaching the adapter to emit `functionDeclarations` alongside `google_search` and to map `functionCall` response parts back to OpenAI `tool_calls`, in both the streaming and non-streaming converters. Verify that Gemini accepts both tool types together for the target model family before relying on it; a rejection would break every grounded turn.
+**Native grounding and tool calling now coexist.** The Gemini and Anthropic adapters emit their search tool alongside the caller's function declarations, so one request can ground itself and call tools. That removed the reason most turns had to choose, and it is why `retrievalMayOwnTurn` only keeps the `Direct` shape on a native provider — the constrained prompt and clock-time validation are the remaining benefit, not grounding.
+
+Three conversions make it work, and dropping any one silently breaks a multi-round loop:
+
+1. Requests: OpenAI `tools` → `function_declarations` (Gemini) / flat `{name, input_schema}` custom tools (Anthropic). Gemini rejects a large part of JSON Schema, so `sanitizeGeminiSchema` strips the keywords it refuses; a rejection there degrades to local search instead of erroring visibly.
+2. History: an assistant turn carrying tool calls, and the `role: "tool"` results answering it, must round-trip as `functionCall`/`functionResponse` parts or `tool_use`/`tool_result` blocks. An assistant turn that only calls a tool has **empty content**, and both adapters previously skipped blank-text messages — so round two arrived with no record the tool had run and the model called it again. Anthropic additionally needs consecutive tool results merged onto one user turn, because two user turns in a row is a validation error.
+3. Responses: `functionCall` parts and `tool_use` blocks → OpenAI `tool_calls`, **with a `tool_calls` finish reason**, or the loop never continues. Gemini assigns no call IDs so they are synthesized; Anthropic supplies real ones that must be preserved, since the `tool_result` references them.
+
+On a tool-call turn the markdown `**Sources:**` block is withheld — the loop continues and it would land mid-conversation — while the structured citations still go out.
+
+**The one thing offline tests cannot settle** is whether a given Gemini model family accepts `google_search` and `function_declarations` together. `retryGeminiWithoutTools` handles a 400 by retrying once with grounding alone, because grounding is the half worth keeping: without it the answer is ungrounded, without tools it is merely less capable. Do not remove that retry on the assumption that the combination works.
 
 **Do not force a tool retry after a failed retrieval.** It runs the same plan against the provider that just failed, and consumes the one round where the model could reach the tool that can actually answer.
 

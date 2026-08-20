@@ -29,6 +29,19 @@ const (
 
 const metaSearchMechanism = "search_mechanism"
 
+// groundedToolLoopDirective is added when provider-native grounding travels with
+// the tool catalog in the same request.
+//
+// The model has two ways to get information and needs to know which is which:
+// its own search index covers the public web, while the tools reach things the
+// web cannot see. Without this it tends to treat them as interchangeable and
+// reaches for whichever it saw first.
+const groundedToolLoopDirective = `SEARCH AND TOOLS ARE BOTH AVAILABLE THIS TURN.
+
+You have built-in web search for public information, and separately a set of tools for everything the public web cannot answer: the user's own accounts, repositories, documents, and connected systems.
+
+Use your own web search for public facts — prices, releases, benchmarks, news. Use a tool when the question is about the user's data. Use both when a question needs public data and then an action on it, and say which claims came from which. Do not answer a question about current public facts from memory when your search can check it.`
+
 // withoutLocalWebSearch removes the local web_search tool from a catalog.
 //
 // Two situations call for it, and the reason is the same in both: the turn

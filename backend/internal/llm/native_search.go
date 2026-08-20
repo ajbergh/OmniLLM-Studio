@@ -128,6 +128,11 @@ func (t *nativeSearchTransport) RoundTrip(req *http.Request) (*http.Response, er
 
 	provider := nativeProviderForURL(req.URL)
 	stream, _ := payload["stream"].(bool)
+	// The native transforms rewrite the URL in place, so the original path has to
+	// be captured before they run or a retry would rewrite an already-rewritten
+	// path.
+	originalPath, originalQuery := req.URL.Path, req.URL.RawQuery
+	originalTools, _ := payload["tools"].([]interface{})
 	// gemini and anthropic are rewritten to their native endpoints, so their
 	// bodies are set by the transform rather than re-marshalled below.
 	nativeEndpoint := provider == "gemini" || provider == "anthropic"
@@ -155,6 +160,20 @@ func (t *nativeSearchTransport) RoundTrip(req *http.Request) (*http.Response, er
 	}
 
 	resp, err := t.base.RoundTrip(req)
+
+	// A grounded Gemini request now carries both google_search and
+	// function_declarations. Model families that reject the combination answer
+	// 400, and a 400 here degrades to local search rather than surfacing — so
+	// retry once with grounding alone. Grounding is the half worth keeping:
+	// without it the answer is ungrounded, without tools it is merely less
+	// capable.
+	if provider == "gemini" && len(originalTools) > 0 && resp != nil && resp.StatusCode == http.StatusBadRequest {
+		if retried := t.retryGeminiWithoutTools(req, payload, cfg, stream, resp, originalPath, originalQuery); retried != nil {
+			resp = retried
+			err = nil
+		}
+	}
+
 	if err != nil || resp == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// A grounded request that fails here degrades to local search, which
 		// looks like a working-but-stale answer rather than an error. Log enough
@@ -193,6 +212,50 @@ func (t *nativeSearchTransport) RoundTrip(req *http.Request) (*http.Response, er
 // URL produced ".../openai//chat/completions", the trim missed, and the rewrite
 // appended the native path onto the compat path — a 404 that fell back to local
 // search, so grounding silently stopped working with no visible error.
+// retryGeminiWithoutTools re-sends a rejected grounded request with the function
+// declarations removed.
+//
+// Returns nil when the retry is not worth making or also fails, in which case the
+// caller keeps the original 400 so the failure is still reported.
+func (t *nativeSearchTransport) retryGeminiWithoutTools(
+	req *http.Request,
+	payload map[string]interface{},
+	cfg *NativeSearchConfig,
+	stream bool,
+	failed *http.Response,
+	originalPath, originalQuery string,
+) *http.Response {
+	detail := ""
+	if failed.Body != nil {
+		if body, readErr := io.ReadAll(io.LimitReader(failed.Body, 4096)); readErr == nil {
+			detail = string(body)
+		}
+		_ = failed.Body.Close()
+	}
+	log.Printf("WARN: gemini rejected grounding with function declarations; retrying with grounding only: %s", detail)
+
+	retryReq := req.Clone(req.Context())
+	retryReq.URL.Path = originalPath
+	retryReq.URL.RawQuery = originalQuery
+	if err := transformGeminiGroundedRequest(retryReq, geminiGroundedRequestWithoutTools(payload), cfg, stream); err != nil {
+		log.Printf("ERROR: gemini grounding-only retry could not be built: %v", err)
+		return nil
+	}
+	resp, err := t.base.RoundTrip(retryReq)
+	if err != nil || resp == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+		}
+		log.Printf("ERROR: gemini grounding-only retry failed status=%d err=%v", status, err)
+		return nil
+	}
+	return resp
+}
+
 func nativeGeminiRootPath(path string) string {
 	path = strings.TrimSuffix(path, "/")
 	path = strings.TrimSuffix(path, "/chat/completions")
@@ -305,34 +368,24 @@ func transformGeminiGroundedRequest(req *http.Request, source map[string]interfa
 		return fmt.Errorf("gemini grounded search requires a model")
 	}
 	messages, _ := source["messages"].([]interface{})
-	contents := make([]map[string]interface{}, 0, len(messages))
-	var systemParts []string
-	for _, rawMessage := range messages {
-		message, ok := rawMessage.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		role, _ := message["role"].(string)
-		content := messageText(message["content"])
-		if strings.TrimSpace(content) == "" {
-			continue
-		}
-		if role == "system" || role == "developer" {
-			systemParts = append(systemParts, content)
-			continue
-		}
-		geminiRole := "user"
-		if role == "assistant" {
-			geminiRole = "model"
-		}
-		contents = append(contents, map[string]interface{}{
-			"role":  geminiRole,
-			"parts": []map[string]string{{"text": content}},
-		})
+	contents, systemParts := geminiContentsFromMessages(messages)
+
+	// Native grounding and function calling in one request. The adapter used to
+	// emit only google_search and discard the caller's tools, which forced every
+	// grounded turn to give up tool calling — see gemini_tools.go.
+	geminiTools := []map[string]interface{}{{"google_search": map[string]interface{}{}}}
+	rawTools, _ := source["tools"].([]interface{})
+	declarations := geminiFunctionDeclarations(rawTools)
+	if len(declarations) > 0 {
+		geminiTools = append(geminiTools, map[string]interface{}{"function_declarations": declarations})
 	}
+
 	payload := map[string]interface{}{
 		"contents": contents,
-		"tools":    []map[string]interface{}{{"google_search": map[string]interface{}{}}},
+		"tools":    geminiTools,
+	}
+	if len(declarations) > 0 {
+		payload["tool_config"] = geminiToolConfig()
 	}
 	if len(systemParts) > 0 {
 		payload["system_instruction"] = map[string]interface{}{
@@ -376,6 +429,86 @@ func transformGeminiGroundedRequest(req *http.Request, source map[string]interfa
 	return nil
 }
 
+// geminiGroundedRequestWithoutTools rebuilds a grounded request with the function
+// declarations removed.
+//
+// It is the retry path for a model family that rejects google_search and
+// function_declarations together. Grounding is the more valuable half: without it
+// the answer is ungrounded, whereas without tools it is merely less capable, so
+// tools are what gets dropped.
+func geminiGroundedRequestWithoutTools(source map[string]interface{}) map[string]interface{} {
+	stripped := make(map[string]interface{}, len(source))
+	for key, value := range source {
+		if key == "tools" || key == "tool_choice" {
+			continue
+		}
+		stripped[key] = value
+	}
+	return stripped
+}
+
+// geminiContentsFromMessages converts OpenAI-shaped history to Gemini contents,
+// preserving tool calls and tool results.
+//
+// Preservation matters more than it looks. An assistant message that carries only
+// tool calls has empty content, and the previous implementation skipped every
+// message whose text was blank — so a tool loop's second round arrived with no
+// record that the tool had run, and the model called it again. Tool results were
+// dropped for the same reason.
+func geminiContentsFromMessages(messages []interface{}) ([]map[string]interface{}, []string) {
+	contents := make([]map[string]interface{}, 0, len(messages))
+	var systemParts []string
+
+	for _, rawMessage := range messages {
+		message, ok := rawMessage.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		role, _ := message["role"].(string)
+		content := messageText(message["content"])
+
+		switch role {
+		case "system", "developer":
+			if strings.TrimSpace(content) != "" {
+				systemParts = append(systemParts, content)
+			}
+
+		case "tool":
+			name, _ := message["name"].(string)
+			if strings.TrimSpace(name) == "" {
+				toolCallID, _ := message["tool_call_id"].(string)
+				name = geminiFunctionCallName(messages, toolCallID)
+			}
+			// Gemini expects function responses on a user turn.
+			contents = append(contents, map[string]interface{}{
+				"role":  "user",
+				"parts": []map[string]interface{}{geminiFunctionResponsePart(name, content)},
+			})
+
+		case "assistant":
+			parts := make([]map[string]interface{}, 0, 2)
+			if strings.TrimSpace(content) != "" {
+				parts = append(parts, map[string]interface{}{"text": content})
+			}
+			if rawCalls, ok := message["tool_calls"].([]interface{}); ok {
+				parts = append(parts, geminiToolCallParts(rawCalls)...)
+			}
+			if len(parts) > 0 {
+				contents = append(contents, map[string]interface{}{"role": "model", "parts": parts})
+			}
+
+		default:
+			if strings.TrimSpace(content) != "" {
+				contents = append(contents, map[string]interface{}{
+					"role":  "user",
+					"parts": []map[string]interface{}{{"text": content}},
+				})
+			}
+		}
+	}
+	return contents, systemParts
+}
+
 func messageText(value interface{}) string {
 	switch typed := value.(type) {
 	case string:
@@ -404,13 +537,25 @@ func setRequestBody(req *http.Request, body []byte) {
 	req.Header.Del("Content-Length")
 }
 
+// geminiResponsePart is one part of a Gemini candidate's content. A part carries
+// either text or a function call; grounded turns with tools return both.
+type geminiResponsePart struct {
+	Text string `json:"text"`
+	// Thought marks reasoning parts on model families that expose them. They are
+	// not answer text and must not be concatenated into the response.
+	Thought      bool `json:"thought"`
+	FunctionCall *struct {
+		Name string          `json:"name"`
+		Args json.RawMessage `json:"args"`
+	} `json:"functionCall"`
+}
+
 type geminiGroundedResponse struct {
 	Candidates []struct {
 		Content struct {
-			Parts []struct {
-				Text string `json:"text"`
-			} `json:"parts"`
+			Parts []geminiResponsePart `json:"parts"`
 		} `json:"content"`
+		FinishReason      string `json:"finishReason"`
 		GroundingMetadata struct {
 			GroundingChunks []struct {
 				Web struct {
@@ -426,11 +571,25 @@ type geminiGroundedResponse struct {
 	} `json:"usageMetadata"`
 }
 
+// functionCalls returns every function call across the response's candidates, in
+// OpenAI tool_calls shape.
+func (value geminiGroundedResponse) functionCalls() []interface{} {
+	var parts []geminiResponsePart
+	for _, candidate := range value.Candidates {
+		parts = append(parts, candidate.Content.Parts...)
+	}
+	return geminiFunctionCallsFromParts(parts)
+}
+
 func (value geminiGroundedResponse) textAndSources() (string, map[string]string) {
 	var text strings.Builder
 	sources := map[string]string{}
 	for _, candidate := range value.Candidates {
 		for _, part := range candidate.Content.Parts {
+			// Reasoning parts are not answer text.
+			if part.Thought {
+				continue
+			}
 			text.WriteString(part.Text)
 		}
 		for _, chunk := range candidate.GroundingMetadata.GroundingChunks {
@@ -460,15 +619,26 @@ func transformGeminiResponse(resp *http.Response) (*http.Response, error) {
 		return resp, nil
 	}
 	content, sources := result.textAndSources()
-	content = appendSourceMap(content, sources)
+	toolCalls := result.functionCalls()
+	// Only append the markdown source block on a final answer. Doing it on a
+	// tool-call turn would put a "Sources" list in the middle of the loop, before
+	// the model has said anything.
+	if len(toolCalls) == 0 {
+		content = appendSourceMap(content, sources)
+	}
 	message := map[string]interface{}{"role": "assistant", "content": content}
 	if annotations := annotationsFromSourceMap(sources); annotations != nil {
 		message["annotations"] = annotations
 	}
+	finishReason := "stop"
+	if len(toolCalls) > 0 {
+		message["tool_calls"] = toolCalls
+		finishReason = "tool_calls"
+	}
 	converted := map[string]interface{}{
 		"choices": []interface{}{map[string]interface{}{
 			"message":       message,
-			"finish_reason": "stop",
+			"finish_reason": finishReason,
 		}},
 		"usage": map[string]interface{}{
 			"prompt_tokens":     result.UsageMetadata.PromptTokenCount,
@@ -493,6 +663,7 @@ func wrapGeminiStream(resp *http.Response) *http.Response {
 		scanner := bufio.NewScanner(original)
 		scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 		sources := map[string]string{}
+		emittedToolCalls := 0
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if !strings.HasPrefix(line, "data:") {
@@ -513,6 +684,19 @@ func wrapGeminiStream(resp *http.Response) *http.Response {
 			if text != "" {
 				writeOpenAIStreamChunk(writer, text, nil)
 			}
+			// Function calls arrive as complete parts rather than fragmented
+			// argument strings, so each one is emitted as a finished tool-call
+			// delta. Without this the grounded stream silently swallowed every
+			// tool the model asked for.
+			if calls := chunk.functionCalls(); len(calls) > 0 {
+				for _, call := range calls {
+					if indexed, ok := call.(map[string]interface{}); ok {
+						indexed["index"] = emittedToolCalls
+						emittedToolCalls++
+					}
+				}
+				writeOpenAIToolCallChunk(writer, calls)
+			}
 			if chunk.UsageMetadata.PromptTokenCount > 0 || chunk.UsageMetadata.CandidatesTokenCount > 0 {
 				usage := map[string]interface{}{
 					"prompt_tokens":     chunk.UsageMetadata.PromptTokenCount,
@@ -521,12 +705,32 @@ func wrapGeminiStream(resp *http.Response) *http.Response {
 				writeOpenAIStreamChunk(writer, "", usage)
 			}
 		}
-		if sourceText := appendSourceMap("", sources); sourceText != "" {
-			writeOpenAIStreamChunkWithAnnotations(writer, sourceText, nil, annotationsFromSourceMap(sources))
+		// Sources are appended only when the turn ended with an answer. On a
+		// tool-call turn the loop continues, and a "Sources" block emitted here
+		// would land in the middle of the conversation.
+		if emittedToolCalls == 0 {
+			if sourceText := appendSourceMap("", sources); sourceText != "" {
+				writeOpenAIStreamChunkWithAnnotations(writer, sourceText, nil, annotationsFromSourceMap(sources))
+			}
+		} else if annotations := annotationsFromSourceMap(sources); len(annotations) > 0 {
+			// Still surface the citations as structured data so the backend can
+			// count them even though no markdown block was written.
+			writeOpenAIStreamChunkWithAnnotations(writer, "", nil, annotations)
 		}
 		_, _ = io.WriteString(writer, "data: [DONE]\n\n")
 	}()
 	return resp
+}
+
+// writeOpenAIToolCallChunk emits a converted chunk carrying tool calls.
+func writeOpenAIToolCallChunk(writer io.Writer, calls []interface{}) {
+	chunk := map[string]interface{}{
+		"choices": []interface{}{map[string]interface{}{
+			"delta": map[string]interface{}{"tool_calls": calls},
+		}},
+	}
+	encoded, _ := json.Marshal(chunk)
+	_, _ = fmt.Fprintf(writer, "data: %s\n\n", encoded)
 }
 
 func writeOpenAIStreamChunk(writer io.Writer, content string, usage map[string]interface{}) {

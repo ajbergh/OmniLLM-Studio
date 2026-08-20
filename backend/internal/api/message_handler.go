@@ -1113,6 +1113,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var streamToolEnforcement toolEnforcement
 	var streamCitations []llm.Citation
 	streamMechanism := searchMechanismNone
+	var streamRetrievalPlan websearch.SearchPlan
 	var preflight *websearch.PreflightEvidence
 	var searchRoute searchRouteDecision
 	var searchRouterTelemetry *intentrouter.RouterTelemetry
@@ -1155,7 +1156,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		// Turn ownership and tool calling are mutually exclusive: the
 		// orchestrator paths answer and return, so the tool loop never runs.
 		// Only a single-fact lookup may take that path.
-		streamRetrievalPlan := websearch.BuildSearchPlan(
+		streamRetrievalPlan = websearch.BuildSearchPlan(
 			retrievalText, turncontext.FromContext(r.Context()).Now, turncontext.FromContext(r.Context()).Timezone,
 		)
 		if retrievalMayOwnTurn(streamRetrievalPlan, req.Content, streamOwnership) {
@@ -1167,6 +1168,12 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			} else if wsErr == nil {
 				streamMechanism = searchMechanismLocal
 			}
+		} else if streamOwnership.NativeGrounding {
+			// The provider grounds itself and the adapter carries our tools in the
+			// same request, so there is nothing for a local preflight to add. Skip
+			// it: running one here would search with the weaker provider and then
+			// hand the model evidence it did not need.
+			streamMechanism = searchMechanismNative
 		} else {
 			sendSSE(w, flusher, "web_search", map[string]interface{}{
 				"status": "searching",
@@ -1340,13 +1347,30 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 		providerType := streamProviderType
 		llmTools := streamLLMTools
+		// Grounding now travels with the tool catalog rather than excluding it: the
+		// Gemini and Anthropic adapters emit their search tool alongside the
+		// caller's function declarations, so one request can do both.
+		//
+		// The local web_search tool is still withdrawn. A turn that has the
+		// provider's own index, or evidence already in context, does not need a
+		// rate-limited HTML scraper as a second option — one observed turn spent
+		// five tool calls re-searching, two refused outright.
+		groundedToolLoop := false
+		if streamOwnership.NativeGrounding && searchRoute.NeedsWeb && preflight == nil {
+			if plugin := llm.NativeSearchPlugin(websearch.NativeSearchConfigForPlan(
+				streamRetrievalPlan, turncontext.FromContext(r.Context()),
+			)); plugin.ID != "" {
+				llmReq.Plugins = append(llmReq.Plugins, plugin)
+				groundedToolLoop = true
+				streamMechanism = searchMechanismNative
+			}
+		}
 		if preflight != nil || streamOwnership.NativeGrounding {
-			// This turn already has a search mechanism: either evidence is in
-			// context from the preflight, or the provider grounds itself. Leaving
-			// the local web_search tool on the table invites the model to reach
-			// for the weaker one — one observed turn spent five tool calls
-			// re-searching, two refused outright by the provider.
 			llmTools = withoutLocalWebSearch(llmTools)
+		}
+		if groundedToolLoop {
+			appendToBaseSystemPrompt(&llmReq, groundedToolLoopDirective)
+			logSearchMechanism(streamMechanism, providerName, modelName, false)
 		}
 		streamToolEnforcement = newToolEnforcement(turnSelection)
 		const maxToolLoops = 10

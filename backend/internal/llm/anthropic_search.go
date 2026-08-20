@@ -93,33 +93,7 @@ func transformAnthropicGroundedRequest(
 	}
 
 	messages, _ := source["messages"].([]interface{})
-	converted := make([]map[string]interface{}, 0, len(messages))
-	var systemParts []string
-	for _, rawMessage := range messages {
-		message, ok := rawMessage.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		role, _ := message["role"].(string)
-		content := messageText(message["content"])
-		if strings.TrimSpace(content) == "" {
-			continue
-		}
-		// The Messages API takes system content in a dedicated top-level field,
-		// not as a message role.
-		if role == "system" || role == "developer" {
-			systemParts = append(systemParts, content)
-			continue
-		}
-		messagesRole := "user"
-		if role == "assistant" {
-			messagesRole = "assistant"
-		}
-		converted = append(converted, map[string]interface{}{
-			"role":    messagesRole,
-			"content": []map[string]interface{}{{"type": "text", "text": content}},
-		})
-	}
+	converted, systemParts := anthropicMessagesFromHistory(messages)
 	if len(converted) == 0 {
 		return fmt.Errorf("anthropic grounded search requires at least one message")
 	}
@@ -152,11 +126,19 @@ func transformAnthropicGroundedRequest(
 		maxTokens = int(value)
 	}
 
+	// The Messages API accepts custom tools alongside a server tool, so a grounded
+	// Anthropic turn can also call our tools. The adapter previously sent only the
+	// server tool and dropped the caller's, forcing the same either/or the Gemini
+	// adapter forced.
+	anthropicTools := []map[string]interface{}{searchTool}
+	rawTools, _ := source["tools"].([]interface{})
+	anthropicTools = append(anthropicTools, anthropicCustomTools(rawTools)...)
+
 	payload := map[string]interface{}{
 		"model":      model,
 		"max_tokens": maxTokens,
 		"messages":   converted,
-		"tools":      []map[string]interface{}{searchTool},
+		"tools":      anthropicTools,
 	}
 	if len(systemParts) > 0 {
 		payload["system"] = strings.Join(systemParts, "\n\n")
@@ -233,6 +215,10 @@ type anthropicMessagesResponse struct {
 		// list of results. On error the same field is an object instead, so it is
 		// decoded loosely and type-checked below.
 		Content json.RawMessage `json:"content"`
+		// A tool_use block is a request to call one of our tools.
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
 	} `json:"content"`
 	StopReason string `json:"stop_reason"`
 	Usage      struct {
@@ -311,15 +297,25 @@ func transformAnthropicResponse(resp *http.Response) (*http.Response, error) {
 	}
 
 	content, sources := result.textAndCitations()
-	content = appendSourceMap(content, sources)
+	toolCalls := result.toolCalls()
+	// Only append the markdown source block on a final answer; on a tool-call
+	// turn the loop continues and a "Sources" list would land mid-conversation.
+	if len(toolCalls) == 0 {
+		content = appendSourceMap(content, sources)
+	}
 	message := map[string]interface{}{"role": "assistant", "content": content}
 	if annotations := annotationsFromSourceMap(sources); annotations != nil {
 		message["annotations"] = annotations
 	}
+	finishReason := "stop"
+	if len(toolCalls) > 0 {
+		message["tool_calls"] = toolCalls
+		finishReason = "tool_calls"
+	}
 	converted := map[string]interface{}{
 		"choices": []interface{}{map[string]interface{}{
 			"message":       message,
-			"finish_reason": "stop",
+			"finish_reason": finishReason,
 		}},
 		"usage": map[string]interface{}{
 			"prompt_tokens":     result.Usage.InputTokens,
@@ -331,6 +327,13 @@ func transformAnthropicResponse(resp *http.Response) (*http.Response, error) {
 	return resp, nil
 }
 
+// anthropicPendingToolUse accumulates a streaming tool_use block.
+type anthropicPendingToolUse struct {
+	ID        string
+	Name      string
+	Arguments strings.Builder
+}
+
 // anthropicStreamEvent models the Messages API SSE events this adapter reads.
 type anthropicStreamEvent struct {
 	Type  string `json:"type"`
@@ -338,10 +341,15 @@ type anthropicStreamEvent struct {
 	Delta struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
+		// input_json_delta fragments carry a tool_use block's arguments.
+		PartialJSON string `json:"partial_json"`
 	} `json:"delta"`
 	ContentBlock struct {
 		Type    string          `json:"type"`
 		Content json.RawMessage `json:"content"`
+		ID      string          `json:"id"`
+		Name    string          `json:"name"`
+		Input   json.RawMessage `json:"input"`
 	} `json:"content_block"`
 	Message struct {
 		Usage struct {
@@ -378,6 +386,12 @@ func wrapAnthropicStream(resp *http.Response) *http.Response {
 		sources := map[string]string{}
 		inputTokens := 0
 		outputTokens := 0
+		// A tool_use block streams as content_block_start (id and name) followed
+		// by input_json_delta fragments, so arguments accumulate per block index
+		// and are emitted once the block stops. Emitting on start would send an
+		// empty argument object.
+		pendingToolUse := map[int]*anthropicPendingToolUse{}
+		emittedToolCalls := 0
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -398,7 +412,36 @@ func wrapAnthropicStream(resp *http.Response) *http.Response {
 				if event.Delta.Type == "text_delta" && event.Delta.Text != "" {
 					writeOpenAIStreamChunk(writer, event.Delta.Text, nil)
 				}
+				if event.Delta.Type == "input_json_delta" {
+					if pending, ok := pendingToolUse[event.Index]; ok {
+						pending.Arguments.WriteString(event.Delta.PartialJSON)
+					}
+				}
+			case "content_block_stop":
+				if pending, ok := pendingToolUse[event.Index]; ok {
+					delete(pendingToolUse, event.Index)
+					arguments := strings.TrimSpace(pending.Arguments.String())
+					if arguments == "" {
+						arguments = "{}"
+					}
+					writeOpenAIToolCallChunk(writer, []interface{}{map[string]interface{}{
+						"index": emittedToolCalls,
+						"id":    pending.ID,
+						"type":  "function",
+						"function": map[string]interface{}{
+							"name":      pending.Name,
+							"arguments": arguments,
+						},
+					}})
+					emittedToolCalls++
+				}
 			case "content_block_start":
+				if event.ContentBlock.Type == "tool_use" && strings.TrimSpace(event.ContentBlock.Name) != "" {
+					pendingToolUse[event.Index] = &anthropicPendingToolUse{
+						ID:   event.ContentBlock.ID,
+						Name: event.ContentBlock.Name,
+					}
+				}
 				if event.ContentBlock.Type == "web_search_tool_result" {
 					for _, result := range searchResultsFromBlock(event.ContentBlock.Content) {
 						url := strings.TrimSpace(result.URL)
@@ -424,9 +467,15 @@ func wrapAnthropicStream(resp *http.Response) *http.Response {
 		}
 
 		// Sources are emitted once at the end, the same way the Gemini adapter
-		// does, so the markdown block is not interleaved with the answer.
-		if sourceText := appendSourceMap("", sources); sourceText != "" {
-			writeOpenAIStreamChunkWithAnnotations(writer, sourceText, nil, annotationsFromSourceMap(sources))
+		// does, so the markdown block is not interleaved with the answer. On a
+		// tool-call turn the loop continues, so only the structured citations go
+		// out — a "Sources" block would land mid-conversation.
+		if emittedToolCalls == 0 {
+			if sourceText := appendSourceMap("", sources); sourceText != "" {
+				writeOpenAIStreamChunkWithAnnotations(writer, sourceText, nil, annotationsFromSourceMap(sources))
+			}
+		} else if annotations := annotationsFromSourceMap(sources); len(annotations) > 0 {
+			writeOpenAIStreamChunkWithAnnotations(writer, "", nil, annotations)
 		}
 		if inputTokens > 0 || outputTokens > 0 {
 			writeOpenAIStreamChunk(writer, "", map[string]interface{}{
@@ -438,4 +487,179 @@ func wrapAnthropicStream(resp *http.Response) *http.Response {
 	}()
 
 	return resp
+}
+
+// anthropicCustomTools converts OpenAI tool definitions to Messages API custom
+// tools.
+//
+// The Messages API takes a flat {name, description, input_schema} rather than
+// OpenAI's nested {type, function:{...}}, and accepts these alongside a server
+// tool — which is what makes grounding and tool calling coexist here.
+func anthropicCustomTools(rawTools []interface{}) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(rawTools))
+	for _, raw := range rawTools {
+		tool, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if toolType, _ := tool["type"].(string); toolType != "" && toolType != "function" {
+			continue
+		}
+		function, ok := tool["function"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := function["name"].(string)
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		converted := map[string]interface{}{"name": name}
+		if description, _ := function["description"].(string); description != "" {
+			converted["description"] = description
+		}
+		// input_schema is required and must be an object schema. A tool with no
+		// parameters still needs the field, so an empty object stands in.
+		schema := map[string]interface{}{"type": "object"}
+		if params, ok := function["parameters"].(map[string]interface{}); ok && len(params) > 0 {
+			schema = params
+		}
+		converted["input_schema"] = schema
+		out = append(out, converted)
+	}
+	return out
+}
+
+// anthropicMessagesFromHistory converts OpenAI-shaped history to Messages API
+// messages, preserving tool calls and their results.
+//
+// Two shapes have to survive or a multi-round loop cannot work: an assistant turn
+// carrying tool_calls becomes tool_use content blocks, and each role:"tool"
+// result becomes a tool_result block on a user turn keyed by the same id. An
+// earlier version skipped any message with empty text, which silently dropped
+// both — an assistant turn that only calls a tool has no text.
+func anthropicMessagesFromHistory(messages []interface{}) ([]map[string]interface{}, []string) {
+	converted := make([]map[string]interface{}, 0, len(messages))
+	var systemParts []string
+
+	// Consecutive tool results must be merged onto one user turn: the Messages API
+	// rejects a conversation with two user turns in a row.
+	var pendingResults []map[string]interface{}
+	flushResults := func() {
+		if len(pendingResults) == 0 {
+			return
+		}
+		blocks := make([]map[string]interface{}, len(pendingResults))
+		copy(blocks, pendingResults)
+		converted = append(converted, map[string]interface{}{"role": "user", "content": blocks})
+		pendingResults = nil
+	}
+
+	for _, rawMessage := range messages {
+		message, ok := rawMessage.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		role, _ := message["role"].(string)
+		content := messageText(message["content"])
+
+		switch role {
+		case "system", "developer":
+			if strings.TrimSpace(content) != "" {
+				systemParts = append(systemParts, content)
+			}
+
+		case "tool":
+			toolCallID, _ := message["tool_call_id"].(string)
+			block := map[string]interface{}{
+				"type":        "tool_result",
+				"tool_use_id": strings.TrimSpace(toolCallID),
+				"content":     content,
+			}
+			pendingResults = append(pendingResults, block)
+
+		case "assistant":
+			flushResults()
+			blocks := make([]map[string]interface{}, 0, 2)
+			if strings.TrimSpace(content) != "" {
+				blocks = append(blocks, map[string]interface{}{"type": "text", "text": content})
+			}
+			if rawCalls, ok := message["tool_calls"].([]interface{}); ok {
+				blocks = append(blocks, anthropicToolUseBlocks(rawCalls)...)
+			}
+			if len(blocks) > 0 {
+				converted = append(converted, map[string]interface{}{"role": "assistant", "content": blocks})
+			}
+
+		default:
+			flushResults()
+			if strings.TrimSpace(content) != "" {
+				converted = append(converted, map[string]interface{}{
+					"role":    "user",
+					"content": []map[string]interface{}{{"type": "text", "text": content}},
+				})
+			}
+		}
+	}
+	flushResults()
+	return converted, systemParts
+}
+
+// anthropicToolUseBlocks converts assistant tool calls to tool_use blocks.
+func anthropicToolUseBlocks(rawCalls []interface{}) []map[string]interface{} {
+	blocks := make([]map[string]interface{}, 0, len(rawCalls))
+	for _, raw := range rawCalls {
+		call, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		function, ok := call["function"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _ := function["name"].(string)
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		id, _ := call["id"].(string)
+		input := map[string]interface{}{}
+		if encoded, _ := function["arguments"].(string); strings.TrimSpace(encoded) != "" {
+			// Malformed arguments must not drop the block: the tool_use must exist
+			// to pair with the tool_result that follows, or the request is invalid.
+			_ = json.Unmarshal([]byte(encoded), &input)
+		}
+		blocks = append(blocks, map[string]interface{}{
+			"type":  "tool_use",
+			"id":    strings.TrimSpace(id),
+			"name":  name,
+			"input": input,
+		})
+	}
+	return blocks
+}
+
+// toolCalls returns the response's tool_use blocks in OpenAI tool_calls shape.
+func (r anthropicMessagesResponse) toolCalls() []interface{} {
+	calls := make([]interface{}, 0, len(r.Content))
+	for _, block := range r.Content {
+		if block.Type != "tool_use" || strings.TrimSpace(block.Name) == "" {
+			continue
+		}
+		arguments := "{}"
+		if len(block.Input) > 0 {
+			arguments = string(block.Input)
+		}
+		calls = append(calls, map[string]interface{}{
+			"index": len(calls),
+			"id":    block.ID,
+			"type":  "function",
+			"function": map[string]interface{}{
+				"name":      block.Name,
+				"arguments": arguments,
+			},
+		})
+	}
+	if len(calls) == 0 {
+		return nil
+	}
+	return calls
 }

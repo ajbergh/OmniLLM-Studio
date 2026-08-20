@@ -174,18 +174,40 @@ If a local preflight fails on a provider that can ground itself, the turn escala
 native grounding rather than degrading. The follow-up tool is lost, which is the
 better trade: a grounded answer without the calculation beats a stale answer with one.
 
-### Why the preflight exists at all
+### Grounding and tools in one request
 
-`transformGeminiGroundedRequest` builds `tools: [{google_search: {}}]` and discards
-any function declarations, so one Gemini request cannot carry both native grounding
-and our tools. The same is true of the Anthropic adapter. That mutual exclusion is
-what forces the choice between owning a turn and running a tool loop.
+The Gemini and Anthropic adapters carry their search tool *and* the caller's tools,
+so a grounded turn keeps its tool loop. This is why the preflight is now a fallback
+for providers without native grounding rather than the normal path.
 
-Removing the constraint means teaching each adapter to emit the provider's function-
-declaration format alongside its search tool, and to map function-call response parts
-back to OpenAI `tool_calls` in both converters. Confirm the provider accepts both tool
-types together for the target model family first — a rejection breaks every grounded
-turn, and the failure degrades to local search rather than erroring visibly.
+| | Gemini | Anthropic |
+|---|---|---|
+| Search tool | `tools: [{google_search: {}}]` | `tools: [{type: "web_search_…", name: "web_search"}]` |
+| Our tools | `tools: [… , {function_declarations: […]}]` + `tool_config` mode `AUTO` | flat `{name, description, input_schema}` entries in the same array |
+| Assistant tool call | `functionCall` part on a `model` turn | `tool_use` block on an `assistant` turn |
+| Tool result | `functionResponse` part on a `user` turn, keyed by function **name** | `tool_result` block on a `user` turn, keyed by `tool_use_id` |
+| Call IDs | none — synthesized locally | provider-assigned, must be preserved |
+
+Details that are load-bearing:
+
+- **An assistant turn that only calls a tool has empty content.** Both adapters used
+  to skip blank-text messages, which dropped the call and its result, so round two of
+  a loop had no record the tool had run and the model called it again.
+- **Anthropic rejects two consecutive user turns**, so parallel tool results are
+  merged onto a single turn.
+- **The response needs a `tool_calls` finish reason**, not just the calls, or the loop
+  treats the turn as finished.
+- **Gemini rejects much of JSON Schema.** `sanitizeGeminiSchema` strips `$schema`,
+  `additionalProperties`, `oneOf`, `default`, and similar. A rejection here is a 400,
+  and a 400 on a grounded request degrades to local search rather than surfacing.
+- **The markdown `**Sources:**` block is withheld on a tool-call turn** — the loop
+  continues and it would land mid-conversation — while structured citations still go
+  out so the backend can count them.
+
+Whether a given Gemini model family accepts `google_search` and
+`function_declarations` together cannot be settled by offline tests.
+`retryGeminiWithoutTools` catches a 400 and retries once with grounding alone, since
+grounding is the half worth keeping. Do not remove that retry.
 
 A verified one-event schedule answer should resemble:
 
