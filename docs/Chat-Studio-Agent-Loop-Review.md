@@ -14,7 +14,7 @@ in code were corrected or removed.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Stop the silent failure | ✅ Complete |
-| 1 | Fix classification, then breadth | ⏳ Not started |
+| 1 | Fix classification, then breadth | ✅ Complete |
 | 2 | Make retrieval enforceable | ⏳ Not started |
 | 3 | Backend-owned preflight | ⏳ Not started |
 | 4 | Evidence contract and citations | ⏳ Not started |
@@ -47,6 +47,27 @@ data and mention that the information may not be current") is what the reviewed 
 response ignored. The replacement forbids specific stale claim types, and — more
 importantly — the UI banner now derives from metadata rather than depending on the model
 choosing to comply.
+
+### Phase 1 — complete
+
+| # | Change | Result |
+|---|---|---|
+| 1.1 | Gate rework | `negativePatterns` are now subtractive weights. New `decisivePatterns` short-circuit the score for explicit recency signals, and a narrow `hardSuppressPatterns` list (fenced code, "fix this", conceptual-in-programming) outranks them. `searchScore` no longer breaks early — that was incorrect once negatives could lower the total. |
+| 1.2 | Test rewrite | `gate_test.go:50` inverted: "What's the latest version of React?" must now search. Added 10 technology current-information cases, 8 code-question cases that must stay suppressed, and a precedence test proving hard suppression beats a recency word. |
+| 1.3 | Freshness by intent | New `pricing`, `benchmark`, and `release` intents carry **no** `TimeRange`. `inferTimeRange` now defaults to `""` instead of `24h`. Market data, news, weather, and scores keep their tight windows. |
+| 1.4 | Query expansion | `queryVariants` builds bounded, de-duplicated query sets for pricing, benchmark, release, and research shapes. New `normalizePlan` clamps `MaxIterations` to `len(Queries)` so a plan can no longer advertise iterations that cannot run. |
+| 1.5 | Sufficiency check | `ResultsLikelyAnswerable` is shape-aware: distinct-**host** count against `MinSources`, plus a required-source-class check against `PreferredDomains`. New `rankByPreferredDomains` promotes first-party pages before the summarizer sees them, renumbering citation indexes. |
+| 1.6 | Locale | Wired to Brave `search_lang` / `ui_lang` (landed with Phase 0, since the provider test asserted it). |
+
+Three further defects surfaced from the new table-driven test:
+
+- **`"score"` swallowed benchmark queries.** `strings.Contains(lower, "score")` sits above the research branches, so "latest SWE-bench leaderboard **score**s" was planned as a 4-result sports brief. Benchmarks are now checked first, guarded by `sportsEventPattern` so "NFL power rankings" stays out.
+- **`MaxIterations` was inconsistent, not just unreachable.** Single-query plans advertised `MaxIterations: 2`. `normalizePlan` now makes the struct self-describing.
+- **The planner's research shape was unreachable.** `researchPattern` keys on "comprehensive", "investigate", "report on" — but the *gate* had no matching trigger, so "give me a comprehensive investigation of X" scored zero and never reached the planner. Added as a weight-2 trigger.
+
+**Residual gap, deliberately not closed here:** purely semantic phrasing with no keyword hook. "How do the available models compare?" now reaches the threshold via weak comparison/availability signals, but the general case is regex-resistant and belongs to the semantic router in Phase 3. `TestShouldWebSearch_ComparisonReachesThreshold` marks the boundary.
+
+**Also unchanged by choice:** "the current state of X" still does not trigger. It is as often rhetorical as temporal, and `TestShouldWebSearch_WeakOnly` asserts the existing behaviour. Widening `current` to a bare decisive signal would have broken that case for no clear gain.
 
 ## Investigation summary
 

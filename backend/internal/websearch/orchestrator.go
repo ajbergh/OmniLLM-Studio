@@ -262,6 +262,10 @@ func (o *Orchestrator) searchWithPlan(ctx context.Context, plan SearchPlan, tc t
 	if len(combined) == 0 {
 		return nil, fmt.Errorf("web search returned no results")
 	}
+	// Promote authoritative hosts before handing the evidence to the summarizer.
+	// Result order is what the model reads first, and an aggregator's stale copy
+	// of a price outranking the vendor's own page is how wrong numbers get cited.
+	combined = rankByPreferredDomains(combined, plan.PreferredDomains)
 	return &SearchResponse{
 		Query:     plan.Queries[0],
 		TimeRange: plan.TimeRange,
