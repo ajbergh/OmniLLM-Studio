@@ -17,6 +17,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/config"
 	"github.com/ajbergh/omnillm-studio/internal/db"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
+	"github.com/ajbergh/omnillm-studio/internal/sandbox"
 )
 
 // Set via ldflags: -ldflags "-X main.version=1.0.0 -X main.commit=abc1234"
@@ -39,6 +40,15 @@ func main() {
 	}
 
 	router, shutdownAPI := api.NewRouterWithShutdown(database, cfg, version, commit)
+	sandboxTaskWorker, err := sandbox.NewConfiguredSandboxTaskWorker(database)
+	if err != nil {
+		log.Fatalf("initialize durable sandbox task worker: %v", err)
+	}
+	if sandboxTaskWorker != nil {
+		if err := sandboxTaskWorker.Start(context.Background()); err != nil {
+			log.Fatalf("recover/start durable sandbox task worker: %v", err)
+		}
+	}
 
 	// Periodic cleanup of expired sessions (every 15 minutes).
 	sessionRepo := repository.NewSessionRepo(database)
@@ -82,7 +92,19 @@ func main() {
 		}
 	}()
 
-	<-done
+	if sandboxTaskWorker == nil {
+		<-done
+	} else {
+		select {
+		case <-done:
+		case <-sandboxTaskWorker.Done():
+			if err := sandboxTaskWorker.Err(); err != nil {
+				log.Printf("durable sandbox task worker stopped: %v", err)
+			} else {
+				log.Printf("durable sandbox task worker stopped unexpectedly")
+			}
+		}
+	}
 	log.Println("shutting down server...")
 	close(stopCleanup)
 
@@ -91,6 +113,14 @@ func main() {
 		log.Printf("server shutdown failed: %v", err)
 	}
 	cancelServer()
+
+	if sandboxTaskWorker != nil {
+		workerCtx, cancelWorker := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := sandboxTaskWorker.Shutdown(workerCtx); err != nil {
+			log.Printf("sandbox task worker shutdown failed: %v", err)
+		}
+		cancelWorker()
+	}
 
 	runtimeCtx, cancelRuntime := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := shutdownAPI(runtimeCtx); err != nil {
