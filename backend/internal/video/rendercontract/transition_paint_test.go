@@ -71,9 +71,9 @@ func TestEvaluateTransitionPaintFailsClosedOnInvalidOrUnsupportedSemantics(t *te
 		}
 	})
 
-	t.Run("unsupported-paint-family", func(t *testing.T) {
+	t.Run("unknown-paint-family", func(t *testing.T) {
 		state := base
-		state.Type = "zoom"
+		state.Type = "glitch"
 		state.Placement = "out"
 		state.PeerClipID = ""
 		state.Role = "outgoing"

@@ -1,3 +1,4 @@
+import { easeProgress } from './renderContract';
 import {
   TRANSITION_STATE_CONTRACT_V1,
   type CanonicalTransitionState,
@@ -11,6 +12,9 @@ export const TRANSITION_PAINT_OWNER_TRANSLATE = 'owner-translate' as const;
 export const TRANSITION_PAINT_PAIR_SLIDE = 'pair-slide' as const;
 export const TRANSITION_PAINT_OWNER_WIPE = 'owner-wipe' as const;
 export const TRANSITION_PAINT_PAIR_WIPE = 'pair-wipe' as const;
+export const TRANSITION_PAINT_OWNER_ZOOM = 'owner-zoom' as const;
+export const TRANSITION_PAINT_PAIR_ZOOM = 'pair-zoom' as const;
+export const TRANSITION_PAINT_SCALE_LAYER_MULTIPLIER = 'layer-multiplier' as const;
 export const TRANSITION_PAINT_TRANSLATION_CANVAS_FRACTION = 'canvas-fraction' as const;
 export const TRANSITION_PAINT_CLIP_LAYER_FRACTION = 'layer-fraction' as const;
 
@@ -26,6 +30,7 @@ export function supportsTransitionPaint(transitionType: string): boolean {
     case 'dip_to_black':
     case 'slide':
     case 'wipe':
+    case 'zoom':
       return true;
     default:
       return false;
@@ -44,7 +49,9 @@ export interface CanonicalTransitionPaint {
     | typeof TRANSITION_PAINT_OWNER_TRANSLATE
     | typeof TRANSITION_PAINT_PAIR_SLIDE
     | typeof TRANSITION_PAINT_OWNER_WIPE
-    | typeof TRANSITION_PAINT_PAIR_WIPE;
+    | typeof TRANSITION_PAINT_PAIR_WIPE
+    | typeof TRANSITION_PAINT_OWNER_ZOOM
+    | typeof TRANSITION_PAINT_PAIR_ZOOM;
   owner_clip_id: string;
   peer_clip_id?: string;
   progress: number;
@@ -70,14 +77,19 @@ export interface CanonicalTransitionPaint {
   incoming_clip_right?: number;
   incoming_clip_bottom?: number;
   incoming_clip_left?: number;
+  scale_space?: typeof TRANSITION_PAINT_SCALE_LAYER_MULTIPLIER;
+  owner_scale?: number;
+  outgoing_scale?: number;
+  incoming_scale?: number;
 }
 
 /**
  * Convert canonical transition timing/ownership state into renderer-neutral
  * paint state. Fade is one-sided opacity, crossfade is a true pair blend,
  * dip-to-black has an explicit black contribution, slide uses normalized
- * canvas-fraction translation, and wipe clips the isolated layer surface in
- * normalized layer-fraction coordinates. Direction names the entry/reveal edge.
+ * canvas-fraction translation, wipe clips the isolated layer surface, and zoom
+ * uses a continuous layer-scale multiplier. Direction names the entry/reveal
+ * edge where applicable.
  */
 export function evaluateTransitionPaint(
   ownerClipId: string,
@@ -296,6 +308,50 @@ export function evaluateTransitionPaint(
       throw invalidTransitionPaintState(state, 'wipe requires in, out, or between placement');
     }
 
+    case 'zoom': {
+      const scale_space = TRANSITION_PAINT_SCALE_LAYER_MULTIPLIER;
+      if (placement === 'in') {
+        if (state.role !== 'incoming' || peer) {
+          throw invalidTransitionPaintState(state, 'zoom-in requires an incoming owner with no peer');
+        }
+        return {
+          ...base,
+          composition: TRANSITION_PAINT_OWNER_ZOOM,
+          scale_space,
+          owner_opacity: clamp01(state.progress),
+          owner_scale: transitionZoomScale(state.progress),
+        };
+      }
+      if (placement === 'out') {
+        if (state.role !== 'outgoing' || peer) {
+          throw invalidTransitionPaintState(state, 'zoom-out requires an outgoing owner with no peer');
+        }
+        return {
+          ...base,
+          composition: TRANSITION_PAINT_OWNER_ZOOM,
+          scale_space,
+          owner_opacity: clamp01(1 - state.progress),
+          owner_scale: transitionZoomScale(1 - state.progress),
+        };
+      }
+      if (placement === 'between') {
+        if (!peer) throw invalidTransitionPaintState(state, 'zoom between requires an explicit peer');
+        const pair = transitionPaintPairRoles(owner, state);
+        return {
+          ...base,
+          composition: TRANSITION_PAINT_PAIR_ZOOM,
+          scale_space,
+          outgoing_clip_id: pair.outgoingClipId,
+          incoming_clip_id: pair.incomingClipId,
+          outgoing_weight: clamp01(1 - state.progress),
+          incoming_weight: clamp01(state.progress),
+          outgoing_scale: transitionZoomScale(1 - state.progress),
+          incoming_scale: transitionZoomScale(state.progress),
+        };
+      }
+      throw invalidTransitionPaintState(state, 'zoom requires in, out, or between placement');
+    }
+
     default:
       throw new Error(`transition ${JSON.stringify(transitionId)} type ${JSON.stringify(state.type)} does not yet have canonical paint semantics`);
   }
@@ -355,6 +411,10 @@ function transitionWipeInsets(
       throw new Error('wipe requires direction left, right, up, or down');
   }
   return { top: signedZero(top), right: signedZero(right), bottom: signedZero(bottom), left: signedZero(left) };
+}
+
+function transitionZoomScale(progress: number): number {
+  return 0.82 + 0.18 * easeProgress(progress, 'ease-out');
 }
 
 function invalidTransitionPaintState(state: CanonicalTransitionState, message: string): Error {

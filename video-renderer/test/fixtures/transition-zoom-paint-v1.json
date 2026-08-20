@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "description": "Cross-runtime transition-paint-v1 zoom fixture preserving the 0.82-to-1 canonical ease-out scale envelope without sampled fidelity segments.",
+  "cases": [
+    {
+      "name": "zoom-in-halfway",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "zoom-in",
+        "type": "zoom",
+        "placement": "in",
+        "role": "incoming",
+        "start_frame": 10,
+        "end_frame": 20,
+        "progress": 0.5,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "zoom-in",
+        "type": "zoom",
+        "placement": "in",
+        "composition": "owner-zoom",
+        "owner_clip_id": "owner",
+        "progress": 0.5,
+        "owner_opacity": 0.5,
+        "scale_space": "layer-multiplier",
+        "owner_scale": 0.955
+      }
+    },
+    {
+      "name": "zoom-out-quarter-progress",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "zoom-out",
+        "type": "zoom",
+        "placement": "out",
+        "role": "outgoing",
+        "start_frame": 60,
+        "end_frame": 70,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "zoom-out",
+        "type": "zoom",
+        "placement": "out",
+        "composition": "owner-zoom",
+        "owner_clip_id": "owner",
+        "progress": 0.25,
+        "owner_opacity": 0.75,
+        "scale_space": "layer-multiplier",
+        "owner_scale": 0.98875
+      }
+    },
+    {
+      "name": "zoom-between-quarter-progress",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "zoom-between",
+        "type": "zoom",
+        "placement": "between",
+        "peer_clip_id": "peer",
+        "role": "outgoing",
+        "peer_role": "incoming",
+        "start_frame": 50,
+        "end_frame": 70,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "zoom-between",
+        "type": "zoom",
+        "placement": "between",
+        "composition": "pair-zoom",
+        "owner_clip_id": "owner",
+        "peer_clip_id": "peer",
+        "progress": 0.25,
+        "outgoing_clip_id": "owner",
+        "incoming_clip_id": "peer",
+        "outgoing_weight": 0.75,
+        "incoming_weight": 0.25,
+        "scale_space": "layer-multiplier",
+        "outgoing_scale": 0.98875,
+        "incoming_scale": 0.89875
+      }
+    }
+  ]
+}

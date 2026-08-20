@@ -66,18 +66,18 @@ describe('canonical transition paint', () => {
     expect(() => evaluateTransitionPaint('owner', state)).toThrow(/complementary/);
   });
 
-  it('fails closed for transition families without canonical paint', () => {
-    const state: CanonicalTransitionState = {
+  it('fails closed for unknown transition paint', () => {
+    const state = {
       contract_version: 'transition-state-v1',
-      id: 'zoom',
-      type: 'zoom',
+      id: 'glitch',
+      type: 'glitch',
       placement: 'out',
       role: 'outgoing',
       start_frame: 0,
       end_frame: 10,
       progress: 0.5,
       active: true,
-    };
+    } as unknown as CanonicalTransitionState;
     expect(() => evaluateTransitionPaint('owner', state)).toThrow(/does not yet have canonical paint semantics/);
   });
 
