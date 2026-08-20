@@ -1,0 +1,30 @@
+{{- if .Values.sandboxWorker.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "omnillm-studio.fullname" . }}-sandbox-worker
+  labels:
+    {{- include "omnillm-studio.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-worker
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "omnillm-studio.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: sandbox-worker
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "omnillm-studio.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: backend
+      ports:
+        - protocol: TCP
+          port: {{ .Values.sandboxWorker.service.port }}
+  # sandboxd protocol handling is self-contained; arbitrary sandbox child
+  # processes are no-network and the worker pod itself receives no ambient
+  # outbound network authority from the chart.
+  egress: []
+{{- end }}

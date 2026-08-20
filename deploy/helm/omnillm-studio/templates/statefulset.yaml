@@ -89,6 +89,15 @@ spec:
             - name: OMNILLM_CORS_ORIGINS
               value: {{ join "," .Values.config.corsOrigins | quote }}
             {{- end }}
+            {{- if .Values.sandboxWorker.enabled }}
+            - name: OMNILLM_CODE_SANDBOX_URL
+              value: "http://{{ include "omnillm-studio.fullname" . }}-sandbox-worker:{{ .Values.sandboxWorker.service.port }}"
+            - name: OMNILLM_SANDBOX_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.sandboxWorker.auth.existingSecret }}
+                  key: {{ .Values.sandboxWorker.auth.tokenKey }}
+            {{- end }}
             - name: OMNILLM_MASTER_KEY
               valueFrom:
                 secretKeyRef:
