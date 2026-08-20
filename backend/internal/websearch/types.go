@@ -1,6 +1,10 @@
 package websearch
 
-import "time"
+import (
+	"time"
+
+	"github.com/ajbergh/omnillm-studio/internal/llm"
+)
 
 // ToolCall represents a tool invocation decided by the orchestrator.
 type ToolCall struct {
@@ -46,8 +50,11 @@ type ClassifierOutput struct {
 
 // OrchestratorResult is returned by the orchestrator to the HTTP handler.
 type OrchestratorResult struct {
-	Content      string         `json:"content"`
-	Sources      []SearchResult `json:"sources,omitempty"`
+	Content string         `json:"content"`
+	Sources []SearchResult `json:"sources,omitempty"`
+	// Citations are provider-native grounding sources. For a natively-grounded
+	// answer these are the only sources, since no local search ran.
+	Citations    []llm.Citation `json:"citations,omitempty"`
 	WebSearch    bool           `json:"web_search"`
 	SearchFailed bool           `json:"search_failed,omitempty"`
 	ToolCall     *ToolCall      `json:"tool_call,omitempty"`

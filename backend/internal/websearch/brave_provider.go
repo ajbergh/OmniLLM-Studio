@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,10 +16,13 @@ import (
 //   Docs:    https://api.search.brave.com/app/#/documentation
 // ---------------------------------------------------------------------------
 
+const braveSearchEndpoint = "https://api.search.brave.com/res/v1/web/search"
+
 // BraveProvider performs real web searches via the Brave Search API.
 type BraveProvider struct {
 	apiKey     string
 	httpClient *http.Client
+	endpoint   string
 }
 
 // NewBraveProvider creates a new BraveProvider.
@@ -30,7 +32,31 @@ func NewBraveProvider(apiKey string) *BraveProvider {
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
+		endpoint: braveSearchEndpoint,
 	}
+}
+
+// Name identifies the provider in logs.
+func (b *BraveProvider) Name() string { return "brave" }
+
+// Capabilities reports Brave as a real search API: it honors a freshness
+// parameter, returns publication dates, and tolerates the planner's expanded
+// query sets within its quota.
+func (b *BraveProvider) Capabilities() ProviderCapabilities {
+	return ProviderCapabilities{
+		MaxQueriesPerTurn:        5,
+		SupportsFreshnessFilter:  true,
+		ProvidesPublicationDates: true,
+	}
+}
+
+// searchEndpoint returns the configured endpoint, falling back to the public
+// Brave API. Tests override it; production never does.
+func (b *BraveProvider) searchEndpoint() string {
+	if strings.TrimSpace(b.endpoint) == "" {
+		return braveSearchEndpoint
+	}
+	return b.endpoint
 }
 
 // braveWebResponse models the relevant parts of the Brave Web Search JSON response.
@@ -91,14 +117,29 @@ func (b *BraveProvider) Search(ctx context.Context, req SearchRequest) (*SearchR
 		params.Set("country", strings.ToLower(req.Region))
 	}
 
-	endpoint := "https://api.search.brave.com/res/v1/web/search?" + params.Encode()
+	// Map locale. Brave takes a bare language code for search_lang and a full
+	// language tag for ui_lang, so "en-GB" splits into both.
+	if locale := strings.TrimSpace(req.Locale); locale != "" {
+		if lang, _, ok := strings.Cut(locale, "-"); ok && lang != "" {
+			params.Set("search_lang", strings.ToLower(lang))
+		} else {
+			params.Set("search_lang", strings.ToLower(locale))
+		}
+		params.Set("ui_lang", locale)
+	}
+
+	endpoint := b.searchEndpoint() + "?" + params.Encode()
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create brave request: %w", err)
 	}
 	httpReq.Header.Set("Accept", "application/json")
-	httpReq.Header.Set("Accept-Encoding", "gzip")
+	// Do NOT set Accept-Encoding manually. net/http only performs transparent
+	// gzip decompression when the transport added the header itself; setting it
+	// here makes the caller responsible for decoding and previously caused every
+	// Brave response to fail JSON decoding. readResponseBody still handles a
+	// gzip Content-Encoding defensively in case an intermediary adds one.
 	httpReq.Header.Set("X-Subscription-Token", b.apiKey)
 
 	resp, err := b.httpClient.Do(httpReq)
@@ -108,11 +149,11 @@ func (b *BraveProvider) Search(ctx context.Context, req SearchRequest) (*SearchR
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("brave returned status %d: %s", resp.StatusCode, string(bodyBytes))
+		bodyBytes, _ := readResponseBody(resp)
+		return nil, fmt.Errorf("brave returned status %d: %s", resp.StatusCode, truncateProviderError(string(bodyBytes)))
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := readResponseBody(resp)
 	if err != nil {
 		return nil, fmt.Errorf("read brave response: %w", err)
 	}

@@ -57,11 +57,11 @@
 | **File Library** | Durable file storage with conversation, workspace, and global scopes — hybrid vector + keyword search, citation-aware summarization and comparison, and a dedicated UI panel |
 | **Conversation Branching** | Fork any message into parallel branches — explore different response paths |
 | **Semantic Search** | Vector-based search across all conversations with automatic embedding indexing |
-| **Web Search** | Brave Search or DuckDuckGo (zero-config) with Jina Reader content extraction — runs after file search so private documents take priority |
+| **Web Search** | Provider-native grounding where available (OpenAI, Anthropic, Gemini, OpenRouter), otherwise Brave Search or DuckDuckGo with Jina Reader content extraction — runs after file search so private documents take priority. Freshness, query expansion, and source policy are chosen per question intent, and answers carry sources, a retrieval timestamp, and a freshness badge |
 | **Live Sports Lookup** | ESPN-backed scores, schedules, standings, news, betting odds, rosters, injuries, transactions, team records, rankings, player stats, league stats, and stat leaderboards for MLB, NFL, NBA, WNBA, NHL, college football, college basketball, EPL, MLS, IPL cricket, and broad sports headlines |
 | **Headless Browser** | Full Chromium-powered browsing via go-rod — `browser_navigate`, `browser_screenshot`, `browser_interact`, `browser_pdf`, and `browser_session` tools for JS-heavy pages, research, and stateful multi-step browsing; auto-downloads Chromium on first use; stealth mode for anti-bot bypass |
 | **MCP Servers** | Governed MCP client support for stdio and dual-era Streamable HTTP (2026-07-28 stateless with 2025-06-18 fallback), including OAuth 2.1, tool discovery/calls, approvals, scoped policy, and audit |
-| **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, and document generation |
+| **Tool Calling** | Extensible tool framework — web search, sports lookup, calculator, URL fetch, and document generation. Available on both streaming and non-streaming chat, with provider-level `tool_choice` enforcement where the provider supports it |
 | **Artifact Export** | Ask the LLM for any supported format and it generates a downloadable file automatically — `.docx` (Word), `.xlsx` (Excel), `.csv`, `.pdf`, `.md` (Markdown), `.html`, `.json`, `.yaml` — no copy-pasting required |
 
 ### MCP transport and authorization
@@ -289,8 +289,16 @@ From a single chat prompt to streamed tokens back in the UI:
 2. Backend validates auth/ownership, loads context, and applies local preflight checks
 3. High-confidence ESPN-backed sports data prompts are answered directly through `sports_lookup`
 4. File intent detection runs — if the user asks about uploaded files, file search runs before web search so private documents take priority
-5. If not handled locally, optional enrichments run (RAG retrieval, tools, web search, headless browser) based on settings and model behavior
-6. SSE events stream tokens and metadata back to the client in real time — including `rag_indexing`, `file_search`, `web_search`, `url_context`, and `browser_navigate` status events
+5. Current-information classification runs: a deterministic keyword gate first, then the semantic router if the gate declines and the router is configured for it
+6. If the turn needs live data, retrieval runs one of two ways — the orchestrator answers the turn directly (cheapest, and the only path native provider grounding can take), or a **preflight** gathers evidence and injects it so a follow-up tool can act on it
+7. Remaining enrichments run (RAG retrieval, tools, headless browser) based on settings and model behavior
+8. The finished answer is audited against its evidence for freshness and citation coverage
+9. SSE events stream tokens and metadata back to the client in real time — including `rag_indexing`, `file_search`, `web_search`, `router`, `url_context`, and `browser_navigate` status events
+
+A failed retrieval never silently becomes an ordinary answer: the turn is marked
+`search_failed` in both the SSE `done` payload and the saved message, and the UI
+renders an explicit "could not verify current information" banner from that
+metadata rather than relying on the model to mention it.
 
 ---
 
@@ -483,7 +491,7 @@ OmniLLM-Studio/
 │       ├── sports/                      # ESPN-backed scores, schedules, standings, odds, news, stats, and roster lookup
 │       ├── templates/                   # Prompt template seeding
 │       ├── tools/                       # Tool registry + executor (web search, sports, calculator, document gen)
-│       ├── websearch/                   # Brave/DDG + Jina Reader orchestrator
+│       ├── websearch/                   # Gate, planner, orchestrator, Brave/DDG providers, Jina Reader, freshness + claim audit
 │       ├── wordgen/                     # Markdown → .docx generator (go-word wrapper)
 │       └── artifacts/                   # Multi-format artifact export (xlsx, csv, pdf, md, html, json, yaml)
 ├── frontend/
@@ -629,7 +637,7 @@ All routes are under `/v1/`.
 |--------|------|-------------|
 | `GET` | `/v1/search?q=&limit=` | Semantic search across conversations |
 | `POST` | `/v1/search/reindex` | Rebuild search embeddings |
-| `POST` | `/v1/websearch` | Direct web search |
+| `POST` | `/v1/websearch` | Direct web search — the low-level path, where the caller supplies every parameter. Chat turns use the planner instead |
 
 </details>
 
@@ -784,6 +792,53 @@ For news, use `"intent": "news"` with an optional league or a team-specific quer
 | `GET` | `/v1/version` | Backend version string |
 
 </details>
+
+---
+
+## Assistant Message Metadata
+
+Every assistant message carries a `metadata_json` blob describing *how* the answer
+was produced. The frontend renders provenance from these fields, so the SSE `done`
+payload and the persisted message must agree — otherwise a reloaded conversation
+contradicts what the user saw while it streamed.
+
+### Retrieval
+
+| Field | Type | Meaning |
+|---|---|---|
+| `web_search` | bool | Retrieval grounded this answer |
+| `sources` | array | Normalized search results, or provider-native citations when no local search ran |
+| `search_route` | string | `deterministic` or `router` — which classifier decided |
+| `search_attempted` | bool | Retrieval was attempted, regardless of outcome |
+| `search_failed` | bool | Retrieval was attempted and produced nothing usable |
+| `search_failure_reason` | string | `no_results`, `provider_error`, or `provider_disabled`. A fixed vocabulary — raw provider errors never reach a client |
+
+### Evidence quality
+
+| Field | Type | Meaning |
+|---|---|---|
+| `native_citations` | array | Provider-native grounding sources as structured data, not only the markdown block inside the answer |
+| `citation_count` | number | Distinct citations backing the answer |
+| `freshness_verified` | bool | A window was requested, at least one source was dated, and every dated source fell inside it |
+| `answer_freshness` | string | Age of the newest dated source, verbatim from the provider (e.g. `"2 hours ago"`) |
+| `claim_warning` | string | `numeric_claims_without_citation` — the answer states prices, percentages, or versions, names no source, and does not hedge. **A warning, never a rejection**: claim support is not decidable by string matching |
+
+### Tool enforcement
+
+| Field | Type | Meaning |
+|---|---|---|
+| `tool_required` | string \| bool | The tool the turn required, or `true` for "any tool" |
+| `tool_enforced` | bool | The provider was actually sent `tool_choice`. False means the active provider is not on the allowlist, so the requirement could only be advisory |
+| `tool_requirement_unfulfilled` | bool | The required tool never ran. Streamed content cannot be retracted, so the answer is marked unverified rather than withheld |
+
+Three retrieval states are deliberately distinct, because collapsing them is how a
+stale answer passes for a fresh one:
+
+- **No date** — the source carried no parsable publication date. Neither fresh nor stale.
+- **Dated, no window** — the newest date is known, but the question requested no
+  recency filter (pricing and release lookups deliberately request none), so there is
+  nothing to verify against.
+- **Verified** — a window was requested and every dated source is inside it.
 
 ---
 

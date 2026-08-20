@@ -26,6 +26,9 @@ Use sports_lookup only for ESPN-backed current or factual sports data lookups su
 Use sports_lookup for FIFA World Cup and other explicitly named supported competition schedules. For "World Cup", normalize league to "FIFA World Cup", sport to "soccer", and current game-time questions to intent "schedule".
 For MLB pitching matchups, probable pitchers, probable starters, or starting pitchers for games, use sports_lookup with intent "schedule", league "MLB", and game_detail_subtype "pitching_matchups".
 
+Use web_search when answering correctly requires information that changes after a training cutoff: current prices or API pricing, model or software availability, version and release state, benchmark or leaderboard results, rankings, recent events, or anything the user frames as "now", "currently", or "these days". Choose it even when the topic is technical — a question about software can still be a question about the present state of the world.
+Do not use web_search for questions about how code works, algorithm explanations, or requests to write, fix, or review code the user supplied. Those are normal_llm.
+
 Use normal_llm for explanations, definitions, creative writing, subjective analysis, logo/image requests, or sports questions that do not need ESPN current data.
 
 Use clarify only when a required route parameter is missing and a short question would resolve it.

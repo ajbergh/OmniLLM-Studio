@@ -45,6 +45,10 @@ SQLite FTS5/BM25 and semantic candidates are fused with reciprocal-rank fusion. 
 
 When live web search is triggered, request-scoped private evidence is preserved and supplied to the grounded summarizer rather than discarded.
 
+This holds on both retrieval paths, by different mechanisms. When the search orchestrator owns the turn, `preserveHistoryAndEvidence` carries private evidence into the summarizer request. When retrieval runs as a preflight for a compound request, the handler has already assembled RAG and File Library context into the outgoing request, and web evidence is prepended as one more labeled system message — the same convention file-search context already uses — so both are present without the request-evidence bridge adding a duplicate copy.
+
+Priority between private and web evidence is enforced by *retrieval order*, not message position: File Library search runs before web search, so private documents get the first opportunity to answer.
+
 ## Supporting vector components
 
 The branch also provides a backend-neutral `VectorIndex` contract with:

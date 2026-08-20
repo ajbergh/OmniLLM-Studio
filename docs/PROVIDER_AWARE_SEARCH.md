@@ -14,32 +14,56 @@ A simple schedule question should not pay for broad research and a long summariz
 Chat request
   ├─ File Library / RAG preflight (private knowledge first)
   ├─ deterministic sports preflight (structured ESPN data)
-  └─ current-information planner
-       ├─ OpenAI web_search_options
-       ├─ Gemini google_search
-       ├─ OpenRouter openrouter:web_search
-       └─ Brave or DuckDuckGo + selective Jina fallback
+  └─ current-information classification
+       ├─ deterministic gate  (free; authoritative when it fires)
+       └─ semantic router     (only if the gate declines, and only when configured)
               ↓
-       constrained generation
+       search planner  →  intent, answer shape, freshness, query set, source policy
               ↓
-       answerability and citation normalization
+       ┌─ simple lookup ─────────────────────────────────────────────┐
+       │  orchestrator owns the turn                                 │
+       │    ├─ OpenAI web_search_options                             │
+       │    ├─ Anthropic Messages API web_search                     │
+       │    ├─ Gemini google_search                                  │
+       │    ├─ OpenRouter openrouter:web_search                      │
+       │    └─ Brave or DuckDuckGo + selective Jina fallback         │
+       │         ↓                                                   │
+       │       constrained generation                                │
+       └─────────────────────────────────────────────────────────────┘
+       ┌─ compound request ──────────────────────────────────────────┐
+       │  preflight retrieves without generating (local providers)   │
+       │         ↓                                                   │
+       │  evidence injected as a system message                      │
+       │         ↓                                                   │
+       │  tool loop: calculate, export, format …                     │
+       └─────────────────────────────────────────────────────────────┘
               ↓
-       existing SSE stream
+       answerability + citation normalization + freshness/claim audit
+              ↓
+       existing SSE stream  (sources, retrieval status, freshness badge)
 ```
+
+Native grounding can only take the left branch: it is inseparable from
+generation, so it cannot supply evidence to a later tool round.
 
 ## Provider capability matrix
 
 | Provider path | Models detected by the implementation | Native mechanism | Fallback |
 |---|---|---|---|
 | OpenAI direct | GPT-4.1, GPT-5, o3, and o4 model-name families | Chat Completions `web_search_options` | Brave/DuckDuckGo + Jina |
+| Anthropic direct | Claude 4.x and 5.x families, plus Fable/Mythos | Messages API `web_search` server tool, via a request/response adapter | Brave/DuckDuckGo + Jina |
 | Gemini direct | Gemini 2.x and 3.x model-name families | Native `generateContent` / `streamGenerateContent` with `google_search` | Brave/DuckDuckGo + Jina |
-| OpenRouter | Any model routed through an OpenRouter profile | `openrouter:web_search` server tool | Brave/DuckDuckGo + Jina |
+| OpenRouter | Known-capable vendor prefixes only (Anthropic, OpenAI GPT-4.1/5/o3/o4, Google Gemini 2/3, Perplexity, xAI Grok 3/4) | `openrouter:web_search` server tool | Brave/DuckDuckGo + Jina |
 | Ollama | All local models | None | Brave/DuckDuckGo + Jina |
-| Anthropic direct | All | None in this implementation | Brave/DuckDuckGo + Jina |
 | Groq, Together, Mistral | All | None in this implementation | Brave/DuckDuckGo + Jina |
 | Generic OpenAI-compatible endpoint | All | Not assumed | Brave/DuckDuckGo + Jina |
 
 Capability detection is intentionally conservative. Do not assume that a generic OpenAI-compatible endpoint implements OpenAI hosted search merely because it accepts Chat Completions requests.
+
+Two specific reasons the matrix is shaped this way:
+
+- **Anthropic needs an endpoint change, not a body field.** Web search is a Messages API server tool and is not available through the OpenAI-compatibility endpoint the rest of the Anthropic integration uses, so `backend/internal/llm/anthropic_search.go` rewrites the request to `/v1/messages` and converts the response (and SSE stream) back to the OpenAI-compatible shape. The tool type is version-selected per model: `web_search_20260209` on Opus 4.6+/Sonnet 4.6+, `web_search_20250305` on older families. Claude 3.x predates server tools and stays on the local fallback.
+- **OpenRouter is an allowlist, not the whole provider.** It was previously an unconditional yes for every model behind an OpenRouter profile. A route that ignores the server tool returns HTTP 200 with an ungrounded answer, which the orchestrator then accepted as a successful web search — a confident stale answer. Being wrong in the other direction costs one local search.
 
 ## Planning and cost policy
 
@@ -52,6 +76,24 @@ Capability detection is intentionally conservative. Do not assume that a generic
 | Standard | General current-information question | Medium context and bounded iterative retrieval | Direct answer followed by concise support |
 | Research | Deep research, comprehensive investigation, detailed comparisons | Up to 10 results, up to 3 targeted iterations, high context, more Jina enrichment | Structured synthesis with source-backed claims |
 
+Iteration counts are real, not aspirational. `MaxIterations` is clamped to `len(plan.Queries)` by `normalizePlan`, because `searchWithPlan` clamps its loop to the query count — a plan that raised the iteration budget without also emitting more queries performed exactly one search regardless of what it advertised. `queryVariants` emits the expanded query sets for the pricing, benchmark, release, and research shapes.
+
+### Freshness policy by intent
+
+A freshness window is chosen per intent rather than applied globally. `inferTimeRange` defaults to **no window**; a blanket 24-hour filter excluded official pricing pages, model cards, and release notes, which are rarely re-published within a day and are exactly the primary sources those answers need.
+
+| Intent | Freshness window | Why |
+|---|---|---|
+| `pricing`, `benchmark`, `release` | Forced to none | Vendor documents, not news. A recency filter removes the authoritative page. |
+| `news`, `price` (markets) | 24h *unless the prompt names a period* | Genuinely time-boxed, but "this week's news" must still mean a week. |
+| `weather`, `score`, `general` | Whatever `inferTimeRange` derived | "today" → 24h, "last night" → 7d, no temporal word → no filter. |
+| `schedule` | Forced to none | An exact-date query already pins the event. |
+
+The distinction between *forced* and *inherited* matters: a forced empty window
+overrides an explicit signal in the prompt, which is correct for reference
+material (a pricing page is the pricing page regardless of the word "today"),
+while news and market data only supply a default.
+
 Native grounding is preferred because it usually removes one network search call and one separate summarization call. Local fallback remains mandatory for portability and provider independence.
 
 ## Provider adapters
@@ -59,6 +101,18 @@ Native grounding is preferred because it usually removes one network search call
 ### OpenAI
 
 The LLM-scoped transport removes the internal native-search marker and adds `web_search_options`. Approximate location data may include city, region, country, and IANA timezone. The optional `verbosity` field is sent only to GPT-5 model families.
+
+### Anthropic
+
+The adapter converts the internal request to Messages API `messages` plus a top-level `system` field and one `web_search` server tool, rewrites the path from `/chat/completions` to `/messages`, and moves the bearer token to `x-api-key` with an `anthropic-version` header. Responses and SSE event streams are converted back to the OpenAI-compatible shape.
+
+Details that are easy to get wrong:
+
+- `max_tokens` is required by the Messages API (defaulted when the internal request omits it), unlike Chat Completions.
+- `allowed_domains` and `blocked_domains` are mutually exclusive; sending both is a request error.
+- A conversation must begin with a user turn, so a leading assistant message (possible after history trimming) gets a synthetic user turn prepended.
+- Server-tool errors arrive as HTTP 200 with an error **object** where success returns a **list**, so the result shape is checked rather than assumed.
+- A payload with no `content` array is passed through untouched rather than converted, so an error envelope is not silently turned into an empty but apparently successful answer.
 
 ### Gemini
 
@@ -81,9 +135,79 @@ This prevents the adapter from inspecting or rewriting unrelated POST requests s
 - Native streaming failures retry locally only before answer content has been emitted, preventing duplicate partial answers.
 - Local search failures fall through to model knowledge with a freshness warning.
 
-## Answerability validation
+## Answerability and evidence sufficiency
 
 `backend/internal/websearch/answerability.go` rejects empty, indirect, overly long, or fact-missing direct answers. A schedule response without a concrete clock time is invalid. Generic guidance such as “consult the official schedule” is not accepted as an answer.
+
+`ResultsLikelyAnswerable` decides when to stop searching. It is shape-aware rather than a non-zero-count check: it compares the number of distinct **hosts** against the plan's `MinSources`, and for plans that name authoritative hosts it requires at least one of them before it will settle. Five pages from one vendor count as one source.
+
+## Evidence contract
+
+For any plan carrying `RequiresCitations`, the answer is audited after generation on both the streaming and non-streaming paths:
+
+- Provider-native grounding sources are normalized into `llm.Citation` and written to `metadata.sources` and `metadata.native_citations`. The Gemini and Anthropic adapters synthesize OpenAI-style `url_citation` annotations so one parser handles every grounded provider.
+- Brave publication strings are parsed (`ParsePublishedAt` handles both the ISO `page_age` and phrases like "2 hours ago") and measured against the plan's window. `freshness_verified` requires at least one dated result and **every** dated result inside the window; an undated result is a third state, neither fresh nor stale.
+- A claim-support signal (`claim_warning`) is set when an answer states prices, percentages, or version numbers, names no source at all, and does not hedge. It is a **warning only** — it never gates or rewrites an answer, because claim support is not decidable by string matching.
+
+## Retrieval as a preflight
+
+Requests that ask for current data *and* a follow-up action (calculate, export, compare, chart) do not let the orchestrator own the turn. `Orchestrator.Preflight` retrieves without generating, and its evidence is injected as a system message before the tool loop runs, so the model can act on retrieved data instead of choosing between retrieval and tools.
+
+Native grounding is deliberately not used for a preflight: it is inseparable from generation and cannot supply evidence to a later tool round.
+
+### One mechanism per turn
+
+`searchMechanism` is resolved once per turn and recorded as `search_mechanism` in
+message metadata: `native` when the provider grounded its own answer, `local` when
+the Brave/DuckDuckGo provider ran, `failed` when retrieval produced nothing.
+
+Once a turn has a mechanism, the local `web_search` tool is removed from the model's
+catalog. Offering a second, weaker search alongside an existing one invites the model
+to use it — an observed Gemini turn spent five `web_search` calls re-searching a
+question whose evidence was already in context, two of them refused by the provider,
+and answered from training data anyway.
+
+`browser_*` and `fetch_url` are kept. They read a specific URL rather than querying
+an index, so they complement grounding rather than duplicating it.
+
+If a local preflight fails on a provider that can ground itself, the turn escalates to
+native grounding rather than degrading. The follow-up tool is lost, which is the
+better trade: a grounded answer without the calculation beats a stale answer with one.
+
+### Grounding and tools in one request
+
+The Gemini and Anthropic adapters carry their search tool *and* the caller's tools,
+so a grounded turn keeps its tool loop. This is why the preflight is now a fallback
+for providers without native grounding rather than the normal path.
+
+| | Gemini | Anthropic |
+|---|---|---|
+| Search tool | `tools: [{google_search: {}}]` | `tools: [{type: "web_search_…", name: "web_search"}]` |
+| Our tools | `tools: [… , {function_declarations: […]}]` + `tool_config` mode `AUTO` | flat `{name, description, input_schema}` entries in the same array |
+| Assistant tool call | `functionCall` part on a `model` turn | `tool_use` block on an `assistant` turn |
+| Tool result | `functionResponse` part on a `user` turn, keyed by function **name** | `tool_result` block on a `user` turn, keyed by `tool_use_id` |
+| Call IDs | none — synthesized locally | provider-assigned, must be preserved |
+
+Details that are load-bearing:
+
+- **An assistant turn that only calls a tool has empty content.** Both adapters used
+  to skip blank-text messages, which dropped the call and its result, so round two of
+  a loop had no record the tool had run and the model called it again.
+- **Anthropic rejects two consecutive user turns**, so parallel tool results are
+  merged onto a single turn.
+- **The response needs a `tool_calls` finish reason**, not just the calls, or the loop
+  treats the turn as finished.
+- **Gemini rejects much of JSON Schema.** `sanitizeGeminiSchema` strips `$schema`,
+  `additionalProperties`, `oneOf`, `default`, and similar. A rejection here is a 400,
+  and a 400 on a grounded request degrades to local search rather than surfacing.
+- **The markdown `**Sources:**` block is withheld on a tool-call turn** — the loop
+  continues and it would land mid-conversation — while structured citations still go
+  out so the backend can count them.
+
+Whether a given Gemini model family accepts `google_search` and
+`function_declarations` together cannot be settled by offline tests.
+`retryGeminiWithoutTools` catches a 400 and retries once with grounding alone, since
+grounding is the half worth keeping. Do not remove that retry.
 
 A verified one-event schedule answer should resemble:
 
@@ -156,7 +280,16 @@ npm run build
 
 On Ubuntu 24.04 when desktop packages are included, set `GOFLAGS=-tags=webkit2_41` or use the repository's CI/build scripts.
 
-Regression tests cover the exact World Cup prompt, bounded direct planning, rejection of indirect schedule answers, OpenAI option compatibility, Gemini request conversion, OpenRouter plugin replacement, native marker removal, LLM-service transport isolation, deterministic sports routing, and concise one-event rendering.
+Regression tests cover the exact World Cup prompt, bounded direct planning, rejection of indirect schedule answers, OpenAI option compatibility, Gemini request conversion, Anthropic Messages API conversion (request, response, SSE stream, and tool-error shape), OpenRouter plugin replacement, native marker removal, LLM-service transport isolation, deterministic sports routing, and concise one-event rendering.
+
+Provider transports have their own suites: `brave_provider_test.go` (including a gzip regression under `DisableCompression`) and `ddg_provider_test.go` (a recorded HTML fixture, so markup drift fails CI instead of returning zero results silently).
+
+`internal/eval/retrieval_eval.go` holds the tracked classification corpus. It is deterministic — no network, no model — and reports trigger recall, false negatives and positives, intent accuracy, freshness-policy accuracy, and query-expansion rate:
+
+```bash
+cd backend
+go test ./internal/eval -run TestRetrievalEvalTracksMetrics -v
+```
 
 ## Troubleshooting
 
@@ -176,18 +309,32 @@ Confirm the request uses `streamGenerateContent` with `alt=sse`, moves the API k
 
 Verify web search is enabled and Brave or DuckDuckGo is available. Jina is enrichment, not the primary search provider.
 
+Check the message metadata before assuming a classification miss: `search_attempted`, `search_failed`, and `search_failure_reason` record whether retrieval ran, and the UI renders a banner from them. A `search_failed` answer means retrieval was attempted and the provider returned nothing usable — look for the `ERROR: websearch provider …` line in the server log.
+
+### Brave is configured but every search fails
+
+Historically this was a transport defect: the provider set `Accept-Encoding: gzip` by hand, which disables `net/http`'s transparent decompression and left `json.Unmarshal` reading gzip bytes. `readResponseBody` now decodes a gzip `Content-Encoding` explicitly, and `brave_provider_test.go` pins the behaviour. If Brave still fails, check the logged status code — a 401 or 429 is a key or quota problem, not a decoding one.
+
+### A required tool was not called
+
+`metadata.tool_enforced` records whether the provider was asked to force the call. `false` means the active provider is not on the `tool_choice` allowlist in `backend/internal/llm/tool_choice.go`, so the requirement could only be advisory; `tool_requirement_unfulfilled` means the tool did not run either way.
+
 ### Event time is in the wrong timezone
 
 Inspect the request URL for `omnillm_timezone`, confirm it is a valid IANA zone, and verify the sports request receives it before ESPN rows are rendered.
 
 ## Documentation impact
 
-Canonical documentation updated by this feature:
+Canonical documentation that must be updated when this behavior changes:
 
-- `README.md`
-- `CLAUDE.md`
-- `.github/copilot-instructions.md`
-- `docs/Feature FAQ.md`
-- `docs/TECHNICAL_REFERENCE.md`
-- `docs/CHAT_STUDIO_AGENT_RUNTIME_IMPLEMENTATION_2026-07-18.md`
-- this document
+| Document | What it owns |
+|---|---|
+| this document | The design: capability matrix, planning and freshness policy, adapters, evidence contract |
+| `CLAUDE.md` | Contributor rules and the invariants that must not be collapsed |
+| `.github/copilot-instructions.md` | The same rules in short form |
+| [`TECHNICAL_REFERENCE.md`](TECHNICAL_REFERENCE.md) | Request lifecycle, API surface, and the assistant message metadata contract |
+| [`Feature FAQ.md`](Feature%20FAQ.md) § 2b | The user-facing explanation: what the badges mean, how to configure a provider |
+| [`Chat-Studio-Agent-Loop-Review.md`](Chat-Studio-Agent-Loop-Review.md) | The review that produced the current design, with the defect history |
+| `README.md` | One capability line only |
+
+The predecessor of this list referenced `docs/CHAT_STUDIO_AGENT_RUNTIME_IMPLEMENTATION_2026-07-18.md`, which now lives under `docs/archive/completed/`. Point at live documents.

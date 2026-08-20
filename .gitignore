@@ -40,6 +40,10 @@ node_modules/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# go-rod downloads Chromium into the backend working directory on first use of a
+# browser tool. It is ~600MB of runtime data, not source.
+/backend/chromium-cache/
 /playwright/.auth/
 /backend/test-results/
 *.exe

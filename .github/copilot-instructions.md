@@ -11,7 +11,7 @@ Local-first LLM chat app: **Go backend** (API + SQLite) + **React/TypeScript fro
 - **Layered architecture:** `api/` handlers → domain services (`llm/`, `agent/`, `search/`, `analytics/`, `bundle/`, `rag/`, `tools/`, `templates/`, `plugins/`, `eval/`, `websearch/`, `auth/`) → `repository/` → `models/` → `db/`.
 - **Database:** SQLite with WAL mode and single-writer safety. Numbered migrations live in `internal/db/db.go`; inspect the current highest migration before adding the next one. New tables use `CREATE TABLE IF NOT EXISTS`, new columns require backward-compatible defaults, and applied versions are tracked in `schema_versions`.
 - **Auth:** Solo-mode by default (no users = middleware passthrough). Multi-user mode activates when first user registers. Auth middleware in `auth/auth.go` uses Bearer tokens (`Authorization` header).
-- **Streaming:** SSE (Server-Sent Events) for LLM responses. `WriteTimeout: 0` on the HTTP server. SSE events use `event:` + `data:` format (e.g., `token`, `done`, `web_search_*`, `file_search`, `file_search_results`, `rag_indexing`, `url_context`, `tool_start`, `agent_*`).
+- **Streaming:** SSE (Server-Sent Events) for LLM responses. `WriteTimeout: 0` on the HTTP server. SSE events use `event:` + `data:` format (e.g., `token`, `done`, `web_search_*`, `file_search`, `file_search_results`, `rag_indexing`, `url_context`, `tool_start`, `router`, `agent_*`). Anything the UI renders about *how* an answer was produced must appear in both the `done` payload and the saved message metadata, or a reloaded conversation disagrees with the live stream.
 
 ### Frontend (`frontend/src/`)
 
@@ -50,13 +50,31 @@ The SQLite database file (`omnillm-studio.db`) is created in the `backend/` work
 
 ## Provider-aware Current Information
 
-- `internal/websearch/planner.go` assigns current-information intent, answer shape, query count, result cap, and search context size.
-- Native grounding is preferred for supported OpenAI, Gemini, and OpenRouter models because it removes a separate search-plus-summarization call.
-- Ollama, Anthropic direct, Groq, Together, Mistral, generic OpenAI-compatible providers, and rejected native requests use the configured Brave/DuckDuckGo provider and optional Jina enrichment.
+Retrieval is backend-owned: the model chooses what to look for, the server chooses whether and how, and the answer is audited afterwards.
+
+- `internal/websearch/gate.go` classifies deterministically in three ordered rule classes — `hardSuppressPatterns` (veto), `decisivePatterns` (short-circuit on explicit recency), then `triggerPatterns` minus `negativePatterns`. Subject-matter negatives are **weights, never vetoes**: a question about software can still be about the present state of the world.
+- `internal/api/chat_search_route.go` consults the semantic router only when the gate declines, and only under the `tools_only` / `all_preflight` router modes. A router decision must be passed to the orchestrator as `force`, or its own gate check vetoes it.
+- `internal/websearch/planner.go` assigns intent, answer shape, query set, result cap, search context size, source class, and minimum source count. Freshness is per intent: `pricing`, `benchmark`, and `release` deliberately carry **no** window, because vendor pages and release notes are rarely re-published within a day.
+- `normalizePlan` clamps `MaxIterations` to `len(Queries)`; raising the iteration budget without expanding the query set does nothing.
+- Native grounding is preferred for supported OpenAI, Anthropic, Gemini, and OpenRouter models because it removes a separate search-plus-summarization call. Anthropic goes through a Messages API adapter (`internal/llm/anthropic_search.go`); OpenRouter support is an allowlist of vendor prefixes, not the whole provider.
+- Ollama, Groq, Together, Mistral, generic OpenAI-compatible providers, Claude 3.x, and rejected native requests use the configured Brave/DuckDuckGo provider and optional Jina enrichment.
+- **Turn ownership and tool calling are mutually exclusive.** The orchestrator paths answer and return, so the tool loop never runs and no MCP/plugin/app tool can fire. `retrievalMayOwnTurn` gates it: never with a follow-up action or a private-source reference; `Direct` always may; `Brief` only without connected integrations; `Standard`/`Research` never. Widening the gate once captured tool-backed prompts ("the latest open PRs", "search my Notion") and answered them from the public web — bias toward the preflight.
+- `Orchestrator.Preflight` retrieves without generating so the tool loop can act on the evidence. Native grounding cannot serve a preflight, so `Standard`/`Research` turns use local search.
+- Never force a tool retry after a failed retrieval: it re-runs the plan that just failed and burns the round where another tool could answer.
+- Model-facing search uses `PlannedSearch`, never `DirectSearch`. `DirectSearch` is reserved for the explicit `/v1/websearch` endpoint.
 - `frontend/src/clientContextFetch.ts` adds `omnillm_timezone` and `omnillm_locale` only to Omni API URLs. `internal/turncontext` resolves and validates that context.
 - Direct schedule lookups should return the exact event and localized start time, not a generic explanation or a large table. Preserve FIFA World Cup aliases and the deterministic ESPN route.
 - Do not add a second OpenRouter web plugin, send GPT-5-only fields to older OpenAI models, leak internal marker plugins, or install provider adapters globally.
-- Update `docs/PROVIDER_AWARE_SEARCH.md`, `docs/Feature FAQ.md`, and `docs/TECHNICAL_REFERENCE.md` when changing this behavior.
+- Never let a failed retrieval look like a normal answer. Write `search_attempted` / `search_failed` / `search_failure_reason` and let the UI render the warning from metadata; a system-prompt request to "mention this may be outdated" is not enforcement.
+- Update `docs/PROVIDER_AWARE_SEARCH.md`, `docs/Feature FAQ.md`, and `docs/TECHNICAL_REFERENCE.md` when changing this behavior, and re-run `go test ./internal/eval -run TestRetrievalEvalTracksMetrics -v`.
+
+## Tool Enforcement
+
+- `llm.ToolChoice` is provider-neutral and translated at serialization time. It is sent on an **allowlist** (`internal/llm/tool_choice.go`): a provider that rejects an unknown field returns 400 and breaks the whole turn.
+- `toolEnforcement` forces `tool_choice` on the first round only — a provider held at `required` never emits a final answer — then verifies what actually ran. Set `providerEnforced` from `llm.SupportsToolChoice`, never unconditionally.
+- Streamed content cannot be retracted, so a late violation is recorded in metadata (`tool_required`, `tool_enforced`, `tool_requirement_unfulfilled`) and rendered as unverified rather than rejected.
+- `runSyncToolLoop` gives the non-streaming path tool support, deliberately without browser tools: `genericRuntimeEligible()` refuses `browser_*` because they need the streaming loop's navigation cap, URL cache, and result sanitization.
+- `auditAnswerEvidence` runs after generation on every path. `claim_warning` is a warning, not a gate — claim support is not decidable by string matching.
 
 ## Frontend Conventions
 
@@ -89,7 +107,7 @@ The SQLite database file (`omnillm-studio.db`) is created in the `backend/` work
 ## External Dependencies
 
 - **LLM providers:** OpenAI-compatible API format. `llm/service.go` handles provider routing, streaming, embeddings, and image generation.
-- **Web search:** `internal/websearch/` plans answer shape and cost. Supported OpenAI, Gemini, and OpenRouter models use provider-native grounding; local and unsupported models fall back to Brave Search or DuckDuckGo, with selective Jina Reader extraction. The native adapter in `internal/llm/native_search.go` is scoped to `llm.Service` HTTP clients and must never modify the global transport.
+- **Web search:** `internal/websearch/` plans intent, answer shape, freshness, query set, and source policy. Supported OpenAI, Anthropic, Gemini, and OpenRouter models use provider-native grounding; local and unsupported models fall back to Brave Search or DuckDuckGo, with selective Jina Reader extraction. The native adapters in `internal/llm/native_search.go` and `internal/llm/anthropic_search.go` are scoped to `llm.Service` HTTP clients and must never modify the global transport. Provider transports must not set `Accept-Encoding` by hand — `net/http` only auto-decompresses when it owns that header, and doing so silently broke every Brave response until `readResponseBody` was added.
 - **RAG vector store:** [`chromem-go`](https://github.com/philippgille/chromem-go) v0.7.0 — embedded, persistent, zero-deps Go vector DB. Collections per conversation, workspace, and global scope, persisted under `<OMNILLM_CHROMEM_DIR>/<scope_id>/`. The wrapper lives at `internal/rag/store.go` (`VectorStore`); call sites never import chromem directly. Chunk text + metadata still live in the SQLite `document_chunks` table (chromem stores vectors only). Legacy `document_embeddings` rows lazy-migrate into chromem on first retrieve via `ChromemRetriever.tryLazyMigrate`.
 - **File Library:** Durable file storage with conversation, workspace, and global scopes. Package at `internal/filelibrary/`. Hybrid vector + keyword search with citation formatting. SSE events (`file_search`, `file_search_results`, `rag_indexing`) stream status to the frontend. API routes under `/v1/file-library/`. Frontend panel at `frontend/src/components/FileLibraryPanel.tsx`.
 - **Plugins:** JSON-RPC subprocess model. Plugin directory: `~/.omnillm-studio/plugins/` (override with `OMNILLM_PLUGIN_DIR`).

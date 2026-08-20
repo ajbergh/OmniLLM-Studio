@@ -2,7 +2,9 @@ package websearch
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -53,9 +55,10 @@ func (o *Orchestrator) Process(
 	userText string,
 	history []llm.ChatMessage,
 	provider, model string,
+	force bool,
 ) (*OrchestratorResult, error) {
 	tc := turncontext.FromContext(ctx)
-	plan := BuildSearchPlan(userText, tc.Now, tc.Timezone)
+	plan := planForTurn(userText, tc, force)
 	if !plan.NeedsWeb {
 		rag.ClearRequestEvidence(ctx)
 		return nil, nil
@@ -70,7 +73,12 @@ func (o *Orchestrator) Process(
 			if ok, _ := ValidateAnswer(plan, resp.Content); ok {
 				rag.ClearRequestEvidence(ctx)
 				return &OrchestratorResult{
-					Content:    resp.Content,
+					Content: resp.Content,
+					// Native grounding produces no local results, so its
+					// citations are the only sources this answer has. Dropping
+					// them left metadata.sources empty and made the UI report
+					// "no citable sources" for an answer that cited several.
+					Citations:  resp.Citations,
 					WebSearch:  true,
 					ToolCall:   toolCall,
 					Provider:   resp.Provider,
@@ -131,9 +139,10 @@ func (o *Orchestrator) Process(
 func (o *Orchestrator) ProcessStream(
 	ctx context.Context,
 	userText, provider, model string,
+	force bool,
 ) (*SearchResponse, *llm.ChatRequest, *ToolCall, error) {
 	tc := turncontext.FromContext(ctx)
-	plan := BuildSearchPlan(userText, tc.Now, tc.Timezone)
+	plan := planForTurn(userText, tc, force)
 	if !plan.NeedsWeb {
 		rag.ClearRequestEvidence(ctx)
 		return nil, nil, nil, nil
@@ -141,7 +150,13 @@ func (o *Orchestrator) ProcessStream(
 	toolCall := toolCallForPlan(plan, tc)
 
 	providerType, _ := o.llmSvc.ResolveProviderType(provider)
-	if SupportsNativeSearch(providerType, model) {
+	native := SupportsNativeSearch(providerType, model)
+	// This decision was previously invisible. When grounding silently stopped
+	// working there was no way to tell "the provider was never asked" from "the
+	// provider was asked and ignored it".
+	log.Printf("[websearch] stream plan: provider_type=%q model=%q native=%v intent=%q shape=%q freshness=%q queries=%d",
+		providerType, model, native, plan.Intent, plan.AnswerShape, plan.TimeRange, len(plan.Queries))
+	if native {
 		req := buildNativeSearchRequest(ctx, provider, model, nil, userText, plan, tc)
 		return &SearchResponse{
 			Query:     toolCall.Arguments.Query,
@@ -169,9 +184,10 @@ func (o *Orchestrator) ProcessStream(
 func (o *Orchestrator) ProcessStreamFallback(
 	ctx context.Context,
 	userText, provider, model string,
+	force bool,
 ) (*SearchResponse, *llm.ChatRequest, *ToolCall, error) {
 	tc := turncontext.FromContext(ctx)
-	plan := BuildSearchPlan(userText, tc.Now, tc.Timezone)
+	plan := planForTurn(userText, tc, force)
 	if !plan.NeedsWeb {
 		rag.ClearRequestEvidence(ctx)
 		return nil, nil, nil, nil
@@ -191,12 +207,234 @@ func (o *Orchestrator) ProcessStreamFallback(
 
 // DirectSearch executes a search request without classification or LLM
 // summarization.
+//
+// This is the low-level path, reserved for the explicit /v1/websearch endpoint
+// where the caller supplies every parameter deliberately. Model-facing tools
+// must use PlannedSearch instead: a model that omits time_range, region, and
+// locale should get server-chosen values, not no values.
 func (o *Orchestrator) DirectSearch(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
 	provider, _ := o.snapshot()
 	if provider == nil {
 		return nil, fmt.Errorf("web search is disabled")
 	}
 	return provider.Search(ctx, req)
+}
+
+// PreflightEvidence is the result of a backend-owned retrieval pass that runs
+// *before* generation, leaving the turn free to call other tools afterwards.
+//
+// Process and ProcessStream both take ownership of the whole turn: they return a
+// generation request that answers from the evidence, and nothing can run after
+// it. That is cheaper for a simple lookup — native grounding folds retrieval and
+// summarization into one call — but it cannot compose. A request that needs
+// current data *and* a calculation had to pick one, which is why compound
+// prompts were routed away from retrieval entirely.
+type PreflightEvidence struct {
+	Plan      SearchPlan
+	ToolCall  *ToolCall
+	Results   []SearchResult
+	Query     string
+	TimeRange string
+	FetchedAt time.Time
+	// Sufficient reports whether the evidence met the plan's corroboration and
+	// source-class requirements.
+	Sufficient bool
+}
+
+// Preflight retrieves current-information evidence without generating an answer.
+//
+// Native grounding is deliberately not used here: it is inseparable from
+// generation, so it cannot supply evidence to a later tool round. The local
+// provider path is the only one that yields reusable results.
+//
+// The ToolCall is returned even on failure, mirroring ProcessStream, so the
+// caller can report an attempted-and-failed retrieval instead of a silent one.
+func (o *Orchestrator) Preflight(
+	ctx context.Context,
+	userText string,
+	force bool,
+) (*PreflightEvidence, *ToolCall, error) {
+	tc := turncontext.FromContext(ctx)
+	plan := planForTurn(userText, tc, force)
+	if !plan.NeedsWeb {
+		return nil, nil, nil
+	}
+	toolCall := toolCallForPlan(plan, tc)
+
+	searchResp, err := o.searchWithPlan(ctx, plan, tc)
+	if err != nil {
+		return nil, toolCall, err
+	}
+	if searchResp == nil || len(searchResp.Results) == 0 {
+		return nil, toolCall, fmt.Errorf("web search returned no results")
+	}
+
+	return &PreflightEvidence{
+		Plan:       plan,
+		ToolCall:   toolCall,
+		Results:    searchResp.Results,
+		Query:      searchResp.Query,
+		TimeRange:  plan.TimeRange,
+		FetchedAt:  searchResp.FetchedAt,
+		Sufficient: ResultsLikelyAnswerable(plan, searchResp.Results),
+	}, toolCall, nil
+}
+
+// EvidenceSystemMessage renders preflight evidence as a system message for the
+// generation step.
+//
+// It reuses the same evidence-block format the local summarizer already sends,
+// so a model sees one consistent shape whether retrieval owned the turn or ran
+// as a preflight.
+func (e *PreflightEvidence) EvidenceSystemMessage(tc turncontext.TurnContext) llm.ChatMessage {
+	if e == nil {
+		return llm.ChatMessage{}
+	}
+	freshness := "none (results are not restricted by recency)"
+	if e.TimeRange != "" {
+		freshness = e.TimeRange
+	}
+	content := fmt.Sprintf(`%s
+
+Retrieved at: %s
+Freshness filter: %s
+Search query: %s
+%s
+
+WEB EVIDENCE:
+%s`,
+		evidenceDirective(e.Plan, e.Sufficient),
+		e.FetchedAt.UTC().Format(time.RFC3339),
+		freshness,
+		e.Query,
+		localContextLine(tc),
+		formatResultsForPrompt(e.Results),
+	)
+	return llm.ChatMessage{Role: "system", Content: content}
+}
+
+// evidenceDirective states what the evidence supports, and what it does not.
+func evidenceDirective(plan SearchPlan, sufficient bool) string {
+	base := "WEB EVIDENCE: the numbered results below were retrieved from the live web for this turn. " +
+		"Use them for every current claim. Cite them by index. A result with no publication date is not " +
+		"proof of currency: say so rather than presenting it as up to date. Do not substitute your training " +
+		"data for a value that is absent from the evidence — say the evidence does not cover it."
+	if !sufficient {
+		base += " The retrieved evidence did NOT meet this question's corroboration requirement. " +
+			"Name the claims you could not verify instead of presenting them as established."
+	}
+	if plan.RequiresCitations {
+		base += " Every numeric claim (price, score, version, date) must name the source index it came from."
+	}
+	return base
+}
+
+// PlannedSearchResult carries retrieved evidence plus the retrieval metadata a
+// model needs in order to describe it honestly.
+type PlannedSearchResult struct {
+	Query     string         `json:"query"`
+	Queries   []string       `json:"queries"`
+	TimeRange string         `json:"time_range"`
+	Region    string         `json:"region"`
+	Locale    string         `json:"locale"`
+	Intent    SearchIntent   `json:"intent"`
+	Results   []SearchResult `json:"results"`
+	FetchedAt time.Time      `json:"fetched_at"`
+	// Sufficient reports whether the evidence met the plan's corroboration and
+	// source-class requirements. False means the answer should hedge.
+	Sufficient bool `json:"sufficient"`
+	// RequiresCitations mirrors the plan, so the tool result can tell the model
+	// that claims must be traceable.
+	RequiresCitations bool `json:"requires_citations"`
+}
+
+// PlannedSearch runs a model-supplied query through the planner.
+//
+// The model chooses what to look for; the server chooses how to look. Freshness
+// window, region, locale, query expansion, result count, and source ranking are
+// all decided here, because a model that omits them produces an unconstrained
+// search whose results it then presents as current.
+//
+// timeRangeOverride is honored when non-empty, so a caller that genuinely knows
+// the window it wants can still say so.
+func (o *Orchestrator) PlannedSearch(
+	ctx context.Context,
+	query string,
+	timeRangeOverride string,
+	maxResults int,
+) (*PlannedSearchResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+	tc := turncontext.FromContext(ctx)
+
+	plan := BuildSearchPlan(query, tc.Now, tc.Timezone)
+	if !plan.NeedsWeb {
+		// The gate is tuned for conversational turns. An explicit tool call is
+		// itself the intent signal, so fall back to a general plan rather than
+		// refusing to search.
+		plan = generalPlanForQuery(query, tc)
+	}
+	if strings.TrimSpace(timeRangeOverride) != "" {
+		plan.TimeRange = strings.TrimSpace(timeRangeOverride)
+	}
+	if maxResults > 0 && maxResults <= 20 {
+		plan.MaxResults = maxResults
+	}
+	plan = normalizePlan(plan)
+
+	searchResp, err := o.searchWithPlan(ctx, plan, tc)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PlannedSearchResult{
+		Query:             plan.Queries[0],
+		Queries:           append([]string(nil), plan.Queries...),
+		TimeRange:         plan.TimeRange,
+		Region:            firstNonEmptySearch(tc.Country, "US"),
+		Locale:            firstNonEmptySearch(tc.Locale, "en-US"),
+		Intent:            plan.Intent,
+		Results:           searchResp.Results,
+		FetchedAt:         searchResp.FetchedAt,
+		Sufficient:        ResultsLikelyAnswerable(plan, searchResp.Results),
+		RequiresCitations: plan.RequiresCitations,
+	}, nil
+}
+
+// planForTurn builds the plan for a turn, honoring an external classifier.
+//
+// The deterministic gate is the cheap first pass, but it is not the only
+// classifier: the semantic router catches phrasing regex cannot. When the router
+// says a turn needs current information, re-running the gate here would veto it
+// and return an empty plan — which is exactly what happened before force
+// existed, so a router-classified turn performed no retrieval while still
+// reporting that a search had been attempted.
+func planForTurn(userText string, tc turncontext.TurnContext, force bool) SearchPlan {
+	plan := BuildSearchPlan(userText, tc.Now, tc.Timezone)
+	if plan.NeedsWeb || !force {
+		return plan
+	}
+	return generalPlanForQuery(userText, tc)
+}
+
+// generalPlanForQuery builds a bounded plan for an explicit tool call whose text
+// the conversational gate would not have triggered on.
+func generalPlanForQuery(query string, tc turncontext.TurnContext) SearchPlan {
+	return normalizePlan(SearchPlan{
+		NeedsWeb:            true,
+		Intent:              SearchIntentGeneral,
+		AnswerShape:         AnswerShapeStandard,
+		Queries:             []string{buildSearchQuery(query, tc.Now)},
+		TimeRange:           inferTimeRange(strings.ToLower(query)),
+		MaxResults:          6,
+		MaxIterations:       1,
+		SearchContextSize:   "medium",
+		NativePreferred:     false,
+		RequiredSourceClass: SourceClassAny,
+		MinSources:          1,
+	})
 }
 
 func (o *Orchestrator) searchWithPlan(ctx context.Context, plan SearchPlan, tc turncontext.TurnContext) (*SearchResponse, error) {
@@ -212,6 +450,16 @@ func (o *Orchestrator) searchWithPlan(ctx context.Context, plan SearchPlan, tc t
 	if iterations <= 0 || iterations > len(plan.Queries) {
 		iterations = len(plan.Queries)
 	}
+	// Bound by what the provider can actually deliver. DuckDuckGo serves an
+	// anti-bot challenge after roughly one request per source address, so running
+	// the planner's expanded query set against it guarantees that every query
+	// after the first comes back empty — turning a deliberate breadth increase
+	// into a reliability loss.
+	if capabilities := provider.Capabilities(); capabilities.MaxQueriesPerTurn > 0 && iterations > capabilities.MaxQueriesPerTurn {
+		log.Printf("[websearch] clamping %d queries to %d for provider %q",
+			iterations, capabilities.MaxQueriesPerTurn, provider.Name())
+		iterations = capabilities.MaxQueriesPerTurn
+	}
 	seen := map[string]bool{}
 	combined := make([]SearchResult, 0, plan.MaxResults*iterations)
 
@@ -224,6 +472,19 @@ func (o *Orchestrator) searchWithPlan(ctx context.Context, plan SearchPlan, tc t
 			MaxResults: plan.MaxResults,
 		})
 		if err != nil {
+			// A local search failure previously vanished into a soft fallback that
+			// told the model to answer from training data. Log it loudly: this is
+			// the signal that a provider is misconfigured or broken.
+			log.Printf("ERROR: websearch provider %q failed for query %d/%d: %v",
+				provider.Name(), i+1, iterations, err)
+			// A rate limit applies to the whole turn, so continuing through the
+			// remaining queries just collects more of the same refusal.
+			if errors.Is(err, ErrSearchProviderRateLimited) {
+				if len(combined) == 0 {
+					return nil, err
+				}
+				break
+			}
 			if len(combined) == 0 && i == iterations-1 {
 				return nil, err
 			}
@@ -241,8 +502,12 @@ func (o *Orchestrator) searchWithPlan(ctx context.Context, plan SearchPlan, tc t
 			newResults = append(newResults, result)
 		}
 		if jinaReader != nil && len(newResults) > 0 {
+			// Snippets are not enough to verify a number. Any plan that requires
+			// citations gets full page text for its top results, not just the
+			// research shape: a pricing or release lookup is exactly the case
+			// where the figure lives in a table the snippet truncates.
 			enrichCount := 2
-			if plan.AnswerShape == AnswerShapeResearch {
+			if plan.AnswerShape == AnswerShapeResearch || plan.RequiresCitations {
 				enrichCount = 5
 			}
 			newResults = jinaReader.EnrichResults(ctx, newResults, enrichCount)
@@ -256,6 +521,10 @@ func (o *Orchestrator) searchWithPlan(ctx context.Context, plan SearchPlan, tc t
 	if len(combined) == 0 {
 		return nil, fmt.Errorf("web search returned no results")
 	}
+	// Promote authoritative hosts before handing the evidence to the summarizer.
+	// Result order is what the model reads first, and an aggregator's stale copy
+	// of a price outranking the vendor's own page is how wrong numbers get cited.
+	combined = rankByPreferredDomains(combined, plan.PreferredDomains)
 	return &SearchResponse{
 		Query:     plan.Queries[0],
 		TimeRange: plan.TimeRange,

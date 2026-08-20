@@ -176,6 +176,27 @@ export interface WebSearchResult {
   snippet: string;
 }
 
+/** A provider-native grounding source. */
+export interface NativeCitation {
+  url: string;
+  title?: string;
+}
+
+/** Client-safe retrieval failure codes emitted by the backend. */
+export type SearchFailureReason =
+  | 'no_results'
+  | 'provider_error'
+  | 'provider_disabled'
+  | 'provider_rate_limited';
+
+export const SEARCH_FAILURE_LABELS: Record<SearchFailureReason, string> = {
+  no_results: 'The search returned no usable results.',
+  provider_error: 'The search provider could not be reached.',
+  provider_disabled: 'Web search is not configured.',
+  provider_rate_limited:
+    'The search provider rate-limited this request. DuckDuckGo blocks repeated lookups; add a Brave Search API key in Settings for reliable results.',
+};
+
 export interface WebSearchResponse {
   query: string;
   timeRange: string;
@@ -237,6 +258,43 @@ export interface MessageMetadata {
   file_search?: boolean;
   tool?: string;
   sources?: WebSearchResult[];
+  /**
+   * Current-information retrieval status. These four signals are deliberately
+   * separate: an answer can have had retrieval attempted but failed, or have
+   * succeeded with no usable sources, and the UI must not present those the
+   * same way it presents a grounded answer.
+   */
+  /**
+   * How the turn actually obtained current information: `native` means the
+   * provider grounded its own answer, `local` means the Brave/DuckDuckGo
+   * provider ran, `failed` means retrieval produced nothing.
+   */
+  search_mechanism?: 'none' | 'native' | 'local' | 'failed';
+  search_attempted?: boolean;
+  search_failed?: boolean;
+  search_failure_reason?: SearchFailureReason;
+  /** True when every cited source carried a parsable date inside the plan's window. */
+  freshness_verified?: boolean;
+  /** Human-readable age of the newest cited source, e.g. "2 hours ago". */
+  answer_freshness?: string;
+  /**
+   * Warning code set when the answer makes numeric claims and names no source.
+   * This is a signal, not a verdict — claim support is not decidable by string
+   * matching, so it is rendered as a caution and never used to withhold text.
+   */
+  claim_warning?: 'numeric_claims_without_citation';
+  /** Number of distinct citations backing the answer. */
+  citation_count?: number;
+  /** Provider-native grounding sources, structured rather than markdown-only. */
+  native_citations?: NativeCitation[];
+  /**
+   * Tool-requirement outcome for the turn. `tool_required` names the tool (or is
+   * `true` for "any tool"); `tool_enforced` records whether the provider was
+   * asked to force the call; `tool_requirement_unfulfilled` means it never ran.
+   */
+  tool_required?: string | boolean;
+  tool_enforced?: boolean;
+  tool_requirement_unfulfilled?: boolean;
   file_sources?: FileSearchResult[];
   tool_call?: ToolCall;
   rag_sources?: RAGSourceRef[];

@@ -61,10 +61,10 @@ func TestSafeToolResultSanitizesErrors(t *testing.T) {
 }
 
 func TestRequiresComposableToolLoop(t *testing.T) {
-	if !requiresComposableToolLoop("Find the latest exchange rate and calculate the converted total") {
+	if !requiresPostRetrievalTools("Find the latest exchange rate and calculate the converted total") {
 		t.Fatal("expected compound current-information request to use composable tools")
 	}
-	if requiresComposableToolLoop("What is the latest exchange rate?") {
+	if requiresPostRetrievalTools("What is the latest exchange rate?") {
 		t.Fatal("simple lookup should retain optimized grounded-search orchestration")
 	}
 }

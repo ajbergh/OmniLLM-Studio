@@ -59,6 +59,12 @@ func ValidateDecision(decision RouterDecision, settings models.AppSettings, avai
 		if decision.Route != RouteSportsLookup && decision.Route != RouteNormalLLM && decision.Route != RouteClarify && decision.Route != RouteNone {
 			return fmt.Errorf("%w: %s", ErrUnsupportedRoute, decision.Route)
 		}
+	case RouterModeToolsOnly, RouterModeAllPreflight:
+		// These modes were declared but never reachable: the only Route call site
+		// pinned the mode to sports_only, so RouteWebSearch existed in the enum
+		// and the JSON schema while nothing could ever select it. The available
+		// route list is the authoritative restriction here, and it is already
+		// checked above.
 	}
 	if decision.Route == RouteSportsLookup && decision.Sports == nil {
 		return ErrMissingSportsParam

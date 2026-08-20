@@ -195,9 +195,13 @@ type ChatRequest struct {
 	Think           *bool         `json:"think,omitempty"`            // Ollama-only: enable/disable thinking
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high"
 	Tools           []Tool        `json:"tools,omitempty"`
-	ResponseFormat  interface{}   `json:"response_format,omitempty"` // OpenAI-compatible structured output / JSON mode
-	MaxTokens       *int          `json:"max_tokens,omitempty"`
-	Temperature     *float64      `json:"temperature,omitempty"`
+	// ToolChoice constrains whether and which tool the model must call. It is
+	// translated per provider at serialization time and omitted for providers
+	// that do not accept it; see llm/tool_choice.go.
+	ToolChoice     *ToolChoice `json:"tool_choice,omitempty"`
+	ResponseFormat interface{} `json:"response_format,omitempty"` // OpenAI-compatible structured output / JSON mode
+	MaxTokens      *int        `json:"max_tokens,omitempty"`
+	Temperature    *float64    `json:"temperature,omitempty"`
 
 	// OpenRouter-specific fields (ignored by other providers)
 	ProviderPrefs  *ProviderPreferences `json:"provider_prefs,omitempty"` // Provider routing preferences
@@ -235,6 +239,9 @@ type ChatResponse struct {
 	UpstreamRequestID string     `json:"upstream_request_id,omitempty"`
 	Attempts          int        `json:"attempts,omitempty"`
 
+	// Citations are provider-native grounding sources; see StreamChunk.Citations.
+	Citations []Citation `json:"citations,omitempty"`
+
 	// OpenRouter-specific response fields
 	Cost               *float64 `json:"cost,omitempty"`                 // Credit cost of the request
 	NativeFinishReason string   `json:"native_finish_reason,omitempty"` // Raw finish_reason from provider
@@ -251,6 +258,13 @@ type StreamChunk struct {
 	TokenOutput       int        `json:"token_output,omitempty"` // populated in the final usage chunk
 	RequestID         string     `json:"request_id,omitempty"`
 	UpstreamRequestID string     `json:"upstream_request_id,omitempty"`
+
+	// Citations are provider-native grounding sources, normalized from OpenAI /
+	// OpenRouter url_citation annotations and Gemini groundingChunks. They are
+	// emitted as structured data in addition to the markdown source block the
+	// native-search transport writes into the content, so the backend can count
+	// and validate them and the source panel can render them.
+	Citations []Citation `json:"citations,omitempty"`
 
 	// OpenRouter-specific response fields
 	Cost               *float64 `json:"cost,omitempty"`                 // Credit cost of the request
@@ -427,8 +441,13 @@ func (s *Service) extractProviderDetails(p models.ProviderProfile) (baseURL, api
 }
 
 func getBaseURL(providerType string, customURL *string) string {
-	if customURL != nil && *customURL != "" {
-		return *customURL
+	if customURL != nil && strings.TrimSpace(*customURL) != "" {
+		// Normalize a user-entered URL. Every call site appends a path
+		// ("/chat/completions", "/models/..."), so a trailing slash produced a
+		// double slash on the wire. Some providers tolerate that; the Gemini
+		// native-search rewrite did not, and a pasted URL ending in "/" silently
+		// broke grounding.
+		return strings.TrimRight(strings.TrimSpace(*customURL), "/")
 	}
 
 	switch strings.ToLower(providerType) {
@@ -712,6 +731,7 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 	if len(req.Tools) > 0 {
 		body["tools"] = req.Tools
 	}
+	applyToolChoice(body, req, providerType)
 	if req.ResponseFormat != nil {
 		body["response_format"] = req.ResponseFormat
 	}
@@ -809,6 +829,16 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 			Message struct {
 				Content   string     `json:"content"`
 				ToolCalls []ToolCall `json:"tool_calls"`
+				// Annotations carry provider-native grounding sources. The
+				// native-search transport synthesizes them for Gemini so one
+				// parser handles every grounded provider.
+				Annotations []struct {
+					Type        string `json:"type"`
+					URLCitation struct {
+						URL   string `json:"url"`
+						Title string `json:"title"`
+					} `json:"url_citation"`
+				} `json:"annotations"`
 			} `json:"message"`
 		} `json:"choices"`
 		Usage struct {
@@ -824,9 +854,17 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 
 	content := ""
 	var toolCalls []ToolCall
+	var citations []Citation
 	if len(result.Choices) > 0 {
 		content = result.Choices[0].Message.Content
 		toolCalls = NormalizeToolCalls(providerType, result.Choices[0].Message.ToolCalls)
+		for _, annotation := range result.Choices[0].Message.Annotations {
+			citations = append(citations, Citation{
+				URL:   annotation.URLCitation.URL,
+				Title: annotation.URLCitation.Title,
+			})
+		}
+		citations = NormalizeCitations(citations)
 	}
 
 	tokenIn := result.Usage.PromptTokens
@@ -840,6 +878,7 @@ func (s *Service) ChatComplete(ctx context.Context, req ChatRequest) (*ChatRespo
 	return &ChatResponse{
 		Content:           content,
 		ToolCalls:         toolCalls,
+		Citations:         citations,
 		Provider:          providerType,
 		Model:             model,
 		TokenInput:        &tokenIn,
@@ -875,6 +914,7 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 	if len(req.Tools) > 0 {
 		body["tools"] = req.Tools
 	}
+	applyToolChoice(body, req, providerType)
 	if req.ResponseFormat != nil {
 		body["response_format"] = req.ResponseFormat
 	}
@@ -1014,6 +1054,17 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 								Content   string     `json:"content"`
 								Thinking  string     `json:"thinking"`
 								ToolCalls []ToolCall `json:"tool_calls"`
+								// Annotations carry provider-native grounding
+								// sources. The native-search transport also
+								// synthesizes them for Gemini so one parser
+								// handles every grounded provider.
+								Annotations []struct {
+									Type        string `json:"type"`
+									URLCitation struct {
+										URL   string `json:"url"`
+										Title string `json:"title"`
+									} `json:"url_citation"`
+								} `json:"annotations"`
 							} `json:"delta"`
 						} `json:"choices"`
 						Usage *struct {
@@ -1029,11 +1080,20 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest, onChunk func(
 
 					if len(chunk.Choices) > 0 {
 						delta := chunk.Choices[0].Delta
-						if delta.Content != "" || delta.Thinking != "" || len(delta.ToolCalls) > 0 {
+						citations := make([]Citation, 0, len(delta.Annotations))
+						for _, annotation := range delta.Annotations {
+							citations = append(citations, Citation{
+								URL:   annotation.URLCitation.URL,
+								Title: annotation.URLCitation.Title,
+							})
+						}
+						citations = NormalizeCitations(citations)
+						if delta.Content != "" || delta.Thinking != "" || len(delta.ToolCalls) > 0 || len(citations) > 0 {
 							onChunk(StreamChunk{
 								Content:           delta.Content,
 								Thinking:          delta.Thinking,
 								ToolCalls:         delta.ToolCalls,
+								Citations:         citations,
 								Provider:          providerType,
 								Model:             model,
 								RequestID:         requestID,

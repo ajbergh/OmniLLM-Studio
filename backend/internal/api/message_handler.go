@@ -411,31 +411,123 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	webSearchEnabled := (req.WebSearch == nil || *req.WebSearch) && !urlCtxWebSearchBypass && h.chatPreflightAllowedForTurn(r.Context(), "web_search")
 
 	var orchResult *websearch.OrchestratorResult
+	var syncSearchStatus searchStatus
+	var syncPreflight *websearch.PreflightEvidence
+	var syncSearchRoute searchRouteDecision
+	var syncRouterTelemetry *intentrouter.RouterTelemetry
+
+	syncToolSelection := turnToolSelectionFromContext(r.Context())
+	syncCatalog := filterOutBrowserTools(
+		selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, syncToolSelection),
+	)
+	syncMechanism := searchMechanismNone
+	syncOwnershipProviderType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
+	syncOwnership := turnOwnershipInputs{
+		NativeGrounding:       websearch.SupportsNativeSearch(syncOwnershipProviderType, llmReq.Model),
+		IntegrationsConnected: integrationToolsConnected(syncCatalog),
+	}
+
 	if webSearchEnabled {
-		orchResult, err = h.orchestrator.Process(r.Context(), req.Content, llmReq.Messages, providerName, modelName)
-		if err != nil {
-			log.Printf("ERROR: orchestrator: %v", err)
-			respondError(w, http.StatusBadGateway, "orchestrator error")
-			return
+		syncSearchRoute = h.classifyCurrentInformation(r.Context(), req.Content)
+		syncRouterTelemetry = syncSearchRoute.Telemetry
+	}
+
+	// Same two shapes as the streaming path. Compound requests retrieve as a
+	// preflight so the tool loop below can act on the evidence; simple lookups
+	// let the orchestrator own the turn, which is cheaper.
+	if webSearchEnabled && syncSearchRoute.NeedsWeb {
+		retrievalText := syncSearchRoute.retrievalQuery(req.Content)
+		syncRetrievalPlan := websearch.BuildSearchPlan(
+			retrievalText, turncontext.FromContext(r.Context()).Now, turncontext.FromContext(r.Context()).Timezone,
+		)
+		if !retrievalMayOwnTurn(syncRetrievalPlan, req.Content, syncOwnership) {
+			var preflightErr error
+			syncPreflight, _, preflightErr = h.orchestrator.Preflight(r.Context(), retrievalText, syncSearchRoute.forcesRetrieval())
+			if (preflightErr != nil || syncPreflight == nil) && syncOwnership.NativeGrounding {
+				// The local provider failed but this model grounds itself. A
+				// grounded answer that skips the follow-up tool beats a
+				// training-data answer that includes one.
+				log.Printf("[websearch] preflight failed (%v); escalating to native grounding", preflightErr)
+				syncPreflight = nil
+				if nativeResult, nativeErr := h.orchestrator.Process(
+					r.Context(), retrievalText, llmReq.Messages, providerName, modelName, true,
+				); nativeErr == nil && nativeResult != nil && !nativeResult.SearchFailed {
+					orchResult = nativeResult
+					syncMechanism = searchMechanismNative
+					preflightErr = nil
+				}
+			}
+			if orchResult != nil {
+				// Escalation produced a grounded answer; fall through to the
+				// orchestrator-owned branch below.
+			} else if preflightErr != nil || syncPreflight == nil {
+				syncSearchStatus = searchStatus{
+					Attempted: true,
+					Failed:    true,
+					Reason:    classifySearchFailure(preflightErr),
+				}
+				syncMechanism = searchMechanismFailed
+				llmReq.Messages = append([]llm.ChatMessage{{
+					Role:    "system",
+					Content: degradedAnswerDirective,
+				}}, llmReq.Messages...)
+			} else {
+				syncSearchStatus = searchStatus{Attempted: true}
+				syncMechanism = searchMechanismLocal
+				llmReq.Messages = append(
+					[]llm.ChatMessage{syncPreflight.EvidenceSystemMessage(turncontext.FromContext(r.Context()))},
+					llmReq.Messages...,
+				)
+			}
+		} else {
+			orchResult, err = h.orchestrator.Process(r.Context(), retrievalText, llmReq.Messages, providerName, modelName, syncSearchRoute.forcesRetrieval())
+			if err != nil {
+				log.Printf("ERROR: orchestrator: %v", err)
+				respondError(w, http.StatusBadGateway, "orchestrator error")
+				return
+			}
+			if syncOwnership.NativeGrounding {
+				syncMechanism = searchMechanismNative
+			} else {
+				syncMechanism = searchMechanismLocal
+			}
 		}
 	}
 
 	if orchResult != nil {
 		// If web search was attempted but failed, fall through to normal LLM path
 		if orchResult.SearchFailed {
-			// Prepend a note to the system context about failed search
+			// Record the failure so the saved message is marked unverified. The
+			// directive constrains the answer; the metadata is what the UI trusts,
+			// because models do not reliably self-report stale data.
+			syncSearchStatus = searchStatus{
+				Attempted: true,
+				Failed:    true,
+				Reason:    classifySearchFailure(nil),
+			}
 			llmReq.Messages = append([]llm.ChatMessage{{
 				Role:    "system",
-				Content: "Note: A web search was attempted for this query but returned no results. Answer from your training data and mention that the information may not be current.",
+				Content: degradedAnswerDirective,
 			}}, llmReq.Messages...)
 			// Fall through to normal LLM path below
 		} else {
 			// Web search was triggered – use orchestrator result
 			metadata := map[string]interface{}{
-				"web_search": true,
-				"tool":       "web_search",
-				"sources":    orchResult.Sources,
+				metaWebSearch:       true,
+				"tool":              "web_search",
+				metaSources:         orchResult.Sources,
+				metaSearchAttempted: true,
 			}
+			if syncMechanism != searchMechanismNone {
+				metadata[metaSearchMechanism] = string(syncMechanism)
+			}
+			auditAnswerEvidence(
+				websearch.SearchPlan{TimeRange: orchestratorTimeRange(orchResult)},
+				orchResult.Content,
+				orchResult.Sources,
+				orchResult.Citations,
+				time.Now(),
+			).applyTo(metadata)
 			if orchResult.ToolCall != nil {
 				metadata["tool_call"] = orchResult.ToolCall
 			}
@@ -466,16 +558,57 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// ----- Normal LLM path (no web search) -----
+	// ----- Normal LLM path -----
+	//
+	// Non-streaming chat had no tool loop at all: selectChatToolsForContext was
+	// only called from the streaming handler, so llmReq.Tools was never set and
+	// ChatComplete could not produce a tool call. A compound current-information
+	// request therefore got retrieval or an action, never both.
+	if directive := syncToolSelection.directive(); directive != "" {
+		appendToBaseSystemPrompt(&llmReq, directive)
+	}
+	syncProviderType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
+	// syncCatalog already excludes browser tools. They are long-running and
+	// progress-driven, and the streaming loop routes them through a
+	// browser-aware sequential path that owns the per-turn navigation cap, the
+	// URL cache, and result sanitization. Running them through the generic round
+	// here would bypass all of that.
+	llmReq.Tools = syncCatalog
+	if syncPreflight != nil || syncOwnership.NativeGrounding {
+		// The turn already has a search mechanism; see withoutLocalWebSearch.
+		llmReq.Tools = withoutLocalWebSearch(llmReq.Tools)
+	}
+	syncEnforcement := newToolEnforcement(syncToolSelection)
 
-	// Call LLM (non-streaming)
+	syncWorkspaceID := ""
+	if convo.WorkspaceID != nil {
+		syncWorkspaceID = *convo.WorkspaceID
+	}
+	assistantMessageID := uuid.New().String()
+
 	start := time.Now()
-	resp, err := h.llmSvc.ChatComplete(r.Context(), llmReq)
+	loopOutcome, err := h.runSyncToolLoop(r.Context(), llmReq, syncProviderType, &syncEnforcement, tools.InvocationScope{
+		UserID:         auth.ScopeUserIDFromContext(r.Context()),
+		WorkspaceID:    syncWorkspaceID,
+		ConversationID: convoID,
+		MessageID:      assistantMessageID,
+	})
 	latency := int(time.Since(start).Milliseconds())
 	if err != nil {
-		log.Printf("ERROR: LLM chat complete: %v", err)
+		logSyncToolLoopFailure(err)
 		respondError(w, http.StatusBadGateway, "LLM request failed")
 		return
+	}
+
+	resp := &llm.ChatResponse{
+		Content:     loopOutcome.Content,
+		Thinking:    loopOutcome.Thinking,
+		Provider:    loopOutcome.Provider,
+		Model:       loopOutcome.Model,
+		TokenInput:  loopOutcome.TokenIn,
+		TokenOutput: loopOutcome.TokenOut,
+		Cost:        loopOutcome.Cost,
+		Citations:   loopOutcome.Citations,
 	}
 
 	assistantContent := resp.Content
@@ -528,9 +661,10 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Save assistant message
+	// Save assistant message. The ID was minted before the tool loop so tool
+	// invocation scope and the persisted row refer to the same message.
 	assistantMsg := &models.Message{
-		ID:             uuid.New().String(),
+		ID:             assistantMessageID,
 		ConversationID: convoID,
 		Role:           "assistant",
 		Content:        assistantContent,
@@ -562,6 +696,40 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			for k, v := range urlcontext.BuildMetadata(urlCtxResult) {
 				metaMap[k] = v
 			}
+		}
+		syncSearchStatus.applyTo(metaMap)
+		syncEnforcement.applyTo(metaMap)
+		if syncPreflight != nil || len(resp.Citations) > 0 {
+			auditPlan := websearch.SearchPlan{}
+			var auditSources []websearch.SearchResult
+			if syncPreflight != nil {
+				auditPlan = syncPreflight.Plan
+				auditSources = syncPreflight.Results
+			}
+			auditAnswerEvidence(auditPlan, assistantContent, auditSources, resp.Citations, time.Now()).applyTo(metaMap)
+		}
+		if syncPreflight != nil {
+			metaMap[metaWebSearch] = true
+			metaMap["tool"] = "web_search"
+			metaMap[metaSources] = syncPreflight.Results
+		}
+		if syncRouterTelemetry != nil {
+			metaMap["router"] = syncRouterTelemetry
+		}
+		if syncSearchRoute.NeedsWeb {
+			metaMap["search_route"] = syncSearchRoute.Source
+		}
+		if syncMechanism != searchMechanismNone {
+			metaMap[metaSearchMechanism] = string(syncMechanism)
+		}
+		if resp.Thinking != "" {
+			metaMap["thinking"] = resp.Thinking
+		}
+		if len(loopOutcome.ToolCalls) > 0 {
+			metaMap["tool_calls"] = loopOutcome.ToolCalls
+		}
+		if len(loopOutcome.Results) > 0 {
+			metaMap["tool_results"] = loopOutcome.Results
 		}
 		if len(metaMap) > 0 {
 			metaBytes, _ := json.Marshal(metaMap)
@@ -941,14 +1109,133 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var toolResults []tools.ToolResult
 	var browserToolResults []tools.ToolResult
 	var browserNavigatedURLs []string
-	if webSearchEnabled && !requiresComposableToolLoop(req.Content) {
-		searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
-			r.Context(), req.Content, providerName, modelName,
-		)
+	var streamSearchStatus searchStatus
+	var streamToolEnforcement toolEnforcement
+	var streamCitations []llm.Citation
+	streamMechanism := searchMechanismNone
+	var streamRetrievalPlan websearch.SearchPlan
+	var preflight *websearch.PreflightEvidence
+	var searchRoute searchRouteDecision
+	var searchRouterTelemetry *intentrouter.RouterTelemetry
+
+	// The tool catalog is resolved before the retrieval decision, because turn
+	// ownership depends on it: letting the search orchestrator answer a turn
+	// means the tool loop never runs, so a turn with connected integrations must
+	// not be given away on a keyword match.
+	streamTurnSelection := turnToolSelectionFromContext(r.Context())
+	streamProviderType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
+	streamLLMTools := selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, streamTurnSelection)
+	streamOwnership := turnOwnershipInputs{
+		NativeGrounding:       websearch.SupportsNativeSearch(streamProviderType, llmReq.Model),
+		IntegrationsConnected: integrationToolsConnected(streamLLMTools),
 	}
 
-	if searchResp != nil && wsErr == nil {
-		// Web search was triggered – notify the UI, then stream summarizer
+	if webSearchEnabled {
+		searchRoute = h.classifyCurrentInformation(r.Context(), req.Content)
+		if searchRoute.Telemetry != nil {
+			searchRouterTelemetry = searchRoute.Telemetry
+			sendSSE(w, flusher, "router", searchRouterTelemetry)
+		}
+	}
+
+	// Two shapes of current-information turn:
+	//
+	//   Simple lookup  -> the orchestrator owns the turn. Native grounding folds
+	//                     retrieval and generation into one provider call, which
+	//                     is the cheapest correct path.
+	//   Compound       -> retrieval runs as a preflight and the evidence is
+	//                     injected, leaving the tool loop free to calculate,
+	//                     export, or format afterwards.
+	//
+	// Compound requests used to skip retrieval altogether and hope the model
+	// would call web_search on its own. That was the only way to get a follow-up
+	// tool at all, because the orchestrator path terminates the turn — but it
+	// made evidence optional for exactly the requests most likely to need it.
+	if webSearchEnabled && searchRoute.NeedsWeb {
+		retrievalText := searchRoute.retrievalQuery(req.Content)
+		// Turn ownership and tool calling are mutually exclusive: the
+		// orchestrator paths answer and return, so the tool loop never runs.
+		// Only a single-fact lookup may take that path.
+		streamRetrievalPlan = websearch.BuildSearchPlan(
+			retrievalText, turncontext.FromContext(r.Context()).Now, turncontext.FromContext(r.Context()).Timezone,
+		)
+		if retrievalMayOwnTurn(streamRetrievalPlan, req.Content, streamOwnership) {
+			searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
+				r.Context(), retrievalText, providerName, modelName, searchRoute.forcesRetrieval(),
+			)
+			if wsErr == nil && streamOwnership.NativeGrounding {
+				streamMechanism = searchMechanismNative
+			} else if wsErr == nil {
+				streamMechanism = searchMechanismLocal
+			}
+		} else if streamOwnership.NativeGrounding {
+			// The provider grounds itself and the adapter carries our tools in the
+			// same request, so there is nothing for a local preflight to add. Skip
+			// it: running one here would search with the weaker provider and then
+			// hand the model evidence it did not need.
+			streamMechanism = searchMechanismNative
+		} else {
+			sendSSE(w, flusher, "web_search", map[string]interface{}{
+				"status": "searching",
+				"query":  retrievalText,
+			})
+			preflight, toolCall, wsErr = h.orchestrator.Preflight(r.Context(), retrievalText, searchRoute.forcesRetrieval())
+			if wsErr == nil {
+				streamMechanism = searchMechanismLocal
+			} else if streamOwnership.NativeGrounding {
+				// The local provider failed, but this model can ground itself.
+				// Answering from training data would be strictly worse than a
+				// grounded answer that skips the follow-up tool, and nothing has
+				// been streamed yet, so switching the turn's shape here is safe.
+				log.Printf("[websearch] preflight failed (%v); escalating to native grounding", wsErr)
+				sendSSE(w, flusher, "web_search", map[string]interface{}{
+					"status": "fallback",
+					"query":  retrievalText,
+				})
+				preflight = nil
+				nativeResp, nativeReq, nativeToolCall, nativeErr := h.orchestrator.ProcessStream(
+					r.Context(), retrievalText, providerName, modelName, true,
+				)
+				if nativeErr == nil && nativeResp != nil && nativeReq != nil {
+					searchResp, wsLLMReq, toolCall, wsErr = nativeResp, nativeReq, nativeToolCall, nil
+					streamMechanism = searchMechanismNative
+				}
+			}
+		}
+		if wsErr != nil {
+			streamMechanism = searchMechanismFailed
+		}
+		logSearchMechanism(streamMechanism, providerName, modelName, wsLLMReq != nil)
+	}
+
+	// A preflight supplies evidence to the tool loop rather than answering, so it
+	// must not take the orchestrator-owns-the-turn branch below.
+	if preflight != nil && wsErr == nil {
+		sourcesJSON, _ := json.Marshal(preflight.Results)
+		sendSSE(w, flusher, "web_search_results", map[string]interface{}{
+			"query":   preflight.Query,
+			"results": json.RawMessage(sourcesJSON),
+		})
+		llmReq.Messages = append(
+			[]llm.ChatMessage{preflight.EvidenceSystemMessage(turncontext.FromContext(r.Context()))},
+			llmReq.Messages...,
+		)
+		streamSearchStatus = searchStatus{Attempted: true}
+		// The evidence is already in context, so the model must not be forced to
+		// re-run web_search; it is free to reach for the follow-up tool instead.
+		wsLLMReq = nil
+		searchResp = &websearch.SearchResponse{
+			Query:     preflight.Query,
+			TimeRange: preflight.TimeRange,
+			Results:   preflight.Results,
+			FetchedAt: preflight.FetchedAt,
+		}
+	}
+
+	if searchResp != nil && wsLLMReq != nil && wsErr == nil {
+		// Web search owns this turn: stream the summarizer request it produced.
+		// The preflight path above deliberately leaves wsLLMReq nil, because its
+		// evidence feeds the tool loop instead of a summarizer.
 		sendSSE(w, flusher, "web_search", map[string]interface{}{
 			"tool_call": toolCall,
 			"status":    "searching",
@@ -993,6 +1280,9 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				if chunk.Cost != nil {
 					cost = *chunk.Cost
 				}
+				if len(chunk.Citations) > 0 {
+					streamCitations = llm.MergeCitations(streamCitations, chunk.Citations)
+				}
 				if chunk.Content != "" {
 					sendSSE(w, flusher, "token", map[string]string{"content": chunk.Content})
 				}
@@ -1002,7 +1292,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		err = streamSearchResponse(*wsLLMReq)
 		if err != nil && fullContent == "" && len(searchResp.Results) == 0 {
 			fallbackResp, fallbackReq, fallbackToolCall, fallbackErr := h.orchestrator.ProcessStreamFallback(
-				r.Context(), req.Content, providerName, modelName,
+				r.Context(), searchRoute.retrievalQuery(req.Content), providerName, modelName, searchRoute.forcesRetrieval(),
 			)
 			if fallbackErr == nil && fallbackResp != nil && fallbackReq != nil {
 				searchResp = fallbackResp
@@ -1023,26 +1313,66 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Normal LLM streaming (no web search, or search failed — fall through)
 		if wsErr != nil && toolCall != nil {
-			// Web search was attempted but failed — notify UI and add context
+			// Retrieval was attempted and failed. Record it so the answer is
+			// marked unverified in metadata and in the UI, rather than relying
+			// on the model to volunteer that its data may be stale.
+			streamSearchStatus = searchStatus{
+				Attempted: true,
+				Failed:    true,
+				Reason:    classifySearchFailure(wsErr),
+			}
 			sendSSE(w, flusher, "web_search", map[string]interface{}{
 				"tool_call": toolCall,
 				"status":    "failed",
+				"reason":    streamSearchStatus.Reason,
 			})
 			llmReq.Messages = append([]llm.ChatMessage{{
 				Role:    "system",
-				Content: "Note: A web search was attempted for this query but returned no results. Answer from your training data and mention that the information may not be current.",
+				Content: degradedAnswerDirective,
 			}}, llmReq.Messages...)
+			// Deliberately NOT forcing a web_search retry here. The tool would run
+			// the same plan against the same provider that just failed, and
+			// forcing it consumes the one round where the model could instead
+			// reach for the tool that can actually answer — an MCP, plugin, or app
+			// tool. web_search stays in the catalog; the model may retry if it
+			// judges that useful. The honest hedge is the directive above.
 		}
 
 		// Inject a policy-aware, intent-selected tool catalog. Gemini thought
 		// signatures are preserved in llm.ToolCall.extra_content and returned with
 		// assistant tool-call history.
-		turnSelection := turnToolSelectionFromContext(r.Context())
+		turnSelection := streamTurnSelection
 		if directive := turnSelection.directive(); directive != "" {
 			appendToBaseSystemPrompt(&llmReq, directive)
 		}
-		providerType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
-		llmTools := selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, turnSelection)
+		providerType := streamProviderType
+		llmTools := streamLLMTools
+		// Grounding now travels with the tool catalog rather than excluding it: the
+		// Gemini and Anthropic adapters emit their search tool alongside the
+		// caller's function declarations, so one request can do both.
+		//
+		// The local web_search tool is still withdrawn. A turn that has the
+		// provider's own index, or evidence already in context, does not need a
+		// rate-limited HTML scraper as a second option — one observed turn spent
+		// five tool calls re-searching, two refused outright.
+		groundedToolLoop := false
+		if streamOwnership.NativeGrounding && searchRoute.NeedsWeb && preflight == nil {
+			if plugin := llm.NativeSearchPlugin(websearch.NativeSearchConfigForPlan(
+				streamRetrievalPlan, turncontext.FromContext(r.Context()),
+			)); plugin.ID != "" {
+				llmReq.Plugins = append(llmReq.Plugins, plugin)
+				groundedToolLoop = true
+				streamMechanism = searchMechanismNative
+			}
+		}
+		if preflight != nil || streamOwnership.NativeGrounding {
+			llmTools = withoutLocalWebSearch(llmTools)
+		}
+		if groundedToolLoop {
+			appendToBaseSystemPrompt(&llmReq, groundedToolLoopDirective)
+			logSearchMechanism(streamMechanism, providerName, modelName, false)
+		}
+		streamToolEnforcement = newToolEnforcement(turnSelection)
 		const maxToolLoops = 10
 		const maxBrowserNavsPerTurn = 3
 		const maxToolResultCharsPerTurn = 150000
@@ -1056,6 +1386,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 		streamFinalAnswer := func(reason string) error {
 			llmReq.Tools = nil
+			llmReq.ToolChoice = nil
 			llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
 				Role:    "system",
 				Content: reason + " Do not call any more tools. Give the best possible final answer using the tool results already present in the conversation.",
@@ -1076,11 +1407,18 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				if chunk.Cost != nil {
 					cost = *chunk.Cost
 				}
+				if len(chunk.Citations) > 0 {
+					streamCitations = llm.MergeCitations(streamCitations, chunk.Citations)
+				}
 				if chunk.Content != "" {
 					sendSSE(w, flusher, "token", map[string]string{"content": chunk.Content})
 				}
 			})
 		}
+
+		// retriedForToolRequirement guards the single re-prompt below, so a model
+		// that keeps refusing cannot loop.
+		retriedForToolRequirement := false
 
 		for loopIndex := 0; loopIndex < maxToolLoops; loopIndex++ {
 			if browserNavCount >= maxBrowserNavsPerTurn {
@@ -1088,6 +1426,10 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			} else {
 				llmReq.Tools = llmTools
 			}
+			// Ask the provider to force the call rather than merely requesting it
+			// in the system prompt. Only the first round is constrained; a
+			// provider held at "required" never produces a final answer.
+			llmReq.ToolChoice = streamToolEnforcement.toolChoiceForRound(loopIndex, len(llmReq.Tools) > 0, providerType)
 
 			chunkToolCalls := make(map[int]*llm.ToolCall)
 			var loopContent string
@@ -1109,6 +1451,9 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				if chunk.Cost != nil {
 					cost = *chunk.Cost
 				}
+				if len(chunk.Citations) > 0 {
+					streamCitations = llm.MergeCitations(streamCitations, chunk.Citations)
+				}
 				if chunk.Content != "" {
 					sendSSE(w, flusher, "token", map[string]string{"content": chunk.Content})
 				}
@@ -1125,10 +1470,22 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			if len(chunkToolCalls) == 0 {
+				// A required tool was skipped. Re-prompt once, but only while the
+				// answer is still empty: content already sent to the client cannot
+				// be retracted, and a retry after streaming would duplicate it.
+				if streamToolEnforcement.unfulfilled() && !retriedForToolRequirement && loopContent == "" && fullContent == "" {
+					retriedForToolRequirement = true
+					llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
+						Role:    "system",
+						Content: unfulfilledToolDirective(streamToolEnforcement.requiredTool),
+					})
+					continue
+				}
 				break
 			}
 
 			finalToolCalls := llm.NormalizeToolCalls(providerType, orderedToolCalls(chunkToolCalls))
+			streamToolEnforcement.observe(finalToolCalls)
 			llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
 				Role:      "assistant",
 				Content:   loopContent,
@@ -1378,12 +1735,40 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Build metadata for the saved message
 	metaMap := map[string]interface{}{}
 	if searchResp != nil {
-		metaMap["web_search"] = true
+		metaMap[metaWebSearch] = true
 		metaMap["tool"] = "web_search"
-		metaMap["sources"] = searchResp.Results
+		metaMap[metaSources] = searchResp.Results
 		if toolCall != nil {
 			metaMap["tool_call"] = toolCall
 		}
+	}
+	streamSearchStatus.applyTo(metaMap)
+	streamToolEnforcement.applyTo(metaMap)
+	// Post-stream evidence audit. Streaming previously ran no validation at all:
+	// ProcessStream returns a request and the handler streams it. The audit cannot
+	// reject a streamed answer, so it records freshness and citation state in
+	// metadata for the UI rather than gating the response.
+	if searchResp != nil || len(streamCitations) > 0 {
+		auditPlan := websearch.SearchPlan{}
+		if preflight != nil {
+			auditPlan = preflight.Plan
+		} else if searchResp != nil {
+			auditPlan.TimeRange = searchResp.TimeRange
+		}
+		var auditSources []websearch.SearchResult
+		if searchResp != nil {
+			auditSources = searchResp.Results
+		}
+		auditAnswerEvidence(auditPlan, fullContent, auditSources, streamCitations, time.Now()).applyTo(metaMap)
+	}
+	if searchRouterTelemetry != nil {
+		metaMap["router"] = searchRouterTelemetry
+	}
+	if searchRoute.NeedsWeb {
+		metaMap["search_route"] = searchRoute.Source
+	}
+	if streamMechanism != searchMechanismNone {
+		metaMap[metaSearchMechanism] = string(streamMechanism)
 	}
 	if len(ragSources) > 0 {
 		metaMap["rag_sources"] = ragSources
@@ -1466,8 +1851,29 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		"latency_ms": latency,
 	}
 	if searchResp != nil {
-		donePayload["web_search"] = true
-		donePayload["sources"] = searchResp.Results
+		donePayload[metaWebSearch] = true
+		donePayload[metaSources] = searchResp.Results
+	}
+	streamSearchStatus.applyTo(donePayload)
+	streamToolEnforcement.applyTo(donePayload)
+	// Mirror the evidence audit into the done payload so the live UI marks the
+	// message the same way a reloaded conversation does.
+	for _, key := range []string{
+		metaSources, metaNativeCitations, metaFreshnessVerified,
+		metaAnswerFreshness, metaCitationCount, metaClaimWarning,
+	} {
+		if value, ok := metaMap[key]; ok {
+			donePayload[key] = value
+		}
+	}
+	if searchRouterTelemetry != nil {
+		donePayload["router"] = searchRouterTelemetry
+	}
+	if searchRoute.NeedsWeb {
+		donePayload["search_route"] = searchRoute.Source
+	}
+	if streamMechanism != searchMechanismNone {
+		donePayload[metaSearchMechanism] = string(streamMechanism)
 	}
 	if len(ragSources) > 0 {
 		donePayload["rag_sources"] = ragSources

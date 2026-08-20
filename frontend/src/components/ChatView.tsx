@@ -24,6 +24,8 @@ import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi, a
 import { useImageEditorStore } from '../stores/imageEditor';
 import { useMusicStudioStore } from '../stores/musicStudio';
 import { matchesShortcut } from '../shortcuts';
+import { RetrievalStatus, ClaimWarning, FreshnessBadge } from './RetrievalStatus';
+import { SEARCH_FAILURE_LABELS } from '../types';
 import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult, Attachment, RouterTelemetry, ChatTurnToolSelection } from '../types';
 import { AgentEventType } from '../types';
 import { getKnownImageModels, getModelReasoningLevels, getModelToolCallingSupport, isFreeModel, type ReasoningEffortLevel } from '../models';
@@ -132,7 +134,7 @@ export function ChatView() {
   const {
     messages, loadedConversationId, loading: messagesLoading, streaming, streamingContent, streamingThinking, error,
     sendMessage, clearMessages, replaceMessages, stopStreaming,
-    webSearching, webSearchQuery, urlContextStatus, urlContextKind,
+    webSearching, webSearchQuery, searchFailed, searchFailureReason, urlContextStatus, urlContextKind,
     browserStatus, browserStatusDetail, browserProgress,
     ragIndexingStatus, ragIndexingDetail, imageGenerating,
     streamingTools, waitingForToolApproval,
@@ -894,6 +896,29 @@ export function ChatView() {
                   </div>
                   <span className="text-xs text-violet-400">Generating image…</span>
                 </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Live retrieval failure. The saved message carries the same state in
+              metadata, but that only exists after the stream completes — without
+              this the spinner simply vanished and the answer began, which reads
+              as a successful search. */}
+          {streaming && searchFailed && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-start gap-3 max-w-3xl xl:max-w-4xl 2xl:max-w-5xl min-w-0"
+            >
+              <div className="w-8 h-8 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0 mt-0.5">
+                <Globe size={15} className="text-amber-400" />
+              </div>
+              <div className="flex min-w-0 flex-col gap-1 px-4 py-3 rounded-2xl bg-surface-alt border border-amber-500/25 rounded-bl-md">
+                <span className="text-xs text-amber-300">Could not verify current information</span>
+                <span className="text-[10px] text-text-muted">
+                  {searchFailureReason ? SEARCH_FAILURE_LABELS[searchFailureReason] : 'The search could not be completed.'}
+                  {' '}Answering from training data.
+                </span>
               </div>
             </motion.div>
           )}
@@ -1956,6 +1981,10 @@ function MessageBubble({
           </div>
         )}
 
+        {/* Retrieval outcome: failed lookups and grounded-but-uncitable answers */}
+        {!isUser && <RetrievalStatus metadata={metadata} />}
+        {!isUser && <ClaimWarning metadata={metadata} />}
+
         {/* Collapsible Sources panel */}
         {!isUser && sources.length > 0 && (
           <div className="mt-2">
@@ -1965,6 +1994,7 @@ function MessageBubble({
             >
               <Globe size={10} className="text-blue-400" />
               <span>{sources.length} source{sources.length !== 1 ? 's' : ''} cited</span>
+              <FreshnessBadge metadata={metadata} />
               {sourcesOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
             </button>
 
