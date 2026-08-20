@@ -25,6 +25,35 @@ describe('retrievalStateFrom', () => {
     ).toBe('failed');
   });
 
+  it('reports a skipped required tool ahead of the grounded states', () => {
+    // Content has already streamed by the time the backend knows the tool was
+    // skipped, so metadata is the only channel left to mark the answer.
+    expect(
+      retrievalStateFrom({
+        tool_required: 'web_search',
+        tool_enforced: true,
+        tool_requirement_unfulfilled: true,
+        web_search: true,
+        sources: [source],
+      }),
+    ).toBe('tool-skipped');
+  });
+
+  it('ranks a failed search above a skipped tool', () => {
+    expect(
+      retrievalStateFrom({
+        search_failed: true,
+        tool_requirement_unfulfilled: true,
+      }),
+    ).toBe('failed');
+  });
+
+  it('ignores a satisfied tool requirement', () => {
+    expect(
+      retrievalStateFrom({ tool_required: 'web_search', tool_enforced: true, web_search: true, sources: [source] }),
+    ).toBe('grounded-unverified');
+  });
+
   it('flags a grounded answer that returned no citable sources', () => {
     // Native grounding returns an empty results array; `[] || fallback` yields
     // `[]` because an empty array is truthy, so this state is reachable.

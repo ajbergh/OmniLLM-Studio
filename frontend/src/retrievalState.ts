@@ -7,6 +7,7 @@ import type { MessageMetadata } from './types';
 export type RetrievalState =
   | 'none'
   | 'failed'
+  | 'tool-skipped'
   | 'grounded-verified'
   | 'grounded-unverified'
   | 'grounded-no-sources';
@@ -14,12 +15,14 @@ export type RetrievalState =
 /**
  * Derives the retrieval state from message metadata.
  *
- * Order matters: a failed retrieval outranks everything, because the answer that
- * follows it came from model memory regardless of what else is set.
+ * Order matters: a failed retrieval and a skipped required tool both outrank the
+ * grounded states, because in either case the answer came from model memory
+ * regardless of what else is set.
  */
 export function retrievalStateFrom(metadata: MessageMetadata | null | undefined): RetrievalState {
   if (!metadata) return 'none';
   if (metadata.search_failed) return 'failed';
+  if (metadata.tool_requirement_unfulfilled) return 'tool-skipped';
   if (!metadata.web_search) return 'none';
 
   const sourceCount = metadata.sources?.length ?? 0;

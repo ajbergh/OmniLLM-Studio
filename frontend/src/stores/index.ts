@@ -413,6 +413,13 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             metadata.search_failed = true;
             metadata.search_failure_reason = data.search_failure_reason ?? 'provider_error';
           }
+          if (data.tool_required !== undefined) {
+            metadata.tool_required = data.tool_required;
+            metadata.tool_enforced = data.tool_enforced ?? false;
+          }
+          if (data.tool_requirement_unfulfilled) {
+            metadata.tool_requirement_unfulfilled = true;
+          }
           if (data.file_search) {
             metadata.file_search = true;
             metadata.tool = 'file_search';

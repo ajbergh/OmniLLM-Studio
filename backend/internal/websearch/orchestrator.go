@@ -192,12 +192,109 @@ func (o *Orchestrator) ProcessStreamFallback(
 
 // DirectSearch executes a search request without classification or LLM
 // summarization.
+//
+// This is the low-level path, reserved for the explicit /v1/websearch endpoint
+// where the caller supplies every parameter deliberately. Model-facing tools
+// must use PlannedSearch instead: a model that omits time_range, region, and
+// locale should get server-chosen values, not no values.
 func (o *Orchestrator) DirectSearch(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
 	provider, _ := o.snapshot()
 	if provider == nil {
 		return nil, fmt.Errorf("web search is disabled")
 	}
 	return provider.Search(ctx, req)
+}
+
+// PlannedSearchResult carries retrieved evidence plus the retrieval metadata a
+// model needs in order to describe it honestly.
+type PlannedSearchResult struct {
+	Query     string         `json:"query"`
+	Queries   []string       `json:"queries"`
+	TimeRange string         `json:"time_range"`
+	Region    string         `json:"region"`
+	Locale    string         `json:"locale"`
+	Intent    SearchIntent   `json:"intent"`
+	Results   []SearchResult `json:"results"`
+	FetchedAt time.Time      `json:"fetched_at"`
+	// Sufficient reports whether the evidence met the plan's corroboration and
+	// source-class requirements. False means the answer should hedge.
+	Sufficient bool `json:"sufficient"`
+	// RequiresCitations mirrors the plan, so the tool result can tell the model
+	// that claims must be traceable.
+	RequiresCitations bool `json:"requires_citations"`
+}
+
+// PlannedSearch runs a model-supplied query through the planner.
+//
+// The model chooses what to look for; the server chooses how to look. Freshness
+// window, region, locale, query expansion, result count, and source ranking are
+// all decided here, because a model that omits them produces an unconstrained
+// search whose results it then presents as current.
+//
+// timeRangeOverride is honored when non-empty, so a caller that genuinely knows
+// the window it wants can still say so.
+func (o *Orchestrator) PlannedSearch(
+	ctx context.Context,
+	query string,
+	timeRangeOverride string,
+	maxResults int,
+) (*PlannedSearchResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+	tc := turncontext.FromContext(ctx)
+
+	plan := BuildSearchPlan(query, tc.Now, tc.Timezone)
+	if !plan.NeedsWeb {
+		// The gate is tuned for conversational turns. An explicit tool call is
+		// itself the intent signal, so fall back to a general plan rather than
+		// refusing to search.
+		plan = generalPlanForQuery(query, tc)
+	}
+	if strings.TrimSpace(timeRangeOverride) != "" {
+		plan.TimeRange = strings.TrimSpace(timeRangeOverride)
+	}
+	if maxResults > 0 && maxResults <= 20 {
+		plan.MaxResults = maxResults
+	}
+	plan = normalizePlan(plan)
+
+	searchResp, err := o.searchWithPlan(ctx, plan, tc)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PlannedSearchResult{
+		Query:             plan.Queries[0],
+		Queries:           append([]string(nil), plan.Queries...),
+		TimeRange:         plan.TimeRange,
+		Region:            firstNonEmptySearch(tc.Country, "US"),
+		Locale:            firstNonEmptySearch(tc.Locale, "en-US"),
+		Intent:            plan.Intent,
+		Results:           searchResp.Results,
+		FetchedAt:         searchResp.FetchedAt,
+		Sufficient:        ResultsLikelyAnswerable(plan, searchResp.Results),
+		RequiresCitations: plan.RequiresCitations,
+	}, nil
+}
+
+// generalPlanForQuery builds a bounded plan for an explicit tool call whose text
+// the conversational gate would not have triggered on.
+func generalPlanForQuery(query string, tc turncontext.TurnContext) SearchPlan {
+	return normalizePlan(SearchPlan{
+		NeedsWeb:            true,
+		Intent:              SearchIntentGeneral,
+		AnswerShape:         AnswerShapeStandard,
+		Queries:             []string{buildSearchQuery(query, tc.Now)},
+		TimeRange:           inferTimeRange(strings.ToLower(query)),
+		MaxResults:          6,
+		MaxIterations:       1,
+		SearchContextSize:   "medium",
+		NativePreferred:     false,
+		RequiredSourceClass: SourceClassAny,
+		MinSources:          1,
+	})
 }
 
 func (o *Orchestrator) searchWithPlan(ctx context.Context, plan SearchPlan, tc turncontext.TurnContext) (*SearchResponse, error) {

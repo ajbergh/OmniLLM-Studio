@@ -41,6 +41,28 @@ export function RetrievalStatus({ metadata }: RetrievalStatusProps) {
     );
   }
 
+  if (state === 'tool-skipped') {
+    const toolName = typeof metadata?.tool_required === 'string' ? metadata.tool_required : null;
+    return (
+      <div
+        role="status"
+        className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5"
+      >
+        <AlertTriangle size={12} className="mt-0.5 shrink-0 text-amber-400" aria-hidden="true" />
+        <div className="min-w-0 text-[11px] leading-relaxed">
+          <span className="font-medium text-amber-300">
+            {toolName ? `The ${toolName} tool was required but never ran.` : 'A required tool never ran.'}
+          </span>{' '}
+          <span className="text-text-muted">
+            {metadata?.tool_enforced
+              ? 'The provider was asked to require it and answered anyway, so this response is unverified.'
+              : 'This provider does not support forced tool calls, so the requirement could not be enforced. Treat the answer as unverified.'}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   if (state === 'grounded-no-sources') {
     return (
       <div

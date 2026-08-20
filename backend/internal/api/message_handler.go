@@ -952,6 +952,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var browserToolResults []tools.ToolResult
 	var browserNavigatedURLs []string
 	var streamSearchStatus searchStatus
+	var streamToolEnforcement toolEnforcement
 	if webSearchEnabled && !requiresComposableToolLoop(req.Content) {
 		searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
 			r.Context(), req.Content, providerName, modelName,
@@ -1062,6 +1063,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 		providerType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
 		llmTools := selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, turnSelection)
+		streamToolEnforcement = newToolEnforcement(turnSelection)
 		const maxToolLoops = 10
 		const maxBrowserNavsPerTurn = 3
 		const maxToolResultCharsPerTurn = 150000
@@ -1075,6 +1077,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 		streamFinalAnswer := func(reason string) error {
 			llmReq.Tools = nil
+			llmReq.ToolChoice = nil
 			llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
 				Role:    "system",
 				Content: reason + " Do not call any more tools. Give the best possible final answer using the tool results already present in the conversation.",
@@ -1101,12 +1104,20 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 
+		// retriedForToolRequirement guards the single re-prompt below, so a model
+		// that keeps refusing cannot loop.
+		retriedForToolRequirement := false
+
 		for loopIndex := 0; loopIndex < maxToolLoops; loopIndex++ {
 			if browserNavCount >= maxBrowserNavsPerTurn {
 				llmReq.Tools = filterOutTool(llmTools, "browser_navigate")
 			} else {
 				llmReq.Tools = llmTools
 			}
+			// Ask the provider to force the call rather than merely requesting it
+			// in the system prompt. Only the first round is constrained; a
+			// provider held at "required" never produces a final answer.
+			llmReq.ToolChoice = streamToolEnforcement.toolChoiceForRound(loopIndex, len(llmReq.Tools) > 0)
 
 			chunkToolCalls := make(map[int]*llm.ToolCall)
 			var loopContent string
@@ -1144,10 +1155,22 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			if len(chunkToolCalls) == 0 {
+				// A required tool was skipped. Re-prompt once, but only while the
+				// answer is still empty: content already sent to the client cannot
+				// be retracted, and a retry after streaming would duplicate it.
+				if streamToolEnforcement.unfulfilled() && !retriedForToolRequirement && loopContent == "" && fullContent == "" {
+					retriedForToolRequirement = true
+					llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
+						Role:    "system",
+						Content: unfulfilledToolDirective(streamToolEnforcement.requiredTool),
+					})
+					continue
+				}
 				break
 			}
 
 			finalToolCalls := llm.NormalizeToolCalls(providerType, orderedToolCalls(chunkToolCalls))
+			streamToolEnforcement.observe(finalToolCalls)
 			llmReq.Messages = append(llmReq.Messages, llm.ChatMessage{
 				Role:      "assistant",
 				Content:   loopContent,
@@ -1405,6 +1428,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	streamSearchStatus.applyTo(metaMap)
+	streamToolEnforcement.applyTo(metaMap)
 	if len(ragSources) > 0 {
 		metaMap["rag_sources"] = ragSources
 	}
@@ -1490,6 +1514,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		donePayload[metaSources] = searchResp.Results
 	}
 	streamSearchStatus.applyTo(donePayload)
+	streamToolEnforcement.applyTo(donePayload)
 	if len(ragSources) > 0 {
 		donePayload["rag_sources"] = ragSources
 	}

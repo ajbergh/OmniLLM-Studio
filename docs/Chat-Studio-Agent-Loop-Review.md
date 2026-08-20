@@ -15,7 +15,7 @@ in code were corrected or removed.
 |---|---|---|
 | 0 | Stop the silent failure | ✅ Complete |
 | 1 | Fix classification, then breadth | ✅ Complete |
-| 2 | Make retrieval enforceable | ⏳ Not started |
+| 2 | Make retrieval enforceable | ✅ Complete |
 | 3 | Backend-owned preflight | ⏳ Not started |
 | 4 | Evidence contract and citations | ⏳ Not started |
 | 5 | Provider strategy and measurement | ⏳ Not started |
@@ -68,6 +68,36 @@ Three further defects surfaced from the new table-driven test:
 **Residual gap, deliberately not closed here:** purely semantic phrasing with no keyword hook. "How do the available models compare?" now reaches the threshold via weak comparison/availability signals, but the general case is regex-resistant and belongs to the semantic router in Phase 3. `TestShouldWebSearch_ComparisonReachesThreshold` marks the boundary.
 
 **Also unchanged by choice:** "the current state of X" still does not trigger. It is as often rhetorical as temporal, and `TestShouldWebSearch_WeakOnly` asserts the existing behaviour. Widening `current` to a bare decisive signal would have broken that case for no clear gain.
+
+### Phase 2 — complete
+
+| # | Change | Result |
+|---|---|---|
+| 2.1 | `ToolChoice` | New `llm.ToolChoice` (`auto`/`none`/`required`/`specific`) translated per provider at serialization time by `applyToolChoice`. Sent on an **allowlist** (`openai`, `anthropic`, `openrouter`, `groq`, `together`, `mistral`, `gemini`); omitted elsewhere. |
+| 2.2 | Loop enforcement | New `toolEnforcement` forces `tool_choice` on round 0 only, observes what the model actually called, re-prompts once while the answer is still empty, and records `tool_required` / `tool_enforced` / `tool_requirement_unfulfilled` in metadata. Frontend renders a `tool-skipped` banner. |
+| 2.3 | Tool defaults | `web_search` now gets server-chosen `TimeRange`, `Region`, `Locale`, and `MaxResults` from turn context and the plan. |
+| 2.4 | `PlannedSearch` | New orchestrator method; `WebSearchTool.Execute` uses it. `DirectSearch` is now documented as reserved for `/v1/websearch`. |
+| 2.5 | Retrieval metadata | The tool payload changed from a bare result array to an object carrying `fetched_at`, `time_range`, `region`, `locale`, `intent`, `queries_run`, `evidence_sufficient`, and `guidance`. |
+| 2.6 | `websearch_tool_test.go` | 9 tests asserting server-injected defaults, planner-derived freshness per intent, explicit-override handling, retrieval metadata, official-source ranking, insufficient-evidence hedging, and provider-failure propagation. |
+
+Design notes worth recording, because each is a deliberate trade-off:
+
+- **`tool_choice` is an allowlist, not a denylist.** A provider that rejects an
+  unknown field returns 400 and breaks the entire turn — far worse than falling back
+  to advisory behaviour. Ollama and generic OpenAI-compatible endpoints are excluded;
+  the post-hoc check catches them instead.
+- **Only round 0 is forced.** A provider held at `tool_choice: "required"` never emits
+  a final answer, so the loop would run to its round limit every time.
+- **The post-hoc check cannot retract an answer.** By the time the loop knows a required
+  tool was skipped, tokens have already streamed. The re-prompt therefore fires only
+  while `fullContent == ""`; otherwise the outcome is recorded in metadata and rendered
+  as an "unverified" banner. Pretending the answer can be rejected after streaming would
+  duplicate content in the UI.
+- **`PlannedSearch` falls back to a general plan** when the conversational gate would
+  not have fired. An explicit tool call *is* the intent signal, so refusing to search
+  because the phrasing lacked a keyword would be wrong.
+
+**Also found:** the non-streaming `Send` handler has **no tool loop at all**. `selectChatToolsForContext` is called only in the streaming path, so `llmReq.Tools` is never set for non-streaming requests. The review described this as an "asymmetry"; it is more accurate to say non-streaming chat has no tool support whatsoever. Phase 3.5 addresses it.
 
 ## Investigation summary
 

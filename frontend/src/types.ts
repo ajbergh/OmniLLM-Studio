@@ -261,6 +261,14 @@ export interface MessageMetadata {
   answer_freshness?: string;
   /** Set when the answer makes numeric claims that no source supports. */
   unsupported_claims?: string[];
+  /**
+   * Tool-requirement outcome for the turn. `tool_required` names the tool (or is
+   * `true` for "any tool"); `tool_enforced` records whether the provider was
+   * asked to force the call; `tool_requirement_unfulfilled` means it never ran.
+   */
+  tool_required?: string | boolean;
+  tool_enforced?: boolean;
+  tool_requirement_unfulfilled?: boolean;
   file_sources?: FileSearchResult[];
   tool_call?: ToolCall;
   rag_sources?: RAGSourceRef[];
