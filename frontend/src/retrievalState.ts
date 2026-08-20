@@ -9,6 +9,7 @@ export type RetrievalState =
   | 'failed'
   | 'tool-skipped'
   | 'grounded-verified'
+  | 'grounded-dated'
   | 'grounded-unverified'
   | 'grounded-no-sources';
 
@@ -27,5 +28,12 @@ export function retrievalStateFrom(metadata: MessageMetadata | null | undefined)
 
   const sourceCount = metadata.sources?.length ?? 0;
   if (sourceCount === 0) return 'grounded-no-sources';
-  return metadata.freshness_verified ? 'grounded-verified' : 'grounded-unverified';
+  if (metadata.freshness_verified) return 'grounded-verified';
+  // Knowing the newest source date is a distinct state from knowing nothing.
+  // `freshness_verified` requires a *requested* window, and the pricing,
+  // release, and benchmark intents deliberately request none — so without this
+  // branch those answers reported "dates unknown" while the backend had the
+  // date in hand.
+  if (metadata.answer_freshness) return 'grounded-dated';
+  return 'grounded-unverified';
 }

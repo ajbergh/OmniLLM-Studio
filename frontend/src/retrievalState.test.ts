@@ -68,6 +68,27 @@ describe('retrievalStateFrom', () => {
     ).toBe('grounded-verified');
   });
 
+  it('reports a known newest date even when no window was requested', () => {
+    // `freshness_verified` requires a requested window, and the pricing,
+    // release, and benchmark intents deliberately request none. Without this
+    // state those answers claimed "dates unknown" while the backend had the
+    // date in hand.
+    expect(
+      retrievalStateFrom({ web_search: true, sources: [source], answer_freshness: '2 days ago' }),
+    ).toBe('grounded-dated');
+  });
+
+  it('prefers verified over dated when both are present', () => {
+    expect(
+      retrievalStateFrom({
+        web_search: true,
+        sources: [source],
+        answer_freshness: '2 hours ago',
+        freshness_verified: true,
+      }),
+    ).toBe('grounded-verified');
+  });
+
   it('ignores retrieval state for answers that never searched', () => {
     expect(retrievalStateFrom({ search_attempted: true })).toBe('none');
   });

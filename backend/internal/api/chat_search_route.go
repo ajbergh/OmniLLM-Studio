@@ -113,6 +113,17 @@ func (h *MessageHandler) routerWebSearchMode() intentrouter.RouterMode {
 	}
 }
 
+// forcesRetrieval reports whether the orchestrator must skip its own gate check.
+//
+// The orchestrator entry points re-run BuildSearchPlan, so a turn the
+// deterministic gate declined would be vetoed there even though the semantic
+// router accepted it — producing a turn that reported an attempted search and
+// performed none. Only a router decision needs the override; a deterministic
+// decision will pass the gate again by construction.
+func (d searchRouteDecision) forcesRetrieval() bool {
+	return d.NeedsWeb && d.Source == searchRouteSourceRouter
+}
+
 // retrievalQuery picks the text to search for. The router's rewritten query is
 // preferred when it supplied one, since it normalizes conversational phrasing.
 func (d searchRouteDecision) retrievalQuery(userText string) string {

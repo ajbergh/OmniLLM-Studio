@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ajbergh/omnillm-studio/internal/llm"
@@ -21,7 +22,7 @@ func TestToolEnforcementInactiveForAutoMode(t *testing.T) {
 	if e.active {
 		t.Error("auto mode must not enforce anything")
 	}
-	if e.toolChoiceForRound(0, true) != nil {
+	if e.toolChoiceForRound(0, true, "openai") != nil {
 		t.Error("auto mode must not constrain the provider")
 	}
 	if e.unfulfilled() {
@@ -44,11 +45,11 @@ func TestToolEnforcementForcesFirstRoundOnly(t *testing.T) {
 	}
 	e := newToolEnforcement(selection)
 
-	choice := e.toolChoiceForRound(0, true)
+	choice := e.toolChoiceForRound(0, true, "openai")
 	if choice == nil || choice.Mode != llm.ToolChoiceSpecific || choice.Name != "web_search" {
 		t.Fatalf("round 0 must force the named tool, got %#v", choice)
 	}
-	if got := e.toolChoiceForRound(1, true); got != nil {
+	if got := e.toolChoiceForRound(1, true, "openai"); got != nil {
 		t.Errorf("round 1 must be unconstrained, got %#v", got)
 	}
 	if !e.providerEnforced {
@@ -56,11 +57,40 @@ func TestToolEnforcementForcesFirstRoundOnly(t *testing.T) {
 	}
 }
 
+// TestToolEnforcementProviderEnforcedTracksAllowlist guards a metadata lie: the
+// LLM layer drops tool_choice for providers off its allowlist, so recording
+// enforcement unconditionally made the UI claim the provider had been asked to
+// require the tool and answered anyway — when the request never carried the
+// constraint.
+func TestToolEnforcementProviderEnforcedTracksAllowlist(t *testing.T) {
+	selection, _ := parseTurnToolSelection("specific", []string{"web_search"}, "web_search")
+
+	supported := newToolEnforcement(selection)
+	if choice := supported.toolChoiceForRound(0, true, "openai"); choice == nil {
+		t.Fatal("a supported provider must receive the constraint")
+	}
+	if !supported.providerEnforced {
+		t.Error("providerEnforced must be true for an allowlisted provider")
+	}
+
+	unsupported := newToolEnforcement(selection)
+	_ = unsupported.toolChoiceForRound(0, true, "ollama")
+	if unsupported.providerEnforced {
+		t.Error("providerEnforced must be false when the field is dropped in transport")
+	}
+
+	meta := map[string]interface{}{}
+	unsupported.applyTo(meta)
+	if meta[metaToolEnforced] != false {
+		t.Errorf("%s = %v, want false", metaToolEnforced, meta[metaToolEnforced])
+	}
+}
+
 func TestToolEnforcementSkipsWhenNoToolsAdvertised(t *testing.T) {
 	selection, _ := parseTurnToolSelection("required", nil, "")
 	e := newToolEnforcement(selection)
 	// tool_choice with an empty catalog is a provider error on several backends.
-	if got := e.toolChoiceForRound(0, false); got != nil {
+	if got := e.toolChoiceForRound(0, false, "openai"); got != nil {
 		t.Errorf("no tools advertised means no tool_choice, got %#v", got)
 	}
 }
@@ -68,7 +98,7 @@ func TestToolEnforcementSkipsWhenNoToolsAdvertised(t *testing.T) {
 func TestToolEnforcementRequiredAnyTool(t *testing.T) {
 	selection, _ := parseTurnToolSelection("required", nil, "")
 	e := newToolEnforcement(selection)
-	choice := e.toolChoiceForRound(0, true)
+	choice := e.toolChoiceForRound(0, true, "openai")
 	if choice == nil || choice.Mode != llm.ToolChoiceRequired {
 		t.Fatalf("required mode with no named tool must demand any tool, got %#v", choice)
 	}
@@ -93,7 +123,7 @@ func TestToolEnforcementObserveMatchesNamedToolOnly(t *testing.T) {
 		t.Error("the named tool must satisfy the requirement")
 	}
 	// Once satisfied, later rounds must not be re-constrained.
-	if got := e.toolChoiceForRound(0, true); got != nil {
+	if got := e.toolChoiceForRound(0, true, "openai"); got != nil {
 		t.Errorf("a satisfied requirement must not re-force the provider, got %#v", got)
 	}
 }
@@ -113,7 +143,7 @@ func TestToolEnforcementObserveIgnoresBlankNames(t *testing.T) {
 func TestToolEnforcementMetadataRecordsViolation(t *testing.T) {
 	selection, _ := parseTurnToolSelection("specific", []string{"web_search"}, "web_search")
 	e := newToolEnforcement(selection)
-	_ = e.toolChoiceForRound(0, true)
+	_ = e.toolChoiceForRound(0, true, "openai")
 
 	meta := map[string]interface{}{}
 	e.applyTo(meta)
@@ -154,6 +184,53 @@ func TestToolEnforcementRequireToolEscalation(t *testing.T) {
 	unchanged := newToolEnforcement(selection).requireTool("  ")
 	if unchanged.active {
 		t.Error("escalating with a blank name must do nothing")
+	}
+}
+
+// TestRequireToolEscalationIsWired guards against the hook being built and never
+// called, which is what the review found: the documented invariant "a
+// current-information turn cannot answer without evidence" was unimplemented
+// because requireTool had no non-test caller.
+func TestRequireToolEscalationIsWired(t *testing.T) {
+	text := readMessageHandlerSource(t)
+	if !strings.Contains(text, `streamToolEnforcement.requireTool("web_search")`) {
+		t.Error("a failed preflight must escalate the turn to require web_search")
+	}
+	// Requiring a tool the catalog never advertised would send tool_choice for a
+	// tool the provider cannot see.
+	if !strings.Contains(text, `toolAdvertised(llmTools, "web_search")`) {
+		t.Error("escalation must confirm the tool is actually advertised")
+	}
+}
+
+func TestToolAdvertised(t *testing.T) {
+	catalog := []llm.Tool{}
+	var webSearch llm.Tool
+	webSearch.Function.Name = "web_search"
+	var calculator llm.Tool
+	calculator.Function.Name = "calculator"
+	catalog = append(catalog, calculator, webSearch)
+
+	if !toolAdvertised(catalog, "web_search") {
+		t.Error("web_search should be found")
+	}
+	if toolAdvertised(catalog, "browser_navigate") {
+		t.Error("an absent tool must not be reported as advertised")
+	}
+	if toolAdvertised(nil, "web_search") {
+		t.Error("an empty catalog advertises nothing")
+	}
+}
+
+func TestFilterOutBrowserTools(t *testing.T) {
+	var nav, shot, calc llm.Tool
+	nav.Function.Name = "browser_navigate"
+	shot.Function.Name = "browser_screenshot"
+	calc.Function.Name = "calculator"
+
+	filtered := filterOutBrowserTools([]llm.Tool{nav, calc, shot})
+	if len(filtered) != 1 || filtered[0].Function.Name != "calculator" {
+		t.Errorf("browser tools must be withheld from the non-streaming catalog, got %#v", filtered)
 	}
 }
 

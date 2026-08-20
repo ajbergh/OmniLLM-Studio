@@ -128,10 +128,32 @@ func TestShouldWebSearch_HardSuppressBeatsRecency(t *testing.T) {
 		"Fix this error, I'm on the latest React:\n```js\nconst x = 1\n```",
 		"Refactor my latest migration script",
 		"Debug the following code, it broke in the newest release",
+		// Authoring help: a recency word here must not hand the turn to the
+		// search summarizer, which would answer from web evidence instead of
+		// producing the code that was asked for.
+		"How do I write a retry loop with the latest Go stdlib?",
+		"Show me how to implement auth using the newest Next.js APIs",
+		"Help me configure the latest Postgres for replication",
 	}
 	for _, text := range tests {
 		if got, _ := ShouldWebSearch(text, now, "UTC"); got {
 			t.Errorf("ShouldWebSearch(%q) = true; hard suppression must outrank a recency word", text)
+		}
+	}
+}
+
+// TestShouldWebSearch_FactualQuestionsAboutToolsStillSearch is the counterweight
+// to the authoring suppression above: asking *what* the latest version is remains
+// a current-information question even though it names a tool.
+func TestShouldWebSearch_FactualQuestionsAboutToolsStillSearch(t *testing.T) {
+	now := time.Now()
+	for _, text := range []string{
+		"How do I get the latest Node version?",
+		"Where can I find the newest Postgres release notes?",
+		"What is the latest Next.js version?",
+	} {
+		if got, _ := ShouldWebSearch(text, now, "UTC"); !got {
+			t.Errorf("ShouldWebSearch(%q) = false; a factual currency question must still search", text)
 		}
 	}
 }

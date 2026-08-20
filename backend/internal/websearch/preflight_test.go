@@ -54,7 +54,7 @@ func TestPreflightGathersReusableEvidence(t *testing.T) {
 	}}
 	orch := NewOrchestrator(provider, nil, nil)
 
-	evidence, toolCall, err := orch.Preflight(preflightCtx(), "Find the latest API prices and calculate the monthly total")
+	evidence, toolCall, err := orch.Preflight(preflightCtx(), "Find the latest API prices and calculate the monthly total", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestPreflightSkipsNonCurrentQuestions(t *testing.T) {
 	provider := &stubProvider{}
 	orch := NewOrchestrator(provider, nil, nil)
 
-	evidence, toolCall, err := orch.Preflight(preflightCtx(), "Explain the quicksort algorithm")
+	evidence, toolCall, err := orch.Preflight(preflightCtx(), "Explain the quicksort algorithm", false)
 	if err != nil {
 		t.Fatalf("a non-current question is not an error: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestPreflightReturnsToolCallOnFailure(t *testing.T) {
 	provider := &stubProvider{err: errors.New("provider unreachable")}
 	orch := NewOrchestrator(provider, nil, nil)
 
-	evidence, toolCall, err := orch.Preflight(preflightCtx(), "Find the latest prices and calculate the total")
+	evidence, toolCall, err := orch.Preflight(preflightCtx(), "Find the latest prices and calculate the total", false)
 	if err == nil {
 		t.Fatal("a provider failure must surface as an error")
 	}
@@ -114,7 +114,7 @@ func TestPreflightEmptyResultsAreAFailure(t *testing.T) {
 	provider := &stubProvider{results: nil}
 	orch := NewOrchestrator(provider, nil, nil)
 
-	_, toolCall, err := orch.Preflight(preflightCtx(), "Find the latest prices and calculate the total")
+	_, toolCall, err := orch.Preflight(preflightCtx(), "Find the latest prices and calculate the total", false)
 	if err == nil {
 		t.Fatal("zero results must be an error, not an empty success")
 	}
@@ -129,7 +129,7 @@ func TestEvidenceSystemMessageContent(t *testing.T) {
 	}}
 	orch := NewOrchestrator(provider, nil, nil)
 
-	evidence, _, err := orch.Preflight(preflightCtx(), "Find the current API pricing and calculate the monthly total")
+	evidence, _, err := orch.Preflight(preflightCtx(), "Find the current API pricing and calculate the monthly total", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestEvidenceSystemMessageWarnsOnInsufficientEvidence(t *testing.T) {
 	}}
 	orch := NewOrchestrator(provider, nil, nil)
 
-	evidence, _, err := orch.Preflight(preflightCtx(), "Find the current API pricing and calculate the total")
+	evidence, _, err := orch.Preflight(preflightCtx(), "Find the current API pricing and calculate the total", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +173,46 @@ func TestEvidenceSystemMessageWarnsOnInsufficientEvidence(t *testing.T) {
 	msg := evidence.EvidenceSystemMessage(turncontext.FromContext(preflightCtx()))
 	if !strings.Contains(msg.Content, "did NOT meet") {
 		t.Errorf("the directive must tell the model to hedge:\n%s", msg.Content)
+	}
+}
+
+// TestPreflightForceOverridesGate covers a silent no-op: the semantic router can
+// classify a turn as needing current information, but Preflight re-runs the
+// deterministic gate and would veto it — producing a turn that reported an
+// attempted search and performed none.
+func TestPreflightForceOverridesGate(t *testing.T) {
+	provider := &stubProvider{results: []SearchResult{
+		{Index: 1, Title: "Comparison", URL: "https://example.com/models", Snippet: "..."},
+	}}
+	orch := NewOrchestrator(provider, nil, nil)
+
+	// Phrasing the deterministic gate declines: no recency word, no strong signal.
+	const semantic = "how do the two providers stack up for my workload"
+
+	if BuildSearchPlan(semantic, turncontext.FromContext(preflightCtx()).Now, "UTC").NeedsWeb {
+		t.Skip("the gate now triggers on this phrasing; pick another for the force test")
+	}
+
+	evidence, _, err := orch.Preflight(preflightCtx(), semantic, false)
+	if err != nil || evidence != nil {
+		t.Fatalf("without force the gate must still decline: evidence=%v err=%v", evidence, err)
+	}
+	if provider.callCount() != 0 {
+		t.Fatal("no provider call without force")
+	}
+
+	forced, toolCall, err := orch.Preflight(preflightCtx(), semantic, true)
+	if err != nil {
+		t.Fatalf("force must retrieve: %v", err)
+	}
+	if forced == nil || len(forced.Results) == 0 {
+		t.Fatal("force must produce evidence")
+	}
+	if toolCall == nil {
+		t.Fatal("force must produce a tool call for the UI")
+	}
+	if provider.callCount() == 0 {
+		t.Fatal("the provider must actually be called")
 	}
 }
 
@@ -194,7 +234,7 @@ func TestPreflightRunsExpandedQuerySet(t *testing.T) {
 	}}
 	orch := NewOrchestrator(provider, nil, nil)
 
-	if _, _, err := orch.Preflight(preflightCtx(), "Research the best LLM available via API and compare benchmark versus cost"); err != nil {
+	if _, _, err := orch.Preflight(preflightCtx(), "Research the best LLM available via API and compare benchmark versus cost", false); err != nil {
 		t.Fatal(err)
 	}
 	if got := provider.callCount(); got < 2 {

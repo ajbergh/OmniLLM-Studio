@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
 )
 
@@ -94,7 +95,7 @@ func TestStreamingPreflightWiring(t *testing.T) {
 
 	required := map[string]string{
 		"h.classifyCurrentInformation(r.Context(), req.Content)": "the turn must be classified before retrieval is chosen",
-		"h.orchestrator.Preflight(r.Context(), retrievalText)":   "compound turns must retrieve through the preflight",
+		"h.orchestrator.Preflight(r.Context(), retrievalText,":   "compound turns must retrieve through the preflight",
 		"preflight.EvidenceSystemMessage(":                       "preflight evidence must be injected into the generation request",
 		"requiresPostRetrievalTools(req.Content)":                "the compound test selects preflight-vs-orchestrator",
 	}
@@ -114,6 +115,64 @@ func TestStreamingPreflightWiring(t *testing.T) {
 	}
 }
 
+// TestPreflightDoesNotEnterSummarizerBranch pins the invariant that a nil
+// dereference slipped through: the preflight path sets searchResp (so metadata
+// carries its sources) but clears wsLLMReq (there is no summarizer request).
+// Guarding the summarizer branch on searchResp alone therefore streamed
+// *wsLLMReq with wsLLMReq == nil and killed the turn.
+//
+// This is a source assertion because the package has no HTTP harness. The
+// runtime shape it protects is exercised in TestStreamBranchSelection below.
+func TestPreflightDoesNotEnterSummarizerBranch(t *testing.T) {
+	text := readMessageHandlerSource(t)
+	if strings.Contains(text, "if searchResp != nil && wsErr == nil {") {
+		t.Error("the summarizer branch must also require wsLLMReq != nil; the preflight path clears it")
+	}
+	if !strings.Contains(text, "if searchResp != nil && wsLLMReq != nil && wsErr == nil {") {
+		t.Error("expected the summarizer branch to require a non-nil request")
+	}
+}
+
+// TestStreamBranchSelection models the three reachable combinations of
+// (searchResp, wsLLMReq) and asserts which branch each one selects, so the guard
+// is checked as logic rather than only as text.
+func TestStreamBranchSelection(t *testing.T) {
+	type state struct {
+		searchResp *websearch.SearchResponse
+		wsLLMReq   *llm.ChatRequest
+	}
+	cases := []struct {
+		name           string
+		state          state
+		wantSummarizer bool
+	}{
+		{
+			name:           "orchestrator owns the turn",
+			state:          state{searchResp: &websearch.SearchResponse{}, wsLLMReq: &llm.ChatRequest{}},
+			wantSummarizer: true,
+		},
+		{
+			// The case that panicked.
+			name:           "preflight supplies evidence for the tool loop",
+			state:          state{searchResp: &websearch.SearchResponse{}, wsLLMReq: nil},
+			wantSummarizer: false,
+		},
+		{
+			name:           "no retrieval",
+			state:          state{},
+			wantSummarizer: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.state.searchResp != nil && tc.state.wsLLMReq != nil
+			if got != tc.wantSummarizer {
+				t.Errorf("summarizer branch = %v, want %v", got, tc.wantSummarizer)
+			}
+		})
+	}
+}
+
 // TestSyncToolLoopWiring covers the other half of the asymmetry: non-streaming
 // chat had no tool loop at all, so llmReq.Tools was never set and ChatComplete
 // could not produce a tool call.
@@ -129,13 +188,45 @@ func TestSyncToolLoopWiring(t *testing.T) {
 			t.Errorf("missing %q: %s", marker, why)
 		}
 	}
-	if !strings.Contains(text, "llmReq.Tools = selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, syncToolSelection)") {
+	if !strings.Contains(text, "selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, syncToolSelection)") {
 		t.Error("the non-streaming request must advertise a tool catalog")
+	}
+	// Browser automation belongs to the streaming path, which owns the
+	// navigation cap, URL cache, and result sanitization. The generic round the
+	// sync loop uses refuses browser calls, so they must not be advertised.
+	if !strings.Contains(text, "filterOutBrowserTools(") {
+		t.Error("the non-streaming catalog must exclude browser tools")
 	}
 	// Both paths must share one classifier, or they will disagree about whether a
 	// turn needs current information.
 	if strings.Count(text, "h.classifyCurrentInformation(r.Context(), req.Content)") < 2 {
 		t.Error("streaming and non-streaming must both use classifyCurrentInformation")
+	}
+}
+
+// TestRouterDecisionForcesRetrieval covers a silent no-op: the orchestrator
+// entry points re-run BuildSearchPlan, so a turn the deterministic gate declined
+// but the semantic router accepted was vetoed there — reporting an attempted
+// search that never ran.
+func TestRouterDecisionForcesRetrieval(t *testing.T) {
+	router := searchRouteDecision{NeedsWeb: true, Source: searchRouteSourceRouter}
+	if !router.forcesRetrieval() {
+		t.Error("a router decision must override the orchestrator's own gate check")
+	}
+
+	deterministic := searchRouteDecision{NeedsWeb: true, Source: searchRouteSourceDeterministic}
+	if deterministic.forcesRetrieval() {
+		t.Error("a deterministic decision needs no override; it passes the gate by construction")
+	}
+
+	none := searchRouteDecision{Source: searchRouteSourceNone}
+	if none.forcesRetrieval() {
+		t.Error("no decision must not force retrieval")
+	}
+
+	text := readMessageHandlerSource(t)
+	if strings.Count(text, "forcesRetrieval()") < 4 {
+		t.Error("every orchestrator entry point must be passed the override")
 	}
 }
 

@@ -54,9 +54,10 @@ func (o *Orchestrator) Process(
 	userText string,
 	history []llm.ChatMessage,
 	provider, model string,
+	force bool,
 ) (*OrchestratorResult, error) {
 	tc := turncontext.FromContext(ctx)
-	plan := BuildSearchPlan(userText, tc.Now, tc.Timezone)
+	plan := planForTurn(userText, tc, force)
 	if !plan.NeedsWeb {
 		rag.ClearRequestEvidence(ctx)
 		return nil, nil
@@ -71,7 +72,12 @@ func (o *Orchestrator) Process(
 			if ok, _ := ValidateAnswer(plan, resp.Content); ok {
 				rag.ClearRequestEvidence(ctx)
 				return &OrchestratorResult{
-					Content:    resp.Content,
+					Content: resp.Content,
+					// Native grounding produces no local results, so its
+					// citations are the only sources this answer has. Dropping
+					// them left metadata.sources empty and made the UI report
+					// "no citable sources" for an answer that cited several.
+					Citations:  resp.Citations,
 					WebSearch:  true,
 					ToolCall:   toolCall,
 					Provider:   resp.Provider,
@@ -132,9 +138,10 @@ func (o *Orchestrator) Process(
 func (o *Orchestrator) ProcessStream(
 	ctx context.Context,
 	userText, provider, model string,
+	force bool,
 ) (*SearchResponse, *llm.ChatRequest, *ToolCall, error) {
 	tc := turncontext.FromContext(ctx)
-	plan := BuildSearchPlan(userText, tc.Now, tc.Timezone)
+	plan := planForTurn(userText, tc, force)
 	if !plan.NeedsWeb {
 		rag.ClearRequestEvidence(ctx)
 		return nil, nil, nil, nil
@@ -170,9 +177,10 @@ func (o *Orchestrator) ProcessStream(
 func (o *Orchestrator) ProcessStreamFallback(
 	ctx context.Context,
 	userText, provider, model string,
+	force bool,
 ) (*SearchResponse, *llm.ChatRequest, *ToolCall, error) {
 	tc := turncontext.FromContext(ctx)
-	plan := BuildSearchPlan(userText, tc.Now, tc.Timezone)
+	plan := planForTurn(userText, tc, force)
 	if !plan.NeedsWeb {
 		rag.ClearRequestEvidence(ctx)
 		return nil, nil, nil, nil
@@ -237,9 +245,10 @@ type PreflightEvidence struct {
 func (o *Orchestrator) Preflight(
 	ctx context.Context,
 	userText string,
+	force bool,
 ) (*PreflightEvidence, *ToolCall, error) {
 	tc := turncontext.FromContext(ctx)
-	plan := BuildSearchPlan(userText, tc.Now, tc.Timezone)
+	plan := planForTurn(userText, tc, force)
 	if !plan.NeedsWeb {
 		return nil, nil, nil
 	}
@@ -385,6 +394,22 @@ func (o *Orchestrator) PlannedSearch(
 		Sufficient:        ResultsLikelyAnswerable(plan, searchResp.Results),
 		RequiresCitations: plan.RequiresCitations,
 	}, nil
+}
+
+// planForTurn builds the plan for a turn, honoring an external classifier.
+//
+// The deterministic gate is the cheap first pass, but it is not the only
+// classifier: the semantic router catches phrasing regex cannot. When the router
+// says a turn needs current information, re-running the gate here would veto it
+// and return an empty plan — which is exactly what happened before force
+// existed, so a router-classified turn performed no retrieval while still
+// reporting that a search had been attempted.
+func planForTurn(userText string, tc turncontext.TurnContext, force bool) SearchPlan {
+	plan := BuildSearchPlan(userText, tc.Now, tc.Timezone)
+	if plan.NeedsWeb || !force {
+		return plan
+	}
+	return generalPlanForQuery(userText, tc)
 }
 
 // generalPlanForQuery builds a bounded plan for an explicit tool call whose text

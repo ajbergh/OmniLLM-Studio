@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/ajbergh/omnillm-studio/internal/llm"
 	"github.com/ajbergh/omnillm-studio/internal/tools"
@@ -12,6 +13,37 @@ const (
 	syncMaxToolLoops           = 6
 	syncMaxToolResultCharsTurn = 150000
 )
+
+// filterOutBrowserTools removes browser automation from a tool catalog.
+//
+// The generic tool round deliberately refuses browser calls
+// (chatToolExecution.genericRuntimeEligible returns false for them) because the
+// streaming loop routes them through a browser-aware sequential path that owns
+// provider-type context, the per-turn navigation cap, the visited-URL cache, and
+// result sanitization. The non-streaming loop has no progress channel to drive
+// them from, so they are withheld rather than given a weaker second path.
+func filterOutBrowserTools(toolsList []llm.Tool) []llm.Tool {
+	filtered := make([]llm.Tool, 0, len(toolsList))
+	for _, tool := range toolsList {
+		if strings.HasPrefix(tool.Function.Name, "browser_") {
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
+}
+
+// toolAdvertised reports whether a named tool is in the catalog. Requiring a
+// tool that was never advertised would send tool_choice for a tool the provider
+// cannot see.
+func toolAdvertised(toolsList []llm.Tool, name string) bool {
+	for _, tool := range toolsList {
+		if tool.Function.Name == name {
+			return true
+		}
+	}
+	return false
+}
 
 // syncToolLoopOutcome carries everything the non-streaming handler needs to
 // finish a turn after tool rounds have run.
@@ -25,6 +57,8 @@ type syncToolLoopOutcome struct {
 	Cost      *float64
 	ToolCalls []llm.ToolCall
 	Results   []tools.ToolResult
+	// Citations are provider-native grounding sources accumulated across rounds.
+	Citations []llm.Citation
 	// LimitReached records that the turn stopped on the result-context or
 	// round budget rather than because the model was finished.
 	LimitReached bool
@@ -56,7 +90,7 @@ func (h *MessageHandler) runSyncToolLoop(
 	for round := 0; round < syncMaxToolLoops; round++ {
 		// Only the opening round is constrained; a provider held at
 		// tool_choice=required never produces a final answer.
-		llmReq.ToolChoice = enforcement.toolChoiceForRound(round, len(llmReq.Tools) > 0)
+		llmReq.ToolChoice = enforcement.toolChoiceForRound(round, len(llmReq.Tools) > 0, providerType)
 
 		resp, err := h.llmSvc.ChatComplete(ctx, llmReq)
 		if err != nil {
@@ -67,12 +101,13 @@ func (h *MessageHandler) runSyncToolLoop(
 		outcome.Model = resp.Model
 		outcome.TokenIn = addTokenCount(outcome.TokenIn, resp.TokenInput)
 		outcome.TokenOut = addTokenCount(outcome.TokenOut, resp.TokenOutput)
-		if resp.Cost != nil {
-			outcome.Cost = resp.Cost
-		}
+		// Cost is per request, like tokens. Overwriting would report the last
+		// round's cost against the whole turn's token count.
+		outcome.Cost = addCost(outcome.Cost, resp.Cost)
 		if resp.Thinking != "" {
 			outcome.Thinking += resp.Thinking
 		}
+		outcome.Citations = llm.MergeCitations(outcome.Citations, resp.Citations)
 
 		if len(resp.ToolCalls) == 0 {
 			outcome.Content = resp.Content
@@ -146,13 +181,25 @@ func (h *MessageHandler) completeSyncFinalAnswer(
 	outcome.Model = resp.Model
 	outcome.TokenIn = addTokenCount(outcome.TokenIn, resp.TokenInput)
 	outcome.TokenOut = addTokenCount(outcome.TokenOut, resp.TokenOutput)
-	if resp.Cost != nil {
-		outcome.Cost = resp.Cost
-	}
+	outcome.Cost = addCost(outcome.Cost, resp.Cost)
 	if resp.Thinking != "" {
 		outcome.Thinking += resp.Thinking
 	}
+	outcome.Citations = llm.MergeCitations(outcome.Citations, resp.Citations)
 	return resp.Content, nil
+}
+
+// addCost accumulates optional per-request costs across rounds.
+func addCost(total *float64, next *float64) *float64 {
+	if next == nil {
+		return total
+	}
+	if total == nil {
+		value := *next
+		return &value
+	}
+	sum := *total + *next
+	return &sum
 }
 
 // addTokenCount accumulates optional token counts across rounds. Tokens are

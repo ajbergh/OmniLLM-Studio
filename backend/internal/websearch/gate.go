@@ -120,6 +120,12 @@ var hardSuppressPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(explain|definition of|what is a |what are |meaning of|difference between .{1,30} and)\b.*\b(in programming|in (computer )?science|in math|in code)\b`),
 	// "fix/debug/refactor this" — operating on code the user supplied.
 	regexp.MustCompile(`(?i)\b(write|fix|debug|refactor|rewrite|review|optimi[sz]e)\b[^?.!]{0,40}\b(this|these|the following|my|below|above)\b`),
+	// Authoring help. Without this, a decisive recency word inside a "how do I
+	// write X" request would hand the turn to the search summarizer, which
+	// answers from web evidence instead of producing the code the user asked for.
+	// Note the absence of "get" and "find": "how do I get the latest Node" is a
+	// factual question, not an authoring one.
+	regexp.MustCompile(`(?i)\b(how (do|can) i|show me how to|help me)\b[^?.!]{0,60}\b(write|implement|code|build|configure|set up)\b`),
 }
 
 // negativePatterns lower the score instead of vetoing the search.

@@ -20,6 +20,25 @@ in code were corrected or removed.
 | 4 | Evidence contract and citations | ✅ Complete |
 | 5 | Provider strategy and measurement | ✅ Complete |
 
+### Post-implementation review — 11 defects found and fixed
+
+A full-diff review after Phase 5 found eleven problems in the new code. All are fixed; the notable ones:
+
+| Severity | Defect | Fix |
+|---|---|---|
+| **Critical** | **Nil dereference killing every compound turn.** The preflight branch sets `searchResp` (so metadata carries its sources) and clears `wsLLMReq` (there is no summarizer request), but the branch below still guarded on `searchResp != nil` alone — so it streamed `*wsLLMReq` with `wsLLMReq == nil`. My own comment said that branch "must not" be taken; the guard didn't enforce it. | Guard on `wsLLMReq != nil` too, plus `TestPreflightDoesNotEnterSummarizerBranch` and `TestStreamBranchSelection`. |
+| **High** | **The semantic router route never retrieved.** `classifyCurrentInformation` consults the router only after the gate declines — but `Preflight`/`ProcessStream`/`Process` re-run that same gate and bail with all-nils. A router-classified turn reported an attempted search and performed none; non-streaming even told the user "RETRIEVAL FAILED" for a search never made. | New `planForTurn(…, force)` and `searchRouteDecision.forcesRetrieval()`, threaded through all four entry points. |
+| High | **Browser tools in the sync loop.** `runSyncToolLoop` always used the generic round, but `genericRuntimeEligible()` returns false for `browser_*` precisely because they need provider context, a navigation cap, a URL cache, and result sanitization. | `filterOutBrowserTools` keeps browser automation on the streaming path rather than giving it a weaker second implementation. |
+| High | **Non-streaming native citations were unreachable.** `Process` dropped `resp.Citations` and the rebuilt `ChatResponse` omitted them, so a natively-grounded non-streaming answer got `sources: []` — and the new UI then said "Web search ran, but returned no citable sources" about an answer that had cited several. | `OrchestratorResult.Citations`; the sync loop accumulates them across rounds. |
+| Medium | **The enforcement metadata lied.** `providerEnforced` was set before checking the `tool_choice` allowlist, so for Ollama the UI claimed "the provider was asked to require it and answered anyway" when the field had been dropped in transport. | Set it from `llm.SupportsToolChoice(providerType)`. |
+| Medium | **"dates unknown" shown when the date was known.** `freshness_verified` requires a *requested* window, and pricing/release/benchmark deliberately request none — so exactly the intents this work added always rendered the negative badge. | New `grounded-dated` state showing the newest source date. |
+| Medium | **Coding authoring requests hijacked.** A decisive recency word inside "how do I write X with the latest Y" handed the turn to the search summarizer instead of producing code. | A hard-suppress pattern for authoring verbs, with `TestShouldWebSearch_FactualQuestionsAboutToolsStillSearch` guarding that "what is the latest X version" still searches. |
+| Low | Multi-round non-streaming cost reported the last round against the whole turn's tokens. | `addCost` sums, like `addTokenCount`. |
+| Low | `searchFailed` store state was written and never read. | Wired to a live in-flight banner; the saved-message metadata only exists after the stream ends. |
+| Low | `requireTool` was built and never called, so the documented "cannot answer without evidence" invariant was unimplemented. | A failed preflight now requires `web_search`, giving the turn a second chance at real evidence before falling back to training data. |
+
+**What this says about the testing.** Every one of these compiled and passed the suites I had written. The critical one is the sharpest lesson: I documented "this package has no HTTP harness, so the compound tests assert the decision layer plus source wiring" as a *limitation*, and the very first thing that limitation let through was a nil dereference on the exact path those tests were about. Source-level wiring assertions confirm a call exists; they cannot confirm the surrounding control flow is sound. The two new tests close that specific gap, but a real handler harness remains the honest next step.
+
 ### What changed for the reviewed prompt
 
 Tracing "Research the best LLM available via API and compare benchmark versus cost" through the new code:

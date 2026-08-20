@@ -428,7 +428,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		retrievalText := syncSearchRoute.retrievalQuery(req.Content)
 		if requiresPostRetrievalTools(req.Content) {
 			var preflightErr error
-			syncPreflight, _, preflightErr = h.orchestrator.Preflight(r.Context(), retrievalText)
+			syncPreflight, _, preflightErr = h.orchestrator.Preflight(r.Context(), retrievalText, syncSearchRoute.forcesRetrieval())
 			if preflightErr != nil || syncPreflight == nil {
 				syncSearchStatus = searchStatus{
 					Attempted: true,
@@ -447,7 +447,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 				)
 			}
 		} else {
-			orchResult, err = h.orchestrator.Process(r.Context(), retrievalText, llmReq.Messages, providerName, modelName)
+			orchResult, err = h.orchestrator.Process(r.Context(), retrievalText, llmReq.Messages, providerName, modelName, syncSearchRoute.forcesRetrieval())
 			if err != nil {
 				log.Printf("ERROR: orchestrator: %v", err)
 				respondError(w, http.StatusBadGateway, "orchestrator error")
@@ -484,7 +484,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 				websearch.SearchPlan{TimeRange: orchestratorTimeRange(orchResult)},
 				orchResult.Content,
 				orchResult.Sources,
-				nil,
+				orchResult.Citations,
 				time.Now(),
 			).applyTo(metadata)
 			if orchResult.ToolCall != nil {
@@ -528,7 +528,15 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		appendToBaseSystemPrompt(&llmReq, directive)
 	}
 	syncProviderType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
-	llmReq.Tools = selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, syncToolSelection)
+	// Browser tools are excluded from the non-streaming catalog. They are
+	// long-running and progress-driven, and the streaming loop routes them
+	// through a browser-aware sequential path that owns the per-turn navigation
+	// cap, the URL cache, and result sanitization. Running them through the
+	// generic round here would bypass all of that, so they stay on the streaming
+	// path rather than getting a second, weaker implementation.
+	llmReq.Tools = filterOutBrowserTools(
+		selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, syncToolSelection),
+	)
 	syncEnforcement := newToolEnforcement(syncToolSelection)
 
 	syncWorkspaceID := ""
@@ -559,6 +567,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		TokenInput:  loopOutcome.TokenIn,
 		TokenOutput: loopOutcome.TokenOut,
 		Cost:        loopOutcome.Cost,
+		Citations:   loopOutcome.Citations,
 	}
 
 	assistantContent := resp.Content
@@ -1059,6 +1068,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var streamSearchStatus searchStatus
 	var streamToolEnforcement toolEnforcement
 	var streamCitations []llm.Citation
+	var preflightRetrievalFailed bool
 	var preflight *websearch.PreflightEvidence
 	var searchRoute searchRouteDecision
 	var searchRouterTelemetry *intentrouter.RouterTelemetry
@@ -1091,10 +1101,10 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				"status": "searching",
 				"query":  retrievalText,
 			})
-			preflight, toolCall, wsErr = h.orchestrator.Preflight(r.Context(), retrievalText)
+			preflight, toolCall, wsErr = h.orchestrator.Preflight(r.Context(), retrievalText, searchRoute.forcesRetrieval())
 		} else {
 			searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
-				r.Context(), retrievalText, providerName, modelName,
+				r.Context(), retrievalText, providerName, modelName, searchRoute.forcesRetrieval(),
 			)
 		}
 	}
@@ -1123,8 +1133,10 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if searchResp != nil && wsErr == nil {
-		// Web search was triggered – notify the UI, then stream summarizer
+	if searchResp != nil && wsLLMReq != nil && wsErr == nil {
+		// Web search owns this turn: stream the summarizer request it produced.
+		// The preflight path above deliberately leaves wsLLMReq nil, because its
+		// evidence feeds the tool loop instead of a summarizer.
 		sendSSE(w, flusher, "web_search", map[string]interface{}{
 			"tool_call": toolCall,
 			"status":    "searching",
@@ -1181,7 +1193,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		err = streamSearchResponse(*wsLLMReq)
 		if err != nil && fullContent == "" && len(searchResp.Results) == 0 {
 			fallbackResp, fallbackReq, fallbackToolCall, fallbackErr := h.orchestrator.ProcessStreamFallback(
-				r.Context(), req.Content, providerName, modelName,
+				r.Context(), searchRoute.retrievalQuery(req.Content), providerName, modelName, searchRoute.forcesRetrieval(),
 			)
 			if fallbackErr == nil && fallbackResp != nil && fallbackReq != nil {
 				searchResp = fallbackResp
@@ -1219,6 +1231,11 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				Role:    "system",
 				Content: degradedAnswerDirective,
 			}}, llmReq.Messages...)
+			// The backend's own retrieval failed, but web_search is still in the
+			// model's catalog. Require it: a second attempt through the tool is
+			// better than going straight to a training-data answer, and if the
+			// model refuses, the enforcement check marks the answer unverified.
+			preflightRetrievalFailed = true
 		}
 
 		// Inject a policy-aware, intent-selected tool catalog. Gemini thought
@@ -1231,6 +1248,9 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		providerType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
 		llmTools := selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, turnSelection)
 		streamToolEnforcement = newToolEnforcement(turnSelection)
+		if preflightRetrievalFailed && toolAdvertised(llmTools, "web_search") {
+			streamToolEnforcement = streamToolEnforcement.requireTool("web_search")
+		}
 		const maxToolLoops = 10
 		const maxBrowserNavsPerTurn = 3
 		const maxToolResultCharsPerTurn = 150000
@@ -1287,7 +1307,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			// Ask the provider to force the call rather than merely requesting it
 			// in the system prompt. Only the first round is constrained; a
 			// provider held at "required" never produces a final answer.
-			llmReq.ToolChoice = streamToolEnforcement.toolChoiceForRound(loopIndex, len(llmReq.Tools) > 0)
+			llmReq.ToolChoice = streamToolEnforcement.toolChoiceForRound(loopIndex, len(llmReq.Tools) > 0, providerType)
 
 			chunkToolCalls := make(map[int]*llm.ToolCall)
 			var loopContent string

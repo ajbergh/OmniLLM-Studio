@@ -5,7 +5,7 @@
 // through to an ordinary-looking answer, and a natively-grounded answer showed
 // no sources because the backend sent an empty array. Each state now renders
 // differently so a reader can tell verified content from model recall.
-import { AlertTriangle, Globe, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, Clock, Globe, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { SEARCH_FAILURE_LABELS, type MessageMetadata, type SearchFailureReason } from '../types';
 import { retrievalStateFrom } from '../retrievalState';
 
@@ -123,6 +123,17 @@ export function FreshnessBadge({ metadata }: RetrievalStatusProps) {
       >
         <ShieldCheck size={9} aria-hidden="true" />
         freshness verified
+      </span>
+    );
+  }
+  if (state === 'grounded-dated') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] font-medium text-text-muted"
+        title="No recency filter was requested for this question, so there is no window to verify against"
+      >
+        <Clock size={9} aria-hidden="true" />
+        newest {metadata?.answer_freshness}
       </span>
     );
   }

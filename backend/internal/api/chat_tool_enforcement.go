@@ -78,11 +78,16 @@ func (e toolEnforcement) requireTool(name string) toolEnforcement {
 // Only the first round is forced. Later rounds must be free to produce the final
 // answer, or the loop would never terminate: a provider held at "required" keeps
 // calling tools until the round limit.
-func (e *toolEnforcement) toolChoiceForRound(round int, hasTools bool) *llm.ToolChoice {
+func (e *toolEnforcement) toolChoiceForRound(round int, hasTools bool, providerType string) *llm.ToolChoice {
 	if !e.active || e.satisfied || round != 0 || !hasTools {
 		return nil
 	}
-	e.providerEnforced = true
+	// Record enforcement only when the provider actually accepts tool_choice.
+	// The LLM layer drops the field for providers off its allowlist, so setting
+	// this unconditionally made the metadata claim the provider had been asked to
+	// require the tool and answered anyway — when the request never carried the
+	// constraint at all.
+	e.providerEnforced = llm.SupportsToolChoice(providerType)
 	if e.requiredTool != "" {
 		return llm.RequireTool(e.requiredTool)
 	}
