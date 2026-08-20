@@ -12,6 +12,7 @@ import {
   type CanonicalPerspectiveProjection,
 } from './renderContractPerspectiveProjection';
 import { evaluateClipProperty, evaluateCameraProperty } from './renderContractProperties';
+import { evaluateShapeState, type CanonicalEvaluatedShapeState } from './renderContractShape';
 import { evaluateTextState, type CanonicalEvaluatedTextState } from './renderContractText';
 import {
   evaluateTransitionPaint,
@@ -54,6 +55,7 @@ export interface CanonicalFrameLayerState {
   content_bounds?: TimelineV2ContentBounds;
   media_geometry?: CanonicalMediaGeometry;
   text?: CanonicalEvaluatedTextState;
+  shape?: CanonicalEvaluatedShapeState;
   transform: CanonicalEvaluatedTransform;
   view_transform: CanonicalEvaluatedTransform;
   model_matrix: Matrix4;
@@ -181,7 +183,8 @@ function evaluateFrameLayer(
     rotation_y: transform.rotation_y - camera.rotation_y,
     rotation_z: transform.rotation_z - camera.rotation_z,
   };
-  const contentBounds = effectiveContentBounds(clip);
+  const shape = evaluateShapeState(clip.shape);
+  const contentBounds = effectiveContentBounds(clip, shape);
   const unresolved = unresolvedLayerFeatures(clip, contentBounds);
   const text = evaluateTextState(clip.text, canvas.height);
   const effects = evaluateClipEffectStackAtTime(clip, clipTimeMs);
@@ -222,6 +225,7 @@ function evaluateFrameLayer(
     ...(contentBounds ? { content_bounds: contentBounds } : {}),
     ...(mediaGeometry ? { media_geometry: mediaGeometry } : {}),
     ...(text ? { text } : {}),
+    ...(shape ? { shape } : {}),
     transform,
     view_transform: view,
     model_matrix: composeModelMatrix(view, anchorOffsetX, anchorOffsetY),
@@ -239,16 +243,18 @@ function sceneAtFramePresentation(scenes: TimelineV2Scene[], frameIndex: number,
   return scenes.find((scene) => scene.start_ms * fps <= presentation && presentation < (scene.start_ms + scene.duration_ms) * fps);
 }
 
-function effectiveContentBounds(clip: TimelineV2Clip): TimelineV2ContentBounds | undefined {
+function effectiveContentBounds(
+  clip: TimelineV2Clip,
+  shape: CanonicalEvaluatedShapeState | undefined,
+): TimelineV2ContentBounds | undefined {
   if (clip.content_bounds) return { ...clip.content_bounds };
-  if (clip.shape) return { x: 0, y: 0, width: clip.shape.width && clip.shape.width > 0 ? clip.shape.width : 320, height: clip.shape.height && clip.shape.height > 0 ? clip.shape.height : 180 };
+  if (shape) return { x: 0, y: 0, width: shape.width, height: shape.height };
   if (clip.text?.box_width && clip.text.box_height) return { x: 0, y: 0, width: clip.text.box_width, height: clip.text.box_height };
   return undefined;
 }
 
 function unresolvedLayerFeatures(clip: TimelineV2Clip, contentBounds: TimelineV2ContentBounds | undefined): string[] {
   const unresolved: string[] = [];
-  if (clip.shape) unresolved.push('shape');
   if (clip.cursor) unresolved.push('cursor');
   if (clip.asset_id && !contentBounds) unresolved.push('media_geometry:content_bounds');
   return unresolved;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateVisualFrameState } from '../src/video/renderContractFrameState';
-import { TEXT_STATE_CONTRACT_V1 } from '../src/video/renderContractText';
+import { SHAPE_STATE_CONTRACT_V1 } from '../src/video/renderContractShape';
 import type { TimelineV2Document } from '../src/video/renderContractTypes';
 
 function baseDocument(): TimelineV2Document {
@@ -15,43 +15,54 @@ function baseDocument(): TimelineV2Document {
   };
 }
 
-describe('canonical text FrameState projection', () => {
-  it('projects text-state-v1 and clears generic text debt', () => {
+describe('canonical shape FrameState projection', () => {
+  it('projects shape-state-v1, derives bounds from it, and clears generic shape debt', () => {
     const document = baseDocument();
     document.tracks = [{
-      id: 'text-track', type: 'text', name: 'Text', locked: false, muted: false, visible: true,
+      id: 'shape-track', type: 'layer', name: 'Shape', locked: false, muted: false, visible: true,
       clips: [{
-        id: 'title', start_ms: 0, duration_ms: 1000, trim_in_ms: 0, trim_out_ms: 1000,
-        text: { text: 'Canonical', background: '#111111', box_width: 320, box_height: 90 },
+        id: 'callout', start_ms: 0, duration_ms: 1000, trim_in_ms: 0, trim_out_ms: 1000,
+        shape: { kind: 'label', width: 240, height: 120 },
         effects: [], keyframes: [],
       }],
     }];
     const state = evaluateVisualFrameState(document, 0);
     expect(state.layers).toHaveLength(1);
-    expect(state.layers[0].text?.contract_version).toBe(TEXT_STATE_CONTRACT_V1);
-    expect(state.layers[0].text?.text).toBe('Canonical');
-    expect(state.layers[0].content_bounds).toEqual({ x: 0, y: 0, width: 320, height: 90 });
+    expect(state.layers[0].shape?.contract_version).toBe(SHAPE_STATE_CONTRACT_V1);
+    expect(state.layers[0].shape).toMatchObject({ kind: 'label', width: 240, height: 120, stroke: '' });
+    expect(state.layers[0].content_bounds).toEqual({ x: 0, y: 0, width: 240, height: 120 });
     expect(state.layers[0].unresolved).toEqual([]);
     expect(state.layers[0].authoritative).toBe(true);
     expect(state.unresolved).toEqual([]);
     expect(state.authoritative).toBe(true);
   });
 
-  it('projects text and shape while leaving only cursor debt', () => {
+  it('leaves only cursor debt when a shape and cursor share the layer', () => {
     const document = baseDocument();
     document.tracks = [{
       id: 'track', type: 'layer', name: 'Layer', locked: false, muted: false, visible: true,
       clips: [{
         id: 'mixed', start_ms: 0, duration_ms: 1000, trim_in_ms: 0, trim_out_ms: 1000,
-        text: { text: 'Text' },
         shape: { kind: 'rectangle' },
         cursor: { visible: true },
         effects: [], keyframes: [],
       }],
     }];
     const state = evaluateVisualFrameState(document, 0);
-    expect(state.layers[0].text?.text).toBe('Text');
     expect(state.layers[0].shape?.kind).toBe('rectangle');
     expect(state.unresolved).toEqual(['mixed:cursor']);
+  });
+
+  it('fails closed when invalid shape dimensions reach FrameState', () => {
+    const document = baseDocument();
+    document.tracks = [{
+      id: 'track', type: 'layer', name: 'Layer', locked: false, muted: false, visible: true,
+      clips: [{
+        id: 'bad-shape', start_ms: 0, duration_ms: 1000, trim_in_ms: 0, trim_out_ms: 1000,
+        shape: { kind: 'rectangle', width: 0 },
+        effects: [], keyframes: [],
+      }],
+    }];
+    expect(() => evaluateVisualFrameState(document, 0)).toThrow(/shape width/);
   });
 });

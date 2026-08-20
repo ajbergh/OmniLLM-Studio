@@ -9,17 +9,19 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG PR: **#241 — Define canonical text renderer state** — `9b072685b689cdb74e0a5590a26478f6a3ef12b4`.
+Latest merged WYSIWYG PR: **#242 — Define canonical shape renderer state** — `1a25ac0fef217731197169b229bde19aff158c8b`.
 
-Current PR: **#242 — Define canonical shape renderer state**.  
-Current branch: `feat/video-wysiwyg-phase2-shape-state`.  
-Code-only validation head before tracker/final normalization work: `5958857ef48e50d75913ca1e014b3cccd23773f0`.
+Current PR: **#243 — Consume canonical shape state in FrameState**.  
+Current branch: `feat/video-wysiwyg-phase2-shape-framestate`.  
+Corrected code-only validation head before final normalization: `aebffaa049e2090a0d50c63df5db106e16fdfd78`.
 
-PR #241 merged only after its documentation-complete exact head `d51c02cd0710120fc895567ad81a2c456f297773` was one intended commit ahead/zero behind current `main`, had no review threads, and passed the complete hosted assurance matrix: Go formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright smoke, deterministic renderer parity, Security Scan including both CodeQL languages and dependency audit, all platform/sandbox assurances, and frontend/backend container builds.
+PR #242 merged only after exact final head `b8db59304664f220cd0699d385598426b84ae52e` was one intended commit ahead/zero behind current `main`, had no review submissions or inline threads, and passed the complete hosted assurance matrix: Go formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright smoke, deterministic renderer parity, Security Scan including CodeQL and dependency audit, all platform/sandbox assurances, and frontend/backend container builds.
 
-PR #242 starts directly from post-#241 `main` merge `9b072685b689cdb74e0a5590a26478f6a3ef12b4`. It deliberately defines canonical shape semantics only. FrameState consumption/removal of generic shape debt is the immediate follow-on slice so evaluator definition and consumption remain independently reviewable.
+PR #243 starts directly from post-#242 `main` merge `1a25ac0fef217731197169b229bde19aff158c8b`. It is deliberately a consumption-only slice: `shape-state-v1` is projected into `visual-frame-state-v1`, evaluated shape dimensions become the single shape-derived content-bounds source, and generic `shape` unresolved debt is removed while cursor debt remains explicit.
 
-No preview CSS compositor or FFmpeg composition behavior changes are included in #242. Legacy FFmpeg shape approximations remain implementation evidence, not semantic authority.
+The first #243 code-only Quality Gate correctly exposed one stale pre-#243 regression assertion: `frame_state_text_test.go` still expected generic `shape` debt alongside `cursor`. The actual evaluated state was the intended `[mixed:cursor]`. The Go interaction test and its TypeScript counterpart were updated to require text+shape projection with only cursor debt. No implementation rollback was needed.
+
+No preview CSS compositor or FFmpeg composition behavior changes are included in #243. The canonical state is being made consumable before Phase 3 shared composition changes any painter.
 
 ## Phase tracker
 
@@ -27,7 +29,7 @@ No preview CSS compositor or FFmpeg composition behavior changes are included in
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, all current transition state/paint families, effect stack state, and canonical text state are merged. #242 defines canonical shape state. Shape FrameState consumption, cursor state, remaining provenance edges, and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, all current transition state/paint families, effect stack state, canonical text state, and canonical shape-state definition are merged. #243 consumes canonical shape state in FrameState. Cursor state, remaining provenance edges, and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close text metrics/fonts, shapes, effects, transitions, cursor, camera, color, asset loading, and decoded visual thresholds. |
@@ -125,9 +127,9 @@ Compatibility boundary for #241:
 
 ### Shape renderer state
 
-`shape-state-v1` is the renderer-independent static annotation contract introduced by #242.
+`shape-state-v1` is the renderer-independent static annotation contract merged in #242.
 
-Current #242 semantics:
+Merged #242 semantics:
 
 - all 14 currently authorable shape kinds are explicit: rectangle, highlight, blur, rounded rectangle, ellipse, arrow, line, speech bubble, spotlight, pixelate, checkmark, x mark, step marker, and label;
 - dimensions are canvas pixels and default to current preview-compatible 320×180 when not authored;
@@ -144,8 +146,17 @@ Current #242 semantics:
 Compatibility boundary for #242:
 
 - current preview supports all authored shape kinds, but several legacy FFmpeg paths are approximations or preview-only;
-- #242 defines authored/preview semantic intent so shared Phase 3/4 composition can close export parity without preserving legacy approximations;
-- FrameState shape projection/removal of generic `shape` debt is intentionally deferred to the immediate follow-on consumption PR.
+- #242 defines authored/preview semantic intent so shared Phase 3/4 composition can close export parity without preserving legacy approximations.
+
+Current #243 FrameState consumption rules:
+
+- `FrameLayerState.shape` carries the evaluated `shape-state-v1` object in both Go and TypeScript;
+- shape-derived `content_bounds` come from the evaluated canonical shape dimensions rather than a second 320×180/defaulting implementation;
+- invalid shape dimensions/kinds therefore fail through FrameState instead of being silently replaced by local bounds defaults;
+- explicit clip `content_bounds` still take precedence over shape-derived bounds, preserving the existing content-bounds precedence rule;
+- generic `shape` unresolved debt is removed once evaluation succeeds;
+- `cursor` remains unresolved and continues to prevent FrameState from claiming authority until canonical cursor semantics exist;
+- no preview/export painter consumes the new shape field in #243; that remains Phase 3/4 work.
 
 ### Safe stacked-branch normalization
 
@@ -212,6 +223,7 @@ Remaining Phase 0 sign-off:
 | #229 | Canonical zoom transition paint + FrameState consumption | `a8e2a0964e1e49232be08bf2fe7091ce3d9403e6` |
 | #237 | Canonical effect stack state + FrameState consumption | `22e73cc291a4f8723a99ad123c963aedf0fd0d8a` |
 | #241 | Canonical text renderer state + FrameState consumption | `9b072685b689cdb74e0a5590a26478f6a3ef12b4` |
+| #242 | Canonical shape renderer state definition | `1a25ac0fef217731197169b229bde19aff158c8b` |
 
 Security unblock during the program:
 
@@ -223,50 +235,50 @@ CI reliability unblocks:
 - #226 quiesced competing apt activity before Playwright retry setup — `ffbf797108c291c927fc7b67f6154b29c1351496`.
 - #239 aligned the durable sandbox-worker test SQLite helper with production WAL/busy-timeout behavior, eliminating a false `SQLITE_BUSY` blocker encountered while #237 was being replayed over concurrent sandbox work.
 
-### Current PR #242 — canonical shape renderer state definition
+### Current PR #243 — canonical shape FrameState consumption
 
-Implemented on code-only validation head `5958857ef48e50d75913ca1e014b3cccd23773f0` before tracker/final normalization work:
+Implemented before final normalization:
 
-- shared Go/TypeScript `shape-state-v1` evaluator;
-- all 14 authorable shape kinds with preview-grounded defaults;
-- explicit dimensions, fill/stroke, stroke width, blur/pixel block radius, and corner-radius state;
-- fail-closed unsupported-kind/non-finite/invalid-dimension policy;
-- shared `shape-state-v1.json` Go↔TypeScript fixture;
-- mirrored focused Go/TypeScript tests;
-- no FrameState consumption in this definition slice.
+- Go `FrameLayerState.Shape` and TypeScript `CanonicalFrameLayerState.shape` projections;
+- shape evaluation during exact-frame layer evaluation;
+- shape-derived bounds sourced from evaluated `shape-state-v1` dimensions;
+- removal of generic `shape` unresolved debt without touching cursor debt;
+- fail-closed propagation of invalid shape state through FrameState;
+- mirrored Go/TypeScript tests for authoritative shape-only layers, shape+cursor debt, and invalid dimensions;
+- updated preexisting text+shape interaction tests to require shape projection and only cursor debt.
 
-Validation history before final normalized head:
+Validation history before final normalization:
 
-- code-only Go formatting/vet/unit/integration/race: PASS;
-- code-only frontend lint/unit/performance/build: PASS;
-- code-only core platform/sandbox assurance: PASS for completed jobs;
-- manual review of `ShapePreview.tsx` caught the falsy zero-radius fallback for rounded rectangle, speech bubble, and label; both evaluators and the shared fixture were corrected;
-- follow-up review against `ShapePreview.tsx`, `VideoInspector.tsx`, and `annotationRegistry.ts` caught that speech bubble/label default borders are absent unless `shape.stroke` is authored; both evaluators and shared fixtures were corrected so empty stroke means no default callout border;
-- these compatibility corrections and tracker update change the head, so every required hosted gate must pass again on the final documentation-complete normalized head before merge.
+- initial code-only head `82329ce5ec7b35657c6a740209ae2808d9482d08`: Go formatting/vet PASS; complete frontend lint/unit/performance/build PASS; backend unit/integration FAIL only because `frame_state_text_test.go` still asserted the pre-#243 unresolved set `[mixed:cursor, mixed:shape]`; smoke/parity were skipped behind that backend failure;
+- the stale Go assertion and matching TypeScript interaction assertion were corrected without changing FrameState implementation semantics;
+- corrected code-only head `aebffaa049e2090a0d50c63df5db106e16fdfd78`: Go formatting PASS; Go vet PASS; Go unit/integration PASS; Go race detector was still running when this tracker revision was authored;
+- corrected-head frontend lint/unit/performance/build PASS;
+- corrected-head Security Scan PASS and all completed standalone Linux/macOS/browser/sandbox assurances PASS;
+- corrected-head container build and remaining Quality Gate work were still completing at tracker authoring time;
+- this tracker revision changes the branch head, so none of those superseded-head results replace the required exact final documentation-complete validation.
 
-Remaining before #242 merge:
+Remaining before #243 merge:
 
-1. Rebuild/squash the corrected documentation-complete intended tree as one commit directly on current `main`.
-2. Reconfirm `main...branch` contains only the five shape code/test/fixture paths plus this tracker.
-3. Refresh #242 body with both compatibility corrections and exact final head; keep ready for review.
+1. Rebuild/squash the documentation-complete intended tree as one commit directly on current `main`.
+2. Reconfirm `main...branch` contains only the two FrameState implementation paths, two focused shape test paths, two updated text+shape interaction test paths, and this tracker.
+3. Refresh #243 body with final head and exact scope; mark ready for review.
 4. Validate formatting, vet, unit/integration, race, frontend lint/unit/performance/build, Playwright smoke, deterministic renderer parity, Security Scan, container builds, and all platform/sandbox assurances on the exact final head.
 5. Inspect and resolve any actionable review thread.
 6. Merge only when the exact head is current, one intended commit ahead, zero behind, mergeable, and clean.
-7. Immediately create the separate shape-state FrameState consumption slice from resulting current `main`.
+7. Create the next Phase 2 branch for canonical cursor renderer state from resulting current `main`.
 
 ### Remaining Phase 2 work
 
-After #242:
+After #243:
 
-1. **Shape state consumption** — project `shape-state-v1` into FrameState, add permanent Go↔TypeScript parity coverage, and remove generic `shape` debt.
-2. **Cursor state** — canonicalize sampled cursor position, visibility, scale, highlight/click-ring semantics, smoothing policy, and any asset/provenance needs.
-3. **Provenance edges** — close remaining anchor/content-bounds/source-probe/font-resource cases surfaced by parity diagnostics.
-4. **AudioGraph** — define serializable timing/rate/pitch/channel/gain/fade/mute/solo/processing/stem decisions and exact sample-count semantics.
-5. Keep all unknown authorable fields fail closed until canonical semantics exist.
+1. **Cursor state** — canonicalize sampled cursor position, visibility, scale, highlight/click-ring semantics, smoothing policy, and any asset/provenance needs.
+2. **Provenance edges** — close remaining anchor/content-bounds/source-probe/font-resource cases surfaced by parity diagnostics.
+3. **AudioGraph** — define serializable timing/rate/pitch/channel/gain/fade/mute/solo/processing/stem decisions and exact sample-count semantics.
+4. Keep all unknown authorable fields fail closed until canonical semantics exist.
 
 ### Phase 2 exit gate
 
-Preview and export callers consume identical FrameState/AudioGraph fixtures. No renderer owns separate curve, range, ordering, transform, geometry, projection, transition placement/activity/paint, effect, text, shape, source-time, or audio semantic math. Go/TypeScript schema/type/fixture drift fails CI.
+Preview and export callers consume identical FrameState/AudioGraph fixtures. No renderer owns separate curve, range, ordering, transform, geometry, projection, transition placement/activity/paint, effect, text, shape, cursor, source-time, or audio semantic math. Go/TypeScript schema/type/fixture drift fails CI.
 
 ## Phase 3 — Shared preview composition
 
@@ -341,10 +353,12 @@ Before every merge:
 | Intrinsic text bounds are guessed | Only explicit positive box dimensions become canonical bounds until a deterministic glyph-layout contract exists. |
 | Shape semantics inherit legacy FFmpeg omissions | `shape-state-v1` is grounded in authored/preview semantics; FFmpeg approximations are not canonical state. |
 | Shape defaults drift between preview and export | Shared Go/TypeScript fixture serializes dimensions/style defaults once before FrameState consumption. |
+| Shape bounds are defaulted twice | #243 derives shape `content_bounds` from evaluated `shape-state-v1`; FrameState does not independently reinterpret width/height defaults. |
+| Invalid shape state is hidden by fallback bounds | Shape evaluation occurs before shape-derived bounds, so invalid authoring fails closed through FrameState. |
 | Falsy authored shape defaults drift from preview | Zero stroke/blur/radius values follow current preview truthy-fallback rules and are covered by shared fixtures. |
 | Optional callout borders are invented | Speech bubble/label serialize empty default stroke; only an authored non-empty stroke enables their border. |
 | Stacked branch appears current but carries stale tree | Rebuild from actual current `main`; compare every path before merge. |
-| FrameState claims authority too early | Explicit unresolved sets until canonical family semantics exist. |
+| FrameState claims authority too early | Explicit unresolved sets until canonical family semantics exist; cursor remains debt after #243. |
 | CI setup/runner saturation hides code state | Distinguish setup/queue from executed code checks. |
 | Browser worker resource cost | Admission control, health checks, cancellation, guarded rollout, FFmpeg retained for media I/O. |
 | Audio runtime differences | Explicit AudioGraph and unsupported-boundary policy before default shared export. |
@@ -377,11 +391,12 @@ Before every merge:
 
 ### 2026-08-20
 
-- #242 defines renderer-neutral `shape-state-v1` for all currently authored annotation kinds. The code-only evaluator passed formatting, vet, unit/integration, race, and the full frontend pipeline. Manual review then caught two preview-compatibility details before merge: falsy zero corner radii must preserve the kind fallback for rounded rectangle/speech bubble/label, and speech bubble/label have no default border unless a stroke is authored. Both runtimes and shared fixtures were corrected before final normalization.
+- #242 defined renderer-neutral `shape-state-v1` for all currently authored annotation kinds. Manual review caught and corrected preview-compatible falsy radius behavior and optional speech-bubble/label borders; the final exact head passed the complete Quality/Security/container/platform/parity matrix and merged as `1a25ac0fef217731197169b229bde19aff158c8b`.
+- #243 consumes `shape-state-v1` in FrameState, centralizes shape-derived bounds on evaluated canonical dimensions, removes generic shape debt, preserves cursor debt, and adds mirrored fail-closed/projection coverage. Its first code-only backend run found one stale text-state regression assertion still expecting generic shape debt; the assertion and its TypeScript counterpart were corrected, and the corrected code-only head passed formatting, vet, unit/integration, and the complete frontend pipeline before final normalization (race still running when this tracker revision was authored).
 
 ## Next recommended slice
 
-1. Normalize, validate, and merge #242 from its corrected documentation-complete exact head.
-2. Immediately consume `shape-state-v1` in FrameState and remove generic shape debt in a separate small PR.
-3. Follow with canonical cursor renderer state, then remaining provenance/font-resource edges and AudioGraph.
+1. Normalize, validate, and merge #243 from its documentation-complete exact head.
+2. Start canonical cursor renderer state immediately after #243.
+3. Follow with remaining provenance/font-resource edges and AudioGraph.
 4. Continue Phase 0 visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.
