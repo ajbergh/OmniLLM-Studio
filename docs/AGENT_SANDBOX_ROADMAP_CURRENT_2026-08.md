@@ -2,7 +2,7 @@
 
 > **Status:** ACTIVE
 >
-> **Checkpoint:** Windows Phase 12 is complete. Explicit execution cancellation is complete in PR #155. macOS Phase 13 is complete through Phase 13D, merged in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`. Native browser egress assurance merged in PR #168, Broker resource admission fails closed after PR #170, Windows process-count quotas merged in PR #171, Windows aggregate memory enforcement merged in PR #172 as `bc9eb6f204db9dcb2c6fb3670262ef8d0c58cb3f`, Linux cgroup-v2 PID enforcement merged in PR #173 as `981691a0058efd7a061cc892d3f43f1edf4d22e3`, strict aggregate Linux memory enforcement merged in PR #174 as `c8adc3cd4e8492b57ff4b05450e84a46f409edbc`, Linux descriptor-relative workspace content reads merged in PR #175 as `925e258539bc16ad4bf96c1d1c6d78f49dd64ada`, Linux descriptor-relative mutation transactions merged in PR #176 as `3324114d1792c120206642741b0839b9153c40fc`, durable Linux registered-root identity binding merged in PR #177 as `9f242f60996e59f863a2b1bae1829ebf777f12bd`, and Linux descriptor-relative search enumeration merged in PR #182 as `3825fd5074203b2382e55cb6ff0d0e9110bd3f90`. PR #183 now adds native Darwin registered-root identity replacement detection; Darwin governed read/search/mutation path-race hardening and Windows workspace identity/operation hardening remain open.
+> **Checkpoint (2026-08-19):** Linux governed-workspace TOCTOU hardening is complete through #182. Darwin durable root identity (#183) and descriptor-relative governed reads/search/mutations (#210, merged as `dadb0372`) are complete. Dedicated sandbox-worker image packaging is complete in #214. CI Playwright package-manager quiescence hardening merged in #226 (`ffbf7971`). The remaining reviewed sandbox slices have been rebuilt directly on current `main`: Windows governed-workspace hardening #231, cumulative CPU enforcement #232, durable leased sandbox tasks #233, Kubernetes worker deployment #234, and isolated agent worktrees #235. These rebuilt PRs must pass their own exact-head gates before merge; closed stacked drafts #211/#215/#216/#217/#221/#223 are historical only.
 
 ## Program invariants
 
@@ -15,6 +15,7 @@
 - Capability reporting is limited to controls actually enforced and proven.
 - Guarded Git state/digest protections remain authoritative for reviewed publication workflows.
 - Multi-user deployments do not run arbitrary tenant code in the primary API process/container.
+- Restart recovery must never replay side effects while a predecessor runtime may still be alive.
 
 ## Current phase status
 
@@ -22,106 +23,163 @@
 |---|---|---|---|
 | 0 | Architecture, threat model, durable roadmap | **COMPLETE** | Core design documents are on `main`. |
 | 1 | Protocol v2 + owner-bound sessions | **COMPLETE** | Broker sessions, ownership/TTL checks, authenticated worker protocol, bounded results, and capability negotiation merged in #118. |
-| 2 | First-party runtime abstraction + Linux execution plane | **IN PROGRESS** | Bubblewrap/rootfs runtime and `sandboxd` exist. #173 merged delegated cgroup-v2 PID enforcement and #174 merged aggregate memory enforcement. Packaging remains open. |
+| 2 | First-party runtime abstraction + Linux execution plane | **IN PROGRESS** | Bubblewrap/rootfs runtime and `sandboxd` exist; #173/#174 provide delegated PID/memory enforcement; #214 packages the dedicated worker image. CPU enforcement is rebuilt in #232 but capability promotion remains gated. |
 | 3 | Immediate stdio MCP/plugin subprocess hardening | **COMPLETE** | Ambient environment inheritance removed in #99. |
 | 4 | Broker-backed `code_execute` + `python_analysis` | **COMPLETE** | Owner-bound execution; restricted Python has no unrestricted host fallback. |
-| 5 | Workspace registry + grants + durable journal | **IN PROGRESS** | Owner-scoped grants and state-bound journaled mutations exist. #175 binds Linux content opens to pinned directory FDs; #176 binds Linux write/delete/revert transactions to pinned directory identities; #177 binds persisted Linux grants to registered root device+inode; #182 binds Linux search enumeration and candidate reads to the same descriptor lineage. #183 adds Darwin persisted root device+inode identity and legacy-grant fail-closed behavior. Darwin descriptor-relative operations and Windows native identity/operations remain open. |
-| 6 | Governed workspace tools | **IN PROGRESS** | Read/write/patch/delete/revert/search tools exist. Linux governed path races are covered through #175/#176/#177/#182. #183 protects fresh-operation Darwin root replacement before governed resolution, but Darwin file operations remain pathname-based. Completion still tracks cross-platform Phase 5 assurance. |
-| 7 | `terminal_exec` + cancellation + resource controls | **IN PROGRESS** | Caller-known execution IDs and explicit cancellation merged in #155. Broker quota requests fail closed when unsupported (#170). Windows PID/memory quotas merged in #171/#172; Linux PID/memory quotas merged in #173/#174. macOS resource quotas, CPU semantics, and physical-disk quotas remain open. |
-| 8 | Network broker + destination approvals | **IN PROGRESS** | Owner-bound grants exist; first-party Linux/Windows/Darwin runtimes remain no-network because destination-enforced egress is not implemented. |
+| 5 | Workspace registry + grants + durable journal | **IN PROGRESS — FINAL PLATFORM SLICE** | Linux identity/read/search/mutation hardening is merged through #182. Darwin root identity (#183) and descriptor-relative operations (#210) are merged. Rebuilt Windows native identity/path-race hardening is #231. |
+| 6 | Governed workspace tools | **IN PROGRESS — FINAL PLATFORM SLICE** | Read/write/patch/delete/revert/search tools exist. Linux and Darwin operations are bound to opened filesystem objects. #231 provides the Windows equivalent and must pass exact-head native assurance before this cross-platform item can close. |
+| 7 | `terminal_exec` + cancellation + resource controls | **IN PROGRESS** | Explicit cancellation merged in #155; fail-closed quota admission in #170; Windows PID/memory #171/#172; Linux PID/memory #173/#174. Cumulative CPU primitives are rebuilt in #232. Disk accounting and macOS resource quotas remain open. |
+| 8 | Network broker + destination approvals | **IN PROGRESS** | Owner-bound grants exist; first-party Linux/Windows/Darwin arbitrary runtimes remain no-network because destination-enforced egress is not implemented. |
 | 9 | Credential broker | **IN PROGRESS** | Opaque owner/TTL handles and raw-secret environment rejection exist; service-specific consumers remain. |
-| 10 | Local plugin + stdio MCP confinement policy | **COMPLETE** | `auto|required|off` and shared managed-process seam are implemented; Linux uses Bubblewrap, Windows uses AppContainer, and macOS uses Seatbelt after #164. |
+| 10 | Local plugin + stdio MCP confinement policy | **COMPLETE** | `auto|required|off` and shared managed-process seam are implemented; Linux uses Bubblewrap, Windows AppContainer, macOS Seatbelt. |
 | 11 | Desktop sandbox/workspace UX | **COMPLETE** | Workspace grants, review APIs, Settings UX, and loopback grant hardening merged in #125. |
 | 12 | Windows native confinement backend | **COMPLETE** | #127, #128, #139, and #149 provide protocol-v2 and persistent-extension AppContainer/Job confinement with native adversarial evidence. |
-| 13 | macOS native confinement backend | **COMPLETE** | 13A Seatbelt primitive (#159), 13B first-party local runtime (#162), 13C persistent extensions (#164), and 13D adversarial assurance (#166) are merged. The proven detached-descendant limitation remains explicit. |
-| 14 | Durable sandbox-backed agent tasks | NOT STARTED | Persist sandbox/task association and recovery/scheduling semantics. |
-| 15 | Server/Kubernetes sandbox workers | NOT STARTED | Separate worker identity/pods, quotas, hardened security context, cgroup delegation, and network policy. |
-| 16 | Multi-agent isolated worktrees/workspaces | NOT STARTED | Independent writable workspaces with reviewed promotion/reconciliation. |
-| 17 | Adversarial assurance suite | **IN PROGRESS** | Browser-native egress assurance is covered by #168, Windows quota controls have native negative evidence, Linux cgroup-v2 quota assurance covers PID/memory, the Ubuntu workspace lane exercises #175/#176/#177/#182 negatives ten times, and #183 adds repeated native macOS root-replacement/legacy-grant negatives. |
+| 13 | macOS native confinement backend | **COMPLETE** | 13A Seatbelt (#159), 13B runtime (#162), 13C persistent extensions (#164), and 13D adversarial assurance (#166) are merged. Detached-descendant limitation remains explicit. |
+| 14 | Durable sandbox-backed agent tasks | **IN PROGRESS / REBUILT** | Reviewed queue/recovery/executor work from closed #215 has been rebuilt directly on current `main` as #233. Lifecycle integration from closed #223 follows only after the durable contract merges. |
+| 15 | Server/Kubernetes sandbox workers | **IN PROGRESS / REBUILT** | Worker image packaging merged in #214. Reviewed isolated Helm workload/network policy from closed #216 is rebuilt as #234. Durable worker lifecycle remains dependent on Phase 14. |
+| 16 | Multi-agent isolated worktrees/workspaces | **IN PROGRESS / REBUILT** | Reviewed owner-scoped immutable-base/writable-snapshot worktree primitive from closed #217 is rebuilt as #235. Promotion remains digest-bound and does not bypass guarded Git publication controls. |
+| 17 | Adversarial assurance suite | **IN PROGRESS** | Browser egress (#168), Windows and Linux quota negatives, Linux workspace race assurance, Darwin root/path-race assurance, and rebuilt Windows workspace assurance are part of the active matrix. Every new enforcement claim requires native negative evidence. |
 
-## Windows Phase 12 lineage
+## Completed platform lineage
 
-- **12A / PR #127** — unique per-sandbox Windows authority, restricted-token primitives, Job Objects, DACL helpers, and cross-sandbox denial; merged as `c68ba013d3ad41ff2044646733d38ab981b3dc87`.
-- **12B / PR #128** — first-party Windows AppContainer protocol-v2 runtime; merged as `43c1c42bebf245ded6722d742fcb3ea0a71b4502`.
-- **12C / PR #139** — persistent stdio MCP/plugin AppContainer confinement; merged as `69590078223f85f4a6eb5c64aa24959aafa10835`.
-- **12D / PR #149** — direct adversarial Windows assurance; merged as `65bf1cd807b9cd94a2e7b62e653c9057366c6e8b`.
+### Windows Phase 12
 
-PR #149's exact final head passed Quality Gate, Security Scan, native Windows sandbox/plugin/desktop jobs, backend format/vet/tests/race, Chromium, frontend, Helm, dependency audit, both CodeQL lanes, and frontend/backend `linux/amd64` + `linux/arm64` container builds.
+- **12A / #127** — unique per-sandbox Windows authority, restricted-token primitives, Job Objects, DACL helpers, and cross-sandbox denial.
+- **12B / #128** — first-party Windows AppContainer protocol-v2 runtime.
+- **12C / #139** — persistent stdio MCP/plugin AppContainer confinement.
+- **12D / #149** — direct adversarial Windows assurance.
 
-## Cross-platform cancellation lineage
+### Cross-platform cancellation
 
-**PR #155** fixed the protocol-v2 cancellation addressability defect. Callers can provide a canonical execution reference before `Exec`; omitted IDs are generated through the shared helper; active duplicates fail closed; HTTP and `sandboxd` preserve the reference; Linux and Windows runtimes use it as the cancellation key. The issue tracked as #151 is therefore no longer an open roadmap item.
+**#155** made execution cancellation addressable before `Exec`: callers can provide a canonical execution reference; omitted IDs use the shared generator; active duplicates fail closed; HTTP and `sandboxd` preserve the reference; platform runtimes use it as the cancellation key.
 
-## macOS Phase 13 lineage
+### macOS Phase 13
 
-- **13A / PR #159** — fixed `/usr/bin/sandbox-exec` Seatbelt primitive, canonicalized policy roots, default network deny, explicit write-root proof, and native `macos-latest` evidence; merged as `ce7d880ab39402671a6f39407ea9319418089de4`.
-- **13B / PR #162** — first-party Darwin local runtime, merged as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2` after native and repository validation.
-- **13C / PR #164** — native persistent stdio MCP/plugin Seatbelt confinement with `auto|required|off` semantics and native lifecycle/denial tests, merged as `44f410793a70444963ec1eecb989b15df159b5f1`.
-- **13D / PR #166** — final macOS adversarial assurance: detached process/session attempts, path/symlink/rename pressure, cross-runtime authority reuse, and persistent-extension equivalents; merged as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17` after native and repository validation.
+- **13A / #159** — Seatbelt primitive, canonicalized roots, default network deny, explicit write-root proof.
+- **13B / #162** — first-party Darwin local runtime.
+- **13C / #164** — persistent stdio MCP/plugin Seatbelt confinement with `auto|required|off` semantics.
+- **13D / #166** — adversarial detached process/session, path/symlink/rename, cross-runtime authority, and persistent-extension assurance.
 
-## Open enforcement gaps
+## Governed-workspace filesystem status
 
-### Filesystem
+### Linux — complete for current governed tools
 
-Windows staged-copy flows reject reparse points/junctions, hard links, special files, traversal, and post-open source-handle escapes.
+- **#175:** file content opens traverse from an opened root using descriptor-relative `O_NOFOLLOW` operations and validate the final descriptor with `fstat`.
+- **#176:** write/delete/revert pin the root and final parent directory, capture and mutate relative to that descriptor lineage, and use the same lineage for verification/rollback.
+- **#177:** registered roots persist device+inode; fresh operations fail closed if the path now refers to a different object; legacy pathname-only grants require trusted re-registration.
+- **#182:** search enumeration recurses from pinned directory descriptors, opens candidates without following symlinks, and reads from the same validated descriptor; global early-stop is preserved.
 
-Darwin 13B staging rejects symbolic links, hard links, special files, traversal, source-identity changes, and size changes while copying. The Seatbelt runtime grants file contents only below explicit read roots; exact ancestor directories receive only the directory traversal access macOS requires to resolve those roots. Live host workspace roots are not granted to a staged read-only session.
+### Darwin — complete for current governed tools
 
-On Linux workspace tools, #175 replaces pathname re-open for file content with descriptor-relative traversal from an already-open workspace root. Each parent is opened with `O_NOFOLLOW|O_DIRECTORY`, the final file is opened with `O_NOFOLLOW`, and the opened inode is validated with `fstat`.
+- **#183:** registered roots persist device+inode from a no-follow opened directory and reject root replacement/legacy grants.
+- **#210 (`dadb0372`):** governed reads, search, mutations, and rollback use no-follow descriptor-relative operations and pinned directory identities. Native macOS race/symlink/root-replacement assurance is included.
 
-#176 extends descriptor-relative identity through governed mutations. `WriteFile`, delete, and revert pin the workspace root and final parent directory, capture the final file with `openat(O_NOFOLLOW)` plus `fstat`, create replacement files inside the pinned parent, commit with `renameat`, delete with `unlinkat`, and use the same pinned parent for after-state capture and rollback.
+### Windows — rebuilt, validation active
 
-#177 closes fresh-operation registered-root replacement on Linux. `sandbox_workspaces.root_identity` persists device+inode for new registrations; `Get`, `List`, `InternalMount`, and governed resolution fail closed if the current root no longer matches. Legacy pathname-only rows require trusted re-registration instead of unsafe auto-backfill.
+**#231** is the clean current-main rebuild of the reviewed Windows slice. It:
 
-#182 closes Linux search enumeration TOCTOU. Search opens the registered root as a no-follow directory descriptor, verifies that descriptor against the persisted root identity, recursively enumerates names from pinned directory descriptors, opens child directories and candidate files with `O_NOFOLLOW`, validates file descriptors with `fstat`, and reads bytes from the same candidate descriptor. Candidate discovery no longer uses `filepath.WalkDir` on Linux. Native negatives cover final/directory symlinks, parent rename-to-outside-symlink pressure, root replacement after registry lookup, and global early-stop propagation.
+- persists workspace root identity as volume serial + file ID from `GetFileInformationByHandle`;
+- opens roots/directories with `FILE_FLAG_OPEN_REPARSE_POINT` and rejects directory reparse points;
+- validates opened file handles before governed reads consume bytes;
+- treats search enumeration names as untrusted hints and reopens candidates through the hardened read boundary;
+- pins mutation parent handles and replaces via native `NtSetInformationFile(FileRenameInformation)` relative to the opened parent;
+- deletes through the opened target handle using `FileDispositionInfo`;
+- proves root replacement, legacy grant, reparse candidate, renamed-parent mutation, search-root replacement, and global early-stop behavior on Windows.
 
-#183 extends durable registered-root identity to Darwin. The canonical root is opened with `O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW`, device+inode is derived with `Fstat`, and the existing registry identity contract now fails closed when a macOS root path is replaced or when a stored grant predates durable Darwin identity. Native macOS tests prove replacement rejection through `Get`, `List`, and governed `Resolve`, and require trusted re-registration for legacy rows.
+Phase 5/6 cross-platform filesystem hardening closes only after #231 passes its rebuilt exact-head matrix and merges.
 
-The remaining governed-workspace filesystem hardening is platform-specific. Darwin `readWorkspaceRegularFile`, search enumeration, and mutation targets still use pathname operations and need descriptor-relative Darwin implementations. Windows still needs a native persistent root identity and handle-based/path-verified governed operation design. Linux and Darwin root identities are internal governed-workspace invariants rather than general sandbox capability bits.
+## Resource controls
 
-### Resource controls
+Currently enforced where applicable: OS/filesystem/no-network isolation, TTL cleanup, wall-time bounds, stdout/stderr bounds, platform-specific process teardown, Windows Job Object process-count and aggregate committed-memory limits, Linux delegated cgroup-v2 `pids.max`, and aggregate Linux `memory.max` with `memory.swap.max=0`.
 
-Enforced where applicable: OS/filesystem/no-network isolation, TTL cleanup, wall-time bounds, stdout/stderr bounds, platform-specific process teardown, Windows Job Object process-count limits, Windows aggregate Job committed-memory limits, Linux delegated cgroup-v2 `pids.max`, and aggregate Linux `memory.max` with cgroup swap disabled by `memory.swap.max=0` after #174.
+Broker admission rejects a non-zero resource request if the selected runtime does not advertise the matching capability. Capability truthfulness is therefore part of the security boundary rather than presentation metadata.
 
-Broker admission rejects non-zero memory, CPU, process-count, or disk limits when the selected runtime does not advertise the matching capability. Windows advertises `pid_limit=true` and `memory_limit=true`. Linux dynamically advertises `pid_limit`/`memory_limit` only for controllers available at the configured delegated cgroup-v2 boundary. A non-zero quota fails closed when the matching controller is unavailable. Linux executions are atomically born in their execution cgroup with `CLONE_INTO_CGROUP`; PID and memory limits therefore apply to descendants inherited into the same cgroup before untrusted code executes.
+### CPU
 
-The cgroup-v2 `pids` controller limits tasks, not only distinct process IDs, so threads also consume the configured `resources.max_processes` ceiling. For memory, `memory.max` is the hard resident/accounted memory limit while swap authority is separate; #174 sets `memory.swap.max=0` for positive `resources.memory_bytes` so anonymous pages cannot use swap to exceed the application-level byte ceiling. Native evidence requires `memory.events` to record OOM enforcement under descendant pressure.
+Rebuilt **#232** preserves the reviewed cumulative CPU contract work:
 
-CPU remains deferred until the cumulative `cpu_time_ms` contract is reconciled with cgroup/Job Object CPU primitives; physical-disk accounting remains a separate design problem. All macOS resource quota capabilities remain false.
+- Linux enables the delegated cgroup-v2 `cpu` controller additively when available.
+- `cpu.stat usage_usec` is the aggregate process-tree accounting source.
+- `cpu.max` is used only as an overshoot bound; it is not the application CPU-time contract.
+- Whole execution cgroups can be terminated with `cgroup.kill`.
+- A cumulative monitor and final accounting close sampling-window escapes.
+- Windows Job Object aggregate user+kernel accounting and whole-Job termination primitives are staged with native tests.
 
-### Network
+`CPULimit` remains false until an exact validated runtime path is intentionally promoted. Darwin CPU remains false because detached-descendant accounting is unresolved. Physical `DiskLimit` remains false everywhere pending a separate enforceable design.
 
-First-party Linux, Windows, and Darwin runtimes remain no-network. Destination-scoped allowlisted egress is not implemented, so `network_allowlist` remains false.
+## Durable execution and worker recovery
 
-The browser perimeter is separately validated by native Chromium adversarial coverage after PR #168; that does not constitute arbitrary-sandbox socket egress enforcement.
+Rebuilt **#233** defines the Phase 14 durable contract:
 
-### Credentials
+- immutable owner-scoped create/exec specifications;
+- lease owner/token/expiry authority and immutable execution-attempt records;
+- durable Broker session and underlying runtime association before side-effecting execution;
+- bounded terminal result/error storage;
+- retry default `never`, with replay available only for explicitly idempotent work;
+- expired work with a recorded runtime is not claimable until that exact runtime is destroyed;
+- cleanup failure stops claiming rather than allowing overlap;
+- executor runs through `sandbox.Broker` only, preallocates execution identity, renews leases, cancels on lease loss, and destroys the sandbox before terminal success.
 
-Arbitrary sandbox environments reject credential-bearing keys and dangerous auth/proxy delegation. Opaque handles are owner/TTL scoped. Darwin additionally rejects runtime-owned path/home/temp overrides and `DYLD_*` injection. Service-specific broker consumers remain open.
+After #233 merges, rebuild the lifecycle-only delta from closed #223 directly on the new `main`: startup recovery before new claims, process-unique worker identity, server/Wails composition using the existing process-wide Broker and SQLite handle, and shutdown ordering that drains/cancels sandbox work before database teardown.
 
-### Persistent extensions
+## Kubernetes worker deployment
 
-- Linux `auto`: Bubblewrap when a sandbox rootfs is configured; otherwise compatibility behavior unless `required` is selected.
-- Windows `auto`: native AppContainer when available; `required`: fail closed; `off`: explicit sanitized-host compatibility.
-- macOS: native persistent extension confinement is active after #164; `required` fails closed if the native primitive is unavailable and `off` remains the explicit sanitized-host compatibility path.
-- Native Linux/Windows/Darwin confinement rejects credential-sensitive explicit environment values by default. `OMNILLM_EXTENSION_ALLOW_SECRET_ENV=true` is a transitional operator override.
+Rebuilt **#234** preserves the reviewed Phase 15 Helm slice:
 
-### Process-tree isolation on Darwin
+- separate worker Deployment and ServiceAccount;
+- no service-account token automount;
+- non-root UID/GID, RuntimeDefault seccomp, read-only root filesystem, no privilege escalation, all capabilities dropped;
+- bounded scratch `emptyDir`;
+- internal ClusterIP only;
+- ingress only from backend pods and worker egress denied by default;
+- bearer token from an existing Secret shared with backend wiring;
+- no fabricated cgroup delegation or quota capability claims.
 
-Darwin uses process-group cancellation for ordinary descendants and deliberately reports `process_tree_isolation=false`. 13D proves that a deliberately detached descendant remains Seatbelt-confined but may outlive ordinary process-group cancellation, so the capability remains false until a stronger native teardown primitive is implemented and proven.
+The dedicated `Kubernetes Sandbox Worker Assurance` workflow must remain green before merge.
+
+## Isolated agent worktrees
+
+Rebuilt **#235** preserves the reviewed Phase 16 primitive:
+
+- trusted generation of worktree IDs/physical paths and owner scope including user + agent-run identity;
+- base revisions resolved to immutable commit IDs with go-git;
+- base and writable snapshots materialized from commit blobs without repository checkout hooks, filters, credential helpers, or `.git` authority;
+- unsafe symlinks/file modes fail closed;
+- review uses a bounded binary `git diff --no-index` between immutable base and writable snapshot;
+- normalized patch output is SHA-256 bound;
+- promotion recomputes the digest, requires target cleanliness, and uses guarded `git apply --check` / `git apply`;
+- promotion does not stage, commit, fetch, push, or merge, so existing guarded Git mutation/publication controls remain authoritative.
+
+## Network
+
+First-party arbitrary Linux, Windows, and Darwin runtimes remain no-network. Destination-scoped allowlisted egress is not implemented, so `network_allowlist` remains false. Browser-native egress assurance from #168 validates the browser perimeter only; it is not a substitute for arbitrary sandbox socket enforcement.
+
+The next Phase 8 design must resist DNS rebinding/resolution drift, redirects, proxy delegation, private/link-local/loopback address escape, IPv4/IPv6 ambiguity, and connection reuse that violates the approved destination set.
+
+## Credentials
+
+Arbitrary sandbox environments reject credential-bearing keys and dangerous auth/proxy delegation. Opaque credential handles are owner/TTL scoped. Service-specific broker consumers remain open; raw provider credentials must not be injected into arbitrary sandbox environments as a shortcut.
+
+## Persistent extensions
+
+- Linux `auto`: Bubblewrap when a sandbox rootfs is configured; `required` fails closed if confinement is unavailable.
+- Windows `auto`: native AppContainer when available; `required` fails closed; `off` is explicit sanitized-host compatibility.
+- macOS: native Seatbelt confinement after #164; `required` fails closed if unavailable; `off` remains explicit compatibility.
+- Native confinement rejects credential-sensitive explicit environment values by default; the transitional secret-env override remains operator controlled.
+
+## Darwin process-tree limitation
+
+Darwin uses process-group cancellation for ordinary descendants and deliberately reports `process_tree_isolation=false`. Phase 13D proves deliberately detached descendants remain Seatbelt-confined but can outlive ordinary process-group cancellation. Do not promote this capability without a stronger native teardown primitive and matching adversarial proof.
 
 ## Execution order
 
-1. Complete and merge Darwin registered-root identity hardening (#183) after its documentation-inclusive exact head passes native macOS and repository-wide gates.
-2. Implement descriptor-relative Darwin governed reads, search enumeration, and mutations as one or more reviewable native slices.
-3. Design and prove Windows workspace root identity and operation path-race hardening with Windows-native handle/file-ID primitives.
-4. Resolve the aggregate/cumulative CPU-time semantic contract before enabling `cpu_limit` on any platform; design physical-disk accounting separately.
-5. Continue Phase 8/9 work: destination-enforced egress and service-specific credential consumers.
-6. Continue Phase 17 adversarial assurance with every platform/runtime change.
-7. After the intended deployment's required quota/egress hardening is complete, advance durable sandbox-backed tasks and isolated workers.
+1. Complete exact-head validation and merge **#231** (Windows governed-workspace identity/path-race hardening).
+2. Normalize **#232** onto the resulting `main` if required, rerun its exact-head matrix, and merge only with CPU capability reporting still fail-closed unless promotion is independently proven.
+3. Continue Phase 8/9: destination-enforced arbitrary-sandbox egress and service-specific credential consumers. Physical-disk accounting remains a separate resource-control design.
+4. Normalize and merge **#233** (durable leased task contract), then rebuild only the lifecycle delta from closed #223 on that merged contract.
+5. Normalize/validate **#234** (isolated Kubernetes worker) and **#235** (owner-scoped isolated worktrees) on the then-current `main` and merge independently.
+6. Continue Phase 17 adversarial assurance with every platform/runtime/capability change.
 
 ## Validation discipline
 
-A sandbox phase is complete only when platform-native negative tests exist, capability claims match enforcement, unsupported controls are explicit, and the exact merge head passes applicable repository checks.
-
-Windows Phase 12 met that bar through PRs #127, #128, #139, and #149. macOS Phase 13 met the same standard incrementally for arbitrary local execution (13B), persistent extensions (13C), and final adversarial assurance (13D). PR #171 merged as `11dfab99e73fe414e45cc44b0f33d4c80789295a`; PR #172 merged as `bc9eb6f204db9dcb2c6fb3670262ef8d0c58cb3f`; PR #173 merged as `981691a0058efd7a061cc892d3f43f1edf4d22e3`; PR #174 merged as `c8adc3cd4e8492b57ff4b05450e84a46f409edbc`; PR #175 merged as `925e258539bc16ad4bf96c1d1c6d78f49dd64ada`; PR #176 merged as `3324114d1792c120206642741b0839b9153c40fc`; PR #177 merged as `9f242f60996e59f863a2b1bae1829ebf777f12bd`; PR #182 passed its exact-head matrix and merged as `3825fd5074203b2382e55cb6ff0d0e9110bd3f90`. PR #183 has native macOS root-identity tests green on implementation head `d8e24e41bd9116108662d978d99923e637407745`; its documentation-inclusive final head must pass the complete applicable matrix before merge.
+A sandbox phase is complete only when platform-native negative tests exist, capability claims match enforcement, unsupported controls remain explicit, and the exact merge candidate passes all applicable repository checks. A previously green stacked branch is evidence for design review, not permission to merge stale history; rebuilt current-main heads must earn their own validation.
