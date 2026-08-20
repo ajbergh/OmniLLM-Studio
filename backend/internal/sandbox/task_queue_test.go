@@ -13,10 +13,17 @@ import (
 
 func newSandboxTaskQueueForTest(t *testing.T) *SandboxTaskQueue {
 	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "sandbox-task-test.db")+"?_pragma=foreign_keys(1)")
+	// Mirror the production SQLite concurrency settings that matter to the
+	// durable task worker. The worker claims/completes on background goroutines
+	// while tests poll through the same sql.DB; without WAL + a busy timeout the
+	// raw modernc connection can return SQLITE_BUSY even though production
+	// db.Open waits for the writer and permits concurrent readers.
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "sandbox-task-test.db")+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatal(err)
 	}
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 	t.Cleanup(func() { _ = db.Close() })
 	queue, err := NewSandboxTaskQueue(db)
 	if err != nil {
