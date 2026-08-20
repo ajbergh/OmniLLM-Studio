@@ -73,8 +73,7 @@ func TestEvaluateTransitionPaintFailsClosedOnInvalidOrUnsupportedSemantics(t *te
 
 	t.Run("unsupported-paint-family", func(t *testing.T) {
 		state := base
-		state.Type = "wipe"
-		state.Direction = "left"
+		state.Type = "zoom"
 		state.Placement = "out"
 		state.PeerClipID = ""
 		state.Role = "outgoing"
@@ -96,6 +95,20 @@ func TestEvaluateTransitionPaintFailsClosedOnInvalidOrUnsupportedSemantics(t *te
 		_, err := EvaluateTransitionPaint("owner", state)
 		if err == nil || !strings.Contains(err.Error(), "direction left, right, up, or down") {
 			t.Fatalf("slide direction error = %v", err)
+		}
+	})
+
+	t.Run("wipe-direction-must-be-canonical", func(t *testing.T) {
+		state := base
+		state.Type = "wipe"
+		state.Direction = "diagonal"
+		state.Placement = "in"
+		state.PeerClipID = ""
+		state.Role = "incoming"
+		state.PeerRole = ""
+		_, err := EvaluateTransitionPaint("owner", state)
+		if err == nil || !strings.Contains(err.Error(), "wipe requires direction left, right, up, or down") {
+			t.Fatalf("wipe direction error = %v", err)
 		}
 	})
 
