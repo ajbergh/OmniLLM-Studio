@@ -54,6 +54,7 @@ type FrameLayerState struct {
 	MediaFit              string                         `json:"media_fit,omitempty"`
 	ContentBounds         *TimelineV2ContentBounds       `json:"content_bounds,omitempty"`
 	MediaGeometry         *EvaluatedMediaGeometry        `json:"media_geometry,omitempty"`
+	Text                  *EvaluatedTextState            `json:"text,omitempty"`
 	Transform             EvaluatedTransform             `json:"transform"`
 	ViewTransform         EvaluatedTransform             `json:"view_transform"`
 	ModelMatrix           Matrix4                        `json:"model_matrix"`
@@ -80,9 +81,9 @@ type VisualFrameState struct {
 
 // EvaluateVisualFrameState produces the renderer-independent visual FrameState
 // projection. It evaluates exact-frame clip/camera properties, visibility/order,
-// source time, canonical media geometry, perspective projection, ordered effect
-// stacks, transition timing/peer state, and supported canonical transition paint.
-// Visual families not yet canonicalized remain explicit unresolved debt.
+// source time, canonical media geometry, text state, perspective projection,
+// ordered effect stacks, transition timing/peer state, and supported canonical
+// transition paint. Visual families not yet canonicalized remain explicit debt.
 func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualFrameState, error) {
 	normalized, err := NormalizeTimelineV2EvaluationInputs(doc)
 	if err != nil {
@@ -206,6 +207,10 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 
 	bounds := effectiveContentBounds(clip)
 	unresolved := unresolvedLayerFeatures(clip, bounds)
+	text, err := EvaluateTextState(clip.Text, canvas.Height)
+	if err != nil {
+		return FrameLayerState{}, fmt.Errorf("canonical text state for clip %q: %w", clip.ID, err)
+	}
 	effects, err := EvaluateClipEffectStackAtFrame(clip, frameIndex, canvas.FPS)
 	if err != nil {
 		return FrameLayerState{}, err
@@ -254,7 +259,7 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 	return FrameLayerState{
 		TrackIndex: active.TrackIndex, ClipIndex: active.ClipIndex, TrackID: track.ID, ClipID: clip.ID,
 		ZIndex: active.ZIndex, StartFrame: active.StartFrame, EndFrame: active.EndFrame, SourceTimeMS: active.SourceTimeMS,
-		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Transform: transform, ViewTransform: view,
+		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Text: text, Transform: transform, ViewTransform: view,
 		ModelMatrix: matrix, PerspectiveProjection: projection, Effects: effects, Transitions: transitions, TransitionPaint: paint,
 		Unresolved: unresolved, Authoritative: len(unresolved) == 0,
 	}, nil
@@ -295,9 +300,6 @@ func effectiveContentBounds(clip TimelineV2Clip) *TimelineV2ContentBounds {
 
 func unresolvedLayerFeatures(clip TimelineV2Clip, bounds *TimelineV2ContentBounds) []string {
 	unresolved := []string{}
-	if clip.Text != nil {
-		unresolved = append(unresolved, "text")
-	}
 	if clip.Shape != nil {
 		unresolved = append(unresolved, "shape")
 	}

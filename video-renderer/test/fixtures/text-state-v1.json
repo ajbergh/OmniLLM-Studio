@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "description": "Cross-runtime canonical text-state-v1 fixture grounded in current Video Edit Studio preview text semantics.",
+  "canvas_height": 360,
+  "default_case": {
+    "input": {
+      "text": "Hello\nWorld",
+      "background": "#112233",
+      "stroke": "#000000",
+      "shadow": true
+    },
+    "expected": {
+      "contract_version": "text-state-v1",
+      "text": "Hello\nWorld",
+      "font_family": "",
+      "font_family_source": "composition-default",
+      "font_size": 20,
+      "font_weight": "700",
+      "color": "#ffffff",
+      "background": "#112233",
+      "stroke": "#000000",
+      "stroke_width": 2,
+      "shadow": {
+        "offset_x": 2,
+        "offset_y": 2,
+        "blur_radius": 4,
+        "color": "rgba(0,0,0,0.7)"
+      },
+      "text_align": "center",
+      "vertical_align": "middle",
+      "line_height_mode": "normal",
+      "letter_spacing": 0,
+      "border_radius": 0,
+      "padding": { "top": 8, "right": 18, "bottom": 8, "left": 18 }
+    }
+  },
+  "authored_case": {
+    "input": {
+      "text": "Title",
+      "font_family": " Inter ",
+      "font_size": 48,
+      "font_weight": "600",
+      "color": "#abcdef",
+      "background": "rgba(1,2,3,0.5)",
+      "stroke": "#123456",
+      "stroke_width": 3,
+      "shadow": false,
+      "text_align": "left",
+      "vertical_align": "top",
+      "line_height": 1.4,
+      "letter_spacing": 2.5,
+      "border_radius": 12,
+      "box_width": 400,
+      "box_height": 120,
+      "padding_top": 4,
+      "padding_right": 5,
+      "padding_bottom": 6,
+      "padding_left": 7,
+      "params": { "non_authoritative_note": "ignored" }
+    },
+    "expected": {
+      "contract_version": "text-state-v1",
+      "text": "Title",
+      "font_family": "Inter",
+      "font_family_source": "authored",
+      "font_size": 48,
+      "font_weight": "600",
+      "color": "#abcdef",
+      "background": "rgba(1,2,3,0.5)",
+      "stroke": "#123456",
+      "stroke_width": 3,
+      "text_align": "left",
+      "vertical_align": "top",
+      "line_height_mode": "multiplier",
+      "line_height": 1.4,
+      "letter_spacing": 2.5,
+      "border_radius": 12,
+      "box_width": 400,
+      "box_height": 120,
+      "padding": { "top": 4, "right": 5, "bottom": 6, "left": 7 }
+    }
+  }
+}
