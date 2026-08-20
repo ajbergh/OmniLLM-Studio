@@ -183,12 +183,18 @@ export interface NativeCitation {
 }
 
 /** Client-safe retrieval failure codes emitted by the backend. */
-export type SearchFailureReason = 'no_results' | 'provider_error' | 'provider_disabled';
+export type SearchFailureReason =
+  | 'no_results'
+  | 'provider_error'
+  | 'provider_disabled'
+  | 'provider_rate_limited';
 
 export const SEARCH_FAILURE_LABELS: Record<SearchFailureReason, string> = {
   no_results: 'The search returned no usable results.',
   provider_error: 'The search provider could not be reached.',
   provider_disabled: 'Web search is not configured.',
+  provider_rate_limited:
+    'The search provider rate-limited this request. DuckDuckGo blocks repeated lookups; add a Brave Search API key in Settings for reliable results.',
 };
 
 export interface WebSearchResponse {

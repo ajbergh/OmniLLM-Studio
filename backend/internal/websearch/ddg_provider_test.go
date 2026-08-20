@@ -2,6 +2,7 @@ package websearch
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -188,5 +189,86 @@ func TestExtractDDGRedirectURL(t *testing.T) {
 		if got := extractDDGRedirectURL(in); got != want {
 			t.Errorf("extractDDGRedirectURL(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestDDGRateLimitIsDistinctFromMarkupDrift covers a misdiagnosis that reached a
+// user's screen. DuckDuckGo answers roughly one request per source address and
+// then serves an anti-bot challenge; the old code reported every unparsable body
+// as "markup may have changed", which blamed the parser for a rate limit and
+// invited a retry that could not succeed.
+func TestDDGRateLimitIsDistinctFromMarkupDrift(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      int
+		body        string
+		wantLimited bool
+	}{
+		{
+			name:        "202 challenge",
+			status:      http.StatusAccepted,
+			body:        `<!DOCTYPE html><html><head><title>DuckDuckGo</title></head><body></body></html>`,
+			wantLimited: true,
+		},
+		{
+			name:        "429",
+			status:      http.StatusTooManyRequests,
+			body:        "slow down",
+			wantLimited: true,
+		},
+		{
+			// Verbatim wording from an observed challenge body.
+			name:   "200 challenge page",
+			status: http.StatusOK,
+			body: `<html><body><p>Unfortunately, bots use DuckDuckGo too. Please complete the ` +
+				`following challenge to confirm this search was made by a human. Select all ` +
+				`squares containing a duck:</p></body></html>`,
+			wantLimited: true,
+		},
+		{
+			// A real class rename must still be reported as a markup change, even
+			// though it also yields zero parsable results. Guessing from body size
+			// got this wrong and blamed a rate limit instead.
+			name:        "genuine markup change",
+			status:      http.StatusOK,
+			body:        `<html><body><div class="renamed__body"><a class="renamed__a" href="https://x.test">X</a></div></body></html>`,
+			wantLimited: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := newTestDDGProvider(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			})
+			_, err := provider.Search(context.Background(), SearchRequest{Query: "q", MaxResults: 5})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			limited := errors.Is(err, ErrSearchProviderRateLimited)
+			if limited != tc.wantLimited {
+				t.Errorf("rate-limited = %v, want %v (err: %v)", limited, tc.wantLimited, err)
+			}
+			if !tc.wantLimited && !strings.Contains(err.Error(), "markup") {
+				t.Errorf("a real markup change should still say so: %v", err)
+			}
+		})
+	}
+}
+
+// TestDDGCapabilitiesAreHonest pins the declared limits. Reporting DuckDuckGo as
+// more capable than it is caused the planner to issue expanded query sets that
+// were guaranteed to be refused.
+func TestDDGCapabilitiesAreHonest(t *testing.T) {
+	capabilities := NewDuckDuckGoProvider().Capabilities()
+	if capabilities.MaxQueriesPerTurn != 1 {
+		t.Errorf("MaxQueriesPerTurn = %d; measured behaviour is one request per source address", capabilities.MaxQueriesPerTurn)
+	}
+	if capabilities.SupportsFreshnessFilter {
+		t.Error("DuckDuckGo HTML has no freshness parameter")
+	}
+	if capabilities.ProvidesPublicationDates {
+		t.Error("DuckDuckGo HTML returns no publication dates, so freshness cannot be verified")
 	}
 }

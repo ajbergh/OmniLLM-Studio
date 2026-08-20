@@ -2,6 +2,7 @@ package websearch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -449,6 +450,16 @@ func (o *Orchestrator) searchWithPlan(ctx context.Context, plan SearchPlan, tc t
 	if iterations <= 0 || iterations > len(plan.Queries) {
 		iterations = len(plan.Queries)
 	}
+	// Bound by what the provider can actually deliver. DuckDuckGo serves an
+	// anti-bot challenge after roughly one request per source address, so running
+	// the planner's expanded query set against it guarantees that every query
+	// after the first comes back empty — turning a deliberate breadth increase
+	// into a reliability loss.
+	if capabilities := provider.Capabilities(); capabilities.MaxQueriesPerTurn > 0 && iterations > capabilities.MaxQueriesPerTurn {
+		log.Printf("[websearch] clamping %d queries to %d for provider %q",
+			iterations, capabilities.MaxQueriesPerTurn, provider.Name())
+		iterations = capabilities.MaxQueriesPerTurn
+	}
 	seen := map[string]bool{}
 	combined := make([]SearchResult, 0, plan.MaxResults*iterations)
 
@@ -466,6 +477,14 @@ func (o *Orchestrator) searchWithPlan(ctx context.Context, plan SearchPlan, tc t
 			// the signal that a provider is misconfigured or broken.
 			log.Printf("ERROR: websearch provider %q failed for query %d/%d: %v",
 				provider.Name(), i+1, iterations, err)
+			// A rate limit applies to the whole turn, so continuing through the
+			// remaining queries just collects more of the same refusal.
+			if errors.Is(err, ErrSearchProviderRateLimited) {
+				if len(combined) == 0 {
+					return nil, err
+				}
+				break
+			}
 			if len(combined) == 0 && i == iterations-1 {
 				return nil, err
 			}

@@ -420,7 +420,11 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	syncCatalog := filterOutBrowserTools(
 		selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, syncToolSelection),
 	)
-	syncHasIntegrations := integrationToolsConnected(syncCatalog)
+	syncOwnershipProviderType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
+	syncOwnership := turnOwnershipInputs{
+		NativeGrounding:       websearch.SupportsNativeSearch(syncOwnershipProviderType, llmReq.Model),
+		IntegrationsConnected: integrationToolsConnected(syncCatalog),
+	}
 
 	if webSearchEnabled {
 		syncSearchRoute = h.classifyCurrentInformation(r.Context(), req.Content)
@@ -435,7 +439,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		syncRetrievalPlan := websearch.BuildSearchPlan(
 			retrievalText, turncontext.FromContext(r.Context()).Now, turncontext.FromContext(r.Context()).Timezone,
 		)
-		if !retrievalMayOwnTurn(syncRetrievalPlan, req.Content, syncHasIntegrations) {
+		if !retrievalMayOwnTurn(syncRetrievalPlan, req.Content, syncOwnership) {
 			var preflightErr error
 			syncPreflight, _, preflightErr = h.orchestrator.Preflight(r.Context(), retrievalText, syncSearchRoute.forcesRetrieval())
 			if preflightErr != nil || syncPreflight == nil {
@@ -1084,7 +1088,10 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	streamTurnSelection := turnToolSelectionFromContext(r.Context())
 	streamProviderType, _ := h.llmSvc.ResolveProviderType(llmReq.Provider)
 	streamLLMTools := selectChatToolsForContext(r.Context(), h.toolRegistry, h.toolExecutor, req.Content, streamTurnSelection)
-	streamHasIntegrations := integrationToolsConnected(streamLLMTools)
+	streamOwnership := turnOwnershipInputs{
+		NativeGrounding:       websearch.SupportsNativeSearch(streamProviderType, llmReq.Model),
+		IntegrationsConnected: integrationToolsConnected(streamLLMTools),
+	}
 
 	if webSearchEnabled {
 		searchRoute = h.classifyCurrentInformation(r.Context(), req.Content)
@@ -1115,7 +1122,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		streamRetrievalPlan := websearch.BuildSearchPlan(
 			retrievalText, turncontext.FromContext(r.Context()).Now, turncontext.FromContext(r.Context()).Timezone,
 		)
-		if retrievalMayOwnTurn(streamRetrievalPlan, req.Content, streamHasIntegrations) {
+		if retrievalMayOwnTurn(streamRetrievalPlan, req.Content, streamOwnership) {
 			searchResp, wsLLMReq, toolCall, wsErr = h.orchestrator.ProcessStream(
 				r.Context(), retrievalText, providerName, modelName, searchRoute.forcesRetrieval(),
 			)

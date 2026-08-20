@@ -399,7 +399,10 @@ A: Explicit recency words ("latest", "current release", "right now") reliably tr
 A: Retrieval was attempted and the provider returned nothing usable. Check that a search provider is configured in Settings; if you use Brave, check that the key is valid and within quota. The answer you received came from training data.
 
 **Q: DuckDuckGo results seem weaker than Brave.**
-A: They are. DuckDuckGo has no recency filter and returns no publication dates, so freshness cannot be verified and the recency signal is only a hint added to the query text. Brave is worth configuring for anything price-, version-, or benchmark-related.
+A: They are, and the gap is larger than it looks. DuckDuckGo has no recency filter and returns no publication dates, so freshness cannot be verified and the recency signal is only a hint added to the query text. It is also a scraped HTML page rather than an API: it answers roughly **one request per source address** and then serves an anti-bot challenge for several minutes. A research question that wants three targeted searches will get one. OmniLLM-Studio caps its query plan to match, and reports "The search provider rate-limited this request" rather than pretending the results were complete — but there is no way around the underlying limit. **Configure a Brave key for anything price-, version-, or benchmark-related.**
+
+**Q: I got "The search provider rate-limited this request".**
+A: DuckDuckGo blocked the lookup. It is free and needs no key, and this is the trade-off. Add a Brave Search API key in Settings; the free tier covers 2,000 queries a month, which is far more than a scraped endpoint will reliably serve.
 
 **Q: Does searching send my whole conversation to the search provider?**
 A: No. Only a generated search query is sent. Full-page extraction sends the URL of a search result to Jina Reader.

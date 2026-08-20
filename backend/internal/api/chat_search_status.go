@@ -1,7 +1,10 @@
 package api
 
 import (
+	"errors"
 	"strings"
+
+	"github.com/ajbergh/omnillm-studio/internal/websearch"
 )
 
 // Retrieval-status metadata keys. These form the contract the frontend reads to
@@ -19,9 +22,10 @@ const (
 // Failure reason codes. These are deliberately coarse: raw provider errors must
 // never reach a client, so the handler maps them to a fixed vocabulary.
 const (
-	searchFailureNoResults = "no_results"
-	searchFailureProvider  = "provider_error"
-	searchFailureDisabled  = "provider_disabled"
+	searchFailureNoResults   = "no_results"
+	searchFailureProvider    = "provider_error"
+	searchFailureDisabled    = "provider_disabled"
+	searchFailureRateLimited = "provider_rate_limited"
 )
 
 // searchStatus records what actually happened during current-information
@@ -39,8 +43,16 @@ func classifySearchFailure(err error) string {
 	if err == nil {
 		return searchFailureNoResults
 	}
+	// A rate limit is its own outcome: the provider works, the quota or the
+	// anti-bot challenge does not. Conflating it with provider_error hides the one
+	// failure the user can actually fix by configuring a real search API.
+	if errors.Is(err, websearch.ErrSearchProviderRateLimited) {
+		return searchFailureRateLimited
+	}
 	msg := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(msg, "rate-limited"), strings.Contains(msg, "rate limited"):
+		return searchFailureRateLimited
 	case strings.Contains(msg, "disabled"):
 		return searchFailureDisabled
 	case strings.Contains(msg, "no results"), strings.Contains(msg, "no parsable results"):

@@ -38,7 +38,7 @@ func TestRetrievalDoesNotStarveToolCalling(t *testing.T) {
 	for _, prompt := range prompts {
 		t.Run(prompt, func(t *testing.T) {
 			plan := websearch.BuildSearchPlan(prompt, now, "UTC")
-			if retrievalMayOwnTurn(plan, prompt, false) {
+			if retrievalMayOwnTurn(plan, prompt, turnOwnershipInputs{}) {
 				t.Errorf("retrieval would own this turn (NeedsWeb=%v, shape=%q), so the tool loop never runs and MCP tools cannot be called",
 					plan.NeedsWeb, plan.AnswerShape)
 			}
@@ -61,7 +61,7 @@ func TestSimpleLookupsMayStillOwnTheTurn(t *testing.T) {
 		if !plan.NeedsWeb {
 			t.Fatalf("%q should still plan retrieval", prompt)
 		}
-		if !retrievalMayOwnTurn(plan, prompt, false) {
+		if !retrievalMayOwnTurn(plan, prompt, turnOwnershipInputs{}) {
 			t.Errorf("%q is a single-fact lookup and should keep the cheap turn-owning path", prompt)
 		}
 	}
@@ -80,10 +80,10 @@ func TestConnectedIntegrationsNarrowTurnOwnership(t *testing.T) {
 	if brief.AnswerShape != websearch.AnswerShapeBrief {
 		t.Fatalf("expected a brief plan, got %q", brief.AnswerShape)
 	}
-	if !retrievalMayOwnTurn(brief, "What's the weather today?", false) {
+	if !retrievalMayOwnTurn(brief, "What's the weather today?", turnOwnershipInputs{}) {
 		t.Error("with no integrations a brief lookup should keep the cheap path")
 	}
-	if retrievalMayOwnTurn(brief, "What's the weather today?", true) {
+	if retrievalMayOwnTurn(brief, "What's the weather today?", turnOwnershipInputs{IntegrationsConnected: true}) {
 		t.Error("with integrations connected a brief lookup must not take the whole turn")
 	}
 
@@ -92,8 +92,63 @@ func TestConnectedIntegrationsNarrowTurnOwnership(t *testing.T) {
 	if direct.AnswerShape != websearch.AnswerShapeDirect {
 		t.Fatalf("expected a direct plan, got %q", direct.AnswerShape)
 	}
-	if !retrievalMayOwnTurn(direct, "What time does the World Cup game start today?", true) {
+	if !retrievalMayOwnTurn(direct, "What time does the World Cup game start today?", turnOwnershipInputs{IntegrationsConnected: true}) {
 		t.Error("a direct single-fact lookup should keep the cheap path even with integrations")
+	}
+}
+
+// TestNativeGroundingKeepsResearchTurns is the regression test for the observed
+// live failure: a Gemini research question was routed to a preflight, which can
+// only use the local provider, and DuckDuckGo rate-limited mid-turn. The answer
+// came back recommending models from over a year earlier while Gemini's own
+// grounding — which works — went unused.
+//
+// Routing a turn away from working native grounding and onto an unreliable local
+// scraper is a downgrade, so with no integrations connected native grounding wins
+// regardless of answer shape.
+func TestNativeGroundingKeepsResearchTurns(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	const prompt = "Research the best LLM available via API and compare benchmark versus cost"
+
+	plan := websearch.BuildSearchPlan(prompt, now, "UTC")
+	if plan.AnswerShape != websearch.AnswerShapeResearch {
+		t.Fatalf("expected a research plan, got %q", plan.AnswerShape)
+	}
+
+	// This prompt asks for a comparison, so the tool loop is needed either way.
+	// Use a research prompt with no follow-up verb to isolate the routing rule.
+	const plainResearch = "give me a comprehensive investigation of current LLM API pricing tiers"
+	plainPlan := websearch.BuildSearchPlan(plainResearch, now, "UTC")
+	if !plainPlan.NeedsWeb {
+		t.Fatalf("expected retrieval to be planned for %q", plainResearch)
+	}
+
+	native := turnOwnershipInputs{NativeGrounding: true}
+	if !retrievalMayOwnTurn(plainPlan, plainResearch, native) {
+		t.Error("with native grounding available and no integrations, retrieval should own the turn rather than fall back to local search")
+	}
+
+	localOnly := turnOwnershipInputs{}
+	if retrievalMayOwnTurn(plainPlan, plainResearch, localOnly) {
+		t.Error("without native grounding, owning the turn buys nothing over a preflight, so keep the tool loop")
+	}
+
+	// A connected integration still outranks native grounding for non-direct
+	// shapes: starving a configured tool reads as the feature being broken.
+	both := turnOwnershipInputs{NativeGrounding: true, IntegrationsConnected: true}
+	if retrievalMayOwnTurn(plainPlan, plainResearch, both) {
+		t.Error("connected integrations must keep non-direct turns on the tool loop")
+	}
+}
+
+// TestPrivateSourceOutranksNativeGrounding: no provider capability justifies
+// answering a question about the user's own systems from the public web.
+func TestPrivateSourceOutranksNativeGrounding(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.UTC)
+	const prompt = "what are the latest open PRs on my repo"
+	plan := websearch.BuildSearchPlan(prompt, now, "UTC")
+	if retrievalMayOwnTurn(plan, prompt, turnOwnershipInputs{NativeGrounding: true}) {
+		t.Error("a private-source prompt must reach the tool loop even with native grounding available")
 	}
 }
 

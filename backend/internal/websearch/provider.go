@@ -14,6 +14,28 @@ type Provider interface {
 	// Name identifies the provider in logs and telemetry. It must never include
 	// credentials.
 	Name() string
+	// Capabilities describes what this provider can reliably deliver. The planner
+	// bounds itself by these rather than assuming every provider behaves like an
+	// API with a quota.
+	Capabilities() ProviderCapabilities
+}
+
+// ProviderCapabilities describes the limits of a search backend.
+//
+// This exists because the two supported providers are not the same kind of
+// thing. Brave is an API with a quota and real query parameters. DuckDuckGo is a
+// scraped HTML endpoint that serves an anti-bot challenge after roughly one
+// request per source address, so issuing an expanded three-query plan against it
+// guarantees that queries two and three come back empty.
+type ProviderCapabilities struct {
+	// MaxQueriesPerTurn bounds how many searches one turn may issue.
+	MaxQueriesPerTurn int
+	// SupportsFreshnessFilter is true when the provider honors a real recency
+	// parameter rather than approximating it with query text.
+	SupportsFreshnessFilter bool
+	// ProvidesPublicationDates is true when results carry dates that
+	// ParsePublishedAt can read. Without them, freshness cannot be verified.
+	ProvidesPublicationDates bool
 }
 
 // ---------------------------------------------------------------------------
@@ -29,6 +51,11 @@ func NewFakeProvider() *FakeProvider {
 
 // Name identifies the provider in logs.
 func (f *FakeProvider) Name() string { return "fake" }
+
+// Capabilities reports the canned provider as fully capable.
+func (f *FakeProvider) Capabilities() ProviderCapabilities {
+	return ProviderCapabilities{MaxQueriesPerTurn: 5, SupportsFreshnessFilter: true, ProvidesPublicationDates: true}
+}
 
 func (f *FakeProvider) Search(_ context.Context, req SearchRequest) (*SearchResponse, error) {
 	now := time.Now().UTC()

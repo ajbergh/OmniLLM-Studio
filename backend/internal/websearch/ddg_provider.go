@@ -41,6 +41,24 @@ func NewDuckDuckGoProvider() *DuckDuckGoProvider {
 // Name identifies the provider in logs.
 func (d *DuckDuckGoProvider) Name() string { return "duckduckgo" }
 
+// Capabilities reports DuckDuckGo honestly, which means reporting it as weak.
+//
+// It is a scraped HTML endpoint, not an API. Measured behaviour: the first
+// request from a source address returns results, and subsequent requests return
+// HTTP 202 with a challenge page and zero parsable results — for minutes. So one
+// query per turn is the only volume that reliably works, and issuing the
+// planner's expanded three-query set against it guarantees two empty results.
+//
+// It also has no freshness parameter and returns no publication dates, so
+// recency can only be hinted at in the query text and can never be verified.
+func (d *DuckDuckGoProvider) Capabilities() ProviderCapabilities {
+	return ProviderCapabilities{
+		MaxQueriesPerTurn:        1,
+		SupportsFreshnessFilter:  false,
+		ProvidesPublicationDates: false,
+	}
+}
+
 // searchEndpoint returns the configured endpoint, falling back to the public
 // DuckDuckGo HTML endpoint. Tests override it; production never does.
 func (d *DuckDuckGoProvider) searchEndpoint() string {
@@ -100,6 +118,15 @@ func (d *DuckDuckGoProvider) Search(ctx context.Context, req SearchRequest) (*Se
 	}
 	defer resp.Body.Close()
 
+	// HTTP 202 with an HTML body is DuckDuckGo's anti-bot challenge, not a
+	// transient error. It is returned per source address for minutes after about
+	// one successful request, so retrying inside the same turn cannot help.
+	if resp.StatusCode == http.StatusAccepted {
+		return nil, ErrSearchProviderRateLimited
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, ErrSearchProviderRateLimited
+	}
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := readResponseBody(resp)
 		return nil, fmt.Errorf("ddg returned status %d: %s", resp.StatusCode, truncateProviderError(string(bodyBytes)))
@@ -115,9 +142,13 @@ func (d *DuckDuckGoProvider) Search(ctx context.Context, req SearchRequest) (*Se
 		return nil, fmt.Errorf("parse ddg html: %w", err)
 	}
 	if len(raw) == 0 {
-		// DuckDuckGo HTML is scraped, not an API. A markup change yields a 200
-		// with zero parsable results, which must surface as a provider failure
-		// rather than a successful empty search.
+		// A 200 with no parsable results is ambiguous: either the markup changed,
+		// or this is a challenge page served with a 200. Distinguish them, because
+		// the previous single message blamed the parser for what was almost always
+		// a rate limit and sent readers to the wrong place.
+		if looksLikeDDGChallenge(bodyBytes) {
+			return nil, ErrSearchProviderRateLimited
+		}
 		return nil, fmt.Errorf("ddg returned no parsable results (markup may have changed)")
 	}
 
@@ -143,6 +174,39 @@ func (d *DuckDuckGoProvider) Search(ctx context.Context, req SearchRequest) (*Se
 		Results:   results,
 		FetchedAt: time.Now().UTC(),
 	}, nil
+}
+
+// ddgChallengeMarkers are phrases taken from an observed DuckDuckGo challenge
+// page. The live body reads:
+//
+//	"Unfortunately, bots use DuckDuckGo too. Please complete the following
+//	 challenge to confirm this search was made by a human. Select all squares
+//	 containing a duck"
+//
+// Detection is by explicit marker only. An earlier version also guessed from body
+// size and the absence of result markup, which misclassified a genuine markup
+// change as a rate limit — a wrong diagnosis is worse than an unspecific one,
+// because it sends the reader to the wrong file.
+var ddgChallengeMarkers = []string{
+	"bots use duckduckgo",
+	"confirm this search was made by a human",
+	"complete the following challenge",
+	"squares containing a duck",
+	"unusual traffic",
+	"captcha",
+	"anomaly",
+}
+
+// looksLikeDDGChallenge reports whether a 200 body is an anti-bot challenge
+// rather than a results page.
+func looksLikeDDGChallenge(body []byte) bool {
+	lower := strings.ToLower(string(body))
+	for _, marker := range ddgChallengeMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseDDGHTML parses the DuckDuckGo HTML search results page.

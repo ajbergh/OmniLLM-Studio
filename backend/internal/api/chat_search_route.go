@@ -135,83 +135,66 @@ func (d searchRouteDecision) retrievalQuery(userText string) string {
 	return userText
 }
 
+// turnOwnershipInputs are the facts, beyond the plan and the prompt, that decide
+// whether retrieval may answer a turn by itself.
+type turnOwnershipInputs struct {
+	// NativeGrounding is true when the active provider and model can ground
+	// their own answer.
+	NativeGrounding bool
+	// IntegrationsConnected is true when the turn's catalog contains a tool from
+	// a connected MCP server or plugin.
+	IntegrationsConnected bool
+}
+
 // retrievalMayOwnTurn reports whether the search orchestrator may answer a turn
 // by itself, instead of retrieving as a preflight and handing off to the tool
 // loop.
 //
-// This exists because turn ownership and tool calling are mutually exclusive:
-// the orchestrator paths (Process / ProcessStream) generate an answer and
-// return, so the tool loop never runs and no MCP, plugin, or app tool can be
-// invoked. That was survivable while the gate was narrow. Once it correctly
-// started triggering on "latest", "current <noun>", "search for", and "find", it
-// began capturing the exact phrasings people use to ask for tool-backed data —
-// "the latest open PRs", "search my Notion", "current sprint status" — and
-// silently answered them from the public web instead.
+// Turn ownership and tool calling are mutually exclusive: the orchestrator paths
+// generate an answer and return, so the tool loop never runs and no MCP, plugin,
+// or app tool can be invoked. But the reverse costs something real too — a
+// preflight can only use the *local* search provider, because provider-native
+// grounding is inseparable from generation. Routing a turn away from working
+// native grounding and onto an unreliable local scraper makes every answer worse.
 //
-// The rule: retrieval may own a turn only when there is plausibly nothing else
-// to run. That is true for single-fact lookups, which is also where owning the
-// turn pays for itself, because a native-grounding provider answers them in one
-// call instead of a search plus a summarization.
-//
-// Everything else retrieves as a preflight. The model still gets fresh evidence
-// in context; it also keeps its tools.
-func retrievalMayOwnTurn(plan websearch.SearchPlan, prompt string, integrationsConnected bool) bool {
+// So this is a two-sided decision, not a one-sided safety rule.
+func retrievalMayOwnTurn(plan websearch.SearchPlan, prompt string, in turnOwnershipInputs) bool {
 	if !plan.NeedsWeb {
 		return false
 	}
-	// An explicit follow-up action always needs the tool loop.
-	if requiresPostRetrievalTools(prompt) {
+
+	// A prompt that must act on the retrieved data, or that names a private or
+	// account-scoped source, always needs the tool loop. No provider capability
+	// changes that.
+	if requiresPostRetrievalTools(prompt) || referencesPrivateSource(prompt) {
 		return false
 	}
-	// A prompt that names a private or account-scoped source is asking for a
-	// tool, not the public web, even when it also reads as current-information.
-	if referencesPrivateSource(prompt) {
-		return false
+
+	// With connected integrations, stay conservative: only a strongly-typed
+	// single-fact lookup may take the turn. Keyword matching cannot distinguish
+	// "the latest from Alice on the launch" (wants Slack) from "the latest news"
+	// (wants the web), and starving a connected integration reads as the feature
+	// being broken.
+	if in.IntegrationsConnected {
+		return plan.AnswerShape == websearch.AnswerShapeDirect
 	}
-	// Single-fact shapes only. Standard and Research answers are the ones most
-	// likely to benefit from tools alongside evidence.
-	switch plan.AnswerShape {
-	case websearch.AnswerShapeDirect:
-		// A direct lookup is a single fact with a strongly-typed shape (a
-		// kickoff time, a score). Safe to own even with integrations connected.
+
+	// No integrations are connected, so there is no tool to starve beyond the
+	// built-ins. Native grounding is materially better than the local fallback
+	// and cannot serve a preflight, so prefer it whenever it exists.
+	if in.NativeGrounding {
 		return true
-	case websearch.AnswerShapeBrief:
-		// Brief covers scores, weather, and market data — but also anything the
-		// planner could not classify more precisely. When the user has connected
-		// integrations, the phrase-matching above is not a good enough filter:
-		// "what did Alice say about the launch" names no source and no action,
-		// yet clearly wants a tool. Prefer the preflight and let the model choose.
-		return !integrationsConnected
+	}
+
+	// Local-only provider: owning the turn buys nothing over a preflight, since
+	// both perform one local search. Keep the tool loop available so the model
+	// can retry, browse, or calculate.
+	switch plan.AnswerShape {
+	case websearch.AnswerShapeDirect, websearch.AnswerShapeBrief:
+		return true
 	default:
 		return false
 	}
-}
-
-// integrationToolsConnected reports whether this turn's catalog contains a tool
-// from an actually-connected integration.
-//
-// MCP tools are named "mcp_<server>_<tool>" by mcpclient.BuildToolName, so the
-// prefix only appears once a server is configured and its tools are discovered.
-// Plugin tools follow the same convention.
-//
-// The app_* tools are deliberately NOT counted: app_catalog, app_connections,
-// app_connect_mcp, and app_disconnect are connection *management* tools
-// registered unconditionally at startup. Treating them as evidence of an
-// integration would make this always true and disable the cheap turn-owning path
-// for everyone.
-//
-// This is a deliberate thumb on the scale. Someone who has connected an
-// integration expects it to be used, and the cost of wrongly starving it — the
-// feature looks broken — is far higher than the cost of wrongly running a
-// preflight, which is one extra search call.
-func integrationToolsConnected(catalog []llm.Tool) bool {
-	for _, tool := range catalog {
-		name := tool.Function.Name
-		if strings.HasPrefix(name, "mcp_") || strings.HasPrefix(name, "plugin_") {
-			return true
-		}
-	}
-	return false
 }
 
 // referencesPrivateSource reports whether a prompt points at data the public web
@@ -237,4 +220,27 @@ func referencesPrivateSource(prompt string) bool {
 		"bigquery", "databricks", "grafana", "datadog", "pagerduty",
 		"crm", "mcp server",
 	)
+}
+
+// integrationToolsConnected reports whether this turn's catalog contains a tool
+// from an actually-connected integration.
+//
+// MCP tools are named "mcp_<server>_<tool>" by mcpclient.BuildToolName, so the
+// prefix only appears once a server is configured and its tools are discovered.
+// Plugin tools follow the same convention.
+//
+// The app_* tools are deliberately NOT counted: app_catalog, app_connections,
+// app_connect_mcp, and app_disconnect are connection *management* tools
+// registered unconditionally at startup. Treating them as evidence of an
+// integration would make this always true, which would silently route every
+// research turn onto the local search provider even when the active model has
+// working native grounding.
+func integrationToolsConnected(catalog []llm.Tool) bool {
+	for _, tool := range catalog {
+		name := tool.Function.Name
+		if strings.HasPrefix(name, "mcp_") || strings.HasPrefix(name, "plugin_") {
+			return true
+		}
+	}
+	return false
 }

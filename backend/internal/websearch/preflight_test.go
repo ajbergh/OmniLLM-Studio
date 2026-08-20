@@ -12,13 +12,21 @@ import (
 )
 
 type stubProvider struct {
-	mu       sync.Mutex
-	requests []SearchRequest
-	results  []SearchResult
-	err      error
+	mu         sync.Mutex
+	requests   []SearchRequest
+	results    []SearchResult
+	err        error
+	maxQueries int
 }
 
 func (p *stubProvider) Name() string { return "stub" }
+
+func (p *stubProvider) Capabilities() ProviderCapabilities {
+	if p.maxQueries > 0 {
+		return ProviderCapabilities{MaxQueriesPerTurn: p.maxQueries}
+	}
+	return ProviderCapabilities{MaxQueriesPerTurn: 5, SupportsFreshnessFilter: true, ProvidesPublicationDates: true}
+}
 
 func (p *stubProvider) Search(_ context.Context, req SearchRequest) (*SearchResponse, error) {
 	p.mu.Lock()

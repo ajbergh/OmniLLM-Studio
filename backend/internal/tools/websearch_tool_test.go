@@ -23,6 +23,14 @@ type recordingProvider struct {
 
 func (p *recordingProvider) Name() string { return "recording" }
 
+func (p *recordingProvider) Capabilities() websearch.ProviderCapabilities {
+	return websearch.ProviderCapabilities{
+		MaxQueriesPerTurn:        5,
+		SupportsFreshnessFilter:  true,
+		ProvidesPublicationDates: true,
+	}
+}
+
 func (p *recordingProvider) Search(_ context.Context, req websearch.SearchRequest) (*websearch.SearchResponse, error) {
 	p.mu.Lock()
 	p.requests = append(p.requests, req)

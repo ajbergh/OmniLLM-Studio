@@ -138,15 +138,22 @@ Subject-matter negatives are **weights, never vetoes**. A question about softwar
 
 - never when the prompt has a follow-up action (`requiresPostRetrievalTools`);
 - never when it names a private or account-scoped source (`referencesPrivateSource`);
-- `Direct` shape always may — a kickoff time has no plausible tool;
-- `Brief` may only when no connected integration is in the catalog (`integrationToolsConnected`), because keyword matching cannot catch "what did Alice say about the launch";
-- `Standard` and `Research` never may.
+- with a connected integration (`integrationToolsConnected`), only `Direct` may — keyword matching cannot tell "the latest from Alice on the launch" from "the latest news";
+- with no integration connected, **native grounding wins any shape**, because a preflight can only use the local provider, and routing away from working native grounding onto an unreliable scraper makes every answer worse;
+- local-only providers may own `Direct` and `Brief`, and no more: owning the turn buys nothing over a preflight when both run one local search.
 
-This regressed once already: widening the gate to trigger on `latest`, `current <noun>`, `search for`, and `find` captured the exact phrasings people use to ask for tool-backed data, and those turns silently answered from the public web instead of calling the tool. The cost of wrongly starving a tool (the feature looks broken) is far higher than the cost of a wrongly-run preflight (one extra search call) — keep the bias in that direction.
+This decision is two-sided, and both sides have been observed failing in production:
 
-A consequence to accept: `Standard` and `Research` turns use local search rather than native grounding, because native grounding is inseparable from generation and cannot feed a tool loop. Configure Brave for those to be good.
+- Widening the gate to trigger on `latest`, `current <noun>`, `search for`, and `find` captured the phrasings people use to ask for tool-backed data, and those turns silently answered from the public web instead of calling the tool.
+- Then over-correcting sent Gemini research questions to a preflight, which can only use DuckDuckGo, which rate-limits mid-turn — producing an answer that recommended models from over a year earlier while the model's own working grounding went unused.
+
+Neither "always own the turn" nor "never own the turn" is right. Keep both guards.
 
 **Do not force a tool retry after a failed retrieval.** It runs the same plan against the provider that just failed, and consumes the one round where the model could reach the tool that can actually answer.
+
+**Providers declare their own limits; the planner must respect them.** `Provider.Capabilities()` reports `MaxQueriesPerTurn`, `SupportsFreshnessFilter`, and `ProvidesPublicationDates`, and `searchWithPlan` clamps its iteration count to the first. This is not decoration: Brave is an API with a quota, while DuckDuckGo is a scraped HTML endpoint that serves an anti-bot challenge after roughly one request per source address. Issuing an expanded three-query plan against DuckDuckGo guarantees that queries two and three come back empty, turning a deliberate breadth increase into a reliability loss. Report a new provider's limits honestly, including when that means reporting it as weak.
+
+`ErrSearchProviderRateLimited` is a distinct sentinel because the correct response differs from every other failure: retrying within the turn cannot succeed. It stops the query loop, surfaces as `provider_rate_limited` in metadata, and makes the `web_search` tool return a non-retryable result telling the model to stop. Do not fold it back into a generic provider error — an earlier version reported it as "markup may have changed", which blamed the parser and sent readers to the wrong file.
 
 Preserve provider-specific contracts:
 

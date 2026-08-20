@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/ajbergh/omnillm-studio/internal/websearch"
@@ -112,6 +113,22 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*Too
 	// omits those arguments gets server-chosen values instead of none.
 	resp, err := t.orchestrator.PlannedSearch(ctx, a.Query, a.TimeRange, a.MaxResults)
 	if err != nil {
+		// A rate limit is terminal for this turn: the provider refuses by source
+		// address for minutes, so another call cannot succeed. Say so in the
+		// result, because a generic failure reads as transient and invites the
+		// retry loop that produced five failed searches in one turn.
+		if errors.Is(err, websearch.ErrSearchProviderRateLimited) {
+			return &ToolResult{
+				Content: "The search provider is rate-limited and will refuse further requests for several minutes. " +
+					"Do not call web_search again in this turn. Answer from what you already have, state clearly " +
+					"which claims you could not verify, and do not present unverified current data as fact.",
+				IsError: true,
+				Metadata: map[string]interface{}{
+					"error_code": "SEARCH_PROVIDER_RATE_LIMITED",
+					"retryable":  false,
+				},
+			}, nil
+		}
 		return nil, fmt.Errorf("web search failed: %w", err)
 	}
 

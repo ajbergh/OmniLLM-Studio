@@ -2,11 +2,20 @@ package websearch
 
 import (
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 )
+
+// ErrSearchProviderRateLimited reports that the search backend refused the
+// request for volume reasons rather than failing.
+//
+// It is a distinct sentinel because the correct response differs from every other
+// failure: retrying inside the same turn cannot help, so the model must be told
+// to stop rather than encouraged to try again.
+var ErrSearchProviderRateLimited = errors.New("search provider rate-limited")
 
 // maxProviderResponseBytes bounds how much of a search provider response is
 // read into memory. Brave web+news payloads are well under this; the cap exists

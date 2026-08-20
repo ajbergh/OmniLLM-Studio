@@ -39,6 +39,17 @@ func NewBraveProvider(apiKey string) *BraveProvider {
 // Name identifies the provider in logs.
 func (b *BraveProvider) Name() string { return "brave" }
 
+// Capabilities reports Brave as a real search API: it honors a freshness
+// parameter, returns publication dates, and tolerates the planner's expanded
+// query sets within its quota.
+func (b *BraveProvider) Capabilities() ProviderCapabilities {
+	return ProviderCapabilities{
+		MaxQueriesPerTurn:        5,
+		SupportsFreshnessFilter:  true,
+		ProvidesPublicationDates: true,
+	}
+}
+
 // searchEndpoint returns the configured endpoint, falling back to the public
 // Brave API. Tests override it; production never does.
 func (b *BraveProvider) searchEndpoint() string {
