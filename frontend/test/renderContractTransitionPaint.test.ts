@@ -69,10 +69,9 @@ describe('canonical transition paint', () => {
   it('fails closed for transition families without canonical paint', () => {
     const state: CanonicalTransitionState = {
       contract_version: 'transition-state-v1',
-      id: 'wipe',
-      type: 'wipe',
+      id: 'zoom',
+      type: 'zoom',
       placement: 'out',
-      direction: 'left',
       role: 'outgoing',
       start_frame: 0,
       end_frame: 10,
@@ -96,6 +95,22 @@ describe('canonical transition paint', () => {
       active: true,
     } as unknown as CanonicalTransitionState;
     expect(() => evaluateTransitionPaint('owner', state)).toThrow(/direction left, right, up, or down/);
+  });
+
+  it('fails closed for a non-canonical wipe direction', () => {
+    const state = {
+      contract_version: 'transition-state-v1',
+      id: 'wipe',
+      type: 'wipe',
+      placement: 'in',
+      direction: 'diagonal',
+      role: 'incoming',
+      start_frame: 0,
+      end_frame: 10,
+      progress: 0.5,
+      active: true,
+    } as unknown as CanonicalTransitionState;
+    expect(() => evaluateTransitionPaint('owner', state)).toThrow(/wipe requires direction left, right, up, or down/);
   });
 
   it('rejects non-canonical progress', () => {

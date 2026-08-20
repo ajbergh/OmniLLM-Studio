@@ -9,7 +9,10 @@ export const TRANSITION_PAINT_CROSSFADE = 'pair-crossfade' as const;
 export const TRANSITION_PAINT_DIP_BLACK = 'dip-to-black' as const;
 export const TRANSITION_PAINT_OWNER_TRANSLATE = 'owner-translate' as const;
 export const TRANSITION_PAINT_PAIR_SLIDE = 'pair-slide' as const;
+export const TRANSITION_PAINT_OWNER_WIPE = 'owner-wipe' as const;
+export const TRANSITION_PAINT_PAIR_WIPE = 'pair-wipe' as const;
 export const TRANSITION_PAINT_TRANSLATION_CANVAS_FRACTION = 'canvas-fraction' as const;
+export const TRANSITION_PAINT_CLIP_LAYER_FRACTION = 'layer-fraction' as const;
 
 /**
  * Report whether transition-paint-v1 defines paint semantics for this type.
@@ -22,6 +25,7 @@ export function supportsTransitionPaint(transitionType: string): boolean {
     case 'crossfade':
     case 'dip_to_black':
     case 'slide':
+    case 'wipe':
       return true;
     default:
       return false;
@@ -38,7 +42,9 @@ export interface CanonicalTransitionPaint {
     | typeof TRANSITION_PAINT_CROSSFADE
     | typeof TRANSITION_PAINT_DIP_BLACK
     | typeof TRANSITION_PAINT_OWNER_TRANSLATE
-    | typeof TRANSITION_PAINT_PAIR_SLIDE;
+    | typeof TRANSITION_PAINT_PAIR_SLIDE
+    | typeof TRANSITION_PAINT_OWNER_WIPE
+    | typeof TRANSITION_PAINT_PAIR_WIPE;
   owner_clip_id: string;
   peer_clip_id?: string;
   progress: number;
@@ -55,13 +61,23 @@ export interface CanonicalTransitionPaint {
   outgoing_offset_y?: number;
   incoming_offset_x?: number;
   incoming_offset_y?: number;
+  clip_space?: typeof TRANSITION_PAINT_CLIP_LAYER_FRACTION;
+  owner_clip_top?: number;
+  owner_clip_right?: number;
+  owner_clip_bottom?: number;
+  owner_clip_left?: number;
+  incoming_clip_top?: number;
+  incoming_clip_right?: number;
+  incoming_clip_bottom?: number;
+  incoming_clip_left?: number;
 }
 
 /**
  * Convert canonical transition timing/ownership state into renderer-neutral
  * paint state. Fade is one-sided opacity, crossfade is a true pair blend,
- * dip-to-black has an explicit black contribution, and slide uses normalized
- * canvas-fraction translation where direction names the entry edge.
+ * dip-to-black has an explicit black contribution, slide uses normalized
+ * canvas-fraction translation, and wipe clips the isolated layer surface in
+ * normalized layer-fraction coordinates. Direction names the entry/reveal edge.
  */
 export function evaluateTransitionPaint(
   ownerClipId: string,
@@ -229,6 +245,57 @@ export function evaluateTransitionPaint(
       throw invalidTransitionPaintState(state, 'slide requires in, out, or between placement');
     }
 
+    case 'wipe': {
+      const clip_space = TRANSITION_PAINT_CLIP_LAYER_FRACTION;
+      if (placement === 'in') {
+        if (state.role !== 'incoming' || peer) {
+          throw invalidTransitionPaintState(state, 'wipe-in requires an incoming owner with no peer');
+        }
+        const clip = transitionWipeInsets(state.direction, state.progress, false);
+        return {
+          ...base,
+          composition: TRANSITION_PAINT_OWNER_WIPE,
+          clip_space,
+          owner_clip_top: clip.top,
+          owner_clip_right: clip.right,
+          owner_clip_bottom: clip.bottom,
+          owner_clip_left: clip.left,
+        };
+      }
+      if (placement === 'out') {
+        if (state.role !== 'outgoing' || peer) {
+          throw invalidTransitionPaintState(state, 'wipe-out requires an outgoing owner with no peer');
+        }
+        const clip = transitionWipeInsets(state.direction, state.progress, true);
+        return {
+          ...base,
+          composition: TRANSITION_PAINT_OWNER_WIPE,
+          clip_space,
+          owner_clip_top: clip.top,
+          owner_clip_right: clip.right,
+          owner_clip_bottom: clip.bottom,
+          owner_clip_left: clip.left,
+        };
+      }
+      if (placement === 'between') {
+        if (!peer) throw invalidTransitionPaintState(state, 'wipe between requires an explicit peer');
+        const pair = transitionPaintPairRoles(owner, state);
+        const clip = transitionWipeInsets(state.direction, state.progress, false);
+        return {
+          ...base,
+          composition: TRANSITION_PAINT_PAIR_WIPE,
+          clip_space,
+          outgoing_clip_id: pair.outgoingClipId,
+          incoming_clip_id: pair.incomingClipId,
+          incoming_clip_top: clip.top,
+          incoming_clip_right: clip.right,
+          incoming_clip_bottom: clip.bottom,
+          incoming_clip_left: clip.left,
+        };
+      }
+      throw invalidTransitionPaintState(state, 'wipe requires in, out, or between placement');
+    }
+
     default:
       throw new Error(`transition ${JSON.stringify(transitionId)} type ${JSON.stringify(state.type)} does not yet have canonical paint semantics`);
   }
@@ -259,6 +326,35 @@ function transitionSlideEntryVector(direction: string | undefined): [number, num
     case 'down': return [0, 1];
     default: throw new Error('slide requires direction left, right, up, or down');
   }
+}
+
+function transitionWipeInsets(
+  direction: string | undefined,
+  progress: number,
+  outgoing: boolean,
+): { top: number; right: number; bottom: number; left: number } {
+  const hidden = outgoing ? progress : 1 - progress;
+  let top = 0;
+  let right = 0;
+  let bottom = 0;
+  let left = 0;
+  switch ((direction ?? '').trim().toLowerCase()) {
+    case 'left':
+      if (outgoing) left = hidden; else right = hidden;
+      break;
+    case 'right':
+      if (outgoing) right = hidden; else left = hidden;
+      break;
+    case 'up':
+      if (outgoing) top = hidden; else bottom = hidden;
+      break;
+    case 'down':
+      if (outgoing) bottom = hidden; else top = hidden;
+      break;
+    default:
+      throw new Error('wipe requires direction left, right, up, or down');
+  }
+  return { top: signedZero(top), right: signedZero(right), bottom: signedZero(bottom), left: signedZero(left) };
 }
 
 function invalidTransitionPaintState(state: CanonicalTransitionState, message: string): Error {

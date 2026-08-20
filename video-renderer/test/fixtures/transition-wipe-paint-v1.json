@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "description": "Cross-runtime transition-paint-v1 wipe fixture using normalized isolated-layer clip insets.",
+  "cases": [
+    {
+      "name": "wipe-in-from-left",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "wipe-in",
+        "type": "wipe",
+        "placement": "in",
+        "direction": "left",
+        "role": "incoming",
+        "start_frame": 10,
+        "end_frame": 20,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "wipe-in",
+        "type": "wipe",
+        "placement": "in",
+        "composition": "owner-wipe",
+        "owner_clip_id": "owner",
+        "progress": 0.25,
+        "clip_space": "layer-fraction",
+        "owner_clip_top": 0,
+        "owner_clip_right": 0.75,
+        "owner_clip_bottom": 0,
+        "owner_clip_left": 0
+      }
+    },
+    {
+      "name": "wipe-out-through-opposite-edge",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "wipe-out",
+        "type": "wipe",
+        "placement": "out",
+        "direction": "left",
+        "role": "outgoing",
+        "start_frame": 60,
+        "end_frame": 70,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "wipe-out",
+        "type": "wipe",
+        "placement": "out",
+        "composition": "owner-wipe",
+        "owner_clip_id": "owner",
+        "progress": 0.25,
+        "clip_space": "layer-fraction",
+        "owner_clip_top": 0,
+        "owner_clip_right": 0,
+        "owner_clip_bottom": 0,
+        "owner_clip_left": 0.25
+      }
+    },
+    {
+      "name": "wipe-between-reveals-incoming-from-top",
+      "owner_clip_id": "owner",
+      "state": {
+        "contract_version": "transition-state-v1",
+        "id": "wipe-between",
+        "type": "wipe",
+        "placement": "between",
+        "direction": "up",
+        "peer_clip_id": "peer",
+        "role": "outgoing",
+        "peer_role": "incoming",
+        "start_frame": 50,
+        "end_frame": 70,
+        "progress": 0.25,
+        "active": true
+      },
+      "expected": {
+        "contract_version": "transition-paint-v1",
+        "transition_id": "wipe-between",
+        "type": "wipe",
+        "placement": "between",
+        "composition": "pair-wipe",
+        "owner_clip_id": "owner",
+        "peer_clip_id": "peer",
+        "progress": 0.25,
+        "outgoing_clip_id": "owner",
+        "incoming_clip_id": "peer",
+        "clip_space": "layer-fraction",
+        "incoming_clip_top": 0,
+        "incoming_clip_right": 0,
+        "incoming_clip_bottom": 0.75,
+        "incoming_clip_left": 0
+      }
+    }
+  ]
+}
