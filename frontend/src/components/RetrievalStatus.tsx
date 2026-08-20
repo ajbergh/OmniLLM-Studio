@@ -82,6 +82,30 @@ export function RetrievalStatus({ metadata }: RetrievalStatusProps) {
 }
 
 /**
+ * ClaimWarning renders the claim-support signal.
+ *
+ * Deliberately separate from RetrievalStatus and deliberately mild: claim
+ * support is not decidable by string matching, so this is a caution about a
+ * missing citation, not an assertion that the figures are wrong. It never
+ * suppresses the answer.
+ */
+export function ClaimWarning({ metadata }: RetrievalStatusProps) {
+  if (metadata?.claim_warning !== 'numeric_claims_without_citation') return null;
+  return (
+    <div
+      role="note"
+      className="mt-2 flex items-start gap-2 rounded-lg border border-border/40 bg-surface-hover/40 p-2.5"
+    >
+      <ShieldAlert size={12} className="mt-0.5 shrink-0 text-text-muted" aria-hidden="true" />
+      <div className="min-w-0 text-[11px] leading-relaxed text-text-muted">
+        <span className="font-medium text-text">This answer states figures without citing a source.</span>{' '}
+        Check the numbers against the sources before relying on them.
+      </div>
+    </div>
+  );
+}
+
+/**
  * Badge shown alongside the source count. Separated from RetrievalStatus so the
  * sources panel keeps ownership of its own disclosure button.
  */

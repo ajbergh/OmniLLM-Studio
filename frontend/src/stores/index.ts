@@ -420,6 +420,21 @@ export const useMessageStore = create<MessageState>((set, get) => ({
           if (data.tool_requirement_unfulfilled) {
             metadata.tool_requirement_unfulfilled = true;
           }
+          if (data.freshness_verified) {
+            metadata.freshness_verified = true;
+          }
+          if (data.answer_freshness) {
+            metadata.answer_freshness = data.answer_freshness;
+          }
+          if (data.citation_count !== undefined) {
+            metadata.citation_count = data.citation_count;
+          }
+          if (data.claim_warning) {
+            metadata.claim_warning = data.claim_warning;
+          }
+          if (data.native_citations && data.native_citations.length > 0) {
+            metadata.native_citations = data.native_citations;
+          }
           if (data.file_search) {
             metadata.file_search = true;
             metadata.tool = 'file_search';

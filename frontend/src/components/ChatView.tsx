@@ -24,7 +24,7 @@ import { api, imageSessionApi, templateApi, branchApi, agentApi, workspaceApi, a
 import { useImageEditorStore } from '../stores/imageEditor';
 import { useMusicStudioStore } from '../stores/musicStudio';
 import { matchesShortcut } from '../shortcuts';
-import { RetrievalStatus, FreshnessBadge } from './RetrievalStatus';
+import { RetrievalStatus, ClaimWarning, FreshnessBadge } from './RetrievalStatus';
 import type { Message, WebSearchResult, FileSearchResult, MessageMetadata, OpenRouterMetadata, URLContextSourceRef, PromptTemplate, UsageSummary, ToolCall, ToolResult, Attachment, RouterTelemetry, ChatTurnToolSelection } from '../types';
 import { AgentEventType } from '../types';
 import { getKnownImageModels, getModelReasoningLevels, getModelToolCallingSupport, isFreeModel, type ReasoningEffortLevel } from '../models';
@@ -1959,6 +1959,7 @@ function MessageBubble({
 
         {/* Retrieval outcome: failed lookups and grounded-but-uncitable answers */}
         {!isUser && <RetrievalStatus metadata={metadata} />}
+        {!isUser && <ClaimWarning metadata={metadata} />}
 
         {/* Collapsible Sources panel */}
         {!isUser && sources.length > 0 && (

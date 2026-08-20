@@ -17,7 +17,7 @@ in code were corrected or removed.
 | 1 | Fix classification, then breadth | ✅ Complete |
 | 2 | Make retrieval enforceable | ✅ Complete |
 | 3 | Backend-owned preflight | ✅ Complete |
-| 4 | Evidence contract and citations | ⏳ Not started |
+| 4 | Evidence contract and citations | ✅ Complete |
 | 5 | Provider strategy and measurement | ⏳ Not started |
 
 ### Phase 0 — complete
@@ -118,6 +118,25 @@ Two design decisions worth recording:
 - **`Preflight` returns its `ToolCall` even on failure.** The handler keys its "attempted and failed" branch on a non-nil tool call, so returning nil there would have made preflight failures invisible — reintroducing the Phase 0 bug through a new path. `TestPreflightReturnsToolCallOnFailure` pins it.
 
 **Testing limit, stated plainly:** this package has no HTTP harness for `MessageHandler` (it would need a live DB plus a mock LLM), so the compound-request tests assert the decision layer — planner wants retrieval **and** the turn is classified as needing follow-up tools — plus source-level wiring assertions in the style of the existing `message_handler_tool_runtime_wiring_test.go`. That verifies the composition, not a real end-to-end turn.
+
+### Phase 4 — complete
+
+| # | Change | Result |
+|---|---|---|
+| 4.1 | Native sources reach metadata | New `llm.Citation` plus `Citations` on `StreamChunk` and `ChatResponse`. The stream and non-streaming parsers read `url_citation` annotations, and the Gemini adapter now *synthesizes* those annotations from its grounding chunks so one parser handles every grounded provider. |
+| 4.2 | Structured, not markdown-only | `evidenceAudit.applyTo` writes `native_citations` and backfills `metadata.sources` when the local result set is empty — the case that left the source panel blank for every natively-grounded answer. The markdown `**Sources:**` block is kept for readability, not replaced. |
+| 4.3 | Brave age parsing | New `ParsePublishedAt` handles both shapes Brave sends (`page_age` ISO timestamps and `age` phrases like "2 hours ago"). `EvaluateFreshness` measures a result set against the plan's window. |
+| 4.4 | Claim-support signal | New `AuditAnswer` counts numeric claims, inline citation markers, named evidence hosts, and hedging. |
+| 4.5 | Post-stream hook | `auditAnswerEvidence` runs on the streaming, non-streaming, and orchestrator-owned paths. Streaming previously ran **no** validation at all. |
+| 4.6 | Four frontend states | `retrievalStateFrom` distinguishes `failed`, `tool-skipped`, `grounded-no-sources`, `grounded-unverified`, and `grounded-verified`. New `ClaimWarning` component; `FreshnessBadge` shows "freshness verified" or "dates unknown". |
+
+Three deliberate conservatism choices in the freshness logic:
+
+- **Undated is a third state, not "stale".** A result with no parsable date proves nothing. It cannot verify freshness and it cannot be rejected either, so `FreshnessReport` counts `Dated` and `Undated` separately.
+- **One stale source fails verification.** `Verified` requires *every* dated result inside the window, not a majority. A single stale source among fresh ones is precisely where a model picks up the wrong number.
+- **No window means nothing to verify.** Pricing and release intents apply no recency filter by design (Phase 1.3), so absence of a filter must not be read as evidence of freshness.
+
+**4.4 shipped as a warning, exactly as the plan required.** `metaClaimWarning` is set only in the high-confidence case — the answer states prices, percentages, or versions and names **no** source at all, and does not hedge. It does not attempt to judge whether a *named* source actually supports a figure, because that is not decidable by string matching. Nothing gates or rewrites an answer on this signal; `TestAuditClaimWarningIsAWarning` asserts that. Promoting it to a hard rejection needs the Phase 5.6 eval set to measure the false-positive rate first.
 
 ## Investigation summary
 

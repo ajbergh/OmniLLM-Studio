@@ -480,6 +480,13 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 				metaSources:         orchResult.Sources,
 				metaSearchAttempted: true,
 			}
+			auditAnswerEvidence(
+				websearch.SearchPlan{TimeRange: orchestratorTimeRange(orchResult)},
+				orchResult.Content,
+				orchResult.Sources,
+				nil,
+				time.Now(),
+			).applyTo(metadata)
 			if orchResult.ToolCall != nil {
 				metadata["tool_call"] = orchResult.ToolCall
 			}
@@ -642,6 +649,15 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		syncSearchStatus.applyTo(metaMap)
 		syncEnforcement.applyTo(metaMap)
+		if syncPreflight != nil || len(resp.Citations) > 0 {
+			auditPlan := websearch.SearchPlan{}
+			var auditSources []websearch.SearchResult
+			if syncPreflight != nil {
+				auditPlan = syncPreflight.Plan
+				auditSources = syncPreflight.Results
+			}
+			auditAnswerEvidence(auditPlan, assistantContent, auditSources, resp.Citations, time.Now()).applyTo(metaMap)
+		}
 		if syncPreflight != nil {
 			metaMap[metaWebSearch] = true
 			metaMap["tool"] = "web_search"
@@ -1042,6 +1058,7 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	var browserNavigatedURLs []string
 	var streamSearchStatus searchStatus
 	var streamToolEnforcement toolEnforcement
+	var streamCitations []llm.Citation
 	var preflight *websearch.PreflightEvidence
 	var searchRoute searchRouteDecision
 	var searchRouterTelemetry *intentrouter.RouterTelemetry
@@ -1152,6 +1169,9 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				if chunk.Cost != nil {
 					cost = *chunk.Cost
 				}
+				if len(chunk.Citations) > 0 {
+					streamCitations = llm.MergeCitations(streamCitations, chunk.Citations)
+				}
 				if chunk.Content != "" {
 					sendSSE(w, flusher, "token", map[string]string{"content": chunk.Content})
 				}
@@ -1245,6 +1265,9 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				if chunk.Cost != nil {
 					cost = *chunk.Cost
 				}
+				if len(chunk.Citations) > 0 {
+					streamCitations = llm.MergeCitations(streamCitations, chunk.Citations)
+				}
 				if chunk.Content != "" {
 					sendSSE(w, flusher, "token", map[string]string{"content": chunk.Content})
 				}
@@ -1285,6 +1308,9 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				}
 				if chunk.Cost != nil {
 					cost = *chunk.Cost
+				}
+				if len(chunk.Citations) > 0 {
+					streamCitations = llm.MergeCitations(streamCitations, chunk.Citations)
 				}
 				if chunk.Content != "" {
 					sendSSE(w, flusher, "token", map[string]string{"content": chunk.Content})
@@ -1576,6 +1602,23 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	streamSearchStatus.applyTo(metaMap)
 	streamToolEnforcement.applyTo(metaMap)
+	// Post-stream evidence audit. Streaming previously ran no validation at all:
+	// ProcessStream returns a request and the handler streams it. The audit cannot
+	// reject a streamed answer, so it records freshness and citation state in
+	// metadata for the UI rather than gating the response.
+	if searchResp != nil || len(streamCitations) > 0 {
+		auditPlan := websearch.SearchPlan{}
+		if preflight != nil {
+			auditPlan = preflight.Plan
+		} else if searchResp != nil {
+			auditPlan.TimeRange = searchResp.TimeRange
+		}
+		var auditSources []websearch.SearchResult
+		if searchResp != nil {
+			auditSources = searchResp.Results
+		}
+		auditAnswerEvidence(auditPlan, fullContent, auditSources, streamCitations, time.Now()).applyTo(metaMap)
+	}
 	if searchRouterTelemetry != nil {
 		metaMap["router"] = searchRouterTelemetry
 	}
@@ -1668,6 +1711,16 @@ func (h *MessageHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	streamSearchStatus.applyTo(donePayload)
 	streamToolEnforcement.applyTo(donePayload)
+	// Mirror the evidence audit into the done payload so the live UI marks the
+	// message the same way a reloaded conversation does.
+	for _, key := range []string{
+		metaSources, metaNativeCitations, metaFreshnessVerified,
+		metaAnswerFreshness, metaCitationCount, metaClaimWarning,
+	} {
+		if value, ok := metaMap[key]; ok {
+			donePayload[key] = value
+		}
+	}
 	if searchRouterTelemetry != nil {
 		donePayload["router"] = searchRouterTelemetry
 	}

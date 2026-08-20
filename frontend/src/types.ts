@@ -176,6 +176,12 @@ export interface WebSearchResult {
   snippet: string;
 }
 
+/** A provider-native grounding source. */
+export interface NativeCitation {
+  url: string;
+  title?: string;
+}
+
 /** Client-safe retrieval failure codes emitted by the backend. */
 export type SearchFailureReason = 'no_results' | 'provider_error' | 'provider_disabled';
 
@@ -259,8 +265,16 @@ export interface MessageMetadata {
   freshness_verified?: boolean;
   /** Human-readable age of the newest cited source, e.g. "2 hours ago". */
   answer_freshness?: string;
-  /** Set when the answer makes numeric claims that no source supports. */
-  unsupported_claims?: string[];
+  /**
+   * Warning code set when the answer makes numeric claims and names no source.
+   * This is a signal, not a verdict — claim support is not decidable by string
+   * matching, so it is rendered as a caution and never used to withhold text.
+   */
+  claim_warning?: 'numeric_claims_without_citation';
+  /** Number of distinct citations backing the answer. */
+  citation_count?: number;
+  /** Provider-native grounding sources, structured rather than markdown-only. */
+  native_citations?: NativeCitation[];
   /**
    * Tool-requirement outcome for the turn. `tool_required` names the tool (or is
    * `true` for "any tool"); `tool_enforced` records whether the provider was
