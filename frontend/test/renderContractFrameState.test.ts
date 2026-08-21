@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { CURSOR_STATE_CONTRACT_V1 } from '../src/video/renderContractCursor';
 import {
   evaluateVisualFrameState,
   frameRelativeMilliseconds,
@@ -27,6 +28,9 @@ interface VisualFrameStateFixture {
     expected_perspective_distance: number;
     expected_projection_source: 'camera' | 'clip';
     expected_projection_origin_w: number;
+    expected_cursor_x: number;
+    expected_cursor_y: number;
+    expected_cursor_click: boolean;
     expected_projection_matrix: Matrix4;
     expected_model_matrix: Matrix4;
   }>;
@@ -74,6 +78,11 @@ describe('canonical visual FrameState', () => {
       expect(layer.content_bounds).toEqual({ x: 0, y: 0, width: 200, height: 100 });
       expect(layer.media_geometry?.contract_version).toBe(MEDIA_GEOMETRY_CONTRACT_V1);
       expect(layer.media_geometry?.painted_bounds).toEqual({ x: 0, y: 0, width: 200, height: 100 });
+      expect(layer.cursor?.contract_version).toBe(CURSOR_STATE_CONTRACT_V1);
+      expect(layer.cursor).toMatchObject({ scale: 1.25, highlight: true, click_rings: true });
+      expect(layer.cursor?.x).toBeCloseTo(sample.expected_cursor_x, 9);
+      expect(layer.cursor?.y).toBeCloseTo(sample.expected_cursor_y, 9);
+      expect(layer.cursor?.click).toBe(sample.expected_cursor_click);
       expect(layer.transform.crop).toEqual({ top: 0.1, right: 0.2, bottom: 0, left: 0 });
     });
   }

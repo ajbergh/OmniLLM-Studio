@@ -26,6 +26,9 @@ type visualFrameStateFixture struct {
 		ExpectedPerspectiveDistance float64 `json:"expected_perspective_distance"`
 		ExpectedProjectionSource    string  `json:"expected_projection_source"`
 		ExpectedProjectionOriginW   float64 `json:"expected_projection_origin_w"`
+		ExpectedCursorX             float64 `json:"expected_cursor_x"`
+		ExpectedCursorY             float64 `json:"expected_cursor_y"`
+		ExpectedCursorClick         bool    `json:"expected_cursor_click"`
 		ExpectedProjectionMatrix    Matrix4 `json:"expected_projection_matrix"`
 		ExpectedModelMatrix         Matrix4 `json:"expected_model_matrix"`
 	} `json:"cases"`
@@ -102,6 +105,14 @@ func TestEvaluateVisualFrameStateMatchesSharedFixture(t *testing.T) {
 			}
 			if layer.MediaGeometry.PaintedBounds.Width != 200 || layer.MediaGeometry.PaintedBounds.Height != 100 {
 				t.Fatalf("painted bounds = %+v", layer.MediaGeometry.PaintedBounds)
+			}
+			if layer.Cursor == nil || layer.Cursor.ContractVersion != CursorStateContractV1 || layer.Cursor.Scale != 1.25 || !layer.Cursor.Highlight || !layer.Cursor.ClickRings {
+				t.Fatalf("cursor state = %+v", layer.Cursor)
+			}
+			assertClose(t, "cursor.x", layer.Cursor.X, sample.ExpectedCursorX)
+			assertClose(t, "cursor.y", layer.Cursor.Y, sample.ExpectedCursorY)
+			if layer.Cursor.Click != sample.ExpectedCursorClick {
+				t.Fatalf("cursor click = %v, want %v", layer.Cursor.Click, sample.ExpectedCursorClick)
 			}
 			if layer.Transform.Crop == nil || layer.Transform.Crop.Top != 0.1 || layer.Transform.Crop.Right != 0.2 {
 				t.Fatalf("crop = %+v", layer.Transform.Crop)
