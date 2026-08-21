@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  renderManifestAssetKinds, renderManifestTypeProjection, timelineV2Easings, timelineV2EffectTypes,
+  renderManifestAssetKinds, renderManifestFontFormats, renderManifestFontStyles, renderManifestTypeProjection, timelineV2Easings, timelineV2EffectTypes,
   timelineV2MediaFits, timelineV2ShapeKinds, timelineV2TextAlignments, timelineV2TrackTypes,
   timelineV2TransitionDirections, timelineV2TransitionPlacements, timelineV2TransitionTypes,
   timelineV2TypeProjection, timelineV2VerticalAlignments,
@@ -68,6 +68,8 @@ describe('canonical render contract type projections', () => {
   });
   it('keeps manifest enum and fixed contract values aligned with JSON Schema', () => {
     expect([...renderManifestAssetKinds]).toEqual(enumValues(manifest, 'asset', 'kind'));
+    expect([...renderManifestFontStyles]).toEqual(enumValues(manifest, 'fontResource', 'font_style'));
+    expect([...renderManifestFontFormats]).toEqual(enumValues(manifest, 'fontResource', 'format'));
     expect(manifest.properties?.version?.const).toBe(1);
     expect(manifest.properties?.contract_version?.const).toBe('timeline-v2');
     expect(manifest.$defs.settings.properties?.audio_sample_rate?.const).toBe(48000);

@@ -196,17 +196,18 @@ type TimelineV2Marker struct {
 
 // RenderManifestV1 is the Go projection of render-manifest-v1.schema.json.
 type RenderManifestV1 struct {
-	Version             int                    `json:"version"`
-	ContractVersion     string                 `json:"contract_version"`
-	SnapshotID          string                 `json:"snapshot_id"`
-	TimelineID          string                 `json:"timeline_id"`
-	TimelineRevision    int64                  `json:"timeline_revision"`
-	TimelineSHA256      string                 `json:"timeline_sha256"`
-	AssetManifestSHA256 string                 `json:"asset_manifest_sha256"`
-	Timeline            TimelineV2Document     `json:"timeline"`
-	Assets              []RenderManifestAsset  `json:"assets"`
-	Settings            RenderManifestSettings `json:"settings"`
-	Metadata            Metadata               `json:"metadata,omitempty"`
+	Version             int                          `json:"version"`
+	ContractVersion     string                       `json:"contract_version"`
+	SnapshotID          string                       `json:"snapshot_id"`
+	TimelineID          string                       `json:"timeline_id"`
+	TimelineRevision    int64                        `json:"timeline_revision"`
+	TimelineSHA256      string                       `json:"timeline_sha256"`
+	AssetManifestSHA256 string                       `json:"asset_manifest_sha256"`
+	Timeline            TimelineV2Document           `json:"timeline"`
+	Assets              []RenderManifestAsset        `json:"assets"`
+	FontResources       []RenderManifestFontResource `json:"font_resources,omitempty"`
+	Settings            RenderManifestSettings       `json:"settings"`
+	Metadata            Metadata                     `json:"metadata,omitempty"`
 }
 type RenderManifestAsset struct {
 	AssetID    string                    `json:"asset_id"`
@@ -217,6 +218,20 @@ type RenderManifestAsset struct {
 	Kind       string                    `json:"kind"`
 	MimeType   string                    `json:"mime_type,omitempty"`
 	Media      *RenderManifestMediaProbe `json:"media,omitempty"`
+}
+
+// RenderManifestFontResource identifies one immutable, packaged static font
+// face. Text-to-resource selection is deliberately evaluated separately so a
+// renderer never guesses a face from a system font or an ambiguous family.
+type RenderManifestFontResource struct {
+	FontResourceID string `json:"font_resource_id"`
+	FontFamily     string `json:"font_family"`
+	FontWeight     int    `json:"font_weight"`
+	FontStyle      string `json:"font_style"`
+	Format         string `json:"format"`
+	StagedPath     string `json:"staged_path"`
+	FileSHA256     string `json:"file_sha256"`
+	SizeBytes      int64  `json:"size_bytes"`
 }
 type RenderManifestMediaProbe struct {
 	DurationMS     *int64 `json:"duration_ms,omitempty"`

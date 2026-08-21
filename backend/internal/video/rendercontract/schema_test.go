@@ -75,10 +75,13 @@ func TestRenderManifestV1SchemaBindsImmutableIdentity(t *testing.T) {
 	}
 	for _, field := range []string{
 		"contract_version", "snapshot_id", "timeline_id", "timeline_revision",
-		"timeline_sha256", "asset_manifest_sha256", "timeline", "assets", "settings",
+		"timeline_sha256", "asset_manifest_sha256", "timeline", "assets", "font_resources", "settings",
 	} {
 		if _, ok := schema.Properties[field]; !ok {
 			t.Errorf("render manifest v1 missing immutable identity field %q", field)
 		}
+	}
+	if _, ok := schema.Defs["fontResource"]; !ok {
+		t.Error("render manifest v1 missing fontResource definition")
 	}
 }

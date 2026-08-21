@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "description": "Cross-runtime immutable font-resource-provenance fixture for packaged static font faces. It intentionally assigns no text face or glyph metrics.",
+  "manifest": {
+    "version": 1,
+    "contract_version": "timeline-v2",
+    "snapshot_id": "font-resource-provenance-snapshot",
+    "timeline_id": "font-resource-provenance-timeline",
+    "timeline_revision": 1,
+    "timeline_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "asset_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "timeline": {
+      "version": 2,
+      "canvas": { "width": 200, "height": 100, "fps": 30, "background": "#000000" },
+      "duration_ms": 1000,
+      "working_color_space": "srgb",
+      "metadata": {},
+      "markers": [],
+      "tracks": [],
+      "scenes": []
+    },
+    "assets": [],
+    "font_resources": [
+      {
+        "font_resource_id": "inter-700-italic",
+        "font_family": "Inter",
+        "font_weight": 700,
+        "font_style": "italic",
+        "format": "woff2",
+        "staged_path": "video/render-snapshots/font-resource-provenance-snapshot/fonts/inter-700-italic.woff2",
+        "file_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "size_bytes": 12345
+      },
+      {
+        "font_resource_id": "inter-400-normal",
+        "font_family": "Inter",
+        "font_weight": 400,
+        "font_style": "normal",
+        "format": "woff2",
+        "staged_path": "video/render-snapshots/font-resource-provenance-snapshot/fonts/inter-400-normal.woff2",
+        "file_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "size_bytes": 12001
+      }
+    ],
+    "settings": {
+      "width": 200,
+      "height": 100,
+      "fps": 30,
+      "range_start_frame": 0,
+      "range_end_frame": 30,
+      "burn_in_captions": false,
+      "audio_sample_rate": 48000,
+      "audio_channels": 2,
+      "working_color_space": "srgb"
+    }
+  },
+  "expected_font_resource_provenance": [
+    {
+      "contract_version": "font-resource-provenance-v1",
+      "font_resource_id": "inter-400-normal",
+      "font_family": "Inter",
+      "font_weight": 400,
+      "font_style": "normal",
+      "format": "woff2",
+      "staged_path": "video/render-snapshots/font-resource-provenance-snapshot/fonts/inter-400-normal.woff2",
+      "file_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "size_bytes": 12001
+    },
+    {
+      "contract_version": "font-resource-provenance-v1",
+      "font_resource_id": "inter-700-italic",
+      "font_family": "Inter",
+      "font_weight": 700,
+      "font_style": "italic",
+      "format": "woff2",
+      "staged_path": "video/render-snapshots/font-resource-provenance-snapshot/fonts/inter-700-italic.woff2",
+      "file_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "size_bytes": 12345
+    }
+  ]
+}

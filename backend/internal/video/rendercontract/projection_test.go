@@ -66,7 +66,7 @@ func TestTimelineV2GoProjectionMatchesSchema(t *testing.T) {
 func TestRenderManifestV1GoProjectionMatchesSchema(t *testing.T) {
 	schema := loadProjectionSchema(t, "render-manifest-v1.schema.json")
 	assertStructProjection(t, "manifest", reflect.TypeOf(RenderManifestV1{}), schema.projectionNode, schema.Defs, true)
-	projections := map[string]reflect.Type{"asset": reflect.TypeOf(RenderManifestAsset{}), "mediaProbe": reflect.TypeOf(RenderManifestMediaProbe{}), "settings": reflect.TypeOf(RenderManifestSettings{})}
+	projections := map[string]reflect.Type{"asset": reflect.TypeOf(RenderManifestAsset{}), "fontResource": reflect.TypeOf(RenderManifestFontResource{}), "mediaProbe": reflect.TypeOf(RenderManifestMediaProbe{}), "settings": reflect.TypeOf(RenderManifestSettings{})}
 	for name, goType := range projections {
 		node, ok := schema.Defs[name]
 		if !ok {
