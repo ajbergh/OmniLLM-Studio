@@ -37,20 +37,23 @@ describe('canonical shape FrameState projection', () => {
     expect(state.authoritative).toBe(true);
   });
 
-  it('leaves only cursor debt when a shape and cursor share the layer', () => {
+  it('resolves an empty cursor when a shape and cursor share the layer', () => {
     const document = baseDocument();
     document.tracks = [{
       id: 'track', type: 'layer', name: 'Layer', locked: false, muted: false, visible: true,
       clips: [{
         id: 'mixed', start_ms: 0, duration_ms: 1000, trim_in_ms: 0, trim_out_ms: 1000,
         shape: { kind: 'rectangle' },
-        cursor: { visible: true },
+        cursor: {},
         effects: [], keyframes: [],
       }],
     }];
     const state = evaluateVisualFrameState(document, 0);
     expect(state.layers[0].shape?.kind).toBe('rectangle');
-    expect(state.unresolved).toEqual(['mixed:cursor']);
+    expect(state.layers[0].cursor).toBeUndefined();
+    expect(state.layers[0].unresolved).toEqual([]);
+    expect(state.layers[0].authoritative).toBe(true);
+    expect(state.authoritative).toBe(true);
   });
 
   it('fails closed when invalid shape dimensions reach FrameState', () => {

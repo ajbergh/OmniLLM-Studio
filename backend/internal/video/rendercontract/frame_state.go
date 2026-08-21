@@ -56,6 +56,7 @@ type FrameLayerState struct {
 	MediaGeometry         *EvaluatedMediaGeometry        `json:"media_geometry,omitempty"`
 	Text                  *EvaluatedTextState            `json:"text,omitempty"`
 	Shape                 *EvaluatedShapeState           `json:"shape,omitempty"`
+	Cursor                *EvaluatedCursorState          `json:"cursor,omitempty"`
 	Transform             EvaluatedTransform             `json:"transform"`
 	ViewTransform         EvaluatedTransform             `json:"view_transform"`
 	ModelMatrix           Matrix4                        `json:"model_matrix"`
@@ -82,9 +83,9 @@ type VisualFrameState struct {
 
 // EvaluateVisualFrameState produces the renderer-independent visual FrameState
 // projection. It evaluates exact-frame clip/camera properties, visibility/order,
-// source time, canonical media geometry, text/shape state, perspective projection,
-// ordered effect stacks, transition timing/peer state, and supported canonical
-// transition paint. Visual families not yet canonicalized remain explicit debt.
+// source time, canonical media geometry, text/shape/cursor state, perspective
+// projection, ordered effect stacks, transition timing/peer state, and supported
+// canonical transition paint. Visual families not yet canonicalized remain debt.
 func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualFrameState, error) {
 	normalized, err := NormalizeTimelineV2EvaluationInputs(doc)
 	if err != nil {
@@ -210,6 +211,10 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 	if err != nil {
 		return FrameLayerState{}, fmt.Errorf("canonical shape state for clip %q: %w", clip.ID, err)
 	}
+	cursor, err := EvaluateCursorState(clip.Cursor, FrameRelativeMilliseconds(frameIndex, canvas.FPS, clip.StartMS))
+	if err != nil {
+		return FrameLayerState{}, fmt.Errorf("canonical cursor state for clip %q: %w", clip.ID, err)
+	}
 	bounds := effectiveContentBounds(clip, shape)
 	unresolved := unresolvedLayerFeatures(clip, bounds)
 	text, err := EvaluateTextState(clip.Text, canvas.Height)
@@ -264,7 +269,7 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 	return FrameLayerState{
 		TrackIndex: active.TrackIndex, ClipIndex: active.ClipIndex, TrackID: track.ID, ClipID: clip.ID,
 		ZIndex: active.ZIndex, StartFrame: active.StartFrame, EndFrame: active.EndFrame, SourceTimeMS: active.SourceTimeMS,
-		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Text: text, Shape: shape, Transform: transform, ViewTransform: view,
+		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Text: text, Shape: shape, Cursor: cursor, Transform: transform, ViewTransform: view,
 		ModelMatrix: matrix, PerspectiveProjection: projection, Effects: effects, Transitions: transitions, TransitionPaint: paint,
 		Unresolved: unresolved, Authoritative: len(unresolved) == 0,
 	}, nil
@@ -298,9 +303,6 @@ func effectiveContentBounds(clip TimelineV2Clip, shape *EvaluatedShapeState) *Ti
 
 func unresolvedLayerFeatures(clip TimelineV2Clip, bounds *TimelineV2ContentBounds) []string {
 	unresolved := []string{}
-	if clip.Cursor != nil {
-		unresolved = append(unresolved, "cursor")
-	}
 	if clip.AssetID != "" && bounds == nil {
 		unresolved = append(unresolved, "media_geometry:content_bounds")
 	}

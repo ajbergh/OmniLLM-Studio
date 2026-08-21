@@ -37,7 +37,7 @@ describe('canonical text FrameState projection', () => {
     expect(state.authoritative).toBe(true);
   });
 
-  it('projects text and shape while leaving only cursor debt', () => {
+  it('projects text and shape while resolving an empty cursor', () => {
     const document = baseDocument();
     document.tracks = [{
       id: 'track', type: 'layer', name: 'Layer', locked: false, muted: false, visible: true,
@@ -45,13 +45,16 @@ describe('canonical text FrameState projection', () => {
         id: 'mixed', start_ms: 0, duration_ms: 1000, trim_in_ms: 0, trim_out_ms: 1000,
         text: { text: 'Text' },
         shape: { kind: 'rectangle' },
-        cursor: { visible: true },
+        cursor: {},
         effects: [], keyframes: [],
       }],
     }];
     const state = evaluateVisualFrameState(document, 0);
     expect(state.layers[0].text?.text).toBe('Text');
     expect(state.layers[0].shape?.kind).toBe('rectangle');
-    expect(state.unresolved).toEqual(['mixed:cursor']);
+    expect(state.layers[0].cursor).toBeUndefined();
+    expect(state.layers[0].unresolved).toEqual([]);
+    expect(state.layers[0].authoritative).toBe(true);
+    expect(state.authoritative).toBe(true);
   });
 });

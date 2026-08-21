@@ -38,7 +38,7 @@ func TestVisualFrameStateProjectsCanonicalTextWithoutGenericTextDebt(t *testing.
 	}
 }
 
-func TestVisualFrameStateTextShapeProjectionLeavesOnlyCursorDebt(t *testing.T) {
+func TestVisualFrameStateTextShapeProjectionResolvesEmptyCursor(t *testing.T) {
 	doc := TimelineV2Document{
 		Version:    2,
 		Canvas:     TimelineV2Canvas{Width: 640, Height: 360, FPS: 30, Background: "#000000"},
@@ -60,10 +60,10 @@ func TestVisualFrameStateTextShapeProjectionLeavesOnlyCursorDebt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EvaluateVisualFrameState: %v", err)
 	}
-	if len(state.Layers) != 1 || state.Layers[0].Text == nil || state.Layers[0].Shape == nil {
+	if len(state.Layers) != 1 || state.Layers[0].Text == nil || state.Layers[0].Shape == nil || state.Layers[0].Cursor != nil {
 		t.Fatalf("layer = %+v", state.Layers)
 	}
-	if len(state.Unresolved) != 1 || state.Unresolved[0] != "mixed:cursor" {
-		t.Fatalf("unresolved = %v", state.Unresolved)
+	if !state.Layers[0].Authoritative || !state.Authoritative || len(state.Unresolved) != 0 {
+		t.Fatalf("resolved cursor state = %+v", state)
 	}
 }

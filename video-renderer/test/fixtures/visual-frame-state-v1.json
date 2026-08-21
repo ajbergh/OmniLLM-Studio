@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Cross-runtime exact-frame visual FrameState fixture for transform/camera/source/crop, canonical media geometry, perspective projection, and effect-stack evaluation.",
+  "description": "Cross-runtime exact-frame visual FrameState fixture for transform/camera/source/crop, canonical media geometry, perspective projection, effect-stack, and cursor evaluation.",
   "document": {
     "version": 2,
     "canvas": { "width": 200, "height": 100, "fps": 120, "background": "#000000" },
@@ -35,6 +35,15 @@
               "crop": { "top": 0.1, "right": 0.2, "bottom": 0, "left": 0 }
             },
             "media_fit": "contain",
+            "cursor": {
+              "scale": 1.25,
+              "highlight": true,
+              "click_rings": true,
+              "events": [
+                { "time_ms": 0, "x": 10, "y": 20 },
+                { "time_ms": 10, "x": 40, "y": 50, "click": true }
+              ]
+            },
             "fade_in_ms": 10,
             "effects": [],
             "keyframes": [
@@ -96,6 +105,9 @@
       "expected_perspective_distance": 1200,
       "expected_projection_source": "camera",
       "expected_projection_origin_w": 1,
+      "expected_cursor_x": 10,
+      "expected_cursor_y": 20,
+      "expected_cursor_click": true,
       "expected_projection_matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -0.0008333333333333334, 1],
       "expected_model_matrix": [2, 0, 0, -90, 0, 2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
     },
@@ -112,6 +124,9 @@
       "expected_perspective_distance": 86.60254037844388,
       "expected_projection_source": "camera",
       "expected_projection_origin_w": 1,
+      "expected_cursor_x": 20,
+      "expected_cursor_y": 30,
+      "expected_cursor_click": true,
       "expected_projection_matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -0.011547005383792514, 1],
       "expected_model_matrix": [2, 0, 0, -90.66666666666667, 0, 2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
     }

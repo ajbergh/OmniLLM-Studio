@@ -1,5 +1,9 @@
 import { endFrame } from './renderContract';
 import {
+  evaluateCursorState,
+  type CanonicalEvaluatedCursorState,
+} from './renderContractCursor';
+import {
   evaluateClipEffectStackAtTime,
   evaluateSceneEffectStack,
   type CanonicalEvaluatedEffectState,
@@ -56,6 +60,7 @@ export interface CanonicalFrameLayerState {
   media_geometry?: CanonicalMediaGeometry;
   text?: CanonicalEvaluatedTextState;
   shape?: CanonicalEvaluatedShapeState;
+  cursor?: CanonicalEvaluatedCursorState;
   transform: CanonicalEvaluatedTransform;
   view_transform: CanonicalEvaluatedTransform;
   model_matrix: Matrix4;
@@ -184,6 +189,10 @@ function evaluateFrameLayer(
     rotation_z: transform.rotation_z - camera.rotation_z,
   };
   const shape = evaluateShapeState(clip.shape);
+  const cursor = evaluateCursorState(clip.cursor, {
+    numerator: frameIndex * 1000 - clip.start_ms * canvas.fps,
+    denominator: canvas.fps,
+  });
   const contentBounds = effectiveContentBounds(clip, shape);
   const unresolved = unresolvedLayerFeatures(clip, contentBounds);
   const text = evaluateTextState(clip.text, canvas.height);
@@ -226,6 +235,7 @@ function evaluateFrameLayer(
     ...(mediaGeometry ? { media_geometry: mediaGeometry } : {}),
     ...(text ? { text } : {}),
     ...(shape ? { shape } : {}),
+    ...(cursor ? { cursor } : {}),
     transform,
     view_transform: view,
     model_matrix: composeModelMatrix(view, anchorOffsetX, anchorOffsetY),
@@ -255,7 +265,6 @@ function effectiveContentBounds(
 
 function unresolvedLayerFeatures(clip: TimelineV2Clip, contentBounds: TimelineV2ContentBounds | undefined): string[] {
   const unresolved: string[] = [];
-  if (clip.cursor) unresolved.push('cursor');
   if (clip.asset_id && !contentBounds) unresolved.push('media_geometry:content_bounds');
   return unresolved;
 }
