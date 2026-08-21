@@ -43,4 +43,18 @@ describe('canonical text state', () => {
     const state = evaluateTextState({ text: 'x', params: { font_size: 999, unknown: true } }, 360);
     expect(state?.font_size).toBe(20);
   });
+
+  it('serializes font-face provenance without claiming a packaged face', () => {
+    expect(evaluateTextState({ text: 'x' }, 360)?.font_face_source).toBe('composition-default');
+    expect(evaluateTextState({ text: 'x', font_family: 'Inter' }, 360)?.font_face_source).toBe('family-name-only');
+    const withResource = evaluateTextState({ text: 'x', font_family: 'Inter', font_resource_id: 'inter-400-normal' }, 360);
+    expect(withResource?.font_resource_id).toBe('inter-400-normal');
+    // Only the manifest-level FrameState entry point can promote a face to
+    // packaged-resource; the pure evaluator never claims one.
+    expect(withResource?.font_face_source).toBe('family-name-only');
+  });
+
+  it('rejects surrounding whitespace in font_resource_id', () => {
+    expect(() => evaluateTextState({ text: 'x', font_resource_id: ' inter-400-normal ' }, 360)).toThrow(/font_resource_id/);
+  });
 });

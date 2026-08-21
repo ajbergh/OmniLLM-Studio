@@ -9,6 +9,10 @@ import {
   type CanonicalEvaluatedEffectState,
 } from './renderContractEffects';
 import { activeClipsAtFrame } from './renderContractEvaluation';
+import {
+  evaluateFontResourceProvenance,
+  type CanonicalFontResourceProvenance,
+} from './renderContractFontResourceProvenance';
 import { evaluateMediaGeometry, type CanonicalMediaGeometry } from './renderContractMediaGeometry';
 import { normalizeTimelineV2EvaluationInputs } from './renderContractNormalize';
 import {
@@ -21,7 +25,11 @@ import {
   sourceProvenanceByAsset,
   type CanonicalSourceProvenance,
 } from './renderContractSourceProvenance';
-import { evaluateTextState, type CanonicalEvaluatedTextState } from './renderContractText';
+import {
+  evaluateTextState,
+  TEXT_FONT_FACE_SOURCE_PACKAGED_RESOURCE,
+  type CanonicalEvaluatedTextState,
+} from './renderContractText';
 import {
   evaluateTransitionPaint,
   supportsTransitionPaint,
@@ -104,7 +112,11 @@ export function evaluateVisualFrameState(document: TimelineV2Document, frameInde
 
 /** Evaluate the immutable timeline and source probes bound into a Render Manifest v1. */
 export function evaluateVisualFrameStateForRenderManifest(manifest: RenderManifestV1, frameIndex: number): CanonicalVisualFrameState {
-  return evaluateVisualFrameStateWithSourceProvenance(manifest.timeline, frameIndex, sourceProvenanceByAsset(manifest), true);
+  const fontResourcesByID = new Map<string, CanonicalFontResourceProvenance>();
+  for (const resource of evaluateFontResourceProvenance(manifest)) {
+    fontResourcesByID.set(resource.font_resource_id, resource);
+  }
+  return evaluateVisualFrameStateWithSourceProvenance(manifest.timeline, frameIndex, sourceProvenanceByAsset(manifest), true, fontResourcesByID);
 }
 
 function evaluateVisualFrameStateWithSourceProvenance(
@@ -112,6 +124,7 @@ function evaluateVisualFrameStateWithSourceProvenance(
   frameIndex: number,
   provenanceByAsset?: ReadonlyMap<string, CanonicalSourceProvenance>,
   manifestSourceProvenance = false,
+  fontResourcesByID?: ReadonlyMap<string, CanonicalFontResourceProvenance>,
 ): CanonicalVisualFrameState {
   const normalized = normalizeTimelineV2EvaluationInputs(document);
   const fps = normalized.canvas.fps;
@@ -144,7 +157,7 @@ function evaluateVisualFrameStateWithSourceProvenance(
       active.clip_index,
       frame,
     );
-    const layer = evaluateFrameLayer(normalized.canvas, track, clip, active, camera, transitions, frame, provenanceByAsset, manifestSourceProvenance);
+    const layer = evaluateFrameLayer(normalized.canvas, track, clip, active, camera, transitions, frame, provenanceByAsset, manifestSourceProvenance, fontResourcesByID);
     state.layers.push(layer);
     state.unresolved.push(...layer.unresolved.map((entry) => `${clip.id}:${entry}`));
   }
@@ -184,6 +197,7 @@ function evaluateFrameLayer(
   frameIndex: number,
   provenanceByAsset?: ReadonlyMap<string, CanonicalSourceProvenance>,
   manifestSourceProvenance = false,
+  fontResourcesByID?: ReadonlyMap<string, CanonicalFontResourceProvenance>,
 ): CanonicalFrameLayerState {
   const clipTimeMs = frameRelativeMilliseconds(frameIndex, canvas.fps, clip.start_ms);
   const transform: CanonicalEvaluatedTransform = {
@@ -219,6 +233,21 @@ function evaluateFrameLayer(
   const contentBounds = effectiveContentBounds(clip, shape, sourceProvenance);
   const unresolved = unresolvedLayerFeatures(clip, contentBounds, manifestSourceProvenance);
   const text = evaluateTextState(clip.text, canvas.height);
+  if (text?.font_resource_id) {
+    const resource = fontResourcesByID?.get(text.font_resource_id);
+    if (!resource) {
+      throw new Error(`canonical text state for clip ${JSON.stringify(clip.id)} names font resource ${JSON.stringify(text.font_resource_id)} that the manifest does not package`);
+    }
+    // An explicit resource binding must agree with the authored family so
+    // a renderer never silently substitutes a different face.
+    if (text.font_family && text.font_family.toLowerCase() !== resource.font_family.toLowerCase()) {
+      throw new Error(
+        `canonical text state for clip ${JSON.stringify(clip.id)} names font resource ${JSON.stringify(text.font_resource_id)} with family ` +
+        `${JSON.stringify(resource.font_family)} but authors family ${JSON.stringify(text.font_family)}`,
+      );
+    }
+    text.font_face_source = TEXT_FONT_FACE_SOURCE_PACKAGED_RESOURCE;
+  }
   const effects = evaluateClipEffectStackAtTime(clip, clipTimeMs);
   const transitionPaint: CanonicalTransitionPaint[] = [];
   for (const transition of transitions) {

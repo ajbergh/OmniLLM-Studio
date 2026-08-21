@@ -47,7 +47,7 @@ export interface TimelineV2Transform { x?: number; y?: number; z?: number; scale
 export interface TimelineV2Crop { top: number; right: number; bottom: number; left: number; }
 export interface TimelineV2ContentBounds { x: number; y: number; width: number; height: number; }
 export interface TimelineV2Text {
-  text: string; font_family?: string; font_size?: number; font_weight?: string; color?: string; background?: string; stroke?: string; stroke_width?: number;
+  text: string; font_family?: string; font_resource_id?: string; font_size?: number; font_weight?: string; color?: string; background?: string; stroke?: string; stroke_width?: number;
   shadow?: boolean; text_align?: TimelineV2TextAlignment; vertical_align?: TimelineV2VerticalAlignment; line_height?: number; letter_spacing?: number;
   border_radius?: number; box_width?: number; box_height?: number; padding_top?: number; padding_right?: number; padding_bottom?: number; padding_left?: number;
   params?: RenderContractMetadata;
@@ -90,7 +90,7 @@ export const timelineV2TypeProjection = {
   transform: defineExactKeys<TimelineV2Transform>()('x', 'y', 'z', 'scale', 'scale_x', 'scale_y', 'rotation', 'rotation_x', 'rotation_y', 'rotation_z', 'opacity', 'anchor_x', 'anchor_y', 'perspective', 'crop'),
   crop: defineExactKeys<TimelineV2Crop>()('top', 'right', 'bottom', 'left'),
   contentBounds: defineExactKeys<TimelineV2ContentBounds>()('x', 'y', 'width', 'height'),
-  text: defineExactKeys<TimelineV2Text>()('text', 'font_family', 'font_size', 'font_weight', 'color', 'background', 'stroke', 'stroke_width', 'shadow', 'text_align', 'vertical_align', 'line_height', 'letter_spacing', 'border_radius', 'box_width', 'box_height', 'padding_top', 'padding_right', 'padding_bottom', 'padding_left', 'params'),
+  text: defineExactKeys<TimelineV2Text>()('text', 'font_family', 'font_resource_id', 'font_size', 'font_weight', 'color', 'background', 'stroke', 'stroke_width', 'shadow', 'text_align', 'vertical_align', 'line_height', 'letter_spacing', 'border_radius', 'box_width', 'box_height', 'padding_top', 'padding_right', 'padding_bottom', 'padding_left', 'params'),
   shape: defineExactKeys<TimelineV2Shape>()('kind', 'width', 'height', 'fill', 'stroke', 'stroke_width', 'blur_radius', 'corner_radius'),
   cursor: defineExactKeys<TimelineV2Cursor>()('visible', 'scale', 'highlight', 'click_rings', 'smoothing', 'events'),
   cursorEvent: defineExactKeys<TimelineV2CursorEvent>()('time_ms', 'x', 'y', 'click'),

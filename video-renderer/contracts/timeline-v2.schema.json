@@ -118,7 +118,7 @@
       "required": ["text"],
       "properties": {
         "text": { "type": "string" },
-        "font_family": { "type": "string" }, "font_size": { "type": "integer", "minimum": 1 },
+        "font_family": { "type": "string" }, "font_resource_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" }, "font_size": { "type": "integer", "minimum": 1 },
         "font_weight": { "type": "string" }, "color": { "type": "string" }, "background": { "type": "string" },
         "stroke": { "type": "string" }, "stroke_width": { "type": "number", "minimum": 0 }, "shadow": { "type": "boolean" },
         "text_align": { "enum": ["left", "center", "right"] },
