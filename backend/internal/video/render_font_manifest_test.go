@@ -100,6 +100,20 @@ func TestBuildRenderFontManifestPackagesReferencedFaces(t *testing.T) {
 	}
 }
 
+func TestTimelineFontResourceClipIDsToleratesNonTextClips(t *testing.T) {
+	// Regression: the collector dereferenced clip.Text before its nil check,
+	// panicking StartRender for any timeline containing a non-text clip.
+	doc := NewEmptyTimeline(640, 360, 30)
+	doc.Tracks = append(doc.Tracks, TimelineTrack{
+		ID: "media-track", Type: TrackTypeVideo, Name: "Media", Visible: true,
+		Clips: []TimelineClip{{ID: "media-clip", AssetID: "asset-1", StartMS: 0, DurationMS: 1000}},
+	})
+	references := timelineFontResourceClipIDs(doc)
+	if len(references) != 0 {
+		t.Fatalf("references = %v, want empty", references)
+	}
+}
+
 func TestBuildRenderFontManifestEmptyWithoutReferences(t *testing.T) {
 	service, _ := newFontStagingTestService(t)
 	project, err := service.CreateProject("", "Font Project", "openrouter", "test-model", 640, 360, 30, "16:9")

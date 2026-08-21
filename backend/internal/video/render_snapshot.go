@@ -296,8 +296,11 @@ func timelineFontResourceClipIDs(doc TimelineDocument) map[string][]string {
 	result := map[string][]string{}
 	for _, track := range doc.Tracks {
 		for _, clip := range track.Clips {
+			if clip.Text == nil {
+				continue
+			}
 			resourceID := strings.TrimSpace(clip.Text.FontResourceID)
-			if clip.Text == nil || resourceID == "" {
+			if resourceID == "" {
 				continue
 			}
 			result[resourceID] = append(result[resourceID], clip.ID)
