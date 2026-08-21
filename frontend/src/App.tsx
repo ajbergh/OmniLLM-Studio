@@ -24,7 +24,8 @@ import { useSettingsStore, useConversationStore, useMessageStore, useProviderSto
 import { useImageEditorStore } from './stores/imageEditor';
 import { useMusicStudioStore } from './stores/musicStudio';
 import { useVideoStudioStore } from './stores/videoStudio';
-import { authApi } from './api';
+import { api, authApi } from './api';
+import { setDiscoveredOllamaModels } from './models';
 import { matchesShortcut } from './shortcuts';
 import {
   Settings, Keyboard, BarChart3, Layout, Puzzle, FlaskConical,
@@ -91,6 +92,7 @@ function App() {
   const [fileLibraryPreferredWorkspaceId, setFileLibraryPreferredWorkspaceId] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(true); // Default true (solo mode)
   const [authChecked, setAuthChecked] = useState(false);
+  const [, setOllamaModelRevision] = useState(0);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -127,6 +129,23 @@ function App() {
     if (appMode === 'video-edit' && videoProjectId) path = `/video/${encodeURIComponent(videoProjectId)}/edit`;
     if (window.location.pathname !== path) window.history.replaceState({}, '', path);
   }, [activeId, appMode, imageSessionId, musicSessionId, videoProjectId]);
+
+  // Refresh the shared Ollama catalog whenever Settings opens. This runs after
+  // the desktop API base has been initialized, so it works in both Wails and web builds.
+  useEffect(() => {
+    if (!settingsOpen) return;
+    let cancelled = false;
+    void api.fetchOllamaModels('').then((models) => {
+      if (cancelled) return;
+      setDiscoveredOllamaModels(models);
+      // The catalog is module state, so force one normal React render to make
+      // newly discovered models visible in the unsaved provider form.
+      setOllamaModelRevision((revision) => revision + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsOpen]);
 
   // Studio data must load independently of the sidebar: the mobile drawer unmounts
   // immediately after a mode change.
