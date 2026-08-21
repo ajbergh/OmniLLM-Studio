@@ -53,6 +53,7 @@ type FrameLayerState struct {
 	SourceTimeMS          float64                        `json:"source_time_ms"`
 	MediaFit              string                         `json:"media_fit,omitempty"`
 	ContentBounds         *TimelineV2ContentBounds       `json:"content_bounds,omitempty"`
+	SourceProvenance      *EvaluatedSourceProvenance     `json:"source_provenance,omitempty"`
 	MediaGeometry         *EvaluatedMediaGeometry        `json:"media_geometry,omitempty"`
 	Text                  *EvaluatedTextState            `json:"text,omitempty"`
 	Shape                 *EvaluatedShapeState           `json:"shape,omitempty"`
@@ -87,6 +88,21 @@ type VisualFrameState struct {
 // projection, ordered effect stacks, transition timing/peer state, and supported
 // canonical transition paint. Visual families not yet canonicalized remain debt.
 func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualFrameState, error) {
+	return evaluateVisualFrameState(doc, frameIndex, nil, false)
+}
+
+// EvaluateVisualFrameStateForRenderManifest evaluates the exact immutable
+// timeline and source probes bound into a Render Manifest v1. It adds source
+// provenance as a geometry input without probing source files at frame time.
+func EvaluateVisualFrameStateForRenderManifest(manifest RenderManifestV1, frameIndex int64) (VisualFrameState, error) {
+	provenance, err := sourceProvenanceByAsset(manifest)
+	if err != nil {
+		return VisualFrameState{}, err
+	}
+	return evaluateVisualFrameState(manifest.Timeline, frameIndex, provenance, true)
+}
+
+func evaluateVisualFrameState(doc TimelineV2Document, frameIndex int64, provenanceByAsset map[string]EvaluatedSourceProvenance, manifestSourceProvenance bool) (VisualFrameState, error) {
 	normalized, err := NormalizeTimelineV2EvaluationInputs(doc)
 	if err != nil {
 		return VisualFrameState{}, err
@@ -128,7 +144,7 @@ func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualF
 		if err != nil {
 			return VisualFrameState{}, err
 		}
-		layer, err := evaluateFrameLayer(normalized.Canvas, track, clip, active, camera, transitions, frameIndex)
+		layer, err := evaluateFrameLayer(normalized.Canvas, track, clip, active, camera, transitions, frameIndex, provenanceByAsset, manifestSourceProvenance)
 		if err != nil {
 			return VisualFrameState{}, err
 		}
@@ -170,7 +186,7 @@ func evaluateFrameCamera(scene *TimelineV2Scene, frameIndex int64, fps, canvasHe
 	}, nil
 }
 
-func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip TimelineV2Clip, active ActiveClip, camera EvaluatedCamera, transitions []EvaluatedTransitionState, frameIndex int64) (FrameLayerState, error) {
+func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip TimelineV2Clip, active ActiveClip, camera EvaluatedCamera, transitions []EvaluatedTransitionState, frameIndex int64, provenanceByAsset map[string]EvaluatedSourceProvenance, manifestSourceProvenance bool) (FrameLayerState, error) {
 	properties := []string{"x", "y", "z", "scale_x", "scale_y", "rotation_x", "rotation_y", "rotation_z", "opacity"}
 	values := make(map[string]float64, len(properties))
 	for _, property := range properties {
@@ -215,8 +231,12 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 	if err != nil {
 		return FrameLayerState{}, fmt.Errorf("canonical cursor state for clip %q: %w", clip.ID, err)
 	}
-	bounds := effectiveContentBounds(clip, shape)
-	unresolved := unresolvedLayerFeatures(clip, bounds)
+	sourceProvenance, err := sourceProvenanceForClip(clip, provenanceByAsset)
+	if err != nil {
+		return FrameLayerState{}, err
+	}
+	bounds := effectiveContentBounds(clip, shape, sourceProvenance)
+	unresolved := unresolvedLayerFeatures(clip, bounds, manifestSourceProvenance)
 	text, err := EvaluateTextState(clip.Text, canvas.Height)
 	if err != nil {
 		return FrameLayerState{}, fmt.Errorf("canonical text state for clip %q: %w", clip.ID, err)
@@ -243,8 +263,10 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 		}
 	}
 	var mediaGeometry *EvaluatedMediaGeometry
-	if clip.AssetID != "" && clip.ContentBounds != nil {
-		geometry, err := EvaluateMediaGeometry(canvas, clip)
+	if clip.AssetID != "" && bounds != nil {
+		geometryClip := clip
+		geometryClip.ContentBounds = bounds
+		geometry, err := EvaluateMediaGeometry(canvas, geometryClip)
 		if err != nil {
 			return FrameLayerState{}, err
 		}
@@ -269,7 +291,7 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 	return FrameLayerState{
 		TrackIndex: active.TrackIndex, ClipIndex: active.ClipIndex, TrackID: track.ID, ClipID: clip.ID,
 		ZIndex: active.ZIndex, StartFrame: active.StartFrame, EndFrame: active.EndFrame, SourceTimeMS: active.SourceTimeMS,
-		MediaFit: clip.MediaFit, ContentBounds: bounds, MediaGeometry: mediaGeometry, Text: text, Shape: shape, Cursor: cursor, Transform: transform, ViewTransform: view,
+		MediaFit: clip.MediaFit, ContentBounds: bounds, SourceProvenance: sourceProvenance, MediaGeometry: mediaGeometry, Text: text, Shape: shape, Cursor: cursor, Transform: transform, ViewTransform: view,
 		ModelMatrix: matrix, PerspectiveProjection: projection, Effects: effects, Transitions: transitions, TransitionPaint: paint,
 		Unresolved: unresolved, Authoritative: len(unresolved) == 0,
 	}, nil
@@ -287,9 +309,16 @@ func sceneAtFramePresentation(scenes []TimelineV2Scene, frameIndex int64, fps in
 	return nil
 }
 
-func effectiveContentBounds(clip TimelineV2Clip, shape *EvaluatedShapeState) *TimelineV2ContentBounds {
+func effectiveContentBounds(clip TimelineV2Clip, shape *EvaluatedShapeState, sourceProvenance *EvaluatedSourceProvenance) *TimelineV2ContentBounds {
 	if clip.ContentBounds != nil {
 		bounds := *clip.ContentBounds
+		return &bounds
+	}
+	if clip.AssetID != "" {
+		if sourceProvenance == nil {
+			return nil
+		}
+		bounds := sourceProvenance.SourceBounds
 		return &bounds
 	}
 	if shape != nil {
@@ -301,10 +330,14 @@ func effectiveContentBounds(clip TimelineV2Clip, shape *EvaluatedShapeState) *Ti
 	return nil
 }
 
-func unresolvedLayerFeatures(clip TimelineV2Clip, bounds *TimelineV2ContentBounds) []string {
+func unresolvedLayerFeatures(clip TimelineV2Clip, bounds *TimelineV2ContentBounds, manifestSourceProvenance bool) []string {
 	unresolved := []string{}
 	if clip.AssetID != "" && bounds == nil {
-		unresolved = append(unresolved, "media_geometry:content_bounds")
+		debt := "media_geometry:content_bounds"
+		if manifestSourceProvenance {
+			debt = "media_geometry:source_provenance"
+		}
+		unresolved = append(unresolved, debt)
 	}
 	return unresolved
 }

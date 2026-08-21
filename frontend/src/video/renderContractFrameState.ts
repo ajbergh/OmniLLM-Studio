@@ -17,6 +17,10 @@ import {
 } from './renderContractPerspectiveProjection';
 import { evaluateClipProperty, evaluateCameraProperty } from './renderContractProperties';
 import { evaluateShapeState, type CanonicalEvaluatedShapeState } from './renderContractShape';
+import {
+  sourceProvenanceByAsset,
+  type CanonicalSourceProvenance,
+} from './renderContractSourceProvenance';
 import { evaluateTextState, type CanonicalEvaluatedTextState } from './renderContractText';
 import {
   evaluateTransitionPaint,
@@ -33,6 +37,7 @@ import type {
   TimelineV2ContentBounds,
   TimelineV2Crop,
   TimelineV2Document,
+  RenderManifestV1,
   TimelineV2Scene,
   TimelineV2Track,
 } from './renderContractTypes';
@@ -57,6 +62,7 @@ export interface CanonicalFrameLayerState {
   track_index: number; clip_index: number; track_id: string; clip_id: string; z_index: number;
   start_frame: number; end_frame: number; source_time_ms: number; media_fit?: string;
   content_bounds?: TimelineV2ContentBounds;
+  source_provenance?: CanonicalSourceProvenance;
   media_geometry?: CanonicalMediaGeometry;
   text?: CanonicalEvaluatedTextState;
   shape?: CanonicalEvaluatedShapeState;
@@ -93,6 +99,20 @@ export function frameRelativeMilliseconds(frameIndex: number, fps: number, origi
 
 /** Renderer-independent visual FrameState. Unimplemented paint families are explicit. */
 export function evaluateVisualFrameState(document: TimelineV2Document, frameIndex: number): CanonicalVisualFrameState {
+  return evaluateVisualFrameStateWithSourceProvenance(document, frameIndex);
+}
+
+/** Evaluate the immutable timeline and source probes bound into a Render Manifest v1. */
+export function evaluateVisualFrameStateForRenderManifest(manifest: RenderManifestV1, frameIndex: number): CanonicalVisualFrameState {
+  return evaluateVisualFrameStateWithSourceProvenance(manifest.timeline, frameIndex, sourceProvenanceByAsset(manifest), true);
+}
+
+function evaluateVisualFrameStateWithSourceProvenance(
+  document: TimelineV2Document,
+  frameIndex: number,
+  provenanceByAsset?: ReadonlyMap<string, CanonicalSourceProvenance>,
+  manifestSourceProvenance = false,
+): CanonicalVisualFrameState {
   const normalized = normalizeTimelineV2EvaluationInputs(document);
   const fps = normalized.canvas.fps;
   const frame = Math.trunc(frameIndex);
@@ -124,7 +144,7 @@ export function evaluateVisualFrameState(document: TimelineV2Document, frameInde
       active.clip_index,
       frame,
     );
-    const layer = evaluateFrameLayer(normalized.canvas, track, clip, active, camera, transitions, frame);
+    const layer = evaluateFrameLayer(normalized.canvas, track, clip, active, camera, transitions, frame, provenanceByAsset, manifestSourceProvenance);
     state.layers.push(layer);
     state.unresolved.push(...layer.unresolved.map((entry) => `${clip.id}:${entry}`));
   }
@@ -162,6 +182,8 @@ function evaluateFrameLayer(
   camera: CanonicalEvaluatedCamera,
   transitions: CanonicalTransitionState[],
   frameIndex: number,
+  provenanceByAsset?: ReadonlyMap<string, CanonicalSourceProvenance>,
+  manifestSourceProvenance = false,
 ): CanonicalFrameLayerState {
   const clipTimeMs = frameRelativeMilliseconds(frameIndex, canvas.fps, clip.start_ms);
   const transform: CanonicalEvaluatedTransform = {
@@ -193,8 +215,9 @@ function evaluateFrameLayer(
     numerator: frameIndex * 1000 - clip.start_ms * canvas.fps,
     denominator: canvas.fps,
   });
-  const contentBounds = effectiveContentBounds(clip, shape);
-  const unresolved = unresolvedLayerFeatures(clip, contentBounds);
+  const sourceProvenance = sourceProvenanceForClip(clip, provenanceByAsset);
+  const contentBounds = effectiveContentBounds(clip, shape, sourceProvenance);
+  const unresolved = unresolvedLayerFeatures(clip, contentBounds, manifestSourceProvenance);
   const text = evaluateTextState(clip.text, canvas.height);
   const effects = evaluateClipEffectStackAtTime(clip, clipTimeMs);
   const transitionPaint: CanonicalTransitionPaint[] = [];
@@ -207,7 +230,9 @@ function evaluateFrameLayer(
     const paint = evaluateTransitionPaint(clip.id, transition);
     if (paint) transitionPaint.push(paint);
   }
-  const mediaGeometry = clip.asset_id && clip.content_bounds ? evaluateMediaGeometry(canvas, clip) : undefined;
+  const mediaGeometry = clip.asset_id && contentBounds
+    ? evaluateMediaGeometry(canvas, { ...clip, content_bounds: contentBounds })
+    : undefined;
   let anchorOffsetX = 0;
   let anchorOffsetY = 0;
   if (mediaGeometry) {
@@ -232,6 +257,7 @@ function evaluateFrameLayer(
     source_time_ms: active.source_time_ms,
     ...(clip.media_fit ? { media_fit: clip.media_fit } : {}),
     ...(contentBounds ? { content_bounds: contentBounds } : {}),
+    ...(sourceProvenance ? { source_provenance: sourceProvenance } : {}),
     ...(mediaGeometry ? { media_geometry: mediaGeometry } : {}),
     ...(text ? { text } : {}),
     ...(shape ? { shape } : {}),
@@ -256,17 +282,38 @@ function sceneAtFramePresentation(scenes: TimelineV2Scene[], frameIndex: number,
 function effectiveContentBounds(
   clip: TimelineV2Clip,
   shape: CanonicalEvaluatedShapeState | undefined,
+  sourceProvenance: CanonicalSourceProvenance | undefined,
 ): TimelineV2ContentBounds | undefined {
   if (clip.content_bounds) return { ...clip.content_bounds };
+  if (clip.asset_id) return sourceProvenance ? { ...sourceProvenance.source_bounds } : undefined;
   if (shape) return { x: 0, y: 0, width: shape.width, height: shape.height };
   if (clip.text?.box_width && clip.text.box_height) return { x: 0, y: 0, width: clip.text.box_width, height: clip.text.box_height };
   return undefined;
 }
 
-function unresolvedLayerFeatures(clip: TimelineV2Clip, contentBounds: TimelineV2ContentBounds | undefined): string[] {
+function unresolvedLayerFeatures(
+  clip: TimelineV2Clip,
+  contentBounds: TimelineV2ContentBounds | undefined,
+  manifestSourceProvenance: boolean,
+): string[] {
   const unresolved: string[] = [];
-  if (clip.asset_id && !contentBounds) unresolved.push('media_geometry:content_bounds');
+  if (clip.asset_id && !contentBounds) {
+    unresolved.push(manifestSourceProvenance ? 'media_geometry:source_provenance' : 'media_geometry:content_bounds');
+  }
   return unresolved;
+}
+
+function sourceProvenanceForClip(
+  clip: TimelineV2Clip,
+  provenanceByAsset: ReadonlyMap<string, CanonicalSourceProvenance> | undefined,
+): CanonicalSourceProvenance | undefined {
+  if (!clip.asset_id || !provenanceByAsset) return undefined;
+  const source = provenanceByAsset.get(clip.asset_id);
+  if (!source) return undefined;
+  if (!source.clip_ids.includes(clip.id)) {
+    throw new Error(`source provenance asset ${JSON.stringify(clip.asset_id)} does not bind clip ${JSON.stringify(clip.id)}`);
+  }
+  return { ...source, clip_ids: [...source.clip_ids], source_bounds: { ...source.source_bounds } };
 }
 
 function fadeFactorAtTime(clip: TimelineV2Clip, clipTimeMs: number): number {
