@@ -1025,6 +1025,8 @@ type VideoRenderSnapshot struct {
 	TimelineSHA256        string    `json:"timeline_sha256"`
 	AssetManifestJSON     string    `json:"asset_manifest_json"`
 	AssetManifestSHA256   string    `json:"asset_manifest_sha256"`
+	FontManifestJSON      string    `json:"font_manifest_json"`
+	FontManifestSHA256    string    `json:"font_manifest_sha256"`
 	SettingsJSON          string    `json:"settings_json"`
 	RenderContractVersion int       `json:"render_contract_version"`
 	Renderer              string    `json:"renderer"`

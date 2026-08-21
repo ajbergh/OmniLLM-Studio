@@ -94,12 +94,13 @@ func (r *VideoRenderJobRepo) CreateWithSnapshot(j *models.VideoRenderJob, snapsh
 	if _, err := tx.Exec(`
 		INSERT INTO video_render_snapshots (
 			id, project_id, timeline_id, timeline_revision, timeline_json, timeline_sha256,
-			asset_manifest_json, asset_manifest_sha256, settings_json,
-			render_contract_version, renderer, renderer_version, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			asset_manifest_json, asset_manifest_sha256, font_manifest_json, font_manifest_sha256,
+			settings_json, render_contract_version, renderer, renderer_version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		snapshot.ID, snapshot.ProjectID, snapshot.TimelineID, snapshot.TimelineRevision,
 		snapshot.TimelineJSON, snapshot.TimelineSHA256, snapshot.AssetManifestJSON,
-		snapshot.AssetManifestSHA256, snapshot.SettingsJSON, snapshot.RenderContractVersion,
+		snapshot.AssetManifestSHA256, snapshot.FontManifestJSON, snapshot.FontManifestSHA256,
+		snapshot.SettingsJSON, snapshot.RenderContractVersion,
 		snapshot.Renderer, snapshot.RendererVersion, snapshot.CreatedAt,
 	); err != nil {
 		return fmt.Errorf("create video render snapshot: %w", err)
@@ -132,14 +133,15 @@ func (r *VideoRenderJobRepo) GetByID(id string) (*models.VideoRenderJob, error) 
 func (r *VideoRenderJobRepo) GetSnapshot(id string) (*models.VideoRenderSnapshot, error) {
 	row := r.db.QueryRow(`
 		SELECT id, project_id, timeline_id, timeline_revision, timeline_json, timeline_sha256,
-		       asset_manifest_json, asset_manifest_sha256, settings_json,
-		       render_contract_version, renderer, renderer_version, created_at
+		       asset_manifest_json, asset_manifest_sha256, font_manifest_json, font_manifest_sha256,
+		       settings_json, render_contract_version, renderer, renderer_version, created_at
 		FROM video_render_snapshots WHERE id = ?`, id)
 	var snapshot models.VideoRenderSnapshot
 	if err := row.Scan(
 		&snapshot.ID, &snapshot.ProjectID, &snapshot.TimelineID, &snapshot.TimelineRevision,
 		&snapshot.TimelineJSON, &snapshot.TimelineSHA256, &snapshot.AssetManifestJSON,
-		&snapshot.AssetManifestSHA256, &snapshot.SettingsJSON, &snapshot.RenderContractVersion,
+		&snapshot.AssetManifestSHA256, &snapshot.FontManifestJSON, &snapshot.FontManifestSHA256,
+		&snapshot.SettingsJSON, &snapshot.RenderContractVersion,
 		&snapshot.Renderer, &snapshot.RendererVersion, &snapshot.CreatedAt,
 	); err == sql.ErrNoRows {
 		return nil, nil

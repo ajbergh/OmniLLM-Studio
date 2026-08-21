@@ -9,13 +9,20 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG feature PR: **#252 — Define canonical font-resource provenance** — squash merge `a8a1d649a209d0013390f0f838b5f32613a2ce02` (2026-08-21).
+Latest merged WYSIWYG feature PR: **#253 — Bind authored text faces to packaged font resources** — squash merge `c7db41ade06c6729a77c6d0464ae30aa8a9fa4a6` (2026-08-21).
 
-Prior merged feature PR: **#251 — Project immutable source provenance into FrameState** — squash merge `d49808f1ea7fc23f658e95f52fdbe404bf0be92a`.
+Prior merged feature PR: **#252 — Define canonical font-resource provenance** — squash merge `a8a1d649a209d0013390f0f838b5f32613a2ce02` (2026-08-21).
 
 CI coverage prerequisite merged immediately afterward: **#246 — Run canonical render-contract suite in Vitest** — merge `ad7ec51596807293ebb1206ce873088a0ad07da7`.
 
-Current branch: `feat/video-wysiwyg-phase2-font-packaging`, created directly from merged #252 (`a8a1d649a209d0013390f0f838b5f32613a2ce02`). It adds explicit authored text-face selection on top of the merged `font-resource-provenance-v1` identity/package contract: Timeline v2 text gains an optional `font_resource_id`, evaluated `text-state-v1` carries `font_resource_id` plus a `font_face_source` of `packaged-resource` / `family-name-only` / `composition-default`, and the manifest FrameState entry point fails closed when an authored resource id is not packaged or conflicts with the authored family. It deliberately does not add a font upload UI, snapshot font staging, choose a text face from a family name, use a system-font fallback, or claim intrinsic glyph metrics; those remain explicit follow-on work.
+Current branch: `feat/video-wysiwyg-phase2-font-storage`, created directly from merged #253 (`c7db41ade06c6729a77c6d0464ae30aa8a9fa4a6`). It completes the font-resource ownership loop end to end without changing preview or FFmpeg painters:
+
+- migration V53 adds `font_manifest_json`/`font_manifest_sha256` to `video_render_snapshots` and rebuilds `video_assets` to admit the `font` kind (SQLite cannot alter a CHECK constraint; existing rows keep their kind values);
+- `POST /v1/video/projects/{projectId}/assets/upload` accepts woff2/woff/ttf/otf as kind `font` (10 MB limit) and requires a canonical `font_resource_id` form field stored in asset metadata; an `application/octet-stream` declaration no longer conflicts with a specific sniffed type because it carries no claim;
+- Timeline v1 text gains optional `font_resource_id`, which flows through both v1→v2 adapters unchanged;
+- `StartRender` stages every referenced face into `<snapshot>/fonts/<resource-id>/`, persists an immutable font manifest alongside the asset manifest, and fails closed when a referenced resource id has no project font asset or is declared twice;
+- render execution re-verifies the font manifest hash and every staged face's bytes before consuming the snapshot, matching the existing asset tamper detection;
+- it deliberately does not choose a text face from a family name, use a system-font fallback, or claim intrinsic glyph metrics; those remain explicit follow-on work.
 
 PR #243 is complete. `shape-state-v1` is projected into `visual-frame-state-v1`, evaluated shape dimensions are the single shape-derived content-bounds source, and generic `shape` unresolved debt is removed. It intentionally retained cursor debt, which #247 now consumes canonically.
 
@@ -31,7 +38,7 @@ No Phase 3 preview compositor or Phase 4 Chromium renderer behavior is changed b
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, all current transition state/paint families, effect stack state, canonical text/shape state, cursor FrameState consumption (#247), immutable source-provenance/anchor consumption (#251), and manifest-backed font-resource provenance (#252) are merged. Snapshot font packaging/text-face selection/glyph metrics and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, all current transition state/paint families, effect stack state, canonical text/shape state, cursor FrameState consumption (#247), immutable source-provenance/anchor consumption (#251), manifest-backed font-resource provenance (#252), and authored text-face binding (#253) are merged. Font upload/storage + snapshot packaging and glyph metrics and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close text metrics/fonts, shapes, effects, transitions, cursor, camera, color, asset loading, and decoded visual thresholds. |
@@ -254,6 +261,7 @@ Remaining Phase 0 sign-off:
 | #247 | Canonical cursor state consumption in FrameState | `66530a07e3a5585546d978794e24198083bbeaa2` |
 | #251 | Immutable source provenance and FrameState consumption | `d49808f1ea7fc23f658e95f52fdbe404bf0be92a` |
 | #252 | Canonical font-resource provenance definition | `a8a1d649a209d0013390f0f838b5f32613a2ce02` |
+| #253 | Authored text-face binding to packaged resources | `c7db41ade06c6729a77c6d0464ae30aa8a9fa4a6` |
 
 Security unblock during the program:
 
@@ -328,9 +336,9 @@ Current local evidence: focused `go test ./internal/video/rendercontract`, compl
 
 Merge record: the diff was verified as a clean 13-path font-resource delta based directly on merged #251 (`d49808f1…`). The exact head `2045f7f8f403d4ebec904c08cf18d6464e72c1ed` passed the complete hosted Quality Gate (backend tests/race, frontend lint/unit/build, Playwright smoke, video renderer parity), Security Scan, container builds, and platform/sandbox/browser assurances with no review submissions or inline threads. #252 was marked ready and squash-merged as `a8a1d649a209d0013390f0f838b5f32613a2ce02` on 2026-08-21.
 
-### Current branch — authored text-face selection
+### Merged PR #253 — authored text-face selection
 
-The `feat/video-wysiwyg-phase2-font-packaging` branch adds explicit text-face selection without changing preview or FFmpeg painters:
+PR #253 added explicit text-face selection without changing preview or FFmpeg painters:
 
 - add optional `font_resource_id` to Timeline v2 `text`, projected in lockstep into the JSON schema, Go types, and TypeScript types including exact-key drift checks;
 - evaluated `text-state-v1` gains optional `font_resource_id` and a new `font_face_source`: `packaged-resource` only when a manifest binds the face, `family-name-only` for an authored family without a packaged face, and `composition-default` when no family is authored;
@@ -341,11 +349,27 @@ The `feat/video-wysiwyg-phase2-font-packaging` branch adds explicit text-face se
 
 Local evidence: focused Go render-contract tests, complete `go test ./internal/video/...`, and `go vet ./internal/video/...` passed. Focused Vitest coverage (2 files / 11 tests), the complete frontend unit gate (57 files / 290 tests), the video-performance fixture, TypeScript lint (9 pre-existing warnings and no errors), and the production frontend build passed.
 
+Merge record: the diff was verified as a clean 13-path text-face delta based directly on merged #252 (`a8a1d649…`). The exact head `ca07ce4083d1dd03b66dae45e67dcb39eecae8a2` passed the complete hosted Quality Gate (backend tests/race, frontend lint/unit/build, Playwright smoke, video renderer parity), Security Scan, container builds, and platform/sandbox/browser assurances with no review submissions or inline threads. #253 was squash-merged as `c7db41ade06c6729a77c6d0464ae30aa8a9fa4a6` on 2026-08-21.
+
+### Current branch — font upload/storage and snapshot packaging
+
+The `feat/video-wysiwyg-phase2-font-storage` branch closes the remaining font-resource ownership loop without changing preview or FFmpeg painters:
+
+- migration V53 adds `font_manifest_json`/`font_manifest_sha256` to `video_render_snapshots` and rebuilds `video_assets` to admit the `font` kind;
+- the upload endpoint accepts woff2/woff/ttf/otf as kind `font` (10 MB limit), requires a canonical `font_resource_id`, stores it in asset metadata, and rejects a resource id on non-font uploads; an `application/octet-stream` declaration no longer conflicts with a specific sniffed type because it carries no claim;
+- Timeline v1 text gains optional `font_resource_id`, which flows through both v1→v2 adapters unchanged;
+- `StartRender` stages every referenced face into `<snapshot>/fonts/<resource-id>/`, persists an immutable sorted font manifest alongside the asset manifest, and fails closed when a referenced resource id has no project font asset or is declared twice; unreferenced faces are not packaged;
+- render execution re-verifies the font manifest hash and every staged face's bytes before consuming the snapshot, matching the existing asset tamper detection;
+- mirrored Go coverage proves packaging, empty-provenance behavior, missing/duplicate resource failure, end-to-end persistence, and staged-byte tamper detection; API tests prove accepted/rejected upload paths;
+- retain the scope boundary: no font-management UI yet, no variable-font policy, no glyph-layout/metric ownership, no intrinsic text bounds, and no preview/FFmpeg painter changes.
+
+Local evidence: focused Go font-staging/upload tests, complete `go test ./internal/video/... ./internal/api/... ./internal/db/... ./internal/repository/...`, and `go vet ./internal/...` passed. The complete frontend unit gate (57 files / 290 tests), TypeScript lint (9 pre-existing warnings and no errors), and the production frontend build passed.
+
 ### Remaining Phase 2 work
 
-After the current text-face-selection branch:
+After the current font-storage branch:
 
-1. **Complete font-resource ownership** — add font upload/storage and wire resources into immutable snapshot creation so a manifest actually packages the declared faces; then define variable-font policy and glyph-layout/metric ownership. Intrinsic text bounds remain non-canonical until this work exists.
+1. **Glyph-layout/metric ownership** — define variable-font policy and deterministic glyph-layout/metric ownership. Intrinsic text bounds remain non-canonical until this work exists.
 2. **AudioGraph** — define serializable timing/rate/pitch/channel/gain/fade/mute/solo/processing/stem decisions and exact sample-count semantics.
 3. Keep all unknown authorable fields fail closed until canonical semantics exist.
 
@@ -476,10 +500,12 @@ Before every merge:
 - The next branch began directly from merged #251 and is draft PR #252. It defines fail-closed `font-resource-provenance-v1` from explicitly packaged Render Manifest font faces, while retaining the unimplemented snapshot-package, text-face-selection, and glyph-metric boundaries rather than guessing them.
 - #252 completed that font-resource identity/package contract, passed the exact-head hosted Quality Gate (backend tests/race, frontend, Playwright smoke, video renderer parity), Security Scan, container builds, and platform/sandbox/browser assurances without review submissions or inline threads, and squash-merged as `a8a1d649a209d0013390f0f838b5f32613a2ce02` on 2026-08-21.
 - The next branch began directly from merged #252: it adds explicit authored text-face selection — Timeline v2 `font_resource_id`, evaluated `font_face_source` provenance, and fail-closed manifest binding — while retaining the unimplemented upload/snapshot-package and glyph-metric boundaries rather than guessing them.
+- #253 completed that text-face selection work, passed the exact-head hosted Quality Gate (backend tests/race, frontend, Playwright smoke, video renderer parity), Security Scan, container builds, and platform/sandbox/browser assurances without review submissions or inline threads, and squash-merged as `c7db41ade06c6729a77c6d0464ae30aa8a9fa4a6` on 2026-08-21.
+- The next branch began directly from merged #253: it adds durable font upload/storage and wires resources into immutable snapshot creation so a manifest packages its declared faces.
 
 ## Next recommended slice
 
-1. Validate the text-face-selection branch in hosted CI, address any review feedback, and merge only when it remains current, scoped, and green.
-2. Add font upload/storage and wire resources into immutable snapshot creation so a manifest packages its declared faces; then assign glyph-layout/metric ownership without guessing intrinsic text bounds.
+1. Validate the font-storage/snapshot-packaging branch in hosted CI, address any review feedback, and merge only when it remains current, scoped, and green.
+2. Assign glyph-layout/metric ownership without guessing intrinsic text bounds; then define variable-font policy.
 3. Define and consume canonical AudioGraph to complete Phase 2 semantic ownership.
 4. Continue Phase 0 visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.

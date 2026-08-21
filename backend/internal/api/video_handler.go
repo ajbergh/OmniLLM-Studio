@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"image"
 	_ "image/gif"  // register decoder for upload dimension checks
@@ -542,8 +543,37 @@ const (
 	videoUploadMaxImageBytes = 25 << 20  // 25 MB
 	videoUploadMaxAudioBytes = 100 << 20 // 100 MB
 	videoUploadMaxVideoBytes = 500 << 20 // 500 MB
+	videoUploadMaxFontBytes  = 10 << 20  // 10 MB
 	videoUploadMaxImageDim   = 8192      // pixels per side
 )
+
+// videoFontMIMEByExt maps canonical font extensions to the MIME type stored on
+// the asset. Font containers are frequently mis-sniffed as
+// application/octet-stream, so the extension decides after a top-level
+// content sanity check.
+var videoFontMIMEByExt = map[string]string{
+	".woff2": "font/woff2",
+	".woff":  "font/woff",
+	".ttf":   "font/ttf",
+	".otf":   "font/otf",
+}
+
+// isValidFontResourceID mirrors the canonical font-resource id shape enforced
+// by the render contract: lowercase ASCII letters, digits, dots, underscores,
+// or hyphens, starting with a letter or digit.
+func isValidFontResourceID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for index, character := range value {
+		isLowerAlpha := character >= 'a' && character <= 'z'
+		isDigit := character >= '0' && character <= '9'
+		if (index == 0 && !isLowerAlpha && !isDigit) || (index > 0 && !isLowerAlpha && !isDigit && character != '.' && character != '_' && character != '-') {
+			return false
+		}
+	}
+	return true
+}
 
 // UploadAsset accepts a multipart file upload and creates a video asset in the
 // project.  Uploaded bytes are MIME-sniffed and validated per asset kind before
@@ -603,16 +633,42 @@ func (h *VideoHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(mimeType, "audio/"):
 		kind = "audio"
 	default:
-		respondError(w, http.StatusBadRequest, "unsupported file type — upload an image, video, or audio file")
+		// Font containers rarely carry a recognizable magic prefix for the
+		// sniffer; a matching canonical extension plus binary (non-text,
+		// non-HTML) sniffed content admits the font kind.
+		if fontMIME, ok := videoFontMIMEByExt[strings.ToLower(filepath.Ext(header.Filename))]; ok &&
+			sniffed != "text/plain" && !strings.HasPrefix(sniffed, "text/") && !strings.Contains(sniffed, "html") {
+			kind = "font"
+			mimeType = fontMIME
+			break
+		}
+		respondError(w, http.StatusBadRequest, "unsupported file type — upload an image, video, audio, or font file")
 		return
 	}
 
 	// When both sniffed and declared types are specific, they must agree on the
 	// top-level kind (a renamed .html file declared as image/png is rejected).
-	if sniffed != "application/octet-stream" && declared != "" &&
+	// An application/octet-stream declaration carries no specific claim, so it
+	// cannot conflict with any sniffed type.
+	if sniffed != "application/octet-stream" && declared != "" && declared != "application/octet-stream" &&
 		strings.SplitN(sniffed, "/", 2)[0] != strings.SplitN(declared, "/", 2)[0] &&
 		sniffed != "text/plain" && sniffed != "application/ogg" {
 		respondError(w, http.StatusBadRequest, "file content does not match its declared type")
+		return
+	}
+
+	// A font upload must declare the canonical resource id text clips will
+	// reference. The id is validated against the same canonical shape the
+	// render contract enforces so a manifest can never carry a face that no
+	// clip can bind to.
+	fontResourceID := strings.TrimSpace(r.FormValue("font_resource_id"))
+	if kind == "font" {
+		if !isValidFontResourceID(fontResourceID) {
+			respondError(w, http.StatusBadRequest, "font uploads require a font_resource_id using lowercase ASCII letters, digits, dots, underscores, or hyphens")
+			return
+		}
+	} else if fontResourceID != "" {
+		respondError(w, http.StatusBadRequest, "font_resource_id is only valid for font uploads")
 		return
 	}
 
@@ -625,6 +681,9 @@ func (h *VideoHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 	case "audio":
 		sizeLimit = videoUploadMaxAudioBytes
 		limitLabel = "100 MB"
+	case "font":
+		sizeLimit = videoUploadMaxFontBytes
+		limitLabel = "10 MB"
 	}
 
 	var width, height *int
@@ -681,6 +740,15 @@ func (h *VideoHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 		Width:      width,
 		Height:     height,
 		CreatedAt:  time.Now().UTC(),
+	}
+	if kind == "font" {
+		metadata, err := json.Marshal(map[string]string{"font_resource_id": fontResourceID})
+		if err != nil {
+			_ = os.Remove(storagePath)
+			respondInternalError(w, err)
+			return
+		}
+		asset.MetadataJSON = string(metadata)
 	}
 	// Best-effort metadata enrichment: real duration/dimensions/FPS make
 	// timeline placement accurate. Uploads succeed without ffprobe installed.

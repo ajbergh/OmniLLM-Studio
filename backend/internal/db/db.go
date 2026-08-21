@@ -166,6 +166,7 @@ func versionedMigrations() []Migration {
 		{Version: 50, Name: "mcp_oauth_incremental_scope", SQL: migrationMCPOAuthIncrementalScope},
 		{Version: 51, Name: "foreign_key_admission", SQL: migrationForeignKeyAdmission},
 		{Version: 52, Name: "video_render_snapshots", SQL: migrationVideoRenderSnapshots},
+		{Version: 53, Name: "video_render_snapshot_fonts", SQL: migrationVideoRenderSnapshotFonts},
 	}
 }
 
@@ -1036,6 +1037,44 @@ CREATE INDEX idx_video_render_snapshot_assets_asset ON video_render_snapshot_ass
 
 ALTER TABLE video_render_jobs ADD COLUMN snapshot_id TEXT REFERENCES video_render_snapshots(id) ON DELETE SET NULL;
 CREATE UNIQUE INDEX idx_video_render_jobs_snapshot ON video_render_jobs(snapshot_id) WHERE snapshot_id IS NOT NULL;
+`
+
+// V53: Package declared font resources into the immutable render snapshot and
+// admit font-kind assets. video_assets is rebuilt because SQLite cannot alter
+// a CHECK constraint; existing rows keep their kind values. Existing snapshot
+// rows keep empty font manifests, which the canonical font-resource contract
+// already treats as explicit empty provenance.
+const migrationVideoRenderSnapshotFonts = `
+ALTER TABLE video_render_snapshots ADD COLUMN font_manifest_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE video_render_snapshots ADD COLUMN font_manifest_sha256 TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE video_assets_v53 (
+	id TEXT PRIMARY KEY,
+	project_id TEXT,
+	source_type TEXT NOT NULL,
+	source_studio TEXT,
+	source_id TEXT,
+	kind TEXT NOT NULL CHECK(kind IN ('video','image','audio','music','text','caption','export','font','other')),
+	file_name TEXT NOT NULL,
+	file_path TEXT NOT NULL,
+	mime_type TEXT NOT NULL,
+	size_bytes INTEGER NOT NULL DEFAULT 0,
+	duration_ms INTEGER,
+	width INTEGER,
+	height INTEGER,
+	fps REAL,
+	thumbnail_path TEXT,
+	waveform_path TEXT,
+	provider TEXT,
+	model TEXT,
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+	FOREIGN KEY (project_id) REFERENCES video_projects(id) ON DELETE CASCADE
+);
+INSERT INTO video_assets_v53 SELECT * FROM video_assets;
+DROP TABLE video_assets;
+ALTER TABLE video_assets_v53 RENAME TO video_assets;
+CREATE INDEX IF NOT EXISTS idx_video_projects_user ON video_projects(user_id);
 `
 
 // V14: Add workspace_id to conversations

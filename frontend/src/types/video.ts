@@ -79,7 +79,7 @@ export interface VideoAsset {
   source_type: string;
   source_studio?: string;
   source_id?: string;
-  kind: 'video' | 'image' | 'audio' | 'music' | 'text' | 'caption' | 'export' | 'other';
+  kind: 'video' | 'image' | 'audio' | 'music' | 'text' | 'caption' | 'export' | 'font' | 'other';
   file_name: string;
   file_path: string;
   mime_type: string;
@@ -240,6 +240,7 @@ export interface VideoTimelineTransform {
 export interface VideoTimelineText {
   text: string;
   font_family?: string;
+  font_resource_id?: string;
   font_size?: number;
   font_weight?: string;
   color?: string;
