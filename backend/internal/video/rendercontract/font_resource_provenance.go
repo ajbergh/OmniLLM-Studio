@@ -9,6 +9,11 @@ import (
 
 const FontResourceProvenanceContractV1 = "font-resource-provenance-v1"
 
+// FontFaceClassStatic is the only accepted face class. Variable-font axis and
+// instance semantics have no versioned contract yet, so any other class fails
+// closed instead of being silently treated as a static face.
+const FontFaceClassStatic = "static"
+
 // EvaluatedFontResourceProvenance is one immutable static font face packaged
 // with a Render Manifest snapshot. It is an identity/package contract only:
 // text face selection and glyph metrics remain deliberately unassigned until
@@ -19,6 +24,7 @@ type EvaluatedFontResourceProvenance struct {
 	FontFamily      string `json:"font_family"`
 	FontWeight      int    `json:"font_weight"`
 	FontStyle       string `json:"font_style"`
+	FaceClass       string `json:"face_class"`
 	Format          string `json:"format"`
 	StagedPath      string `json:"staged_path"`
 	FileSHA256      string `json:"file_sha256"`
@@ -50,6 +56,9 @@ func EvaluateFontResourceProvenance(manifest RenderManifestV1) ([]EvaluatedFontR
 		if resource.FontStyle != "normal" && resource.FontStyle != "italic" {
 			return nil, fmt.Errorf("font resource provenance font resource %q has unsupported font style %q", resourceID, resource.FontStyle)
 		}
+		if resource.FaceClass != FontFaceClassStatic {
+			return nil, fmt.Errorf("font resource provenance font resource %q has unsupported face_class %q; only static faces have canonical semantics", resourceID, resource.FaceClass)
+		}
 		if resource.Format != "woff2" && resource.Format != "woff" && resource.Format != "ttf" && resource.Format != "otf" {
 			return nil, fmt.Errorf("font resource provenance font resource %q has unsupported format %q", resourceID, resource.Format)
 		}
@@ -68,6 +77,7 @@ func EvaluateFontResourceProvenance(manifest RenderManifestV1) ([]EvaluatedFontR
 			FontFamily:      fontFamily,
 			FontWeight:      resource.FontWeight,
 			FontStyle:       resource.FontStyle,
+			FaceClass:       resource.FaceClass,
 			Format:          resource.Format,
 			StagedPath:      resource.StagedPath,
 			FileSHA256:      resource.FileSHA256,

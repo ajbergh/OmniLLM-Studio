@@ -224,11 +224,15 @@ type RenderManifestAsset struct {
 // RenderManifestFontResource identifies one immutable, packaged static font
 // face. Text-to-resource selection is deliberately evaluated separately so a
 // renderer never guesses a face from a system font or an ambiguous family.
+// FaceClass is explicit so the static-face-only policy is enforced rather
+// than implied: variable-font axis/instance semantics have no versioned
+// contract yet and fail closed.
 type RenderManifestFontResource struct {
 	FontResourceID string `json:"font_resource_id"`
 	FontFamily     string `json:"font_family"`
 	FontWeight     int    `json:"font_weight"`
 	FontStyle      string `json:"font_style"`
+	FaceClass      string `json:"face_class"`
 	Format         string `json:"format"`
 	StagedPath     string `json:"staged_path"`
 	FileSHA256     string `json:"file_sha256"`

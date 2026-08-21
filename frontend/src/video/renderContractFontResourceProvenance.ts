@@ -2,6 +2,11 @@ import type { RenderManifestV1 } from './renderContractTypes';
 
 export const FONT_RESOURCE_PROVENANCE_CONTRACT_V1 = 'font-resource-provenance-v1' as const;
 
+// The only accepted face class. Variable-font axis and instance semantics
+// have no versioned contract yet, so any other class fails closed instead of
+// being silently treated as a static face.
+export const FONT_FACE_CLASS_STATIC = 'static' as const;
+
 /**
  * One immutable static font face packaged with a Render Manifest snapshot.
  * This package/identity contract intentionally does not select a face for a
@@ -13,6 +18,7 @@ export interface CanonicalFontResourceProvenance {
   font_family: string;
   font_weight: number;
   font_style: 'normal' | 'italic';
+  face_class: typeof FONT_FACE_CLASS_STATIC;
   format: 'woff2' | 'woff' | 'ttf' | 'otf';
   staged_path: string;
   file_sha256: string;
@@ -38,6 +44,9 @@ export function evaluateFontResourceProvenance(manifest: RenderManifestV1): Cano
     if (resource.font_style !== 'normal' && resource.font_style !== 'italic') {
       throw new Error(`font resource provenance font resource ${JSON.stringify(resourceID)} has unsupported font style ${JSON.stringify(resource.font_style)}`);
     }
+    if (resource.face_class !== FONT_FACE_CLASS_STATIC) {
+      throw new Error(`font resource provenance font resource ${JSON.stringify(resourceID)} has unsupported face_class ${JSON.stringify((resource as { face_class?: unknown }).face_class)}; only static faces have canonical semantics`);
+    }
     if (!['woff2', 'woff', 'ttf', 'otf'].includes(resource.format)) {
       throw new Error(`font resource provenance font resource ${JSON.stringify(resourceID)} has unsupported format ${JSON.stringify(resource.format)}`);
     }
@@ -54,6 +63,7 @@ export function evaluateFontResourceProvenance(manifest: RenderManifestV1): Cano
       font_family: fontFamily,
       font_weight: resource.font_weight,
       font_style: resource.font_style,
+      face_class: resource.face_class,
       format: resource.format,
       staged_path: resource.staged_path,
       file_sha256: resource.file_sha256,
