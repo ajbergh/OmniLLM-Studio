@@ -6,6 +6,13 @@ export const TEXT_FONT_FAMILY_SOURCE_COMPOSITION_DEFAULT = 'composition-default'
 export const TEXT_LINE_HEIGHT_NORMAL = 'normal' as const;
 export const TEXT_LINE_HEIGHT_MULTIPLIER = 'multiplier' as const;
 
+// Font-face provenance for evaluated text. A packaged resource is the only
+// deterministic face; a family name alone stays renderer-dependent until a
+// packaged face binds it.
+export const TEXT_FONT_FACE_SOURCE_PACKAGED_RESOURCE = 'packaged-resource' as const;
+export const TEXT_FONT_FACE_SOURCE_FAMILY_NAME_ONLY = 'family-name-only' as const;
+export const TEXT_FONT_FACE_SOURCE_COMPOSITION_DEFAULT = 'composition-default' as const;
+
 export interface CanonicalEvaluatedTextPadding {
   top: number;
   right: number;
@@ -25,6 +32,11 @@ export interface CanonicalEvaluatedTextState {
   text: string;
   font_family: string;
   font_family_source: typeof TEXT_FONT_FAMILY_SOURCE_AUTHORED | typeof TEXT_FONT_FAMILY_SOURCE_COMPOSITION_DEFAULT;
+  font_resource_id?: string;
+  font_face_source:
+    | typeof TEXT_FONT_FACE_SOURCE_PACKAGED_RESOURCE
+    | typeof TEXT_FONT_FACE_SOURCE_FAMILY_NAME_ONLY
+    | typeof TEXT_FONT_FACE_SOURCE_COMPOSITION_DEFAULT;
   font_size: number;
   font_weight: string;
   color: string;
@@ -51,6 +63,10 @@ export interface CanonicalEvaluatedTextState {
 export function evaluateTextState(text: TimelineV2Text | undefined, canvasHeight: number): CanonicalEvaluatedTextState | undefined {
   if (!text) return undefined;
   const fontFamily = text.font_family?.trim() ?? '';
+  const fontResourceID = text.font_resource_id?.trim() ?? '';
+  if (fontResourceID && text.font_resource_id !== fontResourceID) {
+    throw new Error(`canonical text font_resource_id ${JSON.stringify(text.font_resource_id)} must not have surrounding whitespace`);
+  }
   const background = text.background?.trim() ?? '';
   const stroke = text.stroke?.trim() ?? '';
   const rawTextAlign = text.text_align?.trim().toLowerCase() ?? '';
@@ -74,6 +90,11 @@ export function evaluateTextState(text: TimelineV2Text | undefined, canvasHeight
     text: text.text,
     font_family: fontFamily,
     font_family_source: fontFamily ? TEXT_FONT_FAMILY_SOURCE_AUTHORED : TEXT_FONT_FAMILY_SOURCE_COMPOSITION_DEFAULT,
+    // Font-face provenance is resolved by the caller when manifest font
+    // resources are available; without them a family name alone stays
+    // renderer-dependent and never claims a packaged face.
+    font_face_source: fontFamily ? TEXT_FONT_FACE_SOURCE_FAMILY_NAME_ONLY : TEXT_FONT_FACE_SOURCE_COMPOSITION_DEFAULT,
+    ...(fontResourceID ? { font_resource_id: fontResourceID } : {}),
     font_size: fontSize,
     font_weight: text.font_weight?.trim() || '700',
     color: text.color?.trim() || '#ffffff',

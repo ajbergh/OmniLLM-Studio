@@ -15,6 +15,15 @@ const (
 	TextLineHeightMultiplier               = "multiplier"
 )
 
+// Font-face provenance for evaluated text. A packaged resource is the only
+// deterministic face; a family name alone stays renderer-dependent until a
+// packaged face binds it.
+const (
+	TextFontFaceSourcePackagedResource   = "packaged-resource"
+	TextFontFaceSourceFamilyNameOnly     = "family-name-only"
+	TextFontFaceSourceCompositionDefault = "composition-default"
+)
+
 // EvaluatedTextPadding is text box padding in canvas pixels.
 type EvaluatedTextPadding struct {
 	Top    float64 `json:"top"`
@@ -41,6 +50,8 @@ type EvaluatedTextState struct {
 	Text             string               `json:"text"`
 	FontFamily       string               `json:"font_family"`
 	FontFamilySource string               `json:"font_family_source"`
+	FontResourceID   string               `json:"font_resource_id,omitempty"`
+	FontFaceSource   string               `json:"font_face_source"`
 	FontSize         int                  `json:"font_size"`
 	FontWeight       string               `json:"font_weight"`
 	Color            string               `json:"color"`
@@ -83,6 +94,19 @@ func EvaluateTextState(text *TimelineV2Text, canvasHeight int) (*EvaluatedTextSt
 	}
 	if state.FontFamily != "" {
 		state.FontFamilySource = TextFontFamilySourceAuthored
+	}
+	// Font-face provenance is resolved by the caller when manifest font
+	// resources are available; without them a family name alone stays
+	// renderer-dependent and never claims a packaged face.
+	state.FontFaceSource = TextFontFaceSourceCompositionDefault
+	if state.FontFamily != "" {
+		state.FontFaceSource = TextFontFaceSourceFamilyNameOnly
+	}
+	if resourceID := strings.TrimSpace(text.FontResourceID); resourceID != "" {
+		if text.FontResourceID != resourceID {
+			return nil, fmt.Errorf("canonical text font_resource_id %q must not have surrounding whitespace", text.FontResourceID)
+		}
+		state.FontResourceID = resourceID
 	}
 	if text.FontSize != nil {
 		if *text.FontSize < 0 {

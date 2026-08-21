@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 )
 
 const VisualFrameStateContractV1 = "visual-frame-state-v1"
@@ -88,21 +89,31 @@ type VisualFrameState struct {
 // projection, ordered effect stacks, transition timing/peer state, and supported
 // canonical transition paint. Visual families not yet canonicalized remain debt.
 func EvaluateVisualFrameState(doc TimelineV2Document, frameIndex int64) (VisualFrameState, error) {
-	return evaluateVisualFrameState(doc, frameIndex, nil, false)
+	return evaluateVisualFrameState(doc, frameIndex, nil, false, nil)
 }
 
 // EvaluateVisualFrameStateForRenderManifest evaluates the exact immutable
 // timeline and source probes bound into a Render Manifest v1. It adds source
-// provenance as a geometry input without probing source files at frame time.
+// provenance as a geometry input without probing source files at frame time,
+// and it fails closed when an authored text face names a font resource the
+// manifest does not package.
 func EvaluateVisualFrameStateForRenderManifest(manifest RenderManifestV1, frameIndex int64) (VisualFrameState, error) {
 	provenance, err := sourceProvenanceByAsset(manifest)
 	if err != nil {
 		return VisualFrameState{}, err
 	}
-	return evaluateVisualFrameState(manifest.Timeline, frameIndex, provenance, true)
+	fontResources, err := EvaluateFontResourceProvenance(manifest)
+	if err != nil {
+		return VisualFrameState{}, err
+	}
+	fontResourcesByID := make(map[string]EvaluatedFontResourceProvenance, len(fontResources))
+	for _, resource := range fontResources {
+		fontResourcesByID[resource.FontResourceID] = resource
+	}
+	return evaluateVisualFrameState(manifest.Timeline, frameIndex, provenance, true, fontResourcesByID)
 }
 
-func evaluateVisualFrameState(doc TimelineV2Document, frameIndex int64, provenanceByAsset map[string]EvaluatedSourceProvenance, manifestSourceProvenance bool) (VisualFrameState, error) {
+func evaluateVisualFrameState(doc TimelineV2Document, frameIndex int64, provenanceByAsset map[string]EvaluatedSourceProvenance, manifestSourceProvenance bool, fontResourcesByID map[string]EvaluatedFontResourceProvenance) (VisualFrameState, error) {
 	normalized, err := NormalizeTimelineV2EvaluationInputs(doc)
 	if err != nil {
 		return VisualFrameState{}, err
@@ -144,7 +155,7 @@ func evaluateVisualFrameState(doc TimelineV2Document, frameIndex int64, provenan
 		if err != nil {
 			return VisualFrameState{}, err
 		}
-		layer, err := evaluateFrameLayer(normalized.Canvas, track, clip, active, camera, transitions, frameIndex, provenanceByAsset, manifestSourceProvenance)
+		layer, err := evaluateFrameLayer(normalized.Canvas, track, clip, active, camera, transitions, frameIndex, provenanceByAsset, manifestSourceProvenance, fontResourcesByID)
 		if err != nil {
 			return VisualFrameState{}, err
 		}
@@ -186,7 +197,7 @@ func evaluateFrameCamera(scene *TimelineV2Scene, frameIndex int64, fps, canvasHe
 	}, nil
 }
 
-func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip TimelineV2Clip, active ActiveClip, camera EvaluatedCamera, transitions []EvaluatedTransitionState, frameIndex int64, provenanceByAsset map[string]EvaluatedSourceProvenance, manifestSourceProvenance bool) (FrameLayerState, error) {
+func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip TimelineV2Clip, active ActiveClip, camera EvaluatedCamera, transitions []EvaluatedTransitionState, frameIndex int64, provenanceByAsset map[string]EvaluatedSourceProvenance, manifestSourceProvenance bool, fontResourcesByID map[string]EvaluatedFontResourceProvenance) (FrameLayerState, error) {
 	properties := []string{"x", "y", "z", "scale_x", "scale_y", "rotation_x", "rotation_y", "rotation_z", "opacity"}
 	values := make(map[string]float64, len(properties))
 	for _, property := range properties {
@@ -240,6 +251,18 @@ func evaluateFrameLayer(canvas TimelineV2Canvas, track TimelineV2Track, clip Tim
 	text, err := EvaluateTextState(clip.Text, canvas.Height)
 	if err != nil {
 		return FrameLayerState{}, fmt.Errorf("canonical text state for clip %q: %w", clip.ID, err)
+	}
+	if text != nil && text.FontResourceID != "" {
+		resource, packaged := fontResourcesByID[text.FontResourceID]
+		if !packaged {
+			return FrameLayerState{}, fmt.Errorf("canonical text state for clip %q names font resource %q that the manifest does not package", clip.ID, text.FontResourceID)
+		}
+		// An explicit resource binding must agree with the authored family so
+		// a renderer never silently substitutes a different face.
+		if text.FontFamily != "" && !strings.EqualFold(text.FontFamily, resource.FontFamily) {
+			return FrameLayerState{}, fmt.Errorf("canonical text state for clip %q names font resource %q with family %q but authors family %q", clip.ID, text.FontResourceID, resource.FontFamily, text.FontFamily)
+		}
+		text.FontFaceSource = TextFontFaceSourcePackagedResource
 	}
 	effects, err := EvaluateClipEffectStackAtFrame(clip, frameIndex, canvas.FPS)
 	if err != nil {

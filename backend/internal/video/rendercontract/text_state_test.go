@@ -103,3 +103,36 @@ func TestEvaluateTextStateDoesNotInterpretExtensionParams(t *testing.T) {
 		t.Fatalf("font size = %d, want preview default 20", state.FontSize)
 	}
 }
+
+func TestEvaluateTextStateFontFaceProvenance(t *testing.T) {
+	cases := []struct {
+		name         string
+		text         TimelineV2Text
+		wantFace     string
+		wantResource string
+	}{
+		{"default", TimelineV2Text{Text: "x"}, TextFontFaceSourceCompositionDefault, ""},
+		{"family-only", TimelineV2Text{Text: "x", FontFamily: "Inter"}, TextFontFaceSourceFamilyNameOnly, ""},
+		{"resource", TimelineV2Text{Text: "x", FontFamily: "Inter", FontResourceID: "inter-400-normal"}, TextFontFaceSourceFamilyNameOnly, "inter-400-normal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state, err := EvaluateTextState(&tc.text, 360)
+			if err != nil {
+				t.Fatalf("EvaluateTextState: %v", err)
+			}
+			if state.FontFaceSource != tc.wantFace {
+				t.Fatalf("font_face_source = %q, want %q", state.FontFaceSource, tc.wantFace)
+			}
+			if state.FontResourceID != tc.wantResource {
+				t.Fatalf("font_resource_id = %q, want %q", state.FontResourceID, tc.wantResource)
+			}
+		})
+	}
+}
+
+func TestEvaluateTextStateRejectsWhitespaceResourceID(t *testing.T) {
+	if _, err := EvaluateTextState(&TimelineV2Text{Text: "x", FontResourceID: " inter-400-normal "}, 360); err == nil || !strings.Contains(err.Error(), "font_resource_id") {
+		t.Fatalf("error = %v, want font_resource_id whitespace rejection", err)
+	}
+}
