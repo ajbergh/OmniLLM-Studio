@@ -313,6 +313,15 @@ export const KNOWN_IMAGE_MODELS: Record<string, string[]> = Object.fromEntries(
     .map(([provider, catalog]) => [provider, [...(catalog.image || [])]])
 ) as Record<string, string[]>;
 
+// Updates the shared Ollama catalog after local discovery so every model picker
+// sees the same installed-model list. Inputs are normalized for deterministic UI.
+export function setDiscoveredOllamaModels(models: string[]): void {
+  const normalized = Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  PROVIDER_MODEL_CATALOG.ollama.chat = normalized;
+  KNOWN_MODELS.ollama = [...normalized];
+}
+
 const FREE_OPENROUTER_MODELS = new Set([
   'openrouter/free',
   'openrouter/owl-alpha',

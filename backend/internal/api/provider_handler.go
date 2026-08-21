@@ -109,35 +109,35 @@ func (h *ProviderHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// FetchOllamaModels proxies model discovery for an Ollama endpoint. Provider
-// discovery is an administrative network action: in multi-user mode only an
-// admin may invoke it. Solo mode remains available for local desktop use.
+// FetchOllamaModels proxies model discovery for Ollama. Without provider_id it
+// discovers the default local daemon at 127.0.0.1:11434 so the provider setup
+// form can populate before a profile exists. With provider_id it uses only the
+// stored provider BaseURL. Request-controlled discovery URLs are never accepted.
 func (h *ProviderHandler) FetchOllamaModels(w http.ResponseWriter, r *http.Request) {
 	if !requireAdminOrSolo(w, r) {
 		return
 	}
 
-	providerID := strings.TrimSpace(r.URL.Query().Get("provider_id"))
-	if providerID == "" {
-		respondError(w, http.StatusBadRequest, "provider_id is required")
-		return
-	}
-	provider, err := h.repo.GetByID(providerID)
-	if err != nil {
-		respondInternalError(w, err)
-		return
-	}
-	if provider == nil || !strings.EqualFold(provider.Type, "ollama") {
-		respondError(w, http.StatusNotFound, "Ollama provider not found")
+	if strings.TrimSpace(r.URL.Query().Get("base_url")) != "" {
+		respondError(w, http.StatusBadRequest, "base_url is not accepted for Ollama discovery")
 		return
 	}
 
-	baseURL := ""
-	if provider.BaseURL != nil && strings.TrimSpace(*provider.BaseURL) != "" {
-		baseURL = strings.TrimRight(strings.TrimSpace(*provider.BaseURL), "/")
-	}
-	if baseURL == "" {
-		baseURL = "http://127.0.0.1:11434"
+	baseURL := "http://127.0.0.1:11434"
+	providerID := strings.TrimSpace(r.URL.Query().Get("provider_id"))
+	if providerID != "" {
+		provider, err := h.repo.GetByID(providerID)
+		if err != nil {
+			respondInternalError(w, err)
+			return
+		}
+		if provider == nil || !strings.EqualFold(provider.Type, "ollama") {
+			respondError(w, http.StatusNotFound, "Ollama provider not found")
+			return
+		}
+		if provider.BaseURL != nil && strings.TrimSpace(*provider.BaseURL) != "" {
+			baseURL = strings.TrimRight(strings.TrimSpace(*provider.BaseURL), "/")
+		}
 	}
 
 	parsed, err := validateProviderDiscoveryURL(baseURL)
@@ -160,7 +160,7 @@ func (h *ProviderHandler) FetchOllamaModels(w http.ResponseWriter, r *http.Reque
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		respondError(w, http.StatusBadGateway, "cannot reach configured Ollama provider")
+		respondError(w, http.StatusBadGateway, "cannot reach Ollama provider")
 		return
 	}
 	defer resp.Body.Close()
