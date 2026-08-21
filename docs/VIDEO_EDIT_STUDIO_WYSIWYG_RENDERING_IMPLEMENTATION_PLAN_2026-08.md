@@ -9,19 +9,17 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG feature PR: **#245 — Define canonical cursor renderer state** — squash merge `c428d81f25ce1d85faa6655fb5772430a8fe6b22`.
+Latest merged WYSIWYG feature PR: **#247 — Consume canonical cursor state in FrameState** — squash merge `66530a07e3a5585546d978794e24198083bbeaa2`.
 
 CI coverage prerequisite merged immediately afterward: **#246 — Run canonical render-contract suite in Vitest** — merge `ad7ec51596807293ebb1206ce873088a0ad07da7`.
 
-Current PR: **#247 — Consume canonical cursor state in FrameState**.
-Current branch: `feat/video-wysiwyg-phase2-cursor-framestate`.
-The former child branch was based on #245's pre-squash commit. On 2026-08-21 it was rebuilt directly from current `main` (`826667734b55b3063efc8d747f40f565e233992f`) with only its intended 12-path delta plus this tracker; it now requires fresh exact-head validation before merge.
+Current draft PR: **#251 — Project immutable source provenance into FrameState** (`feat/video-wysiwyg-phase2-source-provenance`), based directly on merged #247 (`66530a07e3a5585546d978794e24198083bbeaa2`). It defines immutable `source-provenance-v1` from Render Manifest v1 media probes and adds a manifest-based FrameState evaluator. The complete hosted matrix has passed with no review submissions or inline threads; it remains draft pending review and a merge decision.
 
 PR #243 is complete. `shape-state-v1` is projected into `visual-frame-state-v1`, evaluated shape dimensions are the single shape-derived content-bounds source, and generic `shape` unresolved debt is removed. It intentionally retained cursor debt, which #247 now consumes canonically.
 
 PR #246 fixed a test-discovery gap that had excluded the canonical TypeScript render-contract suite under `frontend/test/` from `npm run test:unit` and the hosted Quality Gate. The normal frontend unit gate now executes 51 files / 248 tests instead of 28 files / 131 tests, so every Phase 2 TypeScript contract mirror added under `frontend/test/` is exercised in CI.
 
-PR #245 defines the renderer-independent `cursor-state-v1` evaluator. PR #247 consumes it in Go and TypeScript `visual-frame-state-v1`: valid visible cursor state is serialized at exact clip-relative rational time, valid hidden/empty state is intentional no-paint, and malformed or unsupported cursor authoring fails closed. Preview painting and legacy FFmpeg cursor composition remain unchanged.
+PR #245 defines the renderer-independent `cursor-state-v1` evaluator. Merged #247 consumes it in Go and TypeScript `visual-frame-state-v1`: valid visible cursor state is serialized at exact clip-relative rational time, valid hidden/empty state is intentional no-paint, and malformed or unsupported cursor authoring fails closed. Preview painting and legacy FFmpeg cursor composition remain unchanged.
 
 No Phase 3 preview compositor or Phase 4 Chromium renderer behavior is changed by #245 or #247.
 
@@ -31,7 +29,7 @@ No Phase 3 preview compositor or Phase 4 Chromium renderer behavior is changed b
 |---|---|---|
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Production visual thresholds, unsupported-audio policy, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, all current transition state/paint families, effect stack state, canonical text/shape state, and `cursor-state-v1` are merged. #247 is validating FrameState cursor consumption; provenance edges and AudioGraph remain. |
+| Phase 2 — Canonical contract | In progress | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, all current transition state/paint families, effect stack state, canonical text/shape state, and cursor FrameState consumption (#247) are merged. Immutable source-provenance/anchor consumption is in progress; font-resource provenance and AudioGraph remain. |
 | Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close text metrics/fonts, shapes, effects, transitions, cursor, camera, color, asset loading, and decoded visual thresholds. |
@@ -59,7 +57,7 @@ The legacy FFmpeg compositor is implementation evidence, not semantic authority.
 
 `media-geometry-v1` is authoritative for asset geometry:
 
-- source aspect ratio requires explicit `content_bounds` or a future versioned source-probe projection;
+- source aspect ratio requires explicit `content_bounds` or the current versioned immutable source-probe projection;
 - source dimensions are never guessed from the output canvas;
 - `mask_source_crop` operates in source coordinates before fit;
 - `contain`, `cover`, `fill`, and `none` are canonical fit modes;
@@ -156,7 +154,7 @@ Merged #243 FrameState consumption rules:
 
 ### Cursor renderer state
 
-`cursor-state-v1` is the renderer-independent sampled cursor contract defined by #245 and consumed by `visual-frame-state-v1` in current PR #247.
+`cursor-state-v1` is the renderer-independent sampled cursor contract defined by #245 and consumed by `visual-frame-state-v1` in merged #247.
 
 Merged #245 semantics:
 
@@ -251,6 +249,7 @@ Remaining Phase 0 sign-off:
 | #242 | Canonical shape renderer state definition | `1a25ac0fef217731197169b229bde19aff158c8b` |
 | #243 | Canonical shape state consumption in FrameState | `111fba5fd7ea73740aee1d92fc1038ee72fda30b` |
 | #245 | Canonical cursor renderer state definition | `c428d81f25ce1d85faa6655fb5772430a8fe6b22` |
+| #247 | Canonical cursor state consumption in FrameState | `66530a07e3a5585546d978794e24198083bbeaa2` |
 
 Security unblock during the program:
 
@@ -286,7 +285,7 @@ Merge record:
 - #245 squash-merged as `c428d81f25ce1d85faa6655fb5772430a8fe6b22` after the exact-head hosted matrix completed successfully;
 - this PR defines canonical state only: preview and FFmpeg painter behavior remain unchanged until later consumer work.
 
-### Current PR #247 — cursor FrameState consumption
+### Merged PR #247 — cursor FrameState consumption
 
 Implemented in the normalized 12-path delta:
 
@@ -296,13 +295,25 @@ Implemented in the normalized 12-path delta:
 - add mirrored Go/TypeScript focused tests and shared permanent `visual-frame-state-v1.json` fixture expectations;
 - retain the scope boundary: no preview painter, legacy FFmpeg compositor, or Phase 4 browser-renderer behavior changes.
 
-Status at 2026-08-21: PR #247 had no review submissions or inline threads. Its former hosted matrix passed on the prior base, but that result is intentionally not reused after `main` advanced. On the rebuilt tree, focused Go render-contract tests passed; frontend lint completed with 9 pre-existing warnings and no errors; 54 frontend unit files / 266 tests, the video-performance fixture, and the production build passed. The full Go suite reached all video packages successfully but cannot complete `internal/gitrepo`'s unrelated symlink test because this Windows sandbox lacks symlink privilege; the local race detector also cannot start because no GCC compiler is installed. The 30-test Playwright smoke run reached 29 passes and one unrelated Video Edit Studio UI timeout where the workspace-collapse button intercepted the Export-tab click. The full hosted matrix remains required on the exact normalized head before it can be marked ready and merged.
+Status at 2026-08-21: PR #247 had no review submissions or inline threads. Its former hosted matrix passed on the prior base, then `main` advanced; the seven-file cursor delta was rebuilt as the intended 12-path normalized head directly on current `main`. Focused Go render-contract tests, frontend lint (9 pre-existing warnings and no errors), 54 frontend unit files / 266 tests, the video-performance fixture, and the production build passed locally. The full Go suite's unrelated Windows symlink limitation, unavailable local GCC race detector, and one unrelated Playwright workspace-collapse timeout were recorded rather than hidden. The complete exact-head hosted Quality, security, container, browser, renderer-parity, and platform/sandbox matrix then passed. The PR was marked ready and squash-merged as `66530a07e3a5585546d978794e24198083bbeaa2`.
+
+### Current draft PR #251 — source-provenance FrameState consumption
+
+The current `feat/video-wysiwyg-phase2-source-provenance` branch closes the concrete source-probe and anchor side of the remaining provenance debt without changing preview or FFmpeg painters:
+
+- define pure `source-provenance-v1` from immutable Render Manifest v1 asset identity, clip bindings, content hash, and validated media-probe dimensions;
+- add manifest-based Go and TypeScript FrameState entry points that use those source bounds only when authored clip `content_bounds` is absent;
+- project serialized source provenance into each media `FrameLayerState`, use it for media geometry and anchor offsets, and never probe a file or guess a canvas-sized source box;
+- keep timeline-only FrameState compatibility unchanged, while a manifest call with no eligible source probe remains non-authoritative with explicit source-provenance and anchor debt;
+- reject partial/non-positive probe dimensions and a manifest source not bound to the active clip; shared Go/TypeScript fixtures prove success and fail-closed cases.
+
+Local evidence: `go test ./internal/video/...`, `go vet ./...`, focused mirrored Vitest tests (13 tests), the complete frontend unit gate (55 files / 272 tests), the video-performance fixture, TypeScript lint with no errors, and the production frontend build passed. `go test ./...` reached an unrelated `internal/api` sandbox-workspace test but cannot resolve workspace-root symlinks in this Windows sandbox (`Access is denied`); the local race command cannot start because CGO needs a GCC compiler that is not installed. The browser smoke suite first left a test-only SQLite lock, which was released by stopping only its identified orphaned processes; its clean retry is then blocked by a pre-existing Vite development server on port 4173, which is intentionally not terminated. The hosted Quality Gate (including backend tests/race, frontend, Playwright, and video renderer parity), Security Scan, container builds, and platform/sandbox/browser assurances all passed; #251 has no review submissions or inline threads and remains draft pending review and merge direction.
 
 ### Remaining Phase 2 work
 
-After #247:
+After the current source-provenance branch:
 
-1. **Provenance edges** — close remaining anchor/content-bounds/source-probe/font-resource cases surfaced by parity diagnostics.
+1. **Font-resource provenance** — package deterministic font resources and define glyph-layout/metric ownership; intrinsic text bounds remain non-canonical until then.
 2. **AudioGraph** — define serializable timing/rate/pitch/channel/gain/fade/mute/solo/processing/stem decisions and exact sample-count semantics.
 3. Keep all unknown authorable fields fail closed until canonical semantics exist.
 
@@ -370,7 +381,7 @@ Before every merge:
 | Legacy FFmpeg approximations become de facto contract | Canonical semantics are explicit; legacy renderer is evidence only. |
 | v1 adapter guesses ambiguous behavior | Ambiguous state fails closed. |
 | Millisecond rounding creates frame/source drift | Canonical rational frame/range/source helpers. |
-| Source aspect ratio is guessed from canvas | Explicit source `content_bounds`; missing provenance stays unresolved. |
+| Source aspect ratio is guessed from canvas | Explicit source `content_bounds` takes precedence; otherwise only immutable `source-provenance-v1` media probes may supply source bounds, and missing provenance stays unresolved. |
 | Crop ordering diverges | Source mask before fit; output crop after fit. |
 | Perspective differs between preview/export | One canonical projection contract carried in FrameState. |
 | Transition peer/handle inference differs | Explicit placement/peer/real-overlap semantics. |
@@ -389,6 +400,7 @@ Before every merge:
 | Cursor smoothing diverges by renderer | `smoothing:true` fails closed until one versioned canonical algorithm exists. |
 | Cursor click-ring timing drifts | `cursor-state-v1` serializes exact sampled click proximity using strict `<300ms` semantics. |
 | Cursor FrameState claims authority before evaluation | #247 serializes `cursor-state-v1` only after exact rational evaluation; hidden/empty states are explicit no-paint and invalid semantics fail closed. |
+| Source probe and anchor diverge by consumer | Draft #251 serializes immutable asset/clip/hash/source-bounds evidence once, supplies it to FrameState geometry and anchor math, and rejects partial or unbound manifest data. |
 | Stacked branch appears current but carries stale tree | Rebuild from actual current `main`; compare every path before merge. |
 | CI setup/runner saturation hides code state | Distinguish setup/queue from executed code checks. |
 | Browser worker resource cost | Admission control, health checks, cancellation, guarded rollout, FFmpeg retained for media I/O. |
@@ -426,11 +438,12 @@ Before every merge:
 - #243 consumed `shape-state-v1` in FrameState, centralized shape-derived bounds on evaluated canonical dimensions, removed generic shape debt, preserved cursor debt, and added mirrored fail-closed/projection coverage. Its first code-only backend run found one stale text-state regression assertion still expecting generic shape debt; the assertion and its TypeScript counterpart were corrected. The final normalized head passed the complete hosted matrix and merged as `111fba5fd7ea73740aee1d92fc1038ee72fda30b`.
 - #246 repaired frontend Vitest discovery before cursor work could merge. Activating `frontend/test/` raised the normal unit gate to 51 files / 248 tests and exposed four latent test-only issues: three transition assertions still encoded pre-paint debt, and one zoom fixture used bit-exact floating-point equality. Those assertions were corrected without product-runtime changes; the exact normalized head passed Quality Gate, Security Scan, containers, and all platform/sandbox assurances before merge as `ad7ec51596807293ebb1206ce873088a0ad07da7`.
 - #245 defined `cursor-state-v1` in Go and TypeScript, preserved optional visibility semantics, sampled exact rational cursor position/click state, validated malformed authoring, and failed closed on undefined smoothing. It merged as `c428d81f25ce1d85faa6655fb5772430a8fe6b22`.
-- #247 cursor FrameState consumption was reviewed with no submitted reviews or inline threads. Its initial hosted matrix was green on the former `c428d81f…` base, then `main` advanced; on 2026-08-21 the exact intended 12-path delta was rebuilt directly on current `main` for fresh validation rather than relying on stale results.
+- #247 cursor FrameState consumption was reviewed with no submitted reviews or inline threads. Its initial hosted matrix was green on the former `c428d81f…` base, then `main` advanced; on 2026-08-21 the exact intended 12-path delta was rebuilt directly on current `main` for fresh validation rather than relying on stale results. The rebuilt exact head passed the complete hosted matrix and squash-merged as `66530a07e3a5585546d978794e24198083bbeaa2`.
+- The next branch began directly from merged #247: it derives `source-provenance-v1` from immutable Render Manifest v1 media probes and feeds that state into FrameState geometry and anchors without file probing or canvas-size fallbacks.
 
 ## Next recommended slice
 
-1. Validate the exact normalized #247 head locally and in the full hosted matrix, then merge only if it remains current, one intended commit ahead, zero behind, and green.
-2. Close remaining provenance/font-resource/source-probe edges surfaced by parity diagnostics.
+1. Review #251 and, if approved, mark it ready and merge only if it remains current, scoped, and green.
+2. Define deterministic font-resource provenance and glyph-layout/metric ownership without guessing intrinsic text bounds.
 3. Define and consume canonical AudioGraph to complete Phase 2 semantic ownership.
 4. Continue Phase 0 visual thresholds, unsupported-audio boundary, and second-platform evidence in parallel.

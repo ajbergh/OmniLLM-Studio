@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "description": "Cross-runtime immutable source-provenance fixture for Render Manifest v1 media probes and FrameState geometry/anchor consumption.",
+  "manifest": {
+    "version": 1,
+    "contract_version": "timeline-v2",
+    "snapshot_id": "source-provenance-snapshot",
+    "timeline_id": "source-provenance-timeline",
+    "timeline_revision": 1,
+    "timeline_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "asset_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "timeline": {
+      "version": 2,
+      "canvas": { "width": 200, "height": 100, "fps": 30, "background": "#000000" },
+      "duration_ms": 1000,
+      "working_color_space": "srgb",
+      "metadata": {},
+      "markers": [],
+      "tracks": [
+        {
+          "id": "visual-track",
+          "type": "video",
+          "name": "Visual",
+          "locked": false,
+          "muted": false,
+          "visible": true,
+          "clips": [
+            {
+              "id": "visual-clip",
+              "asset_id": "visual-source",
+              "start_ms": 0,
+              "duration_ms": 1000,
+              "trim_in_ms": 0,
+              "trim_out_ms": 1000,
+              "playback_rate": 1,
+              "z_index": 0,
+              "media_fit": "none",
+              "transform": { "scale": 2, "anchor_x": 10, "anchor_y": 5 },
+              "effects": [],
+              "keyframes": []
+            }
+          ]
+        }
+      ],
+      "scenes": []
+    },
+    "assets": [
+      {
+        "asset_id": "visual-source",
+        "clip_ids": ["visual-clip"],
+        "staged_path": "video/render-snapshots/source-provenance-snapshot/inputs/visual-source/input.mp4",
+        "file_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "size_bytes": 42,
+        "kind": "video",
+        "media": { "width": 400, "height": 200 }
+      }
+    ],
+    "settings": {
+      "width": 200,
+      "height": 100,
+      "fps": 30,
+      "range_start_frame": 0,
+      "range_end_frame": 30,
+      "burn_in_captions": false,
+      "audio_sample_rate": 48000,
+      "audio_channels": 2,
+      "working_color_space": "srgb"
+    }
+  },
+  "expected_source_provenance": {
+    "contract_version": "source-provenance-v1",
+    "asset_id": "visual-source",
+    "clip_ids": ["visual-clip"],
+    "file_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "source_bounds": { "x": 0, "y": 0, "width": 400, "height": 200 }
+  },
+  "expected_model_matrix": [2, 0, 0, -20, 0, 2, 0, -10, 0, 0, 1, 0, 0, 0, 0, 1]
+}
