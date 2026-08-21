@@ -17,7 +17,7 @@ func TestFetchOllamaModelsRejectsRequestControlledBaseURL(t *testing.T) {
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
 	}
-	if !strings.Contains(response.Body.String(), "provider_id is required") {
-		t.Fatalf("response body = %q, want provider_id validation error", response.Body.String())
+	if !strings.Contains(response.Body.String(), "base_url is not accepted") {
+		t.Fatalf("response body = %q, want base_url validation error", response.Body.String())
 	}
 }
