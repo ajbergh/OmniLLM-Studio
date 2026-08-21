@@ -15,7 +15,12 @@ Prior merged feature PR: **#253 — Bind authored text faces to packaged font re
 
 CI coverage prerequisite merged immediately afterward: **#246 — Run canonical render-contract suite in Vitest** — merge `ad7ec51596807293ebb1206ce873088a0ad07da7`.
 
-Current branch: `feat/video-wysiwyg-phase2-glyph-metrics`, created directly from merged #254 (`b99991c5121c2122bf0cd0f5ef0f7ab8e3514845`). It begins the remaining Phase 2 text work: deterministic glyph-layout/metric ownership and variable-font policy. It deliberately does not guess intrinsic text bounds from browser metrics or claim a layout algorithm before one is defined; those semantics must be explicit contract work.
+Current branch: `feat/video-wysiwyg-phase2-glyph-metrics`, created directly from merged #254 (`b99991c5121c2122bf0cd0f5ef0f7ab8e3514845`). It makes the static-face-only variable-font policy explicit and enforced in the `font-resource-provenance-v1` contract:
+
+- Render Manifest v1 `fontResource` gains a required `face_class` field whose only accepted value is `static`, projected in lockstep into the JSON schema, Go types, and TypeScript types including exact-key drift checks;
+- both evaluators fail closed on any other face class (including an absent one) with an explicit message that only static faces have canonical semantics, instead of silently treating a variable font as a static face;
+- the shared Go/TypeScript fixture carries `face_class` and proves the fail-closed behavior for `variable` and empty classes;
+- it deliberately does not define variable-font axis/instance semantics (that requires its own versioned contract), does not guess intrinsic text bounds from browser metrics, and does not claim a glyph-layout algorithm before one is defined; those remain explicit follow-on work.
 
 PR #243 is complete. `shape-state-v1` is projected into `visual-frame-state-v1`, evaluated shape dimensions are the single shape-derived content-bounds source, and generic `shape` unresolved debt is removed. It intentionally retained cursor debt, which #247 now consumes canonically.
 
@@ -361,9 +366,10 @@ Merge record: the first head `0b01c84a0b59724028cf44ebddc76cd242feed5c` failed t
 
 After merged #254:
 
-1. **Glyph-layout/metric ownership** — define variable-font policy and deterministic glyph-layout/metric ownership. Intrinsic text bounds remain non-canonical until this work exists.
-2. **AudioGraph** — define serializable timing/rate/pitch/channel/gain/fade/mute/solo/processing/stem decisions and exact sample-count semantics.
-3. Keep all unknown authorable fields fail closed until canonical semantics exist.
+1. **Variable-font policy** (current branch) — make the static-face-only policy explicit and enforced via a required `face_class` field; variable-font axis/instance semantics require their own versioned contract before any renderer may interpret them.
+2. **Glyph-layout/metric ownership** — define deterministic glyph-layout/metric ownership. Intrinsic text bounds remain non-canonical until this work exists.
+3. **AudioGraph** — define serializable timing/rate/pitch/channel/gain/fade/mute/solo/processing/stem decisions and exact sample-count semantics.
+4. Keep all unknown authorable fields fail closed until canonical semantics exist.
 
 ### Phase 2 exit gate
 

@@ -61,15 +61,16 @@
       }
     },
     "fontResource": {
-      "description": "One immutable static font face packaged with the render snapshot. A later text-selection contract binds authored text to one of these explicit faces.",
+      "description": "One immutable static font face packaged with the render snapshot. A later text-selection contract binds authored text to one of these explicit faces. Only static faces are accepted: variable-font axis and instance semantics have no versioned contract yet and fail closed.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["font_resource_id", "font_family", "font_weight", "font_style", "format", "staged_path", "file_sha256", "size_bytes"],
+      "required": ["font_resource_id", "font_family", "font_weight", "font_style", "face_class", "format", "staged_path", "file_sha256", "size_bytes"],
       "properties": {
         "font_resource_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
         "font_family": { "type": "string", "minLength": 1 },
         "font_weight": { "type": "integer", "minimum": 1, "maximum": 1000 },
         "font_style": { "enum": ["normal", "italic"] },
+        "face_class": { "enum": ["static"] },
         "format": { "enum": ["woff2", "woff", "ttf", "otf"] },
         "staged_path": { "type": "string", "minLength": 1 },
         "file_sha256": { "$ref": "#/$defs/sha256" },

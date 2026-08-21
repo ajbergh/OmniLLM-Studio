@@ -86,6 +86,16 @@ func TestEvaluateFontResourceProvenanceRejectsAmbiguousOrMalformedResources(t *t
 			want:   `font resource provenance font resource "inter-700-italic" has unsupported font style "oblique"`,
 		},
 		{
+			name:   "variable-font face class",
+			mutate: func(manifest *RenderManifestV1) { manifest.FontResources[0].FaceClass = "variable" },
+			want:   `font resource provenance font resource "inter-700-italic" has unsupported face_class "variable"; only static faces have canonical semantics`,
+		},
+		{
+			name:   "missing face class",
+			mutate: func(manifest *RenderManifestV1) { manifest.FontResources[0].FaceClass = "" },
+			want:   `font resource provenance font resource "inter-700-italic" has unsupported face_class ""; only static faces have canonical semantics`,
+		},
+		{
 			name:   "unsafe staged path",
 			mutate: func(manifest *RenderManifestV1) { manifest.FontResources[0].StagedPath = "../system-font.woff2" },
 			want:   `font resource provenance font resource "inter-700-italic" staged path must be a clean relative POSIX path`,

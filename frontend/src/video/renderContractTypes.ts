@@ -74,7 +74,7 @@ export const renderManifestFontStyles = ['normal', 'italic'] as const;
 export type RenderManifestFontStyle = typeof renderManifestFontStyles[number];
 export const renderManifestFontFormats = ['woff2', 'woff', 'ttf', 'otf'] as const;
 export type RenderManifestFontFormat = typeof renderManifestFontFormats[number];
-export interface RenderManifestFontResource { font_resource_id: string; font_family: string; font_weight: number; font_style: RenderManifestFontStyle; format: RenderManifestFontFormat; staged_path: string; file_sha256: string; size_bytes: number; }
+export interface RenderManifestFontResource { font_resource_id: string; font_family: string; font_weight: number; font_style: RenderManifestFontStyle; face_class: 'static'; format: RenderManifestFontFormat; staged_path: string; file_sha256: string; size_bytes: number; }
 export interface RenderManifestMediaProbe { duration_ms?: number; width?: number; height?: number; fps_num?: number; fps_den?: number; sample_rate?: number; channels?: number; channel_layout?: string; pixel_format?: string; color_space?: string; color_primaries?: string; color_transfer?: string; }
 export interface RenderManifestSettings { width: number; height: number; fps: number; range_start_frame: number; range_end_frame: number; burn_in_captions: boolean; audio_sample_rate: 48000; audio_channels: 2; working_color_space?: 'srgb'; output_container?: string; video_codec?: string; audio_codec?: string; }
 
@@ -107,7 +107,7 @@ export const timelineV2TypeProjection = {
 export const renderManifestTypeProjection = {
   manifest: defineExactKeys<RenderManifestV1>()('version', 'contract_version', 'snapshot_id', 'timeline_id', 'timeline_revision', 'timeline_sha256', 'asset_manifest_sha256', 'timeline', 'assets', 'font_resources', 'settings', 'metadata'),
   asset: defineExactKeys<RenderManifestAsset>()('asset_id', 'clip_ids', 'staged_path', 'file_sha256', 'size_bytes', 'kind', 'mime_type', 'media'),
-  fontResource: defineExactKeys<RenderManifestFontResource>()('font_resource_id', 'font_family', 'font_weight', 'font_style', 'format', 'staged_path', 'file_sha256', 'size_bytes'),
+  fontResource: defineExactKeys<RenderManifestFontResource>()('font_resource_id', 'font_family', 'font_weight', 'font_style', 'face_class', 'format', 'staged_path', 'file_sha256', 'size_bytes'),
   mediaProbe: defineExactKeys<RenderManifestMediaProbe>()('duration_ms', 'width', 'height', 'fps_num', 'fps_den', 'sample_rate', 'channels', 'channel_layout', 'pixel_format', 'color_space', 'color_primaries', 'color_transfer'),
   settings: defineExactKeys<RenderManifestSettings>()('width', 'height', 'fps', 'range_start_frame', 'range_end_frame', 'burn_in_captions', 'audio_sample_rate', 'audio_channels', 'working_color_space', 'output_container', 'video_codec', 'audio_codec'),
 } as const;
