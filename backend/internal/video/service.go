@@ -1569,6 +1569,11 @@ func (s *Service) StartRender(ctx context.Context, userID, projectID string, set
 	if err != nil {
 		return nil, err
 	}
+	_, fontManifestJSON, fontManifestSHA256, err := s.buildRenderFontManifest(ctx, project.ID, snapshotID, doc)
+	if err != nil {
+		_ = removeRenderSnapshotStaging(s.attachmentsDir, snapshotID)
+		return nil, err
+	}
 	settingsJSON, _ := json.Marshal(settings)
 	snapshot := &models.VideoRenderSnapshot{
 		ID:                    snapshotID,
@@ -1579,6 +1584,8 @@ func (s *Service) StartRender(ctx context.Context, userID, projectID string, set
 		TimelineSHA256:        timeline.ContentSHA256,
 		AssetManifestJSON:     assetManifestJSON,
 		AssetManifestSHA256:   assetManifestSHA256,
+		FontManifestJSON:      fontManifestJSON,
+		FontManifestSHA256:    fontManifestSHA256,
 		SettingsJSON:          string(settingsJSON),
 		RenderContractVersion: doc.Version,
 		Renderer:              legacySnapshotRenderer,
@@ -1782,6 +1789,9 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 	jobMeta["timeline_revision"] = snapshot.TimelineRevision
 	jobMeta["timeline_sha256"] = snapshot.TimelineSHA256
 	jobMeta["asset_manifest_sha256"] = snapshot.AssetManifestSHA256
+	if snapshotHasFontResources(snapshot) {
+		jobMeta["font_manifest_sha256"] = snapshot.FontManifestSHA256
+	}
 	jobMeta["render_contract_version"] = snapshot.RenderContractVersion
 	jobMeta["renderer"] = snapshot.Renderer
 	jobMeta["renderer_version"] = snapshot.RendererVersion
@@ -1810,6 +1820,9 @@ func (s *Service) runRenderJob(ctx context.Context, jobID string) {
 	meta["timeline_revision"] = snapshot.TimelineRevision
 	meta["timeline_sha256"] = snapshot.TimelineSHA256
 	meta["asset_manifest_sha256"] = snapshot.AssetManifestSHA256
+	if snapshotHasFontResources(snapshot) {
+		meta["font_manifest_sha256"] = snapshot.FontManifestSHA256
+	}
 	meta["snapshot_id"] = snapshot.ID
 	meta["render_contract_version"] = snapshot.RenderContractVersion
 	meta["renderer"] = snapshot.Renderer

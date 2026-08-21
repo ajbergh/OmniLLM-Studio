@@ -344,20 +344,21 @@ type TimelineMarker struct {
 }
 
 type TimelineText struct {
-	Text          string         `json:"text"`
-	FontFamily    string         `json:"font_family,omitempty"`
-	FontSize      int            `json:"font_size,omitempty"`
-	FontWeight    string         `json:"font_weight,omitempty"`
-	Color         string         `json:"color,omitempty"`
-	Background    string         `json:"background,omitempty"`
-	Stroke        string         `json:"stroke,omitempty"`
-	StrokeWidth   float64        `json:"stroke_width,omitempty"`
-	Shadow        bool           `json:"shadow,omitempty"`
-	TextAlign     string         `json:"text_align,omitempty"`
-	LineHeight    float64        `json:"line_height,omitempty"`
-	LetterSpacing float64        `json:"letter_spacing,omitempty"`
-	BorderRadius  float64        `json:"border_radius,omitempty"`
-	Params        map[string]any `json:"params,omitempty"`
+	Text           string         `json:"text"`
+	FontFamily     string         `json:"font_family,omitempty"`
+	FontResourceID string         `json:"font_resource_id,omitempty"`
+	FontSize       int            `json:"font_size,omitempty"`
+	FontWeight     string         `json:"font_weight,omitempty"`
+	Color          string         `json:"color,omitempty"`
+	Background     string         `json:"background,omitempty"`
+	Stroke         string         `json:"stroke,omitempty"`
+	StrokeWidth    float64        `json:"stroke_width,omitempty"`
+	Shadow         bool           `json:"shadow,omitempty"`
+	TextAlign      string         `json:"text_align,omitempty"`
+	LineHeight     float64        `json:"line_height,omitempty"`
+	LetterSpacing  float64        `json:"letter_spacing,omitempty"`
+	BorderRadius   float64        `json:"border_radius,omitempty"`
+	Params         map[string]any `json:"params,omitempty"`
 }
 
 type TimelineEffect struct {

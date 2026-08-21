@@ -1520,6 +1520,16 @@ export const videoApi = {
     });
   },
 
+  uploadFontAsset: (projectId: string, file: File, fontResourceId: string): Promise<VideoAsset> => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('font_resource_id', fontResourceId);
+    return apiFetch<VideoAsset>(`/video/projects/${encodeURIComponent(projectId)}/assets/upload`, {
+      method: 'POST',
+      body: form,
+    });
+  },
+
   deleteAsset: (assetId: string) =>
     apiFetch<{ deleted: boolean }>(`/video/assets/${encodeURIComponent(assetId)}`, {
       method: 'DELETE',

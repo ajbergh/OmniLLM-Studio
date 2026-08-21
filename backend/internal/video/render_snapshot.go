@@ -281,6 +281,153 @@ func (s *Service) buildRenderAssetManifest(ctx context.Context, projectID, snaps
 	return entries, string(raw), contentSHA256(raw), nil
 }
 
+// RenderFontManifestEntry freezes one packaged font face and the content
+// identity used by a render. ClipIDs make missing-face failures actionable.
+type RenderFontManifestEntry struct {
+	Asset      models.VideoAsset `json:"asset"`
+	ClipIDs    []string          `json:"clip_ids"`
+	FileSHA256 string            `json:"file_sha256"`
+	SizeBytes  int64             `json:"size_bytes"`
+}
+
+// timelineFontResourceClipIDs collects every authored font_resource_id on text
+// clips mapped to the referencing clip IDs. The map key is the resource id.
+func timelineFontResourceClipIDs(doc TimelineDocument) map[string][]string {
+	result := map[string][]string{}
+	for _, track := range doc.Tracks {
+		for _, clip := range track.Clips {
+			if clip.Text == nil {
+				continue
+			}
+			resourceID := strings.TrimSpace(clip.Text.FontResourceID)
+			if resourceID == "" {
+				continue
+			}
+			result[resourceID] = append(result[resourceID], clip.ID)
+		}
+	}
+	return result
+}
+
+// buildRenderFontManifest stages every font asset referenced by an authored
+// text font_resource_id into the snapshot's fonts/ directory and returns a
+// stable, sorted manifest. A referenced resource id with no project font
+// asset fails closed; unreferenced font assets are not packaged.
+func (s *Service) buildRenderFontManifest(ctx context.Context, projectID, snapshotID string, doc TimelineDocument) (entries []RenderFontManifestEntry, manifestJSON string, manifestSHA256 string, err error) {
+	references := timelineFontResourceClipIDs(doc)
+	if len(references) == 0 {
+		return []RenderFontManifestEntry{}, "[]", contentSHA256([]byte("[]")), nil
+	}
+	fontAssets, err := s.fontAssetsByResourceID(projectID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	ids := make([]string, 0, len(references))
+	for resourceID := range references {
+		ids = append(ids, resourceID)
+	}
+	sort.Strings(ids)
+	entries = make([]RenderFontManifestEntry, 0, len(ids))
+	for _, resourceID := range ids {
+		asset, ok := fontAssets[resourceID]
+		if !ok {
+			return nil, "", "", fmt.Errorf("timeline clips %s reference font resource %q that the project does not provide", strings.Join(references[resourceID], ", "), resourceID)
+		}
+		if strings.TrimSpace(asset.FilePath) == "" {
+			return nil, "", "", fmt.Errorf("font resource %q has no source file", resourceID)
+		}
+		fullPath, err := resolveRenderAssetPath(s.attachmentsDir, asset.FilePath)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("font resource %q source path is invalid: %w", resourceID, err)
+		}
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("font resource %q source file is unavailable: %w", resourceID, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, "", "", fmt.Errorf("font resource %q source is not a regular file", resourceID)
+		}
+		stagedName := sanitizeFileName(asset.FileName)
+		if stagedName == "" {
+			stagedName = "face" + filepath.Ext(asset.FilePath)
+		}
+		stagedRelativePath := filepath.Join("video", "render-snapshots", snapshotID, "fonts", sanitizePathSegment(resourceID), stagedName)
+		stagedPath, err := safeJoin(s.attachmentsDir, stagedRelativePath)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("stage font resource %q path: %w", resourceID, err)
+		}
+		fileHash, sizeBytes, err := stageRenderAsset(fullPath, stagedPath)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("stage font resource %q bytes: %w", resourceID, err)
+		}
+		stagedAsset := asset
+		stagedAsset.FilePath = filepath.ToSlash(stagedRelativePath)
+		stagedAsset.SizeBytes = sizeBytes
+		entries = append(entries, RenderFontManifestEntry{
+			Asset: stagedAsset, ClipIDs: append([]string(nil), references[resourceID]...),
+			FileSHA256: fileHash, SizeBytes: sizeBytes,
+		})
+	}
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("marshal render font manifest: %w", err)
+	}
+	return entries, string(raw), contentSHA256(raw), nil
+}
+
+// fontAssetsByResourceID resolves the project's font-kind assets by their
+// declared font_resource_id metadata. Duplicate or missing declarations fail
+// closed so one resource id always names exactly one immutable face.
+func (s *Service) fontAssetsByResourceID(projectID string) (map[string]models.VideoAsset, error) {
+	assets, err := s.assets.ListByProject(projectID)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]models.VideoAsset)
+	for _, asset := range assets {
+		if !strings.EqualFold(strings.TrimSpace(asset.Kind), "font") || asset.ProjectID == nil || *asset.ProjectID != projectID {
+			continue
+		}
+		resourceID := strings.TrimSpace(fontResourceIDFromMetadata(asset))
+		if resourceID == "" {
+			continue
+		}
+		if existing, exists := result[resourceID]; exists {
+			return nil, fmt.Errorf("project declares font resource %q on both %q and %q", resourceID, existing.FileName, asset.FileName)
+		}
+		result[resourceID] = asset
+	}
+	return result, nil
+}
+
+// fontResourceIDFromMetadata reads the canonical font_resource_id declaration
+// from an uploaded font asset's metadata JSON.
+func fontResourceIDFromMetadata(asset models.VideoAsset) string {
+	if strings.TrimSpace(asset.MetadataJSON) == "" {
+		return ""
+	}
+	var metadata struct {
+		FontResourceID string `json:"font_resource_id"`
+	}
+	if err := json.Unmarshal([]byte(asset.MetadataJSON), &metadata); err != nil {
+		return ""
+	}
+	return metadata.FontResourceID
+}
+
+// snapshotHasFontResources reports whether an immutable snapshot packaged any
+// declared font faces.
+func snapshotHasFontResources(snapshot *models.VideoRenderSnapshot) bool {
+	if snapshot == nil || strings.TrimSpace(snapshot.FontManifestJSON) == "" {
+		return false
+	}
+	var entries []RenderFontManifestEntry
+	if err := json.Unmarshal([]byte(snapshot.FontManifestJSON), &entries); err != nil {
+		return false
+	}
+	return len(entries) > 0
+}
+
 func renderAssetRequiresMediaProbe(asset models.VideoAsset) bool {
 	kind := strings.ToLower(strings.TrimSpace(asset.Kind))
 	mimeType := strings.ToLower(strings.TrimSpace(asset.MimeType))
@@ -337,5 +484,47 @@ func (s *Service) assetsFromRenderSnapshot(snapshot *models.VideoRenderSnapshot)
 		}
 		assets[asset.ID] = asset
 	}
+	if err := s.verifyFontsFromRenderSnapshot(snapshot); err != nil {
+		return nil, err
+	}
 	return assets, nil
+}
+
+// verifyFontsFromRenderSnapshot re-verifies the immutable font manifest hash
+// and every staged font face's bytes before a render consumes the snapshot.
+func (s *Service) verifyFontsFromRenderSnapshot(snapshot *models.VideoRenderSnapshot) error {
+	if strings.TrimSpace(snapshot.FontManifestJSON) == "" {
+		if snapshot.FontManifestSHA256 != "" {
+			return fmt.Errorf("render snapshot font manifest hash mismatch")
+		}
+		return nil
+	}
+	if contentSHA256([]byte(snapshot.FontManifestJSON)) != snapshot.FontManifestSHA256 {
+		return fmt.Errorf("render snapshot font manifest hash mismatch")
+	}
+	var entries []RenderFontManifestEntry
+	if err := json.Unmarshal([]byte(snapshot.FontManifestJSON), &entries); err != nil {
+		return fmt.Errorf("parse render font manifest: %w", err)
+	}
+	for _, entry := range entries {
+		fullPath, err := resolveRenderAssetPath(s.attachmentsDir, entry.Asset.FilePath)
+		if err != nil {
+			return fmt.Errorf("snapshot font %q source path is invalid: %w", entry.Asset.ID, err)
+		}
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			return fmt.Errorf("snapshot font %q source file is unavailable: %w", entry.Asset.ID, err)
+		}
+		if !info.Mode().IsRegular() || info.Size() != entry.SizeBytes {
+			return fmt.Errorf("snapshot font %q source file changed after submission", entry.Asset.ID)
+		}
+		fileHash, err := fileContentSHA256(fullPath)
+		if err != nil {
+			return fmt.Errorf("verify snapshot font %q source: %w", entry.Asset.ID, err)
+		}
+		if fileHash != entry.FileSHA256 {
+			return fmt.Errorf("snapshot font %q source content changed after submission", entry.Asset.ID)
+		}
+	}
+	return nil
 }
