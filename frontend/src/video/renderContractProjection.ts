@@ -1,5 +1,5 @@
 import type {
-  RenderManifestAsset, RenderManifestMediaProbe, RenderManifestSettings, RenderManifestV1,
+  RenderManifestAsset, RenderManifestFontResource, RenderManifestMediaProbe, RenderManifestSettings, RenderManifestV1,
   TimelineV2AnimationBlock, TimelineV2Camera, TimelineV2Canvas, TimelineV2Clip, TimelineV2ContentBounds,
   TimelineV2Crop, TimelineV2Cursor, TimelineV2CursorEvent, TimelineV2Document, TimelineV2Effect,
   TimelineV2Keyframe, TimelineV2Marker, TimelineV2Scene, TimelineV2Shape, TimelineV2Text, TimelineV2Track,
@@ -36,6 +36,7 @@ export const timelineV2RequiredProjection = {
 export const renderManifestRequiredProjection = {
   manifest: defineRequiredKeys<RenderManifestV1>()('version', 'contract_version', 'snapshot_id', 'timeline_id', 'timeline_revision', 'timeline_sha256', 'asset_manifest_sha256', 'timeline', 'assets', 'settings'),
   asset: defineRequiredKeys<RenderManifestAsset>()('asset_id', 'clip_ids', 'staged_path', 'file_sha256', 'size_bytes', 'kind'),
+  fontResource: defineRequiredKeys<RenderManifestFontResource>()('font_resource_id', 'font_family', 'font_weight', 'font_style', 'format', 'staged_path', 'file_sha256', 'size_bytes'),
   mediaProbe: defineRequiredKeys<RenderManifestMediaProbe>()(),
   settings: defineRequiredKeys<RenderManifestSettings>()('width', 'height', 'fps', 'range_start_frame', 'range_end_frame', 'burn_in_captions', 'audio_sample_rate', 'audio_channels'),
 } as const;

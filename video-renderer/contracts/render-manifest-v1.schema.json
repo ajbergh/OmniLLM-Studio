@@ -30,6 +30,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/asset" }
     },
+    "font_resources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fontResource" }
+    },
     "settings": { "$ref": "#/$defs/settings" },
     "metadata": {
       "type": "object",
@@ -54,6 +58,22 @@
         "kind": { "enum": ["video", "image", "audio", "music", "text", "caption", "export", "other"] },
         "mime_type": { "type": "string" },
         "media": { "$ref": "#/$defs/mediaProbe" }
+      }
+    },
+    "fontResource": {
+      "description": "One immutable static font face packaged with the render snapshot. A later text-selection contract binds authored text to one of these explicit faces.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["font_resource_id", "font_family", "font_weight", "font_style", "format", "staged_path", "file_sha256", "size_bytes"],
+      "properties": {
+        "font_resource_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "font_family": { "type": "string", "minLength": 1 },
+        "font_weight": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "font_style": { "enum": ["normal", "italic"] },
+        "format": { "enum": ["woff2", "woff", "ttf", "otf"] },
+        "staged_path": { "type": "string", "minLength": 1 },
+        "file_sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1 }
       }
     },
     "mediaProbe": {
