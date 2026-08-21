@@ -10,13 +10,6 @@ on:
       - 'deploy/docker/**'
       - 'deploy/helm/**'
       - '.github/workflows/container.yml'
-  pull_request:
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'deploy/docker/**'
-      - 'deploy/helm/**'
-      - '.github/workflows/container.yml'
   workflow_dispatch:
 
 permissions:
