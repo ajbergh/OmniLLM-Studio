@@ -264,6 +264,9 @@ export function VideoPreviewCanvas() {
   const [smartGuides, setSmartGuides] = useState<Array<{ axis: 'x' | 'y'; pos: number }>>([]);
   const [dragReadout, setDragReadout] = useState<string | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  // Refs mirror the live drag state so pointer-up commits can read the final
+  // value without side effects inside setState updaters (StrictMode runs
+  // updaters twice in dev, which would double-commit).
   const liveTransformRef = useRef<{ clipId: string; patch: LivePatch } | null>(null);
   const cropDraftRef = useRef<CropBox | null>(null);
   const applyLiveTransform = (value: { clipId: string; patch: LivePatch } | null) => {
@@ -308,6 +311,8 @@ export function VideoPreviewCanvas() {
   const previewLayers = [...layers, ...posterLayers]
     .sort(compareIndexedTimelineClipOrder);
 
+  // Audio uses the same interval index as visuals, eliminating full timeline
+  // scans and repeated asset lookups on every playhead update.
   const audioLayers = activeIndexed
     .filter(({ track }) => !track.muted && (!soloTrackId || track.id === soloTrackId))
     .filter((entry): entry is LayerEntry & { asset: VideoAsset } => Boolean(
@@ -330,16 +335,20 @@ export function VideoPreviewCanvas() {
   );
   const canCrop = Boolean(selectedEntry && selectedIsMedia && !selectedEntry.track.locked && !isPlaying);
 
+  // Crop mode is per-selection; leaving the clip (or playing) leaves the mode.
   useEffect(() => {
     setCropMode(false);
     setCropDraft(null);
     cropDraftRef.current = null;
   }, [selectedClipId, isPlaying]);
 
+  // Text editing follows the selection; playing always ends the edit session.
   useEffect(() => {
     setEditingTextClipId(null);
   }, [selectedClipId, isPlaying]);
 
+  // Fit the stage to the available area while preserving the canvas aspect ratio,
+  // so layer math can use exact pixel scale.
   useEffect(() => {
     const node = fitRef.current;
     if (!node) return;
@@ -355,6 +364,7 @@ export function VideoPreviewCanvas() {
     return () => observer.disconnect();
   }, [canvasWidth, canvasHeight]);
 
+  // rAF loop: advance playheadMs in the store while playing.
   useEffect(() => {
     if (!isPlaying) {
       if (rafRef.current !== null) {
@@ -386,6 +396,11 @@ export function VideoPreviewCanvas() {
     };
   }, [isPlaying, setPlayhead, setPlaying]);
 
+  // Keep every mounted media element in sync with output-timeline time on every
+  // tick. Deterministic visual media consumes canonical FrameState source time
+  // when the strict preview projection succeeds; free-running playback and the
+  // explicit compatibility fallback keep the established address evaluator.
+  // Audio remains outside visual FrameState until AudioGraph consumption lands.
   useEffect(() => {
     const address = deterministicFrame !== null
       ? { kind: 'frame' as const, frameIndex: deterministicFrame, fps }
@@ -412,6 +427,7 @@ export function VideoPreviewCanvas() {
           element.currentTime = target;
           element.play().catch(() => { /* autoplay policy */ });
         } else if (Math.abs(element.currentTime - target) > 0.35) {
+          // Drift correction (tab throttling, slow decode).
           element.currentTime = target;
         }
       } else {
@@ -430,11 +446,13 @@ export function VideoPreviewCanvas() {
       if (!entry) continue;
       const clipTimeMs = Math.max(0, playheadMs - entry.clip.start_ms);
       const clipVolume = evaluateClipProperty(entry.clip, 'volume', clipTimeMs);
+      // Element volume caps at 1; gains above unity remain export-only.
       audio.volume = Math.min(1, Math.max(0, clipVolume * fadeFactor(entry.clip, playheadMs) * previewVolume));
       syncElement(audio, entry.clip);
     }
   }, [deterministicFrame, fps, playheadMs, isPlaying, previewVolume]);
 
+  /** Alignment candidates in client coordinates, captured once per drag. */
   const collectSnapCandidates = (excludeClipId: string) => {
     const stage = stageRef.current;
     const candidatesX: number[] = [];
@@ -443,6 +461,7 @@ export function VideoPreviewCanvas() {
     const rect = stage.getBoundingClientRect();
     candidatesX.push(rect.left, rect.left + rect.width / 2, rect.right);
     candidatesY.push(rect.top, rect.top + rect.height / 2, rect.bottom);
+    // Safe-area bounds double as common margins.
     candidatesX.push(rect.left + rect.width * 0.05, rect.right - rect.width * 0.05, rect.left + rect.width * 0.1, rect.right - rect.width * 0.1);
     candidatesY.push(rect.top + rect.height * 0.05, rect.bottom - rect.height * 0.05, rect.top + rect.height * 0.1, rect.bottom - rect.height * 0.1);
     if (snapToObjects) {
@@ -510,6 +529,7 @@ export function VideoPreviewCanvas() {
         let dxClient = moveEvent.clientX - drag.startClientX;
         let dyClient = moveEvent.clientY - drag.startClientY;
         const guides: Array<{ axis: 'x' | 'y'; pos: number }> = [];
+        // Ctrl/Cmd temporarily bypasses snapping.
         if (snappingEnabled && !moveEvent.ctrlKey && !moveEvent.metaKey) {
           const moved = {
             left: drag.baseRect.left + dxClient,
@@ -554,6 +574,8 @@ export function VideoPreviewCanvas() {
       } else if (drag.mode === 'resize' && drag.handle) {
         const h = drag.handle;
         if (drag.isShape) {
+          // Shapes resize their real width/height in canvas pixels; deltas are
+          // rotated into the shape's local axes first.
           const factor = stageScale * drag.base.scale;
           const rad = (-drag.base.rotation * Math.PI) / 180;
           const rawDx = moveEvent.clientX - drag.startClientX;
@@ -570,6 +592,8 @@ export function VideoPreviewCanvas() {
           }
           const patch: LivePatch = { shapeWidth: Math.round(width), shapeHeight: Math.round(height) };
           if (!fromCenter) {
+            // Keep the opposite edge anchored: the center shifts by half the
+            // size change along the handle direction (in rotated coords).
             const shiftX = (h.hx * (width - drag.base.shapeWidth)) / 2 * drag.base.scale;
             const shiftY = (h.hy * (height - drag.base.shapeHeight)) / 2 * drag.base.scale;
             const rotRad = (drag.base.rotation * Math.PI) / 180;
@@ -579,6 +603,8 @@ export function VideoPreviewCanvas() {
           setDragReadout(`${Math.round(width)} × ${Math.round(height)} px`);
           applyLiveTransform({ clipId: drag.clipId, patch });
         } else {
+          // Media and text scale uniformly. Alt resizes around the center;
+          // otherwise the opposite corner/edge stays anchored.
           const fromCenter = moveEvent.altKey;
           const ax = fromCenter ? drag.centerClientX : drag.anchorClientX;
           const ay = fromCenter ? drag.centerClientY : drag.anchorClientY;
@@ -613,6 +639,7 @@ export function VideoPreviewCanvas() {
       dragRef.current = null;
       setSmartGuides([]);
       setDragReadout(null);
+      // Commit once on release: a single undo entry and a single save.
       const live = liveTransformRef.current;
       if (live && live.clipId === drag.clipId && Object.keys(live.patch).length > 0) {
         const { shapeWidth, shapeHeight, ...transformPatch } = live.patch;
@@ -660,6 +687,7 @@ export function VideoPreviewCanvas() {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       setDragReadout(null);
+      // The draft persists across drags; Apply commits it as one undo entry.
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -722,6 +750,8 @@ export function VideoPreviewCanvas() {
       * (opacityIncludesClipFades ? 1 : fadeFactor(clip, playheadMs));
     const selected = clip.id === selectedClipId;
     const isMedia = Boolean(asset && (asset.mime_type.startsWith('video/') || asset.mime_type.startsWith('image/')));
+    // Crop editing renders the full frame with dimmed margins; rotation is
+    // suppressed while editing so handle math stays axis-aligned.
     const inCropEdit = cropMode && selected && isMedia && !isPlaying;
     const effectiveCrop: CropBox = { ...EMPTY_CROP, ...(transform.crop || {}), ...(inCropEdit && cropDraft ? cropDraft : {}) };
     const crop = transform.crop;
@@ -807,6 +837,8 @@ export function VideoPreviewCanvas() {
         padding: text.background ? `${8 * stageScale}px ${18 * stageScale}px` : undefined,
       };
       if (isEditingText) {
+        // contentEditable manages its own children; React renders none so
+        // re-renders can't clobber the in-progress edit.
         content = (
           <div
             ref={(node) => {
@@ -891,6 +923,7 @@ export function VideoPreviewCanvas() {
         }}
       >
         {content}
+        {/* Cursor-effect overlay for clips carrying recorded cursor metadata */}
         {clip.cursor && (() => {
           const sample = sampleCursor(clip.cursor, clipTimeMs);
           if (!sample) return null;
@@ -966,6 +999,7 @@ export function VideoPreviewCanvas() {
                 className="pointer-events-none absolute border border-dashed border-white/80"
                 style={{ top: `${cropTop}%`, left: `${cropLeft}%`, width: `${cropWidth}%`, height: `${cropHeight}%` }}
               >
+                {/* Thirds grid inside the crop boundary */}
                 <div className="absolute left-1/3 top-0 h-full w-px bg-white/30" />
                 <div className="absolute left-2/3 top-0 h-full w-px bg-white/30" />
                 <div className="absolute left-0 top-1/3 h-px w-full bg-white/30" />
@@ -1092,6 +1126,7 @@ export function VideoPreviewCanvas() {
             filter: composePreviewFilter(activeScene?.effects),
           }}
           onPointerDown={(event) => {
+            // Clicking empty stage space deselects.
             if (event.target === event.currentTarget) selectClip(null);
           }}
           onContextMenu={(event) => {
@@ -1157,6 +1192,8 @@ export function VideoPreviewCanvas() {
       </div>
       {menu && (() => {
         const entry = menu.clipId ? previewLayers.find((layer) => layer.clip.id === menu.clipId) : undefined;
+        // Cover the canvas while preserving the asset's aspect ratio
+        // (object-contain renders at scale 1 = fit).
         const fillScale = (asset?: VideoAsset): number => {
           if (!asset?.width || !asset?.height) return 1;
           const assetAR = asset.width / asset.height;
