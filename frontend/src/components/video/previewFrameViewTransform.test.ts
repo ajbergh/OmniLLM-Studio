@@ -82,8 +82,9 @@ describe('preview FrameState view transform resolver', () => {
       }],
     };
     const entry = queryActiveClipsAtFrame(buildTimelineIntervalIndex(document, []), 15, 30)[0];
+    const canonicalState = entry.canonicalState;
 
-    expect(entry.canonicalState?.view_transform).toMatchObject({
+    expect(canonicalState?.view_transform).toMatchObject({
       x: 55,
       y: -25,
       z: 40,
@@ -91,9 +92,10 @@ describe('preview FrameState view transform resolver', () => {
       rotation_y: -6,
       rotation_z: 10,
     });
+    if (!canonicalState) throw new Error('expected canonical frame state');
     expect(resolvePreviewFrameViewTransform(
-      entry.clip.transform || {},
-      entry.canonicalState,
+      canonicalState.transform,
+      canonicalState,
       // Deliberately wrong local camera proves canonical view state owns the
       // deterministic path rather than being subtracted again here.
       { x: 999, y: 999, z: 999, rotation_x: 99, rotation_y: 99, rotation_z: 99 },
