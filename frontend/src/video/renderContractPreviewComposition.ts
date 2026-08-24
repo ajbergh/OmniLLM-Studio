@@ -12,6 +12,7 @@ import {
   evaluateVisualFrameStateDiagnostic,
   type VisualFrameStateDiagnosticError,
 } from './renderContractFrameStateDiagnostics';
+import type { TimelineV2ContentBounds } from './renderContractTypes';
 
 export const PREVIEW_COMPOSITION_FRAME_V1 = 'preview-composition-frame-v1' as const;
 export const PREVIEW_COMPOSITION_IDENTITY_MISMATCH = 'PREVIEW_COMPOSITION_IDENTITY_MISMATCH' as const;
@@ -46,9 +47,15 @@ export interface CanonicalPreviewCompositionFrame {
  *
  * The v1 -> v2 adapter remains fail closed. If authored v1 state cannot be
  * represented canonically, callers receive an unavailable diagnostic instead
- * of a permissive preview-specific interpretation. The projection also checks
- * positional and ID identity so a future adapter that reorders tracks/clips
- * cannot silently bind canonical state to the wrong editor object.
+ * of a permissive preview-specific interpretation. Persisted VideoAsset probe
+ * width/height are projected into the temporary Timeline v2 document as
+ * content_bounds so canonical media_geometry can be evaluated. This bridge
+ * deliberately does not fabricate source-provenance-v1, which additionally
+ * requires immutable file hashes and manifest clip bindings.
+ *
+ * The projection also checks positional and ID identity so a future adapter
+ * that reorders tracks/clips cannot silently bind canonical state to the wrong
+ * editor object.
  */
 export function evaluateCanonicalPreviewCompositionFrame(
   document: VideoTimelineDocument,
@@ -56,7 +63,9 @@ export function evaluateCanonicalPreviewCompositionFrame(
   frameIndex: number,
 ): CanonicalPreviewCompositionFrame {
   const frame = Math.trunc(frameIndex);
-  const diagnostic = evaluateVisualFrameStateDiagnostic(document, frame);
+  const assetByID = new Map(assets.map((asset) => [asset.id, asset]));
+  const contentBoundsByAsset = previewContentBoundsByAsset(assets);
+  const diagnostic = evaluateVisualFrameStateDiagnostic(document, frame, { contentBoundsByAsset });
   if (!diagnostic.available || !diagnostic.state) {
     return {
       contract_version: PREVIEW_COMPOSITION_FRAME_V1,
@@ -66,7 +75,6 @@ export function evaluateCanonicalPreviewCompositionFrame(
     };
   }
 
-  const assetByID = new Map(assets.map((asset) => [asset.id, asset]));
   const layers: CanonicalPreviewCompositionLayer[] = [];
   for (const state of diagnostic.state.layers) {
     const track = document.tracks[state.track_index];
@@ -101,4 +109,24 @@ export function evaluateCanonicalPreviewCompositionFrame(
     frame_state: diagnostic.state,
     layers,
   };
+}
+
+/**
+ * Project only trustworthy persisted visual probe dimensions. Missing,
+ * partial, non-integer, or non-positive dimensions stay absent so the
+ * canonical evaluator reports media geometry unresolved instead of guessing.
+ */
+function previewContentBoundsByAsset(assets: readonly VideoAsset[]): ReadonlyMap<string, TimelineV2ContentBounds> {
+  const boundsByAsset = new Map<string, TimelineV2ContentBounds>();
+  for (const asset of assets) {
+    if (!Number.isInteger(asset.width) || !Number.isInteger(asset.height)) continue;
+    if ((asset.width as number) < 1 || (asset.height as number) < 1) continue;
+    boundsByAsset.set(asset.id, {
+      x: 0,
+      y: 0,
+      width: asset.width as number,
+      height: asset.height as number,
+    });
+  }
+  return boundsByAsset;
 }

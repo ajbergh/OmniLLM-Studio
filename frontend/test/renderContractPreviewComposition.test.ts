@@ -42,7 +42,7 @@ function documentWith(clips: VideoTimelineClip[]): VideoTimelineDocument {
   };
 }
 
-function asset(id: string): VideoAsset {
+function asset(id: string, dimensions: { width?: number; height?: number } = {}): VideoAsset {
   return {
     id,
     kind: 'image',
@@ -51,6 +51,7 @@ function asset(id: string): VideoAsset {
     file_path: `/tmp/${id}.png`,
     mime_type: 'image/png',
     size_bytes: 128,
+    ...dimensions,
     created_at: '2026-08-24T00:00:00Z',
   };
 }
@@ -107,5 +108,46 @@ describe('canonical preview composition projection', () => {
     expect(layer?.state.source_time_ms).toBe(1200);
     expect(layer?.state.transform.x).toBe(60);
     expect(layer?.state.transform.opacity).toBe(0.8);
+  });
+
+  it('projects persisted asset dimensions into canonical contain geometry without fabricating source provenance', () => {
+    const document = documentWith([clip('clip-portrait', { asset_id: 'asset-portrait' })]);
+    const portrait = asset('asset-portrait', { width: 1000, height: 2000 });
+
+    const result = evaluateCanonicalPreviewCompositionFrame(document, [portrait], 0);
+    const state = result.layers?.[0].state;
+
+    expect(result.available).toBe(true);
+    expect(state?.content_bounds).toEqual({ x: 0, y: 0, width: 1000, height: 2000 });
+    expect(state?.source_provenance).toBeUndefined();
+    expect(state?.media_geometry).toEqual({
+      contract_version: 'media-geometry-v1',
+      fit: 'contain',
+      viewport_bounds: { x: 0, y: 0, width: 1280, height: 720 },
+      source_bounds: { x: 0, y: 0, width: 1000, height: 2000 },
+      visible_source_bounds: { x: 0, y: 0, width: 1000, height: 2000 },
+      painted_bounds: { x: 460, y: 0, width: 360, height: 720 },
+      clip_bounds: { x: 0, y: 0, width: 1280, height: 720 },
+      scale_x: 0.36,
+      scale_y: 0.36,
+    });
+    expect(state?.unresolved).toEqual([]);
+    expect(state?.authoritative).toBe(true);
+    expect(result.frame_state?.authoritative).toBe(true);
+  });
+
+  it('keeps media geometry unresolved when persisted probe dimensions are incomplete or invalid', () => {
+    const document = documentWith([clip('clip-missing-bounds', { asset_id: 'asset-missing-bounds' })]);
+    const incomplete = asset('asset-missing-bounds', { width: 1920 });
+
+    const result = evaluateCanonicalPreviewCompositionFrame(document, [incomplete], 0);
+    const state = result.layers?.[0].state;
+
+    expect(result.available).toBe(true);
+    expect(state?.content_bounds).toBeUndefined();
+    expect(state?.media_geometry).toBeUndefined();
+    expect(state?.unresolved).toContain('media_geometry:content_bounds');
+    expect(state?.authoritative).toBe(false);
+    expect(result.frame_state?.authoritative).toBe(false);
   });
 });
