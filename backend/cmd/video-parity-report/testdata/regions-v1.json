@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "frames": [
+    {
+      "frame_index": 15,
+      "regions": [
+        {
+          "name": "canonical-structure",
+          "bounds": {
+            "min_x": 0,
+            "min_y": 0,
+            "max_x": 16,
+            "max_y": 16
+          }
+        }
+      ]
+    }
+  ]
+}
