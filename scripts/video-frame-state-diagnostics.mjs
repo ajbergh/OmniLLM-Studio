@@ -60,18 +60,38 @@ try {
   await fs.writeFile(timelinePath, `${JSON.stringify(timeline, null, 2)}\n`);
 
   const diagnostics = await page.evaluate(async ({ document, samples }) => {
-    const module = await import('/src/video/renderContractFrameStateDiagnostics.ts');
-    return samples.map((sample) => ({
-      name: sample.name,
-      frame_index: sample.frame_index,
-      diagnostic: module.evaluateVisualFrameStateDiagnostic(document, sample.frame_index),
-    }));
+    const frameStateModule = await import('/src/video/renderContractFrameStateDiagnostics.ts');
+    const previewCompositionModule = await import('/src/video/renderContractPreviewComposition.ts');
+    return samples.map((sample) => {
+      const diagnostic = frameStateModule.evaluateVisualFrameStateDiagnostic(document, sample.frame_index);
+      const composition = previewCompositionModule.evaluateCanonicalPreviewCompositionFrame(document, [], sample.frame_index);
+      if (composition.available !== diagnostic.available) {
+        throw new Error(`preview composition availability drift at frame ${sample.frame_index}: FrameState=${diagnostic.available} preview=${composition.available}`);
+      }
+      const frameStateClipIDs = diagnostic.state?.layers?.map((layer) => layer.clip_id) || [];
+      const previewClipIDs = composition.layers?.map((layer) => layer.clip.id) || [];
+      if (composition.available && JSON.stringify(previewClipIDs) !== JSON.stringify(frameStateClipIDs)) {
+        throw new Error(`preview composition clip identity/order drift at frame ${sample.frame_index}: FrameState=${JSON.stringify(frameStateClipIDs)} preview=${JSON.stringify(previewClipIDs)}`);
+      }
+      return {
+        name: sample.name,
+        frame_index: sample.frame_index,
+        diagnostic,
+        preview_composition: {
+          contract_version: composition.contract_version,
+          available: composition.available,
+          clip_ids: previewClipIDs,
+          ...(composition.error ? { error: composition.error } : {}),
+        },
+      };
+    });
   }, { document: timeline, samples: fixture.samples });
 
   const output = {
-    version: 1,
+    version: 2,
     source: 'browser-typescript',
     diagnostic_contract: 'visual-frame-state-diagnostic-v1',
+    preview_composition_contract: 'preview-composition-frame-v1',
     mode: transitionFreeControl ? 'transition-free-control' : 'saved-timeline',
     timeline_sha256: seedResult.timeline_sha256,
     snapshot_id: seedResult.snapshot_id,
