@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"image"
+	"io"
 	"os"
 	"strings"
 
@@ -28,13 +30,24 @@ func loadParityRegionManifest(path string) (map[int64][]video.ParityRegion, erro
 	if strings.TrimSpace(path) == "" {
 		return nil, nil
 	}
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
 	var manifest parityRegionManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
+	if err := decoder.Decode(&manifest); err != nil {
 		return nil, fmt.Errorf("decode parity region manifest: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("parity region manifest must contain exactly one JSON object")
+		}
+		return nil, fmt.Errorf("decode parity region manifest trailing data: %w", err)
 	}
 	if manifest.Version != parityRegionManifestVersion {
 		return nil, fmt.Errorf("parity region manifest version = %d, want %d", manifest.Version, parityRegionManifestVersion)
@@ -68,6 +81,25 @@ func loadParityRegionManifest(path string) (map[int64][]video.ParityRegion, erro
 		byFrame[frame.FrameIndex] = regions
 	}
 	return byFrame, nil
+}
+
+// validateParityRegionsForPair prevents exact-region comparisons from clipping
+// silently at decoded image bounds. A clipped or fully out-of-frame rectangle
+// could otherwise report Exact=true while comparing fewer (or zero) pixels.
+func validateParityRegionsForPair(frameIndex int64, regions []video.ParityRegion, preview, rendered image.Image) error {
+	previewBounds, renderedBounds := preview.Bounds(), rendered.Bounds()
+	for _, region := range regions {
+		bounds := region.Bounds
+		if bounds.MaxX > previewBounds.Dx() || bounds.MaxY > previewBounds.Dy() ||
+			bounds.MaxX > renderedBounds.Dx() || bounds.MaxY > renderedBounds.Dy() {
+			return fmt.Errorf(
+				"frame_index %d region %q bounds [%d,%d)-[%d,%d) exceed decoded frame dimensions preview=%dx%d rendered=%dx%d",
+				frameIndex, region.Name, bounds.MinX, bounds.MinY, bounds.MaxX, bounds.MaxY,
+				previewBounds.Dx(), previewBounds.Dy(), renderedBounds.Dx(), renderedBounds.Dy(),
+			)
+		}
+	}
+	return nil
 }
 
 func cloneParityRegions(regions []video.ParityRegion) []video.ParityRegion {
