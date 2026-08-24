@@ -6,6 +6,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ajbergh/omnillm-studio/internal/video"
@@ -48,6 +49,30 @@ func TestLoadPairsAttachesRegionsByCanonicalFrameIndex(t *testing.T) {
 	pairs[0].Regions[0].Name = "mutated"
 	if policy[15][0].Name != "camera-structure" {
 		t.Fatalf("loadPairs mutated region policy: %#v", policy[15])
+	}
+}
+
+func TestLoadPairsRejectsRegionOutsideDecodedFrame(t *testing.T) {
+	previewDir := filepath.Join(t.TempDir(), "preview")
+	renderedDir := filepath.Join(t.TempDir(), "rendered")
+	if err := os.MkdirAll(previewDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(renderedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestPNG(t, filepath.Join(previewDir, "15-camera.png"))
+	writeTestPNG(t, filepath.Join(renderedDir, "15-camera.png"))
+
+	policy := map[int64][]video.ParityRegion{
+		15: {{
+			Name:   "outside",
+			Bounds: video.ParityBounds{MinX: 0, MinY: 0, MaxX: 2, MaxY: 1},
+		}},
+	}
+	_, err := loadPairs(previewDir, renderedDir, 30, policy)
+	if err == nil || !strings.Contains(err.Error(), "exceed decoded frame dimensions") {
+		t.Fatalf("error = %v, want decoded-frame bounds failure", err)
 	}
 }
 
