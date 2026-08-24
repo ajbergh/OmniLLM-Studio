@@ -26,6 +26,7 @@ func main() {
 	fps := flag.Int("fps", 30, "timeline frames per second")
 	timelineHash := flag.String("timeline-sha256", "", "immutable timeline hash")
 	manifestHash := flag.String("manifest-sha256", "", "immutable asset manifest hash")
+	regionsPath := flag.String("regions", "", "optional versioned JSON structural-region manifest keyed by canonical frame index")
 	previewAudio := flag.String("preview-audio", "", "optional signed 16-bit little-endian PCM (interleaved channels are compared as a sample sequence)")
 	renderedAudio := flag.String("rendered-audio", "", "optional signed 16-bit little-endian PCM (interleaved channels are compared as a sample sequence)")
 	maxAudioOffset := flag.Int("max-audio-offset", 2400, "maximum offset searched when aligning PCM samples")
@@ -42,7 +43,11 @@ func main() {
 	if *fps <= 0 {
 		exitf("--fps must be positive")
 	}
-	pairs, err := loadPairs(*previewDir, *renderedDir, *fps)
+	regionsByFrame, err := loadParityRegionManifest(*regionsPath)
+	if err != nil {
+		exitf("load parity region manifest: %v", err)
+	}
+	pairs, err := loadPairs(*previewDir, *renderedDir, *fps, regionsByFrame)
 	if err != nil {
 		exitf("load frame pairs: %v", err)
 	}
@@ -94,12 +99,13 @@ func main() {
 	}
 }
 
-func loadPairs(previewDir, renderedDir string, fps int) ([]video.ParityFramePair, error) {
+func loadPairs(previewDir, renderedDir string, fps int, regionsByFrame map[int64][]video.ParityRegion) ([]video.ParityFramePair, error) {
 	entries, err := os.ReadDir(previewDir)
 	if err != nil {
 		return nil, err
 	}
 	var pairs []video.ParityFramePair
+	matchedRegionFrames := make(map[int64]struct{}, len(regionsByFrame))
 	for _, entry := range entries {
 		if entry.IsDir() || strings.ToLower(filepath.Ext(entry.Name())) != ".png" {
 			continue
@@ -120,7 +126,38 @@ func loadPairs(previewDir, renderedDir string, fps int) ([]video.ParityFramePair
 			return nil, err
 		}
 		index, name := parseFrameName(entry.Name())
-		pairs = append(pairs, video.ParityFramePair{Name: name, FrameIndex: index, TimeMS: index * 1000 / int64(fps), Preview: preview, Rendered: rendered})
+		regions := cloneParityRegions(regionsByFrame[index])
+		if err := validateParityRegionsForPair(index, regions, preview, rendered); err != nil {
+			return nil, err
+		}
+		if len(regions) > 0 {
+			matchedRegionFrames[index] = struct{}{}
+		}
+		pairs = append(pairs, video.ParityFramePair{
+			Name:       name,
+			FrameIndex: index,
+			TimeMS:     index * 1000 / int64(fps),
+			Preview:    preview,
+			Rendered:   rendered,
+			Regions:    regions,
+		})
+	}
+	var firstUnmatchedFrame int64
+	hasUnmatchedFrame := false
+	for frameIndex, regions := range regionsByFrame {
+		if len(regions) == 0 {
+			continue
+		}
+		if _, matched := matchedRegionFrames[frameIndex]; matched {
+			continue
+		}
+		if !hasUnmatchedFrame || frameIndex < firstUnmatchedFrame {
+			firstUnmatchedFrame = frameIndex
+			hasUnmatchedFrame = true
+		}
+	}
+	if hasUnmatchedFrame {
+		return nil, fmt.Errorf("parity region manifest frame_index %d has no matching preview/rendered PNG pair", firstUnmatchedFrame)
 	}
 	video.SortParityPairs(pairs)
 	return pairs, nil
