@@ -2,7 +2,7 @@
 
 `video-parity-report` can optionally attach exact structural regions to decoded frame pairs through `--regions <path>`.
 
-The input is a versioned JSON manifest keyed by canonical integer `frame_index`. Each frame may define named rectangular regions using `min_x`, `min_y`, `max_x`, and `max_y` pixel bounds. Invalid versions, duplicate frame indices, duplicate region names, empty names, negative coordinates, and empty/inverted rectangles fail closed before comparison.
+The input is a versioned JSON manifest keyed by canonical integer `frame_index`. Each frame may define named rectangular regions using `min_x`, `min_y`, `max_x`, and `max_y` pixel bounds. Invalid versions, unknown fields, duplicate frame indices, duplicate region names, empty names, negative coordinates, empty/inverted rectangles, multiple JSON values, and rectangles extending outside either decoded frame fail closed before comparison.
 
 Omitting `--regions` preserves the existing parity-report behavior and attaches no structural regions.
 
