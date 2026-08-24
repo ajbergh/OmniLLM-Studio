@@ -9,22 +9,22 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG feature PR: **#263 — Consume canonical preview source time** — squash merge `77b49e096e165ad579d7eb5daed81763c023203c` (2026-08-24).
+Latest merged WYSIWYG feature PR: **#264 — Consume canonical preview transform state** — squash merge `357ae16301fc0b7d6c0f0d65e99c0277bac77adb` (2026-08-24).
 
 **Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active.** The renderer-independent visual contract (`visual-frame-state-v1` and its subcontracts) and audio contract (`audio-graph-v1`) define semantics; Phase 3 is migrating actual program-monitor consumers onto those canonical decisions in small, reversible slices.
 
-Current implementation PR: **#264 — Consume canonical preview transform state** on branch `feat/video-wysiwyg-phase3-canonical-transform`, rebuilt directly from current `main` `77b49e096e165ad579d7eb5daed81763c023203c` after #263 merged.
+Current implementation PR: **#265 — Consume canonical preview view transform** on branch `feat/video-wysiwyg-phase3-canonical-view-transform`, rebuilt directly from current `main` `357ae16301fc0b7d6c0f0d65e99c0277bac77adb` after #264 merged.
 
-#264 advances deterministic transform/opacity consumption without replacing the existing DOM/CSS painter:
+#265 advances deterministic camera-relative transform consumption without claiming full perspective parity:
 
-- `resolvePreviewFrameTransform` consumes `CanonicalFrameLayerState.transform` for deterministic canonical entries instead of re-evaluating clip transform keyframes locally;
-- canonical opacity is already fade-adjusted by FrameState, so the preview does not multiply clip fades a second time;
-- canonical `transform`, not `view_transform`, is consumed because camera/projection remains a separate Phase 3 slice;
-- free-running playback and strict-adapter compatibility fallback keep the established `evaluateClipProperty` path;
-- an active `liveTransform` gesture deliberately bypasses canonical state so direct manipulation remains responsive until commit;
-- canonical zero axis scale is preserved through the legacy painter's truthy `scale_x || scale` / `scale_y || scale` compatibility behavior by carrying a zero compatibility scalar when either canonical axis is exactly zero.
+- `resolvePreviewFrameViewTransform` consumes `CanonicalFrameLayerState.view_transform` for deterministic canonical x/y/z and XYZ rotation rather than subtracting locally evaluated camera state a second time;
+- free-running playback and canonical-unavailable compatibility fallback retain the established local camera subtraction behavior;
+- an active `liveTransform` gesture deliberately bypasses canonical view state so direct manipulation remains responsive until commit;
+- exact zero camera-relative values are preserved;
+- focused coverage includes a real Timeline v1 scene-camera projection, proving canonical view state owns the deterministic path even if the caller supplies a deliberately wrong local camera;
+- the current single parent CSS `perspective` remains unchanged because canonical per-layer `perspective_projection` can carry clip-specific perspective overrides and requires a separate explicit painter/projection mapping.
 
-Camera/projection, media geometry/bounds, transition/effect paint, text/shape/cursor paint, normal-playback canonicalization, and AudioGraph scheduling are **not changed by #264**. They remain separate Phase 3 slices.
+Media geometry/bounds, full perspective projection, transition/effect paint, text/shape/cursor paint, normal-playback canonicalization, and AudioGraph scheduling are **not changed by #265**. They remain separate Phase 3 slices.
 
 ## Phase tracker
 
@@ -33,7 +33,7 @@ Camera/projection, media geometry/bounds, transition/effect paint, text/shape/cu
 | Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Production structural-region policy and second-platform evidence remain. `audio-graph-v1` defines the unsupported-audio semantic boundary. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
 | Phase 2 — Canonical contract | **Complete** | Frame/range/source/order, curves, transforms/geometry/projection, transitions, effects, text/fonts, shapes, cursor, immutable source provenance, and AudioGraph semantics are versioned and cross-runtime checked. #260 closed the final contract gap. |
-| Phase 3 — Shared preview composition | **In progress** | #261 merged canonical visual activity/projection consumption; #262 retained parity evidence for projection identity/availability; #263 routes deterministic visual-media source time through FrameState; #264 consumes deterministic transform/opacity state while preserving free-running/fallback/direct-manipulation boundaries. Camera/geometry/painter/audio consumption remains. |
+| Phase 3 — Shared preview composition | **In progress** | #261 merged canonical visual activity/projection consumption; #262 retained parity evidence for projection identity/availability; #263 routes deterministic visual-media source time through FrameState; #264 consumes deterministic transform/opacity state; #265 consumes deterministic camera-relative `view_transform` while preserving fallback/live-interaction behavior. Full perspective/geometry/painter/audio consumption remains. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, text metrics/fonts, shapes, transitions, effects, cursor, camera, color, and deterministic asset loading. |
 | Phase 6 — Audio parity closure | Not started | Make preview/Chromium/export obey AudioGraph exactly, including pitch, gain/fades, channels, program processing, processed stems, and decoded delivery. |
@@ -111,7 +111,7 @@ A stacked PR is rebuilt from the **actual current `main` tree** after its parent
 5. Update this tracker on the clean branch.
 6. Validate the exact final head before merge.
 
-Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can look current while the tree silently reverts unrelated work. #261 followed this rule after #260; #262 followed it after #261; #264 was rebuilt from #263's actual squash result after its original stack diverged by one final parent-tracker commit.
+Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can look current while the tree silently reverts unrelated work. #261 followed this rule after #260; #262 followed it after #261; #264 was rebuilt from #263's actual squash result after its original stack diverged by one final parent-tracker commit; #265 was rebuilt directly from #264's squash result before production Canvas/tracker integration.
 
 ## Phase 0 — Reproducible parity baseline
 
@@ -195,7 +195,7 @@ The renderer-independent semantic contract now covers the currently authorable v
 
 ## Phase 3 — Shared preview composition
 
-**In progress. #261–#263 merged; #264 is the current transform/opacity consumer slice.**
+**In progress. #261–#264 merged; #265 is the current camera-relative view-transform consumer slice.**
 
 ### Merged #261 — canonical preview projection and deterministic activity consumption
 
@@ -233,17 +233,27 @@ Exact head `64a9a034b6e77334980c87bfcbc73416e1fd927e` passed Quality Gate #1506,
 
 Exact head `5e22a663506bcc8321534329693bcd1b185cf444` passed Quality Gate #1517, Security #1523, Playwright, deterministic renderer parity, backend race, CodeQL, and all platform/sandbox assurances. Review submissions, inline threads, and PR comments were empty; final compare contained only the four intended source-time/test/canvas/tracker paths. #263 squash-merged with expected-head protection as `77b49e096e165ad579d7eb5daed81763c023203c`.
 
-### Current #264 — canonical deterministic transform/opacity consumption
+### Merged #264 — canonical deterministic transform/opacity consumption
 
 `resolvePreviewFrameTransform` centralizes the transform values fed into the current preview painter. Deterministic canonical entries consume FrameState transform/opacity directly; free-running and fallback entries retain local property evaluation; live direct-manipulation intentionally bypasses canonical state until gesture commit. Canonical opacity owns clip fades exactly once.
 
-The normalized production delta is `previewFrameTransform.ts`, its focused Vitest coverage, and `VideoPreviewCanvas.tsx`. The branch was rebuilt directly from #263's squash result and is ahead of `main` with no stale parent history. A focused compatibility fix preserves exact canonical zero axis scale despite the legacy painter's truthy axis fallback.
+Exact head `b84b4b82e72393b27fcf6bf579fb9a8579ea9f5c` passed Quality Gate #1523, Security Scan #1529, backend race, frontend lint/unit/performance/build, Playwright smoke, deterministic renderer parity, CodeQL, desktop/Helm, and all platform/sandbox assurances. Final compare was ahead 4 / behind 0 with exactly the resolver/test/Canvas/tracker paths; review submissions, inline threads, and PR comments were empty. #264 squash-merged with expected-head protection as `357ae16301fc0b7d6c0f0d65e99c0277bac77adb`.
+
+A focused compatibility fix in #264 preserves exact canonical zero axis scale despite the legacy painter's truthy axis fallback.
+
+### Current #265 — canonical deterministic camera-relative view-transform consumption
+
+`resolvePreviewFrameViewTransform` centralizes the camera-relative x/y/z and XYZ rotation values consumed by the current CSS painter. Deterministic canonical entries use `CanonicalFrameLayerState.view_transform` directly; free-running and compatibility-fallback entries retain local camera subtraction; live direct manipulation bypasses canonical view state until commit.
+
+#265 was first opened as a helper-only stack while #264's final renderer-parity gate was running. After #264 merged, #265 was rebuilt directly from `357ae16301fc0b7d6c0f0d65e99c0277bac77adb` using only its resolver/test blobs, retargeted to `main`, and verified ahead 1 / behind 0 before production wiring. The Canvas integration adds one resolver import, one camera-relative resolution call, and replaces the old inline local camera-subtraction transform string. Focused coverage includes exact zeros, fallback/live behavior, and a real Timeline v1 scene-camera projection.
+
+This slice intentionally does **not** consume canonical `perspective_projection`: per-layer perspective distance can differ due to clip overrides, while the current DOM painter exposes one parent CSS `perspective`. Full projection adoption needs an explicit representation decision rather than a silent approximation.
 
 ### Remaining Phase 3 work
 
-Recommended order after #264:
+Recommended order after #265:
 
-1. Consume canonical camera/projection state in the program monitor, replacing local camera property re-evaluation and CSS camera subtraction with one explicit mapping from FrameState projection/model decisions.
+1. Consume canonical `perspective_projection` in the program monitor with an explicit mapping that can represent per-layer clip perspective overrides; do not force it through one parent CSS perspective when semantics differ.
 2. Consume canonical media geometry/bounds and fit/crop placement, removing remaining source/canvas geometry assumptions while preserving crop-edit interaction as a temporary overlay.
 3. Move transitions/effects/text/shape/cursor painter inputs to their already-evaluated FrameState fields, removing remaining local `sampleCursor`, fade/property, and registry re-evaluation where canonical state exists.
 4. Extend the same frame-addressed composition model to normal playback without sacrificing interactive responsiveness; keep unsupported legacy v1 semantics visibly on the compatibility path until their persisted representation is unambiguous.
@@ -322,6 +332,8 @@ Before every merge:
 | Visual media recomputes source time after canonical FrameState evaluation | #263 consumes `canonicalState.source_time_ms` only for frame-addressed canonical visual entries; free-running/fallback paths retain `sourceTiming.ts`, and audio waits for AudioGraph. |
 | Preview re-evaluates deterministic transform/opacity after FrameState | #264 routes deterministic canonical entries through `resolvePreviewFrameTransform`; canonical opacity owns clip fades once, while free-running/fallback/live-gesture paths remain explicit. |
 | Exact zero axis scale is lost by legacy truthy CSS fallback | #264 carries compatibility `scale: 0` whenever either canonical axis is exactly zero; the painter should still migrate from `||` to nullish/exact axis selection in a later cleanup. |
+| Deterministic preview subtracts camera twice or re-evaluates camera-relative transforms | #265 consumes canonical `view_transform` for deterministic entries; fallback/free-running/live-gesture paths alone use local camera subtraction. |
+| Per-layer perspective overrides are collapsed into one parent perspective | #265 explicitly leaves `perspective_projection` for a separate slice that can represent per-layer distance rather than approximating it. |
 | Millisecond rounding creates frame/source drift | Rational frame/source helpers and integer AudioGraph sample-boundary rules. |
 | Source aspect ratio is guessed | Explicit bounds or immutable source provenance only. |
 | Perspective differs between consumers | One canonical projection contract in FrameState. |
@@ -331,7 +343,7 @@ Before every merge:
 | Audio pitch/fade/processing location diverges | AudioGraph explicitly owns pitch preservation, minimum fade overlap, and post-mix processing. |
 | Unsupported channels are silently remixed | v1 accepts mono→stereo or stereo passthrough only; other layouts fail closed. |
 | Structural parity is claimed from codec-noisy raw RGB equality | Phase 0 separates canonical zero-tolerance identity/geometry from tolerance-aware decoded regions; global metrics or arbitrary exact rectangles alone do not satisfy the structural gate. |
-| Stacked branch carries stale tree | Rebuild from actual `main` and inspect `compare`; #261/#262/#264 were normalized this way. |
+| Stacked branch carries stale tree | Rebuild from actual `main` and inspect `compare`; #261/#262/#264/#265 were normalized this way. |
 | CI setup/runner saturation hides code state | Distinguish setup/queue from executed checks. |
 | Browser worker resource cost | Admission control, health checks, cancellation, guarded rollout, FFmpeg retained for media I/O. |
 
@@ -377,13 +389,13 @@ Before every merge:
 - Retained decoded parity evidence was inspected before defining Phase 0 structural policy; raw RGB exactness is codec-noisy and is not being promoted into a false zero-tolerance production gate.
 - #263 exact head `5e22a663506bcc8321534329693bcd1b185cf444` passed Quality Gate #1517, Security #1523, Playwright, renderer parity, backend race, CodeQL, and all platform/sandbox assurances with no review comments/threads; final compare contained only the intended four paths.
 - #263 squash-merged with expected-head protection as `77b49e096e165ad579d7eb5daed81763c023203c`.
-- #264 had been stacked on an earlier #263 head and was one parent commit behind after #263 finalized. It was rebuilt from the exact #263 squash tree using only its three intended production blobs, retargeted to `main`, and verified ahead 1 / behind 0 before tracker work.
-- Review of canonical scale validation confirmed zero is valid. #264 therefore adds focused zero-axis compatibility handling/test coverage rather than allowing the legacy truthy CSS scale fallback to silently replace canonical zero.
-- This tracker update creates the #264 exact hosted validation candidate; camera/geometry/painter/audio semantics remain outside this slice.
+- #264 was rebuilt from #263's exact squash result, retained only its transform resolver/test/Canvas/tracker scope, and added exact-zero-axis compatibility coverage for the legacy truthy CSS scale fallback.
+- #264 exact head `b84b4b82e72393b27fcf6bf579fb9a8579ea9f5c` passed Quality Gate #1523, Security #1529, backend race, frontend lint/unit/performance/build, Playwright, renderer parity, CodeQL, desktop/Helm, and all platform/sandbox assurances with a clean review audit; it squash-merged with expected-head protection as `357ae16301fc0b7d6c0f0d65e99c0277bac77adb`.
+- #265 was opened helper-only while #264 parity was still running. After #264 merged, #265 was rebuilt directly from `357ae16301fc0b7d6c0f0d65e99c0277bac77adb`, retargeted to `main`, verified ahead 1 / behind 0, and then wired into `VideoPreviewCanvas.tsx` while keeping full perspective projection explicitly out of scope.
 
 ## Next recommended slice
 
-1. Run exact-head Quality/Security/platform/Playwright/renderer-parity validation for #264, inspect `compare main...branch` and review threads, then squash-merge only if the transform/opacity consumer remains current/scoped/green.
-2. From resulting `main`, consume canonical **camera/projection** state in `VideoPreviewCanvas.tsx`, keeping camera/projection adoption separate from media geometry and painter-family migration.
+1. Run exact-head Quality/Security/platform/Playwright/renderer-parity validation for #265, inspect `compare main...branch` and review threads, then squash-merge only if the canonical view-transform consumer remains current/scoped/green.
+2. From resulting `main`, consume canonical **perspective projection** with an explicit per-layer-capable mapping rather than forcing clip overrides through the current single parent CSS perspective.
 3. Then consume canonical media geometry/bounds, followed by transition/effect and text/shape/cursor painter inputs, and finally AudioGraph scheduling in separate reviewable slices.
 4. In parallel, implement the codec-aware Phase 0 structural-policy wiring and add second-platform parity evidence; current global numeric thresholds alone are not visual sign-off.
