@@ -9,33 +9,35 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG feature PR: **#265 — Consume canonical preview view transform** — squash merge `02b0a5d5ce68f0ee46c16e092c525772751d5681` (2026-08-24).
+Latest merged WYSIWYG program PR: **#266 — Add parity structural-region manifest input** — squash merge `7cf8a82a4081f487e13c2117e1c9176c91266253` (2026-08-24). The latest merged Phase 3 preview-consumer PR remains **#265 — Consume canonical preview view transform** — squash merge `02b0a5d5ce68f0ee46c16e092c525772751d5681`.
 
-**Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active.** The renderer-independent visual contract (`visual-frame-state-v1` and its subcontracts) and audio contract (`audio-graph-v1`) define semantics; Phase 3 is migrating actual program-monitor consumers onto those canonical decisions in small, reversible slices. Phase 0 parity-evidence hardening continues in parallel.
+**Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** The renderer-independent visual contract (`visual-frame-state-v1` and its subcontracts) and audio contract (`audio-graph-v1`) define semantics; current work is migrating real program-monitor consumers onto those already-evaluated decisions in small, reversible slices.
 
-Current implementation PR: **#266 — Add parity structural-region manifest input** on branch `feat/video-wysiwyg-phase0-parity-region-input`, rebuilt directly from current `main` `02b0a5d5ce68f0ee46c16e092c525772751d5681` after #265 merged.
+Current implementation PR: **#267 — Consume canonical preview perspective projection** on branch `feat/video-wysiwyg-phase3-canonical-perspective-projection`, rebuilt directly from #266's actual squash result `7cf8a82a4081f487e13c2117e1c9176c91266253`.
 
-#266 advances Phase 0 infrastructure without claiming structural sign-off:
+#267 advances deterministic projection consumption without changing geometry or paint semantics:
 
-- `video-parity-report` accepts an optional versioned `--regions` manifest keyed by canonical integer `frame_index`;
-- manifest loading fails closed on unsupported versions, negative/duplicate frame indices, empty/duplicate region names, and invalid rectangles;
-- exact-region slices are cloned before binding to `ParityFramePair`, preventing report-pair mutation from changing policy state;
-- omitting `--regions` preserves the previous parity-report behavior exactly;
-- focused tests cover frame binding, no-policy compatibility, validation, fixture loading, and clone isolation;
-- the input boundary deliberately does **not** enable structural regions in the parity torture CI baseline or redefine `ParityRegion` semantics.
+- deterministic frame-addressed preview uses `CanonicalFrameLayerState.perspective_projection.distance` rather than recomputing camera/clip projection in the painter;
+- clip-specific perspective overrides are represented by a full-stage **per-layer CSS perspective wrapper**, so one layer's projection distance does not collapse into the previous single parent perspective;
+- every per-layer wrapper keeps `perspective-origin: 50% 50%`, preserving the stage-centered vanishing point while canonical DOM order remains authoritative for track/z-index stacking;
+- the legacy shared stage perspective is disabled only when the frame is deterministic, at least one visual layer exists, every active visual layer has valid canonical projection state, and no live direct-manipulation override is active;
+- free-running playback, canonical-unavailable frames, empty visual frames, and live interaction keep the established shared-stage perspective path;
+- canonical canvas-pixel distance is scaled into preview CSS pixels with the browser's effective 1px floor rather than the legacy shared-stage 100px clamp;
+- `data-preview-perspective-mode` exposes `canonical-per-layer` vs `legacy-shared` for diagnostics;
+- focused tests include a real Timeline v1 clip-specific perspective override plus multi-layer, missing-state, empty-frame, live/fallback, and CSS-distance cases.
 
-Existing `ParityRegion` still means exact decoded RGB equality. Codec-affected image areas therefore cannot be promoted to zero-tolerance structure merely because the CLI can now accept regions. Production Phase 0 sign-off still requires canonical identity/geometry assertions for true zero-tolerance structure plus a tolerance-aware decoded-region policy and second-platform evidence.
+This mapping is contract-faithful rather than heuristic: `perspective-projection-v1` explicitly defines a CSS-style homogeneous projection with `m34 = -1 / distance`, applied after the camera-relative layer model transform. A parent CSS `perspective: <distance>` on each full-stage layer context is therefore the intended representation.
 
-The next Phase 3 consumer remains canonical **per-layer perspective projection**. Media geometry/bounds, transition/effect paint, text/shape/cursor paint, normal-playback canonicalization, and AudioGraph scheduling remain separate later slices.
+Media geometry/bounds, fit/crop placement, transition/effect paint, text/shape/cursor paint, normal-playback canonicalization, and AudioGraph scheduling are **not changed by #267**.
 
 ## Phase tracker
 
 | Phase | Status | Progress / exit work |
 |---|---|---|
-| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 adds a safe optional frame-indexed exact-region input boundary, but production structural policy, tolerance-aware codec-region semantics, and second-platform evidence remain. `audio-graph-v1` defines the unsupported-audio semantic boundary. |
-| Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
+| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged the fail-closed optional frame-indexed exact-region input boundary. Production structural policy, tolerance-aware codec-region semantics, and second-platform evidence remain. `audio-graph-v1` defines the unsupported-audio semantic boundary. |
+| Phase 1 — Immutable submission | **Complete** | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
 | Phase 2 — Canonical contract | **Complete** | Frame/range/source/order, curves, transforms/geometry/projection, transitions, effects, text/fonts, shapes, cursor, immutable source provenance, and AudioGraph semantics are versioned and cross-runtime checked. #260 closed the final contract gap. |
-| Phase 3 — Shared preview composition | **In progress** | #261 merged canonical visual activity/projection consumption; #262 retained parity evidence for projection identity/availability; #263 routes deterministic visual-media source time through FrameState; #264 consumes deterministic transform/opacity state; #265 consumes deterministic camera-relative `view_transform` while preserving fallback/live-interaction behavior. Canonical per-layer perspective is next; geometry/painter/audio consumption remains. |
+| Phase 3 — Shared preview composition | **In progress** | #261–#265 merged deterministic activity/source/transform/view consumption. #267 is the canonical per-layer perspective consumer. Media geometry/bounds, painter inputs, normal-playback canonicalization, diagnostics, and audio consumption remain. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, text metrics/fonts, shapes, transitions, effects, cursor, camera, color, and deterministic asset loading. |
 | Phase 6 — Audio parity closure | Not started | Make preview/Chromium/export obey AudioGraph exactly, including pitch, gain/fades, channels, program processing, processed stems, and decoded delivery. |
@@ -71,7 +73,7 @@ The legacy FFmpeg compositor is implementation evidence, not semantic authority.
 
 ### Perspective and stacking
 
-Track/z-index order remains authoritative for stacking; spatial `z` affects projection. `perspective-projection-v1` serializes projection independently from camera-relative model transforms and preserves the preview-compatible 1200-canvas-pixel no-camera distance.
+Track/z-index order remains authoritative for stacking; spatial `z` affects projection. `perspective-projection-v1` serializes projection independently from camera-relative model transforms and preserves the preview-compatible 1200-canvas-pixel no-camera distance. Phase 3 projection consumers must preserve per-layer distance overrides rather than flattening them into one shared camera value.
 
 ### Transition state and paint
 
@@ -113,7 +115,7 @@ A stacked PR is rebuilt from the **actual current `main` tree** after its parent
 5. Update this tracker on the clean branch.
 6. Validate the exact final head before merge.
 
-Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can look current while the tree silently reverts unrelated work. #261 followed this rule after #260; #262 followed it after #261; #264 was rebuilt from #263's actual squash result after its original stack diverged by one final parent-tracker commit; #265 was rebuilt directly from #264's squash result before production Canvas/tracker integration; #266 was reset to #265's actual squash result before its parity-region input/tests/docs were restored.
+Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can look current while the tree silently reverts unrelated work. #261 followed this rule after #260; #262 followed it after #261; #264 was rebuilt from #263's actual squash result; #265 was rebuilt directly from #264's squash result; #266 was reset to #265's actual squash result; #267 was force-reset to #266's actual squash result before its helper/tests/Canvas delta was restored.
 
 ## Phase 0 — Reproducible parity baseline
 
@@ -121,7 +123,11 @@ The deterministic `parity-torture-v1` fixture covers 20 seconds at 640×360/30 f
 
 Retained evidence `32074904557` / artifact `9303432653` established exact frame/audio/delivery identity mechanics. The visual baseline remains a known-mismatch diagnostic baseline, not a production threshold.
 
-Current parity metric defaults define production-like numeric tolerances (`channel <= 2`, pixel pass rate `>= 0.999`, SSIM `>= 0.995`) and support exact structural regions. #266 adds an optional versioned CLI input that can bind those existing exact regions to frame pairs by canonical integer frame index; it does **not** enable them in CI or define where exact decoded equality is valid. Inspection of retained decoded H.264 evidence on 2026-08-24 showed that literal RGB equality is not a sound general structural policy: codec-affected decoded pixels can differ even where frame identity and tolerance metrics are materially aligned. Structural sign-off therefore needs canonical geometry/identity assertions for truly zero-tolerance structure plus tolerance-aware decoded-image regions where codec output is involved, rather than arbitrary raw RGB-exact rectangles.
+Current parity metric defaults define production-like numeric tolerances (`channel <= 2`, pixel pass rate `>= 0.999`, SSIM `>= 0.995`) and support exact structural regions. #266 merged a fail-closed optional versioned CLI input that binds those regions to frame pairs by canonical integer frame index. It rejects unknown fields/multiple JSON values, invalid or duplicate policy entries, exact rectangles that extend outside either decoded frame, and configured region frames absent from the matched preview/rendered PNG set. Region slices are cloned before binding. Omitting `--regions` preserves previous behavior.
+
+`ParityRegion` exact comparison is decoded **RGBA** equality; the global tolerance metric is RGB. Retained decoded H.264 evidence on 2026-08-24 showed that literal decoded equality is not a sound general structural policy for codec-affected image areas. #266 therefore intentionally did not enable exact regions in the existing parity CI baseline or claim Phase 0 sign-off.
+
+#266 final exact head `1b656672dd83f0e90f1efc9fc31be3ecdb1ed3a6` passed Quality Gate #1545, Security Scan #1551, backend race, frontend lint/unit/performance/build, Playwright, deterministic renderer parity, CodeQL, desktop/Helm, plugin lifecycle, and all standalone platform/sandbox assurances. Final compare was ahead 17 / behind 0 with exactly six `video-parity-report` paths plus this tracker; reviews, inline threads, and comments were empty. It squash-merged with expected-head protection as `7cf8a82a4081f487e13c2117e1c9176c91266253`.
 
 Remaining Phase 0 sign-off:
 
@@ -180,87 +186,52 @@ Remaining Phase 0 sign-off:
 
 Supporting unblocks: #201 repaired the reachable PDF dependency; #219/#226 improved CI setup resilience; #239 aligned sandbox-worker SQLite test behavior; #246 ensured `frontend/test/` canonical suites run in the normal unit/Quality Gate.
 
-### #260 validation and merge evidence
-
-- Initial head `a630f0fe67ed4d485182622140e24115e94bb925` exposed only connector-authored Go formatting in `audio_graph_test.go`; frontend lint/unit/build was already green.
-- Formatting was corrected; the final exact PR head was `43a0d1c1a5044937f13be30e0bad58bb7640d41c`.
-- Exact-head **Quality Gate #1491 passed**, including backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright smoke, Windows desktop contract, and deterministic renderer parity.
-- Exact-head **Security Scan #1497 passed**, including dependency audits and Go/JavaScript-TypeScript CodeQL.
-- Linux workspace/quota, browser-egress, sandbox-worker, macOS runtime/extension/adversarial, and Windows/macOS confinement assurances all passed.
-- No review submissions, inline review threads, or PR comments required remediation.
-- `compare main...branch` contained only intended AudioGraph/test/tracker paths immediately before merge.
-- #260 squash-merged as `9acc544eac6cc63a14a4e0f22ee52cb07688e010`.
-
 ### Phase 2 exit gate — satisfied
 
-The renderer-independent semantic contract now covers the currently authorable visual and audio state required by this plan. Phase 3/4/6 consumers must use the canonical contracts rather than duplicate curve, frame, source-time, ordering, geometry, projection, transition, effect, text, shape, cursor, or audio semantic math. New authorable fields without explicit semantics remain fail closed.
+The renderer-independent semantic contract covers the currently authorable visual and audio state required by this plan. Phase 3/4/6 consumers must use the canonical contracts rather than duplicate curve, frame, source-time, ordering, geometry, projection, transition, effect, text, shape, cursor, or audio semantic math. New authorable fields without explicit semantics remain fail closed.
 
 ## Phase 3 — Shared preview composition
 
-**In progress. #261–#265 merged; canonical per-layer perspective projection is the next consumer slice.**
+**In progress. #261–#265 merged; #267 is the current canonical per-layer perspective consumer.**
 
 ### Merged #261 — canonical preview projection and deterministic activity consumption
 
-`preview-composition-frame-v1` is a lightweight runtime projection, not a new semantic engine. It:
+`preview-composition-frame-v1` evaluates the strict `visual-frame-state-v1` path, binds canonical layers back to exact Timeline v1 track/clip/asset objects, verifies positional/ID mapping, surfaces structured unavailable state rather than guessing ambiguous v1 transition placement, and allows the existing DOM/CSS painter to migrate incrementally without re-deriving canonical semantics.
 
-- evaluates the existing strict `visual-frame-state-v1` diagnostic path;
-- binds canonical layer state back to exact Timeline v1 track/clip/asset objects required by the current editor UI;
-- verifies identity/position mapping;
-- surfaces structured unavailable state instead of inventing v1 transition placement;
-- allows the current DOM/CSS painter to migrate incrementally without re-deriving canonical semantics.
-
-`queryActiveClipsAtFrame` consumes that projection for deterministic visual activity when available and carries `canonicalState` on matched entries. The existing indexed point query still serves free-running playback. Audio entries remain separate until the AudioGraph consumer slice.
-
-Focused coverage proves canonical z/order, object/asset identity binding, fail-closed transition ambiguity, canonical source-time/transform propagation, high-FPS frame activity, and explicit compatibility fallback without falsely attaching canonical state.
-
-### #261 validation and merge evidence
-
-- Final exact head: `c6417af5682adb54ccaaa0b340089e9b18d162cb`.
-- Exact-head **Quality Gate #1501 passed**: backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Windows desktop, Helm, Playwright smoke, and deterministic Video renderer parity all completed successfully.
-- Exact-head **Security Scan #1507 passed**, including dependency vulnerability audit and both Go and JavaScript/TypeScript CodeQL.
-- Linux workspace/quota, browser-egress, macOS runtime/extension/adversarial, Windows confinement, macOS confinement, and plugin lifecycle assurances passed.
-- There were no review submissions, inline review threads, or PR comments requiring remediation.
-- Final `compare main...branch` showed exactly the four intended Phase 3 code/test files plus this tracker; the branch was ahead of and not behind `main`.
-- #261 was marked ready and squash-merged with expected-head protection as `1fa4a2c9fb0ba02b00a194374dc363fe5f796199`.
+`queryActiveClipsAtFrame` consumes that projection for deterministic visual activity when available and carries `canonicalState` on matched entries. Exact head `c6417af5682adb54ccaaa0b340089e9b18d162cb` passed Quality #1501, Security #1507, Playwright, renderer parity, CodeQL, and platform/sandbox assurances, then squash-merged as `1fa4a2c9fb0ba02b00a194374dc363fe5f796199`.
 
 ### Merged #262 — retained preview-composition parity diagnostics
 
-The browser diagnostics script evaluates FrameState and preview composition together for every parity sample. It fails immediately on availability or ordered clip-identity drift and serializes preview-composition evidence into the retained diagnostic artifact. Both real saved-timeline fail-closed behavior and the transition-free positive control remain intact.
-
-Exact head `64a9a034b6e77334980c87bfcbc73416e1fd927e` passed Quality Gate #1506, Security #1512, Playwright, deterministic renderer parity, CodeQL, and the platform/sandbox assurances, then squash-merged as `3c2acfc9d5bc1fb1e97d3ef32c14d4707b62f8ec`.
+Browser diagnostics evaluate FrameState and preview composition together for every parity sample, fail on availability or ordered clip-identity drift, and serialize projection evidence into retained artifacts. Exact head `64a9a034b6e77334980c87bfcbc73416e1fd927e` passed Quality #1506, Security #1512, Playwright, renderer parity, CodeQL, and platform assurances, then squash-merged as `3c2acfc9d5bc1fb1e97d3ef32c14d4707b62f8ec`.
 
 ### Merged #263 — canonical deterministic visual-media source time
 
-`sourceTimeForPreviewMediaMs` consumes `canonicalState.source_time_ms` for explicit frame-addressed visual media, while free-running playback remains timeline-time based and deterministic compatibility fallback retains rational frame evaluation. Managed audio remains on the existing path until AudioGraph runtime adoption.
-
-Exact head `5e22a663506bcc8321534329693bcd1b185cf444` passed Quality Gate #1517, Security #1523, Playwright, deterministic renderer parity, backend race, CodeQL, and all platform/sandbox assurances. Review submissions, inline threads, and PR comments were empty; final compare contained only the four intended source-time/test/canvas/tracker paths. #263 squash-merged with expected-head protection as `77b49e096e165ad579d7eb5daed81763c023203c`.
+`sourceTimeForPreviewMediaMs` consumes `canonicalState.source_time_ms` for explicit frame-addressed visual media; free-running playback remains timeline-time based and deterministic fallback retains rational frame evaluation. Exact head `5e22a663506bcc8321534329693bcd1b185cf444` passed Quality #1517, Security #1523, Playwright, renderer parity, race, CodeQL, and platform assurances, then squash-merged as `77b49e096e165ad579d7eb5daed81763c023203c`.
 
 ### Merged #264 — canonical deterministic transform/opacity consumption
 
-`resolvePreviewFrameTransform` centralizes the transform values fed into the current preview painter. Deterministic canonical entries consume FrameState transform/opacity directly; free-running and fallback entries retain local property evaluation; live direct-manipulation intentionally bypasses canonical state until gesture commit. Canonical opacity owns clip fades exactly once.
+`resolvePreviewFrameTransform` routes deterministic canonical entries through FrameState transform/opacity while free-running/fallback entries retain local property evaluation and live manipulation bypasses canonical state until commit. Canonical opacity owns clip fades once. Exact head `b84b4b82e72393b27fcf6bf579fb9a8579ea9f5c` passed Quality #1523, Security #1529, Playwright, renderer parity, race, CodeQL, and platform assurances, then squash-merged as `357ae16301fc0b7d6c0f0d65e99c0277bac77adb`.
 
-Exact head `b84b4b82e72393b27fcf6bf579fb9a8579ea9f5c` passed Quality Gate #1523, Security Scan #1529, backend race, frontend lint/unit/performance/build, Playwright smoke, deterministic renderer parity, CodeQL, desktop/Helm, and all platform/sandbox assurances. Final compare was ahead 4 / behind 0 with exactly the resolver/test/Canvas/tracker paths; review submissions, inline threads, and PR comments were empty. #264 squash-merged with expected-head protection as `357ae16301fc0b7d6c0f0d65e99c0277bac77adb`.
+### Merged #265 — canonical deterministic camera-relative view transform
 
-A focused compatibility fix in #264 preserves exact canonical zero axis scale despite the legacy painter's truthy axis fallback.
+`resolvePreviewFrameViewTransform` routes deterministic canonical entries through `CanonicalFrameLayerState.view_transform`; fallback/free-running entries retain local camera subtraction and live direct manipulation bypasses canonical view state until commit. Exact head `7e86fcf07eec0cccf375ea68f019cc13a9e16b00` passed Quality #1532, Security #1538, frontend lint/unit/performance/build, backend tests/race, Playwright, renderer parity, CodeQL, desktop/Helm, and all standalone platform/sandbox assurances. Final compare/review audit was clean; #265 squash-merged as `02b0a5d5ce68f0ee46c16e092c525772751d5681`.
 
-### Merged #265 — canonical deterministic camera-relative view-transform consumption
+### Current #267 — canonical deterministic per-layer perspective projection
 
-`resolvePreviewFrameViewTransform` centralizes the camera-relative x/y/z and XYZ rotation values consumed by the current CSS painter. Deterministic canonical entries use `CanonicalFrameLayerState.view_transform` directly; free-running and compatibility-fallback entries retain local camera subtraction; live direct manipulation bypasses canonical view state until commit.
+`shouldUseCanonicalPreviewPerspective` makes projection adoption frame-global and fail closed: deterministic frame identity is required, at least one visual layer must exist, every visual layer must expose a finite positive canonical projection distance, and any live transform keeps the whole frame on the legacy shared context.
 
-#265 was first opened as a helper-only stack while #264's final renderer-parity gate was running. After #264 merged, #265 was rebuilt directly from `357ae16301fc0b7d6c0f0d65e99c0277bac77adb` using only its resolver/test blobs, retargeted to `main`, and verified ahead 1 / behind 0 before production wiring. The final Canvas integration added one resolver import, one camera-relative resolution call, and replaced the old inline local camera-subtraction transform string. Focused coverage includes exact zeros, fallback/live behavior, and a real Timeline v1 scene-camera projection.
+When canonical mode is active, the stage's old shared perspective becomes `none`. Each layer is wrapped in a full-stage absolute perspective context using that layer's canonical canvas-pixel distance scaled by preview stage scale. The wrapper preserves a stage-centered perspective origin; the transformed layer remains the explicit pointer target; independent perspective contexts remain in canonical DOM order so spatial `z` changes projection without replacing track/z-index stacking authority.
 
-Final exact head `7e86fcf07eec0cccf375ea68f019cc13a9e16b00` passed Quality Gate #1532, Security Scan #1538, frontend lint/unit/performance/build, backend tests/race, Playwright smoke, deterministic renderer parity, both CodeQL languages, desktop/Helm, and all standalone platform/sandbox assurances. Final compare was ahead 6 / behind 0 with exactly the resolver/test/Canvas/tracker paths; review submissions, inline threads, and PR comments were empty. #265 squash-merged with expected-head protection as `02b0a5d5ce68f0ee46c16e092c525772751d5681`.
+The real Timeline v1 test proves a clip `perspective: 500` override becomes canonical source `clip`, distance `500`, and is selected by the consumer. Additional tests cover mixed camera/clip distances, missing/NaN state, empty visual frames, free-running playback, live interaction fallback, distance scaling, and invalid distance rejection.
 
-This slice intentionally did **not** consume canonical `perspective_projection`: per-layer perspective distance can differ due to clip overrides, while the current DOM painter exposes one parent CSS `perspective`. Full projection adoption requires an explicit per-layer representation rather than a silent approximation.
+Implementation-only draft head `f03310043884cca1539fc76077f7bae0832d7387` was normalized from #266's squash result and had only three intended frontend paths before this tracker update. Its first hosted Quality #1547 run already passed frontend lint, unit tests, and Video Studio performance before the tracker commit; final exact-head validation must run again after this document update.
 
-### Remaining Phase 3 work
+### Remaining Phase 3 work after #267
 
-Recommended order after #265:
-
-1. Consume canonical `perspective_projection` in the program monitor with an explicit mapping that can represent per-layer clip perspective overrides; do not force it through one parent CSS perspective when semantics differ.
-2. Consume canonical media geometry/bounds and fit/crop placement, removing remaining source/canvas geometry assumptions while preserving crop-edit interaction as a temporary overlay.
-3. Move transitions/effects/text/shape/cursor painter inputs to their already-evaluated FrameState fields, removing remaining local `sampleCursor`, fade/property, and registry re-evaluation where canonical state exists.
-4. Extend the same frame-addressed composition model to normal playback without sacrificing interactive responsiveness; keep unsupported legacy v1 semantics visibly on the compatibility path until their persisted representation is unambiguous.
+1. Consume canonical media geometry/bounds and fit/crop placement, removing remaining source/canvas geometry assumptions while preserving crop-edit interaction as a temporary overlay.
+2. Move transition/effect painter inputs to their evaluated FrameState fields, preserving isolated pair-transition semantics.
+3. Move text/shape/cursor painter inputs to canonical state, including packaged font-resource identity and exact cursor sampling.
+4. Extend the same frame-addressed canonical composition model to normal playback without sacrificing interactive responsiveness; keep unsupported legacy v1 semantics visibly on the compatibility path until persisted representation is unambiguous.
 5. Add a preview diagnostic overlay/event payload for frame identity, canonical/fallback mode, active clip IDs, source times, transforms/bounds/projection, transition/effect IDs, and eventually AudioGraph identity.
 6. Introduce the AudioGraph preview consumer: selection, mute/solo, playback-rate/pitch policy, gain/fades, and channel policy come from `audio-graph-v1`; program processing/processed-stem audition may remain Phase 6 where offline DSP is required.
 
@@ -332,23 +303,24 @@ Before every merge:
 | Legacy FFmpeg approximations become contract | Canonical state is explicit; legacy renderers are evidence/consumers only. |
 | v1 adapter guesses ambiguous behavior | Ambiguous state fails closed; #261 preserves this boundary. |
 | Canonical preview projection binds wrong editor object | #261 verifies track/clip positional and ID identity before exposing canonical state. |
-| Frame-addressed preview silently mixes canonical and fallback semantics | #261 attaches `canonicalState` only when the strict projection succeeds; fallback entries remain explicitly without it. |
-| Visual media recomputes source time after canonical FrameState evaluation | #263 consumes `canonicalState.source_time_ms` only for frame-addressed canonical visual entries; free-running/fallback paths retain `sourceTiming.ts`, and audio waits for AudioGraph. |
-| Preview re-evaluates deterministic transform/opacity after FrameState | #264 routes deterministic canonical entries through `resolvePreviewFrameTransform`; canonical opacity owns clip fades once, while free-running/fallback/live-gesture paths remain explicit. |
-| Exact zero axis scale is lost by legacy truthy CSS fallback | #264 carries compatibility `scale: 0` whenever either canonical axis is exactly zero; the painter should still migrate from `||` to nullish/exact axis selection in a later cleanup. |
-| Deterministic preview subtracts camera twice or re-evaluates camera-relative transforms | #265 consumes canonical `view_transform` for deterministic entries; fallback/free-running/live-gesture paths alone use local camera subtraction. |
-| Per-layer perspective overrides are collapsed into one parent perspective | #265 leaves `perspective_projection` for the next explicit slice, which must represent per-layer distance rather than approximating it through one shared parent value. |
-| Parity-region input is mistaken for production structural policy | #266 only binds optional exact regions by canonical frame index and documents that decoded RGB exactness is unsafe for codec-affected areas; CI policy and tolerance-aware regions remain separate work. |
+| Frame-addressed preview silently mixes canonical and fallback semantics | Canonical state is attached only when strict projection succeeds; fallback entries remain explicit. #267 additionally makes perspective mode all-or-fallback for the whole visual frame. |
+| Visual media recomputes source time after canonical FrameState evaluation | #263 consumes `canonicalState.source_time_ms` for frame-addressed canonical visual entries; free-running/fallback paths retain `sourceTiming.ts`. |
+| Preview re-evaluates deterministic transform/opacity after FrameState | #264 routes deterministic entries through `resolvePreviewFrameTransform`; free-running/fallback/live gesture paths remain explicit. |
+| Exact zero axis scale is lost by legacy truthy CSS fallback | #264 carries compatibility `scale: 0` whenever either canonical axis is exactly zero; painter cleanup remains later work. |
+| Deterministic preview subtracts camera twice | #265 consumes canonical `view_transform`; fallback/free-running/live-gesture paths alone use local camera subtraction. |
+| Per-layer perspective overrides collapse into one parent perspective | #267 removes the shared parent perspective only for complete deterministic canonical frames and gives each layer a full-stage perspective context using its canonical distance. |
+| Independent perspective contexts reorder layers by spatial z | #267 keeps each full-stage perspective context in canonical DOM order; track/z-index order remains stacking authority while z affects projection within the layer context. |
+| Live manipulation mixes canonical and legacy projection contexts | Any `liveTransform` forces the entire visual frame to the legacy shared-stage perspective until commit. |
+| Parity-region input is mistaken for production structural policy | #266 is only a fail-closed input boundary; exact decoded RGBA is not enabled as general codec-region policy. |
 | Millisecond rounding creates frame/source drift | Rational frame/source helpers and integer AudioGraph sample-boundary rules. |
 | Source aspect ratio is guessed | Explicit bounds or immutable source provenance only. |
-| Perspective differs between consumers | One canonical projection contract in FrameState. |
 | Pair transitions become independent alpha layers | Pair paint operates on isolated surfaces with canonical weights/transforms. |
 | Effect/text/shape/cursor defaults drift | Versioned evaluated state is authoritative; unsupported metadata fails closed. |
 | Browser/system font fallback changes metrics | Packaged static-face provenance; deterministic intrinsic metric ownership remains explicit Phase 3–5 work. |
-| Audio pitch/fade/processing location diverges | AudioGraph explicitly owns pitch preservation, minimum fade overlap, and post-mix processing. |
+| Audio pitch/fade/processing location diverges | AudioGraph owns pitch preservation, minimum fade overlap, and post-mix processing. |
 | Unsupported channels are silently remixed | v1 accepts mono→stereo or stereo passthrough only; other layouts fail closed. |
-| Structural parity is claimed from codec-noisy raw RGB equality | Phase 0 separates canonical zero-tolerance identity/geometry from tolerance-aware decoded regions; global metrics or arbitrary exact rectangles alone do not satisfy the structural gate. |
-| Stacked branch carries stale tree | Rebuild from actual `main` and inspect `compare`; #261/#262/#264/#265/#266 were normalized this way. |
+| Structural parity is claimed from codec-noisy decoded equality | Phase 0 separates canonical zero-tolerance identity/geometry from tolerance-aware decoded regions; global metrics or arbitrary exact rectangles alone do not satisfy sign-off. |
+| Stacked branch carries stale tree | Rebuild from actual `main` and inspect `compare`; #261/#262/#264/#265/#266/#267 were normalized this way. |
 | CI setup/runner saturation hides code state | Distinguish setup/queue from executed checks. |
 | Browser worker resource cost | Admission control, health checks, cancellation, guarded rollout, FFmpeg retained for media I/O. |
 
@@ -384,25 +356,19 @@ Before every merge:
 ### 2026-08-24
 
 - Refreshed against actual `main` `dc51d7ddaf8060304fbe63153796e4ebafe48a20`; the previous handoff's claimed AudioGraph branch did not exist.
-- Created `feat/video-wysiwyg-phase2-audio-graph`, opened #260, implemented mirrored Go/TypeScript `audio-graph-v1`, and added one shared cross-runtime fixture.
-- Initial #260 head exposed only Go formatting; corrected final head passed complete Quality/Security/platform validation and #260 squash-merged as `9acc544eac6cc63a14a4e0f22ee52cb07688e010`, completing Phase 2.
-- Opened draft #261 while #260 parity was still executing, then safely rebuilt #261 directly from merged `main` and retargeted it to `main`.
-- #261 introduced `preview-composition-frame-v1`, strict identity binding, and the first real canonical preview consumer: deterministic visual frame activity comes from FrameState when available and carries `canonicalState` into the existing preview index.
-- #261 exact head `c6417af5682adb54ccaaa0b340089e9b18d162cb` passed Quality Gate #1501, Security #1507, backend race, frontend lint/unit/build/performance, Playwright, renderer parity, desktop/Helm, CodeQL, and all platform/sandbox assurances; no review threads/comments required remediation.
-- #261 squash-merged as `1fa4a2c9fb0ba02b00a194374dc363fe5f796199`.
-- #262 was rebuilt from the #261 merge, retargeted to `main`, and retained only its diagnostics/tracker delta. Exact head `64a9a034b6e77334980c87bfcbc73416e1fd927e` passed Quality Gate #1506, Security #1512, Playwright, deterministic renderer parity, CodeQL, and the platform/sandbox assurances, then squash-merged as `3c2acfc9d5bc1fb1e97d3ef32c14d4707b62f8ec`.
-- Retained decoded parity evidence was inspected before defining Phase 0 structural policy; raw RGB exactness is codec-noisy and is not being promoted into a false zero-tolerance production gate.
-- #263 exact head `5e22a663506bcc8321534329693bcd1b185cf444` passed Quality Gate #1517, Security #1523, Playwright, renderer parity, backend race, CodeQL, and all platform/sandbox assurances with no review comments/threads; final compare contained only the intended four paths.
-- #263 squash-merged with expected-head protection as `77b49e096e165ad579d7eb5daed81763c023203c`.
-- #264 was rebuilt from #263's exact squash result, retained only its transform resolver/test/Canvas/tracker scope, and added exact-zero-axis compatibility coverage for the legacy truthy CSS scale fallback.
-- #264 exact head `b84b4b82e72393b27fcf6bf579fb9a8579ea9f5c` passed Quality Gate #1523, Security #1529, backend race, frontend lint/unit/performance/build, Playwright, renderer parity, CodeQL, desktop/Helm, and all platform/sandbox assurances with a clean review audit; it squash-merged with expected-head protection as `357ae16301fc0b7d6c0f0d65e99c0277bac77adb`.
-- #265 was opened helper-only while #264 parity was still running. After #264 merged, #265 was rebuilt directly from `357ae16301fc0b7d6c0f0d65e99c0277bac77adb`, retargeted to `main`, verified ahead 1 / behind 0, and then wired into `VideoPreviewCanvas.tsx` while keeping full perspective projection explicitly out of scope.
-- #265 exact head `7e86fcf07eec0cccf375ea68f019cc13a9e16b00` passed Quality Gate #1532, Security #1538, Playwright, renderer parity, backend race, CodeQL, and all platform/sandbox assurances with a clean review audit; it squash-merged with expected-head protection as `02b0a5d5ce68f0ee46c16e092c525772751d5681`.
-- #266 was rebuilt directly from the #265 squash result and adds the optional versioned frame-indexed structural-region input boundary for `video-parity-report` without changing CI parity policy. Its first normalized hosted run exposed only `gofmt` alignment in `regions.go`; that formatting defect was corrected before final validation.
+- #260 implemented mirrored Go/TypeScript `audio-graph-v1`, passed complete validation, and squash-merged as `9acc544eac6cc63a14a4e0f22ee52cb07688e010`, completing Phase 2.
+- #261 introduced `preview-composition-frame-v1` and canonical deterministic visual activity; it passed complete validation and squash-merged as `1fa4a2c9fb0ba02b00a194374dc363fe5f796199`.
+- #262 added retained preview-composition parity diagnostics and squash-merged as `3c2acfc9d5bc1fb1e97d3ef32c14d4707b62f8ec`.
+- Retained decoded parity evidence was inspected; raw decoded equality is codec-noisy and was not promoted into a false zero-tolerance production gate.
+- #263 consumed canonical deterministic visual-media source time and squash-merged as `77b49e096e165ad579d7eb5daed81763c023203c`.
+- #264 consumed canonical deterministic transform/opacity, including exact-zero scale compatibility, and squash-merged as `357ae16301fc0b7d6c0f0d65e99c0277bac77adb`.
+- #265 consumed canonical deterministic camera-relative `view_transform`, passed Quality #1532/Security #1538 plus full parity/platform gates, and squash-merged as `02b0a5d5ce68f0ee46c16e092c525772751d5681`.
+- #266 normalized onto #265, added the fail-closed parity-region manifest boundary, corrected formatter and static-review findings, passed Quality #1545/Security #1551 plus the complete exact-head matrix, and squash-merged as `7cf8a82a4081f487e13c2117e1c9176c91266253`.
+- #267 was force-reset to the #266 squash result, restored only the perspective helper/tests, verified the full-file Canvas write reduced to a scoped 34-addition/2-deletion patch, and wired deterministic per-layer canonical CSS perspective while retaining legacy shared perspective for fallback/live paths. Draft implementation head `f03310043884cca1539fc76077f7bae0832d7387` passed frontend lint/unit/performance before this tracker update; exact final-head validation remains required.
 
 ## Next recommended slice
 
-1. Finish exact-head Quality/Security/platform/Playwright/renderer-parity validation and review audit for #266, then squash-merge only if the optional parity-region boundary remains scoped and green.
-2. Rebuild the already-started perspective helper branch from the resulting actual `main`, then consume canonical **perspective projection** with an explicit per-layer-capable mapping rather than forcing clip overrides through the current single parent CSS perspective.
-3. Then consume canonical media geometry/bounds, followed by transition/effect and text/shape/cursor painter inputs, and finally AudioGraph scheduling in separate reviewable slices.
-4. In parallel, use #266's input boundary to define the codec-aware Phase 0 production structural policy and add second-platform parity evidence; current global numeric thresholds or arbitrary exact decoded regions alone are not visual sign-off.
+1. Validate #267's **exact tracker-updated head** through Quality/Security/platform/Playwright/renderer-parity, inspect current `main`, `compare main...branch`, reviews/threads/comments, and squash-merge only if the projection consumer remains scoped and green.
+2. From resulting `main`, consume canonical **media geometry/bounds and fit/crop placement** in a separate Phase 3 PR; preserve crop editing as an explicit temporary interaction overlay rather than re-deriving canonical geometry.
+3. Then consume canonical transition/effect painter inputs, followed by text/shape/cursor painter inputs, normal-playback canonicalization/diagnostics, and AudioGraph scheduling in separate reviewable slices.
+4. In parallel, use #266's fail-closed input boundary to define the codec-aware Phase 0 production structural policy and add second-platform parity evidence; current global numeric thresholds or arbitrary exact decoded regions alone are not visual sign-off.

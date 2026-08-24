@@ -30,6 +30,11 @@ import { renderPreviewPCM } from './parity/previewAudioRenderer';
 import { frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForPreviewMediaMs } from './sourceTiming';
 import { resolvePreviewFrameTransform } from './previewFrameTransform';
 import { resolvePreviewFrameViewTransform } from './previewFrameViewTransform';
+import {
+  canonicalPreviewPerspectiveCSSPixels,
+  resolveCanonicalPreviewPerspectiveDistance,
+  shouldUseCanonicalPreviewPerspective,
+} from './previewFramePerspectiveProjection';
 
 function formatTime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -310,6 +315,11 @@ export function VideoPreviewCanvas() {
   const posterClipIds = new Set(posterLayers.map(({ clip }) => clip.id));
   const previewLayers = [...layers, ...posterLayers]
     .sort(compareIndexedTimelineClipOrder);
+  const useCanonicalPerspective = shouldUseCanonicalPreviewPerspective(
+    deterministicFrame,
+    previewLayers.map((entry) => entry.canonicalState),
+    Boolean(liveTransform),
+  );
 
   // Audio uses the same interval index as visuals, eliminating full timeline
   // scans and repeated asset lookups on every playhead update.
@@ -746,6 +756,10 @@ export function VideoPreviewCanvas() {
       camera,
       hasLiveOverride,
     );
+    const perspectiveDistance = resolveCanonicalPreviewPerspectiveDistance(
+      entry.canonicalState,
+      useCanonicalPerspective,
+    );
     const opacity = Math.max(0, Math.min(1, transform.opacity))
       * (opacityIncludesClipFades ? 1 : fadeFactor(clip, playheadMs));
     const selected = clip.id === selectedClipId;
@@ -770,6 +784,7 @@ export function VideoPreviewCanvas() {
       transform: `translate(-50%, -50%) translate3d(${viewTransform.x * stageScale}px, ${viewTransform.y * stageScale}px, ${viewTransform.z * stageScale}px) rotateX(${inCropEdit ? 0 : viewTransform.rotation_x}deg) rotateY(${inCropEdit ? 0 : viewTransform.rotation_y}deg) rotateZ(${inCropEdit ? 0 : viewTransform.rotation_z}deg) scale3d(${transform.scale_x || transform.scale}, ${transform.scale_y || transform.scale}, 1)`,
       opacity,
       filter: composePreviewFilter(clip.effects),
+      pointerEvents: perspectiveDistance !== null ? 'auto' : undefined,
     };
 
     const isEditingText = editingTextClipId === clip.id;
@@ -892,7 +907,7 @@ export function VideoPreviewCanvas() {
       return null;
     }
 
-    return (
+    const layer = (
       <div
         key={clip.id}
         data-preview-clip-id={clip.id}
@@ -1021,6 +1036,20 @@ export function VideoPreviewCanvas() {
         })()}
       </div>
     );
+    if (perspectiveDistance === null) return layer;
+    return (
+      <div
+        key={clip.id}
+        className="pointer-events-none absolute inset-0"
+        style={{
+          perspective: `${canonicalPreviewPerspectiveCSSPixels(perspectiveDistance, stageScale)}px`,
+          perspectiveOrigin: '50% 50%',
+          transformStyle: 'preserve-3d',
+        }}
+      >
+        {layer}
+      </div>
+    );
   };
 
   return (
@@ -1115,12 +1144,15 @@ export function VideoPreviewCanvas() {
           data-testid="video-preview-program"
           data-parity-frame-index={deterministicFrame ?? Math.floor((playheadMs * fps) / 1000)}
           data-parity-time-ms={Math.round(playheadMs)}
+          data-preview-perspective-mode={useCanonicalPerspective ? 'canonical-per-layer' : 'legacy-shared'}
           className="relative overflow-hidden border border-white/10"
           style={{
             width: stageSize.width || undefined,
             height: stageSize.height || undefined,
             background: timeline?.canvas.background || '#000000',
-            perspective: `${Math.max(100, activeScene?.camera ? (canvasHeight / (2 * Math.tan(Math.max(1, Math.min(179, camera.field_of_view)) * Math.PI / 360))) * stageScale : 1200 * stageScale)}px`,
+            perspective: useCanonicalPerspective
+              ? 'none'
+              : `${Math.max(100, activeScene?.camera ? (canvasHeight / (2 * Math.tan(Math.max(1, Math.min(179, camera.field_of_view)) * Math.PI / 360))) * stageScale : 1200 * stageScale)}px`,
             perspectiveOrigin: '50% 50%',
             transformStyle: 'preserve-3d',
             filter: composePreviewFilter(activeScene?.effects),
