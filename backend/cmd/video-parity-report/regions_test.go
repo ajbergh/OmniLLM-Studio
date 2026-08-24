@@ -39,6 +39,16 @@ func TestLoadParityRegionManifestRejectsInvalidPolicy(t *testing.T) {
 			want: "version = 2, want 1",
 		},
 		{
+			name: "unknown field",
+			data: `{"version":1,"frames":[],"framez":[]}`,
+			want: "unknown field \"framez\"",
+		},
+		{
+			name: "multiple JSON values",
+			data: `{"version":1,"frames":[]} {"version":1,"frames":[]}`,
+			want: "exactly one JSON object",
+		},
+		{
 			name: "duplicate frame",
 			data: `{"version":1,"frames":[{"frame_index":2,"regions":[]},{"frame_index":2,"regions":[]}]}`,
 			want: "duplicate frame_index 2",
