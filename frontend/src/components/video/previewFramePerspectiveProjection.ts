@@ -17,7 +17,7 @@ export function shouldUseCanonicalPreviewPerspective(
   canonicalStates: Array<CanonicalPerspectiveState | undefined>,
   hasLiveOverride: boolean,
 ): boolean {
-  if (deterministicFrame === null || hasLiveOverride) return false;
+  if (deterministicFrame === null || hasLiveOverride || canonicalStates.length === 0) return false;
   return canonicalStates.every((state) => {
     const distance = state?.perspective_projection.distance;
     return typeof distance === 'number' && Number.isFinite(distance) && distance > 0;
