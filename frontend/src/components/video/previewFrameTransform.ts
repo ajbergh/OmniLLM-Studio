@@ -25,12 +25,18 @@ export function resolvePreviewFrameTransform(
 ): ResolvedPreviewFrameTransform {
   if (canonicalState && !hasLiveOverride) {
     const canonical = canonicalState.transform;
+    // The legacy CSS painter still uses `scale_x || scale` / `scale_y || scale`.
+    // Preserve an exact canonical zero axis until that painter is migrated to
+    // nullish axis selection; non-zero canonical axes remain authoritative.
+    const compatibilityScale = canonical.scale_x === 0 || canonical.scale_y === 0
+      ? 0
+      : (clip.transform?.scale ?? 1);
     return {
       transform: {
         x: canonical.x,
         y: canonical.y,
         z: canonical.z,
-        scale: clip.transform?.scale ?? 1,
+        scale: compatibilityScale,
         scale_x: canonical.scale_x,
         scale_y: canonical.scale_y,
         rotation: canonical.rotation_z,
