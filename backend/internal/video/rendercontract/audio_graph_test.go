@@ -10,7 +10,7 @@ import (
 
 type audioGraphFixture struct {
 	Manifest RenderManifestV1 `json:"manifest"`
-	Expected AudioGraphV1      `json:"expected"`
+	Expected AudioGraphV1     `json:"expected"`
 }
 
 func loadAudioGraphFixture(t *testing.T) audioGraphFixture {
