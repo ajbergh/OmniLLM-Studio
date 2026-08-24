@@ -12,7 +12,7 @@ import (
 const parityRegionManifestVersion = 1
 
 type parityRegionManifest struct {
-	Version int                     `json:"version"`
+	Version int                      `json:"version"`
 	Frames  []parityRegionFrameInput `json:"frames"`
 }
 
