@@ -142,7 +142,8 @@ func loadPairs(previewDir, renderedDir string, fps int, regionsByFrame map[int64
 			Regions:    regions,
 		})
 	}
-	var firstUnmatchedFrame *int64
+	var firstUnmatchedFrame int64
+	hasUnmatchedFrame := false
 	for frameIndex, regions := range regionsByFrame {
 		if len(regions) == 0 {
 			continue
@@ -150,13 +151,13 @@ func loadPairs(previewDir, renderedDir string, fps int, regionsByFrame map[int64
 		if _, matched := matchedRegionFrames[frameIndex]; matched {
 			continue
 		}
-		if firstUnmatchedFrame == nil || frameIndex < *firstUnmatchedFrame {
-			candidate := frameIndex
-			firstUnmatchedFrame = &candidate
+		if !hasUnmatchedFrame || frameIndex < firstUnmatchedFrame {
+			firstUnmatchedFrame = frameIndex
+			hasUnmatchedFrame = true
 		}
 	}
-	if firstUnmatchedFrame != nil {
-		return nil, fmt.Errorf("parity region manifest frame_index %d has no matching preview/rendered PNG pair", *firstUnmatchedFrame)
+	if hasUnmatchedFrame {
+		return nil, fmt.Errorf("parity region manifest frame_index %d has no matching preview/rendered PNG pair", firstUnmatchedFrame)
 	}
 	video.SortParityPairs(pairs)
 	return pairs, nil
