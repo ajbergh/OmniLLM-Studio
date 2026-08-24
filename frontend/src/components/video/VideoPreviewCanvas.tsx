@@ -22,11 +22,12 @@ import { ContextMenu } from '../common/ContextMenu';
 import type { ContextMenuEntry } from '../common/ContextMenu';
 import { composePreviewFilter } from './effects/effectRegistry';
 import { evaluateCameraProperty, evaluateClipProperty } from '../../video/renderContractProperties';
+import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 import { ShapePreview } from './ShapePreview';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineTrack } from '../../types/video';
 import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips, queryActiveClipsAtFrame } from './pro/timelineIndex';
 import { renderPreviewPCM } from './parity/previewAudioRenderer';
-import { frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForAddressMs } from './sourceTiming';
+import { frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForPreviewMediaMs } from './sourceTiming';
 
 function formatTime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -65,6 +66,8 @@ interface LayerEntry {
   clipIndex: number;
   clip: VideoTimelineClip;
   asset?: VideoAsset;
+  /** Exact canonical visual state, present only when frame projection succeeds. */
+  canonicalState?: CanonicalFrameLayerState;
 }
 
 /** Interpolated cursor position at a clip-relative time, or null when hidden/empty. */
@@ -392,19 +395,24 @@ export function VideoPreviewCanvas() {
   }, [isPlaying, setPlayhead, setPlaying]);
 
   // Keep every mounted media element in sync with output-timeline time on every
-  // tick. Deterministic frame-addressed capture derives source time directly
-  // from output-frame identity; free-running playback keeps sub-frame playhead
-  // timing for responsiveness. Visual videos are muted; managed <audio>
-  // elements apply volume keyframes, fades, solo, and preview master gain.
+  // tick. Deterministic visual media consumes canonical FrameState source time
+  // when the strict preview projection succeeds; free-running playback and the
+  // explicit compatibility fallback keep the established address evaluator.
+  // Audio remains outside visual FrameState until AudioGraph consumption lands.
   useEffect(() => {
     const address = deterministicFrame !== null
       ? { kind: 'frame' as const, frameIndex: deterministicFrame, fps }
       : { kind: 'time' as const, timelineMs: playheadMs };
 
-    const syncElement = (element: HTMLMediaElement, clip: VideoTimelineClip) => {
+    const syncElement = (
+      element: HTMLMediaElement,
+      clip: VideoTimelineClip,
+      canonicalState?: CanonicalFrameLayerState,
+    ) => {
       const playbackRate = Math.min(4, Math.max(0.25, clip.playback_rate ?? 1));
-      const targetMs = sourceTimeForAddressMs(
+      const targetMs = sourceTimeForPreviewMediaMs(
         address,
+        canonicalState,
         clip.start_ms,
         clip.trim_in_ms ?? 0,
         playbackRate,
@@ -429,7 +437,7 @@ export function VideoPreviewCanvas() {
     };
     for (const [clipId, video] of videoRefs.current) {
       const entry = layersRef.current.find((layer) => layer.clip.id === clipId);
-      if (entry) syncElement(video, entry.clip);
+      if (entry) syncElement(video, entry.clip, entry.canonicalState);
     }
     for (const [clipId, audio] of audioRefs.current) {
       const entry = audioLayersRef.current.find((layer) => layer.clip.id === clipId);
