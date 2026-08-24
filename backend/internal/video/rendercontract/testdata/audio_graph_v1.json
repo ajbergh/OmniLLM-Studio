@@ -1,0 +1,350 @@
+{
+  "manifest": {
+    "version": 1,
+    "contract_version": "timeline-v2",
+    "snapshot_id": "snapshot-audio-graph",
+    "timeline_id": "timeline-audio-graph",
+    "timeline_revision": 7,
+    "timeline_sha256": "timeline-sha",
+    "asset_manifest_sha256": "asset-sha",
+    "timeline": {
+      "version": 2,
+      "canvas": {
+        "width": 1280,
+        "height": 720,
+        "fps": 30,
+        "background": "#000000"
+      },
+      "duration_ms": 2000,
+      "tracks": [
+        {
+          "id": "music-track",
+          "type": "audio",
+          "name": "Music",
+          "locked": false,
+          "muted": false,
+          "solo": true,
+          "visible": true,
+          "clips": [
+            {
+              "id": "clip-a",
+              "asset_id": "asset-a",
+              "start_ms": 250,
+              "duration_ms": 1000,
+              "trim_in_ms": 100,
+              "trim_out_ms": 999,
+              "playback_rate": 1.5,
+              "volume": 0.8,
+              "fade_in_ms": 100,
+              "fade_out_ms": 200,
+              "effects": [],
+              "keyframes": [
+                {
+                  "id": "x",
+                  "property": "x",
+                  "time_ms": 0,
+                  "value": 10
+                },
+                {
+                  "id": "gain-late",
+                  "property": "volume",
+                  "time_ms": 1000,
+                  "value": 1.5,
+                  "easing": "ease-out"
+                },
+                {
+                  "id": "gain-early",
+                  "property": "volume",
+                  "time_ms": 0,
+                  "value": 0.5
+                }
+              ]
+            },
+            {
+              "id": "clip-muted",
+              "asset_id": "asset-a",
+              "start_ms": 1000,
+              "duration_ms": 500,
+              "trim_in_ms": 0,
+              "trim_out_ms": 500,
+              "muted": true,
+              "effects": [],
+              "keyframes": []
+            }
+          ]
+        },
+        {
+          "id": "video-track",
+          "type": "video",
+          "name": "Video",
+          "locked": false,
+          "muted": false,
+          "visible": true,
+          "clips": [
+            {
+              "id": "clip-b",
+              "asset_id": "asset-b",
+              "start_ms": 0,
+              "duration_ms": 2000,
+              "trim_in_ms": 0,
+              "trim_out_ms": 2000,
+              "effects": [],
+              "keyframes": []
+            }
+          ]
+        },
+        {
+          "id": "muted-track",
+          "type": "music",
+          "name": "Muted",
+          "locked": false,
+          "muted": true,
+          "solo": true,
+          "visible": true,
+          "clips": [
+            {
+              "id": "clip-c",
+              "asset_id": "asset-c",
+              "start_ms": 1250,
+              "duration_ms": 500,
+              "trim_in_ms": 50,
+              "trim_out_ms": 550,
+              "effects": [],
+              "keyframes": []
+            }
+          ]
+        }
+      ],
+      "markers": [],
+      "metadata": {
+        "render_audio_processing": {
+          "normalize": true,
+          "target_lufs": -16,
+          "denoise": true,
+          "eq_preset": "voice",
+          "compressor": false,
+          "limiter": true,
+          "channels": "stereo"
+        }
+      }
+    },
+    "assets": [
+      {
+        "asset_id": "asset-a",
+        "clip_ids": [
+          "clip-a",
+          "clip-muted"
+        ],
+        "staged_path": "assets/a.wav",
+        "file_sha256": "a",
+        "size_bytes": 1000,
+        "kind": "audio",
+        "mime_type": "audio/wav",
+        "media": {
+          "duration_ms": 5000,
+          "sample_rate": 44100,
+          "channels": 1,
+          "channel_layout": "mono"
+        }
+      },
+      {
+        "asset_id": "asset-b",
+        "clip_ids": [
+          "clip-b"
+        ],
+        "staged_path": "assets/b.mp4",
+        "file_sha256": "b",
+        "size_bytes": 2000,
+        "kind": "video",
+        "mime_type": "video/mp4",
+        "media": {
+          "duration_ms": 2000,
+          "sample_rate": 48000,
+          "channels": 2,
+          "channel_layout": "stereo"
+        }
+      },
+      {
+        "asset_id": "asset-c",
+        "clip_ids": [
+          "clip-c"
+        ],
+        "staged_path": "assets/c.wav",
+        "file_sha256": "c",
+        "size_bytes": 1000,
+        "kind": "music",
+        "mime_type": "audio/wav",
+        "media": {
+          "duration_ms": 2000,
+          "sample_rate": 48000,
+          "channels": 2,
+          "channel_layout": "stereo"
+        }
+      }
+    ],
+    "settings": {
+      "width": 1280,
+      "height": 720,
+      "fps": 30,
+      "range_start_frame": 15,
+      "range_end_frame": 45,
+      "burn_in_captions": true,
+      "audio_sample_rate": 48000,
+      "audio_channels": 2,
+      "working_color_space": "srgb",
+      "output_container": "mp4",
+      "video_codec": "h264",
+      "audio_codec": "aac"
+    },
+    "metadata": {}
+  },
+  "expected": {
+    "contract_version": "audio-graph-v1",
+    "sample_rate": 48000,
+    "channels": 2,
+    "channel_layout": "stereo",
+    "timeline_sample_count": 96000,
+    "range_start_sample": 24000,
+    "range_end_sample": 72000,
+    "range_sample_count": 48000,
+    "mix_policy": "sum-no-normalize",
+    "program_stem_id": "program-mix",
+    "sources": [
+      {
+        "node_id": "source:clip-a",
+        "stem_id": "clip:clip-a",
+        "track_id": "music-track",
+        "clip_id": "clip-a",
+        "asset_id": "asset-a",
+        "track_index": 0,
+        "clip_index": 0,
+        "enabled": true,
+        "suppression_reason": "",
+        "start_sample": 12000,
+        "end_sample": 60000,
+        "output_sample_count": 48000,
+        "source_start_ms": 100,
+        "source_end_ms": 1600,
+        "playback_rate": 1.5,
+        "pitch_policy": "preserve",
+        "source_channels": 1,
+        "channel_map": "mono-to-stereo",
+        "base_gain": 0.8,
+        "gain_mode": "automation-overrides-base",
+        "gain_keyframes": [
+          {
+            "id": "gain-early",
+            "authored_order": 2,
+            "time_ms": 0,
+            "value": 0.5
+          },
+          {
+            "id": "gain-late",
+            "authored_order": 1,
+            "time_ms": 1000,
+            "value": 1.5,
+            "easing": "ease-out"
+          }
+        ],
+        "fade_in_samples": 4800,
+        "fade_out_samples": 9600,
+        "fade_curve": "linear",
+        "fade_combine_policy": "minimum"
+      },
+      {
+        "node_id": "source:clip-muted",
+        "stem_id": "clip:clip-muted",
+        "track_id": "music-track",
+        "clip_id": "clip-muted",
+        "asset_id": "asset-a",
+        "track_index": 0,
+        "clip_index": 1,
+        "enabled": false,
+        "suppression_reason": "clip-muted",
+        "start_sample": 48000,
+        "end_sample": 72000,
+        "output_sample_count": 24000,
+        "source_start_ms": 0,
+        "source_end_ms": 500,
+        "playback_rate": 1,
+        "pitch_policy": "preserve",
+        "source_channels": 1,
+        "channel_map": "mono-to-stereo",
+        "base_gain": 1,
+        "gain_mode": "automation-overrides-base",
+        "gain_keyframes": [],
+        "fade_in_samples": 0,
+        "fade_out_samples": 0,
+        "fade_curve": "linear",
+        "fade_combine_policy": "minimum"
+      },
+      {
+        "node_id": "source:clip-b",
+        "stem_id": "clip:clip-b",
+        "track_id": "video-track",
+        "clip_id": "clip-b",
+        "asset_id": "asset-b",
+        "track_index": 1,
+        "clip_index": 0,
+        "enabled": false,
+        "suppression_reason": "solo-suppressed",
+        "start_sample": 0,
+        "end_sample": 96000,
+        "output_sample_count": 96000,
+        "source_start_ms": 0,
+        "source_end_ms": 2000,
+        "playback_rate": 1,
+        "pitch_policy": "preserve",
+        "source_channels": 2,
+        "channel_map": "stereo-passthrough",
+        "base_gain": 1,
+        "gain_mode": "automation-overrides-base",
+        "gain_keyframes": [],
+        "fade_in_samples": 0,
+        "fade_out_samples": 0,
+        "fade_curve": "linear",
+        "fade_combine_policy": "minimum"
+      },
+      {
+        "node_id": "source:clip-c",
+        "stem_id": "clip:clip-c",
+        "track_id": "muted-track",
+        "clip_id": "clip-c",
+        "asset_id": "asset-c",
+        "track_index": 2,
+        "clip_index": 0,
+        "enabled": false,
+        "suppression_reason": "track-muted",
+        "start_sample": 60000,
+        "end_sample": 84000,
+        "output_sample_count": 24000,
+        "source_start_ms": 50,
+        "source_end_ms": 550,
+        "playback_rate": 1,
+        "pitch_policy": "preserve",
+        "source_channels": 2,
+        "channel_map": "stereo-passthrough",
+        "base_gain": 1,
+        "gain_mode": "automation-overrides-base",
+        "gain_keyframes": [],
+        "fade_in_samples": 0,
+        "fade_out_samples": 0,
+        "fade_curve": "linear",
+        "fade_combine_policy": "minimum"
+      }
+    ],
+    "program_processing": {
+      "mode": "processed-stem-required",
+      "stage": "post-mix",
+      "input_stem_id": "program-mix",
+      "output_stem_id": "program-output",
+      "denoise": true,
+      "eq_preset": "voice",
+      "compressor": false,
+      "normalize": true,
+      "target_lufs": -16,
+      "limiter": true,
+      "channel_mode": "stereo"
+    }
+  }
+}
