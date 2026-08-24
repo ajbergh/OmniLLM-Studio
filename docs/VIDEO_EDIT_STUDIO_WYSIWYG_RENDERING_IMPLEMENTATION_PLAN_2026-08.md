@@ -9,22 +9,28 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG program PR: **#267 — Consume canonical preview perspective projection** — squash merge `8a9343cf42d4e47f5b9d2b459737601c420d097b` (2026-08-24).
+Latest merged WYSIWYG program PR: **#268 — Bridge persisted asset bounds into preview geometry** — squash merge `e498bee75757bdeff3bb3c5b8b35aa3f402265b4` (2026-08-24).
 
 **Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** The renderer-independent visual contract (`visual-frame-state-v1` and its subcontracts) and audio contract (`audio-graph-v1`) define semantics; current work is migrating real program-monitor consumers onto those already-evaluated decisions in small, reversible slices.
 
-Current implementation PR: **#268 — Bridge persisted asset bounds into preview geometry** on branch `feat/video-wysiwyg-phase3-canonical-media-geometry`, created directly from #267's actual squash result `8a9343cf42d4e47f5b9d2b459737601c420d097b`.
+Current implementation PR: **#269 — Consume canonical preview media geometry** on branch `feat/video-wysiwyg-phase3-canonical-media-geometry-consumer`, created directly from #268's actual squash result `e498bee75757bdeff3bb3c5b8b35aa3f402265b4`.
 
-#268 advances canonical media-geometry availability without changing the Canvas painter:
+#268 made canonical media geometry available to deterministic editor frames without changing the painter:
 
-- `evaluateVisualFrameStateDiagnostic` accepts an optional asset-ID → `content_bounds` map used only on the temporary adapted Timeline v2 document;
-- `evaluateCanonicalPreviewCompositionFrame` projects persisted `VideoAsset.width` / `VideoAsset.height` probe metadata into that map only when both dimensions are complete, positive integers;
-- missing, partial, zero, negative, or non-integer dimensions stay absent, so `media_geometry:content_bounds` remains explicit unresolved state instead of being guessed from the output canvas or browser DOM;
-- the bridge deliberately does **not** fabricate `source-provenance-v1`; immutable file SHA-256 and render-manifest clip binding remain required for canonical immutable source provenance;
-- focused tests prove portrait 1000×2000 media on a 1280×720 canvas produces canonical contain geometry with `painted_bounds = {x:460,y:0,width:360,height:720}` and remains provenance-free;
-- focused tests also prove incomplete probe dimensions remain unresolved and non-authoritative.
+- persisted `VideoAsset.width` / `height` probe metadata becomes temporary Timeline v2 `content_bounds` only when both values are complete positive integers;
+- missing/partial/invalid dimensions remain unresolved and are never inferred from canvas or DOM state;
+- editor probe bounds do **not** fabricate `source-provenance-v1`; immutable SHA-256 and manifest clip binding remain render-manifest-only truth;
+- exact final head `5e692376855a6178c8d95661fdfcbb96b5ec848a` passed Quality #1556, Security #1562, frontend lint/unit/performance/build, backend tests/race, Playwright, deterministic renderer parity including immutable snapshot capture, CodeQL, desktop/Helm/plugin lifecycle, and all standalone platform/sandbox assurances;
+- final compare was ahead 9 / behind 0 with exactly the three source-bounds implementation/test files plus this tracker, and reviews/threads/comments were empty before expected-head squash merge.
 
-A temporary CSS media-geometry helper was preflighted on #268 but removed before final review because it was not yet consumed by `VideoPreviewCanvas.tsx`. The only failure in that transient CI head was a test-fixture default-parameter mistake inside that temporary helper test; the five source-bounds/preview-composition tests all passed. Canvas `painted_bounds` / `clip_bounds` consumption is intentionally deferred to the next branch created from #268's actual squash result.
+#269 consumes that state in the program monitor:
+
+- deterministic image/video pixels are placed directly from canonical `painted_bounds`; `object-fit: fill` is used only after canonical fit has already chosen the painted rectangle;
+- canonical `clip_bounds` are applied to a full-stage media clipping surface in canvas coordinates, avoiding element-relative reinterpretation of output crop;
+- the existing full-stage layer wrapper remains the selection/snap/resize/rotation interaction box, so this slice does not redefine direct-manipulation geometry;
+- free-running playback, missing/invalid canonical geometry, active transform gestures, and crop editing retain the established `object-contain` / percentage-crop compatibility path;
+- `data-preview-media-geometry-mode` exposes `canonical-frame` vs `legacy-object-fit` for diagnostics;
+- the current v1 adapter authors visual media as canonical `contain` and does not expose source-crop UI state, so #269 deliberately does not invent `mask_source_crop` semantics.
 
 ## Phase tracker
 
@@ -33,7 +39,7 @@ A temporary CSS media-geometry helper was preflighted on #268 but removed before
 | Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged the fail-closed optional frame-indexed exact-region input boundary. Production structural policy, tolerance-aware codec-region semantics, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | **Complete** | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
 | Phase 2 — Canonical contract | **Complete** | Frame/range/source/order, curves, transforms/geometry/projection, transitions, effects, text/fonts, shapes, cursor, immutable source provenance, and AudioGraph semantics are versioned and cross-runtime checked. #260 closed the final contract gap. |
-| Phase 3 — Shared preview composition | **In progress** | #261–#267 merged deterministic activity/source/transform/view/perspective consumption. #268 bridges persisted editor source dimensions into canonical FrameState media geometry. Canvas media placement, painter inputs, normal-playback canonicalization, diagnostics, and audio consumption remain. |
+| Phase 3 — Shared preview composition | **In progress** | #261–#268 merged deterministic activity/source/transform/view/perspective plus source-bounds availability. #269 consumes canonical media painted/clip bounds in deterministic Canvas frames. Transition/effect/text/shape/cursor painter inputs, normal-playback canonicalization, diagnostics, and audio consumption remain. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, text metrics/fonts, shapes, transitions, effects, cursor, camera, color, and deterministic asset loading. |
 | Phase 6 — Audio parity closure | Not started | Make preview/Chromium/export obey AudioGraph exactly, including pitch, gain/fades, channels, program processing, processed stems, and decoded delivery. |
@@ -67,7 +73,7 @@ The legacy FFmpeg compositor is implementation evidence, not semantic authority.
 - `contain`, `cover`, `fill`, and `none` have canonical meaning;
 - FrameState carries evaluated source/visible/painted/clip bounds;
 - missing or invalid bounds remain explicit unresolved state rather than a canvas-sized fallback;
-- future Canvas consumption must place media from canonical `painted_bounds` and apply `clip_bounds` in canvas space without asking browser `object-fit` to reinterpret fit semantics.
+- deterministic Canvas media consumption places decoded pixels from canonical `painted_bounds` and clips through canonical canvas-space `clip_bounds`; browser `object-fit` remains only an explicit compatibility fallback.
 
 ### Perspective and stacking
 
@@ -115,7 +121,7 @@ A stacked PR is rebuilt from the **actual current `main` tree** after its parent
 5. Update this tracker on the clean branch.
 6. Validate the exact final head before merge.
 
-Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can look current while the tree silently reverts unrelated work. #261/#262/#264/#265/#266/#267 followed this normalization rule, and #268 was created directly from #267's squash result.
+Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can look current while the tree silently reverts unrelated work. #261/#262/#264/#265/#266/#267 followed this normalization rule; #268 was created directly from #267's squash result, and #269 was created directly from #268's actual squash result.
 
 ## Phase 0 — Reproducible parity baseline
 
@@ -172,16 +178,16 @@ Merged consumer sequence:
 | #264 | Canonical deterministic transform/opacity | `357ae16301fc0b7d6c0f0d65e99c0277bac77adb` |
 | #265 | Canonical deterministic camera-relative `view_transform` | `02b0a5d5ce68f0ee46c16e092c525772751d5681` |
 | #267 | Canonical deterministic per-layer perspective projection | `8a9343cf42d4e47f5b9d2b459737601c420d097b` |
+| #268 | Persisted editor asset bounds projected into canonical preview `media_geometry` | `e498bee75757bdeff3bb3c5b8b35aa3f402265b4` |
 
-Current #268 makes canonical `media_geometry` available for editor deterministic frames from persisted asset probe dimensions. It does not yet change media DOM placement.
+Current #269 consumes canonical `painted_bounds` and `clip_bounds` for deterministic image/video pixels while retaining explicit compatibility fallback for interaction/free-running paths.
 
 Remaining Phase 3 sequence should stay reviewable:
 
-1. Consume canonical media `painted_bounds` and `clip_bounds` in the program monitor; retain explicit fallback for free-running playback, missing geometry, active transform gestures, and crop editing.
-2. Consume canonical transition/effect painter inputs.
-3. Consume canonical text/shape/cursor painter inputs and deterministic intrinsic text metrics.
-4. Canonicalize normal playback rather than only parity frame-addressed mode, with diagnostics/rollback.
-5. Make preview audio scheduling consume `audio-graph-v1` in a separate audio-focused slice.
+1. Consume canonical transition/effect painter inputs.
+2. Consume canonical text/shape/cursor painter inputs and deterministic intrinsic text metrics.
+3. Canonicalize normal playback rather than only parity frame-addressed mode, with diagnostics/rollback.
+4. Make preview audio scheduling consume `audio-graph-v1` in a separate audio-focused slice.
 
 ## Phase 4 — Shared Chromium render worker
 
@@ -248,8 +254,8 @@ Before every merge:
 | Independent perspective contexts reorder layers by spatial z | Canonical DOM/track/z-index ordering remains stacking authority. |
 | Editor asset dimensions are mistaken for immutable provenance | #268 projects persisted width/height only as temporary `content_bounds`; it never emits `source_provenance`. |
 | Source aspect ratio is guessed | Missing/partial/invalid probe bounds remain unresolved; canvas/DOM dimensions are never substituted. |
-| Browser `object-fit` reinterprets canonical fit | Next Canvas consumer must place decoded media from `painted_bounds` and use `object-fit: fill` or equivalent after canonical fit is already resolved. |
-| Output crop is applied in the wrong coordinate system | Canonical `clip_bounds` are canvas-space; next consumer must clip a full-stage viewport rather than applying percentages to the smaller painted media rectangle. |
+| Browser `object-fit` reinterprets canonical fit | #269 places deterministic decoded media directly at canonical `painted_bounds` and uses `object-fit: fill` only after fit is resolved; compatibility paths remain explicit. |
+| Output crop is applied in the wrong coordinate system | #269 applies canonical `clip_bounds` to a full-stage media surface in canvas coordinates; legacy element-relative percentage crop is fallback-only. |
 | Pair transitions become independent alpha layers | Pair paint operates on isolated surfaces with canonical weights/transforms. |
 | Effect/text/shape/cursor defaults drift | Versioned evaluated state is authoritative; unsupported metadata fails closed. |
 | Browser/system font fallback changes metrics | Packaged static-face provenance; deterministic intrinsic metric ownership remains explicit Phase 3–5 work. |
@@ -290,11 +296,12 @@ Before every merge:
 - #265 consumed canonical deterministic camera-relative `view_transform`, passed Quality #1532/Security #1538 plus full parity/platform gates, and squash-merged as `02b0a5d5ce68f0ee46c16e092c525772751d5681`.
 - #266 added the fail-closed parity-region manifest boundary, passed Quality #1545/Security #1551 plus the complete exact-head matrix, and squash-merged as `7cf8a82a4081f487e13c2117e1c9176c91266253`.
 - #267 consumed deterministic per-layer canonical CSS perspective. Final head `ca54a256ff6872ce65c52f99885bbad5d8ba1cdf` passed Quality #1548, Security #1554, backend race, frontend lint/unit/performance/build, Playwright, deterministic renderer parity, CodeQL, desktop/Helm, plugin lifecycle, and all standalone platform/sandbox assurances. Final compare was ahead 6 / behind 0 with only the intended perspective files plus this tracker and no review/comment activity. It squash-merged with expected-head protection as `8a9343cf42d4e47f5b9d2b459737601c420d097b`.
-- #268 was created directly from #267's squash result. It projects complete positive-integer persisted editor asset width/height into temporary canonical `content_bounds` for preview FrameState, leaves incomplete dimensions unresolved, and never fabricates immutable source provenance. A transient unconsumed painter helper was removed before final review; its only CI failure was a test-fixture default-parameter error, while all five source-bounds/preview-composition tests passed.
+- #268 was created directly from #267's squash result. It projected complete positive-integer persisted editor asset width/height into temporary canonical `content_bounds`, left incomplete dimensions unresolved, never fabricated immutable source provenance, passed the complete exact-head matrix at `5e692376855a6178c8d95661fdfcbb96b5ec848a`, and squash-merged with expected-head protection as `e498bee75757bdeff3bb3c5b8b35aa3f402265b4`.
+- #269 was created directly from #268's squash result. Its initial implementation adds a fail-closed media-geometry resolver, real Timeline v1 portrait-source coverage, canonical painted-bounds placement, full-stage canonical output clipping, and explicit compatibility fallback/diagnostic mode in `VideoPreviewCanvas.tsx`.
 
 ## Next recommended slice
 
-1. Validate #268's **exact tracker-updated head** through Quality/Security/platform/Playwright/renderer-parity, inspect current `main`, `compare main...branch`, reviews/comments, and squash-merge only if the source-bounds bridge remains scoped and green.
-2. From #268's actual squash result, create a separate Phase 3 PR that consumes canonical media `painted_bounds` and `clip_bounds` in `VideoPreviewCanvas.tsx`. Use a full-stage clipping viewport, place decoded media at canonical painted bounds, prevent browser `object-fit` from recomputing fit, and preserve explicit fallback for free-running playback, missing canonical geometry, live transforms, and crop editing.
-3. Then consume canonical transition/effect painter inputs, followed by text/shape/cursor painter inputs, normal-playback canonicalization/diagnostics, and AudioGraph scheduling in separate reviewable slices.
+1. Validate #269's **exact tracker-updated head** through Quality/Security/platform/Playwright/renderer-parity; inspect current `main`, `compare main...branch`, reviews/threads/comments, and squash-merge only if the canonical media consumer remains scoped and green.
+2. From #269's actual squash result, consume canonical transition/effect painter inputs in a separate Phase 3 PR without broadening into text/shape/cursor or audio.
+3. Then consume text/shape/cursor painter inputs and deterministic intrinsic text metrics, followed by normal-playback canonicalization/diagnostics and AudioGraph scheduling as separate reviewable slices.
 4. In parallel, use #266's fail-closed input boundary to define the codec-aware Phase 0 production structural policy and add second-platform parity evidence; current global numeric thresholds or arbitrary exact decoded regions alone are not visual sign-off.

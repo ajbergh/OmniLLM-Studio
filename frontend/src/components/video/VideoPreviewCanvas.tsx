@@ -31,6 +31,11 @@ import { frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeFor
 import { resolvePreviewFrameTransform } from './previewFrameTransform';
 import { resolvePreviewFrameViewTransform } from './previewFrameViewTransform';
 import {
+  canonicalPreviewMediaClipPath,
+  canonicalPreviewMediaElementStyle,
+  resolveCanonicalPreviewMediaGeometry,
+} from './previewFrameMediaGeometry';
+import {
   canonicalPreviewPerspectiveCSSPixels,
   resolveCanonicalPreviewPerspectiveDistance,
   shouldUseCanonicalPreviewPerspective,
@@ -772,6 +777,19 @@ export function VideoPreviewCanvas() {
     const clipPath = crop && !inCropEdit
       ? `inset(${(crop.top || 0) * 100}% ${(crop.right || 0) * 100}% ${(crop.bottom || 0) * 100}% ${(crop.left || 0) * 100}%)`
       : undefined;
+    const canonicalMediaGeometry = resolveCanonicalPreviewMediaGeometry(
+      deterministicFrame,
+      entry.canonicalState,
+      isMedia,
+      hasLiveOverride,
+      inCropEdit,
+    );
+    const canonicalMediaElementStyle = canonicalMediaGeometry
+      ? canonicalPreviewMediaElementStyle(canonicalMediaGeometry, stageScale)
+      : undefined;
+    const canonicalMediaClipPath = canonicalMediaGeometry
+      ? canonicalPreviewMediaClipPath(canonicalMediaGeometry, stageScale)
+      : undefined;
 
     const wrapperStyle: CSSProperties = {
       left: '50%',
@@ -789,19 +807,29 @@ export function VideoPreviewCanvas() {
 
     const isEditingText = editingTextClipId === clip.id;
 
+    const wrapCanonicalMedia = (media: React.ReactNode) => canonicalMediaGeometry ? (
+      <div className="absolute inset-0" style={{ clipPath: canonicalMediaClipPath }}>
+        {media}
+      </div>
+    ) : media;
+    const mediaClassName = canonicalMediaGeometry ? undefined : 'h-full w-full object-contain';
+    const mediaStyle = canonicalMediaElementStyle ?? { clipPath };
+
     let content = null;
     if (asset && asset.mime_type.startsWith('video/')) {
       content = poster ? (
         <div className="relative h-full w-full bg-black/60" title="Video decoder budget: showing thumbnail">
-          <img
-            src={videoApi.artifactUrl(asset.id, 'thumbnail')}
-            alt={`${asset.file_name} thumbnail`}
-            className="h-full w-full object-contain"
-            style={{ clipPath }}
-          />
+          {wrapCanonicalMedia(
+            <img
+              src={videoApi.artifactUrl(asset.id, 'thumbnail')}
+              alt={`${asset.file_name} thumbnail`}
+              className={mediaClassName}
+              style={mediaStyle}
+            />,
+          )}
           <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[9px] text-white/60">proxy frame</span>
         </div>
-      ) : (
+      ) : wrapCanonicalMedia(
         <video
           ref={(node) => {
             if (node) videoRefs.current.set(clip.id, node);
@@ -810,18 +838,18 @@ export function VideoPreviewCanvas() {
           key={asset.id}
           data-video-preview-media="true"
           src={videoApi.downloadUrl(asset.id)}
-          className="h-full w-full object-contain"
-          style={{ clipPath }}
+          className={mediaClassName}
+          style={mediaStyle}
           controls={false}
           playsInline
           autoPlay={false}
           muted
           aria-label={asset.file_name}
-        />
+        />,
       );
     } else if (asset && asset.mime_type.startsWith('image/')) {
-      content = (
-        <img src={videoApi.downloadUrl(asset.id)} alt={asset.file_name} className="h-full w-full object-contain" style={{ clipPath }} />
+      content = wrapCanonicalMedia(
+        <img src={videoApi.downloadUrl(asset.id)} alt={asset.file_name} className={mediaClassName} style={mediaStyle} />,
       );
     } else if (clip.shape) {
       content = (
@@ -911,6 +939,7 @@ export function VideoPreviewCanvas() {
       <div
         key={clip.id}
         data-preview-clip-id={clip.id}
+        data-preview-media-geometry-mode={isMedia ? (canonicalMediaGeometry ? 'canonical-frame' : 'legacy-object-fit') : undefined}
         className={`absolute flex items-center justify-center ${selected && !isPlaying ? 'outline outline-1 outline-primary' : ''} ${
           track.locked ? '' : 'cursor-move'
         }`}
