@@ -125,13 +125,17 @@ func loadPairs(previewDir, renderedDir string, fps int, regionsByFrame map[int64
 			return nil, err
 		}
 		index, name := parseFrameName(entry.Name())
+		regions := cloneParityRegions(regionsByFrame[index])
+		if err := validateParityRegionsForPair(index, regions, preview, rendered); err != nil {
+			return nil, err
+		}
 		pairs = append(pairs, video.ParityFramePair{
 			Name:       name,
 			FrameIndex: index,
 			TimeMS:     index * 1000 / int64(fps),
 			Preview:    preview,
 			Rendered:   rendered,
-			Regions:    cloneParityRegions(regionsByFrame[index]),
+			Regions:    regions,
 		})
 	}
 	video.SortParityPairs(pairs)
