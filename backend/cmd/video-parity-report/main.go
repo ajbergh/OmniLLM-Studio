@@ -105,6 +105,7 @@ func loadPairs(previewDir, renderedDir string, fps int, regionsByFrame map[int64
 		return nil, err
 	}
 	var pairs []video.ParityFramePair
+	matchedRegionFrames := make(map[int64]struct{}, len(regionsByFrame))
 	for _, entry := range entries {
 		if entry.IsDir() || strings.ToLower(filepath.Ext(entry.Name())) != ".png" {
 			continue
@@ -129,6 +130,9 @@ func loadPairs(previewDir, renderedDir string, fps int, regionsByFrame map[int64
 		if err := validateParityRegionsForPair(index, regions, preview, rendered); err != nil {
 			return nil, err
 		}
+		if len(regions) > 0 {
+			matchedRegionFrames[index] = struct{}{}
+		}
 		pairs = append(pairs, video.ParityFramePair{
 			Name:       name,
 			FrameIndex: index,
@@ -137,6 +141,22 @@ func loadPairs(previewDir, renderedDir string, fps int, regionsByFrame map[int64
 			Rendered:   rendered,
 			Regions:    regions,
 		})
+	}
+	var firstUnmatchedFrame *int64
+	for frameIndex, regions := range regionsByFrame {
+		if len(regions) == 0 {
+			continue
+		}
+		if _, matched := matchedRegionFrames[frameIndex]; matched {
+			continue
+		}
+		if firstUnmatchedFrame == nil || frameIndex < *firstUnmatchedFrame {
+			candidate := frameIndex
+			firstUnmatchedFrame = &candidate
+		}
+	}
+	if firstUnmatchedFrame != nil {
+		return nil, fmt.Errorf("parity region manifest frame_index %d has no matching preview/rendered PNG pair", *firstUnmatchedFrame)
 	}
 	video.SortParityPairs(pairs)
 	return pairs, nil
