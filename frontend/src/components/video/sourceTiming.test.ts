@@ -63,6 +63,16 @@ describe('media source timing', () => {
     )).toBe(432.125);
   });
 
+  it('preserves an exact canonical zero source time', () => {
+    expect(sourceTimeForPreviewMediaMs(
+      { kind: 'frame', frameIndex: 0, fps: 120 },
+      { source_time_ms: 0 },
+      1000,
+      250,
+      4,
+    )).toBe(0);
+  });
+
   it('keeps free-running visual media on timeline-time evaluation', () => {
     expect(sourceTimeForPreviewMediaMs(
       { kind: 'time', timelineMs: 1000.5 },
