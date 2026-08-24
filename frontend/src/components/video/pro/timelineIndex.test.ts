@@ -205,7 +205,7 @@ describe('timeline interval index', () => {
     );
   });
 
-  it('uses frame-overlap activity for deterministic high-fps evaluation', () => {
+  it('uses canonical FrameState activity for deterministic high-fps visual evaluation', () => {
     const frameDocument: VideoTimelineDocument = {
       version: 1,
       canvas: { width: 100, height: 100, fps: 120, background: '#000' },
@@ -235,11 +235,46 @@ describe('timeline interval index', () => {
     const index = buildTimelineIntervalIndex(frameDocument, []);
 
     expect(queryActiveClips(index, 0)).toEqual([]);
-    expect(queryActiveClipsAtFrame(index, 0, 120).map((item) => item.clip.id))
-      .toEqual(['starts-inside-frame-zero']);
+    const frameZero = queryActiveClipsAtFrame(index, 0, 120);
+    expect(frameZero.map((item) => item.clip.id)).toEqual(['starts-inside-frame-zero']);
+    expect(frameZero[0].canonicalState?.clip_id).toBe('starts-inside-frame-zero');
+    expect(frameZero[0].canonicalState?.start_frame).toBe(0);
     expect(queryActiveClipsAtFrame(index, 1, 120).map((item) => item.clip.id))
       .toEqual(['starts-inside-frame-zero']);
     expect(queryActiveClipsAtFrame(index, 2, 120)).toEqual([]);
+  });
+
+  it('preserves the legacy deterministic frame path when v1 semantics are not canonically representable', () => {
+    const ambiguous: VideoTimelineDocument = {
+      version: 1,
+      canvas: { width: 100, height: 100, fps: 30, background: '#000' },
+      duration_ms: 1000,
+      markers: [],
+      metadata: {},
+      tracks: [{
+        id: 'transition-track',
+        type: 'layer',
+        name: 'Transition track',
+        locked: false,
+        muted: false,
+        visible: true,
+        clips: [{
+          id: 'transition-clip',
+          start_ms: 0,
+          duration_ms: 1000,
+          trim_in_ms: 0,
+          trim_out_ms: 1000,
+          transform: transform(),
+          effects: [],
+          keyframes: [],
+          transitions: [{ id: 'legacy-transition', type: 'fade', duration_ms: 250 }],
+        }],
+      }],
+    };
+
+    const active = queryActiveClipsAtFrame(buildTimelineIntervalIndex(ambiguous, []), 0, 30);
+    expect(active.map((item) => item.clip.id)).toEqual(['transition-clip']);
+    expect(active[0].canonicalState).toBeUndefined();
   });
 
   it('virtualizes clips intersecting the visible window', () => {
