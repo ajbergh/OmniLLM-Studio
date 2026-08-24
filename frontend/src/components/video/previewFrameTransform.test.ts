@@ -99,6 +99,28 @@ describe('preview FrameState transform resolver', () => {
     expect(result.transform.opacity).toBe(0);
   });
 
+  it('preserves exact canonical zero axis scale through the legacy truthy fallback', () => {
+    const zeroX = resolvePreviewFrameTransform(
+      clip(),
+      500,
+      { transform: { ...canonicalTransform, scale_x: 0 } },
+      false,
+    );
+    expect(zeroX.transform.scale_x).toBe(0);
+    expect(zeroX.transform.scale_y).toBe(0.75);
+    expect(zeroX.transform.scale).toBe(0);
+
+    const zeroY = resolvePreviewFrameTransform(
+      clip(),
+      500,
+      { transform: { ...canonicalTransform, scale_y: 0 } },
+      false,
+    );
+    expect(zeroY.transform.scale_x).toBe(1.25);
+    expect(zeroY.transform.scale_y).toBe(0);
+    expect(zeroY.transform.scale).toBe(0);
+  });
+
   it('keeps free-running/fallback transform evaluation on the established property path', () => {
     const result = resolvePreviewFrameTransform(clip(), 500, undefined, false);
 
