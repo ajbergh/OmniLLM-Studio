@@ -76,6 +76,30 @@ func TestLoadPairsRejectsRegionOutsideDecodedFrame(t *testing.T) {
 	}
 }
 
+func TestLoadPairsRejectsUnmatchedManifestFrame(t *testing.T) {
+	previewDir := filepath.Join(t.TempDir(), "preview")
+	renderedDir := filepath.Join(t.TempDir(), "rendered")
+	if err := os.MkdirAll(previewDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(renderedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestPNG(t, filepath.Join(previewDir, "15-camera.png"))
+	writeTestPNG(t, filepath.Join(renderedDir, "15-camera.png"))
+
+	policy := map[int64][]video.ParityRegion{
+		30: {{
+			Name:   "must-run",
+			Bounds: video.ParityBounds{MinX: 0, MinY: 0, MaxX: 1, MaxY: 1},
+		}},
+	}
+	_, err := loadPairs(previewDir, renderedDir, 30, policy)
+	if err == nil || !strings.Contains(err.Error(), "frame_index 30 has no matching preview/rendered PNG pair") {
+		t.Fatalf("error = %v, want unmatched manifest frame failure", err)
+	}
+}
+
 func TestLoadPairsWithoutRegionPolicyPreservesExistingBehavior(t *testing.T) {
 	previewDir := filepath.Join(t.TempDir(), "preview")
 	renderedDir := filepath.Join(t.TempDir(), "rendered")
