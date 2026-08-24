@@ -1,9 +1,12 @@
 import { sourceTimeMs } from '../../video/renderContract';
 import { sourceTimeAtFrameMs } from '../../video/renderContractEvaluation';
+import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 
 export type TimelineSourceAddress =
   | { kind: 'frame'; frameIndex: number; fps: number }
   | { kind: 'time'; timelineMs: number };
+
+type CanonicalSourceTimeState = Pick<CanonicalFrameLayerState, 'source_time_ms'>;
 
 /** True when playhead time still represents the exact frame address supplied by a deterministic caller. */
 export function frameAddressMatchesTimelineMs(
@@ -18,10 +21,10 @@ export function frameAddressMatchesTimelineMs(
 /**
  * Resolve media source time from the authoritative timeline address.
  *
- * Deterministic render/capture callers must pass an output-frame address so
- * source time is derived directly from rational frame identity. Interactive,
- * free-running playback uses timeline time and intentionally remains
- * sub-frame/responsive rather than quantizing the user's playhead to a frame.
+ * Deterministic callers without evaluated FrameState derive source time from
+ * rational frame identity. Interactive free-running playback uses timeline
+ * time and intentionally remains sub-frame/responsive rather than quantizing
+ * the user's playhead to an output frame.
  */
 export function sourceTimeForAddressMs(
   address: TimelineSourceAddress,
@@ -39,6 +42,28 @@ export function sourceTimeForAddressMs(
     );
   }
   return sourceTimeMs(address.timelineMs, clipStartMs, trimInMs, playbackRate);
+}
+
+/**
+ * Resolve source time for visual preview media.
+ *
+ * A successful canonical frame-addressed preview projection already contains
+ * the evaluated source time and therefore owns that deterministic decision.
+ * Free-running playback and explicit compatibility/fail-closed fallback keep
+ * using the established address evaluator. Audio intentionally does not pass a
+ * visual FrameState here; its timing migrates with AudioGraph consumption.
+ */
+export function sourceTimeForPreviewMediaMs(
+  address: TimelineSourceAddress,
+  canonicalState: CanonicalSourceTimeState | undefined,
+  clipStartMs: number,
+  trimInMs: number,
+  playbackRate: number,
+): number {
+  if (address.kind === 'frame' && canonicalState) {
+    return canonicalState.source_time_ms;
+  }
+  return sourceTimeForAddressMs(address, clipStartMs, trimInMs, playbackRate);
 }
 
 /**

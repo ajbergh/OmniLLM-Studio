@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import type { VideoTimelineDocument } from '../../types/video';
+import { buildTimelineIntervalIndex, queryActiveClipsAtFrame } from './pro/timelineIndex';
 import {
   frameAddressMatchesTimelineMs,
   mediaSeekToleranceSeconds,
   sourceTimeForAddressMs,
+  sourceTimeForPreviewMediaMs,
 } from './sourceTiming';
 
 describe('media source timing', () => {
@@ -50,6 +53,87 @@ describe('media source timing', () => {
       40,
       1.5,
     )).toBeCloseTo(45, 9);
+  });
+
+  it('consumes the canonical source time projected by a transition-free Timeline v1 frame', () => {
+    const document: VideoTimelineDocument = {
+      version: 1,
+      canvas: { width: 100, height: 100, fps: 120, background: '#000000' },
+      duration_ms: 100,
+      markers: [],
+      metadata: {},
+      tracks: [{
+        id: 'track-1',
+        type: 'layer',
+        name: 'Layer 1',
+        locked: false,
+        muted: false,
+        visible: true,
+        clips: [{
+          id: 'clip-1',
+          start_ms: 5,
+          duration_ms: 20,
+          trim_in_ms: 40,
+          trim_out_ms: 70,
+          playback_rate: 1.5,
+          transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
+          effects: [],
+          keyframes: [],
+          transitions: [],
+        }],
+      }],
+    };
+    const entry = queryActiveClipsAtFrame(buildTimelineIntervalIndex(document, []), 1, 120)[0];
+
+    expect(entry.canonicalState).toBeDefined();
+    expect(entry.canonicalState?.source_time_ms).toBeCloseTo(45, 9);
+    expect(sourceTimeForPreviewMediaMs(
+      { kind: 'frame', frameIndex: 1, fps: 120 },
+      entry.canonicalState,
+      entry.clip.start_ms,
+      entry.clip.trim_in_ms,
+      entry.clip.playback_rate ?? 1,
+    )).toBe(entry.canonicalState?.source_time_ms);
+  });
+
+  it('prefers canonical FrameState source time for deterministic visual media', () => {
+    expect(sourceTimeForPreviewMediaMs(
+      { kind: 'frame', frameIndex: 7, fps: 120 },
+      { source_time_ms: 432.125 },
+      1000,
+      0,
+      4,
+    )).toBe(432.125);
+  });
+
+  it('preserves an exact canonical zero source time', () => {
+    expect(sourceTimeForPreviewMediaMs(
+      { kind: 'frame', frameIndex: 0, fps: 120 },
+      { source_time_ms: 0 },
+      1000,
+      250,
+      4,
+    )).toBe(0);
+  });
+
+  it('keeps free-running visual media on timeline-time evaluation', () => {
+    expect(sourceTimeForPreviewMediaMs(
+      { kind: 'time', timelineMs: 1000.5 },
+      { source_time_ms: 9999 },
+      500,
+      100,
+      1.25,
+    )).toBeCloseTo(725.625, 9);
+  });
+
+  it('falls back to frame-address evaluation when canonical projection is unavailable', () => {
+    expect(sourceTimeForPreviewMediaMs(
+      { kind: 'frame', frameIndex: 1, fps: 120 },
+      undefined,
+      0,
+      10,
+      2,
+    )).toBeCloseTo(26.6666666667, 9);
   });
 
   it('recognizes the exact playhead generated from a frame address', () => {
