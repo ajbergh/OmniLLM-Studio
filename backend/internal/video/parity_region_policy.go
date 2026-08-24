@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -16,9 +15,9 @@ const ParityRegionPolicyVersionV1 = 1
 // labels are diagnostic text and may be sanitized for filenames, while integer
 // output-frame identity is the canonical render address.
 type ParityRegionPolicyV1 struct {
-	Version int                           `json:"version"`
-	Canvas  ParityRegionPolicyCanvas      `json:"canvas"`
-	Frames  []ParityRegionPolicyFrameV1   `json:"frames"`
+	Version int                         `json:"version"`
+	Canvas  ParityRegionPolicyCanvas    `json:"canvas"`
+	Frames  []ParityRegionPolicyFrameV1 `json:"frames"`
 }
 
 type ParityRegionPolicyCanvas struct {
@@ -107,16 +106,9 @@ func ValidateParityRegionPolicyV1(policy ParityRegionPolicyV1) error {
 	return nil
 }
 
-// RegionsForParityFrame returns a copy in stable authored region order. Frames
-// omitted by policy intentionally have no zero-tolerance structural regions.
+// RegionsForParityFrame returns a copy in authored region order. Frames omitted
+// by policy intentionally have no zero-tolerance structural regions.
 func RegionsForParityFrame(policy ParityRegionPolicyV1, frameIndex int64) []ParityRegion {
-	position := sort.Search(len(policy.Frames), func(i int) bool {
-		return policy.Frames[i].FrameIndex >= frameIndex
-	})
-	if position < len(policy.Frames) && policy.Frames[position].FrameIndex == frameIndex {
-		return cloneParityRegions(policy.Frames[position].Regions)
-	}
-	// Policy validation does not require authored frame entries to be sorted.
 	for _, frame := range policy.Frames {
 		if frame.FrameIndex == frameIndex {
 			return cloneParityRegions(frame.Regions)
