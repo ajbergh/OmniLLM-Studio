@@ -5,52 +5,46 @@
 **Scope:** Video Edit Studio preview, timeline evaluation, render jobs, visual composition, audio mix, export, validation, packaging, and parity testing.  
 **Primary goal:** The authoritative editor preview and final decoded export must represent the same immutable timeline revision with identical frame identity, active-layer ordering, timing, geometry, styling, effects, transitions, camera state, and audio decisions.
 
-> This is the durable execution tracker for the WYSIWYG rendering program. Every implementation PR in this program must update current status, validation evidence, risks, and the next recommended slice before merge.
+> This is the durable execution tracker for the WYSIWYG rendering program. Every implementation PR in this program updates current status, validation evidence, risks, and the next recommended slice before merge.
 
 ## Current handoff
 
-Latest merged WYSIWYG feature PR: **#255 — Enforce static-face-only variable-font policy in font provenance** — squash merge `853b59d07280f7441258586632aa6a43f618bff5` (2026-08-21).
+Latest merged WYSIWYG feature PR: **#260 — Define canonical AudioGraph v1** — squash merge `9acc544eac6cc63a14a4e0f22ee52cb07688e010` (2026-08-24).
 
-Current implementation PR: **#260 — Define canonical AudioGraph v1** on branch `feat/video-wysiwyg-phase2-audio-graph`.
+**Phase 2 — Canonical contract is complete.** The renderer-independent visual contract (`visual-frame-state-v1` and its versioned subcontracts) and audio contract (`audio-graph-v1`) now define the semantic decisions needed by the remaining preview/export work. No consumer may silently re-define those semantics and still claim canonical parity.
 
-The branch was created from the actual current `main` head `dc51d7ddaf8060304fbe63153796e4ebafe48a20` on 2026-08-24, not from the older #255 merge SHA recorded in the previous handoff. The intervening `main` change was documentation-only, but the branch ancestry was still corrected rather than assuming the stale handoff was current.
+Current implementation PR: **#261 — Add canonical preview composition projection** on branch `feat/video-wysiwyg-phase3-preview-composition`.
 
-PR #260 defines the last remaining Phase 2 semantic contract in both Go and TypeScript, with one shared fixture:
+#261 was initially stacked on the still-running #260 head so Phase 3 work could continue without bypassing #260's merge gate. After #260 passed its exact-head matrix and merged, #261 was rebuilt from the actual new `main` (`9acc544eac6cc63a14a4e0f22ee52cb07688e010`) and retargeted to `main`. `compare main...branch` confirmed exactly four intended code/test paths before this tracker update:
 
-- canonical 48 kHz stereo output and exact timeline/range sample counts;
-- deterministic source-node identity and stable track/clip ordering;
-- track mute, clip mute, and track-solo selection while retaining suppressed-node identity;
-- clip timeline/sample placement and normalized trim windows;
-- playback-rate serialization with an explicit **pitch-preserving** policy;
-- mono-to-stereo and stereo-passthrough channel mapping, failing closed for channel layouts without v1 semantics;
-- base gain and volume automation with authored-order tie-breaking;
-- linear fade durations in samples with the preview-compatible `minimum` overlap-combine policy;
-- non-normalizing summation (`sum-no-normalize`);
-- authorable `render_audio_processing` serialized as a **post-mix processed-stem requirement**, not renderer-specific FFmpeg filter syntax;
-- fail-closed handling for malformed/unknown program-processing fields and unsupported audio metadata.
+- `frontend/src/video/renderContractPreviewComposition.ts`
+- `frontend/test/renderContractPreviewComposition.test.ts`
+- `frontend/src/components/video/pro/timelineIndex.ts`
+- `frontend/src/components/video/pro/timelineIndex.test.ts`
 
-PR #260 deliberately does **not** change Web Audio preview mixing or legacy FFmpeg export mixing. Consumer adoption remains Phase 3/6 work.
+#261 starts **actual Phase 3 consumer adoption**, not just another semantic definition:
 
-Validation status for #260:
+- introduces `preview-composition-frame-v1`, a runtime bridge from canonical `visual-frame-state-v1` back to the exact persisted Timeline v1 track/clip/asset objects needed by the existing editor painter;
+- retains the strict v1 → v2 adapter and its structured unavailable diagnostics rather than weakening ambiguous legacy semantics;
+- validates positional and ID identity so a future adapter reordering cannot bind canonical state to the wrong editor clip;
+- routes deterministic frame-addressed **visual activity** through canonical FrameState when canonical evaluation is available;
+- attaches the exact `CanonicalFrameLayerState` to matching indexed preview entries for subsequent transform/source-time/painter adoption;
+- keeps deterministic audio entries on the current path until AudioGraph runtime consumption lands;
+- explicitly falls back to the previous deterministic frame-overlap path when the strict adapter cannot represent the saved v1 timeline (notably legacy transition placement), preserving current preview behavior without pretending the fallback is canonical.
 
-- initial exact head `a630f0fe67ed4d485182622140e24115e94bb925` passed the frontend lint/unit/build gate but the backend gate stopped at `gofmt` on `audio_graph_test.go` before semantic Go tests ran;
-- formatting was corrected in `51770175e333e59725b44bd0c869e935002ccdd7`;
-- on that corrected implementation head, Go formatting, `go vet`, the full backend unit/integration suite, and frontend lint/unit/build all passed; the complete hosted matrix was still finishing when this tracker commit was authored;
-- this documentation commit creates a new exact PR head and therefore must itself pass the required hosted checks before merge.
-
-No Phase 3 preview compositor or Phase 4 Chromium-renderer behavior is changed by #260.
+The normal free-running preview, camera evaluation, source seeks, transform/geometry/effect/text/shape/cursor painting, and Web Audio gain/fade scheduling are **not yet fully canonical consumers**. They remain the next Phase 3 slices.
 
 ## Phase tracker
 
 | Phase | Status | Progress / exit work |
 |---|---|---|
-| Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Production visual thresholds and second-platform evidence remain. #260 now defines the unsupported-audio semantic boundary that Phase 0 previously lacked. |
+| Phase 0 — Reproducible parity baseline | In progress | Deterministic 103-frame visual/audio/delivery evidence exists. Production visual thresholds and second-platform evidence remain. `audio-graph-v1` now defines the unsupported-audio semantic boundary. |
 | Phase 1 — Immutable submission | Complete | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
-| Phase 2 — Canonical contract | Merge-ready pending #260 CI | Timing, curves, v1 adapter, frame/range/source/order, normalization, frame addressing, property evaluation, FrameState, media geometry, perspective, all current transition state/paint families, effect stack state, canonical text/shape/cursor state, immutable source provenance, manifest-backed font resources, authored text-face binding, static-face policy, and AudioGraph are defined. Consumer adoption begins in Phase 3/6. |
-| Phase 3 — Shared preview composition | Not started | Program monitor consumes canonical FrameState/AudioGraph instead of preview-local semantic math. |
+| Phase 2 — Canonical contract | **Complete** | Frame/range/source/order, curves, transforms/geometry/projection, transitions, effects, text/fonts, shapes, cursor, immutable source provenance, and AudioGraph semantics are versioned and cross-runtime checked. #260 closed the final contract gap. |
+| Phase 3 — Shared preview composition | **In progress** | #261 introduces the canonical preview projection and routes deterministic visual frame activity through FrameState when available. Source-time/transform/camera/painter/audio consumption remains. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
-| Phase 5 — Visual parity closure | Not started | Close text metrics/fonts, shapes, effects, transitions, cursor, camera, color, asset loading, and decoded visual thresholds. |
-| Phase 6 — Audio parity closure | Not started | Shared AudioGraph/processed-stem architecture, rate/pitch policy, gain/fades/channel mapping, processing, and decoded-delivery verification. |
+| Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, text metrics/fonts, shapes, transitions, effects, cursor, camera, color, and deterministic asset loading. |
+| Phase 6 — Audio parity closure | Not started | Make preview/Chromium/export obey AudioGraph exactly, including pitch, gain/fades, channels, program processing, processed stems, and decoded delivery. |
 | Phase 7 — Rollout and legacy retirement | Not started | Shadow comparison, staged default switch, rollback, telemetry, capability/docs updates, and eventual removal of legacy composition semantics. |
 
 ## Canonical architecture rules
@@ -66,121 +60,77 @@ No Phase 3 preview compositor or Phase 4 Chromium-renderer behavior is changed b
 
 ### Renderer-independent canonical core
 
-Canonical evaluators must be pure, deterministic, serializable, free of browser/FFmpeg/filesystem/network I/O, usable by preview and export, and fail closed whenever an authorable value does not have explicit canonical semantics.
+Canonical evaluators are pure, deterministic, serializable, free of browser/FFmpeg/filesystem/network I/O, usable by preview and export, and fail closed whenever an authorable value does not have explicit canonical semantics.
 
-The legacy FFmpeg compositor is implementation evidence, not semantic authority. Preview behavior is the Timeline v1 compatibility target where it is actually implemented. Where preview lacks an authorable feature, the canonical contract defines intended behavior explicitly instead of treating absence as semantics.
+The legacy FFmpeg compositor is implementation evidence, not semantic authority. The existing editor preview is a compatibility target where behavior is implemented, but Phase 3 consumers must stop re-evaluating semantics that the canonical contract already owns.
 
 ### Media geometry and source provenance
 
 `media-geometry-v1` is authoritative for asset geometry:
 
-- source aspect ratio requires explicit `content_bounds` or versioned immutable `source-provenance-v1` media-probe state;
+- source aspect ratio requires explicit `content_bounds` or immutable `source-provenance-v1` media-probe state;
 - source dimensions are never guessed from the output canvas;
-- `mask_source_crop` operates in source coordinates before fit;
-- `contain`, `cover`, `fill`, and `none` are canonical fit modes;
-- `transform.crop` is a separate post-fit output viewport clip;
-- FrameState carries evaluated painted bounds and immutable source provenance;
-- missing or invalid source provenance remains explicit unresolved/fail-closed state rather than a canvas-sized fallback.
+- source crop precedes fit; output crop follows fit;
+- `contain`, `cover`, `fill`, and `none` have canonical meaning;
+- FrameState carries evaluated painted bounds and source provenance;
+- missing/invalid provenance remains explicit unresolved state rather than a canvas-sized fallback.
 
 ### Perspective and stacking
 
-Perspective is projection state, not paint order. Track/z-index order remains authoritative for stacking; spatial `z` affects projection.
+Track/z-index order remains authoritative for stacking; spatial `z` affects projection. `perspective-projection-v1` serializes projection independently from camera-relative model transforms and preserves the preview-compatible 1200-canvas-pixel no-camera distance.
 
-`perspective-projection-v1` preserves the preview-compatible 1200-canvas-pixel distance with no scene camera, derives projection distance from evaluated camera FOV when a camera is active, allows a positive per-clip perspective override, and serializes projection separately from the camera-relative model matrix.
+### Transition state and paint
 
-### Transition timing and paint
+`transition-state-v1` owns placement, peer/owner roles, windows, progress, and overlap requirements. `transition-paint-v1` owns all currently authorable paint families: fade, crossfade, dip-to-black, slide, wipe, and zoom. Pair transitions operate on isolated surfaces and must not be reinterpreted as independent layer opacity.
 
-`transition-state-v1` makes placement, owner/peer roles, windows, progress, and real-overlap requirements explicit. No hidden source handles or inferred adjacency are invented.
+### Effects, text, shape, and cursor
 
-`transition-paint-v1` covers every currently authorable Timeline v2 transition family:
-
-- `fade`: one-sided owner opacity;
-- `crossfade`: isolated-surface pair blend;
-- `dip_to_black`: explicit outgoing/black/incoming contribution weights;
-- `slide`: normalized canvas-fraction translations;
-- `wipe`: normalized layer-fraction clip insets;
-- `zoom`: canonical scale envelope around the evaluated authored anchor plus one-sided opacity or pair weights.
-
-Phase 3 consumers must apply pair operations to isolated surfaces and must not reinterpret pair paint as independent stacked layer opacity/transform.
-
-### Effect stack
-
-`effect-state-v1` is the renderer-independent evaluated effect operation carried by FrameState.
-
-- only enabled effects enter the stack;
-- authored effect-array order is preserved;
-- scope is explicit as `clip` or `scene`;
-- defaults and numeric bounds are registry-grounded;
-- clip `effect.<id>.amount` automation is sampled at exact output-frame presentation time, with `effect.<type>.amount` retained as a compatibility fallback;
-- scene effects remain static because Timeline v2 has no scene-effect keyframe collection;
-- unknown effect types/parameters, non-finite values, and undefined amount automation fail closed.
-
-### Text and font state
-
-`text-state-v1` serializes text content, family/source, size, weight, colors, stroke, shadow, alignment, line height, letter spacing, border radius, box dimensions, and per-side padding once.
-
-Deterministic font identity is manifest-backed:
-
-- `font-resource-provenance-v1` identifies packaged static faces;
-- authored `font_resource_id` binds text to an immutable packaged face;
-- `font_face_source` distinguishes packaged-resource, family-name-only, and composition-default provenance;
-- font uploads are stored as video-project assets, referenced resources are staged into immutable render snapshots, and hashes/bytes are revalidated at execution;
-- v1 accepts static faces only; variable faces fail closed until explicit axis-selection semantics exist;
-- intrinsic glyph bounds/metrics are not guessed and remain Phase 3–5 consumer work.
-
-### Shape state
-
-`shape-state-v1` covers all 14 currently authorable annotation kinds with canonical dimensions, fill/stroke/radius defaults, fail-closed validation, and FrameState projection. Shape-derived `content_bounds` come from evaluated canonical shape dimensions, not a second local defaulting implementation.
-
-### Cursor state
-
-`cursor-state-v1` is sampled at exact clip-relative rational presentation time with preview-compatible linear interpolation/endpoint hold, strict `<300ms` click proximity, optional-visible semantics, explicit scale/highlight/click-ring state, and fail-closed malformed-event validation. `smoothing:true` remains unsupported until one canonical algorithm exists.
+- `effect-state-v1` preserves enabled authored order, scope, normalized parameters, and exact-frame automation; unsupported metadata fails closed.
+- `text-state-v1` serializes text/style intent once. Packaged static font identity is manifest-backed via `font-resource-provenance-v1`; intrinsic glyph measurement remains a Phase 3–5 consumer problem and is never guessed.
+- `shape-state-v1` covers all currently authorable annotation kinds and supplies canonical dimensions/style defaults/bounds.
+- `cursor-state-v1` owns exact rational sampling, visibility, scale, highlight/click-ring state, and strict `<300ms` click proximity; undefined smoothing fails closed.
 
 ### AudioGraph v1
 
-`audio-graph-v1` is the renderer-independent evaluated audio contract introduced by #260.
+`audio-graph-v1` is the renderer-independent audio contract merged in #260:
 
-Canonical v1 rules:
+1. Output is exactly 48,000 Hz stereo.
+2. Timeline/range boundaries become deterministic integer sample boundaries.
+3. Audio-capable clips retain stable node identity even when suppressed.
+4. Track mute, clip mute, and solo selection have explicit precedence/reason identity.
+5. Playback rate explicitly **preserves pitch**.
+6. Mono duplicates to stereo; stereo passes through; unsupported layouts fail closed until an explicit matrix exists.
+7. Base gain and volume automation are finite, deterministic, and authored-order stable.
+8. Volume automation is the property envelope (`automation-overrides-base`), avoiding double application.
+9. Fades are linear and overlapping fade envelopes combine with `minimum`.
+10. Summation is `sum-no-normalize`.
+11. `render_audio_processing` is one **post-mix** program operation represented by a processed-stem boundary, not FFmpeg filter syntax.
+12. Unknown processing fields, unsupported channel modes/layouts, missing probes, and invalid numeric domains fail closed.
+13. Phase 6 makes Web Audio/Chromium/export obey the graph and validates decoded delivery.
 
-1. Output format is exactly 48,000 Hz, two-channel stereo.
-2. Timeline and render-range boundaries are converted to exact integer sample boundaries with floor/ceil rules analogous to frame addressing.
-3. Every audio-capable clip is represented by a stable source node even when mute/solo policy suppresses playback.
-4. Track mute wins over clip mute; clip mute wins over solo suppression for diagnostic reason identity. If any track is soloed, non-solo tracks are suppressed.
-5. Playback rate is serialized explicitly and **preserves pitch**. This matches the existing FFmpeg `atempo` intent and marks legacy Web Audio rate-induced pitch shift as consumer debt rather than contract semantics.
-6. Mono sources map to stereo duplication; stereo sources pass through. Other probed channel counts fail closed in v1 until an explicit downmix/upmix matrix is defined.
-7. Clip `volume` is a finite 0–2 base gain. Volume automation is serialized in exact keyframe order; equal-time points retain authored array order.
-8. When volume automation exists it is the canonical gain envelope for that property (`automation-overrides-base`), matching existing property-evaluator semantics rather than multiplying a second base-gain implementation.
-9. Fades are linear, serialized as exact sample counts, and overlapping fade-in/fade-out contributions combine with `minimum`, matching the current preview contract instead of legacy FFmpeg's multiplicative overlap side effect.
-10. Source summation is `sum-no-normalize`; consumers must not silently normalize the mix.
-11. `render_audio_processing` is a program-level **post-mix** operation. The canonical graph exposes `program-mix` → `program-output` as a processed-stem boundary rather than baking FFmpeg filter syntax into semantic state.
-12. Unknown processing keys, missing required processing fields, unsupported presets/channel modes, invalid numeric domains, absent audio probes, and unsupported channel mappings fail closed.
-13. Phase 2 defines semantics only. Phase 6 makes Web Audio/Chromium and export consumers obey the graph and validates decoded-delivery parity.
+## Safe stacked-branch normalization
 
-### Safe stacked-branch normalization
-
-A stacked PR must be rebuilt from the **actual current `main` tree** after its parent merges.
-
-Required procedure:
+A stacked PR is rebuilt from the **actual current `main` tree** after its parent merges:
 
 1. Read current `main` commit/tree.
 2. Identify only the intended child delta.
 3. Rebuild the child directly on current `main`.
-4. Verify `compare main...branch` contains no unrelated changes/deletions.
+4. Verify `compare main...branch` contains only intended paths.
 5. Update this tracker on the clean branch.
 6. Validate the exact final head before merge.
 
-Never manufacture current ancestry by grafting a stale feature tree onto a newer parent; #225 demonstrated that Git ancestry can look current while the resulting tree silently reverts unrelated work.
+Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can look current while the tree silently reverts unrelated work. #261 followed the safe procedure after #260 merged.
 
 ## Phase 0 — Reproducible parity baseline
 
 The deterministic `parity-torture-v1` fixture covers 20 seconds at 640×360/30 fps with 103 named frame samples spanning boundaries, rates, transforms, curves, text, shapes, effects, transitions, camera, captions, cursor, and audio.
 
-Retained evidence `32074904557` / artifact `9303432653` established exact frame/audio/delivery identity mechanics. The visual baseline remains intentionally a known-mismatch diagnostic baseline, not a production threshold.
+Retained evidence `32074904557` / artifact `9303432653` established exact frame/audio/delivery identity mechanics. The visual baseline remains a known-mismatch diagnostic baseline, not a production threshold.
 
 Remaining Phase 0 sign-off:
 
 1. Freeze production visual threshold policy and zero-tolerance structural regions.
-2. Use `audio-graph-v1` as the explicit unsupported/semantic boundary until Phase 6 consumers land; no preview/export path may claim pitch/fade/program-processing parity merely because it can render audio.
+2. Use `audio-graph-v1` as the explicit audio boundary until Phase 6 consumers land; do not claim pitch/fade/program-processing parity merely because a path emits audio.
 3. Run full evidence on a second supported OS/FFmpeg environment and record deltas.
 4. Keep the fixture runnable throughout Phases 3–7.
 
@@ -190,12 +140,14 @@ Remaining Phase 0 sign-off:
 
 ## Phase 2 — Canonical contract
 
+**Complete as of merged #260 on 2026-08-24.**
+
 ### Merged foundations
 
 | PR | Capability | Merge SHA |
 |---|---|---|
 | #187 | Immutable render submission and deterministic parity baseline | `3cbe6ba81dde384ff1c6073537e3d9b71ed8d0b0` |
-| #191 | Timeline v2 / Render Manifest v1; canonical frame/source/easing primitives | `aabbb31288277287673cbed8546c9eb3f38588e4` |
+| #191 | Timeline v2 / Render Manifest v1; frame/source/easing primitives | `aabbb31288277287673cbed8546c9eb3f38588e4` |
 | #193 | Canonical cubic-Bezier and spring evaluation | `3bed9faf8a868b3a125c25cb141769bfcd7861d2` |
 | #194 | Mechanically checked Go/TypeScript schema projections/constants | `62e2180b5153be505fac650cd41b3a0e2d951783` |
 | #195 | Timeline v1 → canonical Timeline v2 adapter | `b5f76aa6328240a6b516d768756c34f68e6fdedb` |
@@ -213,58 +165,76 @@ Remaining Phase 0 sign-off:
 | #220 | Canonical transition placement/peer state | `1bbbabed5185cbe44640426aad1ab141b59d50cc` |
 | #222 | Transition-state consumption and frame-scoped paint debt | `73d7851cff9e0d7efce711f022659db60cc39dd2` |
 | #224 | Canonical fade/crossfade/dip-to-black paint | `86bd0af3924bb10d6c49c411176f72bcdc07b453` |
-| #225 | Fade-family transition-paint consumption in FrameState | `a6f9145f92e2342dfa70144a4058bf10f64625da` |
-| #227 | Canonical slide transition paint + FrameState consumption | `28639ec4fee09635de39764b33021bb6d9aa418c` |
-| #228 | Canonical wipe transition paint + FrameState consumption | `3007be763dacde820b8b494f62b6a82bb9af5324` |
-| #229 | Canonical zoom transition paint + FrameState consumption | `a8e2a0964e1e49232be08bf2fe7091ce3d9403e6` |
+| #225 | Fade-family paint consumption in FrameState | `a6f9145f92e2342dfa70144a4058bf10f64625da` |
+| #227 | Canonical slide transition paint + consumption | `28639ec4fee09635de39764b33021bb6d9aa418c` |
+| #228 | Canonical wipe transition paint + consumption | `3007be763dacde820b8b494f62b6a82bb9af5324` |
+| #229 | Canonical zoom transition paint + consumption | `a8e2a0964e1e49232be08bf2fe7091ce3d9403e6` |
 | #237 | Canonical effect stack state + FrameState consumption | `22e73cc291a4f8723a99ad123c963aedf0fd0d8a` |
 | #241 | Canonical text renderer state + FrameState consumption | `9b072685b689cdb74e0a5590a26478f6a3ef12b4` |
 | #242 | Canonical shape renderer state definition | `1a25ac0fef217731197169b229bde19aff158c8b` |
 | #243 | Canonical shape state consumption in FrameState | `111fba5fd7ea73740aee1d92fc1038ee72fda30b` |
 | #245 | Canonical cursor renderer state definition | `c428d81f25ce1d85faa6655fb5772430a8fe6b22` |
-| #247 | Canonical cursor state consumption in FrameState | `66530a07e3a5585546d978794e24198083bbeaa2` |
-| #251 | Immutable source provenance and FrameState consumption | `d49808f1ea7fc23f658e95f52fdbe404bf0be92a` |
-| #252 | Canonical font-resource provenance definition | `a8a1d649a209d0013390f0f838b5f32613a2ce02` |
+| #247 | Canonical cursor consumption in FrameState | `66530a07e3a5585546d978794e24198083bbeaa2` |
+| #251 | Immutable source provenance + FrameState consumption | `d49808f1ea7fc23f658e95f52fdbe404bf0be92a` |
+| #252 | Canonical font-resource provenance | `a8a1d649a209d0013390f0f838b5f32613a2ce02` |
 | #253 | Authored text-face binding to packaged resources | `c7db41ade06c6729a77c6d0464ae30aa8a9fa4a6` |
 | #254 | Font-resource snapshot packaging and upload/storage | `b99991c5121c2122bf0cd0f5ef0f7ab8e3514845` |
-| #255 | Static-face-only variable-font policy enforcement | `853b59d07280f7441258586632aa6a43f618bff5` |
+| #255 | Static-face-only variable-font policy | `853b59d07280f7441258586632aa6a43f618bff5` |
+| **#260** | **Canonical AudioGraph v1** | **`9acc544eac6cc63a14a4e0f22ee52cb07688e010`** |
 
-Supporting unblocks during the program:
+Supporting unblocks: #201 repaired the reachable PDF dependency; #219/#226 improved CI setup resilience; #239 aligned sandbox-worker SQLite test behavior; #246 ensured `frontend/test/` canonical suites run in the normal unit/Quality Gate.
 
-- #201 replaced reachable-vulnerable `github.com/ledongthuc/pdf` with `github.com/tsawler/tabula v1.6.14` — `57cb7764a73203fc1194dbe51992e7ee4779817f`.
-- #219/#226 improved bounded/retried CI dependency and Playwright setup.
-- #239 aligned sandbox-worker SQLite test behavior with production WAL/busy-timeout behavior.
-- #246 expanded Vitest discovery so canonical contract tests under `frontend/test/` run in the normal unit/Quality Gate.
+### #260 validation and merge evidence
 
-### Current PR #260 — canonical AudioGraph v1
+- Initial head `a630f0fe67ed4d485182622140e24115e94bb925` exposed only connector-authored Go formatting in `audio_graph_test.go`; frontend lint/unit/build was already green.
+- Formatting was corrected; the final exact PR head was `43a0d1c1a5044937f13be30e0bad58bb7640d41c`.
+- Exact-head **Quality Gate #1491 passed**, including backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright smoke, Windows desktop contract, and the deterministic Video renderer parity baseline.
+- Exact-head **Security Scan #1497 passed**, including dependency audits and both Go and JavaScript/TypeScript CodeQL analysis.
+- Linux workspace/quota, browser-egress, sandbox-worker, macOS runtime/extension/adversarial, and Windows/macOS confinement assurances all passed.
+- There were no review submissions, inline review threads, or PR comments requiring remediation.
+- `compare main...branch` was rechecked immediately before merge and contained only the six intended AudioGraph/test/tracker paths; `main` had not advanced.
+- #260 squash-merged as `9acc544eac6cc63a14a4e0f22ee52cb07688e010`.
 
-Implementation paths:
+### Phase 2 exit gate — satisfied
 
-- `backend/internal/video/rendercontract/audio_graph.go`
-- `backend/internal/video/rendercontract/audio_graph_test.go`
-- `backend/internal/video/rendercontract/testdata/audio_graph_v1.json`
-- `frontend/src/video/renderContractAudio.ts`
-- `frontend/test/renderContractAudio.test.ts`
-
-The shared fixture is intentionally consumed by both runtimes so serialized graph drift is a test failure, not a review-time inference.
-
-### Phase 2 exit gate
-
-After #260 merges, the renderer-independent semantic contract is complete for the currently authorable visual and audio state required by this plan. Phase 3 preview and Phase 4/6 export consumers must consume these contracts rather than duplicate semantic math. Any new authorable field without explicit semantics remains fail closed.
+The renderer-independent semantic contract now covers the currently authorable visual and audio state required by this plan. Phase 3/4/6 consumers must use the canonical contracts rather than duplicate curve, frame, source-time, ordering, geometry, projection, transition, effect, text, shape, cursor, or audio semantic math. New authorable fields without explicit semantics remain fail closed.
 
 ## Phase 3 — Shared preview composition
 
-Drive the Video Edit Studio program monitor from canonical FrameState/AudioGraph while preserving direct-manipulation UI state separately.
+**In progress on #261.**
 
-Recommended implementation order:
+### Current slice — canonical preview projection and deterministic activity consumption
 
-1. Introduce a renderer-neutral preview composition adapter that accepts immutable/canonical Timeline v2 or Render Manifest v1 state plus `frameIndex` and returns the already-evaluated `visual-frame-state-v1` and `audio-graph-v1` inputs needed by painters.
-2. Move active-layer selection, source-time selection, ordering, evaluated transforms/bounds/projection, transition paint, effects, text, shape, and cursor reads in the program monitor behind that adapter without changing paint technology in the first slice.
-3. Add an opt-in diagnostic mode showing frame identity, active clip IDs, source time, matrices/bounds/projection, transition/effect identities, and AudioGraph identity.
-4. Replace preview-local audio semantic math with AudioGraph-driven scheduling only after visual FrameState consumption is stable; processed-stem/program-processing audition remains Phase 6 if it requires offline DSP.
-5. Keep direct-manipulation gesture state separate from canonical playback state so dragging/resizing remains responsive while playback/export semantics stay deterministic.
+`preview-composition-frame-v1` is a lightweight runtime projection, not a new semantic engine. It:
 
-Phase 3 exit: normal playback/program-monitor rendering no longer independently decides frame activity, source time, layer order, canonical transforms/geometry/transition/effect/text/shape/cursor state, or audio selection/gain/fade semantics.
+- evaluates the existing strict `visual-frame-state-v1` diagnostic path;
+- binds canonical layer state back to exact Timeline v1 track/clip/asset objects required by the current editor UI;
+- verifies identity/position mapping;
+- surfaces structured unavailable state instead of inventing v1 transition placement;
+- allows the current DOM/CSS painter to migrate incrementally without re-deriving canonical semantics.
+
+`queryActiveClipsAtFrame` now consumes that projection for deterministic visual activity when available and carries `canonicalState` on matched entries. The existing indexed point query still serves free-running playback. Audio entries remain separate until the AudioGraph consumer slice. This deliberately limits blast radius while proving the first production consumer seam.
+
+Focused coverage proves:
+
+- canonical z/order is preserved while exact editor object identity and asset binding remain intact;
+- transition ambiguity remains fail closed in the projection;
+- canonical source-time/transform state is propagated without recomputation;
+- 120-fps clips that start inside an output frame retain canonical frame activity and receive `canonicalState`;
+- when canonical v1 adaptation is unavailable, deterministic selection preserves prior behavior and does not falsely attach canonical state.
+
+### Remaining Phase 3 work
+
+Recommended order after #261:
+
+1. Make deterministic `VideoPreviewCanvas` media seek/source-time reads consume `canonicalState.source_time_ms` when available; retain the existing source-timing helper only for free-running/fallback paths.
+2. Consume canonical evaluated transforms, opacity/fades, bounds/media geometry, perspective/model state, and canonical camera state in the program monitor while keeping drag/live-direct-manipulation state as a separate overlay.
+3. Move transitions/effects/text/shape/cursor painter inputs to their already-evaluated FrameState fields, removing the remaining local `sampleCursor`, fade/property, and registry re-evaluation where canonical state exists.
+4. Extend the same frame-addressed composition model to normal playback without sacrificing interactive responsiveness; keep unsupported legacy v1 semantics visibly on the compatibility path until their persisted representation is unambiguous.
+5. Add a preview diagnostic overlay/event payload for frame identity, canonical/fallback mode, active clip IDs, source times, transforms/bounds/projection, transition/effect IDs, and eventually AudioGraph identity.
+6. Introduce the AudioGraph preview consumer: selection, mute/solo, playback-rate/pitch policy, gain/fades, and channel policy come from `audio-graph-v1`; program processing/processed-stem audition may remain Phase 6 where offline DSP is required.
+
+Phase 3 exit: normal program-monitor playback no longer independently decides frame activity, source time, layer order, evaluated transforms/geometry/projection, transition/effect/text/shape/cursor semantics, or audio selection/gain/fade semantics.
 
 ## Phase 4 — Shared Chromium render worker
 
@@ -272,24 +242,24 @@ Build a deterministic browser composition entry point accepting immutable Render
 
 ## Phase 5 — Visual parity closure
 
-Close decoded output parity for media timing/fit/crop, transforms/anchors/2.5D/camera/z-order, opacity/blending, text metrics/fonts, shapes, transitions, effects, cursor, color space, and deterministic asset loading.
+Close decoded output parity for media timing/fit/crop, transforms/anchors/2.5D/camera/z-order, opacity/blending, text metrics/fonts, shapes, transitions, effects, cursor, color space, and deterministic asset loading. Freeze production thresholds only from retained, reproducible evidence.
 
 ## Phase 6 — Audio parity closure
 
-Make preview/Chromium and export consumers obey `audio-graph-v1` exactly:
+Make preview/Chromium/export consumers obey `audio-graph-v1` exactly:
 
 - source time and playback rate with pitch preservation;
 - canonical mono/stereo mapping and future explicit matrices for additional layouts;
-- mute/solo, gain automation, fade overlap semantics, and non-normalizing mix;
+- mute/solo, gain automation, fade overlap, and non-normalizing summation;
 - one post-mix program-processing stage;
-- processed-stem architecture when the deterministic renderer cannot reproduce a processing operation identically in real time;
+- processed stems when deterministic real-time reproduction is not possible;
 - exact output/range sample counts and decoded-delivery verification.
 
-Phase 6 must remove the current semantic mismatches rather than bless them: legacy Web Audio rate changes pitch, while legacy FFmpeg preserves it; legacy FFmpeg applies program processing per input, while authoring intent and AudioGraph define post-mix processing; overlapping legacy FFmpeg fades multiply, while AudioGraph defines minimum-envelope semantics.
+Do not bless current mismatches: legacy Web Audio rate changes can pitch-shift while the contract requires preservation; legacy FFmpeg has historically applied some processing per input while the contract defines post-mix processing; overlapping legacy FFmpeg fades can multiply while the contract defines minimum-envelope behavior.
 
 ## Phase 7 — Rollout and legacy retirement
 
-Shadow-render, collect safe parity/performance/failure telemetry, stage opt-in → default-on → legacy opt-out, preserve rollback, update capabilities/docs, then retire legacy composition only when canonical coverage and rollback criteria are satisfied.
+Shadow-render, collect parity/performance/failure telemetry, stage opt-in → default-on → legacy opt-out, preserve rollback, update capabilities/docs, then retire legacy composition only when canonical coverage and rollback criteria are satisfied.
 
 ## Validation matrix
 
@@ -318,7 +288,7 @@ Before every merge:
 
 1. Verify the PR's exact final head.
 2. `compare main...branch` and inspect every changed path.
-3. Resolve all review threads or explain why a non-actionable thread is being dismissed.
+3. Resolve all review threads or document why a non-actionable thread is dismissed.
 4. Record concrete validation evidence in this tracker/PR.
 5. Never call an unexecuted or setup-only job green.
 
@@ -326,49 +296,41 @@ Before every merge:
 
 | Risk | Control |
 |---|---|
-| Schema/type drift | Go reflection and TypeScript compile/Vitest projection checks fail CI; canonical `frontend/test/` suites are included by #246. |
+| Schema/type drift | Go reflection and TypeScript compile/Vitest checks; canonical `frontend/test/` suites run in CI via #246. |
 | Browser/Go evaluator drift | Shared fixtures plus permanent FrameState/AudioGraph diagnostics. |
-| Legacy FFmpeg approximations become de facto contract | Canonical semantics are explicit; legacy renderer is evidence only. |
-| v1 adapter guesses ambiguous behavior | Ambiguous state fails closed. |
-| Millisecond rounding creates frame/source drift | Canonical rational frame/range/source helpers; AudioGraph uses deterministic integer sample-boundary rules. |
-| Source aspect ratio is guessed from canvas | Explicit bounds or immutable source provenance only. |
-| Crop ordering diverges | Source mask before fit; output crop after fit. |
-| Perspective differs between preview/export | One canonical projection contract carried in FrameState. |
-| Pair transitions are misapplied as independent alpha layers | Pair paint operates on isolated surfaces using canonical weights/transforms. |
-| Effect ordering/defaults diverge | `effect-state-v1` preserves authored order and normalized parameters. |
-| Unsupported effect metadata is silently ignored | Canonical evaluation fails closed. |
-| Browser/system font fallback changes text metrics | Packaged static-face provenance plus fail-closed resource binding; intrinsic metric ownership remains explicit Phase 3–5 work. |
-| Intrinsic text bounds are guessed | Only explicit positive box dimensions are canonical until deterministic glyph layout exists. |
-| Shape/cursor semantics inherit legacy approximations | Versioned canonical state is authoritative; unsupported state fails closed. |
-| Audio pitch behavior diverges | `audio-graph-v1` explicitly requires pitch preservation. |
-| Audio fade overlap diverges | `audio-graph-v1` explicitly requires linear minimum-envelope overlap semantics. |
-| Program processing is applied at different graph locations | `audio-graph-v1` defines one post-mix processed-stem boundary. |
-| Unsupported channel layout is silently remixed | v1 only accepts canonical mono→stereo or stereo passthrough; other layouts fail closed. |
-| Stacked branch appears current but carries stale tree | Rebuild from actual current `main` and compare every path before merge. |
-| CI setup/runner saturation hides code state | Distinguish setup/queue from executed code checks. |
+| Legacy FFmpeg approximations become contract | Canonical state is explicit; legacy renderers are evidence/consumers only. |
+| v1 adapter guesses ambiguous behavior | Ambiguous state fails closed; #261 preserves this boundary. |
+| Canonical preview projection binds wrong editor object | #261 verifies track/clip positional and ID identity before exposing canonical state. |
+| Frame-addressed preview silently mixes canonical and fallback semantics | #261 attaches `canonicalState` only when the strict projection succeeds; fallback entries remain explicitly without it. |
+| Millisecond rounding creates frame/source drift | Rational frame/source helpers and integer AudioGraph sample-boundary rules. |
+| Source aspect ratio is guessed | Explicit bounds or immutable source provenance only. |
+| Perspective differs between consumers | One canonical projection contract in FrameState. |
+| Pair transitions become independent alpha layers | Pair paint operates on isolated surfaces with canonical weights/transforms. |
+| Effect/text/shape/cursor defaults drift | Versioned evaluated state is authoritative; unsupported metadata fails closed. |
+| Browser/system font fallback changes metrics | Packaged static-face provenance; deterministic intrinsic metric ownership remains explicit Phase 3–5 work. |
+| Audio pitch/fade/processing location diverges | AudioGraph explicitly owns pitch preservation, minimum fade overlap, and post-mix processing. |
+| Unsupported channels are silently remixed | v1 accepts mono→stereo or stereo passthrough only; other layouts fail closed. |
+| Stacked branch carries stale tree | Rebuild from actual `main` and inspect `compare`; #261 was normalized this way. |
+| CI setup/runner saturation hides code state | Distinguish setup/queue from executed checks. |
 | Browser worker resource cost | Admission control, health checks, cancellation, guarded rollout, FFmpeg retained for media I/O. |
 
 ## Implementation log
 
-### 2026-08-17
+### 2026-08-17 to 2026-08-18
 
 - #187 established immutable submission and deterministic parity evidence.
-
-### 2026-08-18
-
-- #191–#206 advanced the canonical contract from schema/timing through exact-frame visual FrameState.
+- #191–#206 advanced the canonical contract through schema/timing, adapters, ordering, curves, exact-frame property evaluation, and visual FrameState.
 - #201 repaired the reachable PDF dependency vulnerability.
-- #208 added permanent cross-runtime FrameState diagnostics and fixed the CodeQL allocation finding before merge.
+- #208 added permanent cross-runtime FrameState diagnostics and corrected its CodeQL finding before merge.
 
 ### 2026-08-19
 
-- #209 canonicalized media geometry and corrected an initial Go formatting-only Quality Gate failure before merge.
-- #212 consumed media geometry in FrameState and removed canvas-sized source-bounds guessing.
+- #209/#212 canonicalized media geometry, source bounds, and FrameState consumption.
 - #218 canonicalized perspective projection.
 - #219/#226 improved CI dependency/Playwright reliability.
-- #220–#229 completed transition placement and all currently authorable canonical paint families.
-- #237 defined `effect-state-v1` and projected clip/scene effects into FrameState.
-- #241 defined `text-state-v1`; its initial connector-authored Go formatting issue was corrected before the exact-head hosted matrix passed.
+- #220–#229 completed transition placement and all currently authorable transition paint families.
+- #237 defined and consumed `effect-state-v1`.
+- #241 defined and consumed `text-state-v1`.
 
 ### 2026-08-20 to 2026-08-21
 
@@ -378,20 +340,22 @@ Before every merge:
 - #251 added immutable source provenance and canonical anchor/geometry consumption.
 - #252 defined font-resource provenance.
 - #253 bound authored text to packaged font faces.
-- #254 added font upload/storage and immutable snapshot packaging; hosted parity caught and drove a fix for a non-text-clip nil dereference before merge.
+- #254 added font upload/storage and immutable snapshot packaging; hosted parity exposed and drove a fix for a non-text-clip nil dereference before merge.
 - #255 enforced static-face-only font semantics.
 
 ### 2026-08-24
 
-- Refreshed against current `main` `dc51d7ddaf8060304fbe63153796e4ebafe48a20`; the stale handoff's claimed AudioGraph branch did not exist.
-- Created `feat/video-wysiwyg-phase2-audio-graph` directly from current `main` and opened #260.
-- Implemented mirrored Go/TypeScript `audio-graph-v1` evaluators plus a shared fixture covering rate/pitch policy, exact sample boundaries, mute/solo suppression identity, channel mapping, gain automation, fades, and post-mix program-processing intent.
-- Initial exact head `a630f0fe67ed4d485182622140e24115e94bb925` exposed a formatting-only backend gate failure in `audio_graph_test.go`; frontend lint/unit/build was already green.
-- Corrected `gofmt` in `51770175e333e59725b44bd0c869e935002ccdd7`; formatting, `go vet`, full backend tests, and frontend lint/unit/build passed on that implementation head while the remaining hosted jobs continued.
-- Updated this tracker on the PR branch; the resulting exact head must pass the required hosted matrix before #260 merges.
+- Refreshed against actual `main` `dc51d7ddaf8060304fbe63153796e4ebafe48a20`; the previous handoff's claimed AudioGraph branch did not exist.
+- Created `feat/video-wysiwyg-phase2-audio-graph`, opened #260, implemented mirrored Go/TypeScript `audio-graph-v1`, and added one shared cross-runtime fixture.
+- Initial #260 head exposed only Go formatting; the corrected final head `43a0d1c1a5044937f13be30e0bad58bb7640d41c` passed the complete Quality/Security/platform matrix, including race, Playwright, CodeQL, and renderer parity.
+- #260 squash-merged as `9acc544eac6cc63a14a4e0f22ee52cb07688e010`, completing Phase 2.
+- Opened draft #261 while #260 parity was still executing, then safely rebuilt #261 directly from merged `main` and retargeted it to `main`.
+- #261 introduced `preview-composition-frame-v1`, strict identity binding, and the first real canonical preview consumer: deterministic visual frame activity now comes from FrameState when available and carries `canonicalState` into the existing preview index.
+- This tracker update creates a new exact #261 head; the complete required hosted matrix must pass before #261 can be marked ready or merged.
 
 ## Next recommended slice
 
-1. Finish exact-head hosted validation and review for #260, verify `compare main...branch`, and squash-merge only if current/scoped/green.
-2. From the resulting current `main`, begin Phase 3 with the smallest shared-preview-composition slice: introduce the canonical preview composition adapter and route program-monitor **semantic reads** through `visual-frame-state-v1` without changing paint technology yet.
-3. Keep Phase 0 production visual thresholds and second-platform evidence moving in parallel; use AudioGraph as the explicit unsupported-audio boundary until Phase 6 consumer parity is complete.
+1. Finish exact-head CI/review for #261, re-check `compare main...branch`, and squash-merge only if current, scoped, and green.
+2. From resulting `main`, route deterministic media **source-time/seek** and evaluated transform/opacity reads in `VideoPreviewCanvas.tsx` through the `canonicalState` already carried by #261; preserve live drag/direct-manipulation state separately.
+3. Continue removing preview-local canonical re-evaluation in small slices: camera/projection, geometry, transitions/effects, text/shape/cursor, then AudioGraph scheduling.
+4. Keep Phase 0 production visual thresholds and second-platform evidence moving in parallel.
