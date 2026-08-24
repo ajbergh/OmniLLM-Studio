@@ -28,6 +28,7 @@ import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineT
 import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips, queryActiveClipsAtFrame } from './pro/timelineIndex';
 import { renderPreviewPCM } from './parity/previewAudioRenderer';
 import { frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForPreviewMediaMs } from './sourceTiming';
+import { resolvePreviewFrameTransform } from './previewFrameTransform';
 
 function formatTime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -722,13 +723,14 @@ export function VideoPreviewCanvas() {
 
   const renderLayer = (entry: LayerEntry, poster = false) => {
     const { clip, track, asset } = entry;
-    const transform = { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, ...(clip.transform || {}) };
-    // Canonical property evaluation owns static/default values and keyframe
-    // interpolation; an in-flight canvas drag still overrides both.
     const clipTimeMs = playheadMs - clip.start_ms;
-    for (const property of ['x', 'y', 'z', 'scale', 'scale_x', 'scale_y', 'rotation', 'rotation_x', 'rotation_y', 'rotation_z', 'opacity'] as const) {
-      transform[property] = evaluateClipProperty(clip, property, clipTimeMs);
-    }
+    const hasLiveOverride = Boolean(liveTransform && liveTransform.clipId === clip.id);
+    const { transform, opacityIncludesClipFades } = resolvePreviewFrameTransform(
+      clip,
+      clipTimeMs,
+      entry.canonicalState,
+      hasLiveOverride,
+    );
     let liveShapeWidth: number | undefined;
     let liveShapeHeight: number | undefined;
     if (liveTransform && liveTransform.clipId === clip.id) {
@@ -737,7 +739,8 @@ export function VideoPreviewCanvas() {
       liveShapeWidth = shapeWidth;
       liveShapeHeight = shapeHeight;
     }
-    const opacity = Math.max(0, Math.min(1, transform.opacity)) * fadeFactor(clip, playheadMs);
+    const opacity = Math.max(0, Math.min(1, transform.opacity))
+      * (opacityIncludesClipFades ? 1 : fadeFactor(clip, playheadMs));
     const selected = clip.id === selectedClipId;
     const isMedia = Boolean(asset && (asset.mime_type.startsWith('video/') || asset.mime_type.startsWith('image/')));
     // Crop editing renders the full frame with dimmed margins; rotation is
