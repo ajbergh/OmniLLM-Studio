@@ -90,6 +90,7 @@ describe('preview FrameState perspective projection resolver', () => {
     expect(shouldUseCanonicalPreviewPerspective(15, [perspectiveState(1000), perspectiveState(500, 'clip')], false)).toBe(true);
     expect(shouldUseCanonicalPreviewPerspective(15, [perspectiveState(1000), undefined], false)).toBe(false);
     expect(shouldUseCanonicalPreviewPerspective(15, [perspectiveState(Number.NaN)], false)).toBe(false);
+    expect(shouldUseCanonicalPreviewPerspective(15, [], false)).toBe(false);
   });
 
   it('keeps free-running playback and live interaction on the shared stage perspective', () => {
