@@ -6,6 +6,8 @@ import type {
 } from '../../../types/video';
 import { activeAtFrame } from '../../../video/renderContract';
 import { compareCanonicalClipOrder } from '../../../video/renderContractEvaluation';
+import type { CanonicalFrameLayerState } from '../../../video/renderContractFrameState';
+import { evaluateCanonicalPreviewCompositionFrame } from '../../../video/renderContractPreviewComposition';
 
 export interface IndexedTimelineClip {
   clip: VideoTimelineClip;
@@ -16,6 +18,8 @@ export interface IndexedTimelineClip {
   asset?: VideoAsset;
   /** Cached interval end. Optional so preview-layer projections remain assignable. */
   endMs?: number;
+  /** Canonical FrameState carried only by explicit frame-addressed preview queries. */
+  canonicalState?: CanonicalFrameLayerState;
 }
 
 export interface TimelineIntervalIndex {
@@ -24,6 +28,9 @@ export interface TimelineIntervalIndex {
   /** Maximum clip end observed from index 0 through each position. */
   prefixMaxEnd: number[];
   assetById: Map<string, VideoAsset>;
+  /** Source document/assets retained for canonical frame-addressed preview evaluation. */
+  document: VideoTimelineDocument | null;
+  assets: VideoAsset[];
 }
 
 function upperBound(values: number[], target: number): number {
@@ -87,7 +94,7 @@ export function buildTimelineIntervalIndex(
     prefixMaxEnd.push(maxEnd);
   }
 
-  return { clips, starts, prefixMaxEnd, assetById };
+  return { clips, starts, prefixMaxEnd, assetById, document, assets };
 }
 
 /**
@@ -113,13 +120,31 @@ export function queryActiveClips(
   return result.sort(compareIndexedTimelineClipOrder);
 }
 
+function canonicalVisualCandidate(item: IndexedTimelineClip): boolean {
+  if (!item.track.visible || item.track.type === 'audio' || item.track.type === 'music' || item.clip.audio_only) return false;
+  return Boolean(item.clip.text)
+    || Boolean(item.clip.shape)
+    || !item.asset
+    || !item.asset.mime_type.startsWith('audio/');
+}
+
+function canonicalLayerKey(trackIndex: number, clipIndex: number): string {
+  return `${trackIndex}:${clipIndex}`;
+}
+
 /**
  * Return clips overlapping one canonical output frame. Deterministic capture is
  * intentionally frame-addressed: a clip authored partway into a frame belongs
  * to that frame under floor-start/ceil-end semantics even when a millisecond
- * point query at the frame's start would miss it. This path is reserved for
- * explicit frame-addressed evaluation; interactive playback keeps the indexed
- * point query above.
+ * point query at the frame's start would miss it.
+ *
+ * Phase 3 visual preview consumption starts here: when the strict v1→v2 bridge
+ * can evaluate the frame, visible visual activity comes from canonical
+ * `visual-frame-state-v1` and each matching index entry carries that exact
+ * layer state. Audio-only/audio-track entries stay on the legacy activity path
+ * until AudioGraph consumption lands. If canonical evaluation is unavailable
+ * (for example ambiguous v1 transition placement), the whole frame query falls
+ * back to the prior frame-overlap behavior rather than guessing semantics.
  */
 export function queryActiveClipsAtFrame(
   index: TimelineIntervalIndex,
@@ -129,13 +154,35 @@ export function queryActiveClipsAtFrame(
   const normalizedFrame = Math.trunc(frameIndex);
   const normalizedFPS = Math.trunc(fps);
   if (normalizedFrame < 0 || normalizedFPS <= 0) return [];
-  return index.clips
+
+  const active = index.clips
     .filter((item) => activeAtFrame(
       normalizedFrame,
       item.clip.start_ms,
       item.clip.duration_ms,
       normalizedFPS,
     ))
+    .sort(compareIndexedTimelineClipOrder);
+
+  if (!index.document || normalizedFPS !== Math.trunc(index.document.canvas.fps)) return active;
+  const composition = evaluateCanonicalPreviewCompositionFrame(index.document, index.assets, normalizedFrame);
+  if (!composition.available || !composition.layers) return active;
+
+  const canonicalByIdentity = new Map(
+    composition.layers.map((layer) => [
+      canonicalLayerKey(layer.track_index, layer.clip_index),
+      layer.state,
+    ]),
+  );
+  return active
+    .filter((item) => (
+      !canonicalVisualCandidate(item)
+      || canonicalByIdentity.has(canonicalLayerKey(item.trackIndex, item.clipIndex))
+    ))
+    .map((item) => {
+      const canonicalState = canonicalByIdentity.get(canonicalLayerKey(item.trackIndex, item.clipIndex));
+      return canonicalState ? { ...item, canonicalState } : item;
+    })
     .sort(compareIndexedTimelineClipOrder);
 }
 
@@ -157,6 +204,7 @@ export function visibleClips(
     const clip = ordered[index];
     if (clip.start_ms + clip.duration_ms > minimum) result.push(clip);
   }
+
   return result;
 }
 
