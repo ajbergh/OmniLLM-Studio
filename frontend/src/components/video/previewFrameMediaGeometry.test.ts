@@ -19,7 +19,7 @@ const portraitGeometry: CanonicalMediaGeometry = {
   scale_y: 0.36,
 };
 
-function state(geometry: CanonicalMediaGeometry | undefined = portraitGeometry): CanonicalFrameLayerState {
+function state(geometry: CanonicalMediaGeometry = portraitGeometry): CanonicalFrameLayerState {
   return {
     media_geometry: geometry,
   } as CanonicalFrameLayerState;
@@ -32,7 +32,7 @@ describe('canonical preview media geometry', () => {
     expect(resolveCanonicalPreviewMediaGeometry(12, state(), false, false, false)).toBeNull();
     expect(resolveCanonicalPreviewMediaGeometry(12, state(), true, true, false)).toBeNull();
     expect(resolveCanonicalPreviewMediaGeometry(12, state(), true, false, true)).toBeNull();
-    expect(resolveCanonicalPreviewMediaGeometry(12, state(undefined), true, false, false)).toBeNull();
+    expect(resolveCanonicalPreviewMediaGeometry(12, {} as CanonicalFrameLayerState, true, false, false)).toBeNull();
   });
 
   it('fails closed when canonical bounds or scales are invalid', () => {
