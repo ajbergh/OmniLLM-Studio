@@ -29,6 +29,7 @@ import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineC
 import { renderPreviewPCM } from './parity/previewAudioRenderer';
 import { frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForPreviewMediaMs } from './sourceTiming';
 import { resolvePreviewFrameTransform } from './previewFrameTransform';
+import { resolvePreviewFrameViewTransform } from './previewFrameViewTransform';
 
 function formatTime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -739,6 +740,12 @@ export function VideoPreviewCanvas() {
       liveShapeWidth = shapeWidth;
       liveShapeHeight = shapeHeight;
     }
+    const viewTransform = resolvePreviewFrameViewTransform(
+      transform,
+      entry.canonicalState,
+      camera,
+      hasLiveOverride,
+    );
     const opacity = Math.max(0, Math.min(1, transform.opacity))
       * (opacityIncludesClipFades ? 1 : fadeFactor(clip, playheadMs));
     const selected = clip.id === selectedClipId;
@@ -760,7 +767,7 @@ export function VideoPreviewCanvas() {
       maxWidth: stageSize.width,
       transformOrigin: `${50 + ((transform.anchor_x || 0) / canvasWidth) * 100}% ${50 + ((transform.anchor_y || 0) / canvasHeight) * 100}%`,
       transformStyle: 'preserve-3d',
-      transform: `translate(-50%, -50%) translate3d(${(transform.x - camera.x) * stageScale}px, ${(transform.y - camera.y) * stageScale}px, ${((transform.z || 0) - camera.z) * stageScale}px) rotateX(${inCropEdit ? 0 : (transform.rotation_x || 0) - camera.rotation_x}deg) rotateY(${inCropEdit ? 0 : (transform.rotation_y || 0) - camera.rotation_y}deg) rotateZ(${inCropEdit ? 0 : (transform.rotation_z ?? transform.rotation) - camera.rotation_z}deg) scale3d(${transform.scale_x || transform.scale}, ${transform.scale_y || transform.scale}, 1)`,
+      transform: `translate(-50%, -50%) translate3d(${viewTransform.x * stageScale}px, ${viewTransform.y * stageScale}px, ${viewTransform.z * stageScale}px) rotateX(${inCropEdit ? 0 : viewTransform.rotation_x}deg) rotateY(${inCropEdit ? 0 : viewTransform.rotation_y}deg) rotateZ(${inCropEdit ? 0 : viewTransform.rotation_z}deg) scale3d(${transform.scale_x || transform.scale}, ${transform.scale_y || transform.scale}, 1)`,
       opacity,
       filter: composePreviewFilter(clip.effects),
     };
