@@ -3,6 +3,7 @@ import {
   frameAddressMatchesTimelineMs,
   mediaSeekToleranceSeconds,
   sourceTimeForAddressMs,
+  sourceTimeForPreviewMediaMs,
 } from './sourceTiming';
 
 describe('media source timing', () => {
@@ -50,6 +51,36 @@ describe('media source timing', () => {
       40,
       1.5,
     )).toBeCloseTo(45, 9);
+  });
+
+  it('prefers canonical FrameState source time for deterministic visual media', () => {
+    expect(sourceTimeForPreviewMediaMs(
+      { kind: 'frame', frameIndex: 7, fps: 120 },
+      { source_time_ms: 432.125 },
+      1000,
+      0,
+      4,
+    )).toBe(432.125);
+  });
+
+  it('keeps free-running visual media on timeline-time evaluation', () => {
+    expect(sourceTimeForPreviewMediaMs(
+      { kind: 'time', timelineMs: 1000.5 },
+      { source_time_ms: 9999 },
+      500,
+      100,
+      1.25,
+    )).toBeCloseTo(725.625, 9);
+  });
+
+  it('falls back to frame-address evaluation when canonical projection is unavailable', () => {
+    expect(sourceTimeForPreviewMediaMs(
+      { kind: 'frame', frameIndex: 1, fps: 120 },
+      undefined,
+      0,
+      10,
+      2,
+    )).toBeCloseTo(26.6666666667, 9);
   });
 
   it('recognizes the exact playhead generated from a frame address', () => {
