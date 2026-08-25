@@ -1,0 +1,42 @@
+name: Temporary pair preserve-3d fix
+
+on:
+  push:
+    branches:
+      - feat/video-wysiwyg-phase3-transition-pair-source-over-consumer
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/video-wysiwyg-phase3-transition-pair-source-over-consumer
+          fetch-depth: 0
+      - name: Preserve 3D pair subtree
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/src/components/video/VideoPreviewCanvas.tsx')
+          text = path.read_text()
+          old = "        style={{ isolation: 'isolate', pointerEvents: 'none', transformStyle: 'preserve-3d' }}\n"
+          new = "        // Do not use CSS `isolation: isolate` here: it is a grouping property\n        // that can flatten preserve-3d descendants. Canonical adjacency already\n        // makes this structural wrapper an exact source-over pair replacement.\n        style={{ pointerEvents: 'none', transformStyle: 'preserve-3d' }}\n"
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one pair wrapper style, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git diff --check
+      - name: Commit and remove temporary workflow
+        shell: bash
+        run: |
+          git rm -- .github/workflows/tmp-video-pair-preserve3d-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/components/video/VideoPreviewCanvas.tsx
+          git commit -m "fix(video): preserve 3d transition pair composition"
+          git push origin HEAD:feat/video-wysiwyg-phase3-transition-pair-source-over-consumer
