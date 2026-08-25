@@ -199,6 +199,7 @@ export function VideoPreviewCanvas() {
 
   useLayoutEffect(() => {
     if (!consumeWeightedPairs || !stage) return;
+    const previousRuntimeError = stage.getAttribute('data-preview-transition-pair-runtime-error');
     const onParityReady = (event: Event) => {
       const detail = (event as CustomEvent<Record<string, unknown>>).detail || {};
       if (detail.weightedCanvasResume === true) return;
@@ -206,18 +207,26 @@ export function VideoPreviewCanvas() {
       event.stopImmediatePropagation();
       const deadline = performance.now() + 2000;
       const signalWhenSettled = () => {
-        if (!weightedPairSurfacesReady(stage, weightedSlots.length) && performance.now() < deadline) {
+        if (weightedPairSurfacesReady(stage, weightedSlots.length)) {
+          stage.removeAttribute('data-preview-transition-pair-runtime-error');
+          window.dispatchEvent(new CustomEvent('omnillm:video-parity-ready', {
+            detail: { ...detail, weightedCanvasResume: true },
+          }));
+          return;
+        }
+        if (performance.now() < deadline) {
           requestAnimationFrame(signalWhenSettled);
           return;
         }
-        window.dispatchEvent(new CustomEvent('omnillm:video-parity-ready', {
-          detail: { ...detail, weightedCanvasResume: true },
-        }));
+        stage.setAttribute('data-preview-transition-pair-runtime-error', 'weighted-canvas-not-ready');
       };
       requestAnimationFrame(signalWhenSettled);
     };
     window.addEventListener('omnillm:video-parity-ready', onParityReady, true);
-    return () => window.removeEventListener('omnillm:video-parity-ready', onParityReady, true);
+    return () => {
+      window.removeEventListener('omnillm:video-parity-ready', onParityReady, true);
+      restoreAttribute(stage, 'data-preview-transition-pair-runtime-error', previousRuntimeError);
+    };
   }, [consumeWeightedPairs, stage, weightedSlots]);
 
   return (
