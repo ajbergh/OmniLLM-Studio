@@ -4,6 +4,7 @@ import { MEDIA_GEOMETRY_CONTRACT_V1 } from '../../video/renderContractMediaGeome
 import {
   TRANSITION_PAINT_CONTRACT_V1,
   TRANSITION_PAINT_CROSSFADE,
+  TRANSITION_PAINT_OWNER_ALPHA,
   TRANSITION_PAINT_PAIR_ZOOM,
   TRANSITION_PAINT_SCALE_LAYER_MULTIPLIER,
   type CanonicalTransitionPaint,
@@ -111,12 +112,17 @@ describe('weighted pair Canvas admission', () => {
     expect(shouldConsumePreviewFrameWeightedPairs(blocked)).toBe(false);
   });
 
-  it('fails closed when the pair owner has another active paint', () => {
-    const extra = paint({
-      transition_id: 'transition-extra',
-      outgoing_weight: 0.5,
-      incoming_weight: 0.5,
-    });
+  it('fails closed when the pair owner has another active owner-only paint', () => {
+    const extra: CanonicalTransitionPaint = {
+      contract_version: TRANSITION_PAINT_CONTRACT_V1,
+      transition_id: 'fade-extra',
+      type: 'fade',
+      placement: 'in',
+      composition: TRANSITION_PAINT_OWNER_ALPHA,
+      owner_clip_id: 'clip-a',
+      progress: 0.5,
+      owner_opacity: 0.5,
+    };
     const plan = planPreviewFrameTransitionPairs(12, [
       layer('clip-a', [paint(), extra]),
       layer('clip-b'),
