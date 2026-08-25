@@ -152,6 +152,10 @@ var knownTransitionTypes = map[string]bool{
 	TransitionTypeZoom:       true,
 }
 
+var knownTransitionPlacements = map[string]bool{
+	"in": true, "out": true, "between": true,
+}
+
 var knownKeyframeProperties = map[string]bool{
 	"x":          true,
 	"y":          true,
@@ -373,6 +377,11 @@ type TimelineTransition struct {
 	Type       string `json:"type"`
 	DurationMS int64  `json:"duration_ms"`
 	Direction  string `json:"direction,omitempty"`
+	// Placement/PeerClipID are additive v1 authoring fields. Empty
+	// placement preserves legacy ambiguity so the canonical adapter
+	// can continue to fail closed instead of guessing intent.
+	Placement  string `json:"placement,omitempty"`
+	PeerClipID string `json:"peer_clip_id,omitempty"`
 }
 
 type TimelineKeyframe struct {
@@ -983,6 +992,12 @@ func ValidateTimelineDocument(doc TimelineDocument) (TimelineDocument, error) {
 				transition.Type = strings.ToLower(strings.TrimSpace(transition.Type))
 				if !knownTransitionTypes[transition.Type] {
 					return TimelineDocument{}, fmt.Errorf("clip %q has unsupported transition type %q", clip.ID, transition.Type)
+				}
+				transition.Direction = strings.ToLower(strings.TrimSpace(transition.Direction))
+				transition.Placement = strings.ToLower(strings.TrimSpace(transition.Placement))
+				transition.PeerClipID = strings.TrimSpace(transition.PeerClipID)
+				if transition.Placement != "" && !knownTransitionPlacements[transition.Placement] {
+					return TimelineDocument{}, fmt.Errorf("clip %q transition %q has unsupported placement %q", clip.ID, transition.ID, transition.Placement)
 				}
 				if transition.DurationMS <= 0 {
 					return TimelineDocument{}, fmt.Errorf("clip %q transition %q duration_ms must be greater than zero", clip.ID, transition.ID)

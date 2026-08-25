@@ -4,15 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/ajbergh/omnillm-studio/internal/video/rendercontract"
 )
 
 const (
-	canonicalAdapterVersionCode              = "V1_VERSION_UNSUPPORTED"
-	canonicalAdapterTransitionCode           = "V1_TRANSITION_PLACEMENT_AMBIGUOUS"
-	canonicalAdapterUnsupportedTransformCode = "V1_TRANSFORM_FIELD_UNSUPPORTED"
-	canonicalAdapterTransformValueCode       = "V1_TRANSFORM_VALUE_INVALID"
+	canonicalAdapterVersionCode               = "V1_VERSION_UNSUPPORTED"
+	canonicalAdapterTransitionCode            = "V1_TRANSITION_PLACEMENT_AMBIGUOUS"
+	canonicalAdapterTransitionPlacementCode   = "V1_TRANSITION_PLACEMENT_INVALID"
+	canonicalAdapterTransitionPeerCode        = "V1_TRANSITION_PEER_INVALID"
+	canonicalAdapterTransitionOverlapCode     = "V1_TRANSITION_OVERLAP_INVALID"
+	canonicalAdapterTransitionCombinationCode = "V1_TRANSITION_COMBINATION_INVALID"
+	canonicalAdapterUnsupportedTransformCode  = "V1_TRANSFORM_FIELD_UNSUPPORTED"
+	canonicalAdapterTransformValueCode        = "V1_TRANSFORM_VALUE_INVALID"
 )
 
 // CanonicalAdapterError is a fail-closed, path-addressed incompatibility found
@@ -112,12 +117,67 @@ func validateV1CanonicalCompatibility(doc TimelineDocument) error {
 	for trackIndex, track := range doc.Tracks {
 		for clipIndex, clip := range track.Clips {
 			path := fmt.Sprintf("tracks[%d].clips[%d]", trackIndex, clipIndex)
-			if len(clip.Transitions) > 0 {
-				return &CanonicalAdapterError{
-					Code:        canonicalAdapterTransitionCode,
-					Path:        path + ".transitions[0]",
-					Message:     "v1 transition placement is not explicit enough for Timeline v2",
-					Remediation: "remove the transition or migrate it after canonical transition placement and peer semantics are defined",
+			for transitionIndex, transition := range clip.Transitions {
+				transitionPath := fmt.Sprintf("%s.transitions[%d]", path, transitionIndex)
+				placement := strings.ToLower(strings.TrimSpace(transition.Placement))
+				if placement == "" {
+					return &CanonicalAdapterError{
+						Code:        canonicalAdapterTransitionCode,
+						Path:        transitionPath,
+						Message:     "v1 transition placement is not explicit enough for Timeline v2",
+						Remediation: "choose explicit in, out, or between placement in the editor before canonical rendering",
+					}
+				}
+				peerID := strings.TrimSpace(transition.PeerClipID)
+				if err := validateV1TransitionPaintCombination(transition.Type, placement, transitionPath); err != nil {
+					return err
+				}
+				switch placement {
+				case "in", "out":
+					if peerID != "" {
+						return &CanonicalAdapterError{
+							Code: canonicalAdapterTransitionPeerCode, Path: transitionPath + ".peer_clip_id",
+							Message: "in/out transitions must not declare a peer", Remediation: "clear peer_clip_id or choose between placement",
+						}
+					}
+				case "between":
+					if peerID == "" {
+						return &CanonicalAdapterError{
+							Code: canonicalAdapterTransitionPeerCode, Path: transitionPath + ".peer_clip_id",
+							Message: "between transitions require an explicit peer clip", Remediation: "choose an overlapping peer clip in the editor",
+						}
+					}
+					peerTrack, peer, ok := findTimelineClipByID(doc, peerID)
+					if !ok || peer.ID == clip.ID {
+						return &CanonicalAdapterError{
+							Code: canonicalAdapterTransitionPeerCode, Path: transitionPath + ".peer_clip_id",
+							Message: fmt.Sprintf("transition peer %q is missing or invalid", peerID), Remediation: "choose a different existing overlapping clip",
+						}
+					}
+					if !isVisualTransitionPeer(peerTrack, peer) {
+						return &CanonicalAdapterError{
+							Code: canonicalAdapterTransitionPeerCode, Path: transitionPath + ".peer_clip_id",
+							Message: fmt.Sprintf("transition peer %q is not a visible visual clip", peerID), Remediation: "choose a visible non-audio peer clip",
+						}
+					}
+					if peer.StartMS == clip.StartMS {
+						return &CanonicalAdapterError{
+							Code: canonicalAdapterTransitionPeerCode, Path: transitionPath + ".peer_clip_id",
+							Message: "between transition owner and peer must have distinct start times", Remediation: "choose a peer with a distinct authored start time",
+						}
+					}
+					overlap := timelineTransitionOverlapMS(clip, peer)
+					if overlap < transition.DurationMS {
+						return &CanonicalAdapterError{
+							Code: canonicalAdapterTransitionOverlapCode, Path: transitionPath + ".duration_ms",
+							Message: fmt.Sprintf("between transition needs %dms overlap but only %dms is authored", transition.DurationMS, overlap), Remediation: "shorten the transition or increase real clip overlap",
+						}
+					}
+				default:
+					return &CanonicalAdapterError{
+						Code: canonicalAdapterTransitionPlacementCode, Path: transitionPath + ".placement",
+						Message: fmt.Sprintf("unsupported transition placement %q", placement), Remediation: "use in, out, or between",
+					}
 				}
 			}
 			if err := validateV1Transform(clip.Transform, path+".transform"); err != nil {
@@ -126,6 +186,56 @@ func validateV1CanonicalCompatibility(doc TimelineDocument) error {
 		}
 	}
 	return nil
+}
+
+func findTimelineClipByID(doc TimelineDocument, clipID string) (TimelineTrack, TimelineClip, bool) {
+	for _, track := range doc.Tracks {
+		for _, clip := range track.Clips {
+			if clip.ID == clipID {
+				return track, clip, true
+			}
+		}
+	}
+	return TimelineTrack{}, TimelineClip{}, false
+}
+
+func isVisualTransitionPeer(track TimelineTrack, clip TimelineClip) bool {
+	return track.Visible && track.Type != TrackTypeAudio && track.Type != TrackTypeMusic && !clip.AudioOnly
+}
+
+func validateV1TransitionPaintCombination(transitionType, placement, path string) error {
+	switch strings.ToLower(strings.TrimSpace(transitionType)) {
+	case TransitionTypeFade:
+		if placement == "between" {
+			return &CanonicalAdapterError{
+				Code: canonicalAdapterTransitionCombinationCode, Path: path + ".placement",
+				Message: "fade supports only in or out placement", Remediation: "use in/out placement or choose crossfade for a two-clip blend",
+			}
+		}
+	case TransitionTypeCrossfade:
+		if placement != "between" {
+			return &CanonicalAdapterError{
+				Code: canonicalAdapterTransitionCombinationCode, Path: path + ".placement",
+				Message: "crossfade requires between placement", Remediation: "choose between placement and an overlapping visual peer",
+			}
+		}
+	}
+	return nil
+}
+
+func timelineTransitionOverlapMS(left, right TimelineClip) int64 {
+	start := left.StartMS
+	if right.StartMS > start {
+		start = right.StartMS
+	}
+	end := left.StartMS + left.DurationMS
+	if rightEnd := right.StartMS + right.DurationMS; rightEnd < end {
+		end = rightEnd
+	}
+	if end <= start {
+		return 0
+	}
+	return end - start
 }
 
 func validateV1Transform(transform map[string]any, path string) error {
