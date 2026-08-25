@@ -66,7 +66,8 @@ Current implementation PR: **#275 — Plan canonical preview transition pair exe
 - #274's pair-pixel operator selects `source-over-dom` only for pair-slide/pair-wipe and keeps crossfade/zoom/dip as `weighted-canvas-deferred`;
 - source-over pair-slide resolves canonical outgoing/incoming canvas-fraction translations and pair-wipe resolves the canonical incoming layer clip without adding opacity weights;
 - free-running or partially canonical preview state stays on the explicit legacy slot path;
-- focused Vitest coverage exercises legacy fallback, in-place slot replacement, slide, wipe, weighted deferral, and non-adjacent rejection. Repository validation is in progress on the current branch and no final-head pass is claimed until it completes.
+- focused Vitest coverage exercises legacy fallback, in-place slot replacement, slide, wipe, weighted deferral, and non-adjacent rejection;
+- behavioral+tracker head `37b84024b89e13af37f603a913dadebd46053cc2` passed Quality #1599, Security #1605, backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, both CodeQL languages, desktop/Helm/plugin lifecycle, and all standalone Linux/macOS/browser sandbox assurances. Compare was ahead 4 / behind 0 with exactly the tracker, planner, planner tests, and pair-surface input-type narrowing; review submissions and review threads were empty. This final commit only freezes those completed results into the tracker.
 
 ## Phase tracker
 
@@ -349,12 +350,12 @@ Before every merge:
 - #272 consumed exact owner-scoped transition paint and squash-merged as `ffc2ea3ca744262aae2339a85075a749f5fa0b7a` after Quality #1578/Security #1584 and the full platform matrix.
 - #273 defined `transition-pair-surface-plan-v1`. Code-bearing head `ac332dc4980c145c4e1eafbdea6f2037b4dfcfda` passed Quality #1583, Security #1589, and the platform assurance matrix. Final docs/scaffolding cleanup head did not schedule fresh Actions; the final six-path tree/review audit was clean and the PR squash-merged as `5a91fc146aed41864a47b38c626a21789ef52437` without claiming exact-final-head CI.
 - #274 defined `transition-pair-pixel-composition-v1`; exact final head `f7c5829d68e12f682646c7c1d1043928c266de34` passed Quality #1596, Security #1602, backend race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, CodeQL, desktop/Helm/plugin lifecycle, and every standalone platform/sandbox assurance. Review/thread audit was empty before expected-head squash merge as `c8c09aa42073711a52681c7b2edf907210ab4e05`.
-- #275 was created directly from #274's squash result to establish stack-preserving preview transition pair execution slots. It consumes source-over classification/spatial paint for slide/wipe while keeping weighted families Canvas-deferred; repository CI is running and final validation will be recorded before merge.
+- #275 was created directly from #274's squash result to establish stack-preserving preview transition pair execution slots. Behavioral+tracker head `37b84024b89e13af37f603a913dadebd46053cc2` passed Quality #1599, Security #1605, backend race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, CodeQL, desktop/Helm/plugin lifecycle, and every standalone platform/sandbox assurance; the final documentation-only commit freezes this evidence for merge review.
 
 ## Next recommended slice
 
-1. Complete #275 exact-head validation, compare/review audit, and merge only after the tracker reflects the actual final evidence.
-2. From #275's actual squash result, wire the source-over pair slot into `VideoPreviewCanvas` so adjacent slide/wipe inputs are isolated in-place without changing unrelated canonical stack order.
+1. Complete #275 final documentation/tree/review audit and expected-head squash merge.
+2. From #275's actual squash result, wire the source-over pair slot into `VideoPreviewCanvas` so adjacent slide/wipe inputs are isolated in-place without changing unrelated canonical stack order; activate this only for a clean all-source-over pair plan so a frame cannot mix exact and deferred pair semantics.
 3. Follow with the true weighted Canvas compositor for crossfade/zoom/dip using #274's linear-sRGB premultiplied-alpha contract; do not implement these with CSS opacity or duplicate canonical weights.
 4. Separately expose frame-level canonical `scene_effects` without a second canonical frame evaluation, then consume text/shape/cursor painter inputs and deterministic intrinsic text metrics.
 5. Follow with normal-playback canonicalization/diagnostics and AudioGraph scheduling as separate reviewable slices.
