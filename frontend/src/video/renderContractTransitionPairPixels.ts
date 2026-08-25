@@ -5,10 +5,14 @@ import {
 import type { CanonicalTransitionPairSurface } from './renderContractTransitionPairSurfaces';
 
 export const TRANSITION_PAIR_PIXEL_COMPOSITION_V1 = 'transition-pair-pixel-composition-v1' as const;
+export const TRANSITION_PAIR_PIXEL_INPUT_COLOR_SRGB = 'srgb' as const;
 export const TRANSITION_PAIR_PIXEL_WORKING_COLOR_LINEAR_SRGB = 'linear-srgb' as const;
+export const TRANSITION_PAIR_PIXEL_OUTPUT_COLOR_SRGB = 'srgb' as const;
+export const TRANSITION_PAIR_PIXEL_TRANSFER_SRGB_IEC_61966_2_1 = 'iec-61966-2-1-srgb' as const;
 export const TRANSITION_PAIR_PIXEL_INPUT_ALPHA_STRAIGHT = 'straight' as const;
 export const TRANSITION_PAIR_PIXEL_ACCUMULATOR_PREMULTIPLIED = 'premultiplied' as const;
 export const TRANSITION_PAIR_PIXEL_OUTPUT_ALPHA_STRAIGHT = 'straight' as const;
+export const TRANSITION_PAIR_PIXEL_CLAMP_UNIT_BEFORE_OUTPUT_TRANSFER = 'unit-interval-before-output-transfer' as const;
 export const TRANSITION_PAIR_PIXEL_BLEND_WEIGHTED_SUM = 'weighted-sum' as const;
 export const TRANSITION_PAIR_PIXEL_BLEND_SOURCE_OVER_STACK = 'source-over-stack' as const;
 export const TRANSITION_PAIR_PIXEL_BLACK_OPAQUE = 'opaque-linear-black' as const;
@@ -17,10 +21,14 @@ export interface CanonicalTransitionPairPixelComposition {
   contract_version: typeof TRANSITION_PAIR_PIXEL_COMPOSITION_V1;
   transition_id: string;
   composition: string;
+  input_color_encoding: typeof TRANSITION_PAIR_PIXEL_INPUT_COLOR_SRGB;
   working_color_space: typeof TRANSITION_PAIR_PIXEL_WORKING_COLOR_LINEAR_SRGB;
+  output_color_encoding: typeof TRANSITION_PAIR_PIXEL_OUTPUT_COLOR_SRGB;
+  transfer_function: typeof TRANSITION_PAIR_PIXEL_TRANSFER_SRGB_IEC_61966_2_1;
   input_alpha: typeof TRANSITION_PAIR_PIXEL_INPUT_ALPHA_STRAIGHT;
   accumulator_alpha: typeof TRANSITION_PAIR_PIXEL_ACCUMULATOR_PREMULTIPLIED;
   output_alpha: typeof TRANSITION_PAIR_PIXEL_OUTPUT_ALPHA_STRAIGHT;
+  clamp_policy: typeof TRANSITION_PAIR_PIXEL_CLAMP_UNIT_BEFORE_OUTPUT_TRANSFER;
   blend_operator:
     | typeof TRANSITION_PAIR_PIXEL_BLEND_WEIGHTED_SUM
     | typeof TRANSITION_PAIR_PIXEL_BLEND_SOURCE_OVER_STACK;
@@ -40,10 +48,12 @@ export interface CanonicalTransitionPairPixelComposition {
  * Bind exact renderer-independent pair-pixel semantics to a stack-safe pair
  * surface and its canonical transition paint.
  *
- * Crossfade, pair zoom, and between dip-to-black use a linear-sRGB weighted
- * premultiplied accumulator and apply transition weights exactly once. Slide
- * and wipe preserve canonical lower/upper source-over order after their
- * transition-paint-owned spatial operations and add no transition weight.
+ * RGB inputs are decoded with the IEC 61966-2-1 sRGB transfer function,
+ * composition runs in linear sRGB with premultiplied accumulation, values are
+ * clamped to the unit interval, and RGB is encoded back to sRGB after straight
+ * output alpha is recovered. Crossfade, pair zoom, and between dip-to-black
+ * apply canonical weights exactly once. Slide and wipe preserve canonical
+ * lower/upper source-over order and add no transition weight.
  */
 export function evaluateTransitionPairPixelComposition(
   surface: CanonicalTransitionPairSurface,
@@ -90,10 +100,14 @@ export function evaluateTransitionPairPixelComposition(
     contract_version: TRANSITION_PAIR_PIXEL_COMPOSITION_V1,
     transition_id: transitionId,
     composition,
+    input_color_encoding: TRANSITION_PAIR_PIXEL_INPUT_COLOR_SRGB,
     working_color_space: TRANSITION_PAIR_PIXEL_WORKING_COLOR_LINEAR_SRGB,
+    output_color_encoding: TRANSITION_PAIR_PIXEL_OUTPUT_COLOR_SRGB,
+    transfer_function: TRANSITION_PAIR_PIXEL_TRANSFER_SRGB_IEC_61966_2_1,
     input_alpha: TRANSITION_PAIR_PIXEL_INPUT_ALPHA_STRAIGHT,
     accumulator_alpha: TRANSITION_PAIR_PIXEL_ACCUMULATOR_PREMULTIPLIED,
     output_alpha: TRANSITION_PAIR_PIXEL_OUTPUT_ALPHA_STRAIGHT,
+    clamp_policy: TRANSITION_PAIR_PIXEL_CLAMP_UNIT_BEFORE_OUTPUT_TRANSFER,
     blend_operator: TRANSITION_PAIR_PIXEL_BLEND_SOURCE_OVER_STACK,
     lower_clip_id: lower,
     upper_clip_id: upper,
