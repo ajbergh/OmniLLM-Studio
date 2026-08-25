@@ -9,13 +9,13 @@ import (
 const TransitionPairPixelCompositionV1 = "transition-pair-pixel-composition-v1"
 
 const (
-	TransitionPairPixelWorkingColorLinearSRGB = "linear-srgb"
-	TransitionPairPixelInputAlphaStraight      = "straight"
+	TransitionPairPixelWorkingColorLinearSRGB  = "linear-srgb"
+	TransitionPairPixelInputAlphaStraight       = "straight"
 	TransitionPairPixelAccumulatorPremultiplied = "premultiplied"
-	TransitionPairPixelOutputAlphaStraight     = "straight"
-	TransitionPairPixelBlendWeightedSum        = "weighted-sum"
-	TransitionPairPixelBlendSourceOverStack    = "source-over-stack"
-	TransitionPairPixelBlackOpaque             = "opaque-linear-black"
+	TransitionPairPixelOutputAlphaStraight      = "straight"
+	TransitionPairPixelBlendWeightedSum         = "weighted-sum"
+	TransitionPairPixelBlendSourceOverStack     = "source-over-stack"
+	TransitionPairPixelBlackOpaque              = "opaque-linear-black"
 )
 
 // EvaluatedTransitionPairPixelComposition defines renderer-independent pixel
@@ -69,69 +69,76 @@ func EvaluateTransitionPairPixelComposition(
 		strings.TrimSpace(paint.IncomingClipID) != strings.TrimSpace(surface.IncomingClipID) {
 		return EvaluatedTransitionPairPixelComposition{}, fmt.Errorf("transition pair pixel composition paint inputs must match surface")
 	}
-	if strings.TrimSpace(surface.LowerClipID) == "" || strings.TrimSpace(surface.UpperClipID) == "" || surface.LowerClipID == surface.UpperClipID {
+	lower := strings.TrimSpace(surface.LowerClipID)
+	upper := strings.TrimSpace(surface.UpperClipID)
+	outgoing := strings.TrimSpace(surface.OutgoingClipID)
+	incoming := strings.TrimSpace(surface.IncomingClipID)
+	if lower == "" || upper == "" || lower == upper {
 		return EvaluatedTransitionPairPixelComposition{}, fmt.Errorf("transition pair pixel composition requires distinct lower and upper clips")
 	}
-	if !pairIDsMatchOwnerPeer(surface.OwnerClipID, surface.PeerClipID, surface.OutgoingClipID, surface.IncomingClipID) {
+	if !pairIDsMatchOwnerPeer(surface.OwnerClipID, surface.PeerClipID, outgoing, incoming) {
 		return EvaluatedTransitionPairPixelComposition{}, fmt.Errorf("transition pair pixel composition surface inputs must be owner and peer")
+	}
+	if !transitionPairPixelIDsMatch(lower, upper, outgoing, incoming) {
+		return EvaluatedTransitionPairPixelComposition{}, fmt.Errorf("transition pair pixel composition lower/upper clips must be the outgoing/incoming pair")
 	}
 
 	result := EvaluatedTransitionPairPixelComposition{
 		ContractVersion:   TransitionPairPixelCompositionV1,
-		TransitionID:      surface.TransitionID,
-		Composition:       surface.Composition,
+		TransitionID:      strings.TrimSpace(surface.TransitionID),
+		Composition:       strings.TrimSpace(surface.Composition),
 		WorkingColorSpace: TransitionPairPixelWorkingColorLinearSRGB,
 		InputAlpha:        TransitionPairPixelInputAlphaStraight,
 		AccumulatorAlpha:  TransitionPairPixelAccumulatorPremultiplied,
 		OutputAlpha:       TransitionPairPixelOutputAlphaStraight,
-		LowerClipID:       surface.LowerClipID,
-		UpperClipID:       surface.UpperClipID,
-		OutgoingClipID:    surface.OutgoingClipID,
-		IncomingClipID:    surface.IncomingClipID,
+		LowerClipID:       lower,
+		UpperClipID:       upper,
+		OutgoingClipID:    outgoing,
+		IncomingClipID:    incoming,
 	}
 
-	switch surface.Composition {
+	switch result.Composition {
 	case TransitionPaintCrossfade, TransitionPaintPairZoom:
-		outgoing, incoming, err := requireTransitionPairWeights(paint, false)
+		outgoingWeight, incomingWeight, err := requireTransitionPairWeights(paint)
 		if err != nil {
 			return EvaluatedTransitionPairPixelComposition{}, err
 		}
 		result.BlendOperator = TransitionPairPixelBlendWeightedSum
-		result.OutgoingWeight = transitionPairPixelFloat(outgoing)
-		result.IncomingWeight = transitionPairPixelFloat(incoming)
+		result.OutgoingWeight = transitionPairPixelFloat(outgoingWeight)
+		result.IncomingWeight = transitionPairPixelFloat(incomingWeight)
 		return result, nil
 
 	case TransitionPaintDipBlack:
-		outgoing, incoming, black, err := requireTransitionPairBlackWeights(paint)
+		outgoingWeight, incomingWeight, blackWeight, err := requireTransitionPairBlackWeights(paint)
 		if err != nil {
 			return EvaluatedTransitionPairPixelComposition{}, err
 		}
 		result.BlendOperator = TransitionPairPixelBlendWeightedSum
-		result.OutgoingWeight = transitionPairPixelFloat(outgoing)
-		result.IncomingWeight = transitionPairPixelFloat(incoming)
-		result.BlackWeight = transitionPairPixelFloat(black)
+		result.OutgoingWeight = transitionPairPixelFloat(outgoingWeight)
+		result.IncomingWeight = transitionPairPixelFloat(incomingWeight)
+		result.BlackWeight = transitionPairPixelFloat(blackWeight)
 		result.BlackSource = TransitionPairPixelBlackOpaque
 		return result, nil
 
 	case TransitionPaintPairSlide, TransitionPaintPairWipe:
 		if paint.OutgoingWeight != nil || paint.IncomingWeight != nil || paint.BlackWeight != nil {
-			return EvaluatedTransitionPairPixelComposition{}, fmt.Errorf("transition %q source-over pair paint must not carry pair weights", surface.TransitionID)
+			return EvaluatedTransitionPairPixelComposition{}, fmt.Errorf("transition %q source-over pair paint must not carry pair weights", result.TransitionID)
 		}
 		result.BlendOperator = TransitionPairPixelBlendSourceOverStack
-		result.StackBottomClipID = surface.LowerClipID
-		result.StackTopClipID = surface.UpperClipID
+		result.StackBottomClipID = lower
+		result.StackTopClipID = upper
 		return result, nil
 
 	default:
-		return EvaluatedTransitionPairPixelComposition{}, fmt.Errorf("transition %q composition %q does not have pair-pixel semantics", surface.TransitionID, surface.Composition)
+		return EvaluatedTransitionPairPixelComposition{}, fmt.Errorf("transition %q composition %q does not have pair-pixel semantics", result.TransitionID, result.Composition)
 	}
 }
 
-func requireTransitionPairWeights(paint EvaluatedTransitionPaint, allowBlack bool) (float64, float64, error) {
+func requireTransitionPairWeights(paint EvaluatedTransitionPaint) (float64, float64, error) {
 	if paint.OutgoingWeight == nil || paint.IncomingWeight == nil {
 		return 0, 0, fmt.Errorf("transition %q weighted pair paint requires outgoing and incoming weights", paint.TransitionID)
 	}
-	if !allowBlack && paint.BlackWeight != nil {
+	if paint.BlackWeight != nil {
 		return 0, 0, fmt.Errorf("transition %q weighted pair paint must not carry black weight", paint.TransitionID)
 	}
 	outgoing := *paint.OutgoingWeight
@@ -155,8 +162,16 @@ func requireTransitionPairBlackWeights(paint EvaluatedTransitionPaint) (float64,
 	outgoing := *paint.OutgoingWeight
 	incoming := *paint.IncomingWeight
 	black := *paint.BlackWeight
-	for label, weight := range map[string]float64{"outgoing": outgoing, "incoming": incoming, "black": black} {
-		if err := validateTransitionPairPixelWeight(label, weight); err != nil {
+	weights := []struct {
+		label  string
+		weight float64
+	}{
+		{label: "outgoing", weight: outgoing},
+		{label: "incoming", weight: incoming},
+		{label: "black", weight: black},
+	}
+	for _, candidate := range weights {
+		if err := validateTransitionPairPixelWeight(candidate.label, candidate.weight); err != nil {
 			return 0, 0, 0, fmt.Errorf("transition %q %w", paint.TransitionID, err)
 		}
 	}
@@ -171,6 +186,10 @@ func validateTransitionPairPixelWeight(label string, weight float64) error {
 		return fmt.Errorf("%s weight must be finite and within [0,1]", label)
 	}
 	return nil
+}
+
+func transitionPairPixelIDsMatch(lower, upper, outgoing, incoming string) bool {
+	return (lower == outgoing && upper == incoming) || (lower == incoming && upper == outgoing)
 }
 
 func transitionPairPixelUnitSum(value float64) bool {
