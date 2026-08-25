@@ -9,11 +9,11 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG program PR: **#276 — Consume canonical source-over transition pairs** — squash merge `2c69254cc82c3bf4b96a96454b00b9a6ea1c255d` (2026-08-25).
+Latest merged WYSIWYG program PR: **#277 — Add weighted transition pair pixel kernel** — squash merge `4aefa65e4cab7c92ccb32cef486739de7201cc1c` (2026-08-25).
 
 **Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** The renderer-independent visual contract (`visual-frame-state-v1` and its subcontracts) and audio contract (`audio-graph-v1`) define semantics; current work is migrating real program-monitor consumers onto those already-evaluated decisions in small, reversible slices.
 
-Current implementation PR: **#277 — Add weighted transition pair pixel kernel** on branch `feat/video-wysiwyg-phase3-weighted-pair-pixel-kernel`, created directly from #276's actual squash result `2c69254cc82c3bf4b96a96454b00b9a6ea1c255d`.
+Current implementation PR: **#278 — Classify weighted pair raster sources** on branch `feat/video-wysiwyg-phase3-weighted-pair-raster-capability`, created directly from #277's actual squash result `4aefa65e4cab7c92ccb32cef486739de7201cc1c`.
 
 #269 completed deterministic media pixel geometry consumption:
 
@@ -78,14 +78,23 @@ Current implementation PR: **#277 — Add weighted transition pair pixel kernel*
 - stage and pair diagnostic attributes expose plan mode, consumer mode, deferral reasons, pair identity, lower/upper input identity, and per-layer pair-paint mode;
 - exact final head `e51cef9284cfa2a6c88f46083421fb71514b54fd` passed Quality #1608, Security #1614, backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, both CodeQL languages, desktop/Helm/plugin lifecycle, and every standalone Linux/macOS/browser sandbox assurance. Final compare was ahead 8 / behind 0 with exactly four intended paths and no PR comments, review submissions, or review threads. It squash-merged with expected-head protection as `2c69254cc82c3bf4b96a96454b00b9a6ea1c255d`.
 
-#277 adds the executable weighted pair-pixel math boundary without prematurely wiring a Canvas surface:
+#277 completed the executable weighted pair-pixel math boundary without prematurely wiring a Canvas surface:
 
 - `composeWeightedTransitionPairRgba` accepts Canvas `ImageData`-compatible straight-alpha sRGB byte buffers and a validated `transition-pair-pixel-composition-v1` contract;
 - byte RGB inputs use an IEC 61966-2-1 sRGB decode lookup table, composition occurs in linear sRGB with premultiplied accumulation, output alpha is recovered as straight alpha, channels are clamped to the unit interval, then RGB is encoded back to sRGB;
 - pair-crossfade and pair-zoom apply canonical outgoing/incoming weights exactly once; between dip-to-black adds the canonical opaque-linear-black alpha contribution without adding RGB energy;
 - source-over families, color/alpha contract drift, malformed weights/black metadata, empty/non-RGBA buffers, and unequal input/target buffers fail closed;
 - focused Vitest evidence covers the linear-sRGB 50/50 midpoint (`188,188,0` rather than encoded-space `128,128,0`), semitransparent premultiplied accumulation/straight-alpha recovery, dip black, transparent inputs, caller-provided multi-pixel targets, and fail-closed cases;
-- code-bearing head `5985c972e55276b93983e465b242b95344c793ba` passed frontend lint/unit/performance/build, Playwright, Security #1620 including both CodeQL languages and dependency audit, backend formatting/vet/unit/integration/race, desktop/Helm/plugin lifecycle, Windows/macOS confinement, and all standalone Linux/macOS/browser sandbox assurances. Immutable renderer parity was still executing its capture step when this tracker freeze was written, so this line does not claim that code-head parity result. The tracker-bearing final head is revalidated separately; exact-final-head results belong in PR metadata so recording them cannot recursively mutate the validated head.
+- exact final head `a3beed0a3bc7c402ff9360e5f78d0485a9c7efb1` passed Quality #1615, Security #1621, backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, both CodeQL languages, desktop/Helm/plugin lifecycle, and every standalone Linux/macOS/browser sandbox assurance. Final compare was ahead 3 / behind 0 with exactly the tracker, kernel, and focused kernel tests; PR comments, review submissions, and review threads were empty. It squash-merged with expected-head protection as `4aefa65e4cab7c92ccb32cef486739de7201cc1c`.
+
+#278 establishes the weighted preview raster-source capability boundary before Canvas execution:
+
+- weighted pair planning now separately classifies canonical pair-surface validity and preview raster-source capability so consumer limitations never masquerade as canonical contract failures;
+- only authoritative, unresolved-free image/video sources with canonical `media-geometry-v1` and 2D view transforms are source-eligible;
+- canonical text, shapes, cursor paint, clip effects, unsupported/missing media assets, missing geometry, and 3D/perspective transforms are explicitly deferred with per-input reasons;
+- pair classification preserves both blocking input reasons and keeps weighted execution as `weighted-canvas-deferred`; decoded video-frame availability, decoder-budget poster substitution, and the actual Canvas painter remain separate runtime gates;
+- source-over slide/wipe planning and consumption semantics are unchanged;
+- code-bearing head `d4a69d0797aef6d4da2626bd3ccca455d15ad32b` passed Security #1624, frontend lint/unit/performance/build, backend formatting/vet/unit/integration/race, desktop/Helm/plugin lifecycle, Windows/macOS confinement, both CodeQL languages, dependency audit, and all standalone Linux/macOS/browser assurances. Playwright and immutable renderer parity had started but were still executing when this tracker freeze was written, so those two code-head jobs are not claimed here. The tracker-bearing final head is revalidated separately; exact-final-head results belong in PR metadata so recording them cannot recursively mutate the validated head.
 
 ## Phase tracker
 
@@ -94,9 +103,9 @@ Current implementation PR: **#277 — Add weighted transition pair pixel kernel*
 | Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged the fail-closed optional frame-indexed exact-region input boundary. Production structural policy, tolerance-aware codec-region semantics, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | **Complete** | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
 | Phase 2 — Canonical contract | **Complete** | Frame/range/source/order, curves, transforms/geometry/projection, transitions, effects, text/fonts, shapes, cursor, immutable source provenance, and AudioGraph semantics are versioned and cross-runtime checked. #260 closed the final contract gap. |
-| Phase 3 — Shared preview composition | **In progress** | #261–#276 merged deterministic activity/source/transform/view/perspective/media-geometry/effect consumption, explicit transition authoring, owner paint, stack-safe pair planning, exact pair-pixel semantics, safe execution slots, and real source-over slide/wipe consumption. #277 adds the reusable weighted linear-sRGB byte kernel; the actual weighted Canvas pair surface, scene effects, text/shape/cursor painter inputs, normal-playback canonicalization, diagnostics, and audio consumption remain. |
+| Phase 3 — Shared preview composition | **In progress** | #261–#277 merged deterministic activity/source/transform/view/perspective/media-geometry/effect consumption, explicit transition authoring, owner paint, stack-safe pair planning, exact pair-pixel semantics, real source-over slide/wipe consumption, and the weighted linear-sRGB byte kernel. #278 adds the fail-closed weighted raster-source boundary; actual Canvas pair execution, scene effects, text/shape/cursor painter inputs, normal-playback canonicalization, diagnostics, and audio consumption remain. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
-| Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, text metrics/fonts, shapes, transitions, effects, cursor, camera, color, and deterministic asset loading. |
+| Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, text metrics/fonts, shapes, transitions, effects, cursor, camera, color space, and deterministic asset loading. |
 | Phase 6 — Audio parity closure | Not started | Make preview/Chromium/export obey AudioGraph exactly, including pitch, gain/fades, channels, program processing, processed stems, and decoded delivery. |
 | Phase 7 — Rollout and legacy retirement | Not started | Shadow comparison, staged default switch, rollback, telemetry, capability/docs updates, and eventual removal of legacy composition semantics. |
 
@@ -138,7 +147,7 @@ Track/z-index order remains authoritative for stacking; spatial `z` affects proj
 
 ### Transition state, paint, surfaces, and pixels
 
-`transition-state-v1` owns placement, peer/owner roles, windows, progress, and overlap requirements. `transition-paint-v1` owns all currently authorable paint families: fade, crossfade, dip-to-black, slide, wipe, and zoom. Pair transitions operate on pair surfaces and must not be reinterpreted as independent layer opacity. `transition-pair-surface-plan-v1` owns stack-safe pair grouping/slot replacement eligibility. `transition-pair-pixel-composition-v1` owns pair sample blending: linear-sRGB working values, straight input alpha, premultiplied accumulation, straight output alpha, exact-once canonical weighting for crossfade/zoom/dip, opaque linear black for dip contribution, and canonical source-over stack order for slide/wipe. #275 adds the preview execution-slot boundary. #276 consumes only complete, adjacent, unweighted slide/wipe pair plans as one structural DOM pair group at the canonical replacement slot; deferred, weighted, non-adjacent, or multi-paint frames remain on the independent-layer fallback. The group deliberately avoids CSS `isolation: isolate` because that grouping property can flatten `preserve-3d` descendants. #277 implements the reusable exact weighted RGBA byte kernel for crossfade/zoom/dip, including IEC sRGB transfer, premultiplied linear accumulation, straight-alpha recovery, black contribution, clamping, and contract validation. It does **not** yet render a weighted pair surface; weighted preview consumption remains blocked on the next Canvas-surface slice.
+`transition-state-v1` owns placement, peer/owner roles, windows, progress, and overlap requirements. `transition-paint-v1` owns all currently authorable paint families: fade, crossfade, dip-to-black, slide, wipe, and zoom. Pair transitions operate on pair surfaces and must not be reinterpreted as independent layer opacity. `transition-pair-surface-plan-v1` owns stack-safe pair grouping/slot replacement eligibility. `transition-pair-pixel-composition-v1` owns pair sample blending: linear-sRGB working values, straight input alpha, premultiplied accumulation, straight output alpha, exact-once canonical weighting for crossfade/zoom/dip, opaque linear black for dip contribution, and canonical source-over stack order for slide/wipe. #275 adds the preview execution-slot boundary. #276 consumes only complete, adjacent, unweighted slide/wipe pair plans as one structural DOM pair group at the canonical replacement slot; deferred, weighted, non-adjacent, or multi-paint frames remain on the independent-layer fallback. The group deliberately avoids CSS `isolation: isolate` because that grouping property can flatten `preserve-3d` descendants. #277 implements the reusable exact weighted RGBA byte kernel for crossfade/zoom/dip. #278 adds the media raster-source boundary: weighted Canvas may proceed only when both pair inputs are authoritative unresolved-free 2D image/video sources with canonical media geometry and no text/shape/cursor/effect paint debt. Runtime decoded-frame availability and actual Canvas execution remain explicit next-slice work.
 
 ### Effects, text, shape, and cursor
 
@@ -176,7 +185,7 @@ A stacked PR is rebuilt from the **actual current `main` tree** after its parent
 5. Update this tracker on the clean branch.
 6. Validate the exact final head before merge.
 
-Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can look current while the tree silently reverts unrelated work. #261/#262/#264/#265/#266/#267 followed this normalization rule; #268 was created directly from #267's squash result, #269 from #268's actual squash result, #270 from #269's actual squash result, #271 from #270's actual squash result, #272 from #271's actual squash result, #273 from #272's actual squash result, #274 from #273's actual squash result, #275 from #274's actual squash result `c8c09aa42073711a52681c7b2edf907210ab4e05`, #276 from #275's actual squash result `d8f32ba6a4eebc98555ef2bb7e7bbd73f9e98c28`, and #277 from #276's actual squash result `2c69254cc82c3bf4b96a96454b00b9a6ea1c255d`.
+Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can look current while the tree silently reverts unrelated work. #261/#262/#264/#265/#266/#267 followed this normalization rule; #268 was created directly from #267's squash result, #269 from #268's actual squash result, #270 from #269's actual squash result, #271 from #270's actual squash result, #272 from #271's actual squash result, #273 from #272's actual squash result, #274 from #273's actual squash result, #275 from #274's actual squash result `c8c09aa42073711a52681c7b2edf907210ab4e05`, #276 from #275's actual squash result `d8f32ba6a4eebc98555ef2bb7e7bbd73f9e98c28`, #277 from #276's actual squash result `2c69254cc82c3bf4b96a96454b00b9a6ea1c255d`, and #278 from #277's actual squash result `4aefa65e4cab7c92ccb32cef486739de7201cc1c`.
 
 ## Phase 0 — Reproducible parity baseline
 
@@ -242,17 +251,19 @@ Merged consumer sequence:
 | #274 | Exact canonical transition pair-pixel composition | `c8c09aa42073711a52681c7b2edf907210ab4e05` |
 | #275 | Stack-preserving canonical preview pair execution slots | `d8f32ba6a4eebc98555ef2bb7e7bbd73f9e98c28` |
 | #276 | Canonical source-over slide/wipe pair consumption in the real preview | `2c69254cc82c3bf4b96a96454b00b9a6ea1c255d` |
+| #277 | Reusable weighted linear-sRGB transition-pair RGBA kernel | `4aefa65e4cab7c92ccb32cef486739de7201cc1c` |
 
-Current #277 adds the pure reusable weighted RGBA kernel required by the canonical pair-pixel contract. It deliberately does not change `VideoPreviewCanvas`; weighted families remain preview-deferred until the next Canvas-surface slice.
+Current #278 adds the pure fail-closed weighted raster-source capability boundary. It deliberately keeps `VideoPreviewCanvas` behavior unchanged: weighted execution remains deferred until runtime decoded-frame availability and the actual Canvas pair painter are implemented.
 
 Remaining Phase 3 sequence should stay reviewable:
 
-1. Complete #277 final tracker/tree/review audit and expected-head squash merge.
-2. From #277's actual squash result, wire an actual weighted Canvas pair surface into `VideoPreviewCanvas`, using the #277 kernel and consuming only a clean all-weighted pair plan so one canonical frame never mixes exact Canvas and deferred/DOM pair semantics.
-3. Consume frame-level canonical scene effects without duplicate frame evaluation.
-4. Consume canonical text/shape/cursor painter inputs and deterministic intrinsic text metrics.
-5. Canonicalize normal playback rather than only parity frame-addressed mode, with diagnostics/rollback.
-6. Make preview audio scheduling consume `audio-graph-v1` in a separate audio-focused slice.
+1. Complete #278 final tracker/tree/review audit, exact-final-head validation, and expected-head squash merge.
+2. From #278's actual squash result, implement runtime weighted Canvas eligibility and the actual pair surface in `VideoPreviewCanvas`: require a clean all-weighted plan, `weightedRasterSource.supported`, no decoder-budget poster substitution, settled decoded video frames, and no mixed exact/deferred pair semantics in one deterministic frame.
+3. Apply canonical pair-zoom layer multipliers before #277 weighted pixel accumulation and preserve canonical clip transform/opacity/geometry exactly once.
+4. Consume frame-level canonical scene effects without duplicate frame evaluation.
+5. Consume canonical text/shape/cursor painter inputs and deterministic intrinsic text metrics, then broaden the raster capability boundary as those painters become exact.
+6. Canonicalize normal playback rather than only parity frame-addressed mode, with diagnostics/rollback.
+7. Make preview audio scheduling consume `audio-graph-v1` in a separate audio-focused slice.
 
 ## Phase 4 — Shared Chromium render worker
 
@@ -324,6 +335,7 @@ Before every merge:
 | Pair transitions reorder unrelated layers or become independent alpha layers | #273 admits only active authoritative adjacent pair inputs; #275 converts only those exact replacement indices into preview slots; #276 consumes only clean all-source-over pair plans and preserves the canonical replacement slot. |
 | Pair DOM grouping flattens canonical 3D projection | #276 deliberately avoids CSS `isolation: isolate`; the structural pair wrapper preserves `transform-style: preserve-3d` while adjacency provides exact source-over ordering. |
 | Pair blend gamma/alpha semantics drift or weights are applied twice | #274 fixes transfer/color/alpha/clamp and exact-once weighted semantics; #277 implements those semantics in one reusable byte kernel and fails closed on contract drift. The actual Canvas pair surface remains separate so DOM/CSS opacity cannot accidentally duplicate weights. |
+| Any visible transition peer is treated as weighted-Canvas-ready | #278 separates canonical pair validity from raster-source capability and fails closed for text, shape, cursor, effects, missing/unsupported media, missing geometry, and 3D/perspective state. Runtime decoder/poster readiness remains a separate gate. |
 | v1 transition migration guesses placement or peer identity | #271 persists explicit placement/peer intent and validates renderable peer/type/overlap semantics; legacy rows without placement remain `V1_TRANSITION_PLACEMENT_AMBIGUOUS`. |
 | Effect/text/shape/cursor defaults drift | #270 makes deterministic clip `effect-state-v1` authoritative; scene/text/shape/cursor consumers remain explicit debt and unsupported metadata fails closed. |
 | Browser/system font fallback changes metrics | Packaged static-face provenance; deterministic intrinsic metric ownership remains explicit Phase 3–5 work. |
@@ -373,12 +385,14 @@ Before every merge:
 - #274 defined `transition-pair-pixel-composition-v1`; exact final head `f7c5829d68e12f682646c7c1d1043928c266de34` passed Quality #1596, Security #1602, backend race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, CodeQL, desktop/Helm/plugin lifecycle, and every standalone platform/sandbox assurance. Review/thread audit was empty before expected-head squash merge as `c8c09aa42073711a52681c7b2edf907210ab4e05`.
 - #275 established stack-preserving preview transition pair execution slots, passed the full exact-head matrix, and squash-merged as `d8f32ba6a4eebc98555ef2bb7e7bbd73f9e98c28`.
 - #276 consumed clean source-over slide/wipe pair slots in the real program monitor. Exact final head `e51cef9284cfa2a6c88f46083421fb71514b54fd` passed Quality #1608, Security #1614, Playwright, immutable renderer parity, CodeQL, backend/frontend/platform gates, and every standalone assurance; it squash-merged with expected-head protection as `2c69254cc82c3bf4b96a96454b00b9a6ea1c255d`.
-- #277 was created directly from #276's squash result and adds the pure weighted transition-pair RGBA kernel. Code-bearing head `5985c972e55276b93983e465b242b95344c793ba` passed frontend lint/unit/performance/build, Playwright, Security #1620, backend formatting/vet/unit/integration/race, desktop/Helm/plugin lifecycle, Windows/macOS confinement, and all standalone assurances before this tracker freeze; its immutable renderer parity job was still executing and is intentionally not represented as complete here.
+- #277 exact final head `a3beed0a3bc7c402ff9360e5f78d0485a9c7efb1` passed Quality #1615, Security #1621, Playwright, immutable renderer parity, CodeQL, backend/frontend/platform gates, and every standalone assurance; it squash-merged with expected-head protection as `4aefa65e4cab7c92ccb32cef486739de7201cc1c`.
+- #278 was created directly from #277's squash result and adds the weighted pair raster-source capability boundary. Code-bearing head `d4a69d0797aef6d4da2626bd3ccca455d15ad32b` passed Security #1624, frontend lint/unit/performance/build, backend formatting/vet/unit/integration/race, desktop/Helm/plugin lifecycle, Windows/macOS confinement, both CodeQL languages, dependency audit, and all standalone assurances before this tracker freeze; Playwright and immutable renderer parity were still executing and are intentionally not represented as complete here.
 
 ## Next recommended slice
 
-1. Complete #277 final tracker/tree/review audit, exact-final-head validation, and expected-head squash merge.
-2. From #277's actual squash result, implement the weighted Canvas pair surface in `VideoPreviewCanvas`, consuming the #277 kernel without CSS-opacity approximations, duplicate canonical weights, or mixed Canvas/DOM pair semantics in one deterministic frame.
-3. Separately expose frame-level canonical `scene_effects` without a second canonical frame evaluation, then consume text/shape/cursor painter inputs and deterministic intrinsic text metrics.
-4. Follow with normal-playback canonicalization/diagnostics and AudioGraph scheduling as separate reviewable slices.
-5. In parallel, use #266's fail-closed input boundary to define the codec-aware Phase 0 production structural policy and add second-platform parity evidence; current global numeric thresholds or arbitrary exact decoded regions alone are not visual sign-off.
+1. Complete #278 final tracker/tree/review audit, exact-final-head validation, and expected-head squash merge.
+2. From #278's actual squash result, implement runtime weighted Canvas eligibility and the actual pair surface in `VideoPreviewCanvas`, consuming #277's kernel only when both #278 raster sources are supported, no pair input is decoder-budgeted to a poster, required media frames are settled, and the frame contains no incompatible/deferred pair semantics.
+3. Apply pair-zoom scale multipliers and canonical 2D media transform/opacity/geometry exactly once before linear-sRGB weighted accumulation; keep text/shape/cursor/effect/3D sources explicitly deferred until their Canvas painters are canonical.
+4. Separately expose frame-level canonical `scene_effects` without a second canonical frame evaluation, then consume text/shape/cursor painter inputs and deterministic intrinsic text metrics.
+5. Follow with normal-playback canonicalization/diagnostics and AudioGraph scheduling as separate reviewable slices.
+6. In parallel, use #266's fail-closed input boundary to define the codec-aware Phase 0 production structural policy and add second-platform parity evidence; current global numeric thresholds or arbitrary exact decoded regions alone are not visual sign-off.

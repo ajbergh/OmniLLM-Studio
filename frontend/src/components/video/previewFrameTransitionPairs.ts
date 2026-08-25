@@ -15,6 +15,10 @@ import {
   evaluateTransitionPairSurfacePlan,
   type CanonicalTransitionPairSurface,
 } from '../../video/renderContractTransitionPairSurfaces';
+import {
+  resolvePreviewWeightedPairRasterPairCapability,
+  type PreviewWeightedPairRasterPairCapability,
+} from './previewFrameWeightedPairRaster';
 
 export type PreviewTransitionPairExecution = 'source-over-dom' | 'weighted-canvas-deferred';
 
@@ -34,6 +38,8 @@ export interface PreviewTransitionPairSlot<T> {
   pixel: CanonicalTransitionPairPixelComposition;
   execution: PreviewTransitionPairExecution;
   layerPaintByClipId: ReadonlyMap<string, PreviewTransitionPairLayerPaint>;
+  /** Weighted media-source eligibility only; decoded-frame readiness is separate. */
+  weightedRasterSource?: PreviewWeightedPairRasterPairCapability;
 }
 
 export interface PreviewTransitionSingleSlot<T> {
@@ -45,6 +51,8 @@ export interface PreviewTransitionPairPlan<T> {
   mode: 'legacy' | 'canonical-none' | 'canonical-source-over' | 'canonical-weighted-deferred' | 'canonical-mixed';
   slots: Array<PreviewTransitionSingleSlot<T> | PreviewTransitionPairSlot<T>>;
   deferredReasons: string[];
+  /** Consumer-specific source blockers, separate from canonical pair-surface deferrals. */
+  weightedRasterDeferredReasons: string[];
 }
 
 const IDENTITY_LAYER_PAINT: PreviewTransitionPairLayerPaint = {
@@ -55,6 +63,7 @@ const IDENTITY_LAYER_PAINT: PreviewTransitionPairLayerPaint = {
 
 type PairablePreviewLayer = {
   clip: { id: string };
+  asset?: { mime_type: string };
   canonicalState?: CanonicalFrameLayerState;
 };
 
@@ -65,7 +74,9 @@ type PairablePreviewLayer = {
  * Source-over pair slide/wipe can be executed by the DOM painter because the
  * pair-pixel contract adds no weights. Weighted crossfade/zoom/dip remain
  * explicitly deferred until the Canvas path can obey linear-sRGB premultiplied
- * accumulation; callers must not approximate those families with CSS opacity.
+ * accumulation. For those weighted slots we additionally classify whether both
+ * inputs are exact media raster sources under today's canonical preview state;
+ * that classification does not itself enable Canvas execution.
  */
 export function planPreviewFrameTransitionPairs<T extends PairablePreviewLayer>(
   frameIndex: number | null,
@@ -76,6 +87,7 @@ export function planPreviewFrameTransitionPairs<T extends PairablePreviewLayer>(
       mode: 'legacy',
       slots: layers.map((layer) => ({ kind: 'single', layer })),
       deferredReasons: [],
+      weightedRasterDeferredReasons: [],
     };
   }
 
@@ -87,6 +99,7 @@ export function planPreviewFrameTransitionPairs<T extends PairablePreviewLayer>(
     authoritative: canonicalLayers.every((layer) => layer.authoritative),
   });
   const deferredReasons = surfacePlan.deferred.map((entry) => `${entry.transition_id}:${entry.reason}`);
+  const weightedRasterDeferredReasons: string[] = [];
   const pairByLowerIndex = new Map<number, PreviewTransitionPairSlot<T>>();
 
   for (const surface of surfacePlan.surfaces) {
@@ -104,6 +117,14 @@ export function planPreviewFrameTransitionPairs<T extends PairablePreviewLayer>(
     const execution: PreviewTransitionPairExecution = pixel.blend_operator === TRANSITION_PAIR_PIXEL_BLEND_SOURCE_OVER_STACK
       ? 'source-over-dom'
       : 'weighted-canvas-deferred';
+    const weightedRasterSource = execution === 'weighted-canvas-deferred'
+      ? resolvePreviewWeightedPairRasterPairCapability(lower, upper)
+      : undefined;
+    if (weightedRasterSource && !weightedRasterSource.supported) {
+      weightedRasterDeferredReasons.push(...weightedRasterSource.reasons.map(
+        (reason) => `${surface.transition_id}:${reason}`,
+      ));
+    }
     pairByLowerIndex.set(surface.lower_layer_index, {
       kind: 'pair',
       lower,
@@ -113,6 +134,7 @@ export function planPreviewFrameTransitionPairs<T extends PairablePreviewLayer>(
       pixel,
       execution,
       layerPaintByClipId: resolvePairLayerPaint(surface, paint, execution),
+      ...(weightedRasterSource ? { weightedRasterSource } : {}),
     });
   }
 
@@ -133,6 +155,7 @@ export function planPreviewFrameTransitionPairs<T extends PairablePreviewLayer>(
       mode: 'canonical-none',
       slots,
       deferredReasons,
+      weightedRasterDeferredReasons,
     };
   }
   const sourceOver = pairSlots.some((slot) => slot.execution === 'source-over-dom');
@@ -145,6 +168,7 @@ export function planPreviewFrameTransitionPairs<T extends PairablePreviewLayer>(
         : 'canonical-weighted-deferred',
     slots,
     deferredReasons,
+    weightedRasterDeferredReasons,
   };
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
+import { MEDIA_GEOMETRY_CONTRACT_V1 } from '../../video/renderContractMediaGeometry';
 import {
   TRANSITION_PAINT_CLIP_LAYER_FRACTION,
   TRANSITION_PAINT_CONTRACT_V1,
@@ -12,16 +13,55 @@ import {
 } from '../../video/renderContractTransitionPaint';
 import { planPreviewFrameTransitionPairs, shouldConsumePreviewFrameSourceOverPairs } from './previewFrameTransitionPairs';
 
-function state(clipId: string, transitionPaint?: CanonicalTransitionPaint[]): CanonicalFrameLayerState {
+function state(
+  clipId: string,
+  transitionPaint?: CanonicalTransitionPaint[],
+  overrides: Partial<CanonicalFrameLayerState> = {},
+): CanonicalFrameLayerState {
   return {
     clip_id: clipId,
     transition_paint: transitionPaint,
     authoritative: true,
+    unresolved: [],
+    media_geometry: {
+      contract_version: MEDIA_GEOMETRY_CONTRACT_V1,
+      fit: 'contain',
+      viewport_bounds: { x: 0, y: 0, width: 640, height: 360 },
+      source_bounds: { x: 0, y: 0, width: 640, height: 360 },
+      visible_source_bounds: { x: 0, y: 0, width: 640, height: 360 },
+      painted_bounds: { x: 0, y: 0, width: 640, height: 360 },
+      clip_bounds: { x: 0, y: 0, width: 640, height: 360 },
+      scale_x: 1,
+      scale_y: 1,
+    },
+    view_transform: {
+      x: 0,
+      y: 0,
+      z: 0,
+      scale_x: 1,
+      scale_y: 1,
+      rotation_x: 0,
+      rotation_y: 0,
+      rotation_z: 0,
+      opacity: 1,
+      anchor_x: 0,
+      anchor_y: 0,
+    },
+    ...overrides,
   } as CanonicalFrameLayerState;
 }
 
-function layer(clipId: string, transitionPaint?: CanonicalTransitionPaint[]) {
-  return { clip: { id: clipId }, canonicalState: state(clipId, transitionPaint) };
+function layer(
+  clipId: string,
+  transitionPaint?: CanonicalTransitionPaint[],
+  overrides: Partial<CanonicalFrameLayerState> = {},
+  mimeType = 'image/png',
+) {
+  return {
+    clip: { id: clipId },
+    asset: { mime_type: mimeType },
+    canonicalState: state(clipId, transitionPaint, overrides),
+  };
 }
 
 function paint(overrides: Partial<CanonicalTransitionPaint>): CanonicalTransitionPaint {
@@ -45,6 +85,7 @@ describe('planPreviewFrameTransitionPairs', () => {
     const result = planPreviewFrameTransitionPairs(null, [layer('clip-a'), layer('clip-b')]);
     expect(result.mode).toBe('legacy');
     expect(result.slots.map((slot) => slot.kind)).toEqual(['single', 'single']);
+    expect(result.weightedRasterDeferredReasons).toEqual([]);
   });
 
   it('replaces adjacent pair-slide inputs in place and resolves both spatial paints', () => {
@@ -69,6 +110,7 @@ describe('planPreviewFrameTransitionPairs', () => {
     if (pair.kind !== 'pair') return;
     expect(pair.surface.replacement_layer_index).toBe(1);
     expect(pair.execution).toBe('source-over-dom');
+    expect(pair.weightedRasterSource).toBeUndefined();
     expect(pair.layerPaintByClipId.get('clip-a')).toMatchObject({ offsetXFraction: -0.25, offsetYFraction: 0 });
     expect(pair.layerPaintByClipId.get('clip-b')).toMatchObject({ offsetXFraction: 0.75, offsetYFraction: 0 });
   });
@@ -95,7 +137,7 @@ describe('planPreviewFrameTransitionPairs', () => {
     expect(pair.layerPaintByClipId.get('clip-b')?.clipPath).toBe('inset(0% 40% 0% 10%)');
   });
 
-  it('keeps weighted crossfade explicit until the linear-sRGB Canvas consumer exists', () => {
+  it('classifies weighted crossfade media sources while keeping Canvas execution deferred', () => {
     const result = planPreviewFrameTransitionPairs(30, [
       layer('clip-a', [paint({
         type: 'crossfade',
@@ -103,14 +145,20 @@ describe('planPreviewFrameTransitionPairs', () => {
         outgoing_weight: 0.6,
         incoming_weight: 0.4,
       })]),
-      layer('clip-b'),
+      layer('clip-b', undefined, {}, 'video/mp4'),
     ]);
     const pair = result.slots[0];
     expect(result.mode).toBe('canonical-weighted-deferred');
     expect(shouldConsumePreviewFrameSourceOverPairs(result)).toBe(false);
+    expect(result.weightedRasterDeferredReasons).toEqual([]);
     expect(pair.kind).toBe('pair');
     if (pair.kind !== 'pair') return;
     expect(pair.execution).toBe('weighted-canvas-deferred');
+    expect(pair.weightedRasterSource).toMatchObject({
+      supported: true,
+      lower: { clipId: 'clip-a', kind: 'image' },
+      upper: { clipId: 'clip-b', kind: 'video' },
+    });
     expect(pair.pixel.outgoing_weight).toBe(0.6);
     expect(pair.pixel.incoming_weight).toBe(0.4);
     expect(pair.layerPaintByClipId.get('clip-a')).toEqual({
@@ -118,6 +166,28 @@ describe('planPreviewFrameTransitionPairs', () => {
       offsetYFraction: 0,
       scaleMultiplier: 1,
     });
+  });
+
+  it('records consumer-specific weighted raster blockers separately from pair-surface deferrals', () => {
+    const result = planPreviewFrameTransitionPairs(31, [
+      layer('clip-a', [paint({
+        type: 'crossfade',
+        composition: TRANSITION_PAINT_CROSSFADE,
+        outgoing_weight: 0.6,
+        incoming_weight: 0.4,
+      })], {
+        text: { contract_version: 'text-state-v1' } as CanonicalFrameLayerState['text'],
+      }),
+      layer('clip-b'),
+    ]);
+    const pair = result.slots[0];
+    expect(result.deferredReasons).toEqual([]);
+    expect(result.weightedRasterDeferredReasons).toEqual([
+      'transition-1:clip-a:text-raster-deferred',
+    ]);
+    expect(pair.kind).toBe('pair');
+    if (pair.kind !== 'pair') return;
+    expect(pair.weightedRasterSource).toMatchObject({ supported: false });
   });
 
   it('does not regroup a non-adjacent pair around an unrelated canonical layer', () => {
