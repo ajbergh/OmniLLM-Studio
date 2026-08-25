@@ -1,0 +1,87 @@
+import type { VideoTimelineEffect } from '../../types/video';
+import {
+  EFFECT_STATE_CONTRACT_V1,
+  type CanonicalEvaluatedEffectState,
+} from '../../video/renderContractEffects';
+import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
+import { composePreviewFilter, effectDefinition } from './effects/effectRegistry';
+
+export type PreviewFrameEffectMode = 'canonical-frame' | 'legacy-authored';
+
+export interface ResolvedPreviewFrameEffectPaint {
+  filter?: string;
+  mode: PreviewFrameEffectMode;
+}
+
+type CanonicalEffectState = Pick<CanonicalFrameLayerState, 'effects'>;
+
+/**
+ * Resolve the CSS-compatible portion of one deterministic canonical clip effect
+ * stack. Canonical FrameState owns enabled-state, authored order, defaults,
+ * parameter clamping, and exact-frame amount automation. Effects that the
+ * existing CSS preview cannot paint remain intentionally absent from `filter`;
+ * this consumer does not invent new effect-rendering semantics.
+ *
+ * The presence of canonical layer state is authoritative even when `effects`
+ * is omitted, because omission means the canonical enabled stack is empty.
+ * Legacy authored effects are consulted only when canonical FrameState itself
+ * is unavailable (free-running playback or fail-closed projection fallback).
+ */
+export function resolvePreviewFrameEffectPaint(
+  canonicalState: CanonicalEffectState | undefined,
+  legacyEffects: VideoTimelineEffect[] | undefined,
+): ResolvedPreviewFrameEffectPaint {
+  if (!canonicalState) {
+    return {
+      filter: composePreviewFilter(legacyEffects),
+      mode: 'legacy-authored',
+    };
+  }
+
+  return {
+    filter: composeCanonicalPreviewFilter(canonicalState.effects),
+    mode: 'canonical-frame',
+  };
+}
+
+/** Compose the existing CSS preview filter from evaluated effect-state-v1. */
+export function composeCanonicalPreviewFilter(
+  effects: readonly CanonicalEvaluatedEffectState[] | undefined,
+): string | undefined {
+  if (!effects || effects.length === 0) return undefined;
+
+  const ordered = [...effects].sort((left, right) => left.order - right.order);
+  const seenOrders = new Set<number>();
+  const parts: string[] = [];
+
+  for (const effect of ordered) {
+    validateCanonicalClipEffect(effect, seenOrders);
+    const definition = effectDefinition(effect.type);
+    if (!definition) {
+      throw new Error(`canonical preview effect type ${JSON.stringify(effect.type)} is not registered`);
+    }
+    const filter = definition.previewFilter(effect.params);
+    if (filter) parts.push(filter);
+  }
+
+  return parts.length > 0 ? parts.join(' ') : undefined;
+}
+
+function validateCanonicalClipEffect(
+  effect: CanonicalEvaluatedEffectState,
+  seenOrders: Set<number>,
+): void {
+  if (effect.contract_version !== EFFECT_STATE_CONTRACT_V1) {
+    throw new Error(`canonical preview effects require ${EFFECT_STATE_CONTRACT_V1}`);
+  }
+  if (effect.scope !== 'clip') {
+    throw new Error(`canonical preview clip effect ${JSON.stringify(effect.id)} has invalid scope ${JSON.stringify(effect.scope)}`);
+  }
+  if (!effect.id.trim() || !effect.type.trim()) {
+    throw new Error('canonical preview clip effects require non-empty id and type');
+  }
+  if (!Number.isInteger(effect.order) || effect.order < 0 || seenOrders.has(effect.order)) {
+    throw new Error(`canonical preview clip effect ${JSON.stringify(effect.id)} has invalid or duplicate order ${effect.order}`);
+  }
+  seenOrders.add(effect.order);
+}

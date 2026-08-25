@@ -21,6 +21,7 @@ import { useVideoStudioStore } from '../../stores/videoStudio';
 import { ContextMenu } from '../common/ContextMenu';
 import type { ContextMenuEntry } from '../common/ContextMenu';
 import { composePreviewFilter } from './effects/effectRegistry';
+import { resolvePreviewFrameEffectPaint } from './previewFrameEffects';
 import { evaluateCameraProperty, evaluateClipProperty } from '../../video/renderContractProperties';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 import { ShapePreview } from './ShapePreview';
@@ -790,6 +791,7 @@ export function VideoPreviewCanvas() {
     const canonicalMediaClipPath = canonicalMediaGeometry
       ? canonicalPreviewMediaClipPath(canonicalMediaGeometry, stageScale)
       : undefined;
+    const effectPaint = resolvePreviewFrameEffectPaint(entry.canonicalState, clip.effects);
 
     const wrapperStyle: CSSProperties = {
       left: '50%',
@@ -801,7 +803,7 @@ export function VideoPreviewCanvas() {
       transformStyle: 'preserve-3d',
       transform: `translate(-50%, -50%) translate3d(${viewTransform.x * stageScale}px, ${viewTransform.y * stageScale}px, ${viewTransform.z * stageScale}px) rotateX(${inCropEdit ? 0 : viewTransform.rotation_x}deg) rotateY(${inCropEdit ? 0 : viewTransform.rotation_y}deg) rotateZ(${inCropEdit ? 0 : viewTransform.rotation_z}deg) scale3d(${transform.scale_x || transform.scale}, ${transform.scale_y || transform.scale}, 1)`,
       opacity,
-      filter: composePreviewFilter(clip.effects),
+      filter: effectPaint.filter,
       pointerEvents: perspectiveDistance !== null ? 'auto' : undefined,
     };
 
@@ -940,6 +942,7 @@ export function VideoPreviewCanvas() {
         key={clip.id}
         data-preview-clip-id={clip.id}
         data-preview-media-geometry-mode={isMedia ? (canonicalMediaGeometry ? 'canonical-frame' : 'legacy-object-fit') : undefined}
+        data-preview-effect-state-mode={effectPaint.mode}
         className={`absolute flex items-center justify-center ${selected && !isPlaying ? 'outline outline-1 outline-primary' : ''} ${
           track.locked ? '' : 'cursor-move'
         }`}
