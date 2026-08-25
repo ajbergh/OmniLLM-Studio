@@ -66,7 +66,7 @@ describe('canonical transition pair pixel composition', () => {
   it('rejects unsupported pair composition', () => {
     const { surface, paint } = crossfadeSample();
     surface.composition = 'pair-unknown';
-    paint.composition = 'pair-unknown';
+    (paint as CanonicalTransitionPaint & { composition: string }).composition = 'pair-unknown';
     delete paint.outgoing_weight;
     delete paint.incoming_weight;
     expect(() => evaluateTransitionPairPixelComposition(surface, paint))
