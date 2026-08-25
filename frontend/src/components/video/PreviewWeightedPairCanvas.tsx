@@ -47,6 +47,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasRun
   const sourceRefs = useRef(new Map<string, RasterSource>());
   const [sourceRevision, setSourceRevision] = useState(0);
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const bumpSourceRevision = useCallback(() => setSourceRevision((value) => value + 1), []);
 
   const setSourceRef = useCallback((clipId: string, node: RasterSource | null) => {
@@ -96,7 +97,14 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasRun
 
   useEffect(() => {
     setReady(false);
-    setReady(draw());
+    try {
+      const rendered = draw();
+      setError(null);
+      setReady(rendered);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      setReady(false);
+    }
   }, [draw]);
 
   const renderSource = (layer: T) => {
@@ -131,6 +139,10 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasRun
           style={commonStyle}
           onLoadedMetadata={bumpSourceRevision}
           onLoadedData={bumpSourceRevision}
+          onSeeking={() => {
+            setReady(false);
+            bumpSourceRevision();
+          }}
           onSeeked={bumpSourceRevision}
           onError={bumpSourceRevision}
         />
@@ -162,6 +174,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasRun
       data-preview-transition-pair-lower-clip={slot.surface.lower_clip_id}
       data-preview-transition-pair-upper-clip={slot.surface.upper_clip_id}
       data-preview-transition-pair-ready={ready ? 'true' : 'false'}
+      data-preview-transition-pair-error={error ?? undefined}
       className="pointer-events-none absolute inset-0"
     >
       {renderSource(slot.lower)}
