@@ -1132,7 +1132,10 @@ export function VideoPreviewCanvas() {
         data-preview-transition-pair-lower-clip={slot.surface.lower_clip_id}
         data-preview-transition-pair-upper-clip={slot.surface.upper_clip_id}
         className="absolute inset-0"
-        style={{ isolation: 'isolate', pointerEvents: 'none', transformStyle: 'preserve-3d' }}
+        // Do not use CSS `isolation: isolate` here: it is a grouping property
+        // that can flatten preserve-3d descendants. Canonical adjacency already
+        // makes this structural wrapper an exact source-over pair replacement.
+        style={{ pointerEvents: 'none', transformStyle: 'preserve-3d' }}
       >
         {renderLayer(slot.lower, posterClipIds.has(slot.lower.clip.id), lowerPaint, true)}
         {renderLayer(slot.upper, posterClipIds.has(slot.upper.clip.id), upperPaint, true)}
