@@ -43,6 +43,12 @@ export interface CanonicalTransitionPairSurfacePlan {
   authoritative: boolean;
 }
 
+/** Only the canonical FrameState fields used by pair-surface planning. */
+export type TransitionPairSurfaceFrameInput = Pick<
+  CanonicalVisualFrameState,
+  'contract_version' | 'frame_index' | 'layers' | 'authoritative'
+>;
+
 /**
  * Resolve pair-transition surface placement without defining browser paint.
  *
@@ -53,7 +59,7 @@ export interface CanonicalTransitionPairSurfacePlan {
  * regrouped or independently opacity-scaled.
  */
 export function evaluateTransitionPairSurfacePlan(
-  frame: CanonicalVisualFrameState,
+  frame: TransitionPairSurfaceFrameInput,
 ): CanonicalTransitionPairSurfacePlan {
   if (frame.contract_version !== 'visual-frame-state-v1') {
     throw new Error(`transition pair surfaces require visual-frame-state-v1 input`);
