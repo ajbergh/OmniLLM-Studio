@@ -1,0 +1,382 @@
+{
+  "version": 1,
+  "description": "Cross-runtime stack-safety fixture for isolated two-input transition surfaces. Pair inputs must both be active/authoritative and adjacent in canonical bottom-to-top layer order; this fixture does not define pixel blend math.",
+  "cases": [
+    {
+      "name": "owner-only-paint-needs-no-pair-surface",
+      "state": {
+        "contract_version": "visual-frame-state-v1",
+        "frame_index": 10,
+        "authoritative": true,
+        "layers": [
+          {
+            "clip_id": "owner",
+            "authoritative": true,
+            "transition_paint": [
+              {
+                "contract_version": "transition-paint-v1",
+                "transition_id": "fade-in",
+                "type": "fade",
+                "placement": "in",
+                "composition": "owner-opacity",
+                "owner_clip_id": "owner",
+                "progress": 0.25,
+                "owner_opacity": 0.25
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "contract_version": "transition-pair-surface-plan-v1",
+        "frame_index": 10,
+        "surfaces": [],
+        "deferred": [],
+        "authoritative": true
+      }
+    },
+    {
+      "name": "adjacent-crossfade-replaces-two-slots-with-one-surface",
+      "state": {
+        "contract_version": "visual-frame-state-v1",
+        "frame_index": 25,
+        "authoritative": true,
+        "layers": [
+          {
+            "clip_id": "outgoing",
+            "authoritative": true,
+            "transition_paint": [
+              {
+                "contract_version": "transition-paint-v1",
+                "transition_id": "crossfade",
+                "type": "crossfade",
+                "placement": "between",
+                "composition": "pair-crossfade",
+                "owner_clip_id": "outgoing",
+                "peer_clip_id": "incoming",
+                "progress": 0.4,
+                "outgoing_clip_id": "outgoing",
+                "incoming_clip_id": "incoming",
+                "outgoing_weight": 0.6,
+                "incoming_weight": 0.4
+              }
+            ]
+          },
+          { "clip_id": "incoming", "authoritative": true },
+          { "clip_id": "overlay", "authoritative": true }
+        ]
+      },
+      "expected": {
+        "contract_version": "transition-pair-surface-plan-v1",
+        "frame_index": 25,
+        "surfaces": [
+          {
+            "transition_id": "crossfade",
+            "composition": "pair-crossfade",
+            "owner_clip_id": "outgoing",
+            "peer_clip_id": "incoming",
+            "outgoing_clip_id": "outgoing",
+            "incoming_clip_id": "incoming",
+            "lower_clip_id": "outgoing",
+            "upper_clip_id": "incoming",
+            "lower_layer_index": 0,
+            "upper_layer_index": 1,
+            "replacement_layer_index": 0
+          }
+        ],
+        "deferred": [],
+        "authoritative": true
+      }
+    },
+    {
+      "name": "incoming-owner-does-not-change-canonical-stack-slot",
+      "state": {
+        "contract_version": "visual-frame-state-v1",
+        "frame_index": 26,
+        "authoritative": true,
+        "layers": [
+          { "clip_id": "outgoing", "authoritative": true },
+          {
+            "clip_id": "incoming",
+            "authoritative": true,
+            "transition_paint": [
+              {
+                "contract_version": "transition-paint-v1",
+                "transition_id": "crossfade-reversed-owner",
+                "type": "crossfade",
+                "placement": "between",
+                "composition": "pair-crossfade",
+                "owner_clip_id": "incoming",
+                "peer_clip_id": "outgoing",
+                "progress": 0.6,
+                "outgoing_clip_id": "outgoing",
+                "incoming_clip_id": "incoming",
+                "outgoing_weight": 0.4,
+                "incoming_weight": 0.6
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "contract_version": "transition-pair-surface-plan-v1",
+        "frame_index": 26,
+        "surfaces": [
+          {
+            "transition_id": "crossfade-reversed-owner",
+            "composition": "pair-crossfade",
+            "owner_clip_id": "incoming",
+            "peer_clip_id": "outgoing",
+            "outgoing_clip_id": "outgoing",
+            "incoming_clip_id": "incoming",
+            "lower_clip_id": "outgoing",
+            "upper_clip_id": "incoming",
+            "lower_layer_index": 0,
+            "upper_layer_index": 1,
+            "replacement_layer_index": 0
+          }
+        ],
+        "deferred": [],
+        "authoritative": true
+      }
+    },
+    {
+      "name": "non-adjacent-pair-is-deferred-rather-than-reordering-overlay",
+      "state": {
+        "contract_version": "visual-frame-state-v1",
+        "frame_index": 30,
+        "authoritative": true,
+        "layers": [
+          {
+            "clip_id": "outgoing",
+            "authoritative": true,
+            "transition_paint": [
+              {
+                "contract_version": "transition-paint-v1",
+                "transition_id": "slide",
+                "type": "slide",
+                "placement": "between",
+                "composition": "pair-slide",
+                "owner_clip_id": "outgoing",
+                "peer_clip_id": "incoming",
+                "progress": 0.5,
+                "outgoing_clip_id": "outgoing",
+                "incoming_clip_id": "incoming",
+                "translation_space": "canvas-fraction",
+                "outgoing_offset_x": -0.5,
+                "outgoing_offset_y": 0,
+                "incoming_offset_x": 0.5,
+                "incoming_offset_y": 0
+              }
+            ]
+          },
+          { "clip_id": "middle-overlay", "authoritative": true },
+          { "clip_id": "incoming", "authoritative": true }
+        ]
+      },
+      "expected": {
+        "contract_version": "transition-pair-surface-plan-v1",
+        "frame_index": 30,
+        "surfaces": [],
+        "deferred": [
+          {
+            "transition_id": "slide",
+            "owner_clip_id": "outgoing",
+            "peer_clip_id": "incoming",
+            "outgoing_clip_id": "outgoing",
+            "incoming_clip_id": "incoming",
+            "reason": "pair-inputs-not-adjacent"
+          }
+        ],
+        "authoritative": false
+      }
+    },
+    {
+      "name": "missing-pair-input-is-deferred",
+      "state": {
+        "contract_version": "visual-frame-state-v1",
+        "frame_index": 31,
+        "authoritative": true,
+        "layers": [
+          {
+            "clip_id": "outgoing",
+            "authoritative": true,
+            "transition_paint": [
+              {
+                "contract_version": "transition-paint-v1",
+                "transition_id": "wipe",
+                "type": "wipe",
+                "placement": "between",
+                "composition": "pair-wipe",
+                "owner_clip_id": "outgoing",
+                "peer_clip_id": "incoming",
+                "progress": 0.5,
+                "outgoing_clip_id": "outgoing",
+                "incoming_clip_id": "incoming"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "contract_version": "transition-pair-surface-plan-v1",
+        "frame_index": 31,
+        "surfaces": [],
+        "deferred": [
+          {
+            "transition_id": "wipe",
+            "owner_clip_id": "outgoing",
+            "peer_clip_id": "incoming",
+            "outgoing_clip_id": "outgoing",
+            "incoming_clip_id": "incoming",
+            "reason": "pair-input-missing"
+          }
+        ],
+        "authoritative": false
+      }
+    },
+    {
+      "name": "non-authoritative-pair-input-is-deferred",
+      "state": {
+        "contract_version": "visual-frame-state-v1",
+        "frame_index": 32,
+        "authoritative": true,
+        "layers": [
+          {
+            "clip_id": "outgoing",
+            "authoritative": true,
+            "transition_paint": [
+              {
+                "contract_version": "transition-paint-v1",
+                "transition_id": "zoom",
+                "type": "zoom",
+                "placement": "between",
+                "composition": "pair-zoom",
+                "owner_clip_id": "outgoing",
+                "peer_clip_id": "incoming",
+                "progress": 0.5,
+                "outgoing_clip_id": "outgoing",
+                "incoming_clip_id": "incoming"
+              }
+            ]
+          },
+          { "clip_id": "incoming", "authoritative": false }
+        ]
+      },
+      "expected": {
+        "contract_version": "transition-pair-surface-plan-v1",
+        "frame_index": 32,
+        "surfaces": [],
+        "deferred": [
+          {
+            "transition_id": "zoom",
+            "owner_clip_id": "outgoing",
+            "peer_clip_id": "incoming",
+            "outgoing_clip_id": "outgoing",
+            "incoming_clip_id": "incoming",
+            "reason": "pair-input-non-authoritative"
+          }
+        ],
+        "authoritative": false
+      }
+    },
+    {
+      "name": "non-authoritative-frame-is-deferred",
+      "state": {
+        "contract_version": "visual-frame-state-v1",
+        "frame_index": 33,
+        "authoritative": false,
+        "layers": [
+          {
+            "clip_id": "outgoing",
+            "authoritative": true,
+            "transition_paint": [
+              {
+                "contract_version": "transition-paint-v1",
+                "transition_id": "crossfade",
+                "type": "crossfade",
+                "placement": "between",
+                "composition": "pair-crossfade",
+                "owner_clip_id": "outgoing",
+                "peer_clip_id": "incoming",
+                "progress": 0.5,
+                "outgoing_clip_id": "outgoing",
+                "incoming_clip_id": "incoming"
+              }
+            ]
+          },
+          { "clip_id": "incoming", "authoritative": true }
+        ]
+      },
+      "expected": {
+        "contract_version": "transition-pair-surface-plan-v1",
+        "frame_index": 33,
+        "surfaces": [],
+        "deferred": [
+          {
+            "transition_id": "crossfade",
+            "owner_clip_id": "outgoing",
+            "peer_clip_id": "incoming",
+            "outgoing_clip_id": "outgoing",
+            "incoming_clip_id": "incoming",
+            "reason": "frame-non-authoritative"
+          }
+        ],
+        "authoritative": false
+      }
+    },
+    {
+      "name": "between-dip-to-black-is-a-pair-surface",
+      "state": {
+        "contract_version": "visual-frame-state-v1",
+        "frame_index": 34,
+        "authoritative": true,
+        "layers": [
+          {
+            "clip_id": "outgoing",
+            "authoritative": true,
+            "transition_paint": [
+              {
+                "contract_version": "transition-paint-v1",
+                "transition_id": "dip",
+                "type": "dip_to_black",
+                "placement": "between",
+                "composition": "dip-to-black",
+                "owner_clip_id": "outgoing",
+                "peer_clip_id": "incoming",
+                "progress": 0.25,
+                "outgoing_clip_id": "outgoing",
+                "incoming_clip_id": "incoming",
+                "outgoing_weight": 0.5,
+                "incoming_weight": 0,
+                "black_weight": 0.5
+              }
+            ]
+          },
+          { "clip_id": "incoming", "authoritative": true }
+        ]
+      },
+      "expected": {
+        "contract_version": "transition-pair-surface-plan-v1",
+        "frame_index": 34,
+        "surfaces": [
+          {
+            "transition_id": "dip",
+            "composition": "dip-to-black",
+            "owner_clip_id": "outgoing",
+            "peer_clip_id": "incoming",
+            "outgoing_clip_id": "outgoing",
+            "incoming_clip_id": "incoming",
+            "lower_clip_id": "outgoing",
+            "upper_clip_id": "incoming",
+            "lower_layer_index": 0,
+            "upper_layer_index": 1,
+            "replacement_layer_index": 0
+          }
+        ],
+        "deferred": [],
+        "authoritative": true
+      }
+    }
+  ]
+}
