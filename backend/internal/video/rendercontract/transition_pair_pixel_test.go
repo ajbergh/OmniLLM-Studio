@@ -95,31 +95,31 @@ func validPairPixelCrossfade() (EvaluatedTransitionPairSurface, EvaluatedTransit
 	outgoing := 0.75
 	incoming := 0.25
 	return EvaluatedTransitionPairSurface{
-		TransitionID:          "crossfade",
-		Composition:           TransitionPaintCrossfade,
-		OwnerClipID:           "outgoing",
-		PeerClipID:            "incoming",
-		OutgoingClipID:        "outgoing",
-		IncomingClipID:        "incoming",
-		LowerClipID:           "outgoing",
-		UpperClipID:           "incoming",
-		LowerLayerIndex:       0,
-		UpperLayerIndex:       1,
-		ReplacementLayerIndex: 0,
-	}, EvaluatedTransitionPaint{
-		ContractVersion: TransitionPaintContractV1,
-		TransitionID:    "crossfade",
-		Type:            "crossfade",
-		Placement:       "between",
-		Composition:     TransitionPaintCrossfade,
-		OwnerClipID:     "outgoing",
-		PeerClipID:      "incoming",
-		Progress:        0.25,
-		OutgoingClipID:  "outgoing",
-		IncomingClipID:  "incoming",
-		OutgoingWeight:  &outgoing,
-		IncomingWeight:  &incoming,
-	}
+			TransitionID:          "crossfade",
+			Composition:           TransitionPaintCrossfade,
+			OwnerClipID:           "outgoing",
+			PeerClipID:            "incoming",
+			OutgoingClipID:        "outgoing",
+			IncomingClipID:        "incoming",
+			LowerClipID:           "outgoing",
+			UpperClipID:           "incoming",
+			LowerLayerIndex:       0,
+			UpperLayerIndex:       1,
+			ReplacementLayerIndex: 0,
+		}, EvaluatedTransitionPaint{
+			ContractVersion: TransitionPaintContractV1,
+			TransitionID:    "crossfade",
+			Type:            "crossfade",
+			Placement:       "between",
+			Composition:     TransitionPaintCrossfade,
+			OwnerClipID:     "outgoing",
+			PeerClipID:      "incoming",
+			Progress:        0.25,
+			OutgoingClipID:  "outgoing",
+			IncomingClipID:  "incoming",
+			OutgoingWeight:  &outgoing,
+			IncomingWeight:  &incoming,
+		}
 }
 
 func loadTransitionPairPixelFixture(t *testing.T) transitionPairPixelFixture {
