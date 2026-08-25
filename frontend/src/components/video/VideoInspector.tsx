@@ -18,13 +18,14 @@ import { editorModeFeatures } from './editorModes';
 import { effectDefinition, numberParam } from './effects/effectRegistry';
 import { KEYFRAME_EASINGS, KEYFRAME_PROPERTIES } from './effects/keyframeUtils';
 import { transitionDefinition } from './effects/transitionRegistry';
+import { clampTransitionDurationToPeer, transitionPeerOptions, transitionPlacementSupported, visualTransitionOwnerEligible } from './effects/transitionAuthoring';
 import { ANNOTATION_PRESETS, annotationDefinition } from './effects/annotationRegistry';
 import { MOTION_PRESETS } from './effects/motionPresets';
 import { AnimationBlockPicker } from './motion/AnimationBlockPicker';
 import { AnimationBlockEditor } from './motion/AnimationBlockEditor';
 import { AnnotationBrowser, EffectBrowser, TransitionBrowser } from './EffectBrowser';
 import { describeOperationDiff } from './planDiff';
-import type { VideoMotionCurve, VideoTimelineClip, VideoTimelineKeyframe } from '../../types/video';
+import type { VideoMotionCurve, VideoTimelineClip, VideoTimelineKeyframe, VideoTimelineTransition } from '../../types/video';
 
 type InspectorFocus = 'properties' | 'design' | 'animate' | 'effects' | 'transitions' | 'audio';
 
@@ -184,6 +185,8 @@ export function VideoInspector({
   const canRetimeClip = Boolean(clipAsset && (
     clipAsset.mime_type.startsWith('video/') || clipAsset.mime_type.startsWith('audio/')
   ));
+  const transitionPeers = timeline && clip ? transitionPeerOptions(timeline, clip.id) : [];
+  const transitionOwnerEligible = Boolean(timeline && clip && visualTransitionOwnerEligible(timeline, clip.id));
   const [rowMenu, setRowMenu] = useState<{ kind: 'effect' | 'transition' | 'keyframe'; id: string; x: number; y: number } | null>(null);
   const [planMenu, setPlanMenu] = useState<{ x: number; y: number } | null>(null);
   const [variantMenu, setVariantMenu] = useState<{ name: string; x: number; y: number } | null>(null);
@@ -1092,7 +1095,7 @@ export function VideoInspector({
               )}
               {showTransitionControls && (
               <Field label="Transitions">
-                <TransitionBrowser onApply={(transition) => { void addClipTransition(selectedClipId as string, transition); }} />
+                <TransitionBrowser disabled={!transitionOwnerEligible} peerOptions={transitionPeers} onApply={(transition) => { void addClipTransition(selectedClipId as string, transition); }} />
               </Field>
               )}
               {showGeneralProperties && (
@@ -1224,6 +1227,7 @@ export function VideoInspector({
               })}
               {showTransitionControls && (clip.transitions || []).map((transition) => {
                 const definition = transitionDefinition(transition.type);
+                const selectedTransitionPeer = transitionPeers.find((peer) => peer.id === transition.peer_clip_id);
                 return (
                   <div
                     key={transition.id}
@@ -1252,6 +1256,57 @@ export function VideoInspector({
                         <Trash2 size={11} />
                       </button>
                     </div>
+                    <div className="mt-1 flex items-center gap-1">
+                      <select
+                        value={transition.placement || ''}
+                        onChange={(event) => {
+                          const placement = event.target.value as NonNullable<VideoTimelineTransition['placement']>;
+                          if (!transitionPlacementSupported(transition.type, placement)) return;
+                          if (placement === 'between') {
+                            const peer = transitionPeers.find((item) => item.id === transition.peer_clip_id) || transitionPeers[0];
+                            if (!peer) return;
+                            void updateClipTransition(selectedClipId as string, transition.id, {
+                              placement,
+                              peer_clip_id: peer.id,
+                              duration_ms: Math.max(100, Math.min(transition.duration_ms, peer.overlap_ms)),
+                            });
+                            return;
+                          }
+                          void updateClipTransition(selectedClipId as string, transition.id, { placement, peer_clip_id: undefined });
+                        }}
+                        className="rounded border border-border bg-surface px-1 py-0.5 text-[10px]"
+                        aria-label={`${transition.type} placement`}
+                      >
+                        <option value="" disabled>Set placement…</option>
+                        <option value="in" disabled={!transitionPlacementSupported(transition.type, 'in')}>In</option>
+                        <option value="out" disabled={!transitionPlacementSupported(transition.type, 'out')}>Out</option>
+                        <option value="between" disabled={transitionPeers.length === 0 || !transitionPlacementSupported(transition.type, 'between')}>Between</option>
+                      </select>
+                      {transition.placement === 'between' && (
+                        <select
+                          value={selectedTransitionPeer?.id || ''}
+                          onChange={(event) => {
+                            const peer = transitionPeers.find((item) => item.id === event.target.value);
+                            if (!peer) return;
+                            void updateClipTransition(selectedClipId as string, transition.id, {
+                              peer_clip_id: peer.id,
+                              duration_ms: Math.max(100, Math.min(transition.duration_ms, peer.overlap_ms)),
+                            });
+                          }}
+                          className="min-w-0 flex-1 rounded border border-border bg-surface px-1 py-0.5 text-[10px]"
+                          aria-label={`${transition.type} peer clip`}
+                        >
+                          {!selectedTransitionPeer && <option value="" disabled>Choose overlapping peer…</option>}
+                          {transitionPeers.map((peer) => <option key={peer.id} value={peer.id}>{peer.label}</option>)}
+                        </select>
+                      )}
+                    </div>
+                    {!transition.placement && (
+                      <p className="mt-1 text-[9px] text-amber-300">Legacy transition: choose placement to enable canonical transition semantics.</p>
+                    )}
+                    {transition.placement === 'between' && !selectedTransitionPeer && (
+                      <p className="mt-1 text-[9px] text-amber-300">Current peer is no longer an eligible visible overlapping visual clip. Choose a new peer.</p>
+                    )}
                     <div className="mt-1 flex items-center gap-2">
                       <label className="flex items-center gap-1">
                         <span className="text-[10px]">Duration</span>
@@ -1262,7 +1317,10 @@ export function VideoInspector({
                           key={`${transition.id}-${transition.duration_ms}`}
                           defaultValue={transition.duration_ms}
                           onBlur={(event) => {
-                            const duration = Math.max(100, Math.round(Number(event.target.value)));
+                            let duration = Math.max(100, Math.round(Number(event.target.value)));
+                            if (transition.placement === 'between' && selectedTransitionPeer) {
+                              duration = clampTransitionDurationToPeer(duration, selectedTransitionPeer);
+                            }
                             if (Number.isFinite(duration) && duration !== transition.duration_ms) {
                               void updateClipTransition(selectedClipId as string, transition.id, { duration_ms: duration });
                             }

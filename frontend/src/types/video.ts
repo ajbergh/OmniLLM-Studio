@@ -336,6 +336,10 @@ export interface VideoTimelineTransition {
   type: 'fade' | 'crossfade' | 'dip_to_black' | 'slide' | 'wipe' | 'zoom';
   duration_ms: number;
   direction?: 'left' | 'right' | 'up' | 'down';
+  /** Explicit canonical intent for newly authored/migrated v1 transitions. */
+  placement?: 'in' | 'out' | 'between';
+  /** Required only for placement='between'; never inferred from timing. */
+  peer_clip_id?: string;
 }
 
 export interface VideoTimelineKeyframe {

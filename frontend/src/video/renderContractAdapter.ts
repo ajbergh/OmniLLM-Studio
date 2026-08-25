@@ -5,6 +5,7 @@ import type {
   VideoTimelineKeyframe,
   VideoTimelineTrack,
   VideoTimelineTransform,
+  VideoTimelineTransition,
 } from '../types/video';
 import type {
   RenderContractMetadata,
@@ -13,6 +14,7 @@ import type {
   TimelineV2Keyframe,
   TimelineV2Track,
   TimelineV2Transform,
+  TimelineV2Transition,
 } from './renderContractTypes';
 
 const supportedTransformKeys = new Set([
@@ -20,6 +22,7 @@ const supportedTransformKeys = new Set([
   'opacity', 'anchor_x', 'anchor_y', 'perspective', 'crop',
 ]);
 const supportedCropKeys = new Set(['top', 'right', 'bottom', 'left']);
+const supportedTransitionPlacements = new Set(['in', 'out', 'between']);
 const visualTransformDefaults: TimelineV2Transform = { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
 
 export class RenderContractAdapterError extends Error {
@@ -52,7 +55,7 @@ export function adaptTimelineV1ToV2(document: VideoTimelineDocument): TimelineV2
   }
 
   const source = cloneJson(document);
-  const tracks = source.tracks.map((track, trackIndex) => adaptTrack(track, trackIndex));
+  const tracks = source.tracks.map((track, trackIndex) => adaptTrack(source, track, trackIndex));
   const maxClipEnd = Math.max(0, ...tracks.flatMap((track) => track.clips.map((clip) => clip.start_ms + clip.duration_ms)));
   const durationMs = source.duration_ms > 0 ? Math.max(source.duration_ms, maxClipEnd) : Math.max(maxClipEnd, 30_000);
 
@@ -76,7 +79,7 @@ export function adaptTimelineV1ToV2(document: VideoTimelineDocument): TimelineV2
   };
 }
 
-function adaptTrack(track: VideoTimelineTrack, trackIndex: number): TimelineV2Track {
+function adaptTrack(document: VideoTimelineDocument, track: VideoTimelineTrack, trackIndex: number): TimelineV2Track {
   return {
     id: track.id,
     type: track.type,
@@ -86,20 +89,11 @@ function adaptTrack(track: VideoTimelineTrack, trackIndex: number): TimelineV2Tr
     solo: track.solo,
     visible: track.visible,
     height: track.height,
-    clips: track.clips.map((clip, clipIndex) => adaptClip(track, clip, `tracks[${trackIndex}].clips[${clipIndex}]`)),
+    clips: track.clips.map((clip, clipIndex) => adaptClip(document, track, clip, `tracks[${trackIndex}].clips[${clipIndex}]`)),
   };
 }
 
-function adaptClip(track: VideoTimelineTrack, clip: VideoTimelineClip, path: string): TimelineV2Clip {
-  if ((clip.transitions?.length ?? 0) > 0) {
-    throw new RenderContractAdapterError(
-      'V1_TRANSITION_PLACEMENT_AMBIGUOUS',
-      `${path}.transitions[0]`,
-      'v1 transition placement is not explicit enough for Timeline v2',
-      'remove the transition or migrate it after canonical transition placement and peer semantics are defined',
-    );
-  }
-
+function adaptClip(document: VideoTimelineDocument, track: VideoTimelineTrack, clip: VideoTimelineClip, path: string): TimelineV2Clip {
   const playbackRate = clip.playback_rate && clip.playback_rate > 0 ? clip.playback_rate : 1;
   const consumedSourceMs = Math.max(1, Math.round(clip.duration_ms * playbackRate));
   const adapted: TimelineV2Clip = {
@@ -127,6 +121,7 @@ function adaptClip(track: VideoTimelineTrack, clip: VideoTimelineClip, path: str
       events: clip.cursor.events?.map((event) => ({ ...event })),
     } : undefined,
     effects: (clip.effects ?? []).map((effect) => ({ ...effect, params: cloneMetadata(effect.params) })),
+    transitions: adaptTransitions(document, track, clip, path),
     keyframes: (clip.keyframes ?? []).map(adaptKeyframe),
     animation_blocks: clip.animation_blocks?.map((block) => ({
       ...block,
@@ -139,6 +134,124 @@ function adaptClip(track: VideoTimelineTrack, clip: VideoTimelineClip, path: str
     adapted.media_fit = 'contain';
   }
   return adapted;
+}
+
+function adaptTransitions(
+  document: VideoTimelineDocument,
+  track: VideoTimelineTrack,
+  clip: VideoTimelineClip,
+  path: string,
+): TimelineV2Transition[] | undefined {
+  void track;
+  const transitions = clip.transitions ?? [];
+  if (transitions.length === 0) return undefined;
+  return transitions.map((transition: VideoTimelineTransition, transitionIndex) => {
+    const transitionPath = `${path}.transitions[${transitionIndex}]`;
+    const placement = transition.placement?.trim().toLowerCase() ?? '';
+    if (!placement) {
+      throw new RenderContractAdapterError(
+        'V1_TRANSITION_PLACEMENT_AMBIGUOUS', transitionPath,
+        'v1 transition placement is not explicit enough for Timeline v2',
+        'choose explicit in, out, or between placement in the editor before canonical rendering',
+      );
+    }
+    if (!supportedTransitionPlacements.has(placement)) {
+      throw new RenderContractAdapterError(
+        'V1_TRANSITION_PLACEMENT_INVALID', `${transitionPath}.placement`,
+        `unsupported transition placement ${JSON.stringify(transition.placement)}`,
+        'use in, out, or between',
+      );
+    }
+    validateTransitionPaintCombination(transition.type, placement, transitionPath);
+    const peerClipId = transition.peer_clip_id?.trim() ?? '';
+    if (placement === 'between') {
+      if (!peerClipId) {
+        throw new RenderContractAdapterError(
+          'V1_TRANSITION_PEER_INVALID', `${transitionPath}.peer_clip_id`,
+          'between transitions require an explicit peer clip',
+          'choose an overlapping peer clip in the editor',
+        );
+      }
+      const peerLocation = findTimelineClipById(document, peerClipId);
+      if (!peerLocation || peerLocation.clip.id === clip.id) {
+        throw new RenderContractAdapterError(
+          'V1_TRANSITION_PEER_INVALID', `${transitionPath}.peer_clip_id`,
+          `transition peer ${JSON.stringify(peerClipId)} is missing or invalid`,
+          'choose a different existing overlapping clip',
+        );
+      }
+      if (!isVisualTransitionPeer(peerLocation.track, peerLocation.clip)) {
+        throw new RenderContractAdapterError(
+          'V1_TRANSITION_PEER_INVALID', `${transitionPath}.peer_clip_id`,
+          `transition peer ${JSON.stringify(peerClipId)} is not a visible visual clip`,
+          'choose a visible non-audio peer clip',
+        );
+      }
+      if (peerLocation.clip.start_ms === clip.start_ms) {
+        throw new RenderContractAdapterError(
+          'V1_TRANSITION_PEER_INVALID', `${transitionPath}.peer_clip_id`,
+          'between transition owner and peer must have distinct start times',
+          'choose a peer with a distinct authored start time',
+        );
+      }
+      const overlap = timelineTransitionOverlapMs(clip, peerLocation.clip);
+      if (overlap < transition.duration_ms) {
+        throw new RenderContractAdapterError(
+          'V1_TRANSITION_OVERLAP_INVALID', `${transitionPath}.duration_ms`,
+          `between transition needs ${transition.duration_ms}ms overlap but only ${overlap}ms is authored`,
+          'shorten the transition or increase real clip overlap',
+        );
+      }
+    } else if (peerClipId) {
+      throw new RenderContractAdapterError(
+        'V1_TRANSITION_PEER_INVALID', `${transitionPath}.peer_clip_id`,
+        'in/out transitions must not declare a peer',
+        'clear peer_clip_id or choose between placement',
+      );
+    }
+    return {
+      id: transition.id,
+      type: transition.type,
+      duration_ms: transition.duration_ms,
+      direction: transition.direction,
+      placement: placement as TimelineV2Transition['placement'],
+      ...(peerClipId ? { peer_clip_id: peerClipId } : {}),
+    };
+  });
+}
+
+function findTimelineClipById(document: VideoTimelineDocument, clipId: string): { track: VideoTimelineTrack; clip: VideoTimelineClip } | undefined {
+  for (const track of document.tracks) {
+    const clip = track.clips.find((candidate) => candidate.id === clipId);
+    if (clip) return { track, clip };
+  }
+  return undefined;
+}
+
+function isVisualTransitionPeer(track: VideoTimelineTrack, clip: VideoTimelineClip): boolean {
+  return track.visible && track.type !== 'audio' && track.type !== 'music' && !clip.audio_only;
+}
+
+function validateTransitionPaintCombination(type: string, placement: string, path: string): void {
+  const normalizedType = type.trim().toLowerCase();
+  if (normalizedType === 'fade' && placement === 'between') {
+    throw new RenderContractAdapterError(
+      'V1_TRANSITION_COMBINATION_INVALID', `${path}.placement`,
+      'fade supports only in or out placement',
+      'use in/out placement or choose crossfade for a two-clip blend',
+    );
+  }
+  if (normalizedType === 'crossfade' && placement !== 'between') {
+    throw new RenderContractAdapterError(
+      'V1_TRANSITION_COMBINATION_INVALID', `${path}.placement`,
+      'crossfade requires between placement',
+      'choose between placement and an overlapping visual peer',
+    );
+  }
+}
+
+function timelineTransitionOverlapMs(left: VideoTimelineClip, right: VideoTimelineClip): number {
+  return Math.max(0, Math.min(left.start_ms + left.duration_ms, right.start_ms + right.duration_ms) - Math.max(left.start_ms, right.start_ms));
 }
 
 function adaptTransform(

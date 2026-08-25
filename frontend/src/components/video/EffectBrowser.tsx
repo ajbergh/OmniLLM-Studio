@@ -3,6 +3,8 @@ import { Search } from 'lucide-react';
 import { EFFECT_CATEGORIES, EFFECT_DEFINITIONS, defaultEffectParams } from './effects/effectRegistry';
 import type { EffectCategory, EffectDefinition } from './effects/effectRegistry';
 import { TRANSITION_DEFINITIONS } from './effects/transitionRegistry';
+import { clampTransitionDurationToPeer, transitionPlacementSupported } from './effects/transitionAuthoring';
+import type { TransitionPeerOption } from './effects/transitionAuthoring';
 import { ANNOTATION_DEFINITIONS } from './effects/annotationRegistry';
 import type { VideoTimelineEffect, VideoTimelineShapeKind, VideoTimelineTransition } from '../../types/video';
 import { useVideoStudioStore } from '../../stores/videoStudio';
@@ -112,29 +114,71 @@ export function AnnotationBrowser({ onAdd, disabled }: {
   );
 }
 
-/** Transition cards with export-support badges. Click to add to the selected clip. */
-export function TransitionBrowser({ onApply, disabled }: {
+/** Transition cards with explicit canonical placement/peer authoring. */
+export function TransitionBrowser({ onApply, peerOptions = [], disabled }: {
   onApply: (transition: Omit<VideoTimelineTransition, 'id'>) => void;
+  peerOptions?: TransitionPeerOption[];
   disabled?: boolean;
 }) {
+  const [placement, setPlacement] = useState<NonNullable<VideoTimelineTransition['placement']>>('in');
+  const [peerClipId, setPeerClipId] = useState('');
+  const effectivePeer = peerOptions.find((peer) => peer.id === peerClipId) || peerOptions[0];
   return (
-    <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-surface-alt/50 p-2">
-      {TRANSITION_DEFINITIONS.map((definition) => (
-        <button
-          key={definition.type}
-          disabled={disabled}
-          onClick={() => onApply({
-            type: definition.type,
-            duration_ms: definition.defaultDurationMs,
-            ...(definition.supportsDirection ? { direction: 'left' as const } : {}),
-          })}
-          className="flex items-center justify-between gap-1 rounded border border-border bg-surface px-1.5 py-1.5 text-left text-[11px] text-text-secondary hover:border-primary/40 hover:text-text disabled:cursor-not-allowed disabled:opacity-45"
-          title={definition.exportNote || `Add a ${definition.label} transition to the selected clip`}
+    <div className="rounded-md border border-border bg-surface-alt/50 p-2">
+      <div className="mb-1.5 flex items-center gap-1">
+        <select
+          value={placement}
+          onChange={(event) => setPlacement(event.target.value as NonNullable<VideoTimelineTransition['placement']>)}
+          className="min-h-7 flex-1 rounded border border-border bg-surface px-1 text-[10px] text-text-secondary"
+          aria-label="Transition placement"
         >
-          <span className="min-w-0 truncate">{definition.label}</span>
-          <SupportBadge supported={definition.exportSupported} note={definition.exportNote} />
-        </button>
-      ))}
+          <option value="in">In · clip start</option>
+          <option value="out">Out · clip end</option>
+          <option value="between" disabled={peerOptions.length === 0}>Between · overlapping peer</option>
+        </select>
+        {placement === 'between' && (
+          <select
+            value={effectivePeer?.id || ''}
+            onChange={(event) => setPeerClipId(event.target.value)}
+            className="min-h-7 min-w-0 flex-1 rounded border border-border bg-surface px-1 text-[10px] text-text-secondary"
+            aria-label="Transition peer clip"
+          >
+            {peerOptions.map((peer) => <option key={peer.id} value={peer.id}>{peer.label}</option>)}
+          </select>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-1">
+        {TRANSITION_DEFINITIONS.map((definition) => {
+          const durationMs = placement === 'between' && effectivePeer
+            ? clampTransitionDurationToPeer(definition.defaultDurationMs, effectivePeer)
+            : definition.defaultDurationMs;
+          const placementSupported = transitionPlacementSupported(definition.type, placement);
+          const unavailable = disabled || !placementSupported || (placement === 'between' && !effectivePeer);
+          return (
+            <button
+              key={definition.type}
+              disabled={unavailable}
+              onClick={() => onApply({
+                type: definition.type,
+                duration_ms: durationMs,
+                placement,
+                ...(placement === 'between' && effectivePeer ? { peer_clip_id: effectivePeer.id } : {}),
+                ...(definition.supportsDirection ? { direction: 'left' as const } : {}),
+              })}
+              className="flex items-center justify-between gap-1 rounded border border-border bg-surface px-1.5 py-1.5 text-left text-[11px] text-text-secondary hover:border-primary/40 hover:text-text disabled:cursor-not-allowed disabled:opacity-45"
+              title={!placementSupported
+                ? `${definition.label} does not support ${placement} placement`
+                : (definition.exportNote || `Add a ${definition.label} transition to the selected clip`)}
+            >
+              <span className="min-w-0 truncate">{definition.label}</span>
+              <SupportBadge supported={definition.exportSupported} note={definition.exportNote} />
+            </button>
+          );
+        })}
+      </div>
+      {placement === 'between' && peerOptions.length === 0 && (
+        <p className="mt-1 text-[9px] text-amber-300">Between transitions require at least 100ms of real overlap with another visible visual clip.</p>
+      )}
     </div>
   );
 }
