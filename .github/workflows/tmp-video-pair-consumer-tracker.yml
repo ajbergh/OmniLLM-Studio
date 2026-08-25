@@ -1,0 +1,80 @@
+name: Temporary WYSIWYG pair consumer tracker update
+
+on:
+  push:
+    branches:
+      - feat/video-wysiwyg-phase3-transition-pair-source-over-consumer
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/video-wysiwyg-phase3-transition-pair-source-over-consumer
+          fetch-depth: 0
+      - name: Update durable WYSIWYG tracker
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md')
+          text = path.read_text()
+
+          replacements = [
+            (
+              'Latest merged WYSIWYG program PR: **#274 — Define canonical transition pair pixel composition** — squash merge `c8c09aa42073711a52681c7b2edf907210ab4e05` (2026-08-25).',
+              'Latest merged WYSIWYG program PR: **#275 — Plan canonical preview transition pair execution** — squash merge `d8f32ba6a4eebc98555ef2bb7e7bbd73f9e98c28` (2026-08-25).'
+            ),
+            (
+              'Current implementation PR: **#275 — Plan canonical preview transition pair execution** on branch `feat/video-wysiwyg-phase3-transition-pair-preview-consumer`, created directly from #274\'s actual squash result `c8c09aa42073711a52681c7b2edf907210ab4e05`.',
+              'Current implementation PR: **#276 — Consume canonical source-over transition pairs** on branch `feat/video-wysiwyg-phase3-transition-pair-source-over-consumer`, created directly from #275\'s actual squash result `d8f32ba6a4eebc98555ef2bb7e7bbd73f9e98c28`.'
+            ),
+            (
+              '| Phase 3 — Shared preview composition | **In progress** | #261–#274 merged deterministic activity/source/transform/view/perspective/media-geometry/effect consumption, explicit transition authoring, owner paint, stack-safe pair-surface planning, and exact pair-pixel semantics. #275 establishes safe preview pair execution slots; direct source-over pair slot wiring, weighted linear-sRGB Canvas composition, scene effects, text/shape/cursor painter inputs, normal-playback canonicalization, diagnostics, and audio consumption remain. |',
+              '| Phase 3 — Shared preview composition | **In progress** | #261–#275 merged deterministic activity/source/transform/view/perspective/media-geometry/effect consumption, explicit transition authoring, owner paint, stack-safe pair-surface planning, exact pair-pixel semantics, and safe preview pair execution slots. #276 consumes clean source-over slide/wipe pairs in the real preview; weighted linear-sRGB Canvas composition, scene effects, text/shape/cursor painter inputs, normal-playback canonicalization, diagnostics, and audio consumption remain. |'
+            ),
+            (
+              '`transition-state-v1` owns placement, peer/owner roles, windows, progress, and overlap requirements. `transition-paint-v1` owns all currently authorable paint families: fade, crossfade, dip-to-black, slide, wipe, and zoom. Pair transitions operate on isolated surfaces and must not be reinterpreted as independent layer opacity. `transition-pair-surface-plan-v1` owns stack-safe pair grouping/slot replacement eligibility. `transition-pair-pixel-composition-v1` owns pair sample blending: linear-sRGB working values, straight input alpha, premultiplied accumulation, straight output alpha, exact-once canonical weighting for crossfade/zoom/dip, opaque linear black for dip contribution, and canonical source-over stack order for slide/wipe. #275 adds a preview execution-slot boundary that may use DOM source-over only when the pixel contract is unweighted; weighted families remain blocked on a true Canvas implementation.',
+              '`transition-state-v1` owns placement, peer/owner roles, windows, progress, and overlap requirements. `transition-paint-v1` owns all currently authorable paint families: fade, crossfade, dip-to-black, slide, wipe, and zoom. Pair transitions operate on pair surfaces and must not be reinterpreted as independent layer opacity. `transition-pair-surface-plan-v1` owns stack-safe pair grouping/slot replacement eligibility. `transition-pair-pixel-composition-v1` owns pair sample blending: linear-sRGB working values, straight input alpha, premultiplied accumulation, straight output alpha, exact-once canonical weighting for crossfade/zoom/dip, opaque linear black for dip contribution, and canonical source-over stack order for slide/wipe. #275 adds the preview execution-slot boundary. #276 consumes only complete, adjacent, unweighted slide/wipe pair plans as one structural DOM pair group at the canonical replacement slot; deferred, weighted, non-adjacent, or multi-paint frames remain on the independent-layer fallback. The group deliberately avoids CSS `isolation: isolate` because that grouping property can flatten `preserve-3d` descendants. Weighted families remain blocked on the true linear-sRGB Canvas compositor.'
+            ),
+            (
+              'and #275 was created directly from #274\'s actual squash result `c8c09aa42073711a52681c7b2edf907210ab4e05`.',
+              'and #275 was created directly from #274\'s actual squash result `c8c09aa42073711a52681c7b2edf907210ab4e05`; #276 was created directly from #275\'s actual squash result `d8f32ba6a4eebc98555ef2bb7e7bbd73f9e98c28`.'
+            ),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected exactly one tracker replacement for: {old[:100]!r}; found {text.count(old)}')
+              text = text.replace(old, new, 1)
+
+          marker = '\n## Phase tracker\n'
+          if text.count(marker) != 1:
+              raise SystemExit(f'expected one phase tracker marker, found {text.count(marker)}')
+          section = '''
+#276 consumes the first canonical pair plan in the real program monitor:
+
+- deterministic complete canonical frames consume only an all-source-over pair plan; weighted, deferred, non-adjacent, or simultaneous-paint pair frames remain on the established independent-layer fallback;
+- eligible adjacent pair-slide/pair-wipe inputs are replaced in-place by one full-stage structural group at the canonical replacement slot, preserving unrelated bottom-to-top ordering;
+- pair-slide canvas-fraction translation and pair-wipe layer clipping are applied exactly once on the two pair inputs without introducing opacity weights;
+- the pair wrapper preserves direct manipulation and `preserve-3d`; CSS `isolation: isolate` is intentionally not used because it can flatten 3D descendants;
+- stage and pair diagnostic attributes expose plan mode, consumer mode, deferral reasons, pair identity, lower/upper input identity, and per-layer pair-paint mode;
+- exact normalized head `397c8a3876143198aabec2686f7506a9c78d7148` passed Quality #1605, Security #1611, backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, both CodeQL languages, desktop/Helm/plugin lifecycle, and every standalone Linux/macOS/browser sandbox assurance. PR discussion/review activity was empty before this tracker freeze. Weighted crossfade, pair-zoom, and between dip-to-black remain explicitly deferred to the next linear-sRGB Canvas-compositor slice.
+'''
+          text = text.replace(marker, '\n' + section + marker, 1)
+          path.write_text(text)
+          PY
+          git diff --check
+      - name: Commit tracker and remove temporary workflow
+        shell: bash
+        run: |
+          git rm -- .github/workflows/tmp-video-pair-consumer-tracker.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
+          git commit -m "docs(video): record source-over pair consumer validation"
+          git push origin HEAD:feat/video-wysiwyg-phase3-transition-pair-source-over-consumer
