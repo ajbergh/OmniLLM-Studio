@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { videoApi } from '../../api';
-import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 import { composeWeightedTransitionPairRgba } from '../../video/renderContractTransitionPairPixelKernel';
 import type { PreviewTransitionPairSlot } from './previewFrameTransitionPairs';
 import {
@@ -9,51 +7,75 @@ import {
   type PreviewWeightedPairCanvasLayer,
 } from './previewFrameWeightedPairCanvas';
 
-export interface PreviewWeightedPairCanvasRuntimeLayer extends PreviewWeightedPairCanvasLayer {
-  asset?: {
-    id: string;
-    file_name: string;
-    mime_type: string;
-  };
-  canonicalState?: CanonicalFrameLayerState;
-}
-
-interface PreviewWeightedPairCanvasProps<T extends PreviewWeightedPairCanvasRuntimeLayer> {
+interface PreviewWeightedPairCanvasProps<T extends PreviewWeightedPairCanvasLayer> {
   slot: PreviewTransitionPairSlot<T>;
   canvasWidth: number;
   canvasHeight: number;
   stageWidth: number;
   stageHeight: number;
-  registerVideo: (clipId: string, node: HTMLVideoElement | null) => void;
+  sourceForClip: (clipId: string) => HTMLImageElement | HTMLVideoElement | null;
 }
 
 type RasterSource = HTMLImageElement | HTMLVideoElement;
 
 /**
- * Deterministic weighted pair surface. The hidden media elements are the raw
- * decoded sources and remain registered with VideoPreviewCanvas' existing
- * canonical source-time synchronizer. This component owns only readiness,
- * isolated 2D rasterization, and the exact #277 weighted pixel kernel.
+ * Deterministic weighted pair surface. The source elements are the already
+ * mounted image/video nodes owned and synchronized by the existing preview, so
+ * this consumer adds no decoder and no second source-time authority. It owns
+ * only readiness, isolated canonical 2D rasterization, and the exact #277
+ * weighted pixel kernel.
  */
-export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasRuntimeLayer>({
+export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLayer>({
   slot,
   canvasWidth,
   canvasHeight,
   stageWidth,
   stageHeight,
-  registerVideo,
+  sourceForClip,
 }: PreviewWeightedPairCanvasProps<T>) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const sourceRefs = useRef(new Map<string, RasterSource>());
   const [sourceRevision, setSourceRevision] = useState(0);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bumpSourceRevision = useCallback(() => setSourceRevision((value) => value + 1), []);
 
-  const setSourceRef = useCallback((clipId: string, node: RasterSource | null) => {
-    if (node) sourceRefs.current.set(clipId, node);
-    else sourceRefs.current.delete(clipId);
-  }, []);
+  useEffect(() => {
+    const sources = [
+      sourceForClip(slot.lower.clip.id),
+      sourceForClip(slot.upper.clip.id),
+    ].filter((source): source is RasterSource => Boolean(source));
+    const onSeeking = () => {
+      setReady(false);
+      bumpSourceRevision();
+    };
+    const onSettled = () => bumpSourceRevision();
+    for (const source of sources) {
+      if (source instanceof HTMLVideoElement) {
+        source.addEventListener('seeking', onSeeking);
+        source.addEventListener('seeked', onSettled);
+        source.addEventListener('loadedmetadata', onSettled);
+        source.addEventListener('loadeddata', onSettled);
+        source.addEventListener('error', onSettled);
+      } else {
+        source.addEventListener('load', onSettled);
+        source.addEventListener('error', onSettled);
+      }
+    }
+    return () => {
+      for (const source of sources) {
+        if (source instanceof HTMLVideoElement) {
+          source.removeEventListener('seeking', onSeeking);
+          source.removeEventListener('seeked', onSettled);
+          source.removeEventListener('loadedmetadata', onSettled);
+          source.removeEventListener('loadeddata', onSettled);
+          source.removeEventListener('error', onSettled);
+        } else {
+          source.removeEventListener('load', onSettled);
+          source.removeEventListener('error', onSettled);
+        }
+      }
+    };
+  }, [bumpSourceRevision, slot.lower.clip.id, slot.upper.clip.id, sourceForClip]);
 
   const draw = useCallback((): boolean => {
     const canvas = canvasRef.current;
@@ -63,7 +85,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasRun
     const isolated = new Map<string, ImageData>();
 
     for (const layer of pairLayers) {
-      const source = sourceRefs.current.get(layer.clip.id);
+      const source = sourceForClip(layer.clip.id);
       if (!source || !sourceReady(source)) return false;
       const [intrinsicWidth, intrinsicHeight] = intrinsicSize(source);
       const layerPlan = resolvePreviewWeightedPairCanvasLayerPlan(
@@ -93,7 +115,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasRun
     context.clearRect(0, 0, canvasWidth, canvasHeight);
     context.putImageData(new ImageData(output, canvasWidth, canvasHeight), 0, 0);
     return true;
-  }, [canvasHeight, canvasWidth, slot, sourceRevision]);
+  }, [canvasHeight, canvasWidth, slot, sourceForClip, sourceRevision]);
 
   useEffect(() => {
     setReady(false);
@@ -107,68 +129,8 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasRun
     }
   }, [draw]);
 
-  const renderSource = (layer: T) => {
-    const asset = layer.asset;
-    if (!asset) throw new Error(`weighted pair source ${JSON.stringify(layer.clip.id)} is missing its media asset`);
-    const commonStyle = {
-      position: 'absolute' as const,
-      left: 0,
-      top: 0,
-      width: 1,
-      height: 1,
-      opacity: 0,
-      pointerEvents: 'none' as const,
-    };
-    if (asset.mime_type.startsWith('video/')) {
-      return (
-        <video
-          key={`weighted-source-${layer.clip.id}`}
-          ref={(node) => {
-            setSourceRef(layer.clip.id, node);
-            registerVideo(layer.clip.id, node);
-          }}
-          data-video-preview-media="true"
-          data-preview-weighted-pair-source={layer.clip.id}
-          src={videoApi.downloadUrl(asset.id)}
-          preload="auto"
-          playsInline
-          muted
-          autoPlay={false}
-          aria-hidden="true"
-          tabIndex={-1}
-          style={commonStyle}
-          onLoadedMetadata={bumpSourceRevision}
-          onLoadedData={bumpSourceRevision}
-          onSeeking={() => {
-            setReady(false);
-            bumpSourceRevision();
-          }}
-          onSeeked={bumpSourceRevision}
-          onError={bumpSourceRevision}
-        />
-      );
-    }
-    if (asset.mime_type.startsWith('image/')) {
-      return (
-        <img
-          key={`weighted-source-${layer.clip.id}`}
-          ref={(node) => setSourceRef(layer.clip.id, node)}
-          data-preview-weighted-pair-source={layer.clip.id}
-          src={videoApi.downloadUrl(asset.id)}
-          alt=""
-          aria-hidden="true"
-          style={commonStyle}
-          onLoad={bumpSourceRevision}
-          onError={bumpSourceRevision}
-        />
-      );
-    }
-    throw new Error(`weighted pair source ${JSON.stringify(layer.clip.id)} has unsupported media ${JSON.stringify(asset.mime_type)}`);
-  };
-
   return (
     <div
-      key={`weighted-transition-pair-${slot.surface.transition_id}`}
       data-preview-transition-pair-id={slot.surface.transition_id}
       data-preview-transition-pair-execution="weighted-canvas"
       data-preview-transition-pair-lower-clip={slot.surface.lower_clip_id}
@@ -177,8 +139,6 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasRun
       data-preview-transition-pair-error={error ?? undefined}
       className="pointer-events-none absolute inset-0"
     >
-      {renderSource(slot.lower)}
-      {renderSource(slot.upper)}
       <canvas
         ref={canvasRef}
         width={canvasWidth}
