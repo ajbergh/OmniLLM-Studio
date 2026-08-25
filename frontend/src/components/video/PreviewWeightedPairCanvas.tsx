@@ -115,7 +115,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
     context.clearRect(0, 0, canvasWidth, canvasHeight);
     context.putImageData(new ImageData(output, canvasWidth, canvasHeight), 0, 0);
     return true;
-  }, [canvasHeight, canvasWidth, slot, sourceForClip, sourceRevision]);
+  }, [canvasHeight, canvasWidth, slot, sourceForClip]);
 
   useEffect(() => {
     setReady(false);
@@ -127,7 +127,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
       setError(reason instanceof Error ? reason.message : String(reason));
       setReady(false);
     }
-  }, [draw]);
+  }, [draw, sourceRevision]);
 
   return (
     <div
