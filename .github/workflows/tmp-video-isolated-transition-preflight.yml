@@ -1,0 +1,29 @@
+name: Temporary isolated transition paint preflight
+
+on:
+  push:
+    paths:
+      - .github/workflows/tmp-video-isolated-transition-preflight.yml
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/video-wysiwyg-phase3-canonical-pair-transition-paint
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci
+      - working-directory: frontend
+        run: npx vitest run src/components/video/previewFrameIsolatedTransitionPaint.test.ts
+      - working-directory: frontend
+        run: npm run build
