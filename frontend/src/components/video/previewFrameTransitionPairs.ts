@@ -148,6 +148,28 @@ export function planPreviewFrameTransitionPairs<T extends PairablePreviewLayer>(
   };
 }
 
+/**
+ * Admit DOM pair execution only when the complete frame has one clean
+ * source-over interpretation. Pair inputs must not carry another active
+ * paint because ordering multiple transition paints is still explicit debt.
+ */
+export function shouldConsumePreviewFrameSourceOverPairs<T extends PairablePreviewLayer>(
+  plan: PreviewTransitionPairPlan<T>,
+): boolean {
+  if (plan.mode !== 'canonical-source-over' || plan.deferredReasons.length > 0) return false;
+  for (const slot of plan.slots) {
+    if (slot.kind !== 'pair') continue;
+    if (slot.execution !== 'source-over-dom') return false;
+    const owner = slot.surface.owner_clip_id === slot.lower.clip.id ? slot.lower : slot.upper;
+    const peer = slot.surface.peer_clip_id === slot.lower.clip.id ? slot.lower : slot.upper;
+    const ownerPaints = owner.canonicalState?.transition_paint ?? [];
+    const peerPaints = peer.canonicalState?.transition_paint ?? [];
+    if (ownerPaints.length !== 1 || ownerPaints[0].transition_id !== slot.surface.transition_id) return false;
+    if (peerPaints.length !== 0) return false;
+  }
+  return true;
+}
+
 function resolvePairLayerPaint(
   surface: CanonicalTransitionPairSurface,
   paint: CanonicalTransitionPaint,

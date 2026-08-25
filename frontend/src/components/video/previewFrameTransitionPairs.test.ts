@@ -4,12 +4,13 @@ import {
   TRANSITION_PAINT_CLIP_LAYER_FRACTION,
   TRANSITION_PAINT_CONTRACT_V1,
   TRANSITION_PAINT_CROSSFADE,
+  TRANSITION_PAINT_OWNER_ALPHA,
   TRANSITION_PAINT_PAIR_SLIDE,
   TRANSITION_PAINT_PAIR_WIPE,
   TRANSITION_PAINT_TRANSLATION_CANVAS_FRACTION,
   type CanonicalTransitionPaint,
 } from '../../video/renderContractTransitionPaint';
-import { planPreviewFrameTransitionPairs } from './previewFrameTransitionPairs';
+import { planPreviewFrameTransitionPairs, shouldConsumePreviewFrameSourceOverPairs } from './previewFrameTransitionPairs';
 
 function state(clipId: string, transitionPaint?: CanonicalTransitionPaint[]): CanonicalFrameLayerState {
   return {
@@ -61,6 +62,7 @@ describe('planPreviewFrameTransitionPairs', () => {
     ]);
 
     expect(result.mode).toBe('canonical-source-over');
+    expect(shouldConsumePreviewFrameSourceOverPairs(result)).toBe(true);
     expect(result.slots.map((slot) => slot.kind)).toEqual(['single', 'pair', 'single']);
     const pair = result.slots[1];
     expect(pair.kind).toBe('pair');
@@ -105,6 +107,7 @@ describe('planPreviewFrameTransitionPairs', () => {
     ]);
     const pair = result.slots[0];
     expect(result.mode).toBe('canonical-weighted-deferred');
+    expect(shouldConsumePreviewFrameSourceOverPairs(result)).toBe(false);
     expect(pair.kind).toBe('pair');
     if (pair.kind !== 'pair') return;
     expect(pair.execution).toBe('weighted-canvas-deferred');
@@ -131,5 +134,33 @@ describe('planPreviewFrameTransitionPairs', () => {
     ]);
     expect(result.slots.map((slot) => slot.kind)).toEqual(['single', 'single', 'single']);
     expect(result.deferredReasons).toContain('transition-1:pair-inputs-not-adjacent');
+    expect(shouldConsumePreviewFrameSourceOverPairs(result)).toBe(false);
+  });
+
+  it('keeps a pair frame on fallback when either pair input owns another active paint', () => {
+    const result = planPreviewFrameTransitionPairs(50, [
+      layer('clip-a', [
+        paint({
+          translation_space: TRANSITION_PAINT_TRANSLATION_CANVAS_FRACTION,
+          outgoing_offset_x: -0.5,
+          outgoing_offset_y: 0,
+          incoming_offset_x: 0.5,
+          incoming_offset_y: 0,
+        }),
+        paint({
+          transition_id: 'fade-1',
+          type: 'fade',
+          placement: 'in',
+          composition: TRANSITION_PAINT_OWNER_ALPHA,
+          peer_clip_id: undefined,
+          outgoing_clip_id: undefined,
+          incoming_clip_id: undefined,
+          owner_opacity: 0.5,
+        }),
+      ]),
+      layer('clip-b'),
+    ]);
+    expect(result.mode).toBe('canonical-source-over');
+    expect(shouldConsumePreviewFrameSourceOverPairs(result)).toBe(false);
   });
 });

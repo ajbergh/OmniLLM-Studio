@@ -23,6 +23,11 @@ import type { ContextMenuEntry } from '../common/ContextMenu';
 import { composePreviewFilter } from './effects/effectRegistry';
 import { resolvePreviewFrameEffectPaint } from './previewFrameEffects';
 import { resolvePreviewFrameOwnerTransitionPaint } from './previewFrameTransitionPaint';
+import {
+  planPreviewFrameTransitionPairs,
+  shouldConsumePreviewFrameSourceOverPairs,
+  type PreviewTransitionPairLayerPaint,
+} from './previewFrameTransitionPairs';
 import { evaluateCameraProperty, evaluateClipProperty } from '../../video/renderContractProperties';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 import { ShapePreview } from './ShapePreview';
@@ -322,6 +327,13 @@ export function VideoPreviewCanvas() {
   const posterClipIds = new Set(posterLayers.map(({ clip }) => clip.id));
   const previewLayers = [...layers, ...posterLayers]
     .sort(compareIndexedTimelineClipOrder);
+  const transitionPairPlan = planPreviewFrameTransitionPairs(
+    deterministicFrame !== null && !liveTransform && !cropMode && !editingTextClipId
+      ? deterministicFrame
+      : null,
+    previewLayers,
+  );
+  const consumeSourceOverTransitionPairs = shouldConsumePreviewFrameSourceOverPairs(transitionPairPlan);
   const useCanonicalPerspective = shouldUseCanonicalPreviewPerspective(
     deterministicFrame,
     previewLayers.map((entry) => entry.canonicalState),
@@ -739,7 +751,12 @@ export function VideoPreviewCanvas() {
     }
   };
 
-  const renderLayer = (entry: LayerEntry, poster = false) => {
+  const renderLayer = (
+    entry: LayerEntry,
+    poster = false,
+    pairPaint?: PreviewTransitionPairLayerPaint,
+    inPairSurface = false,
+  ) => {
     const { clip, track, asset } = entry;
     const clipTimeMs = playheadMs - clip.start_ms;
     const hasLiveOverride = Boolean(liveTransform && liveTransform.clipId === clip.id);
@@ -808,11 +825,11 @@ export function VideoPreviewCanvas() {
       maxWidth: stageSize.width,
       transformOrigin: `${50 + ((transform.anchor_x || 0) / canvasWidth) * 100}% ${50 + ((transform.anchor_y || 0) / canvasHeight) * 100}%`,
       transformStyle: 'preserve-3d',
-      transform: `translate(-50%, -50%) translate3d(${(viewTransform.x + transitionPaint.offsetXFraction * canvasWidth) * stageScale}px, ${(viewTransform.y + transitionPaint.offsetYFraction * canvasHeight) * stageScale}px, ${viewTransform.z * stageScale}px) rotateX(${inCropEdit ? 0 : viewTransform.rotation_x}deg) rotateY(${inCropEdit ? 0 : viewTransform.rotation_y}deg) rotateZ(${inCropEdit ? 0 : viewTransform.rotation_z}deg) scale3d(${(transform.scale_x || transform.scale) * transitionPaint.scaleMultiplier}, ${(transform.scale_y || transform.scale) * transitionPaint.scaleMultiplier}, 1)`,
+      transform: `translate(-50%, -50%) translate3d(${(viewTransform.x + (transitionPaint.offsetXFraction + (pairPaint?.offsetXFraction ?? 0)) * canvasWidth) * stageScale}px, ${(viewTransform.y + (transitionPaint.offsetYFraction + (pairPaint?.offsetYFraction ?? 0)) * canvasHeight) * stageScale}px, ${viewTransform.z * stageScale}px) rotateX(${inCropEdit ? 0 : viewTransform.rotation_x}deg) rotateY(${inCropEdit ? 0 : viewTransform.rotation_y}deg) rotateZ(${inCropEdit ? 0 : viewTransform.rotation_z}deg) scale3d(${(transform.scale_x || transform.scale) * transitionPaint.scaleMultiplier * (pairPaint?.scaleMultiplier ?? 1)}, ${(transform.scale_y || transform.scale) * transitionPaint.scaleMultiplier * (pairPaint?.scaleMultiplier ?? 1)}, 1)`,
       opacity,
-      clipPath: transitionPaint.clipPath,
+      clipPath: pairPaint?.clipPath ?? transitionPaint.clipPath,
       filter: effectPaint.filter,
-      pointerEvents: perspectiveDistance !== null ? 'auto' : undefined,
+      pointerEvents: inPairSurface || perspectiveDistance !== null ? 'auto' : undefined,
     };
 
     const isEditingText = editingTextClipId === clip.id;
@@ -953,6 +970,7 @@ export function VideoPreviewCanvas() {
         data-preview-effect-state-mode={effectPaint.mode}
         data-preview-transition-paint-mode={transitionPaint.mode}
         data-preview-transition-paint-deferred={transitionPaint.deferredComposition}
+        data-preview-transition-pair-paint-mode={pairPaint ? 'canonical-source-over' : undefined}
         className={`absolute flex items-center justify-center ${selected && !isPlaying ? 'outline outline-1 outline-primary' : ''} ${
           track.locked ? '' : 'cursor-move'
         }`}
@@ -1094,6 +1112,37 @@ export function VideoPreviewCanvas() {
     );
   };
 
+  const renderTransitionSlot = (slot: (typeof transitionPairPlan.slots)[number]) => {
+    if (slot.kind === 'single') {
+      return renderLayer(slot.layer, posterClipIds.has(slot.layer.clip.id));
+    }
+    if (slot.execution !== 'source-over-dom') {
+      throw new Error(`preview transition pair ${JSON.stringify(slot.surface.transition_id)} reached source-over consumer with ${slot.execution}`);
+    }
+    const lowerPaint = slot.layerPaintByClipId.get(slot.lower.clip.id);
+    const upperPaint = slot.layerPaintByClipId.get(slot.upper.clip.id);
+    if (!lowerPaint || !upperPaint) {
+      throw new Error(`preview transition pair ${JSON.stringify(slot.surface.transition_id)} is missing resolved layer paint`);
+    }
+    return (
+      <div
+        key={`transition-pair-${slot.surface.transition_id}`}
+        data-preview-transition-pair-id={slot.surface.transition_id}
+        data-preview-transition-pair-execution={slot.execution}
+        data-preview-transition-pair-lower-clip={slot.surface.lower_clip_id}
+        data-preview-transition-pair-upper-clip={slot.surface.upper_clip_id}
+        className="absolute inset-0"
+        // Do not use CSS `isolation: isolate` here: it is a grouping property
+        // that can flatten preserve-3d descendants. Canonical adjacency already
+        // makes this structural wrapper an exact source-over pair replacement.
+        style={{ pointerEvents: 'none', transformStyle: 'preserve-3d' }}
+      >
+        {renderLayer(slot.lower, posterClipIds.has(slot.lower.clip.id), lowerPaint, true)}
+        {renderLayer(slot.upper, posterClipIds.has(slot.upper.clip.id), upperPaint, true)}
+      </div>
+    );
+  };
+
   return (
     <div ref={rootRef} className="flex h-full min-h-[320px] flex-col rounded-lg border border-border bg-black">
       <div className="hidden">
@@ -1187,6 +1236,9 @@ export function VideoPreviewCanvas() {
           data-parity-frame-index={deterministicFrame ?? Math.floor((playheadMs * fps) / 1000)}
           data-parity-time-ms={Math.round(playheadMs)}
           data-preview-perspective-mode={useCanonicalPerspective ? 'canonical-per-layer' : 'legacy-shared'}
+          data-preview-transition-pair-plan-mode={transitionPairPlan.mode}
+          data-preview-transition-pair-consumer={consumeSourceOverTransitionPairs ? 'canonical-source-over' : 'legacy-independent-layers'}
+          data-preview-transition-pair-deferred={transitionPairPlan.deferredReasons.length > 0 ? transitionPairPlan.deferredReasons.join(',') : undefined}
           className="relative overflow-hidden border border-white/10"
           style={{
             width: stageSize.width || undefined,
@@ -1209,7 +1261,9 @@ export function VideoPreviewCanvas() {
             setMenu({ clipId: null, x: event.clientX, y: event.clientY });
           }}
         >
-          {previewLayers.map((entry) => renderLayer(entry, posterClipIds.has(entry.clip.id)))}
+          {consumeSourceOverTransitionPairs
+            ? transitionPairPlan.slots.map((slot) => renderTransitionSlot(slot))
+            : previewLayers.map((entry) => renderLayer(entry, posterClipIds.has(entry.clip.id)))}
           {previewLayers.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center text-xs text-white/55">
               No active visual clip at playhead
