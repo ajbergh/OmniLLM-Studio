@@ -9,11 +9,11 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG program PR: **#270 — Consume canonical deterministic clip effects** — squash merge `0b6c9bf682287dad0983948ee9168a9b70a11479` (2026-08-24).
+Latest merged WYSIWYG program PR: **#271 — Author explicit v1 transition placement and peers** — squash merge `b2c4abc695035c4c2b61bae4554294eebea674aa` (2026-08-25).
 
 **Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** The renderer-independent visual contract (`visual-frame-state-v1` and its subcontracts) and audio contract (`audio-graph-v1`) define semantics; current work is migrating real program-monitor consumers onto those already-evaluated decisions in small, reversible slices.
 
-Current implementation PR: **#271 — Author explicit v1 transition placement and peers** on branch `feat/video-wysiwyg-phase3-transition-authoring-bridge`, created directly from #270's actual squash result `0b6c9bf682287dad0983948ee9168a9b70a11479`.
+Current implementation PR: **#272 — Consume canonical owner transition paint** on branch `feat/video-wysiwyg-phase3-canonical-owner-transition-paint`, created directly from #271's actual squash result `b2c4abc695035c4c2b61bae4554294eebea674aa`.
 
 #269 completed deterministic media pixel geometry consumption:
 
@@ -28,12 +28,19 @@ Current implementation PR: **#271 — Author explicit v1 transition placement an
 - exact normalized head `8a9494a8251428b05382551893cc2bde64cfeb22` passed Quality #1564, Security #1570, backend race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, both CodeQL languages, desktop/Helm/plugin lifecycle, and all standalone platform/sandbox assurances;
 - final compare was ahead 1 / behind 0 with exactly four intended paths and no review/thread activity before expected-head squash merge as `0b6c9bf682287dad0983948ee9168a9b70a11479`.
 
-#271 establishes the missing explicit v1 transition-authoring bridge:
+#271 completed the explicit v1 transition-authoring bridge:
 
 - additive optional `placement` / `peer_clip_id` fields persist explicit intent without changing Timeline v1 or reclassifying legacy rows;
 - legacy transitions with no placement still fail closed as `V1_TRANSITION_PLACEMENT_AMBIGUOUS`;
-- Go and TypeScript adapters validate real between-peer identity and authored overlap with shared fixture coverage;
-- the editor explicitly authors In, Out, or Between and only offers real overlapping visual peers; legacy rows expose an explicit migration selector rather than inferring intent from timing.
+- Go and TypeScript adapters validate renderable peer identity, distinct starts, authored overlap, and supported type/placement combinations with shared fixture coverage;
+- exact normalized head `b5a27f84317f7219ec76eea22f09826ba217d64c` passed Quality #1570, Security #1576, backend race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, both CodeQL languages, desktop/Helm/plugin lifecycle, and all standalone platform/sandbox assurances before expected-head squash merge as `b2c4abc695035c4c2b61bae4554294eebea674aa`.
+
+#272 consumes the first exact transition-paint subset without inventing pair stacking semantics:
+
+- deterministic owner-scoped `owner-opacity`, `owner-translate`, `owner-wipe`, and `owner-zoom` paint modifies the already-canonical layer surface;
+- canonical omission is authoritative identity paint; live manipulation remains on the explicit legacy interaction path;
+- pair transitions, dip-to-black, and multiple simultaneous paints report `canonical-deferred` and remain unchanged rather than using an incorrect independent-opacity approximation;
+- the next transition slice must define isolated pair-surface stacking relative to unrelated layers before consuming two-input paint.
 
 ## Phase tracker
 
@@ -42,7 +49,7 @@ Current implementation PR: **#271 — Author explicit v1 transition placement an
 | Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged the fail-closed optional frame-indexed exact-region input boundary. Production structural policy, tolerance-aware codec-region semantics, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | **Complete** | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
 | Phase 2 — Canonical contract | **Complete** | Frame/range/source/order, curves, transforms/geometry/projection, transitions, effects, text/fonts, shapes, cursor, immutable source provenance, and AudioGraph semantics are versioned and cross-runtime checked. #260 closed the final contract gap. |
-| Phase 3 — Shared preview composition | **In progress** | #261–#270 merged deterministic activity/source/transform/view/perspective/media-geometry/effect consumption. #271 makes transition placement/peer intent explicitly authorable and adapter-safe. Transition paint, scene effects, text/shape/cursor painter inputs, normal-playback canonicalization, diagnostics, and audio consumption remain. |
+| Phase 3 — Shared preview composition | **In progress** | #261–#271 merged deterministic activity/source/transform/view/perspective/media-geometry/effect consumption plus explicit transition authoring. #272 consumes owner-scoped canonical transition paint; isolated pair/dip composition, scene effects, text/shape/cursor painter inputs, normal-playback canonicalization, diagnostics, and audio consumption remain. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, text metrics/fonts, shapes, transitions, effects, cursor, camera, color, and deterministic asset loading. |
 | Phase 6 — Audio parity closure | Not started | Make preview/Chromium/export obey AudioGraph exactly, including pitch, gain/fades, channels, program processing, processed stems, and decoded delivery. |
@@ -183,13 +190,15 @@ Merged consumer sequence:
 | #267 | Canonical deterministic per-layer perspective projection | `8a9343cf42d4e47f5b9d2b459737601c420d097b` |
 | #268 | Persisted editor asset bounds projected into canonical preview `media_geometry` | `e498bee75757bdeff3bb3c5b8b35aa3f402265b4` |
 | #269 | Canonical deterministic media `painted_bounds` / `clip_bounds` Canvas consumption | `6a382d7ec19a9fc2616ee2db81ca2fe301ecfb26` |
+| #270 | Canonical deterministic clip effect state | `0b6c9bf682287dad0983948ee9168a9b70a11479` |
+| #271 | Explicit v1 transition placement/peer authoring and fail-closed canonical adaptation | `b2c4abc695035c4c2b61bae4554294eebea674aa` |
 
-Current #270 consumes canonical deterministic clip effect state, including exact-frame amount automation, with authored effects as an explicit FrameState-unavailable fallback.
+Current #272 consumes canonical owner-scoped transition paint and explicitly defers two-input composition until pair-surface stacking is defined.
 
 Remaining Phase 3 sequence should stay reviewable:
 
-1. Define explicit editor transition placement/peer authoring or migration semantics so v1 transitions can cross the canonical adapter without guesses.
-2. Consume canonical transition paint after that bridge exists; consume frame-level canonical scene effects without duplicate frame evaluation.
+1. Define and consume isolated pair/dip transition surfaces without reordering unrelated canonical layers.
+2. Consume frame-level canonical scene effects without duplicate frame evaluation.
 3. Consume canonical text/shape/cursor painter inputs and deterministic intrinsic text metrics.
 4. Canonicalize normal playback rather than only parity frame-addressed mode, with diagnostics/rollback.
 5. Make preview audio scheduling consume `audio-graph-v1` in a separate audio-focused slice.
@@ -305,12 +314,13 @@ Before every merge:
 - #268 was created directly from #267's squash result. It projected complete positive-integer persisted editor asset width/height into temporary canonical `content_bounds`, left incomplete dimensions unresolved, never fabricated immutable source provenance, passed the complete exact-head matrix at `5e692376855a6178c8d95661fdfcbb96b5ec848a`, and squash-merged with expected-head protection as `e498bee75757bdeff3bb3c5b8b35aa3f402265b4`.
 - #269 was created directly from #268's squash result. After normalizing away transient branch-only workflow ancestry, exact clean head `679945435ceb8850bed1853b81005ba9e3146ba9` passed the complete Quality #1562 / Security #1568 / Playwright / immutable renderer-parity / platform matrix and squash-merged with expected-head protection as `6a382d7ec19a9fc2616ee2db81ca2fe301ecfb26`.
 - #270 was created directly from #269's squash result, narrowed to the reachable canonical clip-effect consumer, passed the complete exact-head matrix at `8a9494a8251428b05382551893cc2bde64cfeb22`, and squash-merged with expected-head protection as `0b6c9bf682287dad0983948ee9168a9b70a11479`.
-- #271 was created directly from #270's squash result to add explicit v1 transition placement/peer authoring while preserving the legacy ambiguity failure boundary.
+- #271 was created directly from #270's squash result, added explicit transition placement/peer authoring plus fail-closed renderable-peer/type/overlap validation, passed the full exact-head matrix at `b5a27f84317f7219ec76eea22f09826ba217d64c`, and squash-merged as `b2c4abc695035c4c2b61bae4554294eebea674aa`.
+- #272 was created directly from #271's squash result and consumes only exact owner-scoped transition paint; two-input pair/dip composition remains explicitly deferred pending isolated-surface stacking semantics.
 
 ## Next recommended slice
 
-1. Validate #271's exact normalized head through shared Go/TypeScript adapter fixtures, frontend authoring tests, Quality/Security/platform/Playwright/renderer-parity, then inspect live `main`, compare, and review activity before merge.
-2. From #271's actual squash result, consume `transition-paint-v1` owner/pair paint in isolated Canvas surfaces; preserve canonical pair weighting instead of independently attenuating both layers.
+1. Validate #272's exact normalized head through frontend owner-transition tests, Quality/Security/platform/Playwright/renderer-parity, then inspect live `main`, compare, and review activity before merge.
+2. From #272's actual squash result, define and consume isolated pair/dip transition surfaces without changing unrelated canonical layer ordering or double-attenuating crossfade inputs.
 3. Separately expose frame-level canonical `scene_effects` without a second canonical frame evaluation, then consume text/shape/cursor painter inputs and deterministic intrinsic text metrics.
 4. Follow with normal-playback canonicalization/diagnostics and AudioGraph scheduling as separate reviewable slices.
 5. In parallel, use #266's fail-closed input boundary to define the codec-aware Phase 0 production structural policy and add second-platform parity evidence; current global numeric thresholds or arbitrary exact decoded regions alone are not visual sign-off.

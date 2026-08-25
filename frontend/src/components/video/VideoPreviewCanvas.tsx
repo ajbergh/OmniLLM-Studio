@@ -22,6 +22,7 @@ import { ContextMenu } from '../common/ContextMenu';
 import type { ContextMenuEntry } from '../common/ContextMenu';
 import { composePreviewFilter } from './effects/effectRegistry';
 import { resolvePreviewFrameEffectPaint } from './previewFrameEffects';
+import { resolvePreviewFrameOwnerTransitionPaint } from './previewFrameTransitionPaint';
 import { evaluateCameraProperty, evaluateClipProperty } from '../../video/renderContractProperties';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 import { ShapePreview } from './ShapePreview';
@@ -766,8 +767,10 @@ export function VideoPreviewCanvas() {
       entry.canonicalState,
       useCanonicalPerspective,
     );
+    const transitionPaint = resolvePreviewFrameOwnerTransitionPaint(entry.canonicalState, hasLiveOverride);
     const opacity = Math.max(0, Math.min(1, transform.opacity))
-      * (opacityIncludesClipFades ? 1 : fadeFactor(clip, playheadMs));
+      * (opacityIncludesClipFades ? 1 : fadeFactor(clip, playheadMs))
+      * transitionPaint.opacityMultiplier;
     const selected = clip.id === selectedClipId;
     const isMedia = Boolean(asset && (asset.mime_type.startsWith('video/') || asset.mime_type.startsWith('image/')));
     // Crop editing renders the full frame with dimmed margins; rotation is
@@ -801,8 +804,9 @@ export function VideoPreviewCanvas() {
       maxWidth: stageSize.width,
       transformOrigin: `${50 + ((transform.anchor_x || 0) / canvasWidth) * 100}% ${50 + ((transform.anchor_y || 0) / canvasHeight) * 100}%`,
       transformStyle: 'preserve-3d',
-      transform: `translate(-50%, -50%) translate3d(${viewTransform.x * stageScale}px, ${viewTransform.y * stageScale}px, ${viewTransform.z * stageScale}px) rotateX(${inCropEdit ? 0 : viewTransform.rotation_x}deg) rotateY(${inCropEdit ? 0 : viewTransform.rotation_y}deg) rotateZ(${inCropEdit ? 0 : viewTransform.rotation_z}deg) scale3d(${transform.scale_x || transform.scale}, ${transform.scale_y || transform.scale}, 1)`,
+      transform: `translate(-50%, -50%) translate3d(${(viewTransform.x + transitionPaint.offsetXFraction * canvasWidth) * stageScale}px, ${(viewTransform.y + transitionPaint.offsetYFraction * canvasHeight) * stageScale}px, ${viewTransform.z * stageScale}px) rotateX(${inCropEdit ? 0 : viewTransform.rotation_x}deg) rotateY(${inCropEdit ? 0 : viewTransform.rotation_y}deg) rotateZ(${inCropEdit ? 0 : viewTransform.rotation_z}deg) scale3d(${(transform.scale_x || transform.scale) * transitionPaint.scaleMultiplier}, ${(transform.scale_y || transform.scale) * transitionPaint.scaleMultiplier}, 1)`,
       opacity,
+      clipPath: transitionPaint.clipPath,
       filter: effectPaint.filter,
       pointerEvents: perspectiveDistance !== null ? 'auto' : undefined,
     };
@@ -943,6 +947,8 @@ export function VideoPreviewCanvas() {
         data-preview-clip-id={clip.id}
         data-preview-media-geometry-mode={isMedia ? (canonicalMediaGeometry ? 'canonical-frame' : 'legacy-object-fit') : undefined}
         data-preview-effect-state-mode={effectPaint.mode}
+        data-preview-transition-paint-mode={transitionPaint.mode}
+        data-preview-transition-paint-deferred={transitionPaint.deferredComposition}
         className={`absolute flex items-center justify-center ${selected && !isPlaying ? 'outline outline-1 outline-primary' : ''} ${
           track.locked ? '' : 'cursor-move'
         }`}
