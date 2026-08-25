@@ -9,13 +9,17 @@ import (
 const TransitionPairPixelCompositionV1 = "transition-pair-pixel-composition-v1"
 
 const (
-	TransitionPairPixelWorkingColorLinearSRGB  = "linear-srgb"
-	TransitionPairPixelInputAlphaStraight       = "straight"
-	TransitionPairPixelAccumulatorPremultiplied = "premultiplied"
-	TransitionPairPixelOutputAlphaStraight      = "straight"
-	TransitionPairPixelBlendWeightedSum         = "weighted-sum"
-	TransitionPairPixelBlendSourceOverStack     = "source-over-stack"
-	TransitionPairPixelBlackOpaque              = "opaque-linear-black"
+	TransitionPairPixelInputColorSRGB              = "srgb"
+	TransitionPairPixelWorkingColorLinearSRGB      = "linear-srgb"
+	TransitionPairPixelOutputColorSRGB             = "srgb"
+	TransitionPairPixelTransferSRGBIEC6196621       = "iec-61966-2-1-srgb"
+	TransitionPairPixelInputAlphaStraight           = "straight"
+	TransitionPairPixelAccumulatorPremultiplied     = "premultiplied"
+	TransitionPairPixelOutputAlphaStraight          = "straight"
+	TransitionPairPixelClampUnitBeforeOutputTransfer = "unit-interval-before-output-transfer"
+	TransitionPairPixelBlendWeightedSum             = "weighted-sum"
+	TransitionPairPixelBlendSourceOverStack         = "source-over-stack"
+	TransitionPairPixelBlackOpaque                  = "opaque-linear-black"
 )
 
 // EvaluatedTransitionPairPixelComposition defines renderer-independent pixel
@@ -23,32 +27,38 @@ const (
 // transforms/clips/scales stay owned by transition-paint-v1; this contract only
 // fixes how the resulting pair samples contribute to the replacement surface.
 type EvaluatedTransitionPairPixelComposition struct {
-	ContractVersion   string   `json:"contract_version"`
-	TransitionID      string   `json:"transition_id"`
-	Composition       string   `json:"composition"`
-	WorkingColorSpace string   `json:"working_color_space"`
-	InputAlpha        string   `json:"input_alpha"`
-	AccumulatorAlpha  string   `json:"accumulator_alpha"`
-	OutputAlpha       string   `json:"output_alpha"`
-	BlendOperator     string   `json:"blend_operator"`
-	LowerClipID       string   `json:"lower_clip_id"`
-	UpperClipID       string   `json:"upper_clip_id"`
-	OutgoingClipID    string   `json:"outgoing_clip_id"`
-	IncomingClipID    string   `json:"incoming_clip_id"`
-	OutgoingWeight    *float64 `json:"outgoing_weight,omitempty"`
-	IncomingWeight    *float64 `json:"incoming_weight,omitempty"`
-	BlackWeight       *float64 `json:"black_weight,omitempty"`
-	BlackSource       string   `json:"black_source,omitempty"`
-	StackBottomClipID string   `json:"stack_bottom_clip_id,omitempty"`
-	StackTopClipID    string   `json:"stack_top_clip_id,omitempty"`
+	ContractVersion    string   `json:"contract_version"`
+	TransitionID       string   `json:"transition_id"`
+	Composition        string   `json:"composition"`
+	InputColorEncoding string   `json:"input_color_encoding"`
+	WorkingColorSpace  string   `json:"working_color_space"`
+	OutputColorEncoding string  `json:"output_color_encoding"`
+	TransferFunction   string   `json:"transfer_function"`
+	InputAlpha         string   `json:"input_alpha"`
+	AccumulatorAlpha   string   `json:"accumulator_alpha"`
+	OutputAlpha        string   `json:"output_alpha"`
+	ClampPolicy        string   `json:"clamp_policy"`
+	BlendOperator      string   `json:"blend_operator"`
+	LowerClipID        string   `json:"lower_clip_id"`
+	UpperClipID        string   `json:"upper_clip_id"`
+	OutgoingClipID     string   `json:"outgoing_clip_id"`
+	IncomingClipID     string   `json:"incoming_clip_id"`
+	OutgoingWeight     *float64 `json:"outgoing_weight,omitempty"`
+	IncomingWeight     *float64 `json:"incoming_weight,omitempty"`
+	BlackWeight        *float64 `json:"black_weight,omitempty"`
+	BlackSource        string   `json:"black_source,omitempty"`
+	StackBottomClipID  string   `json:"stack_bottom_clip_id,omitempty"`
+	StackTopClipID     string   `json:"stack_top_clip_id,omitempty"`
 }
 
 // EvaluateTransitionPairPixelComposition binds exact pair-pixel semantics to a
 // previously approved stack-safe surface and its canonical transition paint.
-// Weighted families multiply each already-rendered input's premultiplied
-// linear-sRGB contribution and alpha exactly once, then sum and clamp to [0,1].
-// Source-over families preserve canonical lower/upper order after paint-owned
-// spatial operations and add no transition weight of their own.
+// RGB inputs are decoded from sRGB with the IEC 61966-2-1 transfer function,
+// weighted/source-over operations happen in linear sRGB with premultiplied
+// accumulation, components and alpha clamp to [0,1], and RGB is sRGB-encoded
+// again after straight-alpha output is recovered. Transition weights are
+// applied exactly once. Source-over families preserve canonical lower/upper
+// order after paint-owned spatial operations and add no transition weight.
 func EvaluateTransitionPairPixelComposition(
 	surface EvaluatedTransitionPairSurface,
 	paint EvaluatedTransitionPaint,
@@ -84,17 +94,21 @@ func EvaluateTransitionPairPixelComposition(
 	}
 
 	result := EvaluatedTransitionPairPixelComposition{
-		ContractVersion:   TransitionPairPixelCompositionV1,
-		TransitionID:      strings.TrimSpace(surface.TransitionID),
-		Composition:       strings.TrimSpace(surface.Composition),
-		WorkingColorSpace: TransitionPairPixelWorkingColorLinearSRGB,
-		InputAlpha:        TransitionPairPixelInputAlphaStraight,
-		AccumulatorAlpha:  TransitionPairPixelAccumulatorPremultiplied,
-		OutputAlpha:       TransitionPairPixelOutputAlphaStraight,
-		LowerClipID:       lower,
-		UpperClipID:       upper,
-		OutgoingClipID:    outgoing,
-		IncomingClipID:    incoming,
+		ContractVersion:     TransitionPairPixelCompositionV1,
+		TransitionID:        strings.TrimSpace(surface.TransitionID),
+		Composition:         strings.TrimSpace(surface.Composition),
+		InputColorEncoding:  TransitionPairPixelInputColorSRGB,
+		WorkingColorSpace:   TransitionPairPixelWorkingColorLinearSRGB,
+		OutputColorEncoding: TransitionPairPixelOutputColorSRGB,
+		TransferFunction:    TransitionPairPixelTransferSRGBIEC6196621,
+		InputAlpha:          TransitionPairPixelInputAlphaStraight,
+		AccumulatorAlpha:    TransitionPairPixelAccumulatorPremultiplied,
+		OutputAlpha:         TransitionPairPixelOutputAlphaStraight,
+		ClampPolicy:         TransitionPairPixelClampUnitBeforeOutputTransfer,
+		LowerClipID:         lower,
+		UpperClipID:         upper,
+		OutgoingClipID:      outgoing,
+		IncomingClipID:      incoming,
 	}
 
 	switch result.Composition {
