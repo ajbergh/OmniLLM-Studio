@@ -76,7 +76,9 @@ describe('resolvePreviewWeightedPairRasterSourceCapability', () => {
       cursor: { contract_version: 'cursor-state-v1' } as CanonicalFrameLayerState['cursor'],
     }))).toMatchObject({ supported: false, reason: 'cursor-raster-deferred' });
     expect(resolvePreviewWeightedPairRasterSourceCapability(layer('effect', 'image/png', {
-      effects: [{ contract_version: 'effect-state-v1' } as CanonicalFrameLayerState['effects'][number]],
+      effects: [{
+        contract_version: 'effect-state-v1',
+      } as NonNullable<CanonicalFrameLayerState['effects']>[number]],
     }))).toMatchObject({ supported: false, reason: 'clip-effects-raster-deferred' });
   });
 
