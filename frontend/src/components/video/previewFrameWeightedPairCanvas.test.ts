@@ -105,7 +105,7 @@ describe('weighted pair Canvas admission', () => {
 
     const blocked = planPreviewFrameTransitionPairs(12, [
       layer('clip-a', [paint()], {
-        effects: [{ contract_version: 'effect-state-v1' } as CanonicalFrameLayerState['effects'][number]],
+        effects: [{ contract_version: 'effect-state-v1' } as NonNullable<CanonicalFrameLayerState['effects']>[number]],
       }),
       layer('clip-b'),
     ]);
