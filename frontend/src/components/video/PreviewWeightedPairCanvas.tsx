@@ -113,7 +113,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
     const context = canvas.getContext('2d');
     if (!context) throw new Error('weighted pair Canvas could not create output 2D context');
     context.clearRect(0, 0, canvasWidth, canvasHeight);
-    context.putImageData(new ImageData(output, canvasWidth, canvasHeight), 0, 0);
+    context.putImageData(new ImageData(new Uint8ClampedArray(output), canvasWidth, canvasHeight), 0, 0);
     return true;
   }, [canvasHeight, canvasWidth, slot, sourceForClip]);
 
