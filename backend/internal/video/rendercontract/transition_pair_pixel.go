@@ -9,17 +9,17 @@ import (
 const TransitionPairPixelCompositionV1 = "transition-pair-pixel-composition-v1"
 
 const (
-	TransitionPairPixelInputColorSRGB              = "srgb"
-	TransitionPairPixelWorkingColorLinearSRGB      = "linear-srgb"
-	TransitionPairPixelOutputColorSRGB             = "srgb"
-	TransitionPairPixelTransferSRGBIEC6196621       = "iec-61966-2-1-srgb"
-	TransitionPairPixelInputAlphaStraight           = "straight"
-	TransitionPairPixelAccumulatorPremultiplied     = "premultiplied"
-	TransitionPairPixelOutputAlphaStraight          = "straight"
+	TransitionPairPixelInputColorSRGB                = "srgb"
+	TransitionPairPixelWorkingColorLinearSRGB        = "linear-srgb"
+	TransitionPairPixelOutputColorSRGB               = "srgb"
+	TransitionPairPixelTransferSRGBIEC6196621        = "iec-61966-2-1-srgb"
+	TransitionPairPixelInputAlphaStraight            = "straight"
+	TransitionPairPixelAccumulatorPremultiplied      = "premultiplied"
+	TransitionPairPixelOutputAlphaStraight           = "straight"
 	TransitionPairPixelClampUnitBeforeOutputTransfer = "unit-interval-before-output-transfer"
-	TransitionPairPixelBlendWeightedSum             = "weighted-sum"
-	TransitionPairPixelBlendSourceOverStack         = "source-over-stack"
-	TransitionPairPixelBlackOpaque                  = "opaque-linear-black"
+	TransitionPairPixelBlendWeightedSum              = "weighted-sum"
+	TransitionPairPixelBlendSourceOverStack          = "source-over-stack"
+	TransitionPairPixelBlackOpaque                   = "opaque-linear-black"
 )
 
 // EvaluatedTransitionPairPixelComposition defines renderer-independent pixel
@@ -27,28 +27,28 @@ const (
 // transforms/clips/scales stay owned by transition-paint-v1; this contract only
 // fixes how the resulting pair samples contribute to the replacement surface.
 type EvaluatedTransitionPairPixelComposition struct {
-	ContractVersion    string   `json:"contract_version"`
-	TransitionID       string   `json:"transition_id"`
-	Composition        string   `json:"composition"`
-	InputColorEncoding string   `json:"input_color_encoding"`
-	WorkingColorSpace  string   `json:"working_color_space"`
-	OutputColorEncoding string  `json:"output_color_encoding"`
-	TransferFunction   string   `json:"transfer_function"`
-	InputAlpha         string   `json:"input_alpha"`
-	AccumulatorAlpha   string   `json:"accumulator_alpha"`
-	OutputAlpha        string   `json:"output_alpha"`
-	ClampPolicy        string   `json:"clamp_policy"`
-	BlendOperator      string   `json:"blend_operator"`
-	LowerClipID        string   `json:"lower_clip_id"`
-	UpperClipID        string   `json:"upper_clip_id"`
-	OutgoingClipID     string   `json:"outgoing_clip_id"`
-	IncomingClipID     string   `json:"incoming_clip_id"`
-	OutgoingWeight     *float64 `json:"outgoing_weight,omitempty"`
-	IncomingWeight     *float64 `json:"incoming_weight,omitempty"`
-	BlackWeight        *float64 `json:"black_weight,omitempty"`
-	BlackSource        string   `json:"black_source,omitempty"`
-	StackBottomClipID  string   `json:"stack_bottom_clip_id,omitempty"`
-	StackTopClipID     string   `json:"stack_top_clip_id,omitempty"`
+	ContractVersion     string   `json:"contract_version"`
+	TransitionID        string   `json:"transition_id"`
+	Composition         string   `json:"composition"`
+	InputColorEncoding  string   `json:"input_color_encoding"`
+	WorkingColorSpace   string   `json:"working_color_space"`
+	OutputColorEncoding string   `json:"output_color_encoding"`
+	TransferFunction    string   `json:"transfer_function"`
+	InputAlpha          string   `json:"input_alpha"`
+	AccumulatorAlpha    string   `json:"accumulator_alpha"`
+	OutputAlpha         string   `json:"output_alpha"`
+	ClampPolicy         string   `json:"clamp_policy"`
+	BlendOperator       string   `json:"blend_operator"`
+	LowerClipID         string   `json:"lower_clip_id"`
+	UpperClipID         string   `json:"upper_clip_id"`
+	OutgoingClipID      string   `json:"outgoing_clip_id"`
+	IncomingClipID      string   `json:"incoming_clip_id"`
+	OutgoingWeight      *float64 `json:"outgoing_weight,omitempty"`
+	IncomingWeight      *float64 `json:"incoming_weight,omitempty"`
+	BlackWeight         *float64 `json:"black_weight,omitempty"`
+	BlackSource         string   `json:"black_source,omitempty"`
+	StackBottomClipID   string   `json:"stack_bottom_clip_id,omitempty"`
+	StackTopClipID      string   `json:"stack_top_clip_id,omitempty"`
 }
 
 // EvaluateTransitionPairPixelComposition binds exact pair-pixel semantics to a
