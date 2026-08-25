@@ -79,7 +79,9 @@ export function VideoPreviewCanvas() {
     : null;
   const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
   const previewLayers = useMemo(() => {
-    if (deterministicFrame === null) return [];
+    if (deterministicFrame === null) {
+      return { layers: [], posterClipIds: new Set<string>() };
+    }
     const visualIndexed = queryActiveClipsAtFrame(intervalIndex, deterministicFrame, fps)
       .filter(({ track }) => track.visible)
       .filter(({ clip, asset }) => (
@@ -96,22 +98,27 @@ export function VideoPreviewCanvas() {
 
   const transitionPairPlan = useMemo(() => planPreviewFrameTransitionPairs(
     deterministicFrame,
-    Array.isArray(previewLayers) ? previewLayers : previewLayers.layers,
-  ), [deterministicFrame, previewLayers]);
+    previewLayers.layers,
+  ), [deterministicFrame, previewLayers.layers]);
   const weightedClipIds = useMemo(
     () => weightedPairCanvasClipIds(transitionPairPlan),
     [transitionPairPlan],
   );
-  const posterClipIds = Array.isArray(previewLayers) ? new Set<string>() : previewLayers.posterClipIds;
-  const runtimeDeferredReasons = weightedClipIds
-    .filter((clipId) => posterClipIds.has(clipId))
-    .map((clipId) => `${clipId}:decoder-budget-poster`);
+  const runtimeDeferredReasons = useMemo(
+    () => weightedClipIds
+      .filter((clipId) => previewLayers.posterClipIds.has(clipId))
+      .map((clipId) => `${clipId}:decoder-budget-poster`),
+    [previewLayers.posterClipIds, weightedClipIds],
+  );
   const consumeWeightedPairs = shouldConsumePreviewFrameWeightedPairs(transitionPairPlan)
     && runtimeDeferredReasons.length === 0;
-  const weightedSlots = consumeWeightedPairs
-    ? transitionPairPlan.slots.filter((slot) => slot.kind === 'pair')
-    : [];
-  const pairIdentity = weightedSlots.map((slot) => slot.surface.transition_id).join('|');
+  const weightedSlots = useMemo(
+    () => consumeWeightedPairs
+      ? transitionPairPlan.slots.filter((slot) => slot.kind === 'pair')
+      : [],
+    [consumeWeightedPairs, transitionPairPlan],
+  );
+  const weightedRasterDeferredReasons = transitionPairPlan.weightedRasterDeferredReasons;
 
   const sourceForClip = useCallback((clipId: string): HTMLImageElement | HTMLVideoElement | null => {
     if (!stage) return null;
@@ -129,8 +136,8 @@ export function VideoPreviewCanvas() {
     if (consumeWeightedPairs) {
       stage.setAttribute('data-preview-transition-pair-consumer', 'canonical-weighted-canvas');
     }
-    if (transitionPairPlan.weightedRasterDeferredReasons.length > 0) {
-      stage.setAttribute('data-preview-transition-pair-weighted-raster-deferred', transitionPairPlan.weightedRasterDeferredReasons.join(','));
+    if (weightedRasterDeferredReasons.length > 0) {
+      stage.setAttribute('data-preview-transition-pair-weighted-raster-deferred', weightedRasterDeferredReasons.join(','));
     } else {
       stage.removeAttribute('data-preview-transition-pair-weighted-raster-deferred');
     }
@@ -144,7 +151,7 @@ export function VideoPreviewCanvas() {
       restoreAttribute(stage, 'data-preview-transition-pair-weighted-raster-deferred', previousRasterDeferred);
       restoreAttribute(stage, 'data-preview-transition-pair-runtime-deferred', previousRuntimeDeferred);
     };
-  }, [consumeWeightedPairs, runtimeDeferredReasons.join('|'), stage, transitionPairPlan.weightedRasterDeferredReasons.join('|')]);
+  }, [consumeWeightedPairs, runtimeDeferredReasons, stage, weightedRasterDeferredReasons]);
 
   useLayoutEffect(() => {
     if (!consumeWeightedPairs || !stage) return;
@@ -188,7 +195,7 @@ export function VideoPreviewCanvas() {
       });
     }
     return () => restorers.reverse().forEach((restore) => restore());
-  }, [consumeWeightedPairs, pairIdentity, stage]);
+  }, [consumeWeightedPairs, stage, weightedSlots]);
 
   useLayoutEffect(() => {
     if (!consumeWeightedPairs || !stage) return;
@@ -211,7 +218,7 @@ export function VideoPreviewCanvas() {
     };
     window.addEventListener('omnillm:video-parity-ready', onParityReady, true);
     return () => window.removeEventListener('omnillm:video-parity-ready', onParityReady, true);
-  }, [consumeWeightedPairs, stage, weightedSlots.length]);
+  }, [consumeWeightedPairs, stage, weightedSlots]);
 
   return (
     <div ref={rootRef} className="contents">
