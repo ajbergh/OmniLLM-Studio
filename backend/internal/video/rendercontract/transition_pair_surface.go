@@ -19,17 +19,17 @@ const (
 // changing the ordering of any unrelated active layer. Pixel blend semantics
 // remain owned by transition-paint-v1 and are deliberately not redefined here.
 type EvaluatedTransitionPairSurface struct {
-	TransitionID         string `json:"transition_id"`
-	Composition          string `json:"composition"`
-	OwnerClipID          string `json:"owner_clip_id"`
-	PeerClipID           string `json:"peer_clip_id"`
-	OutgoingClipID       string `json:"outgoing_clip_id"`
-	IncomingClipID       string `json:"incoming_clip_id"`
-	LowerClipID          string `json:"lower_clip_id"`
-	UpperClipID          string `json:"upper_clip_id"`
-	LowerLayerIndex      int    `json:"lower_layer_index"`
-	UpperLayerIndex      int    `json:"upper_layer_index"`
-	ReplacementLayerIndex int  `json:"replacement_layer_index"`
+	TransitionID          string `json:"transition_id"`
+	Composition           string `json:"composition"`
+	OwnerClipID           string `json:"owner_clip_id"`
+	PeerClipID            string `json:"peer_clip_id"`
+	OutgoingClipID        string `json:"outgoing_clip_id"`
+	IncomingClipID        string `json:"incoming_clip_id"`
+	LowerClipID           string `json:"lower_clip_id"`
+	UpperClipID           string `json:"upper_clip_id"`
+	LowerLayerIndex       int    `json:"lower_layer_index"`
+	UpperLayerIndex       int    `json:"upper_layer_index"`
+	ReplacementLayerIndex int    `json:"replacement_layer_index"`
 }
 
 type DeferredTransitionPairSurface struct {
@@ -42,11 +42,11 @@ type DeferredTransitionPairSurface struct {
 }
 
 type EvaluatedTransitionPairSurfacePlan struct {
-	ContractVersion string                          `json:"contract_version"`
-	FrameIndex      int64                           `json:"frame_index"`
+	ContractVersion string                           `json:"contract_version"`
+	FrameIndex      int64                            `json:"frame_index"`
 	Surfaces        []EvaluatedTransitionPairSurface `json:"surfaces"`
 	Deferred        []DeferredTransitionPairSurface  `json:"deferred"`
-	Authoritative   bool                            `json:"authoritative"`
+	Authoritative   bool                             `json:"authoritative"`
 }
 
 // EvaluateTransitionPairSurfacePlan resolves stack-safe pair-transition
