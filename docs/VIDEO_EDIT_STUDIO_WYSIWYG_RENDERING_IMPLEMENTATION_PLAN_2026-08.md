@@ -116,7 +116,7 @@ Current implementation PR: **#281 — Consume canonical text, shape, and cursor 
 - deterministic authoritative frames replace only the existing whole-program stage filter; free-running playback and fail-closed projection fallback retain the established authored scene-effect path;
 - focused Vitest coverage proves canonical scene defaults/order, canonical zero-effect authority, malformed scope/order rejection, fail-closed projection fallback, and object-identity reuse across two synchronous wrapper-style indexes;
 - exact code-bearing head `ca0dc9b73f4c15199e9af4b9aed7d1e972130b5e` passed Quality #1632, Security #1638, backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, both CodeQL languages, desktop/Helm/plugin lifecycle, and every standalone Linux/macOS/browser sandbox assurance;
-- exact final documentation head `436795ee...` passed Quality #1633, Security #1639, and every standalone assurance; the final five-path tree plus PR comments/reviews/threads audit was clean before expected-head squash merge as `612dd2d0dc9b51380530b3a97c6558ec5698cc79`.
+- the final documentation head passed Quality #1633, Security #1639, and every standalone assurance; the final five-path tree plus PR comments/reviews/threads audit was clean before expected-head squash merge as `612dd2d0dc9b51380530b3a97c6558ec5698cc79`.
 
 #281 consumes canonical text, shape, and cursor painter inputs in deterministic frame-address mode while preserving the established interactive preview:
 
