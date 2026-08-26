@@ -91,13 +91,14 @@ export interface CanonicalPreviewTextPaint {
 export function resolveCanonicalPreviewTextPaint(
   text: CanonicalEvaluatedTextState,
   stageScale: number,
+  fontFamilyOverride?: string,
 ): CanonicalPreviewTextPaint {
   validateStageScale(stageScale);
   validateCanonicalTextState(text);
 
   const style: CSSProperties = {
     fontSize: text.font_size * stageScale,
-    fontFamily: text.font_family || undefined,
+    fontFamily: fontFamilyOverride || text.font_family || undefined,
     fontWeight: text.font_weight as CSSProperties['fontWeight'],
     color: text.color,
     background: text.background,
@@ -179,12 +180,14 @@ export function CanonicalPreviewText({
   text,
   stageScale,
   embedded = false,
+  fontFamilyOverride,
 }: {
   text: CanonicalEvaluatedTextState;
   stageScale: number;
   embedded?: boolean;
+  fontFamilyOverride?: string;
 }) {
-  const paint = resolveCanonicalPreviewTextPaint(text, stageScale);
+  const paint = resolveCanonicalPreviewTextPaint(text, stageScale, fontFamilyOverride);
   return (
     <div
       data-preview-canonical-content={embedded ? undefined : 'text'}
@@ -192,6 +195,7 @@ export function CanonicalPreviewText({
       data-preview-text-box-mode={paint.boxMode}
       data-preview-text-metrics-mode={paint.metricsMode}
       data-preview-text-font-face-source={text.font_face_source}
+      data-preview-text-font-face-runtime={fontFamilyOverride ? 'editor-resource-loaded' : text.font_resource_id ? 'editor-resource-unloaded' : undefined}
       style={paint.style}
     >
       {text.text}
@@ -203,16 +207,18 @@ export function CanonicalPreviewShape({
   shape,
   text,
   stageScale,
+  textFontFamilyOverride,
 }: {
   shape: CanonicalEvaluatedShapeState;
   text?: CanonicalEvaluatedTextState;
   stageScale: number;
+  textFontFamilyOverride?: string;
 }) {
   const geometry = resolveCanonicalPreviewShapeGeometry(shape, stageScale);
   const { width, height, strokeWidth, cornerRadius, blurRadius } = geometry;
   const strokeBorder = shape.stroke ? `${strokeWidth}px solid ${shape.stroke}` : undefined;
   const textNode: ReactNode = text?.text
-    ? <CanonicalPreviewText text={text} stageScale={stageScale} embedded />
+    ? <CanonicalPreviewText text={text} stageScale={stageScale} embedded fontFamilyOverride={textFontFamilyOverride} />
     : null;
 
   const svgShape = (children: ReactNode) => (
@@ -378,6 +384,11 @@ export function CanonicalPreviewCursor({
       </svg>
     </div>
   );
+}
+
+/** True only for annotation kinds whose canonical painter actually emits text. */
+export function canonicalPreviewShapeUsesText(shape: CanonicalEvaluatedShapeState | undefined): boolean {
+  return shape?.kind === 'step_marker' || shape?.kind === 'speech_bubble' || shape?.kind === 'label';
 }
 
 function validateCanonicalTextState(text: CanonicalEvaluatedTextState): void {
