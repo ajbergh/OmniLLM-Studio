@@ -185,13 +185,19 @@ export function VideoPreviewCanvas() {
 
       const previousContentMode = host.getAttribute('data-preview-content-state-mode');
       const previousCursorMode = host.getAttribute('data-preview-cursor-state-mode');
-      const restoredVisibility: Array<{ node: HTMLElement; visibility: string }> = [];
+      const restoredStyles: Array<{
+        node: HTMLElement;
+        property: 'display' | 'visibility';
+        value: string;
+      }> = [];
 
       if (plan.content === 'canonical-text' || plan.content === 'canonical-shape' || plan.content === 'canonical-omit') {
         const legacyContent = findLegacyBaseContentNode(host);
         if (legacyContent) {
-          restoredVisibility.push({ node: legacyContent, visibility: legacyContent.style.visibility });
-          legacyContent.style.setProperty('visibility', 'hidden');
+          restoredStyles.push({ node: legacyContent, property: 'display', value: legacyContent.style.display });
+          // Removing the old flex item from layout is required: visibility:hidden
+          // would keep its authored dimensions and offset the canonical sibling.
+          legacyContent.style.setProperty('display', 'none');
         }
         host.setAttribute('data-preview-content-state-mode', plan.content);
       }
@@ -199,7 +205,7 @@ export function VideoPreviewCanvas() {
       if (plan.cursor === 'canonical-cursor' || plan.cursor === 'canonical-omit') {
         const legacyCursor = findLegacyCursorOverlay(host);
         if (legacyCursor) {
-          restoredVisibility.push({ node: legacyCursor, visibility: legacyCursor.style.visibility });
+          restoredStyles.push({ node: legacyCursor, property: 'visibility', value: legacyCursor.style.visibility });
           legacyCursor.style.setProperty('visibility', 'hidden');
         }
         host.setAttribute('data-preview-cursor-state-mode', plan.cursor);
@@ -208,9 +214,9 @@ export function VideoPreviewCanvas() {
       restorers.push(() => {
         restoreAttribute(host, 'data-preview-content-state-mode', previousContentMode);
         restoreAttribute(host, 'data-preview-cursor-state-mode', previousCursorMode);
-        for (const { node, visibility } of restoredVisibility) {
-          if (visibility) node.style.setProperty('visibility', visibility);
-          else node.style.removeProperty('visibility');
+        for (const { node, property, value } of restoredStyles) {
+          if (value) node.style.setProperty(property, value);
+          else node.style.removeProperty(property);
         }
       });
     }
