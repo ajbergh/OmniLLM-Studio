@@ -4,6 +4,7 @@ import type { CanonicalEvaluatedCursorState } from '../../video/renderContractCu
 import type { CanonicalEvaluatedShapeState } from '../../video/renderContractShape';
 import type { CanonicalEvaluatedTextState } from '../../video/renderContractText';
 import {
+  canonicalPreviewShapeUsesText,
   resolveCanonicalPreviewCursorGeometry,
   resolveCanonicalPreviewShapeGeometry,
   resolveCanonicalPreviewTextPaint,
@@ -149,6 +150,14 @@ describe('canonical text painter inputs', () => {
     });
   });
 
+  it('uses the already-loaded browser face alias without changing canonical font provenance', () => {
+    const text = textState({ font_resource_id: 'inter-regular' });
+    const paint = resolveCanonicalPreviewTextPaint(text, 1, 'OmniLLMPreview_inter-regular_asset_600');
+    expect(paint.style.fontFamily).toBe('OmniLLMPreview_inter-regular_asset_600');
+    expect(text.font_face_source).toBe('family-name-only');
+    expect(paint.metricsMode).toBe('browser-intrinsic-deferred');
+  });
+
   it('keeps intrinsic glyph metrics explicit debt when no canonical box is authored', () => {
     const paint = resolveCanonicalPreviewTextPaint(textState({
       box_width: undefined,
@@ -178,6 +187,14 @@ describe('canonical text painter inputs', () => {
 });
 
 describe('canonical shape and cursor painter inputs', () => {
+  it('identifies only shape kinds whose canonical painter actually emits embedded text', () => {
+    expect(canonicalPreviewShapeUsesText(shapeState({ kind: 'step_marker' }))).toBe(true);
+    expect(canonicalPreviewShapeUsesText(shapeState({ kind: 'speech_bubble' }))).toBe(true);
+    expect(canonicalPreviewShapeUsesText(shapeState({ kind: 'label' }))).toBe(true);
+    expect(canonicalPreviewShapeUsesText(shapeState({ kind: 'rectangle' }))).toBe(false);
+    expect(canonicalPreviewShapeUsesText(undefined)).toBe(false);
+  });
+
   it('scales evaluated shape dimensions and style parameters exactly once', () => {
     expect(resolveCanonicalPreviewShapeGeometry(shapeState(), 0.5)).toEqual({
       width: 200,
