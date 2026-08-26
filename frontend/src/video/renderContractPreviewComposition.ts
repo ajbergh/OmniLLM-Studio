@@ -4,6 +4,10 @@ import type {
   VideoTimelineDocument,
   VideoTimelineTrack,
 } from '../types/video';
+import {
+  indexEditorFontResources,
+  type EditorFontResourceBindingIssue,
+} from './renderContractEditorFontResources';
 import type {
   CanonicalFrameLayerState,
   CanonicalVisualFrameState,
@@ -29,6 +33,8 @@ export interface CanonicalPreviewCompositionLayer {
   track: VideoTimelineTrack;
   clip: VideoTimelineClip;
   asset?: VideoAsset;
+  /** Current mutable project font asset bound by text.font_resource_id. */
+  font_asset?: VideoAsset;
   state: CanonicalFrameLayerState;
 }
 
@@ -53,6 +59,11 @@ export interface CanonicalPreviewCompositionFrame {
  * deliberately does not fabricate source-provenance-v1, which additionally
  * requires immutable file hashes and manifest clip bindings.
  *
+ * Authored font_resource_id values are resolved against current project font
+ * assets before evaluation. This proves only mutable editor resource
+ * availability and preserves font_face_source as renderer-dependent; immutable
+ * packaged-face provenance remains owned by Render Manifest evaluation.
+ *
  * The projection also checks positional and ID identity so a future adapter
  * that reorders tracks/clips cannot silently bind canonical state to the wrong
  * editor object.
@@ -65,7 +76,18 @@ export function evaluateCanonicalPreviewCompositionFrame(
   const frame = Math.trunc(frameIndex);
   const assetByID = new Map(assets.map((asset) => [asset.id, asset]));
   const contentBoundsByAsset = previewContentBoundsByAsset(assets);
-  const diagnostic = evaluateVisualFrameStateDiagnostic(document, frame, { contentBoundsByAsset });
+  const requiredFontResourceIDs = previewRequiredFontResourceIDs(document);
+  const fontBinding = indexEditorFontResources(assets, requiredFontResourceIDs);
+  if (fontBinding.issue) {
+    return unavailableFontBindingFrame(document, frame, fontBinding.issue);
+  }
+  const availableFontResourceIDs = requiredFontResourceIDs.size > 0
+    ? new Set(fontBinding.resources_by_id.keys())
+    : undefined;
+  const diagnostic = evaluateVisualFrameStateDiagnostic(document, frame, {
+    contentBoundsByAsset,
+    ...(availableFontResourceIDs ? { availableFontResourceIDs } : {}),
+  });
   if (!diagnostic.available || !diagnostic.state) {
     return {
       contract_version: PREVIEW_COMPOSITION_FRAME_V1,
@@ -92,12 +114,14 @@ export function evaluateCanonicalPreviewCompositionFrame(
         },
       };
     }
+    const fontResourceID = state.text?.font_resource_id;
     layers.push({
       track_index: state.track_index,
       clip_index: state.clip_index,
       track,
       clip,
       ...(clip.asset_id ? { asset: assetByID.get(clip.asset_id) } : {}),
+      ...(fontResourceID ? { font_asset: fontBinding.resources_by_id.get(fontResourceID) } : {}),
       state,
     });
   }
@@ -129,4 +153,47 @@ function previewContentBoundsByAsset(assets: readonly VideoAsset[]): ReadonlyMap
     });
   }
   return boundsByAsset;
+}
+
+function previewRequiredFontResourceIDs(document: VideoTimelineDocument): ReadonlySet<string> {
+  const required = new Set<string>();
+  for (const track of document.tracks) {
+    for (const clip of track.clips) {
+      const resourceID = clip.text?.font_resource_id?.trim() ?? '';
+      if (resourceID) required.add(resourceID);
+    }
+  }
+  return required;
+}
+
+function unavailableFontBindingFrame(
+  document: VideoTimelineDocument,
+  frame: number,
+  issue: EditorFontResourceBindingIssue,
+): CanonicalPreviewCompositionFrame {
+  return {
+    contract_version: PREVIEW_COMPOSITION_FRAME_V1,
+    frame_index: frame,
+    available: false,
+    error: {
+      code: issue.code,
+      path: issue.code === 'EDITOR_FONT_RESOURCE_MISSING'
+        ? previewFontResourceReferencePath(document, issue.font_resource_id)
+        : 'assets',
+      message: issue.message,
+      remediation: issue.remediation,
+    },
+  };
+}
+
+function previewFontResourceReferencePath(document: VideoTimelineDocument, resourceID: string): string {
+  for (let trackIndex = 0; trackIndex < document.tracks.length; trackIndex += 1) {
+    const track = document.tracks[trackIndex];
+    for (let clipIndex = 0; clipIndex < track.clips.length; clipIndex += 1) {
+      if (track.clips[clipIndex].text?.font_resource_id?.trim() === resourceID) {
+        return `tracks[${trackIndex}].clips[${clipIndex}].text.font_resource_id`;
+      }
+    }
+  }
+  return 'tracks';
 }

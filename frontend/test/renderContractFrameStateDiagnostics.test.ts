@@ -71,4 +71,38 @@ describe('visual FrameState diagnostic envelope', () => {
     expect(result.error?.code).toBe('FRAME_STATE_EVALUATION_FAILED');
     expect(result.error?.message).toContain('outside timeline frame range');
   });
+
+  it('accepts an editor-verified font resource without claiming packaged-face provenance', () => {
+    const timeline = compatibleTimeline();
+    delete timeline.tracks[0].clips[0].asset_id;
+    timeline.tracks[0].clips[0].text = {
+      text: 'Title',
+      font_family: 'Inter',
+      font_resource_id: 'inter-400-normal',
+    };
+
+    const result = evaluateVisualFrameStateDiagnostic(timeline, 0, {
+      availableFontResourceIDs: new Set(['inter-400-normal']),
+    });
+
+    expect(result.available).toBe(true);
+    expect(result.state?.layers[0].text?.font_resource_id).toBe('inter-400-normal');
+    expect(result.state?.layers[0].text?.font_face_source).toBe('family-name-only');
+  });
+
+  it('keeps font resource references fail closed without an editor resource context', () => {
+    const timeline = compatibleTimeline();
+    delete timeline.tracks[0].clips[0].asset_id;
+    timeline.tracks[0].clips[0].text = {
+      text: 'Title',
+      font_family: 'Inter',
+      font_resource_id: 'inter-400-normal',
+    };
+
+    const result = evaluateVisualFrameStateDiagnostic(timeline, 0);
+
+    expect(result.available).toBe(false);
+    expect(result.error?.code).toBe('FRAME_STATE_EVALUATION_FAILED');
+    expect(result.error?.message).toContain('manifest does not package');
+  });
 });
