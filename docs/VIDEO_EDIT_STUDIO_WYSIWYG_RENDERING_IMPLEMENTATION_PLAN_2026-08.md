@@ -9,11 +9,11 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG program PR: **#279 — Consume weighted transition pairs on Canvas** — squash merge `adb820ae08a4450903546e18962ccbb3275c618b` (2026-08-25).
+Latest merged WYSIWYG program PR: **#280 — Consume canonical scene effects in deterministic preview** — squash merge `612dd2d0dc9b51380530b3a97c6558ec5698cc79` (2026-08-26).
 
 **Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** The renderer-independent visual contract (`visual-frame-state-v1` and its subcontracts) and audio contract (`audio-graph-v1`) define semantics; current work is migrating real program-monitor consumers onto those already-evaluated decisions in small, reversible slices.
 
-Current implementation PR: **#280 — Consume canonical scene effects in deterministic preview** on branch `feat/video-wysiwyg-phase3-scene-effects`, created directly from #279's actual squash result `adb820ae08a4450903546e18962ccbb3275c618b`.
+Current implementation PR: **#281 — Consume canonical text, shape, and cursor painters** on branch `feat/video-wysiwyg-phase3-canonical-painters`, created directly from #280's actual squash result `612dd2d0dc9b51380530b3a97c6558ec5698cc79`.
 
 #269 completed deterministic media pixel geometry consumption:
 
@@ -115,7 +115,20 @@ Current implementation PR: **#280 — Consume canonical scene effects in determi
 - scene-effect resolution validates `effect-state-v1`, exact `scene` scope, non-empty identity, unique authored order, registry membership, canonical defaults, and the existing CSS-paintable subset; canonical omission remains authoritative zero effects rather than falling back to stale authored state;
 - deterministic authoritative frames replace only the existing whole-program stage filter; free-running playback and fail-closed projection fallback retain the established authored scene-effect path;
 - focused Vitest coverage proves canonical scene defaults/order, canonical zero-effect authority, malformed scope/order rejection, fail-closed projection fallback, and object-identity reuse across two synchronous wrapper-style indexes;
-- exact code-bearing head `ca0dc9b73f4c15199e9af4b9aed7d1e972130b5e` passed Quality #1632, Security #1638, backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, both CodeQL languages, desktop/Helm/plugin lifecycle, and every standalone Linux/macOS/browser sandbox assurance. This tracker freeze is documentation-only; exact-final-head status belongs in PR metadata rather than recursively mutating the validated code head.
+- exact code-bearing head `ca0dc9b73f4c15199e9af4b9aed7d1e972130b5e` passed Quality #1632, Security #1638, backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, both CodeQL languages, desktop/Helm/plugin lifecycle, and every standalone Linux/macOS/browser sandbox assurance;
+- exact final documentation head `436795ee...` passed Quality #1633, Security #1639, and every standalone assurance; the final five-path tree plus PR comments/reviews/threads audit was clean before expected-head squash merge as `612dd2d0dc9b51380530b3a97c6558ec5698cc79`.
+
+#281 consumes canonical text, shape, and cursor painter inputs in deterministic frame-address mode while preserving the established interactive preview:
+
+- the canonical wrapper consumes `text-state-v1`, `shape-state-v1`, and exact rational `cursor-state-v1` from the same already-evaluated per-layer FrameState used by the other deterministic consumers;
+- `VideoPreviewCanvasLegacy.tsx` remains the free-running playback/direct-manipulation implementation; canonical painter portals replace only deterministic base text/shape content and cursor paint without widening normal-playback semantics;
+- canonical omission is authoritative, and the established media-before-shape-before-text base-content precedence is preserved while cursor canonicalization remains independent;
+- canonical text maps evaluated defaults/style, explicit box dimensions, horizontal/vertical alignment, line-height mode, letter spacing, stroke, shadow, padding, and border radius without re-evaluating authored defaults;
+- canonical shape paint uses canonical dimensions/style defaults across all current annotation kinds; pixelate remains explicitly marked as a CSS approximation because the DOM preview still cannot perform true raster pixelation;
+- canonical cursor paint consumes sampled position, scale, visibility, highlight, click-ring, and strict click-proximity state rather than resampling authored cursor events locally;
+- intrinsic text layout without explicit box dimensions remains `browser-intrinsic-deferred`; no deterministic glyph metrics are fabricated, and weighted transition Canvas raster eligibility remains unchanged until painter fidelity is exact;
+- a pre-merge audit caught that `visibility:hidden` would leave replaced text/shape flex items participating in layout; corrected head `9e51e7b7f4f28b25e59c1cf56ad114c39d40e278` uses `display:none` for replaced base content with exact restoration while cursor remains visibility-hidden because it is absolutely positioned;
+- exact corrected code-bearing head `9e51e7b7f4f28b25e59c1cf56ad114c39d40e278` passed Quality #1636, Security #1642, backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, both CodeQL languages, desktop/Helm/plugin lifecycle, and every standalone Linux/macOS/browser sandbox assurance. PR comments, review submissions, and review threads were empty before this documentation-only tracker freeze.
 
 ## Phase tracker
 
@@ -124,7 +137,7 @@ Current implementation PR: **#280 — Consume canonical scene effects in determi
 | Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged the fail-closed optional frame-indexed exact-region input boundary. Production structural policy, tolerance-aware codec-region semantics, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | **Complete** | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend concurrency/dirty-state behavior are implemented. |
 | Phase 2 — Canonical contract | **Complete** | Frame/range/source/order, curves, transforms/geometry/projection, transitions, effects, text/fonts, shapes, cursor, immutable source provenance, and AudioGraph semantics are versioned and cross-runtime checked. #260 closed the final contract gap. |
-| Phase 3 — Shared preview composition | **In progress** | #261–#279 merged deterministic activity/source/transform/view/perspective/media-geometry/effect consumption, explicit transition authoring, owner paint, stack-safe pair planning, exact pair-pixel semantics, real source-over slide/wipe consumption, the weighted linear-sRGB byte kernel, fail-closed raster-source classification, and weighted Canvas pair execution. #280 consumes deterministic canonical scene effects without a second frame evaluation; text/shape/cursor painter inputs, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |
+| Phase 3 — Shared preview composition | **In progress** | #261–#280 merged deterministic activity/source/transform/view/perspective/media-geometry/effect consumption, explicit transition authoring, owner paint, stack-safe pair planning, exact pair-pixel semantics, real source-over slide/wipe consumption, the weighted linear-sRGB byte kernel, fail-closed raster-source classification, weighted Canvas pair execution, and canonical scene effects. #281 consumes deterministic canonical text/shape/cursor painter inputs; deterministic intrinsic text metrics, exact pixelate/raster painter fidelity, weighted raster broadening, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, text metrics/fonts, shapes, transitions, effects, cursor, camera, color space, and deterministic asset loading. |
 | Phase 6 — Audio parity closure | Not started | Make preview/Chromium/export obey AudioGraph exactly, including pitch, gain/fades, channels, program processing, processed stems, and decoded delivery. |
@@ -173,9 +186,9 @@ Track/z-index order remains authoritative for stacking; spatial `z` affects proj
 ### Effects, text, shape, and cursor
 
 - `effect-state-v1` preserves enabled authored order, scope, normalized parameters, and exact-frame automation; #270 consumes deterministic clip effect state and #280 consumes deterministic frame-level scene-effect state from the same shared canonical frame evaluation; unsupported metadata fails closed.
-- `text-state-v1` serializes text/style intent once. Packaged static font identity is manifest-backed via `font-resource-provenance-v1`; intrinsic glyph measurement remains a Phase 3–5 consumer problem and is never guessed.
-- `shape-state-v1` covers all currently authorable annotation kinds and supplies canonical dimensions/style defaults/bounds.
-- `cursor-state-v1` owns exact rational sampling, visibility, scale, highlight/click-ring state, and strict `<300ms` click proximity; undefined smoothing fails closed.
+- `text-state-v1` serializes text/style intent once. #281 consumes that evaluated state in deterministic preview, but intrinsic glyph measurement without explicit box metrics remains a Phase 3–5 consumer problem and is never guessed. Packaged static font identity remains manifest-backed via `font-resource-provenance-v1`.
+- `shape-state-v1` covers all currently authorable annotation kinds and supplies canonical dimensions/style defaults/bounds; #281 consumes those painter inputs, while true raster pixelation remains explicit fidelity debt rather than a CSS claim.
+- `cursor-state-v1` owns exact rational sampling, visibility, scale, highlight/click-ring state, and strict `<300ms` click proximity; undefined smoothing fails closed, and #281 consumes the evaluated cursor state rather than locally resampling events.
 
 ### AudioGraph v1
 
@@ -206,7 +219,7 @@ A stacked PR is rebuilt from the **actual current `main` tree** after its parent
 5. Update this tracker on the clean branch.
 6. Validate the exact final head before merge.
 
-Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can look current while the tree silently reverts unrelated work. #261/#262/#264/#265/#266/#267 followed this normalization rule; #268 was created directly from #267's squash result, #269 from #268's actual squash result, #270 from #269's actual squash result, #271 from #270's actual squash result, #272 from #271's actual squash result, #273 from #272's actual squash result, #274 from #273's actual squash result, #275 from #274's actual squash result `c8c09aa42073711a52681c7b2edf907210ab4e05`, #276 from #275's actual squash result `d8f32ba6a4eebc98555ef2bb7e7bbd73f9e98c28`, #277 from #276's actual squash result `2c69254cc82c3bf4b96a96454b00b9a6ea1c255d`, #278 from #277's actual squash result `4aefa65e4cab7c92ccb32cef486739de7201cc1c`, #279 from #278's actual squash result `4a70dc7c0669812a699cc42d4c45c3ce142e5335`, and #280 from #279's actual squash result `adb820ae08a4450903546e18962ccbb3275c618b`.
+Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can look current while the tree silently reverts unrelated work. #261/#262/#264/#265/#266/#267 followed this normalization rule; #268 was created directly from #267's squash result, #269 from #268's actual squash result, #270 from #269's actual squash result, #271 from #270's actual squash result, #272 from #271's actual squash result, #273 from #272's actual squash result, #274 from #273's actual squash result, #275 from #274's actual squash result `c8c09aa42073711a52681c7b2edf907210ab4e05`, #276 from #275's actual squash result `d8f32ba6a4eebc98555ef2bb7e7bbd73f9e98c28`, #277 from #276's actual squash result `2c69254cc82c3bf4b96a96454b00b9a6ea1c255d`, #278 from #277's actual squash result `4aefa65e4cab7c92ccb32cef486739de7201cc1c`, #279 from #278's actual squash result `4a70dc7c0669812a699cc42d4c45c3ce142e5335`, #280 from #279's actual squash result `adb820ae08a4450903546e18962ccbb3275c618b`, and #281 from #280's actual squash result `612dd2d0dc9b51380530b3a97c6558ec5698cc79`.
 
 ## Phase 0 — Reproducible parity baseline
 
@@ -275,13 +288,14 @@ Merged consumer sequence:
 | #277 | Reusable weighted linear-sRGB transition-pair RGBA kernel | `4aefa65e4cab7c92ccb32cef486739de7201cc1c` |
 | #278 | Fail-closed weighted pair raster-source classification | `4a70dc7c0669812a699cc42d4c45c3ce142e5335` |
 | #279 | Deterministic weighted crossfade/zoom/dip Canvas pair execution | `adb820ae08a4450903546e18962ccbb3275c618b` |
+| #280 | Canonical deterministic scene-effect state from the shared frame projection | `612dd2d0dc9b51380530b3a97c6558ec5698cc79` |
 
-Current #280 consumes deterministic top-level canonical scene effects through the existing program-stage filter while sharing the same short-lived strict frame projection used for per-layer canonical state.
+Current #281 consumes deterministic `text-state-v1`, `shape-state-v1`, and `cursor-state-v1` painter inputs through portals layered around the established interactive preview. It intentionally does not claim deterministic intrinsic glyph metrics, exact pixelate rendering, or weighted-raster source eligibility for those painters.
 
 Remaining Phase 3 sequence should stay reviewable:
 
-1. Complete #280 final tracker/tree/review audit and expected-head squash merge.
-2. Consume canonical text/shape/cursor painter inputs and deterministic intrinsic text metrics, then broaden the raster capability boundary as those painters become exact.
+1. Complete #281 final tracker/tree/review audit and expected-head squash merge.
+2. Define deterministic intrinsic text-metric ownership and close exact painter raster fidelity, including true pixelate behavior where required; broaden the weighted raster capability boundary only after those painter sources are exact.
 3. Canonicalize normal playback rather than only parity frame-addressed mode, with diagnostics/rollback and explicit transition-pair runtime observability.
 4. Make preview audio scheduling consume `audio-graph-v1` in a separate audio-focused slice.
 
@@ -355,12 +369,14 @@ Before every merge:
 | Pair transitions reorder unrelated layers or become independent alpha layers | #273 admits only active authoritative adjacent pair inputs; #275 converts only those exact replacement indices into preview slots; #276 consumes only clean all-source-over pair plans and preserves the canonical replacement slot. |
 | Pair DOM grouping flattens canonical 3D projection | #276 deliberately avoids CSS `isolation: isolate`; the structural pair wrapper preserves `transform-style: preserve-3d` while adjacency provides exact source-over ordering. |
 | Pair blend gamma/alpha semantics drift or weights are applied twice | #274 fixes transfer/color/alpha/clamp and exact-once weighted semantics; #277 implements those semantics in one reusable byte kernel. #279 rasterizes isolated inputs before applying that kernel, so DOM/CSS opacity cannot duplicate pair weights. |
-| Any visible transition peer is treated as weighted-Canvas-ready | #278 separates canonical pair validity from raster-source capability and fails closed for text, shape, cursor, effects, missing/unsupported media, missing geometry, and 3D/perspective state. #279 adds runtime decoder/poster/readiness gates and refuses mixed/deferred frames. |
+| Any visible transition peer is treated as weighted-Canvas-ready | #278 separates canonical pair validity from raster-source capability and fails closed for text, shape, cursor, effects, missing/unsupported media, missing geometry, and 3D/perspective state. #279 adds runtime decoder/poster/readiness gates and refuses mixed/deferred frames; #281 does not broaden this gate until canonical painter raster fidelity is exact. |
 | Weighted Canvas capture releases stale or blank evidence | #279 intercepts parity-ready until all active weighted surfaces settle; a source/decode/readback failure records `weighted-canvas-not-ready` and does not release a screenshot-ready event. |
 | v1 transition migration guesses placement or peer identity | #271 persists explicit placement/peer intent and validates renderable peer/type/overlap semantics; legacy rows without placement remain `V1_TRANSITION_PLACEMENT_AMBIGUOUS`. |
-| Effect/text/shape/cursor defaults drift | #270 makes deterministic clip `effect-state-v1` authoritative and #280 makes deterministic scene `effect-state-v1` authoritative; text/shape/cursor consumers remain explicit debt and unsupported metadata fails closed. |
-| Duplicate canonical preview evaluation diverges top-level and layer semantics | #280 carries top-level FrameState through the same frame query and shares one microtask-scoped strict preview composition across synchronous wrapper/legacy consumers. |
-| Browser/system font fallback changes metrics | Packaged static-face provenance; deterministic intrinsic metric ownership remains explicit Phase 3–5 work. |
+| Effect/text/shape/cursor defaults drift | #270 makes deterministic clip `effect-state-v1` authoritative, #280 makes deterministic scene `effect-state-v1` authoritative, and #281 consumes deterministic canonical text/shape/cursor painter state; unsupported metadata stays fail-closed. |
+| Canonical painter replacement changes interactive layout semantics | #281 is frame-address-only; replaced base content uses `display:none` only while the canonical portal is active and restores the exact prior display value. Free-running/direct manipulation remains legacy-owned. |
+| Duplicate canonical preview evaluation diverges top-level and layer semantics | #280 carries top-level FrameState through the same frame query and shares one microtask-scoped strict preview composition across synchronous wrapper/legacy consumers; #281 reuses those per-layer states. |
+| Browser/system font fallback changes metrics | Packaged static-face provenance; #281 labels intrinsic measurement `browser-intrinsic-deferred`, and deterministic metric ownership remains explicit Phase 3–5 work. |
+| CSS pixelate approximation is mistaken for exact raster behavior | #281 keeps pixelate explicitly approximate and does not widen weighted-raster eligibility until a true raster painter exists. |
 | Audio pitch/fade/processing location diverges | AudioGraph owns pitch preservation, minimum fade overlap, and post-mix processing. |
 | Unsupported channels are silently remixed | v1 accepts mono→stereo or stereo passthrough only; other layouts fail closed. |
 | Structural parity is claimed from codec-noisy decoded equality | Phase 0 separates canonical zero-tolerance identity/geometry from codec-aware decoded evidence. |
@@ -410,13 +426,14 @@ Before every merge:
 - #277 exact final head `a3beed0a3bc7c402ff9360e5f78d0485a9c7efb1` passed Quality #1615, Security #1621, Playwright, immutable renderer parity, CodeQL, backend/frontend/platform gates, and every standalone assurance; it squash-merged with expected-head protection as `4aefa65e4cab7c92ccb32cef486739de7201cc1c`.
 - #278 exact final head `0a4ebeb0b623cfd39eef844d475d8048c338a973` passed Quality #1619, Security #1625, Playwright, immutable renderer parity, CodeQL, backend/frontend/platform gates, and every standalone assurance; it squash-merged with expected-head protection as `4a70dc7c0669812a699cc42d4c45c3ce142e5335`.
 - #279 exact final head `c90dd38f9bf0b85a60ac64196692f6f365b0e3a4` passed Quality #1628, Security #1634, Playwright, immutable renderer parity, CodeQL, backend/frontend/platform gates, and every standalone assurance; it squash-merged with expected-head protection as `adb820ae08a4450903546e18962ccbb3275c618b`.
-- #280 was created directly from #279's actual squash result. Exact code-bearing head `ca0dc9b73f4c15199e9af4b9aed7d1e972130b5e` consumes deterministic canonical scene-effect state through the existing program-stage filter while sharing the strict frame projection, and passed Quality #1632, Security #1638, backend race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, CodeQL, desktop/Helm/plugin lifecycle, and every standalone platform/sandbox assurance before this documentation-only tracker freeze.
+- #280 exact code-bearing head `ca0dc9b73f4c15199e9af4b9aed7d1e972130b5e` consumed deterministic canonical scene-effect state through the existing program-stage filter while sharing the strict frame projection; its final documentation head also passed the complete matrix and it squash-merged with expected-head protection as `612dd2d0dc9b51380530b3a97c6558ec5698cc79`.
+- #281 was created directly from #280's actual squash result. Corrected code-bearing head `9e51e7b7f4f28b25e59c1cf56ad114c39d40e278` consumes deterministic canonical text/shape/cursor painter inputs while preserving the legacy interactive path and passed Quality #1636, Security #1642, backend race, frontend lint/unit/performance/build, Playwright, immutable renderer parity, both CodeQL languages, desktop/Helm/plugin lifecycle, and every standalone platform/sandbox assurance before this documentation-only tracker freeze.
 
 ## Next recommended slice
 
-1. Complete #280 final tracker/tree/review audit and expected-head squash merge without changing the validated behavioral files.
-2. From #280's actual squash result, consume `CanonicalFrameLayerState.text`, `.shape`, and `.cursor` as deterministic painter inputs; define deterministic intrinsic text-metric ownership rather than remeasuring unspecified system-font behavior.
-3. Broaden the weighted raster capability boundary only after those canonical painters are exact and can be rasterized without introducing a second semantic authority.
+1. Complete #281 final tracker/tree/review audit and expected-head squash merge without changing the validated behavioral files.
+2. From #281's actual squash result, define deterministic intrinsic text-metric ownership and close exact painter raster fidelity, including true pixelate behavior where needed.
+3. Broaden the weighted raster capability boundary only after canonical text/shape/cursor painter sources are exact and can be rasterized without introducing a second semantic authority.
 4. Follow with normal-playback canonicalization plus diagnostics/rollback as a separate slice; keep frame-addressed fail-closed behavior intact while broadening runtime coverage.
 5. Make preview audio scheduling consume `audio-graph-v1` in a separate audio-focused slice.
 6. In parallel, use #266's fail-closed input boundary to define the codec-aware Phase 0 production structural policy and add second-platform parity evidence; current global numeric thresholds or arbitrary exact decoded regions alone are not visual sign-off.
