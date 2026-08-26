@@ -142,11 +142,12 @@ export function VideoPreviewCanvas() {
     if (!stage || deterministicFrame === null || !sceneEffectPaint || sceneEffectPaint.mode !== 'canonical-frame') return;
     const previousFilter = stage.style.filter;
     const previousMode = stage.getAttribute('data-preview-scene-effect-state-mode');
-    if (sceneEffectPaint.filter) stage.style.filter = sceneEffectPaint.filter;
+    if (sceneEffectPaint.filter) stage.style.setProperty('filter', sceneEffectPaint.filter);
     else stage.style.removeProperty('filter');
     stage.setAttribute('data-preview-scene-effect-state-mode', 'canonical-frame');
     return () => {
-      stage.style.filter = previousFilter;
+      if (previousFilter) stage.style.setProperty('filter', previousFilter);
+      else stage.style.removeProperty('filter');
       restoreAttribute(stage, 'data-preview-scene-effect-state-mode', previousMode);
     };
   }, [deterministicFrame, sceneEffectPaint, stage]);
