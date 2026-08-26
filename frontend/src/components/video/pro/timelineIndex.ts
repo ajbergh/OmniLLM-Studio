@@ -19,6 +19,8 @@ export interface IndexedTimelineClip {
   /** Original clip array index, retained independently of interval sorting. */
   clipIndex: number;
   asset?: VideoAsset;
+  /** Current project font asset resolved by canonical preview composition. */
+  fontAsset?: VideoAsset;
   /** Cached interval end. Optional so preview-layer projections remain assignable. */
   endMs?: number;
   /** Canonical FrameState carried only by explicit frame-addressed preview queries. */
@@ -229,7 +231,7 @@ export function queryActiveClipsAtFrameWithState(
   const canonicalByIdentity = new Map(
     composition.layers.map((layer) => [
       canonicalLayerKey(layer.track_index, layer.clip_index),
-      layer.state,
+      layer,
     ]),
   );
   const clips = active
@@ -238,8 +240,14 @@ export function queryActiveClipsAtFrameWithState(
       || canonicalByIdentity.has(canonicalLayerKey(item.trackIndex, item.clipIndex))
     ))
     .map((item) => {
-      const canonicalState = canonicalByIdentity.get(canonicalLayerKey(item.trackIndex, item.clipIndex));
-      return canonicalState ? { ...item, canonicalState } : item;
+      const canonicalLayer = canonicalByIdentity.get(canonicalLayerKey(item.trackIndex, item.clipIndex));
+      return canonicalLayer
+        ? {
+            ...item,
+            canonicalState: canonicalLayer.state,
+            ...(canonicalLayer.font_asset ? { fontAsset: canonicalLayer.font_asset } : {}),
+          }
+        : item;
     })
     .sort(compareIndexedTimelineClipOrder);
 

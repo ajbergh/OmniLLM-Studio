@@ -244,6 +244,55 @@ describe('timeline interval index', () => {
     expect(queryActiveClipsAtFrame(index, 2, 120)).toEqual([]);
   });
 
+  it('carries the exact canonical preview font asset into frame-addressed indexed clips', () => {
+    const fontDocument: VideoTimelineDocument = {
+      version: 1,
+      canvas: { width: 100, height: 100, fps: 30, background: '#000' },
+      duration_ms: 1000,
+      markers: [],
+      metadata: {},
+      tracks: [{
+        id: 'font-track',
+        type: 'layer',
+        name: 'Font track',
+        locked: false,
+        muted: false,
+        visible: true,
+        clips: [{
+          id: 'font-clip',
+          start_ms: 0,
+          duration_ms: 1000,
+          trim_in_ms: 0,
+          trim_out_ms: 1000,
+          transform: transform(),
+          text: { text: 'Title', font_family: 'Inter', font_resource_id: 'inter-400-normal' },
+          effects: [],
+          keyframes: [],
+          transitions: [],
+        }],
+      }],
+    };
+    const font: VideoAsset = {
+      id: 'font-asset',
+      project_id: 'project',
+      source_type: 'upload',
+      kind: 'font',
+      file_name: 'Inter-Regular.woff2',
+      file_path: 'fonts/Inter-Regular.woff2',
+      mime_type: 'font/woff2',
+      size_bytes: 100,
+      metadata_json: JSON.stringify({ font_resource_id: 'inter-400-normal' }),
+      created_at: new Date(0).toISOString(),
+    };
+
+    const active = queryActiveClipsAtFrame(buildTimelineIntervalIndex(fontDocument, [font]), 0, 30);
+
+    expect(active).toHaveLength(1);
+    expect(active[0].fontAsset).toBe(font);
+    expect(active[0].canonicalState?.text?.font_resource_id).toBe('inter-400-normal');
+    expect(active[0].canonicalState?.text?.font_face_source).toBe('family-name-only');
+  });
+
   it('preserves the legacy deterministic frame path when v1 semantics are not canonically representable', () => {
     const ambiguous: VideoTimelineDocument = {
       version: 1,
