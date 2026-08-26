@@ -56,6 +56,20 @@ function asset(id: string, dimensions: { width?: number; height?: number } = {})
   };
 }
 
+function fontAsset(id: string, resourceID: string, fileName = `${id}.woff2`): VideoAsset {
+  return {
+    id,
+    kind: 'font',
+    source_type: 'upload',
+    file_name: fileName,
+    file_path: `/tmp/${fileName}`,
+    mime_type: 'font/woff2',
+    size_bytes: 256,
+    metadata_json: JSON.stringify({ font_resource_id: resourceID }),
+    created_at: '2026-08-24T00:00:00Z',
+  };
+}
+
 describe('canonical preview composition projection', () => {
   it('preserves canonical layer order while binding exact editor identities and assets', () => {
     const high = clip('clip-high', { asset_id: 'asset-high', z_index: 5 });
@@ -149,5 +163,50 @@ describe('canonical preview composition projection', () => {
     expect(state?.unresolved).toContain('media_geometry:content_bounds');
     expect(state?.authoritative).toBe(false);
     expect(result.frame_state?.authoritative).toBe(false);
+  });
+
+  it('binds an authored font_resource_id to the exact current font asset without claiming packaged provenance', () => {
+    const text = clip('clip-font', {
+      text: { text: 'Title', font_family: 'Inter', font_resource_id: 'inter-400-normal' },
+    });
+    const document = documentWith([text]);
+    const font = fontAsset('font-1', 'inter-400-normal', 'Inter-Regular.woff2');
+
+    const result = evaluateCanonicalPreviewCompositionFrame(document, [font], 0);
+    const layer = result.layers?.[0];
+
+    expect(result.available).toBe(true);
+    expect(layer?.font_asset).toBe(font);
+    expect(layer?.state.text?.font_resource_id).toBe('inter-400-normal');
+    expect(layer?.state.text?.font_face_source).toBe('family-name-only');
+  });
+
+  it('fails closed when an authored font_resource_id has no current project font asset', () => {
+    const document = documentWith([clip('clip-font-missing', {
+      text: { text: 'Title', font_family: 'Inter', font_resource_id: 'inter-400-normal' },
+    })]);
+
+    const result = evaluateCanonicalPreviewCompositionFrame(document, [], 0);
+
+    expect(result.available).toBe(false);
+    expect(result.error?.code).toBe('EDITOR_FONT_RESOURCE_MISSING');
+    expect(result.error?.path).toBe('tracks[0].clips[0].text.font_resource_id');
+    expect(result.error?.message).toContain('inter-400-normal');
+  });
+
+  it('fails closed when two project font assets declare the same font_resource_id', () => {
+    const document = documentWith([clip('clip-font-duplicate', {
+      text: { text: 'Title', font_family: 'Inter', font_resource_id: 'inter-400-normal' },
+    })]);
+    const first = fontAsset('font-1', 'inter-400-normal', 'Inter-Regular.woff2');
+    const second = fontAsset('font-2', 'inter-400-normal', 'Inter-Regular-Copy.woff2');
+
+    const result = evaluateCanonicalPreviewCompositionFrame(document, [first, second], 0);
+
+    expect(result.available).toBe(false);
+    expect(result.error?.code).toBe('EDITOR_FONT_RESOURCE_DUPLICATE');
+    expect(result.error?.path).toBe('assets');
+    expect(result.error?.message).toContain('Inter-Regular.woff2');
+    expect(result.error?.message).toContain('Inter-Regular-Copy.woff2');
   });
 });

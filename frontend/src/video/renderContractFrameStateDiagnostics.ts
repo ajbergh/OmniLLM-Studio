@@ -1,6 +1,9 @@
 import type { VideoTimelineDocument } from '../types/video';
 import { adaptTimelineV1ToV2, RenderContractAdapterError } from './renderContractAdapter';
 import {
+  evaluateVisualFrameStateForEditor,
+} from './renderContractEditorFontResources';
+import {
   evaluateVisualFrameState,
   type CanonicalVisualFrameState,
 } from './renderContractFrameState';
@@ -32,6 +35,12 @@ export interface VisualFrameStateDiagnosticOptions {
    * not claim immutable Render Manifest source provenance.
    */
   contentBoundsByAsset?: ReadonlyMap<string, TimelineV2ContentBounds>;
+  /**
+   * Current project font resource IDs that the editor has already resolved to
+   * unique font assets. This verifies mutable resource availability only; it
+   * does not claim packaged font provenance or deterministic glyph metrics.
+   */
+  availableFontResourceIDs?: ReadonlySet<string>;
 }
 
 /**
@@ -46,7 +55,9 @@ export interface VisualFrameStateDiagnosticOptions {
  *
  * Callers may supply already-probed source dimensions as content bounds. The
  * projection mutates only the temporary adapted Timeline v2 document and never
- * fabricates source-provenance-v1 identity or hashes.
+ * fabricates source-provenance-v1 identity or hashes. When callers also supply
+ * editor-verified font resource IDs, those IDs satisfy only current project
+ * resource availability; immutable font provenance remains Render Manifest-only.
  */
 export function evaluateVisualFrameStateDiagnostic(
   document: VideoTimelineDocument,
@@ -65,11 +76,14 @@ export function evaluateVisualFrameStateDiagnostic(
         }
       }
     }
+    const state = options.availableFontResourceIDs
+      ? evaluateVisualFrameStateForEditor(canonical, frame, options.availableFontResourceIDs)
+      : evaluateVisualFrameState(canonical, frame);
     return {
       contract_version: VISUAL_FRAME_STATE_DIAGNOSTIC_V1,
       frame_index: frame,
       available: true,
-      state: evaluateVisualFrameState(canonical, frame),
+      state,
     };
   } catch (reason) {
     return {
