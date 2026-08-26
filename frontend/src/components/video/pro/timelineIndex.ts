@@ -6,7 +6,10 @@ import type {
 } from '../../../types/video';
 import { activeAtFrame } from '../../../video/renderContract';
 import { compareCanonicalClipOrder } from '../../../video/renderContractEvaluation';
-import type { CanonicalFrameLayerState } from '../../../video/renderContractFrameState';
+import type {
+  CanonicalFrameLayerState,
+  CanonicalVisualFrameState,
+} from '../../../video/renderContractFrameState';
 import { evaluateCanonicalPreviewCompositionFrame } from '../../../video/renderContractPreviewComposition';
 
 export interface IndexedTimelineClip {
@@ -31,6 +34,12 @@ export interface TimelineIntervalIndex {
   /** Source document/assets retained for canonical frame-addressed preview evaluation. */
   document: VideoTimelineDocument | null;
   assets: VideoAsset[];
+}
+
+export interface IndexedTimelineFrameQuery {
+  clips: IndexedTimelineClip[];
+  /** Top-level state from the same canonical evaluation that populated clip states. */
+  frameState?: CanonicalVisualFrameState;
 }
 
 function upperBound(values: number[], target: number): number {
@@ -133,6 +142,62 @@ function canonicalLayerKey(trackIndex: number, clipIndex: number): string {
 }
 
 /**
+ * Return clips overlapping one canonical output frame plus the top-level visual
+ * FrameState from the same strict preview-composition evaluation. Consumers that
+ * need scene/camera/frame semantics must use this result instead of evaluating
+ * visual-frame-state-v1 a second time.
+ *
+ * If canonical evaluation is unavailable, `clips` preserves the previous
+ * frame-overlap fallback and `frameState` is omitted so callers cannot mistake
+ * compatibility data for canonical frame authority.
+ */
+export function queryActiveClipsAtFrameWithState(
+  index: TimelineIntervalIndex,
+  frameIndex: number,
+  fps: number,
+): IndexedTimelineFrameQuery {
+  const normalizedFrame = Math.trunc(frameIndex);
+  const normalizedFPS = Math.trunc(fps);
+  if (normalizedFrame < 0 || normalizedFPS <= 0) return { clips: [] };
+
+  const active = index.clips
+    .filter((item) => activeAtFrame(
+      normalizedFrame,
+      item.clip.start_ms,
+      item.clip.duration_ms,
+      normalizedFPS,
+    ))
+    .sort(compareIndexedTimelineClipOrder);
+
+  if (!index.document || normalizedFPS !== Math.trunc(index.document.canvas.fps)) {
+    return { clips: active };
+  }
+  const composition = evaluateCanonicalPreviewCompositionFrame(index.document, index.assets, normalizedFrame);
+  if (!composition.available || !composition.layers || !composition.frame_state) {
+    return { clips: active };
+  }
+
+  const canonicalByIdentity = new Map(
+    composition.layers.map((layer) => [
+      canonicalLayerKey(layer.track_index, layer.clip_index),
+      layer.state,
+    ]),
+  );
+  const clips = active
+    .filter((item) => (
+      !canonicalVisualCandidate(item)
+      || canonicalByIdentity.has(canonicalLayerKey(item.trackIndex, item.clipIndex))
+    ))
+    .map((item) => {
+      const canonicalState = canonicalByIdentity.get(canonicalLayerKey(item.trackIndex, item.clipIndex));
+      return canonicalState ? { ...item, canonicalState } : item;
+    })
+    .sort(compareIndexedTimelineClipOrder);
+
+  return { clips, frameState: composition.frame_state };
+}
+
+/**
  * Return clips overlapping one canonical output frame. Deterministic capture is
  * intentionally frame-addressed: a clip authored partway into a frame belongs
  * to that frame under floor-start/ceil-end semantics even when a millisecond
@@ -151,39 +216,7 @@ export function queryActiveClipsAtFrame(
   frameIndex: number,
   fps: number,
 ): IndexedTimelineClip[] {
-  const normalizedFrame = Math.trunc(frameIndex);
-  const normalizedFPS = Math.trunc(fps);
-  if (normalizedFrame < 0 || normalizedFPS <= 0) return [];
-
-  const active = index.clips
-    .filter((item) => activeAtFrame(
-      normalizedFrame,
-      item.clip.start_ms,
-      item.clip.duration_ms,
-      normalizedFPS,
-    ))
-    .sort(compareIndexedTimelineClipOrder);
-
-  if (!index.document || normalizedFPS !== Math.trunc(index.document.canvas.fps)) return active;
-  const composition = evaluateCanonicalPreviewCompositionFrame(index.document, index.assets, normalizedFrame);
-  if (!composition.available || !composition.layers) return active;
-
-  const canonicalByIdentity = new Map(
-    composition.layers.map((layer) => [
-      canonicalLayerKey(layer.track_index, layer.clip_index),
-      layer.state,
-    ]),
-  );
-  return active
-    .filter((item) => (
-      !canonicalVisualCandidate(item)
-      || canonicalByIdentity.has(canonicalLayerKey(item.trackIndex, item.clipIndex))
-    ))
-    .map((item) => {
-      const canonicalState = canonicalByIdentity.get(canonicalLayerKey(item.trackIndex, item.clipIndex));
-      return canonicalState ? { ...item, canonicalState } : item;
-    })
-    .sort(compareIndexedTimelineClipOrder);
+  return queryActiveClipsAtFrameWithState(index, frameIndex, fps).clips;
 }
 
 /** Return clips intersecting the visible timeline window, with overscan. */
