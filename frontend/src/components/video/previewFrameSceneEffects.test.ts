@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { VideoTimelineDocument, VideoTimelineEffect } from '../../types/video';
+import type { VideoAsset, VideoTimelineDocument, VideoTimelineEffect } from '../../types/video';
 import {
   buildTimelineIntervalIndex,
   queryActiveClipsAtFrameWithState,
@@ -84,6 +84,25 @@ describe('canonical preview scene effects', () => {
       filter: 'brightness(1.1) contrast(2.5)',
       mode: 'canonical-frame',
     });
+  });
+
+  it('shares one synchronous canonical composition across wrapper-style indexes', () => {
+    const document = documentWithSceneEffects();
+    const assets: VideoAsset[] = [];
+    const wrapperFrame = queryActiveClipsAtFrameWithState(
+      buildTimelineIntervalIndex(document, assets),
+      0,
+      30,
+    );
+    const legacyFrame = queryActiveClipsAtFrameWithState(
+      buildTimelineIntervalIndex(document, assets),
+      0,
+      30,
+    );
+
+    expect(wrapperFrame.frameState).toBeDefined();
+    expect(legacyFrame.frameState).toBe(wrapperFrame.frameState);
+    expect(legacyFrame.clips[0].canonicalState).toBe(wrapperFrame.clips[0].canonicalState);
   });
 
   it('treats canonical omission as authoritative zero scene effects', () => {
