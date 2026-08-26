@@ -96,7 +96,8 @@ export function editorFontResourceIDFromAsset(asset: VideoAsset): string | undef
     const metadata = JSON.parse(rawMetadata) as { font_resource_id?: unknown };
     if (typeof metadata.font_resource_id !== 'string') return undefined;
     const resourceID = metadata.font_resource_id.trim();
-    return resourceID || undefined;
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(resourceID)) return undefined;
+    return resourceID;
   } catch {
     return undefined;
   }
