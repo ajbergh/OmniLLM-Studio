@@ -5,9 +5,8 @@ import {
   applyDecoderBudget,
   buildTimelineIntervalIndex,
   compareIndexedTimelineClipOrder,
-  queryActiveClipsAtFrameWithState,
+  queryActiveClipsAtFrame,
 } from './pro/timelineIndex';
-import { resolvePreviewFrameSceneEffectPaint } from './previewFrameEffects';
 import { frameAddressMatchesTimelineMs } from './sourceTiming';
 import { planPreviewFrameTransitionPairs } from './previewFrameTransitionPairs';
 import {
@@ -21,9 +20,7 @@ import { VideoPreviewCanvas as LegacyVideoPreviewCanvas } from './VideoPreviewCa
  * Canonical deterministic consumer layered around the established interactive
  * preview. Free-running playback and editor gestures remain owned by the legacy
  * surface; explicit frame-addressed weighted transition pairs replace their two
- * adjacent DOM inputs in-place with one exact Canvas surface, and top-level
- * canonical scene effects replace authored stage filtering only for those same
- * authoritative frame-addressed previews.
+ * adjacent DOM inputs in-place with one exact Canvas surface.
  */
 export function VideoPreviewCanvas() {
   const timeline = useVideoStudioStore((state) => state.timeline);
@@ -81,12 +78,11 @@ export function VideoPreviewCanvas() {
     ? frameAddress
     : null;
   const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
-  const previewFrame = useMemo(() => {
+  const previewLayers = useMemo(() => {
     if (deterministicFrame === null) {
-      return { layers: [], posterClipIds: new Set<string>(), frameState: undefined };
+      return { layers: [], posterClipIds: new Set<string>() };
     }
-    const frameQuery = queryActiveClipsAtFrameWithState(intervalIndex, deterministicFrame, fps);
-    const visualIndexed = frameQuery.clips
+    const visualIndexed = queryActiveClipsAtFrame(intervalIndex, deterministicFrame, fps)
       .filter(({ track }) => track.visible)
       .filter(({ clip, asset }) => (
         !clip.audio_only && (Boolean(clip.text) || Boolean(clip.shape) || !asset || !asset.mime_type.startsWith('audio/'))
@@ -97,29 +93,22 @@ export function VideoPreviewCanvas() {
     return {
       layers: [...budgeted.mounted, ...budgeted.posters].sort(compareIndexedTimelineClipOrder),
       posterClipIds: new Set(budgeted.posters.map(({ clip }) => clip.id)),
-      frameState: frameQuery.frameState,
     };
   }, [deterministicFrame, fps, intervalIndex, selectedClipId]);
-  const sceneEffectPaint = useMemo(
-    () => previewFrame.frameState
-      ? resolvePreviewFrameSceneEffectPaint(previewFrame.frameState, undefined)
-      : null,
-    [previewFrame.frameState],
-  );
 
   const transitionPairPlan = useMemo(() => planPreviewFrameTransitionPairs(
     deterministicFrame,
-    previewFrame.layers,
-  ), [deterministicFrame, previewFrame.layers]);
+    previewLayers.layers,
+  ), [deterministicFrame, previewLayers.layers]);
   const weightedClipIds = useMemo(
     () => weightedPairCanvasClipIds(transitionPairPlan),
     [transitionPairPlan],
   );
   const runtimeDeferredReasons = useMemo(
     () => weightedClipIds
-      .filter((clipId) => previewFrame.posterClipIds.has(clipId))
+      .filter((clipId) => previewLayers.posterClipIds.has(clipId))
       .map((clipId) => `${clipId}:decoder-budget-poster`),
-    [previewFrame.posterClipIds, weightedClipIds],
+    [previewLayers.posterClipIds, weightedClipIds],
   );
   const consumeWeightedPairs = shouldConsumePreviewFrameWeightedPairs(transitionPairPlan)
     && runtimeDeferredReasons.length === 0;
@@ -138,19 +127,6 @@ export function VideoPreviewCanvas() {
     return node.querySelector<HTMLVideoElement>('video')
       ?? node.querySelector<HTMLImageElement>('img');
   }, [stage]);
-
-  useLayoutEffect(() => {
-    if (!stage || !sceneEffectPaint || sceneEffectPaint.mode !== 'canonical-frame') return;
-    const previousFilter = stage.style.filter;
-    const previousMode = stage.getAttribute('data-preview-scene-effect-state-mode');
-    if (sceneEffectPaint.filter) stage.style.filter = sceneEffectPaint.filter;
-    else stage.style.removeProperty('filter');
-    stage.setAttribute('data-preview-scene-effect-state-mode', 'canonical-frame');
-    return () => {
-      stage.style.filter = previousFilter;
-      restoreAttribute(stage, 'data-preview-scene-effect-state-mode', previousMode);
-    };
-  }, [deterministicFrame, sceneEffectPaint, stage]);
 
   useLayoutEffect(() => {
     if (!stage) return;
