@@ -2,6 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import {
+  CanonicalPreviewCursor,
+  CanonicalPreviewShape,
+  CanonicalPreviewText,
+  previewClipHasMediaBase,
+  resolvePreviewCanonicalPainterPlan,
+} from './PreviewCanonicalPainters';
+import {
   applyDecoderBudget,
   buildTimelineIntervalIndex,
   compareIndexedTimelineClipOrder,
@@ -21,8 +28,8 @@ import { VideoPreviewCanvas as LegacyVideoPreviewCanvas } from './VideoPreviewCa
  * Canonical deterministic consumer layered around the established interactive
  * preview. Free-running playback and editor gestures remain owned by the legacy
  * surface; explicit frame-addressed weighted transition pairs replace their two
- * adjacent DOM inputs in-place with one exact Canvas surface, while scene-level
- * effects consume the same already-evaluated canonical FrameState.
+ * adjacent DOM inputs in-place with one exact Canvas surface. Scene effects and
+ * text/shape/cursor painter inputs consume the same already-evaluated FrameState.
  */
 export function VideoPreviewCanvas() {
   const timeline = useVideoStudioStore((state) => state.timeline);
@@ -74,6 +81,9 @@ export function VideoPreviewCanvas() {
   }, [stage]);
 
   const fps = timeline?.canvas.fps || 30;
+  const canvasWidth = timeline?.canvas.width || 1920;
+  const canvasHeight = timeline?.canvas.height || 1080;
+  const stageScale = stageSize.width > 0 ? stageSize.width / canvasWidth : 0;
   const deterministicFrame = !isPlaying
     && frameAddress !== null
     && frameAddressMatchesTimelineMs(frameAddress, fps, playheadMs)
@@ -104,6 +114,20 @@ export function VideoPreviewCanvas() {
       ? resolvePreviewFrameSceneEffectPaint(previewFrame.frameState, undefined)
       : null,
     [previewFrame.frameState],
+  );
+  const canonicalPainterPlans = useMemo(
+    () => previewFrame.layers
+      .map((layer) => ({
+        layer,
+        plan: resolvePreviewCanonicalPainterPlan(layer.canonicalState, {
+          hasMediaBase: previewClipHasMediaBase(layer.clip, layer.asset?.mime_type),
+          hasShape: Boolean(layer.clip.shape),
+          hasText: Boolean(layer.clip.text),
+          hasCursor: Boolean(layer.clip.cursor),
+        }),
+      }))
+      .filter(({ plan }) => plan.mode === 'canonical-frame' && (plan.content !== 'none' || plan.cursor !== 'none')),
+    [previewFrame.layers],
   );
 
   const transitionPairPlan = useMemo(() => planPreviewFrameTransitionPairs(
@@ -151,6 +175,47 @@ export function VideoPreviewCanvas() {
       restoreAttribute(stage, 'data-preview-scene-effect-state-mode', previousMode);
     };
   }, [deterministicFrame, sceneEffectPaint, stage]);
+
+  useLayoutEffect(() => {
+    if (!stage || deterministicFrame === null || canonicalPainterPlans.length === 0) return;
+    const restorers: Array<() => void> = [];
+    for (const { layer, plan } of canonicalPainterPlans) {
+      const host = findPreviewClipNode(stage, layer.clip.id);
+      if (!host) continue;
+
+      const previousContentMode = host.getAttribute('data-preview-content-state-mode');
+      const previousCursorMode = host.getAttribute('data-preview-cursor-state-mode');
+      const restoredVisibility: Array<{ node: HTMLElement; visibility: string }> = [];
+
+      if (plan.content === 'canonical-text' || plan.content === 'canonical-shape' || plan.content === 'canonical-omit') {
+        const legacyContent = findLegacyBaseContentNode(host);
+        if (legacyContent) {
+          restoredVisibility.push({ node: legacyContent, visibility: legacyContent.style.visibility });
+          legacyContent.style.setProperty('visibility', 'hidden');
+        }
+        host.setAttribute('data-preview-content-state-mode', plan.content);
+      }
+
+      if (plan.cursor === 'canonical-cursor' || plan.cursor === 'canonical-omit') {
+        const legacyCursor = findLegacyCursorOverlay(host);
+        if (legacyCursor) {
+          restoredVisibility.push({ node: legacyCursor, visibility: legacyCursor.style.visibility });
+          legacyCursor.style.setProperty('visibility', 'hidden');
+        }
+        host.setAttribute('data-preview-cursor-state-mode', plan.cursor);
+      }
+
+      restorers.push(() => {
+        restoreAttribute(host, 'data-preview-content-state-mode', previousContentMode);
+        restoreAttribute(host, 'data-preview-cursor-state-mode', previousCursorMode);
+        for (const { node, visibility } of restoredVisibility) {
+          if (visibility) node.style.setProperty('visibility', visibility);
+          else node.style.removeProperty('visibility');
+        }
+      });
+    }
+    return () => restorers.reverse().forEach((restore) => restore());
+  }, [canonicalPainterPlans, deterministicFrame, stage]);
 
   useLayoutEffect(() => {
     if (!stage) return;
@@ -262,8 +327,8 @@ export function VideoPreviewCanvas() {
         return createPortal(
           <PreviewWeightedPairCanvas
             slot={slot}
-            canvasWidth={timeline?.canvas.width || 1920}
-            canvasHeight={timeline?.canvas.height || 1080}
+            canvasWidth={canvasWidth}
+            canvasHeight={canvasHeight}
             stageWidth={stageSize.width}
             stageHeight={stageSize.height}
             sourceForClip={sourceForClip}
@@ -272,6 +337,36 @@ export function VideoPreviewCanvas() {
           `weighted-pair-${slot.surface.transition_id}`,
         );
       })}
+      {stage && canonicalPainterPlans.flatMap(({ layer, plan }) => {
+        const host = findPreviewClipNode(stage, layer.clip.id);
+        if (!host) return [];
+        const portals = [];
+        if (plan.content === 'canonical-text' && layer.canonicalState?.text) {
+          portals.push(createPortal(
+            <CanonicalPreviewText text={layer.canonicalState.text} stageScale={stageScale} />,
+            host,
+            `canonical-text-${layer.clip.id}`,
+          ));
+        } else if (plan.content === 'canonical-shape' && layer.canonicalState?.shape) {
+          portals.push(createPortal(
+            <CanonicalPreviewShape
+              shape={layer.canonicalState.shape}
+              text={layer.canonicalState.text}
+              stageScale={stageScale}
+            />,
+            host,
+            `canonical-shape-${layer.clip.id}`,
+          ));
+        }
+        if (plan.cursor === 'canonical-cursor' && layer.canonicalState?.cursor) {
+          portals.push(createPortal(
+            <CanonicalPreviewCursor cursor={layer.canonicalState.cursor} stageScale={stageScale} />,
+            host,
+            `canonical-cursor-${layer.clip.id}`,
+          ));
+        }
+        return portals;
+      })}
     </div>
   );
 }
@@ -279,6 +374,35 @@ export function VideoPreviewCanvas() {
 function findPreviewClipNode(stage: HTMLElement, clipId: string): HTMLElement | null {
   for (const node of stage.querySelectorAll<HTMLElement>('[data-preview-clip-id]')) {
     if (node.dataset.previewClipId === clipId) return node;
+  }
+  return null;
+}
+
+function findLegacyBaseContentNode(host: HTMLElement): HTMLElement | null {
+  for (const child of [...host.children]) {
+    const element = child as HTMLElement;
+    if (element.dataset.previewCanonicalContent) continue;
+    if (element.dataset.previewCanonicalCursor === 'true') continue;
+    if (findCursorPath(element)) continue;
+    if (element.tagName === 'BUTTON') continue;
+    return element;
+  }
+  return null;
+}
+
+function findLegacyCursorOverlay(host: HTMLElement): HTMLElement | null {
+  for (const child of [...host.children]) {
+    const element = child as HTMLElement;
+    if (element.dataset.previewCanonicalCursor === 'true') continue;
+    if (element.getAttribute('aria-hidden') !== 'true') continue;
+    if (findCursorPath(element)) return element;
+  }
+  return null;
+}
+
+function findCursorPath(node: HTMLElement): SVGPathElement | null {
+  for (const path of node.querySelectorAll<SVGPathElement>('svg[viewBox="0 0 16 16"] path')) {
+    if (path.getAttribute('d') === 'M2 1 L2 12 L5.5 9.5 L7.5 14 L9.5 13 L7.5 8.8 L12 8.5 Z') return path;
   }
   return null;
 }
