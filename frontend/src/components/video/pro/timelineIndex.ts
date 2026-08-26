@@ -42,6 +42,47 @@ export interface IndexedTimelineFrameQuery {
   frameState?: CanonicalVisualFrameState;
 }
 
+type CanonicalPreviewComposition = ReturnType<typeof evaluateCanonicalPreviewCompositionFrame>;
+interface CachedCanonicalPreviewComposition {
+  frameIndex: number;
+  composition: CanonicalPreviewComposition;
+}
+
+/**
+ * Wrapper and legacy preview render synchronously against the same Zustand
+ * timeline/assets references. Keep only that render turn's canonical projection
+ * so multiple deterministic consumers share one evaluator call without turning
+ * FrameState into persistent mutable state or risking stale data after edits.
+ */
+const canonicalPreviewCompositionCache = new WeakMap<
+  VideoTimelineDocument,
+  WeakMap<VideoAsset[], CachedCanonicalPreviewComposition>
+>();
+
+function evaluateCanonicalPreviewCompositionFrameShared(
+  document: VideoTimelineDocument,
+  assets: VideoAsset[],
+  frameIndex: number,
+): CanonicalPreviewComposition {
+  let byAssets = canonicalPreviewCompositionCache.get(document);
+  if (!byAssets) {
+    byAssets = new WeakMap<VideoAsset[], CachedCanonicalPreviewComposition>();
+    canonicalPreviewCompositionCache.set(document, byAssets);
+  }
+  const cached = byAssets.get(assets);
+  if (cached?.frameIndex === frameIndex) return cached.composition;
+
+  const entry: CachedCanonicalPreviewComposition = {
+    frameIndex,
+    composition: evaluateCanonicalPreviewCompositionFrame(document, assets, frameIndex),
+  };
+  byAssets.set(assets, entry);
+  queueMicrotask(() => {
+    if (byAssets?.get(assets) === entry) byAssets.delete(assets);
+  });
+  return entry.composition;
+}
+
 function upperBound(values: number[], target: number): number {
   let low = 0;
   let high = values.length;
@@ -147,6 +188,10 @@ function canonicalLayerKey(trackIndex: number, clipIndex: number): string {
  * need scene/camera/frame semantics must use this result instead of evaluating
  * visual-frame-state-v1 a second time.
  *
+ * Synchronous callers using the same timeline/assets references share the same
+ * short-lived canonical projection, so the wrapper and established preview do
+ * not independently evaluate one deterministic frame.
+ *
  * If canonical evaluation is unavailable, `clips` preserves the previous
  * frame-overlap fallback and `frameState` is omitted so callers cannot mistake
  * compatibility data for canonical frame authority.
@@ -172,7 +217,11 @@ export function queryActiveClipsAtFrameWithState(
   if (!index.document || normalizedFPS !== Math.trunc(index.document.canvas.fps)) {
     return { clips: active };
   }
-  const composition = evaluateCanonicalPreviewCompositionFrame(index.document, index.assets, normalizedFrame);
+  const composition = evaluateCanonicalPreviewCompositionFrameShared(
+    index.document,
+    index.assets,
+    normalizedFrame,
+  );
   if (!composition.available || !composition.layers || !composition.frame_state) {
     return { clips: active };
   }
