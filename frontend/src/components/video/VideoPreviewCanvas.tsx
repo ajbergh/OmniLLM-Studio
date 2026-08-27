@@ -5,9 +5,15 @@ import {
   CanonicalPreviewCursor,
   CanonicalPreviewShape,
   CanonicalPreviewText,
+  canonicalPreviewShapeUsesText,
   previewClipHasMediaBase,
   resolvePreviewCanonicalPainterPlan,
 } from './PreviewCanonicalPainters';
+import {
+  browserPreviewFontFaceLoader,
+  resolvePreviewFontFaceBinding,
+  type PreviewFontFaceBinding,
+} from './previewFontFaceReadiness';
 import {
   applyDecoderBudget,
   buildTimelineIntervalIndex,
@@ -23,6 +29,12 @@ import {
 } from './previewFrameWeightedPairCanvas';
 import { PreviewWeightedPairCanvas } from './PreviewWeightedPairCanvas';
 import { VideoPreviewCanvas as LegacyVideoPreviewCanvas } from './VideoPreviewCanvasLegacy';
+
+type PreviewFontFaceStatus = 'none' | 'loading' | 'ready' | 'failed';
+interface PreviewFontFaceReadinessState {
+  signature: string;
+  status: PreviewFontFaceStatus;
+}
 
 /**
  * Canonical deterministic consumer layered around the established interactive
@@ -41,6 +53,10 @@ export function VideoPreviewCanvas() {
   const [frameAddress, setFrameAddress] = useState<number | null>(null);
   const [stage, setStage] = useState<HTMLElement | null>(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+  const [fontFaceReadiness, setFontFaceReadiness] = useState<PreviewFontFaceReadinessState>({
+    signature: '',
+    status: 'none',
+  });
 
   useLayoutEffect(() => {
     const onParitySeek = (event: Event) => {
@@ -129,6 +145,63 @@ export function VideoPreviewCanvas() {
       .filter(({ plan }) => plan.mode === 'canonical-frame' && (plan.content !== 'none' || plan.cursor !== 'none')),
     [previewFrame.layers],
   );
+  const fontFacePlan = useMemo(() => {
+    const bindingsByKey = new Map<string, PreviewFontFaceBinding>();
+    const bindingByClipId = new Map<string, PreviewFontFaceBinding>();
+    const errors: string[] = [];
+    for (const { layer, plan } of canonicalPainterPlans) {
+      const text = layer.canonicalState?.text;
+      if (!text?.font_resource_id) continue;
+      const paintsText = plan.content === 'canonical-text'
+        || (plan.content === 'canonical-shape' && canonicalPreviewShapeUsesText(layer.canonicalState?.shape));
+      if (!paintsText) continue;
+      try {
+        const binding = resolvePreviewFontFaceBinding(text, layer.fontAsset);
+        if (!binding) continue;
+        bindingsByKey.set(binding.key, binding);
+        bindingByClipId.set(layer.clip.id, binding);
+      } catch (reason) {
+        errors.push(`${layer.clip.id}:${reason instanceof Error ? reason.message : String(reason)}`);
+      }
+    }
+    const bindings = [...bindingsByKey.values()].sort((left, right) => left.key.localeCompare(right.key));
+    errors.sort();
+    return {
+      bindings,
+      bindingByClipId,
+      errors,
+      signature: JSON.stringify({ bindings: bindings.map(({ key }) => key), errors }),
+    };
+  }, [canonicalPainterPlans]);
+  const fontFaceRequired = fontFacePlan.bindings.length > 0 || fontFacePlan.errors.length > 0;
+  const fontFaceStatus: PreviewFontFaceStatus = !fontFaceRequired
+    ? 'none'
+    : fontFaceReadiness.signature === fontFacePlan.signature
+      ? fontFaceReadiness.status
+      : 'loading';
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!fontFaceRequired) {
+      setFontFaceReadiness({ signature: fontFacePlan.signature, status: 'none' });
+      return;
+    }
+    if (fontFacePlan.errors.length > 0) {
+      setFontFaceReadiness({ signature: fontFacePlan.signature, status: 'failed' });
+      return;
+    }
+    setFontFaceReadiness({ signature: fontFacePlan.signature, status: 'loading' });
+    void Promise.all(fontFacePlan.bindings.map((binding) => browserPreviewFontFaceLoader.ensure(binding)))
+      .then(() => {
+        if (!cancelled) setFontFaceReadiness({ signature: fontFacePlan.signature, status: 'ready' });
+      })
+      .catch(() => {
+        if (!cancelled) setFontFaceReadiness({ signature: fontFacePlan.signature, status: 'failed' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fontFacePlan, fontFaceRequired]);
 
   const transitionPairPlan = useMemo(() => planPreviewFrameTransitionPairs(
     deterministicFrame,
@@ -224,6 +297,39 @@ export function VideoPreviewCanvas() {
   }, [canonicalPainterPlans, deterministicFrame, stage]);
 
   useLayoutEffect(() => {
+    if (!stage || deterministicFrame === null) return;
+    const previousReadiness = stage.getAttribute('data-preview-font-face-readiness');
+    const previousCount = stage.getAttribute('data-preview-font-face-count');
+    const previousBindingErrors = stage.getAttribute('data-preview-font-face-binding-errors');
+    const previousRuntimeError = stage.getAttribute('data-preview-font-face-runtime-error');
+    if (fontFaceRequired) {
+      stage.setAttribute('data-preview-font-face-readiness', fontFaceStatus);
+      stage.setAttribute('data-preview-font-face-count', String(fontFacePlan.bindings.length));
+      if (fontFacePlan.errors.length > 0) {
+        stage.setAttribute('data-preview-font-face-binding-errors', String(fontFacePlan.errors.length));
+      } else {
+        stage.removeAttribute('data-preview-font-face-binding-errors');
+      }
+      if (fontFaceStatus === 'failed') {
+        stage.setAttribute('data-preview-font-face-runtime-error', 'font-face-load-failed');
+      } else {
+        stage.removeAttribute('data-preview-font-face-runtime-error');
+      }
+    } else {
+      stage.removeAttribute('data-preview-font-face-readiness');
+      stage.removeAttribute('data-preview-font-face-count');
+      stage.removeAttribute('data-preview-font-face-binding-errors');
+      stage.removeAttribute('data-preview-font-face-runtime-error');
+    }
+    return () => {
+      restoreAttribute(stage, 'data-preview-font-face-readiness', previousReadiness);
+      restoreAttribute(stage, 'data-preview-font-face-count', previousCount);
+      restoreAttribute(stage, 'data-preview-font-face-binding-errors', previousBindingErrors);
+      restoreAttribute(stage, 'data-preview-font-face-runtime-error', previousRuntimeError);
+    };
+  }, [deterministicFrame, fontFacePlan.bindings.length, fontFacePlan.errors.length, fontFaceRequired, fontFaceStatus, stage]);
+
+  useLayoutEffect(() => {
     if (!stage) return;
     const previousConsumer = stage.getAttribute('data-preview-transition-pair-consumer');
     const previousRasterDeferred = stage.getAttribute('data-preview-transition-pair-weighted-raster-deferred');
@@ -292,6 +398,45 @@ export function VideoPreviewCanvas() {
     return () => restorers.reverse().forEach((restore) => restore());
   }, [consumeWeightedPairs, stage, weightedSlots]);
 
+  // Register before the weighted-Canvas readiness gate so a resumed font event
+  // can still flow into weighted-pair readiness when both consumers are active.
+  useLayoutEffect(() => {
+    if (!fontFaceRequired || !stage || deterministicFrame === null) return;
+    const onParityReady = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, unknown>>).detail || {};
+      if (detail.fontFaceResume === true) return;
+      if (stage.dataset.previewFontFaceReadiness === 'ready') return;
+      event.stopImmediatePropagation();
+      if (stage.dataset.previewFontFaceReadiness === 'failed') {
+        stage.setAttribute('data-preview-font-face-runtime-error', 'font-face-load-failed');
+        return;
+      }
+      const deadline = performance.now() + 2000;
+      const signalWhenSettled = () => {
+        const readiness = stage.dataset.previewFontFaceReadiness;
+        if (readiness === 'ready') {
+          stage.removeAttribute('data-preview-font-face-runtime-error');
+          window.dispatchEvent(new CustomEvent('omnillm:video-parity-ready', {
+            detail: { ...detail, fontFaceResume: true },
+          }));
+          return;
+        }
+        if (readiness === 'failed') {
+          stage.setAttribute('data-preview-font-face-runtime-error', 'font-face-load-failed');
+          return;
+        }
+        if (performance.now() < deadline) {
+          requestAnimationFrame(signalWhenSettled);
+          return;
+        }
+        stage.setAttribute('data-preview-font-face-runtime-error', 'font-face-not-ready');
+      };
+      requestAnimationFrame(signalWhenSettled);
+    };
+    window.addEventListener('omnillm:video-parity-ready', onParityReady, true);
+    return () => window.removeEventListener('omnillm:video-parity-ready', onParityReady, true);
+  }, [deterministicFrame, fontFaceRequired, stage]);
+
   useLayoutEffect(() => {
     if (!consumeWeightedPairs || !stage) return;
     const previousRuntimeError = stage.getAttribute('data-preview-transition-pair-runtime-error');
@@ -347,9 +492,22 @@ export function VideoPreviewCanvas() {
         const host = findPreviewClipNode(stage, layer.clip.id);
         if (!host) return [];
         const portals = [];
-        if (plan.content === 'canonical-text' && layer.canonicalState?.text) {
+        const text = layer.canonicalState?.text;
+        const resourceBackedTextPaint = Boolean(text?.font_resource_id) && (
+          plan.content === 'canonical-text'
+          || (plan.content === 'canonical-shape' && canonicalPreviewShapeUsesText(layer.canonicalState?.shape))
+        );
+        const fontBinding = fontFacePlan.bindingByClipId.get(layer.clip.id);
+        const resourceFaceReady = !resourceBackedTextPaint || (fontFaceStatus === 'ready' && Boolean(fontBinding));
+        const fontFamilyOverride = resourceFaceReady ? fontBinding?.familyAlias : undefined;
+
+        if (plan.content === 'canonical-text' && text && resourceFaceReady) {
           portals.push(createPortal(
-            <CanonicalPreviewText text={layer.canonicalState.text} stageScale={stageScale} />,
+            <CanonicalPreviewText
+              text={text}
+              stageScale={stageScale}
+              fontFamilyOverride={fontFamilyOverride}
+            />,
             host,
             `canonical-text-${layer.clip.id}`,
           ));
@@ -357,7 +515,8 @@ export function VideoPreviewCanvas() {
           portals.push(createPortal(
             <CanonicalPreviewShape
               shape={layer.canonicalState.shape}
-              text={layer.canonicalState.text}
+              text={resourceFaceReady ? text : undefined}
+              textFontFamilyOverride={fontFamilyOverride}
               stageScale={stageScale}
             />,
             host,
