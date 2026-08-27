@@ -12,7 +12,7 @@ export interface PreviewTextLayoutMeasurement {
   fontFamily: string;
   fontWeight: string;
   fontSizePx: number;
-  lineHeightPx: number;
+  lineHeightPx?: number;
   letterSpacingPx: number;
   textAlign: string;
   whiteSpace: string;
@@ -41,7 +41,7 @@ export interface PreviewTextLayoutSnapshot {
   hard_line_count: number;
   wraps_soft_lines: boolean;
   font_size: number;
-  line_height: number;
+  line_height: 'normal' | number;
   letter_spacing: number;
   padding: { top: number; right: number; bottom: number; left: number };
   text_align: string;
@@ -60,7 +60,9 @@ export function buildPreviewTextLayoutSnapshot(
   requirePositiveFinite('stage scale', stageScale);
   const canonical = {
     font_size: canonicalPixels(measurement.fontSizePx, stageScale),
-    line_height: canonicalPixels(measurement.lineHeightPx, stageScale),
+    line_height: measurement.lineHeightPx === undefined
+      ? 'normal' as const
+      : canonicalPixels(measurement.lineHeightPx, stageScale),
     letter_spacing: canonicalPixels(measurement.letterSpacingPx, stageScale),
     padding: {
       top: canonicalPixels(measurement.paddingTopPx, stageScale),
@@ -121,7 +123,7 @@ export function previewTextLayoutSnapshotStable(
 export function installPreviewTextLayoutReadinessGate(): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   const marker = '__omnillmPreviewTextLayoutSnapshotV1';
-  const runtimeWindow = window as Window & Record<string, unknown>;
+  const runtimeWindow = window as unknown as Record<string, unknown>;
   if (runtimeWindow[marker] === true) return;
   runtimeWindow[marker] = true;
 
@@ -214,7 +216,7 @@ function capturePreviewTextLayoutSnapshot(
     fontFamily: style.fontFamily,
     fontWeight: style.fontWeight,
     fontSizePx: cssPixels(style.fontSize),
-    lineHeightPx: resolvedLineHeightPixels(style, node),
+    lineHeightPx: style.lineHeight === 'normal' ? undefined : cssPixels(style.lineHeight),
     letterSpacingPx: style.letterSpacing === 'normal' ? 0 : cssPixels(style.letterSpacing),
     textAlign: style.textAlign,
     whiteSpace: style.whiteSpace,
@@ -277,16 +279,6 @@ function usedBorderBoxPixels(style: CSSStyleDeclaration, axis: 'width' | 'height
   }
   return base + cssPixels(style.paddingTop) + cssPixels(style.paddingBottom)
     + cssPixels(style.borderTopWidth) + cssPixels(style.borderBottomWidth);
-}
-
-function resolvedLineHeightPixels(style: CSSStyleDeclaration, node: HTMLElement): number {
-  if (style.lineHeight !== 'normal') return cssPixels(style.lineHeight);
-  // Chromium does not expose the used `normal` line-height as a numeric
-  // computed value. Keep the input diagnostic explicit without inventing a
-  // typography multiplier: the actual border-box and line-fragment outputs are
-  // still captured from Chromium below.
-  const fontSize = cssPixels(style.fontSize);
-  return Math.max(fontSize, node.getBoundingClientRect().height > 0 ? fontSize : 0);
 }
 
 function textLineFragmentCount(node: HTMLElement): number {
