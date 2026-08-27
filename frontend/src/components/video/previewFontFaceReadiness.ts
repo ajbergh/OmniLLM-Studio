@@ -2,6 +2,7 @@ import { getAuthToken, videoApi } from '../../api';
 import type { VideoAsset } from '../../types/video';
 import { editorFontResourceIDFromAsset } from '../../video/renderContractEditorFontResources';
 import type { CanonicalEvaluatedTextState } from '../../video/renderContractText';
+import { installPreviewTextLayoutReadinessGate } from './previewTextLayoutSnapshot';
 
 export const PREVIEW_FONT_FACE_READINESS_V1 = 'preview-font-face-readiness-v1' as const;
 
@@ -163,3 +164,8 @@ function canonicalPreviewFontWeight(value: string): string {
 function safeAliasToken(value: string): string {
   return value.trim().replace(/[^A-Za-z0-9._-]/g, (character) => `_${character.codePointAt(0)?.toString(16) ?? '0'}_`);
 }
+
+// Module initialization happens before the React readiness listeners register,
+// so this capture-phase gate can wait for font readiness first and then resume
+// into the existing font/weighted-Canvas gates without bypassing either one.
+installPreviewTextLayoutReadinessGate();
