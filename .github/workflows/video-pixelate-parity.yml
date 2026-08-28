@@ -8,6 +8,7 @@ on:
       - 'backend/internal/video/parity_fixture_pixelate_test.go'
       - 'backend/internal/video/renderer.go'
       - 'backend/internal/video/renderer_pixelate_sampling_test.go'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
       - 'frontend/src/components/video/PreviewPixelateBackdropConsumer.tsx'
       - 'frontend/src/components/video/PreviewPixelateCanvas.tsx'
       - 'frontend/src/components/video/previewPixelateBackdrop.ts'
@@ -22,6 +23,7 @@ on:
       - 'backend/internal/video/parity_fixture_pixelate_test.go'
       - 'backend/internal/video/renderer.go'
       - 'backend/internal/video/renderer_pixelate_sampling_test.go'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
       - 'frontend/src/components/video/PreviewPixelateBackdropConsumer.tsx'
       - 'frontend/src/components/video/PreviewPixelateCanvas.tsx'
       - 'frontend/src/components/video/previewPixelateBackdrop.ts'
@@ -139,8 +141,7 @@ jobs:
               --fps 30 \
               --fixture parity-pixelate-opaque-v1 \
               --timeline-sha256 "$timeline_hash" \
-              --regions ../$regions \
-              --allow-fail
+              --regions ../$regions
           )
 
           node - <<'NODE'
@@ -176,6 +177,8 @@ jobs:
           };
           fs.writeFileSync('output/video-pixelate-parity/capture/pixelate-evidence-summary.json', `${JSON.stringify(summary, null, 2)}\n`);
           console.log(JSON.stringify(summary));
+          if (exact !== fixture.samples.length) throw new Error(`pixelate exact-region gate failed: ${exact}/${fixture.samples.length} frames exact`);
+          if (!report.pass) throw new Error('pixelate whole-frame parity report did not pass');
           NODE
       - name: Record toolchain
         if: always()
