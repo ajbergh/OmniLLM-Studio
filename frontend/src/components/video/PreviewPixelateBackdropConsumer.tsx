@@ -24,6 +24,11 @@ interface RuntimeState {
   reason?: string;
 }
 
+interface PixelateParitySurfaceState {
+  status: PreviewPixelateCanvasStatusKind | null;
+  active: boolean;
+}
+
 const IDLE_RUNTIME: RuntimeState = { executionKey: '', status: 'pending' };
 
 /**
@@ -239,24 +244,24 @@ export function PreviewPixelateBackdropConsumer() {
     const onParityReady = (event: Event) => {
       const detail = (event as CustomEvent<Record<string, unknown>>).detail || {};
       if (detail.pixelateCanvasResume === true) return;
-      const current = pixelateSurfaceStatus(stage, targetClipId);
-      if (current === 'ready' || current === 'deferred') return;
+      const current = pixelateParitySurfaceState(stage, targetClipId);
+      if (current.status === 'deferred' || (current.status === 'ready' && current.active)) return;
       event.stopImmediatePropagation();
-      if (current === 'failed') {
+      if (current.status === 'failed') {
         stage.setAttribute('data-preview-pixelate-runtime-error', 'pixelate-canvas-failed');
         return;
       }
       const deadline = performance.now() + 2000;
       const signalWhenSettled = () => {
-        const settled = pixelateSurfaceStatus(stage, targetClipId);
-        if (settled === 'ready' || settled === 'deferred') {
+        const settled = pixelateParitySurfaceState(stage, targetClipId);
+        if (settled.status === 'deferred' || (settled.status === 'ready' && settled.active)) {
           stage.removeAttribute('data-preview-pixelate-runtime-error');
           window.dispatchEvent(new CustomEvent('omnillm:video-parity-ready', {
             detail: { ...detail, pixelateCanvasResume: true },
           }));
           return;
         }
-        if (settled === 'failed') {
+        if (settled.status === 'failed') {
           stage.setAttribute('data-preview-pixelate-runtime-error', 'pixelate-canvas-failed');
           return;
         }
@@ -264,7 +269,10 @@ export function PreviewPixelateBackdropConsumer() {
           requestAnimationFrame(signalWhenSettled);
           return;
         }
-        stage.setAttribute('data-preview-pixelate-runtime-error', 'pixelate-canvas-not-ready');
+        stage.setAttribute(
+          'data-preview-pixelate-runtime-error',
+          settled.status === 'ready' ? 'pixelate-canvas-not-visible' : 'pixelate-canvas-not-ready',
+        );
       };
       requestAnimationFrame(signalWhenSettled);
     };
@@ -301,16 +309,30 @@ function findPreviewClipNode(stage: HTMLElement, clipId: string): HTMLElement | 
   return null;
 }
 
-function pixelateSurfaceStatus(
+function pixelateParitySurfaceState(
   stage: HTMLElement,
   targetClipId: string,
-): PreviewPixelateCanvasStatusKind | null {
+): PixelateParitySurfaceState {
   for (const surface of stage.querySelectorAll<HTMLElement>('[data-preview-pixelate-execution="canvas"]')) {
     if (surface.dataset.previewPixelateTargetClip !== targetClipId) continue;
     const status = surface.dataset.previewPixelateStatus;
-    if (status === 'pending' || status === 'ready' || status === 'deferred' || status === 'failed') return status;
+    if (status !== 'pending' && status !== 'ready' && status !== 'deferred' && status !== 'failed') {
+      return { status: null, active: false };
+    }
+    if (status !== 'ready') return { status, active: false };
+    const host = findPreviewClipNode(stage, targetClipId);
+    const cssFallbackPresent = Boolean(
+      host?.querySelector('[data-preview-shape-painter-deferred="pixelate-css-approximation"]'),
+    );
+    return {
+      status,
+      active: stage.dataset.previewPixelateConsumer === 'canonical-canvas'
+        && host?.dataset.previewPixelateHost === 'canonical-canvas'
+        && surface.style.visibility === 'visible'
+        && !cssFallbackPresent,
+    };
   }
-  return null;
+  return { status: null, active: false };
 }
 
 function restoreAttribute(node: HTMLElement, name: string, value: string | null): void {
