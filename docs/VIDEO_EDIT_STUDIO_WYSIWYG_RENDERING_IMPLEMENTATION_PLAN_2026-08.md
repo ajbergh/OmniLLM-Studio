@@ -9,43 +9,50 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG program PR: **#282 — Bind editor font resources for canonical preview** — squash merge `38ea95aba65207f9de505357d02bf5dbc93c89be` (2026-08-26).
+Latest merged WYSIWYG program PR: **#283 — Gate deterministic text on exact browser font faces** — squash merge `3543ddf7189161a84699a1c4efb296fc8a928400` (2026-08-26).
 
-Current implementation PR: **#283 — Gate deterministic text on exact browser font faces** on branch `feat/video-wysiwyg-phase3-font-face-readiness`, created directly from #282's actual squash result `38ea95aba65207f9de505357d02bf5dbc93c89be`.
+Current implementation PR: **#284 — Own deterministic text layout with Chromium snapshots** on branch `feat/video-wysiwyg-phase3-text-layout-snapshot`, created directly from #283's actual squash result `3543ddf7189161a84699a1c4efb296fc8a928400`.
 
-**Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** The renderer-independent visual contract (`visual-frame-state-v1` and subcontracts) and audio contract (`audio-graph-v1`) own semantics. Phase 3 is moving real program-monitor consumers onto those decisions in small, reversible slices.
+**Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** Renderer-independent contracts own authored semantics. Browser/FFmpeg consumers may produce renderer-specific evidence, but they must not silently redefine canonical intent.
 
-### #283 current result
+### #283 merged result
 
-#283 closes browser face readiness for resource-bound deterministic text without claiming glyph-layout parity:
+#283 closed browser font-face readiness for resource-bound deterministic text:
 
-- `preview-font-face-readiness-v1` binds a canonical text `font_resource_id` to the exact mutable editor `VideoAsset` delivered by #282.
-- The browser downloads the exact current asset through the existing authenticated video-asset path and registers it through `FontFace` / `document.fonts`.
-- Browser registration uses a collision-safe preview-only family alias derived from resource ID, asset ID, and canonical text weight. The alias cannot accidentally select an installed/system/web font with the authored family name.
-- `text-state-v1.font_face_source` remains unchanged. Mutable editor loading never claims immutable `packaged-resource` provenance, hashes, staged paths, or static-face identity.
-- Resource-backed deterministic text is not painted until all required exact faces for the frame are ready. Missing/mismatched bindings, invalid CSS weights, download/load failures, empty bytes, or unavailable browser font APIs fail closed.
-- Failed loader entries are evicted so later deterministic frames may retry after transient fetch/browser failures; concurrent requests for the same binding are deduplicated.
-- Embedded canonical shape text is gated only for the shape kinds that actually paint text: `step_marker`, `speech_bubble`, and `label`.
-- `omnillm:video-parity-ready` is intercepted until required font faces settle. The font resume flag composes with #279's weighted-Canvas readiness gate rather than bypassing it; timeout/failure records explicit stage diagnostics and never releases a bad screenshot.
-- Canonical text metrics remain `browser-intrinsic-deferred`; #283 does not create a second `measureText` authority or claim deterministic glyph shaping/layout.
-- Timeline text currently owns `font_weight` but not `font_style`; #283 therefore binds the exact bytes under the canonical authored weight and does not invent new italic/style semantics.
-- Focused Vitest coverage directly exercises resource binding, collision-safe aliases, invalid bindings/weights, exact-byte load deduplication, failure retry, painter alias injection without provenance mutation, and text-bearing shape classification.
-- The existing `parity-torture-v1` fixture contains no font asset/resource binding. Playwright and immutable parity therefore serve as whole-preview regression gates for #283; they are not represented as direct execution of the resource-font branch.
-- Exact code-bearing head `76c1ee3bdb0db3be700b2a500c392c2d49a265d8` passed **Quality #1646** and **Security #1651**. Executed green gates include backend formatting/vet/unit/integration/race, frontend lint/unit/performance/build, Playwright smoke, immutable renderer parity, dependency audits, both Go and JavaScript/TypeScript CodeQL, Windows desktop/sandbox/plugin lifecycle, Helm, and macOS confinement.
-- The same exact head passed the standalone Linux workspace/quota, macOS runtime/adversarial/extension, and browser-egress assurance workflows.
-- The first close/reopen workflow wave was superseded by GitHub concurrency and produced cancelled jobs; only the newer fully executed #1646/#1651 wave is validation evidence.
-- Code-bearing compare is **ahead 5 / behind 0** from #282's squash merge with exactly five intended frontend/test paths. PR comments, review submissions, and review threads were empty before this tracker freeze.
+- `preview-font-face-readiness-v1` binds canonical `font_resource_id` to the exact current editor `VideoAsset` from #282.
+- Font bytes are downloaded through the existing authenticated video-asset path and loaded with `FontFace` / `document.fonts`.
+- Browser faces use collision-safe preview-only aliases keyed by resource ID, asset ID, and canonical text weight; authored family names cannot silently fall back to an installed/system/web face for a resource-bound layer.
+- Mutable editor loading never upgrades `text-state-v1.font_face_source` to immutable `packaged-resource` provenance.
+- Resource-backed text pixels are suppressed until required exact faces are ready; missing/mismatched bindings, invalid weights, empty/download/load failures, or unavailable browser font APIs fail closed.
+- Font readiness composes with the existing weighted-Canvas parity gate using independent resume flags.
+- Exact code-bearing head `76c1ee3bdb0db3be700b2a500c392c2d49a265d8` passed Quality #1646, Security #1651, and the standalone Linux/macOS/browser assurance workflows.
+- Final tracker head `4f9e9ad42579e22ee874d964d78f545381f47657` subsequently also executed successfully: Quality #1647, Security #1652, Linux workspace/quota, macOS runtime/adversarial/extension, and browser-egress assurances were all green before merge.
+- The `parity-torture-v1` fixture still has no project font resource, so its browser/parity coverage is regression evidence for the broader preview rather than direct resource-font execution.
+
+### #284 current scope
+
+#284 establishes one explicit Chromium DOM/layout snapshot boundary after font readiness instead of introducing a competing text-measurement engine:
+
+- `preview-text-layout-snapshot-v1` records browser shaping/layout output in canonical canvas-pixel units while leaving `text-state-v1` unchanged.
+- Snapshot inputs/diagnostics include text content, box mode, font face provenance/runtime, browser family/weight, font size, literal `line-height` mode/value, letter spacing, alignment, whitespace, padding, and whether width/height were authored.
+- Snapshot outputs include border-box width/height, hard-line count, browser line-fragment count, and whether soft wrapping occurred.
+- `line-height: normal` remains literal. #284 does not invent a numeric multiplier that Chromium does not expose.
+- Intrinsic dimensions are frozen from the first Chromium layout result; a second animation-frame layout pass must retain the same width/height and line-fragment count before parity-ready resumes.
+- The text-layout readiness listener registers before the React font/weighted-Canvas listeners. It waits for #283 font readiness first, then redispatches with its own resume flag so neither existing gate is bypassed.
+- Missing canvas geometry, nonuniform preview scaling, font failure/timeout, missing text painters after resource readiness, invalid CSS measurements, and post-freeze instability fail closed with explicit stage diagnostics.
+- Focused Vitest coverage exercises canonical-pixel normalization, scale-invariant input fingerprints, literal `normal` line-height, wrapping diagnostics, stable second-pass rules, and invalid measurements.
+- **Validation status:** draft PR validation is pending. No #284 head is called green until hosted Actions actually execute.
 
 ## Phase tracker
 
 | Phase | Status | Progress / exit work |
 |---|---|---|
-| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged the fail-closed frame-indexed region-policy input boundary. Production structural policy, codec-aware decoded-region semantics, and second-platform evidence remain. |
+| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged fail-closed frame-indexed region-policy inputs. Production structural policy, codec-aware decoded-region semantics, font-resource fixture coverage, and second-platform evidence remain. |
 | Phase 1 — Immutable submission | **Complete** | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend dirty/concurrency behavior are implemented. |
 | Phase 2 — Canonical contract | **Complete** | Frame/range/source/order, curves, transforms/geometry/projection, transitions, effects, text/fonts, shapes, cursor, immutable source provenance, and AudioGraph semantics are versioned and cross-runtime checked. #260 closed the final contract gap. |
-| Phase 3 — Shared preview composition | **In progress** | #261–#282 merged deterministic activity/source/transform/view/perspective/media-geometry/effects/transitions, canonical text/shape/cursor painters, and mutable editor font-resource identity. #283 adds exact browser face readiness. Deterministic intrinsic browser text layout, exact pixelate/raster painter fidelity, weighted-raster broadening, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |
+| Phase 3 — Shared preview composition | **In progress** | #261–#283 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, editor font-resource binding, and exact browser face readiness. #284 adds Chromium layout snapshots. Exact pixelate/raster painter fidelity, weighted-raster broadening, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
-| Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, text metrics/fonts, shapes, transitions, effects, cursor, camera, color space, and deterministic asset loading. |
+| Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, Chromium text metrics/fonts, shapes, transitions, effects, cursor, camera, color space, and deterministic asset loading. |
 | Phase 6 — Audio parity closure | Not started | Make preview/Chromium/export obey AudioGraph exactly, including pitch, gain/fades, channels, program processing, processed stems, and decoded delivery. |
 | Phase 7 — Rollout and legacy retirement | Not started | Shadow comparison, staged default switch, rollback, telemetry, capability/docs updates, and eventual legacy-composition retirement. |
 
@@ -60,23 +67,23 @@ Current implementation PR: **#283 — Gate deterministic text on exact browser f
 5. Source time comes from one canonical evaluator using frame identity, clip start, trim-in, and playback rate.
 6. Keyframe segments use the later keyframe's easing/curve.
 
-### Renderer-independent canonical core
+### Renderer-independent semantic core
 
 Canonical evaluators are pure, deterministic, serializable, free of browser/FFmpeg/filesystem/network I/O, usable by preview and export, and fail closed whenever an authorable value lacks explicit semantics.
 
-The legacy FFmpeg compositor is implementation evidence, not semantic authority. Existing preview behavior remains an interaction/compatibility target until each Phase 3 consumer moves onto canonical state.
+The legacy FFmpeg compositor is implementation evidence, not semantic authority. Browser layout snapshots are also consumer evidence, not new authored semantics. `text-state-v1` continues to own text intent; Chromium owns the browser shaping/layout result after exact face readiness.
 
 ### Media geometry and source provenance
 
-`media-geometry-v1` owns media geometry. Source dimensions come from explicit content bounds or immutable source provenance, never from canvas size, DOM boxes, decoded element dimensions, or browser `object-fit`. Source crop precedes fit; output crop follows fit. Deterministic media consumption uses canonical `painted_bounds` and canvas-space `clip_bounds`.
+`media-geometry-v1` owns source crop, fit, output crop, painted bounds, and clip bounds. Source dimensions come from explicit content bounds or immutable source provenance, never from output canvas size, DOM boxes, decoded element dimensions, or `object-fit` guesses.
 
 ### Perspective and stacking
 
-Track/z-index order remains stacking authority; spatial `z` affects projection. `perspective-projection-v1` serializes projection separately from camera-relative transforms. #267 consumes per-layer canonical perspective; free-running playback and incomplete canonical frames keep explicit legacy fallback.
+Track/z-index order remains stacking authority; spatial `z` affects projection. `perspective-projection-v1` serializes projection separately from camera-relative transforms. Free-running and incomplete canonical frames keep an explicit compatibility fallback until normal-playback canonicalization is complete.
 
 ### Transitions and pixel composition
 
-`transition-state-v1` owns placement/peer roles/windows/progress; `transition-paint-v1` owns authorable paint families. Pair transitions are pair surfaces, never independent alpha layers.
+`transition-state-v1` owns placement/peer roles/windows/progress; `transition-paint-v1` owns authorable paint families. Pair transitions are pair surfaces, never two independent alpha layers.
 
 - #273 defines stack-safe pair grouping.
 - #274 defines exact linear-sRGB pair-pixel composition.
@@ -84,24 +91,25 @@ Track/z-index order remains stacking authority; spatial `z` affects projection. 
 - #276 consumes source-over slide/wipe pairs.
 - #277 implements the weighted linear-sRGB RGBA kernel.
 - #278 separates canonical pair validity from preview raster-source capability.
-- #279 executes clean weighted crossfade/zoom/dip pairs on Canvas and gates parity-ready until surfaces settle.
+- #279 executes clean weighted crossfade/zoom/dip pairs on Canvas and gates parity-ready until active surfaces settle.
 
-Unsupported/deferred sources stay explicit fallback/debt; they are never approximated as canonical pixels.
+Unsupported/deferred painter sources stay explicit debt and do not become canonical approximations.
 
 ### Effects, text, shapes, cursor, and fonts
 
-- `effect-state-v1` owns enabled authored order, scope, normalized parameters, and exact-frame automation. #270 consumes clip effects; #280 consumes scene effects from the same shared frame projection.
-- `text-state-v1` owns text/style intent. #281 consumes its painter state.
-- #282 verifies authored `font_resource_id` against exactly one current editor font asset without claiming immutable provenance.
-- #283 loads that exact mutable asset into Chromium under an isolated browser alias and blocks deterministic evidence until the face is ready.
-- Immutable static-font identity remains Render Manifest-backed by `font-resource-provenance-v1`; browser/editor readiness and immutable provenance are separate claims.
-- Intrinsic browser glyph layout is still deferred. Do not introduce an independent Canvas `measureText` or FFmpeg-derived approximation as a third authority.
-- `shape-state-v1` owns shape dimensions/style defaults/bounds; #281 consumes them. True raster pixelation remains explicit fidelity debt.
-- `cursor-state-v1` owns exact rational sampling, visibility, scale, highlight/click-ring state, and strict click proximity; #281 consumes evaluated cursor state.
+- `effect-state-v1` owns enabled authored order, scope, normalized parameters, and exact-frame automation. #270 consumes clip effects; #280 consumes scene effects.
+- `text-state-v1` owns renderer-independent text intent. #281 consumes text painter inputs.
+- #282 verifies current editor `font_resource_id` identity without claiming immutable provenance.
+- #283 loads the exact editor font bytes under an isolated browser alias and gates deterministic evidence on readiness.
+- #284 makes Chromium DOM layout the sole browser-side glyph-layout snapshot authority; it does not introduce Canvas `measureText` or FFmpeg `text_w`/`text_h` semantics.
+- Immutable static-font identity remains Render Manifest-backed by `font-resource-provenance-v1`.
+- A family-name-only snapshot is valid evidence for that Chromium environment but is not cross-machine exact font provenance. Resource-backed faces remain the route to deterministic face identity.
+- `shape-state-v1` owns shape geometry/style. True raster pixelation remains explicit fidelity debt.
+- `cursor-state-v1` owns exact rational cursor sampling, visibility, scale, highlight/click-ring state, and click proximity.
 
 ### AudioGraph v1
 
-`audio-graph-v1` owns deterministic 48 kHz stereo sample boundaries, stable clip nodes, mute/solo precedence, pitch-preserving playback rate, channel handling, gain/automation, minimum-overlap fades, non-normalizing summation, and one post-mix program-processing boundary. Phase 6 makes preview/Chromium/export consumers obey the graph exactly.
+`audio-graph-v1` owns deterministic 48 kHz stereo sample boundaries, stable clip nodes, mute/solo precedence, pitch-preserving playback rate, channel handling, gain/automation, minimum-overlap fades, non-normalizing summation, and one post-mix program-processing boundary. Phase 6 makes browser/export consumers obey it exactly.
 
 ## Phase 2 foundation history
 
@@ -112,7 +120,7 @@ Unsupported/deferred sources stay explicit fallback/debt; they are never approxi
 | #208 | Permanent Go↔TypeScript FrameState parity diagnostics |
 | #209/#212 | Canonical media fit/crop/source-bounds geometry and FrameState consumption |
 | #218 | Canonical perspective projection |
-| #220–#229 | Canonical transition placement and all authorable transition paint families |
+| #220–#229 | Canonical transition placement and authorable transition paint families |
 | #237 | `effect-state-v1` |
 | #241 | `text-state-v1` |
 | #242/#243 | `shape-state-v1` |
@@ -146,32 +154,31 @@ Unsupported/deferred sources stay explicit fallback/debt; they are never approxi
 | #280 | Canonical deterministic scene effects | `612dd2d0dc9b51380530b3a97c6558ec5698cc79` |
 | #281 | Canonical text/shape/cursor painter inputs | `a5598fdf93767122c21697113e0540706afff145` |
 | #282 | Mutable editor font-resource identity/binding | `38ea95aba65207f9de505357d02bf5dbc93c89be` |
+| #283 | Exact browser `FontFace` readiness and parity gating | `3543ddf7189161a84699a1c4efb296fc8a928400` |
 
 ## Safe stacked-branch normalization
 
 Every stacked slice starts from the **actual squash result on current `main`**:
 
 1. Read current `main` commit/tree.
-2. Identify only the intended child delta.
-3. Create the child directly from the actual parent squash SHA.
-4. Verify `compare main...branch` contains only intended paths.
-5. Update this tracker on the clean branch.
-6. Validate the exact final head when Actions schedules; never call an unexecuted head green.
-7. Squash-merge with expected-head protection and create the next slice from that actual result.
+2. Create the child directly from the actual parent squash SHA.
+3. Verify `compare main...branch` contains only intended paths and is behind by zero.
+4. Update this tracker on the clean branch.
+5. Validate executed checks on the exact head; never call an unexecuted/cancelled head green.
+6. Audit comments/reviews/threads and merge with expected-head protection.
+7. Create the next slice from the new actual squash result.
 
-Never manufacture ancestry by grafting a stale feature tree onto a newer parent. #225 demonstrated that ancestry can appear current while silently reverting unrelated work.
-
-Recent lineage: #279 from #278 squash `4a70dc7c...`; #280 from #279 `adb820ae...`; #281 from #280 `612dd2d0...`; #282 from #281 `a5598fdf...`; **#283 directly from #282 squash `38ea95aba65207f9de505357d02bf5dbc93c89be`**.
+Recent lineage: #281 from #280 squash `612dd2d0...`; #282 from #281 `a5598fdf...`; #283 from #282 `38ea95ab...`; **#284 directly from #283 squash `3543ddf7189161a84699a1c4efb296fc8a928400`**.
 
 ## Phase 0 parity baseline
 
-The deterministic `parity-torture-v1` fixture covers 20 seconds at 640×360/30 fps with 103 named samples spanning boundaries, rates, transforms, curves, text, shapes, effects, transitions, camera, captions, cursor, and audio. It currently does **not** include a project font resource, so it must not be cited as direct coverage of #283's resource-font loader.
+The deterministic `parity-torture-v1` fixture covers 20 seconds at 640×360/30 fps with 103 named samples spanning boundaries, rates, transforms, curves, text, shapes, effects, transitions, camera, captions, cursor, and audio.
 
-Retained evidence established exact frame/audio/delivery identity mechanics. The visual baseline remains diagnostic, not production sign-off. Remaining Phase 0 work is to freeze a structural policy that separates zero-tolerance canonical identity/geometry from codec-aware decoded thresholds and to retain evidence on a second supported OS/FFmpeg environment.
+It does not yet include a project font resource. Add resource-font fixture coverage before treating cross-machine glyph identity as proven. Retained visual evidence remains diagnostic until structural zero-tolerance policy and codec-aware decoded thresholds are frozen and retained on a second supported OS/FFmpeg environment.
 
 ## Validation matrix
 
-Every Phase 2+ PR runs focused tests plus repository gates:
+Every Phase 2+ behavioral slice should execute focused tests plus repository gates when applicable:
 
 ```text
 cd backend
@@ -190,33 +197,26 @@ npm run build
 npm run test:smoke
 ```
 
-Hosted CI is authoritative for platform/toolchain cases unavailable in the current execution environment. Setup-only stalls, concurrency cancellations, and unscheduled connector-authored commits are recorded explicitly and never represented as passing.
+Hosted CI is authoritative for platform/toolchain cases unavailable in the current connector environment. Setup-only stalls, concurrency cancellations, and unscheduled commits are recorded explicitly and never represented as passing.
 
 ## Risk register
 
 | Risk | Control |
 |---|---|
-| Schema/type drift | Go reflection and TypeScript compile/Vitest checks; canonical frontend suites run in CI. |
-| Browser/Go evaluator drift | Shared fixtures plus permanent FrameState/AudioGraph diagnostics. |
-| v1 adapter guesses ambiguous behavior | Ambiguous state fails closed. |
-| Preview silently mixes canonical/fallback semantics | Canonical state is attached only after strict projection; each consumer has an explicit fallback boundary. |
-| Stale stacked tree reverts unrelated work | Build each slice from the actual parent squash SHA and inspect the full compare. |
-| Duplicate preview evaluation diverges semantics | #280 shares one microtask-scoped strict preview composition across synchronous consumers. |
-| Browser/system font fallback changes glyphs/metrics | #282 requires exact resource identity; #283 loads exact bytes under an isolated alias and blocks evidence until ready. Intrinsic layout remains deferred. |
-| Mutable editor face is mistaken for immutable packaged provenance | #282/#283 never change `font_face_source`; only Render Manifest provenance may claim `packaged-resource`. |
-| Font-face loading leaks fallback pixels into evidence | #283 suppresses resource text until ready and intercepts parity-ready on loading/failure/timeout. |
-| Font readiness bypasses weighted Canvas readiness | #283 and #279 use independent resume flags; each resumed event still traverses the other active gate. |
+| Browser layout becomes a second authored semantic contract | #284 snapshots Chromium consumer output only; `text-state-v1` stays unchanged. |
+| `line-height: normal` is approximated differently across runtimes | Preserve `normal` literally; do not invent a numeric multiplier. |
+| Resource font is measured before exact face readiness | #284 listener waits on #283 readiness before snapshotting and does not bypass the font gate on resume. |
+| Intrinsic size changes after dimensions are frozen | Require a second Chromium pass with stable width/height and line-fragment count before parity-ready. |
+| Family-name-only text is mistaken for deterministic face identity | Snapshot records provenance/runtime; exact cross-machine identity still requires a resource-backed face. |
+| Text-layout gate bypasses weighted Canvas readiness | Independent resume flags preserve traversal through both gates. |
 | CSS pixelate is mistaken for exact raster behavior | Pixelate remains explicit approximation and blocks weighted-raster broadening. |
-| Weighted transition gamma/alpha drift | #274 defines exact semantics; #277/#279 implement them in one linear-sRGB kernel path. |
-| Codec-noisy decoded equality is treated as structural parity | Phase 0 keeps canonical structural policy separate from decoded codec-aware evidence. |
-| CI scheduling hides code state | Only executed checks count; cancelled/startup/unscheduled runs are classified explicitly. |
+| Codec-noisy decoded equality is treated as structural parity | Phase 0 keeps canonical structural policy separate from codec-aware decoded evidence. |
+| CI scheduling hides code state | Only actually executed checks count. |
 
 ## Next recommended slice
 
-1. Complete #283 final tracker/tree/review audit and expected-head squash merge without changing the validated behavioral files.
-2. From #283's actual squash result, define **deterministic Chromium text-layout ownership** after exact font readiness. Use one explicit DOM/layout snapshot boundary at canvas scale rather than introducing `canvas.measureText` or FFmpeg `text_w/text_h` as a third semantic authority.
-3. Version/diagnose the layout snapshot inputs and outputs needed by deterministic painters (intrinsic width/height, explicit box behavior, wrapping/alignment/padding) while keeping renderer-independent text intent separate from browser shaping results.
-4. Close exact pixelate/raster painter fidelity in its own slice; broaden weighted-raster eligibility for text/shape/cursor only after those painter sources are exact.
-5. Follow with normal-playback canonicalization plus diagnostics/rollback.
-6. Make preview audio scheduling consume `audio-graph-v1` in a separate audio-focused slice.
-7. In parallel, use #266's fail-closed policy boundary to finish Phase 0 structural/codec-aware policy and second-platform evidence.
+1. Complete #284 hosted validation, exact-tree/review audit, tracker freeze, and expected-head squash merge.
+2. Add direct browser evidence assertions for `preview-text-layout-snapshot-v1` if the current smoke/parity fixture does not exercise the new readiness diagnostics strongly enough.
+3. Close **exact pixelate/raster painter fidelity** in a separate slice; remove the current CSS approximation only when the exact pixel source exists.
+4. Broaden weighted-Canvas raster eligibility for text/shape/cursor only after each source painter is exact.
+5. Continue Phase 3 with normal-playback canonicalization, explicit diagnostics/rollback, then shared AudioGraph consumption.
