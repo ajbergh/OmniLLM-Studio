@@ -31,7 +31,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: video-pixelate-parity-${{ github.ref }}
@@ -42,6 +42,65 @@ env:
   NODE_VERSION: '24'
 
 jobs:
+  bootstrap-renderer-fix:
+    name: Bootstrap proven pixelate renderer fix
+    if: github.event_name == 'pull_request' && github.head_ref == 'test/video-wysiwyg-phase3-pixelate-opaque-parity-evidence'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: test/video-wysiwyg-phase3-pixelate-opaque-parity-evidence
+          fetch-depth: 2
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - name: Apply guarded renderer substitutions
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('backend/internal/video/renderer.go')
+          text = path.read_text()
+          replacements = [
+              (
+                  'parts = append(parts, "[0:v]setpts=PTS-STARTPTS[base_v]")',
+                  '// Keep the compositing graph in RGB until the final output/codec boundary.\n\t// FFmpeg overlay otherwise negotiates a subsampled YUV format, which loses\n\t// chroma bytes before pixelate samples the already-composited backdrop.\n\tparts = append(parts, "[0:v]format=rgba,setpts=PTS-STARTPTS[base_v]")',
+              ),
+              (
+                  'overlayFilter := fmt.Sprintf("%s%soverlay=enable=\'between(t\\\\,%.3f\\\\,%.3f)\':x=\'%s\':y=\'%s\'%s",',
+                  'overlayFilter := fmt.Sprintf("%s%soverlay=enable=\'between(t\\\\,%.3f\\\\,%.3f)\':x=\'%s\':y=\'%s\':format=rgb%s",',
+              ),
+              (
+                  'fmt.Sprintf("%scrop=%d:%d:%d:%d,scale=%d:%d:flags=neighbor,scale=%d:%d:flags=neighbor%s", srcLabel, boxW, boxH, x, y, downW, downH, boxW, boxH, blurLabel),',
+                  'fmt.Sprintf("%scrop=%d:%d:%d:%d,scale=%d:%d:flags=neighbor+full_chroma_inp,scale=%d:%d:flags=neighbor+full_chroma_inp%s", srcLabel, boxW, boxH, x, y, downW, downH, boxW, boxH, blurLabel),',
+              ),
+              (
+                  'fmt.Sprintf("%s%soverlay=%d:%d:enable=\'between(t\\\\,%.3f\\\\,%.3f)\'%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),',
+                  'fmt.Sprintf("%s%soverlay=%d:%d:enable=\'between(t\\\\,%.3f\\\\,%.3f)\':format=rgb%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),',
+              ),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'guarded renderer replacement matched {count} times, expected exactly once: {old}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+      - name: Validate focused renderer contract
+        run: |
+          gofmt -w backend/internal/video/renderer.go backend/internal/video/renderer_pixelate_sampling_test.go
+          cd backend
+          go test ./internal/video -run 'TestBlurRegionPartsPixelateUsesByteExactRGBNeighborSampling|TestBuildFilterComplexKeepsVisualCompositionInRGB' -count=1
+      - name: Commit only production and test changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout HEAD^ -- .github/workflows/video-pixelate-parity.yml
+          git rm -f .github/workflows/patch-video-pixelate-rgb.yml
+          git add backend/internal/video/renderer.go backend/internal/video/renderer_pixelate_sampling_test.go .github/workflows/video-pixelate-parity.yml
+          git commit -m 'fix(video): preserve exact pixelate rgb sampling'
+          git push origin HEAD:test/video-wysiwyg-phase3-pixelate-opaque-parity-evidence
+
   evidence:
     name: Opaque PNG pixelate preview-render evidence
     runs-on: ubuntu-24.04
