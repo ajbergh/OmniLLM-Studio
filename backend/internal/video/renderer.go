@@ -919,7 +919,7 @@ func blurRegionParts(prev string, clip TimelineClip, shape TimelineShape, width,
 		downH := maxInt(1, boxH/block)
 		return []string{
 			prev + "split" + srcLabel + baseLabel,
-			fmt.Sprintf("%scrop=%d:%d:%d:%d,scale=%d:%d,scale=%d:%d:flags=neighbor%s", srcLabel, boxW, boxH, x, y, downW, downH, boxW, boxH, blurLabel),
+			fmt.Sprintf("%scrop=%d:%d:%d:%d,scale=%d:%d:flags=neighbor,scale=%d:%d:flags=neighbor%s", srcLabel, boxW, boxH, x, y, downW, downH, boxW, boxH, blurLabel),
 			fmt.Sprintf("%s%soverlay=%d:%d:enable='between(t\\,%.3f\\,%.3f)'%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),
 		}, outLabel
 	}
