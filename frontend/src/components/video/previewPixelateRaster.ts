@@ -41,10 +41,12 @@ export function resolvePreviewPixelateRasterPlan(
 }
 
 /**
- * Pixelate one straight-alpha RGBA byte buffer using a deterministic two-pass
- * nearest-neighbor kernel. The first pass samples the center-mapped source
- * pixel for every reduced pixel; the second pass expands the reduced surface
- * back to the authored region dimensions with nearest-neighbor lookup.
+ * Pixelate one straight-alpha RGBA byte buffer using the exact sample-index
+ * policy produced by FFmpeg/libswscale `scale=...:flags=neighbor` for both
+ * passes. libswscale resolves nearest-neighbor coordinates from a rounded
+ * 16.16 fixed-point scale increment; preserving that detail matters for ties
+ * such as 4→3 and 2→7 where floating-point center formulas pick a different
+ * source pixel.
  *
  * This function deliberately does not read Canvas, DOM, media elements, CSS,
  * or renderer state. It is suitable for exact unit fixtures and for a future
@@ -63,23 +65,17 @@ export function pixelatePreviewRgba(
 
   const reduced = new Uint8ClampedArray(plan.downsample_width * plan.downsample_height * 4);
   for (let y = 0; y < plan.downsample_height; y += 1) {
-    const sourceY = centerMappedIndex(y, plan.downsample_height, plan.height);
+    const sourceY = ffmpegNeighborIndex(y, plan.downsample_height, plan.height);
     for (let x = 0; x < plan.downsample_width; x += 1) {
-      const sourceX = centerMappedIndex(x, plan.downsample_width, plan.width);
+      const sourceX = ffmpegNeighborIndex(x, plan.downsample_width, plan.width);
       copyPixel(input, ((sourceY * plan.width) + sourceX) * 4, reduced, ((y * plan.downsample_width) + x) * 4);
     }
   }
 
   for (let y = 0; y < plan.height; y += 1) {
-    const reducedY = Math.min(
-      plan.downsample_height - 1,
-      Math.floor((y * plan.downsample_height) / plan.height),
-    );
+    const reducedY = ffmpegNeighborIndex(y, plan.height, plan.downsample_height);
     for (let x = 0; x < plan.width; x += 1) {
-      const reducedX = Math.min(
-        plan.downsample_width - 1,
-        Math.floor((x * plan.downsample_width) / plan.width),
-      );
+      const reducedX = ffmpegNeighborIndex(x, plan.width, plan.downsample_width);
       copyPixel(
         reduced,
         ((reducedY * plan.downsample_width) + reducedX) * 4,
@@ -114,8 +110,12 @@ function requirePositiveInteger(name: string, value: number): void {
   }
 }
 
-function centerMappedIndex(index: number, outputSize: number, inputSize: number): number {
-  return Math.min(inputSize - 1, Math.floor(((index + 0.5) * inputSize) / outputSize));
+/** Mirror libswscale nearest-neighbor's rounded 16.16 fixed-point coordinate step. */
+function ffmpegNeighborIndex(index: number, outputSize: number, inputSize: number): number {
+  const fixedOne = 65_536;
+  const increment = Math.floor(((inputSize * fixedOne) + (outputSize / 2)) / outputSize);
+  const sourceIndex = Math.floor((((2 * index) + 1) * increment) / (2 * fixedOne));
+  return Math.min(inputSize - 1, sourceIndex);
 }
 
 function copyPixel(
