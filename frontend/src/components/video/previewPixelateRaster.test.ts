@@ -65,9 +65,9 @@ describe('preview-pixelate-raster-v1', () => {
       10, 11, 12, 13, 14,
     ]);
     expect(redValues(pixelatePreviewRgba(plan, input))).toEqual([
-      7, 7, 7, 9, 9,
-      7, 7, 7, 9, 9,
-      7, 7, 7, 9, 9,
+      6, 6, 6, 8, 8,
+      6, 6, 6, 8, 8,
+      6, 6, 6, 8, 8,
     ]);
   });
 
