@@ -15,7 +15,7 @@ export interface PreviewCanvasMediaLayer {
   canonicalState?: CanonicalFrameLayerState;
 }
 
-export interface PreviewWeightedPairCanvasLayer extends PreviewCanvasMediaLayer {}
+export type PreviewWeightedPairCanvasLayer = PreviewCanvasMediaLayer;
 
 export interface PreviewCanvasMediaRect {
   x: number;
