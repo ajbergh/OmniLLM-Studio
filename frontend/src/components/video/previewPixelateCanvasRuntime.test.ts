@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
+import { PERSPECTIVE_PROJECTION_CONTRACT_V1 } from '../../video/renderContractPerspectiveProjection';
 import { SHAPE_STATE_CONTRACT_V1 } from '../../video/renderContractShape';
 import {
   PREVIEW_PIXELATE_CANVAS_REGION_V1,
   previewPixelateRegionIsOpaque,
   resolvePreviewPixelateCanvasRegion,
 } from './previewPixelateCanvasRuntime';
+
+const identityMatrix: CanonicalFrameLayerState['model_matrix'] = [
+  1, 0, 0, 0,
+  0, 1, 0, 0,
+  0, 0, 1, 0,
+  0, 0, 0, 1,
+];
 
 function pixelateState(overrides: Partial<CanonicalFrameLayerState['view_transform']> = {}): CanonicalFrameLayerState {
   const transform: CanonicalFrameLayerState['transform'] = {
@@ -23,9 +31,24 @@ function pixelateState(overrides: Partial<CanonicalFrameLayerState['view_transfo
     ...overrides,
   };
   return {
+    track_index: 0,
+    clip_index: 0,
+    track_id: 'track',
     clip_id: 'pixelate',
+    z_index: 0,
+    start_frame: 0,
+    end_frame: 30,
+    source_time_ms: 0,
     transform: { ...transform },
     view_transform: { ...transform },
+    model_matrix: [...identityMatrix],
+    perspective_projection: {
+      contract_version: PERSPECTIVE_PROJECTION_CONTRACT_V1,
+      distance: 1200,
+      source: 'camera',
+      origin_w: 1,
+      matrix: [...identityMatrix],
+    },
     shape: {
       contract_version: SHAPE_STATE_CONTRACT_V1,
       kind: 'pixelate',
@@ -39,7 +62,7 @@ function pixelateState(overrides: Partial<CanonicalFrameLayerState['view_transfo
     },
     authoritative: true,
     unresolved: [],
-  } as CanonicalFrameLayerState;
+  };
 }
 
 describe('resolvePreviewPixelateCanvasRegion', () => {
