@@ -9,57 +9,47 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG program PR: **#285 — Define deterministic pixelate raster kernel** — squash merge `64e34450806fc97da07ef85901fee591b4a59171` (2026-08-28).
+Latest merged WYSIWYG program PR: **#286 — Plan exact pixelate backdrop admission** — squash merge `40e895eec8323da03acd7b4f077743c8a3411eea` (2026-08-28).
 
-Current implementation PR: **#286 — Plan exact pixelate backdrop admission** on branch `feat/video-wysiwyg-phase3-pixelate-backdrop-planner`, created directly from #285's actual squash result `64e34450806fc97da07ef85901fee591b4a59171`.
+Current implementation PR: **#287 — Align FFmpeg pixelate sampling with explicit neighbor scaling** on branch `fix/video-wysiwyg-phase3-pixelate-ffmpeg-neighbor`, created directly from #286's actual squash result `40e895eec8323da03acd7b4f077743c8a3411eea`.
 
 **Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** Renderer-independent contracts own authored semantics. Browser/FFmpeg consumers may produce renderer-specific evidence, but they must not silently redefine canonical intent.
 
-### #285 merged result
+### #286 merged result
 
-#285 separated deterministic pixelate raster math from backdrop acquisition so the existing CSS approximation cannot be mislabeled parity-safe:
+#286 established the first fail-closed structural admission boundary for exact pixelate backdrop work without changing preview pixels:
 
-- `preview-pixelate-raster-v1` owns pixelate block size and reduced-surface dimensions in canonical canvas pixels.
-- Block policy matches the existing FFmpeg region path: rounded `blur_radius`, a two-pixel minimum block, integer floor division, and a one-pixel minimum reduced surface.
-- The browser kernel reproduces libswscale `flags=neighbor` sample-index selection using the rounded 16.16 fixed-point coordinate step, including non-divisible tie cases; it does not substitute a center/floor approximation.
-- `pixelatePreviewRgba` performs deterministic two-pass straight-alpha RGBA sampling without reading Canvas, DOM, media elements, CSS, network state, or renderer state.
-- Focused Vitest coverage proves aligned/non-aligned dimensions, libswscale tie behavior, straight-alpha byte preservation, and fail-closed plan/buffer validation.
-- The canonical DOM `pixelate` painter remains explicitly marked `pixelate-css-approximation`; #285 intentionally did not remove it.
-- Exact code head `12c9210d574503a4a66a6c18bd5276af0cb80d45` passed Quality #1655, Security #1660, Linux workspace/quota, macOS runtime/adversarial/extension, and browser-egress assurance before merge.
-- Quality #1655 passed backend tests/race, frontend lint/unit/performance/build, full Playwright smoke, and immutable video-renderer parity baseline/capture/report on that exact head.
-- Retained Quality #1655 artifacts include `video-parity-baseline` digest `sha256:44ef97f80910d0015ee55ae430b3e971ef95cf5f1dc252beb2fe096d4cd21d85` and `playwright-report` digest `sha256:1ca3b817d630b92e5b5ab0e36ae545023771314ceacc00ec9c91f7ee6f4ecabc`.
-
-### Export blocker discovered during #285
-
-The browser kernel is **not yet evidence of byte-identical FFmpeg pixelate output**:
-
-- Current `blurRegionParts` specifies `flags=neighbor` on the pixelate **upsample** but leaves the first downsample on FFmpeg's default scaler.
-- Synthetic FFmpeg 7.1.5 probes demonstrated that the implicit first pass can select materially different reduced colors than explicit neighbor scaling.
-- FFmpeg pixel-format conversion/scaler behavior can also perturb alpha bytes. Do not infer transparent-source parity from the straight-alpha TypeScript kernel.
-- Therefore the first exact preview consumer must stay fail-closed, require explicit decoded-pixel evidence, and must not remove `pixelate-css-approximation` until export sampling/composition is aligned and tested.
-
-### #286 current scope
-
-#286 adds a structural backdrop admission contract only; it still does not change preview pixels:
-
-- `preview-pixelate-backdrop-plan-v1` consumes the canonical bottom-to-top preview layer order.
+- `preview-pixelate-backdrop-plan-v1` consumes canonical bottom-to-top preview layer order.
 - V1 admits exactly one active pixelate region over exactly one lower canonical media layer.
 - The pixelate target must be authoritative and resolved, with no text, cursor, clip effects, transitions, crop/perspective, rotation/3D state, opacity reduction, nonuniform scale, nonzero anchor, or camera-relative placement drift.
-- The lower media layer reuses the existing weighted-raster source classifier and additionally rejects opacity reduction, transitions, rotation, and camera-relative placement drift.
+- The lower media layer reuses the weighted-raster source classifier and additionally rejects opacity reduction, transitions, rotation, and camera-relative placement drift.
 - Multiple active pixelate regions and zero/multiple lower visual layers remain explicit deferrals.
-- Runtime pixel evidence remains separate from structural eligibility. Every ready plan carries `decoded-frame-ready` and `opaque-region-proof` requirements; MIME type alone is never treated as opacity proof.
-- The existing DOM `pixelate-css-approximation` marker remains unchanged. Canvas acquisition/execution is a later slice.
+- Runtime pixel evidence remains separate from structural eligibility. Ready plans require both `decoded-frame-ready` and `opaque-region-proof`; MIME type is never treated as opacity proof.
+- The DOM `pixelate-css-approximation` marker remains unchanged; exact Canvas acquisition/execution is deferred.
 - Focused Vitest coverage exercises ready, legacy/none, multiple-region, complex-target, backdrop-count, and independent backdrop blocker paths.
-- **Validation status:** hosted Actions are pending on #286's exact branch head; do not call this slice green until Quality/Security and parity evidence actually execute.
+- Exact final head `d3a703f1b03cb8514cc7c832059ed51a5c2b07c7` passed Security #1665, Quality #1660, backend tests/race, frontend lint/unit/performance/build, full Playwright smoke, immutable video-renderer parity capture, and all scheduled platform assurance workflows.
+- Retained Quality #1660 artifacts include `video-parity-baseline` digest `sha256:497558db300644440798e51b4cdd1cec622ff3fb2b84ac37b540a6bed58a88f5` and `playwright-report` digest `sha256:c8294cf98bbf20e7d49e376baf50531bb94ef9095a176bd01ce8b74bca06962c`.
+- Final review audit found no comments, reviews, or unresolved review threads.
+
+### #287 current scope
+
+#287 removes the specific FFmpeg sampling blocker discovered during #285 while staying deliberately narrower than full browser/export pixel parity:
+
+- `backend/internal/video/renderer.go` makes **both** pixelate scale passes explicit libswscale nearest-neighbor operations. The reduction stage no longer depends on FFmpeg's default scaler.
+- `backend/internal/video/renderer_pixelate_sampling_test.go` locks a non-divisible `403×307` region with block size `20` to the canonical floor reduction `20×15` and requires `flags=neighbor` on both scale stages.
+- `renderer_capabilities.go` is intentionally unchanged. This is a determinism correction for an already-reported annotation path, not a new supported feature.
+- The change does **not** prove transparent-source alpha, pixel-format conversion, premultiplication, codec-decoded byte identity, or Canvas backdrop acquisition parity.
+- `pixelate-css-approximation` therefore remains the preview fallback until the admitted Canvas consumer has decoded-frame readiness and region-opacity proof.
+- **Validation status:** hosted Actions are pending on #287's final tracker-bearing head. Do not call this slice green until Quality/Security, full Playwright, and retained parity evidence actually execute.
 
 ## Phase tracker
 
 | Phase | Status | Progress / exit work |
 |---|---|---|
-| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged fail-closed frame-indexed region-policy inputs. Production structural policy, codec-aware decoded-region semantics, font-resource fixture coverage, and second-platform evidence remain. |
+| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged fail-closed frame-indexed region-policy inputs. Production structural policy, codec-aware decoded-region semantics, resource-font fixture coverage, and second-platform retained evidence remain. |
 | Phase 1 — Immutable submission | **Complete** | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend dirty/concurrency behavior are implemented. |
 | Phase 2 — Canonical contract | **Complete** | Frame/range/source/order, curves, transforms/geometry/projection, transitions, effects, text/fonts, shapes, cursor, immutable source provenance, and AudioGraph semantics are versioned and cross-runtime checked. #260 closed the final contract gap. |
-| Phase 3 — Shared preview composition | **In progress** | #261–#285 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, exact browser font readiness, Chromium text layout snapshots, and deterministic pixelate raster sampling. #286 adds fail-closed backdrop admission. Exact pixelate Canvas consumption/export sampling alignment, weighted-raster broadening, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |
+| Phase 3 — Shared preview composition | **In progress** | #261–#286 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, exact browser font readiness, Chromium text-layout snapshots, deterministic pixelate raster sampling, and fail-closed backdrop admission. #287 aligns FFmpeg's two pixelate scale stages. Exact Canvas backdrop consumption, alpha/pixel-format evidence, weighted-raster broadening, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, Chromium text metrics/fonts, shapes, transitions, effects, cursor, camera, color space, and deterministic asset loading. |
 | Phase 6 — Audio parity closure | Not started | Make preview/Chromium/export obey AudioGraph exactly, including pitch, gain/fades, channels, program processing, processed stems, and decoded delivery. |
@@ -80,7 +70,7 @@ The browser kernel is **not yet evidence of byte-identical FFmpeg pixelate outpu
 
 Canonical evaluators are pure, deterministic, serializable, free of browser/FFmpeg/filesystem/network I/O, usable by preview and export, and fail closed whenever an authorable value lacks explicit semantics.
 
-The legacy FFmpeg compositor is implementation evidence, not semantic authority. Browser layout snapshots are also consumer evidence, not new authored semantics. `text-state-v1` continues to own text intent; Chromium owns the browser shaping/layout result after exact face readiness.
+The legacy FFmpeg compositor is implementation evidence, not semantic authority. Browser layout snapshots are consumer evidence, not a new authored semantic contract. `text-state-v1` continues to own text intent; Chromium owns browser shaping/layout after exact face readiness.
 
 ### Media geometry and source provenance
 
@@ -109,11 +99,11 @@ Unsupported/deferred painter sources stay explicit debt and do not become canoni
 - `effect-state-v1` owns enabled authored order, scope, normalized parameters, and exact-frame automation. #270 consumes clip effects; #280 consumes scene effects.
 - `text-state-v1` owns renderer-independent text intent. #281 consumes text painter inputs.
 - #282 verifies current editor `font_resource_id` identity without claiming immutable provenance.
-- #283 loads the exact editor font bytes under an isolated browser alias and gates deterministic evidence on readiness.
+- #283 loads exact editor font bytes under an isolated browser alias and gates deterministic evidence on readiness.
 - #284 makes Chromium DOM layout the sole browser-side glyph-layout snapshot authority; it does not introduce Canvas `measureText` or FFmpeg `text_w`/`text_h` semantics.
 - Immutable static-font identity remains Render Manifest-backed by `font-resource-provenance-v1`.
 - A family-name-only snapshot is valid evidence for that Chromium environment but is not cross-machine exact font provenance. Resource-backed faces remain the route to deterministic face identity.
-- `shape-state-v1` owns shape geometry/style. #285 defines `preview-pixelate-raster-v1`; #286 defines the first fail-closed backdrop admission boundary. True preview pixelation remains explicit fidelity debt until exact decoded backdrop pixels feed that kernel and FFmpeg sampling is aligned.
+- `shape-state-v1` owns shape geometry/style. #285 defines `preview-pixelate-raster-v1`; #286 defines fail-closed backdrop admission; #287 aligns the FFmpeg reduction/expansion sampling algorithm. True preview pixelation remains explicit fidelity debt until exact decoded backdrop pixels feed the browser kernel.
 - `cursor-state-v1` owns exact rational cursor sampling, visibility, scale, highlight/click-ring state, and click proximity.
 
 ### AudioGraph v1
@@ -166,6 +156,7 @@ Unsupported/deferred painter sources stay explicit debt and do not become canoni
 | #283 | Exact browser `FontFace` readiness and parity gating | `3543ddf7189161a84699a1c4efb296fc8a928400` |
 | #284 | Chromium text layout snapshots and parity-ready stabilization | `7884fef888eadd95a1dd575470e06125d5ec618d` |
 | #285 | Deterministic pixelate raster grid and libswscale-neighbor sampling | `64e34450806fc97da07ef85901fee591b4a59171` |
+| #286 | Fail-closed exact pixelate backdrop admission | `40e895eec8323da03acd7b4f077743c8a3411eea` |
 
 ## Safe stacked-branch normalization
 
@@ -179,7 +170,7 @@ Every stacked slice starts from the **actual squash result on current `main`**:
 6. Audit comments/reviews/threads and merge with expected-head protection.
 7. Create the next slice from the new actual squash result.
 
-Recent lineage: #283 from #282 squash `38ea95ab...`; #284 from #283 `3543ddf7...`; #285 from #284 `7884fef8...`; **#286 directly from #285 squash `64e34450806fc97da07ef85901fee591b4a59171`**.
+Recent lineage: #283 from #282 squash `38ea95ab...`; #284 from #283 `3543ddf7...`; #285 from #284 `7884fef8...`; #286 from #285 `64e34450...`; **#287 directly from #286 squash `40e895eec8323da03acd7b4f077743c8a3411eea`**.
 
 ## Phase 0 parity baseline
 
@@ -220,17 +211,18 @@ Hosted CI is authoritative for platform/toolchain cases unavailable in the curre
 | Intrinsic size changes after dimensions are frozen | Require a second Chromium pass with stable width/height and line-fragment count before parity-ready. |
 | Family-name-only text is mistaken for deterministic face identity | Snapshot records provenance/runtime; exact cross-machine identity still requires a resource-backed face. |
 | Text-layout gate bypasses weighted Canvas readiness | Independent resume flags preserve traversal through both gates. |
-| Pixelate raster math is confused with backdrop-source parity | #285 owns grid/sample-index math only; #286 owns structural backdrop admission only. Neither removes the CSS approximation. |
-| libswscale-neighbor sampling is confused with current FFmpeg pixelate output | Current export downsample is implicit/default scaling. Align both FFmpeg scale passes and add retained evidence before claiming output parity. |
-| MIME type is treated as proof of an opaque backdrop | #286 requires a separate runtime `opaque-region-proof`; decoded-frame readiness is also independent. |
+| Pixelate raster math is confused with backdrop-source parity | #285 owns grid/sample-index math; #286 owns structural backdrop admission; #287 only aligns FFmpeg's scaler selection. None of these by itself proves decoded backdrop parity. |
+| libswscale-neighbor sampling is confused with complete output parity | #287 makes both scale passes explicit neighbor. Retained decoded evidence is still required before claiming browser/export pixel identity. |
+| MIME type is treated as proof of an opaque backdrop | #286 requires separate runtime `opaque-region-proof`; decoded-frame readiness is independent. |
 | Alpha/pixel-format conversion is assumed byte-identical across browser and FFmpeg | Keep transparent-source execution deferred until explicit decoded RGBA/premultiplication evidence exists. |
 | Codec-noisy decoded equality is treated as structural parity | Phase 0 keeps canonical structural policy separate from codec-aware decoded evidence. |
 | CI scheduling hides code state | Only actually executed checks count. |
 
 ## Next recommended slice
 
-1. Complete #286 hosted validation, exact-tree/review audit, tracker freeze, and expected-head squash merge.
-2. Align FFmpeg pixelate sampling in a separate renderer slice: make the first downsample scaler explicit, add renderer contract/golden coverage, and update capabilities only after evidence passes.
-3. Add exact Canvas backdrop acquisition for #286-admitted media, including decoded-frame readiness and region opacity proof; feed the raster through `preview-pixelate-raster-v1` and remove `pixelate-css-approximation` only for proven-ready cases.
-4. Broaden pixelate and weighted-Canvas raster eligibility only after each additional painter/source has exact composition semantics.
-5. Continue Phase 3 with normal-playback canonicalization, explicit diagnostics/rollback, then shared AudioGraph consumption.
+1. Complete #287 hosted validation, exact-tree/review audit, retained parity evidence, tracker freeze, and expected-head squash merge.
+2. Add exact Canvas backdrop acquisition for #286-admitted media, including decoded-frame readiness and region-opacity proof; feed the pixels through `preview-pixelate-raster-v1`.
+3. Remove `pixelate-css-approximation` only for proven-ready cases; retain the compatibility fallback for every deferred or unproven source.
+4. Add decoded browser↔FFmpeg pixel evidence for the admitted opaque-source path before broadening pixelate eligibility; keep transparent/premultiplied sources deferred until alpha semantics are proven.
+5. Broaden pixelate and weighted-Canvas raster eligibility only after each additional painter/source has exact composition semantics.
+6. Continue Phase 3 with normal-playback canonicalization, explicit diagnostics/rollback, then shared AudioGraph consumption.
