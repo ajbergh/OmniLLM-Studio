@@ -50,7 +50,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: test/video-wysiwyg-phase3-pixelate-opaque-parity-evidence
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -75,16 +75,26 @@ jobs:
                   'fmt.Sprintf("%scrop=%d:%d:%d:%d,scale=%d:%d:flags=neighbor,scale=%d:%d:flags=neighbor%s", srcLabel, boxW, boxH, x, y, downW, downH, boxW, boxH, blurLabel),',
                   'fmt.Sprintf("%scrop=%d:%d:%d:%d,scale=%d:%d:flags=neighbor+full_chroma_inp,scale=%d:%d:flags=neighbor+full_chroma_inp%s", srcLabel, boxW, boxH, x, y, downW, downH, boxW, boxH, blurLabel),',
               ),
-              (
-                  'fmt.Sprintf("%s%soverlay=%d:%d:enable=\'between(t\\\\,%.3f\\\\,%.3f)\'%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),',
-                  'fmt.Sprintf("%s%soverlay=%d:%d:enable=\'between(t\\\\,%.3f\\\\,%.3f)\':format=rgb%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),',
-              ),
           ]
           for old, new in replacements:
               count = text.count(old)
               if count != 1:
                   raise SystemExit(f'guarded renderer replacement matched {count} times, expected exactly once: {old}')
               text = text.replace(old, new, 1)
+
+          start_marker = '\tif shape.Kind == ShapeKindPixelate {'
+          end_marker = '\n\t}\n\treturn []string{'
+          if text.count(start_marker) != 1:
+              raise SystemExit('pixelate renderer branch marker must occur exactly once')
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          pixelate = text[start:end]
+          overlay_old = 'fmt.Sprintf("%s%soverlay=%d:%d:enable=\'between(t\\\\,%.3f\\\\,%.3f)\'%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),'
+          overlay_new = 'fmt.Sprintf("%s%soverlay=%d:%d:enable=\'between(t\\\\,%.3f\\\\,%.3f)\':format=rgb%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),'
+          if pixelate.count(overlay_old) != 1:
+              raise SystemExit(f'pixelate-scoped overlay replacement matched {pixelate.count(overlay_old)} times, expected exactly once')
+          pixelate = pixelate.replace(overlay_old, overlay_new, 1)
+          text = text[:start] + pixelate + text[end:]
           path.write_text(text)
       - name: Validate focused renderer contract
         run: |
@@ -95,7 +105,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git checkout HEAD^ -- .github/workflows/video-pixelate-parity.yml
+          git checkout 3f7021a7ee1d97cbcad5fd477abf806895669dfc -- .github/workflows/video-pixelate-parity.yml
           git rm -f .github/workflows/patch-video-pixelate-rgb.yml
           git add backend/internal/video/renderer.go backend/internal/video/renderer_pixelate_sampling_test.go .github/workflows/video-pixelate-parity.yml
           git commit -m 'fix(video): preserve exact pixelate rgb sampling'
