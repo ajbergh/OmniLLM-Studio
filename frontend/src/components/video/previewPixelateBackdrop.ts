@@ -18,6 +18,8 @@ export type PreviewPixelateBackdropDeferredReason =
   | 'pixelate-cursor-deferred'
   | 'pixelate-effects-deferred'
   | 'pixelate-transition-deferred'
+  | 'pixelate-axis-scale-renderer-deferred'
+  | 'pixelate-transform-keyframes-deferred'
   | 'pixelate-transform-deferred'
   | 'pixelate-camera-transform-deferred'
   | 'backdrop-layer-count-deferred'
@@ -27,7 +29,15 @@ export type PreviewPixelateBackdropDeferredReason =
   | 'backdrop-camera-transform-deferred';
 
 export interface PreviewPixelateBackdropLayer {
-  clip: { id: string };
+  clip: {
+    id: string;
+    transform?: {
+      scale?: number;
+      scale_x?: number;
+      scale_y?: number;
+    };
+    keyframes?: readonly { property: string }[];
+  };
   asset?: { mime_type: string };
   canonicalState?: CanonicalFrameLayerState;
 }
@@ -75,6 +85,20 @@ const RUNTIME_REQUIREMENTS: readonly PreviewPixelateBackdropRuntimeRequirement[]
   'opaque-region-proof',
 ];
 
+const PIXELATE_STATIC_RENDERER_TRANSFORM_PROPERTIES = new Set([
+  'x',
+  'y',
+  'z',
+  'scale',
+  'scale_x',
+  'scale_y',
+  'rotation',
+  'rotation_x',
+  'rotation_y',
+  'rotation_z',
+  'opacity',
+]);
+
 /**
  * Plan the first exact pixelate backdrop surface without broadening today's
  * raster eligibility. Layers are bottom-to-top, matching canonical preview
@@ -115,8 +139,7 @@ export function planPreviewPixelateBackdrop<T extends PreviewPixelateBackdropLay
 
   const targetIndex = pixelateIndices[0];
   const target = layers[targetIndex];
-  const targetState = target.canonicalState as CanonicalFrameLayerState;
-  const targetReasons = targetDeferredReasons(targetState);
+  const targetReasons = targetDeferredReasons(target);
 
   const lowerLayers = layers.slice(0, targetIndex);
   if (lowerLayers.length !== 1) {
@@ -159,7 +182,8 @@ export function planPreviewPixelateBackdrop<T extends PreviewPixelateBackdropLay
   };
 }
 
-function targetDeferredReasons(state: CanonicalFrameLayerState): string[] {
+function targetDeferredReasons(layer: PreviewPixelateBackdropLayer): string[] {
+  const state = layer.canonicalState as CanonicalFrameLayerState;
   const reasons: PreviewPixelateBackdropDeferredReason[] = [];
   if (!state.authoritative) reasons.push('pixelate-state-not-authoritative');
   if ((state.unresolved ?? []).length > 0) reasons.push('pixelate-state-unresolved');
@@ -169,6 +193,14 @@ function targetDeferredReasons(state: CanonicalFrameLayerState): string[] {
   if ((state.transitions ?? []).length > 0 || (state.transition_paint ?? []).length > 0) {
     reasons.push('pixelate-transition-deferred');
   }
+  if (axisScaleDiffersFromLegacyScalar(layer.clip.transform)) {
+    reasons.push('pixelate-axis-scale-renderer-deferred');
+  }
+  if ((layer.clip.keyframes ?? []).some((keyframe) => (
+    PIXELATE_STATIC_RENDERER_TRANSFORM_PROPERTIES.has(keyframe.property.trim().toLowerCase())
+  ))) {
+    reasons.push('pixelate-transform-keyframes-deferred');
+  }
   if (!simplePixelateRegionTransform(state.view_transform)) {
     reasons.push('pixelate-transform-deferred');
   }
@@ -176,6 +208,14 @@ function targetDeferredReasons(state: CanonicalFrameLayerState): string[] {
     reasons.push('pixelate-camera-transform-deferred');
   }
   return uniqueStrings(reasons);
+}
+
+function axisScaleDiffersFromLegacyScalar(
+  transform: PreviewPixelateBackdropLayer['clip']['transform'],
+): boolean {
+  const scalar = transform?.scale ?? 1;
+  return (transform?.scale_x !== undefined && transform.scale_x !== scalar)
+    || (transform?.scale_y !== undefined && transform.scale_y !== scalar);
 }
 
 function simplePixelateRegionTransform(transform: CanonicalFrameLayerState['view_transform']): boolean {
