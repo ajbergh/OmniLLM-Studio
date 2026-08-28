@@ -110,7 +110,7 @@ export function planPreviewPixelateBackdrop<T extends PreviewPixelateBackdropLay
     };
   }
   if (pixelateIndices.length > 1) {
-    return deferred(undefined, undefined, ['multiple-pixelate-layers-deferred']);
+    return deferred<T>(undefined, undefined, ['multiple-pixelate-layers-deferred']);
   }
 
   const targetIndex = pixelateIndices[0];
