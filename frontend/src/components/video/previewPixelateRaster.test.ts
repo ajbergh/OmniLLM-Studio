@@ -40,7 +40,7 @@ describe('preview-pixelate-raster-v1', () => {
     });
   });
 
-  it('downsamples by center mapping and expands each reduced sample with nearest-neighbor lookup', () => {
+  it('uses the FFmpeg nearest-neighbor sample map for aligned dimensions', () => {
     const plan = resolvePreviewPixelateRasterPlan(4, 4, 2);
     const input = grayscaleRgba([
       0, 1, 2, 3,
@@ -68,6 +68,19 @@ describe('preview-pixelate-raster-v1', () => {
       6, 6, 6, 8, 8,
       6, 6, 6, 8, 8,
       6, 6, 6, 8, 8,
+    ]);
+  });
+
+  it('preserves libswscale fixed-point tie behavior during non-divisible expansion', () => {
+    const plan = resolvePreviewPixelateRasterPlan(7, 2, 2);
+    expect(plan).toMatchObject({ downsample_width: 3, downsample_height: 1 });
+    const input = grayscaleRgba([
+      0, 1, 2, 3, 4, 5, 6,
+      7, 8, 9, 10, 11, 12, 13,
+    ]);
+    expect(redValues(pixelatePreviewRgba(plan, input))).toEqual([
+      8, 8, 10, 10, 10, 12, 12,
+      8, 8, 10, 10, 10, 12, 12,
     ]);
   });
 
