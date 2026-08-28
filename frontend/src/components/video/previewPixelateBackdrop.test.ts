@@ -6,6 +6,7 @@ import { SHAPE_STATE_CONTRACT_V1 } from '../../video/renderContractShape';
 import {
   PREVIEW_PIXELATE_BACKDROP_PLAN_V1,
   planPreviewPixelateBackdrop,
+  type PreviewPixelateBackdropLayer,
 } from './previewPixelateBackdrop';
 
 const identityMatrix: CanonicalFrameLayerState['model_matrix'] = [
@@ -93,9 +94,10 @@ function layer(
   clipId: string,
   canonicalState: CanonicalFrameLayerState | undefined,
   mimeType?: string,
-) {
+  clipOverrides: Omit<Partial<PreviewPixelateBackdropLayer['clip']>, 'id'> = {},
+): PreviewPixelateBackdropLayer {
   return {
-    clip: { id: clipId },
+    clip: { id: clipId, ...clipOverrides },
     ...(mimeType ? { asset: { mime_type: mimeType } } : {}),
     ...(canonicalState ? { canonicalState: { ...canonicalState, clip_id: clipId } } : {}),
   };
@@ -117,6 +119,16 @@ describe('planPreviewPixelateBackdrop', () => {
       runtimeRequirements: ['decoded-frame-ready', 'opaque-region-proof'],
       deferredReasons: [],
     });
+  });
+
+  it('keeps the legacy scalar scale path eligible when canonical scale is uniform', () => {
+    const scaled = { ...transform, scale_x: 1.5, scale_y: 1.5 };
+    expect(planPreviewPixelateBackdrop(12, [
+      layer('backdrop', mediaState(), 'image/png'),
+      layer('pixelate', pixelateState({ transform: scaled, view_transform: scaled }), undefined, {
+        transform: { scale: 1.5 },
+      }),
+    ])).toMatchObject({ mode: 'canonical-ready' });
   });
 
   it('returns legacy or canonical-none without inventing a pixelate surface', () => {
@@ -172,6 +184,34 @@ describe('planPreviewPixelateBackdrop', () => {
       'pixelate-transform-deferred',
       'pixelate-camera-transform-deferred',
     ]);
+  });
+
+  it('defers renderer-static transform cases before exact Canvas execution', () => {
+    const scaled = { ...transform, scale_x: 1.5, scale_y: 1.5 };
+    const plan = planPreviewPixelateBackdrop(0, [
+      layer('backdrop', mediaState(), 'image/png'),
+      layer('pixelate', pixelateState({ transform: scaled, view_transform: scaled }), undefined, {
+        transform: { scale_x: 1.5, scale_y: 1.5 },
+        keyframes: [{ property: 'x' }],
+      }),
+    ]);
+
+    expect(plan).toMatchObject({ mode: 'canonical-deferred' });
+    if (plan.mode !== 'canonical-deferred') return;
+    expect(plan.deferredReasons).toEqual([
+      'pixelate-axis-scale-renderer-deferred',
+      'pixelate-transform-keyframes-deferred',
+    ]);
+  });
+
+  it('ignores non-transform keyframes for the static region admission check', () => {
+    const plan = planPreviewPixelateBackdrop(0, [
+      layer('backdrop', mediaState(), 'image/png'),
+      layer('pixelate', pixelateState(), undefined, {
+        keyframes: [{ property: 'volume' }],
+      }),
+    ]);
+    expect(plan).toMatchObject({ mode: 'canonical-ready' });
   });
 
   it('requires exactly one lower visual layer before runtime raster acquisition', () => {
