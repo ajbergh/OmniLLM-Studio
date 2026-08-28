@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 import { MEDIA_GEOMETRY_CONTRACT_V1 } from '../../video/renderContractMediaGeometry';
+import { PERSPECTIVE_PROJECTION_CONTRACT_V1 } from '../../video/renderContractPerspectiveProjection';
 import { SHAPE_STATE_CONTRACT_V1 } from '../../video/renderContractShape';
 import {
   PREVIEW_PIXELATE_BACKDROP_PLAN_V1,
   planPreviewPixelateBackdrop,
 } from './previewPixelateBackdrop';
+
+const identityMatrix: CanonicalFrameLayerState['model_matrix'] = [
+  1, 0, 0, 0,
+  0, 1, 0, 0,
+  0, 0, 1, 0,
+  0, 0, 0, 1,
+];
 
 const transform: CanonicalFrameLayerState['transform'] = {
   x: 0,
@@ -33,11 +41,14 @@ function state(overrides: Partial<CanonicalFrameLayerState> = {}): CanonicalFram
     source_time_ms: 0,
     transform: { ...transform },
     view_transform: { ...transform },
-    model_matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    model_matrix: [...identityMatrix],
     perspective_projection: {
-      contract_version: 'perspective-projection-v1',
-      mode: 'none',
-    } as CanonicalFrameLayerState['perspective_projection'],
+      contract_version: PERSPECTIVE_PROJECTION_CONTRACT_V1,
+      distance: 1200,
+      source: 'camera',
+      origin_w: 1,
+      matrix: [...identityMatrix],
+    },
     unresolved: [],
     authoritative: true,
     ...overrides,
