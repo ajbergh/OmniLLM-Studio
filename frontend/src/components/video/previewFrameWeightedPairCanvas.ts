@@ -9,23 +9,25 @@ import type {
   PreviewTransitionPairSlot,
 } from './previewFrameTransitionPairs';
 
-export interface PreviewWeightedPairCanvasLayer {
+export interface PreviewCanvasMediaLayer {
   clip: { id: string };
   asset?: { mime_type: string };
   canonicalState?: CanonicalFrameLayerState;
 }
 
-export interface PreviewWeightedPairCanvasRect {
+export interface PreviewWeightedPairCanvasLayer extends PreviewCanvasMediaLayer {}
+
+export interface PreviewCanvasMediaRect {
   x: number;
   y: number;
   width: number;
   height: number;
 }
 
-export interface PreviewWeightedPairCanvasLayerPlan {
-  source: PreviewWeightedPairCanvasRect;
-  destination: PreviewWeightedPairCanvasRect;
-  clip: PreviewWeightedPairCanvasRect;
+export interface PreviewCanvasMediaLayerPlan {
+  source: PreviewCanvasMediaRect;
+  destination: PreviewCanvasMediaRect;
+  clip: PreviewCanvasMediaRect;
   originX: number;
   originY: number;
   translateX: number;
@@ -35,6 +37,9 @@ export interface PreviewWeightedPairCanvasLayerPlan {
   scaleY: number;
   opacity: number;
 }
+
+export type PreviewWeightedPairCanvasRect = PreviewCanvasMediaRect;
+export type PreviewWeightedPairCanvasLayerPlan = PreviewCanvasMediaLayerPlan;
 
 /**
  * Admit weighted Canvas execution only for a complete deterministic frame that
@@ -79,24 +84,26 @@ export function weightedPairCanvasClipIds<T extends PreviewWeightedPairCanvasLay
 }
 
 /**
- * Resolve one pair input into exact Canvas source/destination geometry plus the
- * established canonical 2D preview transform. Transition weights are excluded:
- * #277's linear-sRGB kernel applies those exactly once after both isolated input
- * surfaces have been rasterized. Pair zoom contributes only its layer-scale
- * multiplier here.
+ * Resolve one canonical media input into exact Canvas source/destination
+ * geometry plus the established canonical 2D preview transform. Callers may
+ * supply one additional positive layer-scale multiplier when a composition
+ * contract (for example pair zoom) owns that scale outside FrameState.
  */
-export function resolvePreviewWeightedPairCanvasLayerPlan<T extends PreviewWeightedPairCanvasLayer>(
-  slot: PreviewTransitionPairSlot<T>,
+export function resolvePreviewCanvasMediaLayerPlan<T extends PreviewCanvasMediaLayer>(
   layer: T,
   intrinsicWidth: number,
   intrinsicHeight: number,
-): PreviewWeightedPairCanvasLayerPlan {
+  scaleMultiplier = 1,
+): PreviewCanvasMediaLayerPlan {
   const state = layer.canonicalState;
   const geometry = state?.media_geometry;
-  if (!state || !geometry) throw new Error('weighted pair Canvas layer requires canonical media geometry');
+  if (!state || !geometry) throw new Error('canonical Canvas media layer requires canonical media geometry');
   if (!Number.isFinite(intrinsicWidth) || intrinsicWidth <= 0
     || !Number.isFinite(intrinsicHeight) || intrinsicHeight <= 0) {
-    throw new Error('weighted pair Canvas layer requires positive intrinsic source dimensions');
+    throw new Error('canonical Canvas media layer requires positive intrinsic source dimensions');
+  }
+  if (!Number.isFinite(scaleMultiplier) || scaleMultiplier <= 0) {
+    throw new Error('canonical Canvas media layer scale multiplier must be finite and positive');
   }
 
   const source = geometry.source_bounds;
@@ -124,13 +131,12 @@ export function resolvePreviewWeightedPairCanvasLayerPlan<T extends PreviewWeigh
     clip.width,
     clip.height,
   ]) {
-    if (!Number.isFinite(value)) throw new Error('weighted pair Canvas geometry must be finite');
+    if (!Number.isFinite(value)) throw new Error('canonical Canvas media geometry must be finite');
   }
   if (sourceRect.width <= 0 || sourceRect.height <= 0 || painted.width <= 0 || painted.height <= 0) {
-    throw new Error('weighted pair Canvas geometry must retain positive source and destination area');
+    throw new Error('canonical Canvas media geometry must retain positive source and destination area');
   }
 
-  const pairScale = weightedPairScaleForClip(slot.paint, layer.clip.id);
   const view = state.view_transform;
   const transform = state.transform;
   const opacity = Math.max(0, Math.min(1, transform.opacity));
@@ -143,17 +149,17 @@ export function resolvePreviewWeightedPairCanvasLayerPlan<T extends PreviewWeigh
     translateX: view.x,
     translateY: view.y,
     rotationRadians: view.rotation_z * Math.PI / 180,
-    scaleX: view.scale_x * pairScale,
-    scaleY: view.scale_y * pairScale,
+    scaleX: view.scale_x * scaleMultiplier,
+    scaleY: view.scale_y * scaleMultiplier,
     opacity,
   };
 }
 
-/** Apply the resolved isolated-layer plan to a 2D context and draw the decoded source. */
-export function paintPreviewWeightedPairCanvasLayer(
+/** Apply one resolved canonical media-layer plan to a 2D context. */
+export function paintPreviewCanvasMediaLayer(
   context: CanvasRenderingContext2D,
   source: CanvasImageSource,
-  plan: PreviewWeightedPairCanvasLayerPlan,
+  plan: PreviewCanvasMediaLayerPlan,
 ): void {
   context.save();
   try {
@@ -180,6 +186,34 @@ export function paintPreviewWeightedPairCanvasLayer(
   } finally {
     context.restore();
   }
+}
+
+/**
+ * Resolve one pair input. Transition weights remain excluded because #277's
+ * linear-sRGB kernel applies them exactly once after isolated rasterization;
+ * pair zoom contributes only its layer-scale multiplier here.
+ */
+export function resolvePreviewWeightedPairCanvasLayerPlan<T extends PreviewWeightedPairCanvasLayer>(
+  slot: PreviewTransitionPairSlot<T>,
+  layer: T,
+  intrinsicWidth: number,
+  intrinsicHeight: number,
+): PreviewWeightedPairCanvasLayerPlan {
+  return resolvePreviewCanvasMediaLayerPlan(
+    layer,
+    intrinsicWidth,
+    intrinsicHeight,
+    weightedPairScaleForClip(slot.paint, layer.clip.id),
+  );
+}
+
+/** Backward-compatible weighted-pair painter over the shared canonical media painter. */
+export function paintPreviewWeightedPairCanvasLayer(
+  context: CanvasRenderingContext2D,
+  source: CanvasImageSource,
+  plan: PreviewWeightedPairCanvasLayerPlan,
+): void {
+  paintPreviewCanvasMediaLayer(context, source, plan);
 }
 
 function weightedPairScaleForClip(paint: CanonicalTransitionPaint, clipId: string): number {
