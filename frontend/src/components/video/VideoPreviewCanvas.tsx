@@ -28,6 +28,7 @@ import {
   weightedPairCanvasClipIds,
 } from './previewFrameWeightedPairCanvas';
 import { PreviewWeightedPairCanvas } from './PreviewWeightedPairCanvas';
+import { PreviewPixelateBackdropConsumer } from './PreviewPixelateBackdropConsumer';
 import { VideoPreviewCanvas as LegacyVideoPreviewCanvas } from './VideoPreviewCanvasLegacy';
 
 type PreviewFontFaceStatus = 'none' | 'loading' | 'ready' | 'failed';
@@ -532,6 +533,7 @@ export function VideoPreviewCanvas() {
         }
         return portals;
       })}
+      <PreviewPixelateBackdropConsumer />
     </div>
   );
 }
