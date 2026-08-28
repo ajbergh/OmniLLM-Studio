@@ -665,7 +665,10 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 	})
 
 	prevV := "[base_v]"
-	parts = append(parts, "[0:v]setpts=PTS-STARTPTS[base_v]")
+	// Keep the compositing graph in RGB until the final output/codec boundary.
+	// FFmpeg overlay otherwise negotiates a subsampled YUV format, which loses
+	// chroma bytes before pixelate samples the already-composited backdrop.
+	parts = append(parts, "[0:v]format=rgba,setpts=PTS-STARTPTS[base_v]")
 	textIdx := 0
 
 	for _, item := range items {
@@ -765,7 +768,7 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 				yExpr = fmt.Sprintf("(%s)+(%s)", yExpr, slideY)
 			}
 		}
-		overlayFilter := fmt.Sprintf("%s%soverlay=enable='between(t\\,%.3f\\,%.3f)':x='%s':y='%s'%s",
+		overlayFilter := fmt.Sprintf("%s%soverlay=enable='between(t\\,%.3f\\,%.3f)':x='%s':y='%s':format=rgb%s",
 			prevV, cLabel, startS, endS, xExpr, yExpr, ovLabel)
 
 		parts = append(parts, srcFilter, overlayFilter)
@@ -919,8 +922,8 @@ func blurRegionParts(prev string, clip TimelineClip, shape TimelineShape, width,
 		downH := maxInt(1, boxH/block)
 		return []string{
 			prev + "split" + srcLabel + baseLabel,
-			fmt.Sprintf("%scrop=%d:%d:%d:%d,scale=%d:%d:flags=neighbor,scale=%d:%d:flags=neighbor%s", srcLabel, boxW, boxH, x, y, downW, downH, boxW, boxH, blurLabel),
-			fmt.Sprintf("%s%soverlay=%d:%d:enable='between(t\\,%.3f\\,%.3f)'%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),
+			fmt.Sprintf("%scrop=%d:%d:%d:%d,scale=%d:%d:flags=neighbor+full_chroma_inp,scale=%d:%d:flags=neighbor+full_chroma_inp%s", srcLabel, boxW, boxH, x, y, downW, downH, boxW, boxH, blurLabel),
+			fmt.Sprintf("%s%soverlay=%d:%d:enable='between(t\\,%.3f\\,%.3f)':format=rgb%s", baseLabel, blurLabel, x, y, startS, endS, outLabel),
 		}, outLabel
 	}
 	return []string{
