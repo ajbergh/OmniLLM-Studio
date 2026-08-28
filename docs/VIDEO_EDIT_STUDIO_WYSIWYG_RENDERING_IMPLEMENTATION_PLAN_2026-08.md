@@ -9,49 +9,55 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG program PR: **#287 — Align FFmpeg pixelate sampling with explicit neighbor scaling** — squash merge `2774ee76913ddea0ef691d90bbc285180893b899` (2026-08-28).
+Latest merged WYSIWYG program PR: **#288 — Execute proven pixelate backdrop on Canvas** — squash merge `7be8e86f9ded0b31b265844e804a92bca3c1b81c` (2026-08-28).
 
-Current implementation PR: **#288 — Execute proven pixelate backdrop on Canvas** on branch `feature/video-wysiwyg-phase3-pixelate-canvas-consumer`, created directly from #287's actual squash result `2774ee76913ddea0ef691d90bbc285180893b899`.
+Current implementation PR: **#289 — Retain opaque pixelate preview-render evidence** on branch `test/video-wysiwyg-phase3-pixelate-opaque-parity-evidence`, created directly from #288's actual squash result `7be8e86f9ded0b31b265844e804a92bca3c1b81c`.
 
 **Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** Renderer-independent contracts own authored semantics. Browser/FFmpeg consumers may produce renderer-specific evidence, but they must not silently redefine canonical intent.
 
-### #287 merged result
+### #288 merged result
 
-#287 removed the FFmpeg sampling ambiguity discovered during #285 without broadening feature support:
-
-- `backend/internal/video/renderer.go` now makes **both** pixelate scale passes explicit libswscale nearest-neighbor operations. The reduction stage no longer depends on FFmpeg's implicit scaler.
-- `backend/internal/video/renderer_pixelate_sampling_test.go` locks a non-divisible `403×307` region with block size `20` to the canonical floor reduction `20×15` and requires `flags=neighbor` on both scale stages.
-- `renderer_capabilities.go` remained unchanged because this was determinism correction for an already-reported annotation path, not a new supported feature.
-- The slice intentionally did **not** claim transparent-source alpha, pixel-format conversion, premultiplication, codec-decoded byte identity, or Canvas backdrop acquisition parity.
-- Exact final head `d0ef841b3197df1ed6bc414414b467ccc6c9b54b` passed Security #1668, Quality #1663, backend tests/race, frontend lint/unit/performance/build, full Playwright smoke, immutable video-renderer parity capture, and all scheduled platform assurance workflows.
-- Retained Quality #1663 artifacts include `video-parity-baseline` digest `sha256:ad5c1e8fc5e0643d6a2ef351ee4028b49de7ba86ba08c31b4b2ef473ef0beecb` and `playwright-report` digest `sha256:da9b97df4a08ae43b6d56a8a1b1a78f2b5a244d155844a20e4f245ff0281be52`.
-- Final review audit found no comments, reviews, or unresolved review threads.
-
-### #288 current scope
-
-#288 executes the first deliberately narrow browser Canvas consumer for a runtime-proven opaque pixelate backdrop while keeping cross-runtime decoded-byte parity as separate evidence work:
+#288 executed the first deliberately narrow browser Canvas pixelate consumer for a runtime-proven opaque backdrop while preserving fail-closed fallback behavior:
 
 - `PreviewPixelateCanvas.tsx` reuses the already-mounted `<video>`/`<img>` as the sole decoder and source-time authority. It does not create a second media element or decoder.
-- `previewFrameWeightedPairCanvas.ts` now exposes the existing canonical media crop/fit/transform painter as a shared Canvas primitive; weighted transition behavior delegates to the same implementation.
+- `previewFrameWeightedPairCanvas.ts` exposes the existing canonical media crop/fit/transform painter as a shared Canvas primitive; weighted transition behavior delegates to the same implementation.
 - `preview-pixelate-canvas-region-v1` mirrors the current FFmpeg pixelate region's integer shape scaling, center-relative placement, signed position truncation, canvas-bound clamping, and #285 non-divisible raster-grid policy.
 - Runtime acquisition rasterizes the admitted lower media layer through canonical media geometry into an isolated full-canvas surface, samples the exact target rectangle, and requires **every** sampled alpha byte to equal `255` before exact Canvas execution.
 - Proven opaque bytes feed `preview-pixelate-raster-v1`. The target's existing preview host is normalized only after the Canvas reports ready, preserving the host's z-order while preventing a second CSS transform/resample.
 - While exact Canvas is active, the CSS pixelate child is hidden and its `pixelate-css-approximation` marker is removed. Cleanup restores the exact prior host style, child visibility, and deferred marker.
 - Transparent regions, decoder-budget posters, structurally unsupported state, free-running playback, and other unproven cases keep the CSS compatibility painter. Runtime errors/timeouts remain evidence failures rather than silently passing parity-ready.
-- The structural planner now also defers pixelate transform keyframes and explicit axis-scale values that differ from the legacy scalar `scale`, because the current FFmpeg region path is static and consumes only scalar region scale. Static uniform scalar scale remains eligible.
+- The structural planner also defers pixelate transform keyframes and explicit axis-scale values that differ from the legacy scalar `scale`, because the current FFmpeg region path is static and consumes only scalar region scale. Static uniform scalar scale remains eligible.
 - Focused Vitest coverage locks FFmpeg-compatible integer region geometry, edge clamping, non-divisible `403×307 → 20×15` raster dimensions, opacity proof, scalar-scale eligibility, and renderer-static transform deferrals.
-- The existing `parity-torture-v1` pixelate annotation remains on the compatibility path because it has rotation and reduced opacity; #288 does not silently reinterpret that fixture.
-- This slice still does **not** prove browser↔FFmpeg decoded RGB byte identity, codec/color conversion, or transparent/premultiplied-alpha semantics. Those remain the next evidence boundary before eligibility broadens.
-- **Validation status:** hosted Actions are pending on #288's final tracker-bearing head. Do not call this slice green until Quality/Security, full Playwright, and retained parity evidence actually execute on that exact head.
+- The existing `parity-torture-v1` pixelate annotation remains on the compatibility path because it has rotation and reduced opacity; #288 did not silently reinterpret that fixture.
+- The first #288 Quality wave exposed only an incomplete TypeScript test-fixture cast. That superseded head was corrected by constructing a complete canonical frame fixture; production behavior did not change.
+- Exact final head `e05bc342fe6c4cd95373ea076626e2abede7214d` passed Security #1672, Quality #1667, backend formatting/vet/tests/race, frontend lint/449 unit tests/performance/build, full Playwright smoke, immutable video-renderer parity capture, Windows desktop, Helm, plugin lifecycle, and all scheduled platform assurance workflows.
+- Retained Quality #1667 artifacts include `video-parity-baseline` digest `sha256:0267093e348d00040af90c11e95686f92a84599e3560e93cd778edfe07bc928b` and `playwright-report` digest `sha256:fa1c6f488f12d2f3d081cd34a97a5882b7f876a3f35eca60e2a2d9ef7fd579c9`.
+- Final review audit found no comments, reviews, or unresolved review threads.
+
+### #289 current scope
+
+#289 adds retained browser↔FFmpeg pixel evidence for the narrow #288-admitted opaque path without modifying the established 103-frame torture baseline or prematurely declaring decoded parity:
+
+- `parity-pixelate-opaque-v1` is a separate deterministic 512×512/30 fps fixture with one 1:1 opaque PNG backdrop, one static `403×307` pixelate region using block size `20`, and four fixed sample frames (`0`, `15`, `30`, `59`).
+- The fixture intentionally uses the deterministic `asset-square.png` source so the first decoded comparison isolates pixelate sampling/composition from lossy video codec and color-conversion noise.
+- A versioned frame-indexed structural-region manifest binds `pixelate-output` to exact canonical frame identity and the fixed renderer-compatible rectangle `[71,94)-[474,401)`.
+- The existing immutable snapshot capture pipeline writes same-frame preview/rendered PNG pairs; #289 does not introduce a competing capture path.
+- `video-pixelate-parity-assert.mjs` independently proves that each sampled browser frame actually used `canonical-canvas`, reached a ready Canvas surface, normalized the target host, removed the CSS approximation marker, and reported no structural/runtime deferral or error.
+- The existing `video-parity-report --regions` path compares every `403×307` pixelate-region RGB pixel exactly. The focused workflow verifies region presence and compared-pixel count and retains exact/non-exact results per frame.
+- The first focused evidence run intentionally uses `--allow-fail`. A mismatch is retained as evidence to investigate; it is not converted into a passing parity claim. The workflow itself only requires that the intended consumer executed and that complete region metrics were produced.
+- The dedicated `Video Pixelate Parity Evidence` workflow retains fixture, snapshot capture, `pixelate-canvas-evidence.json`, structural parity report, `pixelate-evidence-summary.json`, runtime logs, and toolchain identity for 14 days.
+- `parity-torture-v1` and the existing Quality `video-parity-baseline` workflow remain unchanged, preserving longitudinal baseline comparability.
+- Codec-decoded video RGB behavior, browser↔FFmpeg color conversion, transparent/premultiplied-alpha semantics, multiple regions/backdrops, and broader pixelate eligibility remain explicit later boundaries.
+- **Validation status:** the first hosted wave may run before this tracker commit and is diagnostic only. Final merge evidence must execute on #289's exact tracker-bearing head.
 
 ## Phase tracker
 
 | Phase | Status | Progress / exit work |
 |---|---|---|
-| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged fail-closed frame-indexed region-policy inputs. Production structural policy, codec-aware decoded-region semantics, resource-font fixture coverage, and second-platform retained evidence remain. |
+| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged fail-closed frame-indexed region-policy inputs. #289 adds a separate retained exact-region evidence fixture for the first opaque pixelate Canvas path. Production structural policy, codec-aware decoded-region semantics, resource-font fixture coverage, and second-platform retained evidence remain. |
 | Phase 1 — Immutable submission | **Complete** | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend dirty/concurrency behavior are implemented. |
 | Phase 2 — Canonical contract | **Complete** | Frame/range/source/order, curves, transforms/geometry/projection, transitions, effects, text/fonts, shapes, cursor, immutable source provenance, and AudioGraph semantics are versioned and cross-runtime checked. #260 closed the final contract gap. |
-| Phase 3 — Shared preview composition | **In progress** | #261–#287 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, exact browser font readiness, Chromium text-layout snapshots, deterministic pixelate raster sampling/backdrop admission, and explicit FFmpeg neighbor scaling. #288 adds runtime-proven opaque Canvas backdrop consumption. Decoded browser↔FFmpeg pixel evidence, transparent-alpha semantics, weighted-raster broadening, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |
+| Phase 3 — Shared preview composition | **In progress** | #261–#288 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, exact browser font readiness, Chromium text-layout snapshots, deterministic pixelate raster sampling/backdrop admission, explicit FFmpeg neighbor scaling, and runtime-proven opaque Canvas backdrop consumption. #289 measures retained browser↔FFmpeg opaque-PNG region equality. Codec/video evidence, transparent-alpha semantics, weighted-raster broadening, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, Chromium text metrics/fonts, shapes, transitions, effects, cursor, camera, color space, and deterministic asset loading. |
 | Phase 6 — Audio parity closure | Not started | Make preview/Chromium/export obey AudioGraph exactly, including pitch, gain/fades, channels, program processing, processed stems, and decoded delivery. |
@@ -105,7 +111,7 @@ Unsupported/deferred painter sources stay explicit debt and do not become canoni
 - #284 makes Chromium DOM layout the sole browser-side glyph-layout snapshot authority; it does not introduce Canvas `measureText` or FFmpeg `text_w`/`text_h` semantics.
 - Immutable static-font identity remains Render Manifest-backed by `font-resource-provenance-v1`.
 - A family-name-only snapshot is valid evidence for that Chromium environment but is not cross-machine exact font provenance. Resource-backed faces remain the route to deterministic face identity.
-- `shape-state-v1` owns shape geometry/style. #285 defines `preview-pixelate-raster-v1`; #286 defines fail-closed backdrop admission; #287 aligns both FFmpeg scale passes; #288 consumes only decoded opaque browser regions that pass structural/runtime proof. Cross-runtime decoded-byte evidence still gates broader pixelate claims.
+- `shape-state-v1` owns shape geometry/style. #285 defines `preview-pixelate-raster-v1`; #286 defines fail-closed backdrop admission; #287 aligns both FFmpeg scale passes; #288 consumes only decoded opaque browser regions that pass structural/runtime proof; #289 measures retained exact-region output for an isolated opaque PNG source before any broader parity claim.
 - `cursor-state-v1` owns exact rational cursor sampling, visibility, scale, highlight/click-ring state, and click proximity.
 
 ### AudioGraph v1
@@ -160,6 +166,7 @@ Unsupported/deferred painter sources stay explicit debt and do not become canoni
 | #285 | Deterministic pixelate raster grid and libswscale-neighbor sampling | `64e34450806fc97da07ef85901fee591b4a59171` |
 | #286 | Fail-closed exact pixelate backdrop admission | `40e895eec8323da03acd7b4f077743c8a3411eea` |
 | #287 | Explicit FFmpeg neighbor sampling on both pixelate scale passes | `2774ee76913ddea0ef691d90bbc285180893b899` |
+| #288 | Runtime-proven opaque pixelate Canvas consumption | `7be8e86f9ded0b31b265844e804a92bca3c1b81c` |
 
 ## Safe stacked-branch normalization
 
@@ -173,13 +180,15 @@ Every stacked slice starts from the **actual squash result on current `main`**:
 6. Audit comments/reviews/threads and merge with expected-head protection.
 7. Create the next slice from the new actual squash result.
 
-Recent lineage: #283 from #282 squash `38ea95ab...`; #284 from #283 `3543ddf7...`; #285 from #284 `7884fef8...`; #286 from #285 `64e34450...`; #287 from #286 `40e895ee...`; **#288 directly from #287 squash `2774ee76913ddea0ef691d90bbc285180893b899`**.
+Recent lineage: #284 from #283 squash `3543ddf7...`; #285 from #284 `7884fef8...`; #286 from #285 `64e34450...`; #287 from #286 `40e895ee...`; #288 from #287 `2774ee76...`; **#289 directly from #288 squash `7be8e86f9ded0b31b265844e804a92bca3c1b81c`**.
 
 ## Phase 0 parity baseline
 
 The deterministic `parity-torture-v1` fixture covers 20 seconds at 640×360/30 fps with 103 named samples spanning boundaries, rates, transforms, curves, text, shapes, effects, transitions, camera, captions, cursor, and audio.
 
-It does not yet include a project font resource. Add resource-font fixture coverage before treating cross-machine glyph identity as proven. Retained visual evidence remains diagnostic until structural zero-tolerance policy and codec-aware decoded thresholds are frozen and retained on a second supported OS/FFmpeg environment.
+#289 intentionally keeps that longitudinal fixture unchanged and adds `parity-pixelate-opaque-v1` as a focused evidence fixture. The focused fixture can require exact structural-region equality without forcing codec-noisy or unrelated torture-frame behavior into the same policy decision.
+
+The torture baseline does not yet include a project font resource. Add resource-font fixture coverage before treating cross-machine glyph identity as proven. Retained visual evidence remains diagnostic until structural zero-tolerance policy and codec-aware decoded thresholds are frozen and retained on a second supported OS/FFmpeg environment.
 
 ## Validation matrix
 
@@ -214,19 +223,22 @@ Hosted CI is authoritative for platform/toolchain cases unavailable in the curre
 | Intrinsic size changes after dimensions are frozen | Require a second Chromium pass with stable width/height and line-fragment count before parity-ready. |
 | Family-name-only text is mistaken for deterministic face identity | Snapshot records provenance/runtime; exact cross-machine identity still requires a resource-backed face. |
 | Text-layout gate bypasses weighted/pixelate Canvas readiness | Independent resume flags preserve traversal through each deterministic readiness gate. |
-| Pixelate raster math is confused with backdrop-source parity | #285 owns grid/sample-index math; #286 owns structural backdrop admission; #287 owns FFmpeg scaler selection; #288 owns browser runtime acquisition/opaque proof. Decoded cross-runtime bytes remain separate evidence. |
+| Pixelate raster math is confused with backdrop-source parity | #285 owns grid/sample-index math; #286 owns structural backdrop admission; #287 owns FFmpeg scaler selection; #288 owns browser runtime acquisition/opaque proof; #289 measures retained cross-runtime output. None is substituted for another. |
 | MIME type is treated as proof of an opaque backdrop | #288 scans the sampled RGBA target rectangle and admits exact Canvas execution only when every alpha byte is `255`. |
 | A second decoder becomes a competing source-time authority | #288 reuses the already-mounted preview `<video>`/`<img>` and only paints that existing decoded frame. |
 | Pixelate target host applies a second transform to exact bytes | The Canvas stays hidden while proving readiness; only then is the existing target host normalized to full-stage geometry and the CSS painter hidden. |
 | FFmpeg/static-region behavior is confused with canonical transform support | #288 explicitly defers target transform keyframes and explicit axis scale that diverges from legacy scalar `scale`. |
+| Evidence accidentally measures the CSS fallback instead of the Canvas consumer | #289 independently requires `canonical-canvas`, ready surface/host markers, no deferred/error markers, and absence of `pixelate-css-approximation` for every sampled frame. |
+| A diagnostic `--allow-fail` report is mistaken for exact parity | #289 retains `exact`, changed-pixel count, pass rate, SSIM, and max-channel delta per region/frame; workflow success proves evidence completeness, not exactness. Exact parity is claimed only if retained metrics say so. |
 | Alpha/pixel-format conversion is assumed byte-identical across browser and FFmpeg | Keep transparent-source execution deferred until explicit decoded RGBA/premultiplication evidence exists. |
-| Codec-noisy decoded equality is treated as structural parity | Phase 0 keeps canonical structural policy separate from codec-aware decoded evidence. |
+| Codec-noisy decoded equality is treated as structural parity | #289 starts with a deterministic opaque PNG; codec/video evidence and thresholds remain a separate later boundary. |
 | CI scheduling hides code state | Only actually executed checks count. |
 
 ## Next recommended slice
 
-1. Complete #288 hosted validation, exact-tree/review audit, retained parity evidence, tracker freeze, and expected-head squash merge.
-2. Add a deliberately clean admitted opaque pixelate fixture and retain decoded browser↔FFmpeg region evidence for the exact Canvas path before claiming decoded-pixel parity.
-3. Define and test transparent/premultiplied-alpha semantics before permitting transparent-source Canvas execution.
-4. Broaden pixelate and weighted-Canvas raster eligibility only after each additional painter/source has exact composition semantics and retained evidence.
-5. Continue Phase 3 with normal-playback canonicalization, explicit diagnostics/rollback, then shared AudioGraph consumption.
+1. Complete #289 focused evidence plus Quality/Security validation on the exact tracker-bearing head; retain and inspect `pixelate-evidence-summary.json` before any parity claim.
+2. If all opaque-PNG `pixelate-output` regions are exact, freeze that structural policy and add a separate codec-decoded video evidence case with explicitly justified color/codec thresholds rather than weakening PNG exactness.
+3. If opaque-PNG regions are not exact, use the retained changed-pixel metrics/heatmaps to isolate browser Canvas versus FFmpeg conversion/sampling differences before broadening eligibility.
+4. Define and test transparent/premultiplied-alpha semantics before permitting transparent-source Canvas execution.
+5. Broaden pixelate and weighted-Canvas raster eligibility only after each additional painter/source has exact composition semantics and retained evidence.
+6. Continue Phase 3 with normal-playback canonicalization, explicit diagnostics/rollback, then shared AudioGraph consumption.
