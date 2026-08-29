@@ -34,11 +34,11 @@ type regionMeasurement struct {
 }
 
 type report struct {
-	SchemaVersion int                       `json:"schema_version"`
-	Fixture       string                    `json:"fixture"`
-	Thresholds    video.ParityThresholds    `json:"thresholds"`
-	Regions       []regionMeasurement       `json:"regions"`
-	Pass          bool                      `json:"pass"`
+	SchemaVersion int                    `json:"schema_version"`
+	Fixture       string                 `json:"fixture"`
+	Thresholds    video.ParityThresholds `json:"thresholds"`
+	Regions       []regionMeasurement    `json:"regions"`
+	Pass          bool                   `json:"pass"`
 }
 
 func main() {
