@@ -43,14 +43,20 @@ type RenderRequest struct {
 
 // resolvedClip is a timeline clip with its asset file path resolved to an absolute path.
 type resolvedClip struct {
-	inputIdx      int
-	trackIndex    int
-	clip          TimelineClip
-	filePath      string
-	isVideo       bool
-	isImage       bool
-	isAudio       bool
-	audioChannels int
+	// inputIdx is a clip-local filter label ordinal. sourceInputIdx is
+	// the actual FFmpeg input index and may be shared by many fidelity
+	// segments that reference the same immutable media file.
+	inputIdx        int
+	sourceInputIdx  int
+	videoInputLabel string
+	audioInputLabel string
+	trackIndex      int
+	clip            TimelineClip
+	filePath        string
+	isVideo         bool
+	isImage         bool
+	isAudio         bool
+	audioChannels   int
 	// hasAudio reports whether a video asset carries an audio stream that
 	// should join the mixdown (always true for audio assets).
 	hasAudio bool
@@ -202,11 +208,7 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		// ── Media compositing path ─────────────────────────────────────────
 		// Assign input indices and add each file as an FFmpeg input.
 		nextIdx := 1
-		for i := range resolved {
-			resolved[i].inputIdx = nextIdx
-			args = append(args, "-i", resolved[i].filePath)
-			nextIdx++
-		}
+		args, nextIdx = appendResolvedClipInputs(args, resolved, nextIdx)
 		hasAudioClips := func() bool {
 			for _, rc := range resolved {
 				if rc.hasAudio {
@@ -564,6 +566,110 @@ func aliasResolvedClipInputs(workDir string, clips []resolvedClip) []resolvedCli
 	return clips
 }
 
+// appendResolvedClipInputs adds each immutable media file to FFmpeg once, then
+// assigns clip-local fanout labels for every logical consumer. Fidelity expansion
+// can create hundreds of short segments from one authored clip; opening the same
+// file once per segment multiplies decoder memory without changing semantics.
+func appendResolvedClipInputs(args []string, clips []resolvedClip, nextIdx int) ([]string, int) {
+	if nextIdx < 1 {
+		nextIdx = 1
+	}
+	sourceByPath := map[string]int{}
+	visualBySource := map[int][]int{}
+	audioBySource := map[int][]int{}
+	for i := range clips {
+		clips[i].inputIdx = i + 1
+		sourceIdx, ok := sourceByPath[clips[i].filePath]
+		if !ok {
+			sourceIdx = nextIdx
+			nextIdx++
+			sourceByPath[clips[i].filePath] = sourceIdx
+			args = append(args, "-i", clips[i].filePath)
+		}
+		clips[i].sourceInputIdx = sourceIdx
+		if clips[i].isVideo || clips[i].isImage {
+			visualBySource[sourceIdx] = append(visualBySource[sourceIdx], i)
+		}
+		if clips[i].hasAudio {
+			audioBySource[sourceIdx] = append(audioBySource[sourceIdx], i)
+		}
+	}
+	assignResolvedInputLabels(clips, visualBySource, "v")
+	assignResolvedInputLabels(clips, audioBySource, "a")
+	return args, nextIdx
+}
+
+func assignResolvedInputLabels(clips []resolvedClip, consumers map[int][]int, streamKind string) {
+	for sourceIdx, clipIndices := range consumers {
+		for ordinal, clipIndex := range clipIndices {
+			label := fmt.Sprintf("[%d:%s]", sourceIdx, streamKind)
+			if len(clipIndices) > 1 {
+				label = fmt.Sprintf("[input%d_%s%d]", sourceIdx, streamKind, ordinal)
+			}
+			if streamKind == "v" {
+				clips[clipIndex].videoInputLabel = label
+			} else {
+				clips[clipIndex].audioInputLabel = label
+			}
+		}
+	}
+}
+
+// resolvedInputFanoutParts emits split/asplit only when a source stream has
+// multiple logical consumers. AVFrame references are fanned out after one decode;
+// each branch still applies its own trim, rate, transform, fades, and timing.
+func resolvedInputFanoutParts(clips []resolvedClip, includeVideo, includeAudio bool) []string {
+	visualBySource := map[int][]string{}
+	audioBySource := map[int][]string{}
+	for _, clip := range clips {
+		if clip.sourceInputIdx <= 0 {
+			continue
+		}
+		if includeVideo && (clip.isVideo || clip.isImage) && clip.videoInputLabel != "" {
+			visualBySource[clip.sourceInputIdx] = append(visualBySource[clip.sourceInputIdx], clip.videoInputLabel)
+		}
+		if includeAudio && clip.hasAudio && clip.audioInputLabel != "" {
+			audioBySource[clip.sourceInputIdx] = append(audioBySource[clip.sourceInputIdx], clip.audioInputLabel)
+		}
+	}
+	indices := make([]int, 0, len(visualBySource)+len(audioBySource))
+	seen := map[int]bool{}
+	for sourceIdx := range visualBySource {
+		seen[sourceIdx] = true
+		indices = append(indices, sourceIdx)
+	}
+	for sourceIdx := range audioBySource {
+		if !seen[sourceIdx] {
+			indices = append(indices, sourceIdx)
+		}
+	}
+	sort.Ints(indices)
+	parts := make([]string, 0, len(indices)*2)
+	for _, sourceIdx := range indices {
+		if labels := visualBySource[sourceIdx]; len(labels) > 1 {
+			parts = append(parts, fmt.Sprintf("[%d:v]split=%d%s", sourceIdx, len(labels), strings.Join(labels, "")))
+		}
+		if labels := audioBySource[sourceIdx]; len(labels) > 1 {
+			parts = append(parts, fmt.Sprintf("[%d:a]asplit=%d%s", sourceIdx, len(labels), strings.Join(labels, "")))
+		}
+	}
+	return parts
+}
+
+func resolvedVideoInputLabel(clip resolvedClip) string {
+	if clip.videoInputLabel != "" {
+		return clip.videoInputLabel
+	}
+	return fmt.Sprintf("[%d:v]", clip.inputIdx)
+}
+
+func resolvedAudioInputLabel(clip resolvedClip) string {
+	if clip.audioInputLabel != "" {
+		return clip.audioInputLabel
+	}
+	return fmt.Sprintf("[%d:a]", clip.inputIdx)
+}
+
 func clipZIndex(clip TimelineClip) int {
 	if clip.ZIndex != nil {
 		return *clip.ZIndex
@@ -624,7 +730,7 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 // outputs entirely. FFmpeg rejects a labeled filter output that is not mapped,
 // so building the audio branch and then mapping video alone is not valid.
 func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, width, height int, includeAudio bool) (filterStr, videoLabel, audioLabel string) {
-	var parts []string
+	parts := resolvedInputFanoutParts(clips, true, includeAudio)
 
 	// ── Visual chain: media overlays and text interleaved in layer order ────
 	// One ordered list so a text clip on a lower layer composites beneath
@@ -751,7 +857,7 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 			chain = append(chain, fmt.Sprintf("fade=t=out:st=%.3f:d=%.3f:alpha=1", durS-fadeOutS, fadeOutS))
 		}
 
-		srcFilter := fmt.Sprintf("[%d:v]%s%s", rc.inputIdx, strings.Join(chain, ","), cLabel)
+		srcFilter := fmt.Sprintf("%s%s%s", resolvedVideoInputLabel(rc), strings.Join(chain, ","), cLabel)
 		xExpr := fmt.Sprintf("(W-w)/2%+.0f", tr.x)
 		if expr := positionKeyframeExpr(rc.clip.Keyframes, "x", startS); expr != "" {
 			xExpr = "(W-w)/2+" + expr
@@ -798,7 +904,9 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 }
 
 func buildAudioFilterComplex(doc TimelineDocument, clips []resolvedClip) (string, string) {
-	parts, label := audioFilterParts(doc, clips)
+	parts := resolvedInputFanoutParts(clips, false, true)
+	audioParts, label := audioFilterParts(doc, clips)
+	parts = append(parts, audioParts...)
 	if label != "" {
 		durationSeconds := float64(maxInt64(doc.DurationMS, 1)) / 1000
 		// adelay can leave the first decoded frame with a non-zero timestamp even
@@ -841,7 +949,7 @@ func audioFilterParts(doc TimelineDocument, clips []resolvedClip) ([]string, str
 			chain = append(chain, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f", durationS-fadeOutS, fadeOutS))
 		}
 		chain = append(chain, fmt.Sprintf("adelay=%d|%d", rc.clip.StartMS, rc.clip.StartMS))
-		parts = append(parts, fmt.Sprintf("[%d:a]%s%s", rc.inputIdx, strings.Join(chain, ","), label))
+		parts = append(parts, fmt.Sprintf("%s%s%s", resolvedAudioInputLabel(rc), strings.Join(chain, ","), label))
 		labels = append(labels, label)
 	}
 	if len(labels) > 1 {
