@@ -10,7 +10,6 @@ import {
 import {
   previewPixelateRegionIsOpaque,
   resolvePreviewPixelateCanvasRegion,
-  type PreviewPixelateCanvasRegion,
 } from './previewPixelateCanvasRuntime';
 
 export type PreviewPixelateCanvasStatusKind = 'pending' | 'ready' | 'deferred' | 'failed';
@@ -42,6 +41,11 @@ type RasterSource = HTMLImageElement | HTMLVideoElement;
  * that decoded frame through canonical media geometry, proves the entire target
  * region opaque, then runs preview-pixelate-raster-v1. Any missing readiness,
  * alpha, or runtime error leaves the CSS compatibility painter available.
+ *
+ * Canvas bitmap dimensions and placement are owned imperatively by draw().
+ * React deliberately keeps static 1x1 virtual width/height props so a status
+ * render cannot re-apply changed bitmap dimensions and clear pixels that were
+ * just painted into the DOM canvas.
  */
 export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   plan,
@@ -56,14 +60,12 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [sourceRevision, setSourceRevision] = useState(0);
   const [sourceFailed, setSourceFailed] = useState(false);
-  const [region, setRegion] = useState<PreviewPixelateCanvasRegion | null>(null);
   const [status, setStatus] = useState<PreviewPixelateCanvasStatusKind>('pending');
   const [reason, setReason] = useState<string | undefined>();
   const bumpSourceRevision = useCallback(() => setSourceRevision((value) => value + 1), []);
 
   useEffect(() => {
     setSourceFailed(false);
-    setRegion(null);
     setStatus('pending');
     setReason(undefined);
   }, [executionKey]);
@@ -109,7 +111,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
     };
   }, [bumpSourceRevision, plan.backdrop.clip.id, sourceForClip]);
 
-  const draw = useCallback((): { status: PreviewPixelateCanvasStatusKind; region?: PreviewPixelateCanvasRegion; reason?: string } => {
+  const draw = useCallback((): { status: PreviewPixelateCanvasStatusKind; reason?: string } => {
     const output = canvasRef.current;
     if (!output || canvasWidth <= 0 || canvasHeight <= 0 || stageScale <= 0) {
       return { status: 'pending' };
@@ -141,16 +143,14 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
       resolvedRegion.width,
       resolvedRegion.height,
     );
+
+    setOutputGeometry(output, resolvedRegion.x, resolvedRegion.y, resolvedRegion.width, resolvedRegion.height, stageScale);
     if (!previewPixelateRegionIsOpaque(input.data)) {
-      output.width = resolvedRegion.width;
-      output.height = resolvedRegion.height;
       output.getContext('2d')?.clearRect(0, 0, output.width, output.height);
-      return { status: 'deferred', region: resolvedRegion, reason: 'opaque-region-proof' };
+      return { status: 'deferred', reason: 'opaque-region-proof' };
     }
 
     const pixelated = pixelatePreviewRgba(resolvedRegion.raster, input.data);
-    output.width = resolvedRegion.width;
-    output.height = resolvedRegion.height;
     const outputContext = output.getContext('2d');
     if (!outputContext) throw new Error('pixelate Canvas could not create output 2D context');
     outputContext.clearRect(0, 0, output.width, output.height);
@@ -159,18 +159,16 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
       0,
       0,
     );
-    return { status: 'ready', region: resolvedRegion };
+    return { status: 'ready' };
   }, [canvasHeight, canvasWidth, plan.backdrop, plan.target.canonicalState, sourceFailed, sourceForClip, stageScale]);
 
   useEffect(() => {
     try {
       const result = draw();
       setStatus(result.status);
-      setRegion(result.region ?? null);
       setReason(result.reason);
     } catch (error) {
       setStatus('failed');
-      setRegion(null);
       setReason(error instanceof Error ? error.message : String(error));
     }
   }, [draw, sourceRevision]);
@@ -197,18 +195,31 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
     >
       <canvas
         ref={canvasRef}
-        width={region?.width ?? 1}
-        height={region?.height ?? 1}
+        width={1}
+        height={1}
         className="absolute"
-        style={region ? {
-          left: region.x * stageScale,
-          top: region.y * stageScale,
-          width: region.width * stageScale,
-          height: region.height * stageScale,
-        } : undefined}
       />
     </div>
   );
+}
+
+function setOutputGeometry(
+  output: HTMLCanvasElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  stageScale: number,
+): void {
+  // Assign bitmap dimensions before painting. Because React's virtual width and
+  // height remain permanently 1x1, later status renders do not overwrite these
+  // imperative dimensions and therefore cannot clear the finished bitmap.
+  output.width = width;
+  output.height = height;
+  output.style.left = `${x * stageScale}px`;
+  output.style.top = `${y * stageScale}px`;
+  output.style.width = `${width * stageScale}px`;
+  output.style.height = `${height * stageScale}px`;
 }
 
 function sourceReady(source: RasterSource): boolean {

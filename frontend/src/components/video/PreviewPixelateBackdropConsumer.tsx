@@ -24,6 +24,13 @@ interface RuntimeState {
   reason?: string;
 }
 
+interface PixelateParitySurfaceState {
+  status: PreviewPixelateCanvasStatusKind | null;
+  active: boolean;
+}
+
+type PixelateParityGateState = 'waiting' | 'pass' | 'failed';
+
 const IDLE_RUNTIME: RuntimeState = { executionKey: '', status: 'pending' };
 
 /**
@@ -153,12 +160,18 @@ export function PreviewPixelateBackdropConsumer() {
 
   useLayoutEffect(() => {
     if (!stage) return;
+    const previousFrame = stage.getAttribute('data-preview-pixelate-frame-index');
     const previousPlan = stage.getAttribute('data-preview-pixelate-plan-mode');
     const previousConsumer = stage.getAttribute('data-preview-pixelate-consumer');
     const previousStructural = stage.getAttribute('data-preview-pixelate-structural-deferred');
     const previousRuntime = stage.getAttribute('data-preview-pixelate-runtime-deferred');
     const previousError = stage.getAttribute('data-preview-pixelate-runtime-error');
 
+    if (deterministicFrame !== null) {
+      stage.setAttribute('data-preview-pixelate-frame-index', String(deterministicFrame));
+    } else {
+      stage.removeAttribute('data-preview-pixelate-frame-index');
+    }
     stage.setAttribute('data-preview-pixelate-plan-mode', plan.mode);
     stage.setAttribute('data-preview-pixelate-consumer', canvasReady ? 'canonical-canvas' : 'css-fallback');
     if (plan.mode === 'canonical-deferred' && plan.deferredReasons.length > 0) {
@@ -177,13 +190,14 @@ export function PreviewPixelateBackdropConsumer() {
     }
 
     return () => {
+      restoreAttribute(stage, 'data-preview-pixelate-frame-index', previousFrame);
       restoreAttribute(stage, 'data-preview-pixelate-plan-mode', previousPlan);
       restoreAttribute(stage, 'data-preview-pixelate-consumer', previousConsumer);
       restoreAttribute(stage, 'data-preview-pixelate-structural-deferred', previousStructural);
       restoreAttribute(stage, 'data-preview-pixelate-runtime-deferred', previousRuntime);
       restoreAttribute(stage, 'data-preview-pixelate-runtime-error', previousError);
     };
-  }, [canvasReady, plan, posterDeferredReason, runtimeReason, runtimeStatus, stage]);
+  }, [canvasReady, deterministicFrame, plan, posterDeferredReason, runtimeReason, runtimeStatus, stage]);
 
   useLayoutEffect(() => {
     if (!canvasReady || !stage || plan.mode !== 'canonical-ready') return;
@@ -232,24 +246,35 @@ export function PreviewPixelateBackdropConsumer() {
     };
   }, [canvasReady, plan, stage]);
 
+  // This listener is deliberately permanent for the mounted stage. The legacy
+  // preview can emit base readiness before React has finished classifying the
+  // requested frame; a conditionally-mounted gate can therefore miss the event.
+  // Frame-stamping makes the gate wait until this consumer has evaluated the
+  // same canonical frame before deciding whether to pass, defer, or require a
+  // visibly active Canvas surface.
   useLayoutEffect(() => {
-    if (!consume || !stage || plan.mode !== 'canonical-ready') return;
-    const targetClipId = plan.target.clip.id;
+    if (!stage) return;
     const previousError = stage.getAttribute('data-preview-pixelate-runtime-error');
     const onParityReady = (event: Event) => {
       const detail = (event as CustomEvent<Record<string, unknown>>).detail || {};
       if (detail.pixelateCanvasResume === true) return;
-      const current = pixelateSurfaceStatus(stage, targetClipId);
-      if (current === 'ready' || current === 'deferred') return;
+      const frameIndex = typeof detail.frameIndex === 'number'
+        ? Math.max(0, Math.floor(detail.frameIndex))
+        : null;
+      if (frameIndex === null) return;
+
+      const current = pixelateParityGateState(stage, frameIndex);
+      if (current === 'pass') return;
       event.stopImmediatePropagation();
       if (current === 'failed') {
         stage.setAttribute('data-preview-pixelate-runtime-error', 'pixelate-canvas-failed');
         return;
       }
+
       const deadline = performance.now() + 2000;
       const signalWhenSettled = () => {
-        const settled = pixelateSurfaceStatus(stage, targetClipId);
-        if (settled === 'ready' || settled === 'deferred') {
+        const settled = pixelateParityGateState(stage, frameIndex);
+        if (settled === 'pass') {
           stage.removeAttribute('data-preview-pixelate-runtime-error');
           window.dispatchEvent(new CustomEvent('omnillm:video-parity-ready', {
             detail: { ...detail, pixelateCanvasResume: true },
@@ -264,7 +289,13 @@ export function PreviewPixelateBackdropConsumer() {
           requestAnimationFrame(signalWhenSettled);
           return;
         }
-        stage.setAttribute('data-preview-pixelate-runtime-error', 'pixelate-canvas-not-ready');
+        const plannedFrame = stage.dataset.previewPixelateFrameIndex;
+        stage.setAttribute(
+          'data-preview-pixelate-runtime-error',
+          plannedFrame !== String(frameIndex)
+            ? 'pixelate-plan-frame-not-ready'
+            : 'pixelate-canvas-not-visible',
+        );
       };
       requestAnimationFrame(signalWhenSettled);
     };
@@ -273,7 +304,7 @@ export function PreviewPixelateBackdropConsumer() {
       window.removeEventListener('omnillm:video-parity-ready', onParityReady, true);
       restoreAttribute(stage, 'data-preview-pixelate-runtime-error', previousError);
     };
-  }, [consume, plan, stage]);
+  }, [stage]);
 
   if (!consume || !stage || plan.mode !== 'canonical-ready') return null;
   const host = findPreviewClipNode(stage, plan.target.clip.id);
@@ -301,16 +332,56 @@ function findPreviewClipNode(stage: HTMLElement, clipId: string): HTMLElement | 
   return null;
 }
 
-function pixelateSurfaceStatus(
+function pixelateParityGateState(stage: HTMLElement, frameIndex: number): PixelateParityGateState {
+  if (stage.dataset.previewPixelateFrameIndex !== String(frameIndex)) return 'waiting';
+  const mode = stage.dataset.previewPixelatePlanMode;
+  if (mode === 'legacy' || mode === 'canonical-none' || mode === 'canonical-deferred') return 'pass';
+  if (mode !== 'canonical-ready') return 'waiting';
+  if (stage.dataset.previewPixelateRuntimeError) return 'failed';
+  if (stage.dataset.previewPixelateRuntimeDeferred) return 'pass';
+
+  const targetHost = stage.querySelector<HTMLElement>('[data-preview-pixelate-host="canonical-canvas"]');
+  const targetClipId = targetHost?.dataset.previewClipId;
+  if (targetClipId) {
+    const surface = pixelateParitySurfaceState(stage, targetClipId);
+    if (surface.status === 'failed') return 'failed';
+    if (surface.status === 'deferred') return 'pass';
+    if (surface.status === 'ready' && surface.active) return 'pass';
+    return 'waiting';
+  }
+
+  const surface = stage.querySelector<HTMLElement>('[data-preview-pixelate-execution="canvas"]');
+  if (!surface) return 'waiting';
+  const status = surface.dataset.previewPixelateStatus;
+  if (status === 'failed') return 'failed';
+  if (status === 'deferred') return 'pass';
+  return 'waiting';
+}
+
+function pixelateParitySurfaceState(
   stage: HTMLElement,
   targetClipId: string,
-): PreviewPixelateCanvasStatusKind | null {
+): PixelateParitySurfaceState {
   for (const surface of stage.querySelectorAll<HTMLElement>('[data-preview-pixelate-execution="canvas"]')) {
     if (surface.dataset.previewPixelateTargetClip !== targetClipId) continue;
     const status = surface.dataset.previewPixelateStatus;
-    if (status === 'pending' || status === 'ready' || status === 'deferred' || status === 'failed') return status;
+    if (status !== 'pending' && status !== 'ready' && status !== 'deferred' && status !== 'failed') {
+      return { status: null, active: false };
+    }
+    if (status !== 'ready') return { status, active: false };
+    const host = findPreviewClipNode(stage, targetClipId);
+    const cssFallbackPresent = Boolean(
+      host?.querySelector('[data-preview-shape-painter-deferred="pixelate-css-approximation"]'),
+    );
+    return {
+      status,
+      active: stage.dataset.previewPixelateConsumer === 'canonical-canvas'
+        && host?.dataset.previewPixelateHost === 'canonical-canvas'
+        && surface.style.visibility === 'visible'
+        && !cssFallbackPresent,
+    };
   }
-  return null;
+  return { status: null, active: false };
 }
 
 function restoreAttribute(node: HTMLElement, name: string, value: string | null): void {
