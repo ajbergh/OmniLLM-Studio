@@ -4,17 +4,17 @@ const (
 	ParityPixelateOpaqueFixtureName       = "parity-pixelate-opaque-v1"
 	ParityPixelateDecodedVideoFixtureName = "parity-pixelate-decoded-video-v1"
 
-	parityPixelateOpaqueCanvasWidth  = 512
-	parityPixelateOpaqueCanvasHeight = 512
-	parityPixelateDecodedCanvasWidth = 640
+	parityPixelateOpaqueCanvasWidth   = 512
+	parityPixelateOpaqueCanvasHeight  = 512
+	parityPixelateDecodedCanvasWidth  = 640
 	parityPixelateDecodedCanvasHeight = 360
-	parityPixelateFPS                = 30
-	parityPixelateDurationMS         = int64(2000)
-	parityPixelateRegionWidth        = 403
-	parityPixelateRegionHeight       = 307
-	parityPixelateRegionX            = 17
-	parityPixelateRegionY            = -8
-	parityPixelateBlockSize          = 20
+	parityPixelateFPS                 = 30
+	parityPixelateDurationMS          = int64(2000)
+	parityPixelateRegionWidth         = 403
+	parityPixelateRegionHeight        = 307
+	parityPixelateRegionX             = 17
+	parityPixelateRegionY             = -8
+	parityPixelateBlockSize           = 20
 )
 
 // ParityFixtureRegionFrame binds exact structural-region policy to canonical
