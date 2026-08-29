@@ -34,6 +34,8 @@ interface PreviewPixelateCanvasProps<T extends PreviewPixelateBackdropLayer> {
 
 type RasterSource = HTMLImageElement | HTMLVideoElement;
 
+const MAX_PENDING_SOURCE_RETRIES = 120;
+
 /**
  * Exact deterministic pixelate surface for the deliberately narrow backdrop
  * admission in preview-pixelate-backdrop-plan-v1. The existing preview media
@@ -58,6 +60,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   onStatusChange,
 }: PreviewPixelateCanvasProps<T>) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pendingRetryRef = useRef(0);
   const [sourceRevision, setSourceRevision] = useState(0);
   const [sourceFailed, setSourceFailed] = useState(false);
   const [status, setStatus] = useState<PreviewPixelateCanvasStatusKind>('pending');
@@ -65,6 +68,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   const bumpSourceRevision = useCallback(() => setSourceRevision((value) => value + 1), []);
 
   useEffect(() => {
+    pendingRetryRef.current = 0;
     setSourceFailed(false);
     setStatus('pending');
     setReason(undefined);
@@ -163,15 +167,25 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   }, [canvasHeight, canvasWidth, plan.backdrop, plan.target.canonicalState, sourceFailed, sourceForClip, stageScale]);
 
   useEffect(() => {
+    let retryFrame: number | null = null;
     try {
       const result = draw();
       setStatus(result.status);
       setReason(result.reason);
+      if (result.status === 'pending' && pendingRetryRef.current < MAX_PENDING_SOURCE_RETRIES) {
+        pendingRetryRef.current += 1;
+        retryFrame = window.requestAnimationFrame(bumpSourceRevision);
+      } else if (result.status !== 'pending') {
+        pendingRetryRef.current = 0;
+      }
     } catch (error) {
       setStatus('failed');
       setReason(error instanceof Error ? error.message : String(error));
     }
-  }, [draw, sourceRevision]);
+    return () => {
+      if (retryFrame !== null) window.cancelAnimationFrame(retryFrame);
+    };
+  }, [bumpSourceRevision, draw, sourceRevision]);
 
   useEffect(() => {
     onStatusChange({
