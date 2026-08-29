@@ -14,10 +14,32 @@ func TestParityPixelateOpaqueFixtureIsValidAndIsolated(t *testing.T) {
 	if validated.DurationMS != 2000 {
 		t.Fatalf("duration_ms = %d, want 2000", validated.DurationMS)
 	}
-	if len(assets) != 2 || assets[0].ID != "asset-square" || assets[1].ID != "asset-audio" {
+	if len(assets) != 2 || assets[0].ID != "asset-square" || assets[0].Kind != "image" || assets[1].ID != "asset-audio" {
 		t.Fatalf("assets = %#v, want square image plus audio harness asset", assets)
 	}
+	assertIsolatedPixelateFixture(t, validated)
+}
 
+func TestParityPixelateDecodedVideoFixtureIsValidAndUnscaled(t *testing.T) {
+	doc, assets := ParityPixelateDecodedVideoFixture()
+	validated, err := ValidateTimelineDocument(doc)
+	if err != nil {
+		t.Fatalf("ValidateTimelineDocument() error = %v", err)
+	}
+	if validated.Canvas.Width != 640 || validated.Canvas.Height != 360 || validated.Canvas.FPS != 30 {
+		t.Fatalf("canvas = %dx%d@%d, want 640x360@30", validated.Canvas.Width, validated.Canvas.Height, validated.Canvas.FPS)
+	}
+	if validated.DurationMS != 2000 {
+		t.Fatalf("duration_ms = %d, want 2000", validated.DurationMS)
+	}
+	if len(assets) != 2 || assets[0].ID != "asset-landscape" || assets[0].Kind != "video" || assets[0].Width != 640 || assets[0].Height != 360 || assets[1].ID != "asset-audio" {
+		t.Fatalf("assets = %#v, want 640x360 video plus audio harness asset", assets)
+	}
+	assertIsolatedPixelateFixture(t, validated)
+}
+
+func assertIsolatedPixelateFixture(t *testing.T, validated TimelineDocument) {
+	t.Helper()
 	visualClips := 0
 	pixelateClips := 0
 	for _, track := range validated.Tracks {
@@ -45,6 +67,31 @@ func TestParityPixelateOpaqueFixtureIsValidAndIsolated(t *testing.T) {
 func TestParityPixelateOpaqueSamplesAndRegionsStayFrameBound(t *testing.T) {
 	samples := ParityPixelateOpaqueFrameSamples()
 	wantFrames := []int64{0, 15, 30, 59}
+	assertPixelateFrames(t, samples, wantFrames)
+
+	bounds := ParityPixelateOpaqueRegionBounds()
+	wantBounds := (ParityBounds{MinX: 71, MinY: 94, MaxX: 474, MaxY: 401})
+	if bounds != wantBounds {
+		t.Fatalf("bounds = %#v, want %#v", bounds, wantBounds)
+	}
+	assertPixelateRegionFrames(t, samples, bounds, ParityPixelateOpaqueRegionFrames(samples))
+}
+
+func TestParityPixelateDecodedVideoSamplesAndRegionsStayFrameBound(t *testing.T) {
+	samples := ParityPixelateDecodedVideoFrameSamples()
+	wantFrames := []int64{0, 15, 30, 59}
+	assertPixelateFrames(t, samples, wantFrames)
+
+	bounds := ParityPixelateDecodedVideoRegionBounds()
+	wantBounds := (ParityBounds{MinX: 135, MinY: 18, MaxX: 538, MaxY: 325})
+	if bounds != wantBounds {
+		t.Fatalf("bounds = %#v, want %#v", bounds, wantBounds)
+	}
+	assertPixelateRegionFrames(t, samples, bounds, ParityPixelateDecodedVideoRegionFrames(samples))
+}
+
+func assertPixelateFrames(t *testing.T, samples []ParityFrameSample, wantFrames []int64) {
+	t.Helper()
 	if len(samples) != len(wantFrames) {
 		t.Fatalf("samples = %d, want %d", len(samples), len(wantFrames))
 	}
@@ -53,13 +100,10 @@ func TestParityPixelateOpaqueSamplesAndRegionsStayFrameBound(t *testing.T) {
 			t.Fatalf("samples[%d].frame_index = %d, want %d", i, samples[i].FrameIndex, want)
 		}
 	}
+}
 
-	bounds := ParityPixelateOpaqueRegionBounds()
-	wantBounds := (ParityBounds{MinX: 71, MinY: 94, MaxX: 474, MaxY: 401})
-	if bounds != wantBounds {
-		t.Fatalf("bounds = %#v, want %#v", bounds, wantBounds)
-	}
-	frames := ParityPixelateOpaqueRegionFrames(samples)
+func assertPixelateRegionFrames(t *testing.T, samples []ParityFrameSample, bounds ParityBounds, frames []ParityFixtureRegionFrame) {
+	t.Helper()
 	if len(frames) != len(samples) {
 		t.Fatalf("region frames = %d, want %d", len(frames), len(samples))
 	}

@@ -1,9 +1,10 @@
-// Command video-pixelate-parity-fixture emits the focused opaque pixelate
-// timeline, named frame samples, and frame-indexed structural-region policy.
+// Command video-pixelate-parity-fixture emits focused pixelate timelines,
+// named frame samples, and frame-indexed region policy for retained evidence.
 package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,38 +25,52 @@ type regionManifest struct {
 }
 
 func main() {
-	outputDir := "video-renderer/test/fixtures/generated"
-	if len(os.Args) == 3 && os.Args[1] == "--output-dir" {
-		outputDir = os.Args[2]
-	} else if len(os.Args) != 1 {
-		exitf("usage: video-pixelate-parity-fixture [--output-dir <dir>]")
+	outputDir := flag.String("output-dir", "video-renderer/test/fixtures/generated", "fixture output directory")
+	variant := flag.String("variant", "opaque-png", "fixture variant: opaque-png or decoded-video")
+	flag.Parse()
+
+	var (
+		name    string
+		doc     video.TimelineDocument
+		assets  []video.ParityFixtureAsset
+		samples []video.ParityFrameSample
+		frames  []video.ParityFixtureRegionFrame
+	)
+	switch *variant {
+	case "opaque-png":
+		name = video.ParityPixelateOpaqueFixtureName
+		doc, assets = video.ParityPixelateOpaqueFixture()
+		samples = video.ParityPixelateOpaqueFrameSamples()
+		frames = video.ParityPixelateOpaqueRegionFrames(samples)
+	case "decoded-video":
+		name = video.ParityPixelateDecodedVideoFixtureName
+		doc, assets = video.ParityPixelateDecodedVideoFixture()
+		samples = video.ParityPixelateDecodedVideoFrameSamples()
+		frames = video.ParityPixelateDecodedVideoRegionFrames(samples)
+	default:
+		exitf("unknown --variant %q (want opaque-png or decoded-video)", *variant)
 	}
 
-	doc, assets := video.ParityPixelateOpaqueFixture()
 	validated, err := video.ValidateTimelineDocument(doc)
 	if err != nil {
 		exitf("validate fixture: %v", err)
 	}
-	samples := video.ParityPixelateOpaqueFrameSamples()
 	bundle := fixtureBundle{
-		Name:     video.ParityPixelateOpaqueFixtureName,
+		Name:     name,
 		Timeline: validated,
 		Assets:   assets,
 		Samples:  samples,
 	}
-	regions := regionManifest{
-		Version: 1,
-		Frames:  video.ParityPixelateOpaqueRegionFrames(samples),
-	}
+	regions := regionManifest{Version: 1, Frames: frames}
 
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(*outputDir, 0o755); err != nil {
 		exitf("create output directory: %v", err)
 	}
-	fixturePath := filepath.Join(outputDir, video.ParityPixelateOpaqueFixtureName+".json")
+	fixturePath := filepath.Join(*outputDir, name+".json")
 	if err := writeJSON(fixturePath, bundle); err != nil {
 		exitf("write fixture: %v", err)
 	}
-	regionsPath := filepath.Join(outputDir, video.ParityPixelateOpaqueFixtureName+".regions.json")
+	regionsPath := filepath.Join(*outputDir, name+".regions.json")
 	if err := writeJSON(regionsPath, regions); err != nil {
 		exitf("write region manifest: %v", err)
 	}
