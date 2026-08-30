@@ -6,6 +6,7 @@ import {
   PREVIEW_PIXELATE_CANVAS_REGION_V1,
   previewPixelateRegionIsOpaque,
   resolvePreviewPixelateCanvasRegion,
+  resolvePreviewPixelateOpacityProof,
 } from './previewPixelateCanvasRuntime';
 
 const identityMatrix: CanonicalFrameLayerState['model_matrix'] = [
@@ -138,5 +139,49 @@ describe('previewPixelateRegionIsOpaque', () => {
   it('rejects empty or malformed RGBA buffers instead of inventing opacity', () => {
     expect(() => previewPixelateRegionIsOpaque(new Uint8ClampedArray())).toThrow('non-empty RGBA');
     expect(() => previewPixelateRegionIsOpaque(new Uint8ClampedArray([1, 2, 3]))).toThrow('non-empty RGBA');
+  });
+});
+
+describe('resolvePreviewPixelateOpacityProof', () => {
+  const opaque = new Uint8ClampedArray([
+    10, 20, 30, 255,
+    40, 50, 60, 255,
+  ]);
+  const notYetOpaque = new Uint8ClampedArray([
+    10, 20, 30, 255,
+    40, 50, 60, 0,
+  ]);
+
+  it('accepts exact alpha immediately regardless of source kind', () => {
+    expect(resolvePreviewPixelateOpacityProof(opaque, true, 0, 60)).toEqual({ status: 'ready' });
+    expect(resolvePreviewPixelateOpacityProof(opaque, false, 0, 60)).toEqual({ status: 'ready' });
+  });
+
+  it('keeps a decoded-video opacity miss pending only inside the bounded retry window', () => {
+    expect(resolvePreviewPixelateOpacityProof(notYetOpaque, true, 0, 60)).toEqual({
+      status: 'pending',
+      reason: 'decoded-video-opacity-pending',
+    });
+    expect(resolvePreviewPixelateOpacityProof(notYetOpaque, true, 59, 60)).toEqual({
+      status: 'pending',
+      reason: 'decoded-video-opacity-pending',
+    });
+    expect(resolvePreviewPixelateOpacityProof(notYetOpaque, true, 60, 60)).toEqual({
+      status: 'deferred',
+      reason: 'opaque-region-proof',
+    });
+  });
+
+  it('keeps image opacity misses fail-closed without inventing a readiness retry', () => {
+    expect(resolvePreviewPixelateOpacityProof(notYetOpaque, false, 0, 60)).toEqual({
+      status: 'deferred',
+      reason: 'opaque-region-proof',
+    });
+  });
+
+  it('rejects invalid retry accounting', () => {
+    expect(() => resolvePreviewPixelateOpacityProof(opaque, true, -1, 60)).toThrow('retry attempt');
+    expect(() => resolvePreviewPixelateOpacityProof(opaque, true, 0.5, 60)).toThrow('retry attempt');
+    expect(() => resolvePreviewPixelateOpacityProof(opaque, true, 0, -1)).toThrow('retry limit');
   });
 });

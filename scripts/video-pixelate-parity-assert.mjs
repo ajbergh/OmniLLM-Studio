@@ -42,6 +42,25 @@ try {
     element.style.setProperty('flex', '0 0 auto', 'important');
   }, { width: canvasWidth, height: canvasHeight });
 
+  const readPixelateState = () => program.evaluate((stage) => {
+    const host = stage.querySelector('[data-preview-pixelate-host="canonical-canvas"]');
+    const surface = stage.querySelector('[data-preview-pixelate-execution="canvas"]');
+    const fallback = stage.querySelector('[data-preview-shape-painter-deferred="pixelate-css-approximation"]');
+    return {
+      parity_frame_index: stage.dataset.parityFrameIndex ?? null,
+      pixelate_frame_index: stage.dataset.previewPixelateFrameIndex ?? null,
+      plan_mode: stage.dataset.previewPixelatePlanMode ?? null,
+      consumer: stage.dataset.previewPixelateConsumer ?? null,
+      structural_deferred: stage.dataset.previewPixelateStructuralDeferred ?? null,
+      runtime_deferred: stage.dataset.previewPixelateRuntimeDeferred ?? null,
+      runtime_error: stage.dataset.previewPixelateRuntimeError ?? null,
+      target_host: host?.getAttribute('data-preview-pixelate-host') ?? null,
+      surface_status: surface?.getAttribute('data-preview-pixelate-status') ?? null,
+      surface_reason: surface?.getAttribute('data-preview-pixelate-reason') ?? null,
+      css_fallback_marker_present: Boolean(fallback),
+    };
+  });
+
   for (const sample of fixture.samples) {
     const requestId = `pixelate-evidence-${sample.frame_index}`;
     await page.evaluate(({ frameIndex, id }) => new Promise((resolve, reject) => {
@@ -59,29 +78,18 @@ try {
       window.dispatchEvent(new CustomEvent('omnillm:video-parity-seek', { detail: { frameIndex, requestId: id } }));
     }), { frameIndex: sample.frame_index, id: requestId });
 
-    await page.waitForFunction((frameIndex) => {
-      const stage = document.querySelector('[data-testid="video-preview-program"]');
-      return stage?.dataset.parityFrameIndex === String(frameIndex)
-        && stage?.dataset.previewPixelateConsumer === 'canonical-canvas';
-    }, sample.frame_index, { timeout: 5000 });
+    try {
+      await page.waitForFunction((frameIndex) => {
+        const stage = document.querySelector('[data-testid="video-preview-program"]');
+        return stage?.dataset.parityFrameIndex === String(frameIndex)
+          && stage?.dataset.previewPixelateConsumer === 'canonical-canvas';
+      }, sample.frame_index, { timeout: 5000 });
+    } catch (error) {
+      const state = await readPixelateState();
+      throw new Error(`frame ${sample.frame_index} did not activate canonical pixelate Canvas: ${JSON.stringify(state)}`, { cause: error });
+    }
 
-    const state = await program.evaluate((stage) => {
-      const host = stage.querySelector('[data-preview-pixelate-host="canonical-canvas"]');
-      const surface = stage.querySelector('[data-preview-pixelate-execution="canvas"]');
-      const fallback = stage.querySelector('[data-preview-shape-painter-deferred="pixelate-css-approximation"]');
-      return {
-        plan_mode: stage.dataset.previewPixelatePlanMode ?? null,
-        consumer: stage.dataset.previewPixelateConsumer ?? null,
-        structural_deferred: stage.dataset.previewPixelateStructuralDeferred ?? null,
-        runtime_deferred: stage.dataset.previewPixelateRuntimeDeferred ?? null,
-        runtime_error: stage.dataset.previewPixelateRuntimeError ?? null,
-        target_host: host?.getAttribute('data-preview-pixelate-host') ?? null,
-        surface_status: surface?.getAttribute('data-preview-pixelate-status') ?? null,
-        surface_reason: surface?.getAttribute('data-preview-pixelate-reason') ?? null,
-        css_fallback_marker_present: Boolean(fallback),
-      };
-    });
-
+    const state = await readPixelateState();
     if (state.plan_mode !== 'canonical-ready'
       || state.consumer !== 'canonical-canvas'
       || state.target_host !== 'canonical-canvas'

@@ -8,8 +8,8 @@ import {
   resolvePreviewCanvasMediaLayerPlan,
 } from './previewFrameWeightedPairCanvas';
 import {
-  previewPixelateRegionIsOpaque,
   resolvePreviewPixelateCanvasRegion,
+  resolvePreviewPixelateOpacityProof,
 } from './previewPixelateCanvasRuntime';
 
 export type PreviewPixelateCanvasStatusKind = 'pending' | 'ready' | 'deferred' | 'failed';
@@ -34,6 +34,9 @@ interface PreviewPixelateCanvasProps<T extends PreviewPixelateBackdropLayer> {
 
 type RasterSource = HTMLImageElement | HTMLVideoElement;
 
+const MAX_PENDING_SOURCE_RETRIES = 120;
+const MAX_VIDEO_OPACITY_PROOF_RETRIES = 60;
+
 /**
  * Exact deterministic pixelate surface for the deliberately narrow backdrop
  * admission in preview-pixelate-backdrop-plan-v1. The existing preview media
@@ -41,6 +44,12 @@ type RasterSource = HTMLImageElement | HTMLVideoElement;
  * that decoded frame through canonical media geometry, proves the entire target
  * region opaque, then runs preview-pixelate-raster-v1. Any missing readiness,
  * alpha, or runtime error leaves the CSS compatibility painter available.
+ *
+ * A newly sought video can report HAVE_CURRENT_DATA before Chromium can
+ * rasterize the requested decoded frame. Video-only opacity misses therefore
+ * remain pending for a bounded paint window; exact alpha 255 is still required
+ * before activation, and an exhausted window falls back rather than assuming
+ * the source is opaque.
  *
  * Canvas bitmap dimensions and placement are owned imperatively by draw().
  * React deliberately keeps static 1x1 virtual width/height props so a status
@@ -58,6 +67,8 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   onStatusChange,
 }: PreviewPixelateCanvasProps<T>) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pendingRetryRef = useRef(0);
+  const opacityProofRetryRef = useRef(0);
   const [sourceRevision, setSourceRevision] = useState(0);
   const [sourceFailed, setSourceFailed] = useState(false);
   const [status, setStatus] = useState<PreviewPixelateCanvasStatusKind>('pending');
@@ -65,6 +76,8 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   const bumpSourceRevision = useCallback(() => setSourceRevision((value) => value + 1), []);
 
   useEffect(() => {
+    pendingRetryRef.current = 0;
+    opacityProofRetryRef.current = 0;
     setSourceFailed(false);
     setStatus('pending');
     setReason(undefined);
@@ -74,12 +87,15 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
     const source = sourceForClip(plan.backdrop.clip.id);
     if (!source) return;
     const onSeeking = () => {
+      pendingRetryRef.current = 0;
+      opacityProofRetryRef.current = 0;
       setSourceFailed(false);
       setStatus('pending');
       setReason(undefined);
       bumpSourceRevision();
     };
     const onSettled = () => {
+      opacityProofRetryRef.current = 0;
       setSourceFailed(false);
       bumpSourceRevision();
     };
@@ -145,9 +161,15 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
     );
 
     setOutputGeometry(output, resolvedRegion.x, resolvedRegion.y, resolvedRegion.width, resolvedRegion.height, stageScale);
-    if (!previewPixelateRegionIsOpaque(input.data)) {
+    const opacityProof = resolvePreviewPixelateOpacityProof(
+      input.data,
+      source instanceof HTMLVideoElement,
+      opacityProofRetryRef.current,
+      MAX_VIDEO_OPACITY_PROOF_RETRIES,
+    );
+    if (opacityProof.status !== 'ready') {
       output.getContext('2d')?.clearRect(0, 0, output.width, output.height);
-      return { status: 'deferred', reason: 'opaque-region-proof' };
+      return opacityProof;
     }
 
     const pixelated = pixelatePreviewRgba(resolvedRegion.raster, input.data);
@@ -163,15 +185,32 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   }, [canvasHeight, canvasWidth, plan.backdrop, plan.target.canonicalState, sourceFailed, sourceForClip, stageScale]);
 
   useEffect(() => {
+    let retryFrame: number | null = null;
     try {
       const result = draw();
       setStatus(result.status);
       setReason(result.reason);
+      if (result.status === 'pending' && result.reason === 'decoded-video-opacity-pending') {
+        pendingRetryRef.current = 0;
+        if (opacityProofRetryRef.current < MAX_VIDEO_OPACITY_PROOF_RETRIES) {
+          opacityProofRetryRef.current += 1;
+          retryFrame = window.requestAnimationFrame(bumpSourceRevision);
+        }
+      } else if (result.status === 'pending' && pendingRetryRef.current < MAX_PENDING_SOURCE_RETRIES) {
+        pendingRetryRef.current += 1;
+        retryFrame = window.requestAnimationFrame(bumpSourceRevision);
+      } else if (result.status !== 'pending') {
+        pendingRetryRef.current = 0;
+        opacityProofRetryRef.current = 0;
+      }
     } catch (error) {
       setStatus('failed');
       setReason(error instanceof Error ? error.message : String(error));
     }
-  }, [draw, sourceRevision]);
+    return () => {
+      if (retryFrame !== null) window.cancelAnimationFrame(retryFrame);
+    };
+  }, [bumpSourceRevision, draw, sourceRevision]);
 
   useEffect(() => {
     onStatusChange({

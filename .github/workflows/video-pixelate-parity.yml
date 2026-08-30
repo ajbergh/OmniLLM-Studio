@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - '.github/workflows/video-pixelate-parity.yml'
+      - 'backend/cmd/video-parity-region-report/**'
+      - 'backend/cmd/video-pixelate-parity-fixture/**'
       - 'backend/internal/video/parity_fixture_pixelate.go'
       - 'backend/internal/video/parity_fixture_pixelate_test.go'
       - 'backend/internal/video/renderer.go'
@@ -19,6 +21,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/video-pixelate-parity.yml'
+      - 'backend/cmd/video-parity-region-report/**'
+      - 'backend/cmd/video-pixelate-parity-fixture/**'
       - 'backend/internal/video/parity_fixture_pixelate.go'
       - 'backend/internal/video/parity_fixture_pixelate_test.go'
       - 'backend/internal/video/renderer.go'
@@ -44,7 +48,7 @@ env:
   NODE_VERSION: '24'
 
 jobs:
-  evidence:
+  opaque-png-evidence:
     name: Opaque PNG pixelate preview-render evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -80,7 +84,8 @@ jobs:
               --random-samples 0 \
               --generate-media
             go run ./cmd/video-pixelate-parity-fixture \
-              --output-dir ../output/video-pixelate-parity/fixture
+              --output-dir ../output/video-pixelate-parity/fixture \
+              --variant opaque-png
           )
       - name: Capture and report pixelate evidence
         shell: bash
@@ -198,5 +203,164 @@ jobs:
         with:
           name: video-pixelate-parity-evidence
           path: output/video-pixelate-parity
+          if-no-files-found: error
+          retention-days: 14
+
+  decoded-video-evidence:
+    name: H.264 decoded-video pixelate evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+      - working-directory: frontend
+        run: npm ci
+      - name: Install parity dependencies
+        run: |
+          bash scripts/ci-apt-install.sh ffmpeg
+          bash scripts/ci-playwright-install.sh
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Generate decoded-video fixture and shared deterministic media
+        run: |
+          set -euo pipefail
+          (
+            cd backend
+            go run ./cmd/video-parity-fixture \
+              --output-dir ../output/video-pixelate-decoded/fixture \
+              --random-samples 0 \
+              --generate-media
+            go run ./cmd/video-pixelate-parity-fixture \
+              --output-dir ../output/video-pixelate-decoded/fixture \
+              --variant decoded-video
+          )
+      - name: Capture decoded-video pixelate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/output/video-pixelate-decoded/runtime"
+          mkdir -p "$runtime/attachments"
+          export OMNILLM_PORT=18092
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          (
+            cd backend
+            go run ./cmd/server >"$runtime/backend.log" 2>"$runtime/backend.err.log"
+          ) &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18092 npm run dev -- --host 127.0.0.1 --port 14175 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18092/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14175/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "decoded pixelate parity servers did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          fixture=output/video-pixelate-decoded/fixture/parity-pixelate-decoded-video-v1.json
+          regions=output/video-pixelate-decoded/fixture/parity-pixelate-decoded-video-v1.regions.json
+          capture=output/video-pixelate-decoded/capture
+          node scripts/video-parity-capture.mjs \
+            --url http://127.0.0.1:14175 \
+            --fixture "$fixture" \
+            --media-dir output/video-pixelate-decoded/fixture/media \
+            --output "$capture"
+          node scripts/video-pixelate-parity-assert.mjs \
+            --url http://127.0.0.1:14175 \
+            --fixture "$fixture" \
+            --seed-result "$capture/seed-result.json" \
+            --output "$capture/pixelate-canvas-evidence.json"
+
+          timeline_hash="$(node -p "require('./$capture/seed-result.json').timeline_sha256")"
+          (
+            cd backend
+            go run ./cmd/video-parity-report \
+              --preview-dir ../$capture/preview \
+              --rendered-dir ../$capture/rendered \
+              --output-dir ../$capture/whole-frame-report \
+              --fps 30 \
+              --fixture parity-pixelate-decoded-video-v1 \
+              --timeline-sha256 "$timeline_hash" \
+              --allow-fail
+            go run ./cmd/video-parity-region-report \
+              --preview-dir ../$capture/preview \
+              --rendered-dir ../$capture/rendered \
+              --regions ../$regions \
+              --output ../$capture/pixelate-region-report.json \
+              --fixture parity-pixelate-decoded-video-v1 \
+              --fps 30 \
+              --allow-fail
+          )
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const fixture = JSON.parse(fs.readFileSync('output/video-pixelate-decoded/fixture/parity-pixelate-decoded-video-v1.json', 'utf8'));
+          const consumer = JSON.parse(fs.readFileSync('output/video-pixelate-decoded/capture/pixelate-canvas-evidence.json', 'utf8'));
+          const whole = JSON.parse(fs.readFileSync('output/video-pixelate-decoded/capture/whole-frame-report/parity-report.json', 'utf8'));
+          const region = JSON.parse(fs.readFileSync('output/video-pixelate-decoded/capture/pixelate-region-report.json', 'utf8'));
+          if (consumer.frames.length !== fixture.samples.length) throw new Error('decoded pixelate consumer evidence sample count mismatch');
+          if (whole.frames.length !== fixture.samples.length) throw new Error('decoded whole-frame report sample count mismatch');
+          if (region.regions.length !== fixture.samples.length) throw new Error('decoded pixelate region report sample count mismatch');
+          const summary = {
+            schema_version: 1,
+            fixture: fixture.name,
+            samples: fixture.samples.length,
+            whole_frame_pass: whole.pass,
+            pixelate_region_pass: region.pass,
+            thresholds: region.thresholds,
+            frames: region.regions.map((entry) => ({
+              frame_index: entry.frame_index,
+              pixel_pass_rate: entry.metric.pixel_pass_rate,
+              ssim: entry.metric.ssim,
+              mean_absolute_error: entry.metric.mean_absolute_error,
+              root_mean_square_error: entry.metric.root_mean_square_error,
+              max_channel_delta: entry.metric.max_channel_delta,
+              pass: entry.metric.pass,
+            })),
+          };
+          fs.writeFileSync('output/video-pixelate-decoded/capture/pixelate-decoded-evidence-summary.json', `${JSON.stringify(summary, null, 2)}\n`);
+          console.log(JSON.stringify(summary));
+          NODE
+      - name: Record toolchain
+        if: always()
+        run: |
+          mkdir -p output/video-pixelate-decoded
+          {
+            go version
+            node --version
+            npm --version
+            ffmpeg -version | head -n 1
+            ffprobe -version | head -n 1
+            node -e "console.log('playwright ' + require('playwright/package.json').version)"
+          } > output/video-pixelate-decoded/toolchain.txt
+      - name: Upload decoded-video pixelate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-pixelate-decoded-parity-evidence
+          path: output/video-pixelate-decoded
           if-no-files-found: error
           retention-days: 14
