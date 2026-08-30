@@ -24,14 +24,18 @@ jobs:
           set -euo pipefail
           sed -i 's/__PR_NUMBER__/292/g' scripts/.tmp_wysiwyg_frame_identity_patch.py
           python3 scripts/.tmp_wysiwyg_frame_identity_patch.py
+          # The repository Actions token cannot update existing workflow files.
+          # The focused evidence workflow already triggers because this slice
+          # changes its assertion script and durable tracker, so keep its YAML
+          # byte-for-byte unchanged in this implementation push.
+          git checkout -- .github/workflows/video-pixelate-parity.yml
           node --check scripts/video-pixelate-parity-assert.mjs
           git diff --check
-      - name: Commit implementation and remove temporary patch machinery
+      - name: Commit implementation
         shell: bash
         run: |
           set -euo pipefail
           rm scripts/.tmp_wysiwyg_frame_identity_patch.py
-          rm .github/workflows/.tmp-wysiwyg-frame-identity-patch.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
