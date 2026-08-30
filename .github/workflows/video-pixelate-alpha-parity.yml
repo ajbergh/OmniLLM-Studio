@@ -97,7 +97,7 @@ jobs:
               --output-dir ../output/video-pixelate-alpha/fixture \
               --variant alpha-png
           )
-      - name: Capture transparent pixelate composition evidence
+      - name: Capture and gate transparent pixelate composition evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -173,35 +173,44 @@ jobs:
           const consumer = JSON.parse(fs.readFileSync('output/video-pixelate-alpha/capture/pixelate-canvas-evidence.json', 'utf8'));
           const whole = JSON.parse(fs.readFileSync('output/video-pixelate-alpha/capture/whole-frame-report/parity-report.json', 'utf8'));
           const region = JSON.parse(fs.readFileSync('output/video-pixelate-alpha/capture/pixelate-region-report.json', 'utf8'));
+          const alphaChannelTolerance = 1;
           if (fixture.timeline.canvas.background !== '#19324A') throw new Error(`alpha fixture background ${fixture.timeline.canvas.background}, want #19324A`);
           if (consumer.frames.length !== fixture.samples.length) throw new Error('alpha pixelate consumer evidence sample count mismatch');
           if (whole.frames.length !== fixture.samples.length) throw new Error('alpha whole-frame report sample count mismatch');
           if (region.regions.length !== fixture.samples.length) throw new Error('alpha pixelate region report sample count mismatch');
           for (const frame of consumer.frames) {
-            if (frame.consumer !== 'canonical-canvas' || frame.surface_status !== 'ready') {
-              throw new Error(`frame ${frame.frame_index} did not consume canonical Canvas: ${JSON.stringify(frame)}`);
+            if (frame.consumer !== 'canonical-canvas'
+              || frame.surface_status !== 'ready'
+              || frame.surface_background !== '#19324A') {
+              throw new Error(`frame ${frame.frame_index} did not consume canonical #19324A Canvas: ${JSON.stringify(frame)}`);
             }
           }
+          const alphaFrames = region.regions.map((entry) => ({
+            frame_index: entry.frame_index,
+            pixel_pass_rate_at_repository_default: entry.metric.pixel_pass_rate,
+            ssim: entry.metric.ssim,
+            mean_absolute_error: entry.metric.mean_absolute_error,
+            root_mean_square_error: entry.metric.root_mean_square_error,
+            max_channel_delta: entry.metric.max_channel_delta,
+            pass_at_repository_default: entry.metric.pass,
+            all_pixels_within_alpha_tolerance: entry.metric.max_channel_delta <= alphaChannelTolerance,
+          }));
+          const alphaGatePass = alphaFrames.every((frame) => frame.all_pixels_within_alpha_tolerance);
           const summary = {
-            schema_version: 1,
+            schema_version: 2,
             fixture: fixture.name,
             project_background: fixture.timeline.canvas.background,
             samples: fixture.samples.length,
             whole_frame_pass_at_repository_default: whole.pass,
             pixelate_region_pass_at_repository_default: region.pass,
             repository_default_thresholds: region.thresholds,
-            frames: region.regions.map((entry) => ({
-              frame_index: entry.frame_index,
-              pixel_pass_rate: entry.metric.pixel_pass_rate,
-              ssim: entry.metric.ssim,
-              mean_absolute_error: entry.metric.mean_absolute_error,
-              root_mean_square_error: entry.metric.root_mean_square_error,
-              max_channel_delta: entry.metric.max_channel_delta,
-              pass_at_repository_default: entry.metric.pass,
-            })),
+            alpha_channel_tolerance: alphaChannelTolerance,
+            alpha_gate_pass: alphaGatePass,
+            frames: alphaFrames,
           };
           fs.writeFileSync('output/video-pixelate-alpha/capture/pixelate-alpha-evidence-summary.json', `${JSON.stringify(summary, null, 2)}\n`);
           console.log(JSON.stringify(summary));
+          if (!alphaGatePass) throw new Error('transparent PNG pixelate ±1 RGB gate failed');
           NODE
       - name: Record toolchain
         if: always()
