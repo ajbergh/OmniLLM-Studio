@@ -1,0 +1,61 @@
+name: Temporary Transparent Video Core Patch
+
+on:
+  push:
+    branches:
+      - fix/video-wysiwyg-phase3-transparent-video-presentation
+    paths:
+      - '.github/workflows/tmp-transparent-video-core-patch.yml'
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.25.13'
+  NODE_VERSION: '24'
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/video-wysiwyg-phase3-transparent-video-presentation
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply guarded patch
+        run: node scripts/.tmp-transparent-video-core-patch.mjs
+      - name: Format backend
+        run: |
+          gofmt -w backend/internal/video/probe.go backend/internal/video/probe_test.go backend/internal/video/render_snapshot.go backend/internal/video/renderer.go backend/internal/video/renderer_input_fanout_test.go
+      - name: Backend focused tests
+        working-directory: backend
+        run: go test ./internal/video
+      - name: Frontend install
+        working-directory: frontend
+        run: npm ci
+      - name: Frontend focused tests
+        working-directory: frontend
+        run: npm run test:unit -- src/components/video/previewVideoPresentation.test.ts src/components/video/previewPixelateBackdrop.test.ts src/components/video/previewPixelateCanvasRuntime.test.ts
+      - name: Frontend build
+        working-directory: frontend
+        run: npm run build
+      - name: Diff hygiene
+        run: git diff --check
+      - name: Commit production patch and self-clean
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm scripts/.tmp-transparent-video-core-patch.mjs .github/workflows/tmp-transparent-video-core-patch.yml
+          git add frontend/src/components/video backend/internal/video
+          git commit -m 'Prove transparent video presentation and preserve VP9 alpha'
+          git push origin HEAD:fix/video-wysiwyg-phase3-transparent-video-presentation
