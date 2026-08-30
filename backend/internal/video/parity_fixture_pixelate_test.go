@@ -38,6 +38,24 @@ func TestParityPixelateDecodedVideoFixtureIsValidAndUnscaled(t *testing.T) {
 	assertIsolatedPixelateFixture(t, validated)
 }
 
+func TestParityPixelateAlphaFixtureIsValidAndUsesNonBlackBackground(t *testing.T) {
+	doc, assets := ParityPixelateAlphaFixture()
+	validated, err := ValidateTimelineDocument(doc)
+	if err != nil {
+		t.Fatalf("ValidateTimelineDocument() error = %v", err)
+	}
+	if validated.Canvas.Width != 512 || validated.Canvas.Height != 512 || validated.Canvas.FPS != 30 {
+		t.Fatalf("canvas = %dx%d@%d, want 512x512@30", validated.Canvas.Width, validated.Canvas.Height, validated.Canvas.FPS)
+	}
+	if validated.Canvas.Background != "#19324A" {
+		t.Fatalf("background = %q, want #19324A", validated.Canvas.Background)
+	}
+	if len(assets) != 2 || assets[0].ID != "asset-alpha" || assets[0].Kind != "image" || assets[0].Width != 512 || assets[0].Height != 512 || assets[1].ID != "asset-audio" {
+		t.Fatalf("assets = %#v, want alpha PNG plus audio harness asset", assets)
+	}
+	assertIsolatedPixelateFixture(t, validated)
+}
+
 func assertIsolatedPixelateFixture(t *testing.T, validated TimelineDocument) {
 	t.Helper()
 	visualClips := 0
@@ -88,6 +106,19 @@ func TestParityPixelateDecodedVideoSamplesAndRegionsStayFrameBound(t *testing.T)
 		t.Fatalf("bounds = %#v, want %#v", bounds, wantBounds)
 	}
 	assertPixelateRegionFrames(t, samples, bounds, ParityPixelateDecodedVideoRegionFrames(samples))
+}
+
+func TestParityPixelateAlphaSamplesAndRegionsStayFrameBound(t *testing.T) {
+	samples := ParityPixelateAlphaFrameSamples()
+	wantFrames := []int64{0, 15, 30, 59}
+	assertPixelateFrames(t, samples, wantFrames)
+
+	bounds := ParityPixelateAlphaRegionBounds()
+	wantBounds := (ParityBounds{MinX: 71, MinY: 94, MaxX: 474, MaxY: 401})
+	if bounds != wantBounds {
+		t.Fatalf("bounds = %#v, want %#v", bounds, wantBounds)
+	}
+	assertPixelateRegionFrames(t, samples, bounds, ParityPixelateAlphaRegionFrames(samples))
 }
 
 func assertPixelateFrames(t *testing.T, samples []ParityFrameSample, wantFrames []int64) {

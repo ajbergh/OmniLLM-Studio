@@ -3,6 +3,7 @@ package video
 const (
 	ParityPixelateOpaqueFixtureName       = "parity-pixelate-opaque-v1"
 	ParityPixelateDecodedVideoFixtureName = "parity-pixelate-decoded-video-v1"
+	ParityPixelateAlphaFixtureName        = "parity-pixelate-alpha-png-v1"
 
 	parityPixelateOpaqueCanvasWidth   = 512
 	parityPixelateOpaqueCanvasHeight  = 512
@@ -34,6 +35,7 @@ func ParityPixelateOpaqueFixture() (TimelineDocument, []ParityFixtureAsset) {
 		ParityPixelateOpaqueFixtureName,
 		parityPixelateOpaqueCanvasWidth,
 		parityPixelateOpaqueCanvasHeight,
+		"#000000",
 		"asset-square",
 		ParityFixtureAsset{ID: "asset-square", Kind: "image", Width: 512, Height: 512, DurationMS: parityPixelateDurationMS, Description: "opaque 512x512 deterministic PNG"},
 		"Opaque pixelate source",
@@ -50,16 +52,34 @@ func ParityPixelateDecodedVideoFixture() (TimelineDocument, []ParityFixtureAsset
 		ParityPixelateDecodedVideoFixtureName,
 		parityPixelateDecodedCanvasWidth,
 		parityPixelateDecodedCanvasHeight,
+		"#000000",
 		"asset-landscape",
 		ParityFixtureAsset{ID: "asset-landscape", Kind: "video", Width: 640, Height: 360, DurationMS: 24000, Description: "deterministic H.264 yuv420p testsrc2 landscape video with stereo tone"},
 		"Decoded H.264 pixelate source",
 	)
 }
 
-func parityPixelateFixture(name string, canvasWidth, canvasHeight int, assetID string, sourceAsset ParityFixtureAsset, sourceTrackName string) (TimelineDocument, []ParityFixtureAsset) {
+// ParityPixelateAlphaFixture exercises the exact source-over order used by the
+// renderer: opaque project background, straight-alpha PNG media, then pixelate.
+// The generated PNG deliberately includes hidden RGB under alpha=0 plus several
+// partial-alpha bands so a premultiplication or compositing-order mistake is
+// visible in the retained pixelate region.
+func ParityPixelateAlphaFixture() (TimelineDocument, []ParityFixtureAsset) {
+	return parityPixelateFixture(
+		ParityPixelateAlphaFixtureName,
+		parityPixelateOpaqueCanvasWidth,
+		parityPixelateOpaqueCanvasHeight,
+		"#19324A",
+		"asset-alpha",
+		ParityFixtureAsset{ID: "asset-alpha", Kind: "image", Width: 512, Height: 512, DurationMS: parityPixelateDurationMS, Description: "deterministic NRGBA PNG with hidden RGB and 0/64/128/192/255 alpha"},
+		"Partial-alpha PNG pixelate source",
+	)
+}
+
+func parityPixelateFixture(name string, canvasWidth, canvasHeight int, background, assetID string, sourceAsset ParityFixtureAsset, sourceTrackName string) (TimelineDocument, []ParityFixtureAsset) {
 	doc := NewEmptyTimeline(canvasWidth, canvasHeight, parityPixelateFPS)
 	doc.DurationMS = parityPixelateDurationMS
-	doc.Canvas.Background = "#000000"
+	doc.Canvas.Background = background
 	doc.Metadata = map[string]any{"fixture": name}
 
 	mediaZ := 1
@@ -149,6 +169,12 @@ func ParityPixelateDecodedVideoFrameSamples() []ParityFrameSample {
 	return parityPixelateFrameSamples("pixelate-video")
 }
 
+// ParityPixelateAlphaFrameSamples repeats the static alpha composition at the
+// same canonical frame identities used by the other focused pixelate controls.
+func ParityPixelateAlphaFrameSamples() []ParityFrameSample {
+	return parityPixelateFrameSamples("pixelate-alpha")
+}
+
 func parityPixelateFrameSamples(prefix string) []ParityFrameSample {
 	return []ParityFrameSample{
 		{Name: prefix + "-start", FrameIndex: 0, TimeMS: 0, Reason: "pixelate region start"},
@@ -168,6 +194,12 @@ func ParityPixelateOpaqueRegionBounds() ParityBounds {
 // the 640x360 decoded-video canvas without introducing source rescaling.
 func ParityPixelateDecodedVideoRegionBounds() ParityBounds {
 	return parityPixelateRegionBounds(parityPixelateDecodedCanvasWidth, parityPixelateDecodedCanvasHeight)
+}
+
+// ParityPixelateAlphaRegionBounds shares the 512x512 structural rectangle with
+// the lossless opaque control while changing only source alpha/background.
+func ParityPixelateAlphaRegionBounds() ParityBounds {
+	return parityPixelateRegionBounds(parityPixelateOpaqueCanvasWidth, parityPixelateOpaqueCanvasHeight)
 }
 
 func parityPixelateRegionBounds(canvasWidth, canvasHeight int) ParityBounds {
@@ -192,6 +224,12 @@ func ParityPixelateOpaqueRegionFrames(samples []ParityFrameSample) []ParityFixtu
 // bounds without weakening the lossless structural-exactness policy.
 func ParityPixelateDecodedVideoRegionFrames(samples []ParityFrameSample) []ParityFixtureRegionFrame {
 	return parityPixelateRegionFrames(samples, ParityPixelateDecodedVideoRegionBounds())
+}
+
+// ParityPixelateAlphaRegionFrames binds source-over alpha composition evidence
+// to the same exact 403x307 region policy as the lossless PNG control.
+func ParityPixelateAlphaRegionFrames(samples []ParityFrameSample) []ParityFixtureRegionFrame {
+	return parityPixelateRegionFrames(samples, ParityPixelateAlphaRegionBounds())
 }
 
 func parityPixelateRegionFrames(samples []ParityFrameSample, bounds ParityBounds) []ParityFixtureRegionFrame {

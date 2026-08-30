@@ -26,7 +26,7 @@ type regionManifest struct {
 
 func main() {
 	outputDir := flag.String("output-dir", "video-renderer/test/fixtures/generated", "fixture output directory")
-	variant := flag.String("variant", "opaque-png", "fixture variant: opaque-png or decoded-video")
+	variant := flag.String("variant", "opaque-png", "fixture variant: opaque-png, decoded-video, or alpha-png")
 	flag.Parse()
 
 	var (
@@ -47,8 +47,13 @@ func main() {
 		doc, assets = video.ParityPixelateDecodedVideoFixture()
 		samples = video.ParityPixelateDecodedVideoFrameSamples()
 		frames = video.ParityPixelateDecodedVideoRegionFrames(samples)
+	case "alpha-png":
+		name = video.ParityPixelateAlphaFixtureName
+		doc, assets = video.ParityPixelateAlphaFixture()
+		samples = video.ParityPixelateAlphaFrameSamples()
+		frames = video.ParityPixelateAlphaRegionFrames(samples)
 	default:
-		exitf("unknown --variant %q (want opaque-png or decoded-video)", *variant)
+		exitf("unknown --variant %q (want opaque-png, decoded-video, or alpha-png)", *variant)
 	}
 
 	validated, err := video.ValidateTimelineDocument(doc)
