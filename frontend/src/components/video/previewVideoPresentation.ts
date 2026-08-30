@@ -47,7 +47,7 @@ export function previewVideoPresentationMediaTimeMatches(
 export function resetPreviewVideoPresentation(video: HTMLVideoElement): void {
   const capable = video as PresentationVideo;
   const state = presentationState.get(video);
-  if (state?.callbackId !== null && typeof capable.cancelVideoFrameCallback === 'function') {
+  if (state && state.callbackId !== null && typeof capable.cancelVideoFrameCallback === 'function') {
     capable.cancelVideoFrameCallback(state.callbackId);
   }
   presentationState.delete(video);
@@ -87,7 +87,7 @@ export function ensurePreviewVideoPresentation(options: {
     if (video.dataset.videoPreviewPresentationStatus === 'deferred'
       || video.dataset.videoPreviewPresentationStatus === 'unsupported') return;
   } else {
-    if (state?.callbackId !== null && typeof capable.cancelVideoFrameCallback === 'function') {
+    if (state && state.callbackId !== null && typeof capable.cancelVideoFrameCallback === 'function') {
       capable.cancelVideoFrameCallback(state.callbackId);
     }
     state = { token, callbackId: null, attempts: 0 };
@@ -138,7 +138,6 @@ export function ensurePreviewVideoPresentation(options: {
         return;
       }
       schedule();
-      seek();
     });
     // Subscribe before the deterministic seek so a fast decoder cannot present
     // the requested frame between seek and requestVideoFrameCallback setup.
