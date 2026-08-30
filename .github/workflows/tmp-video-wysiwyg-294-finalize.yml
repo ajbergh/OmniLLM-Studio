@@ -1,0 +1,35 @@
+name: Temporary WYSIWYG PR 294 Finalizer
+
+on:
+  push:
+    branches:
+      - fix/video-wysiwyg-phase3-pixelate-alpha-composition
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/video-wysiwyg-phase3-pixelate-alpha-composition
+          fetch-depth: 0
+      - name: Apply final tracker evidence
+        run: python3 scripts/.tmp_wysiwyg_294_final_tracker.py
+      - name: Remove temporary finalizer files
+        run: |
+          rm scripts/.tmp_wysiwyg_294_final_tracker.py
+          rm .github/workflows/tmp-video-wysiwyg-294-finalize.yml
+      - name: Commit clean tracker-bearing head
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md scripts/.tmp_wysiwyg_294_final_tracker.py .github/workflows/tmp-video-wysiwyg-294-finalize.yml
+          git diff --cached --check -- ':!docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+          git diff --cached --quiet && { echo 'no finalization changes produced'; exit 1; }
+          git commit -m 'Finalize PR 294 WYSIWYG evidence tracker'
+          git push origin HEAD:fix/video-wysiwyg-phase3-pixelate-alpha-composition
