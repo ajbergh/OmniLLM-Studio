@@ -67,6 +67,29 @@ export function sourceTimeForPreviewMediaMs(
 }
 
 /**
+ * Convert an exact canonical source-time boundary into a browser video seek
+ * target that is safely inside the requested frame interval. JavaScript's
+ * nearest Float64 representation of a rational PTS can sit infinitesimally
+ * below that boundary (for example 59/30), which lets Chromium display the
+ * previous decoded frame even though canonical frame identity is correct.
+ *
+ * The nudge is browser-consumer policy only: it never changes canonical source
+ * time, never applies to free-running playback/audio, stays below the strict
+ * deterministic seek tolerance, and remains far inside one output-frame span.
+ */
+export function deterministicVideoSeekTargetSeconds(
+  address: TimelineSourceAddress,
+  canonicalTargetSeconds: number,
+): number {
+  if (address.kind !== 'frame' || !Number.isFinite(canonicalTargetSeconds) || canonicalTargetSeconds < 0) {
+    return canonicalTargetSeconds;
+  }
+  const fps = Math.max(1, Math.trunc(address.fps));
+  const nudgeSeconds = Math.min(0.00025, 1 / (fps * 16));
+  return canonicalTargetSeconds + nudgeSeconds;
+}
+
+/**
  * Deterministic frame capture needs a materially tighter seek tolerance than
  * interactive scrub/playback. Otherwise adjacent high-FPS frames can reuse a
  * stale media frame because the legacy 50 ms paused-scrub tolerance is wider

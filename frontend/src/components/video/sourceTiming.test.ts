@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { VideoTimelineDocument } from '../../types/video';
 import { buildTimelineIntervalIndex, queryActiveClipsAtFrame } from './pro/timelineIndex';
 import {
+  deterministicVideoSeekTargetSeconds,
   frameAddressMatchesTimelineMs,
   mediaSeekToleranceSeconds,
   sourceTimeForAddressMs,
@@ -140,6 +141,21 @@ describe('media source timing', () => {
     expect(frameAddressMatchesTimelineMs(1, 120, 1000 / 120)).toBe(true);
     expect(frameAddressMatchesTimelineMs(1, 120, 8)).toBe(false);
     expect(frameAddressMatchesTimelineMs(-1, 120, 0)).toBe(false);
+  });
+
+  it('nudges deterministic video seeks just inside an exact rational frame boundary', () => {
+    const address = { kind: 'frame' as const, frameIndex: 59, fps: 30 };
+    const canonicalTarget = 59 / 30;
+    const seekTarget = deterministicVideoSeekTargetSeconds(address, canonicalTarget);
+
+    expect(seekTarget).toBeGreaterThan(canonicalTarget);
+    expect(seekTarget - canonicalTarget).toBeLessThan(mediaSeekToleranceSeconds(address));
+    expect(seekTarget).toBeLessThan(canonicalTarget + 1 / address.fps);
+  });
+
+  it('does not nudge free-running or invalid video seek targets', () => {
+    expect(deterministicVideoSeekTargetSeconds({ kind: 'time', timelineMs: 1000 }, 1)).toBe(1);
+    expect(deterministicVideoSeekTargetSeconds({ kind: 'frame', frameIndex: 0, fps: 30 }, -1)).toBe(-1);
   });
 
   it('uses a sub-millisecond deterministic seek tolerance', () => {

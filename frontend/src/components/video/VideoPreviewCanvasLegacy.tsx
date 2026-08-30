@@ -34,7 +34,7 @@ import { ShapePreview } from './ShapePreview';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineTrack } from '../../types/video';
 import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips, queryActiveClipsAtFrame } from './pro/timelineIndex';
 import { renderPreviewPCM } from './parity/previewAudioRenderer';
-import { frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForPreviewMediaMs } from './sourceTiming';
+import { deterministicVideoSeekTargetSeconds, frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForPreviewMediaMs } from './sourceTiming';
 import { resolvePreviewFrameTransform } from './previewFrameTransform';
 import { resolvePreviewFrameViewTransform } from './previewFrameViewTransform';
 import {
@@ -462,7 +462,9 @@ export function VideoPreviewCanvas() {
       } else {
         if (!element.paused) element.pause();
         if (Math.abs(element.currentTime - target) > mediaSeekToleranceSeconds(address)) {
-          element.currentTime = target;
+          element.currentTime = element instanceof HTMLVideoElement
+            ? deterministicVideoSeekTargetSeconds(address, target)
+            : target;
         }
       }
     };
