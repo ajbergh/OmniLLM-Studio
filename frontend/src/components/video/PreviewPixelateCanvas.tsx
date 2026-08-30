@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PreviewPixelateBackdropLayer, PreviewPixelateBackdropReady } from './previewPixelateBackdrop';
 import { resolvePreviewCanvasBackgroundColor } from './previewCanvasBackground';
-import {
-  pixelatePreviewRgba,
-} from './previewPixelateRaster';
+import { pixelatePreviewRgba } from './previewPixelateRaster';
 import {
   paintPreviewCanvasMediaLayer,
   resolvePreviewCanvasMediaLayerPlan,
 } from './previewFrameWeightedPairCanvas';
-import {
-  resolvePreviewPixelateCanvasRegion,
-  resolvePreviewPixelateOpacityProof,
-} from './previewPixelateCanvasRuntime';
+import { resolvePreviewPixelateCanvasRegion } from './previewPixelateCanvasRuntime';
+import { resolvePreviewVideoPresentation } from './previewVideoPresentation';
 
 export type PreviewPixelateCanvasStatusKind = 'pending' | 'ready' | 'deferred' | 'failed';
 
@@ -29,6 +25,7 @@ interface PreviewPixelateCanvasProps<T extends PreviewPixelateBackdropLayer> {
   canvasBackground: string;
   stageScale: number;
   sourceForClip: (clipId: string) => HTMLImageElement | HTMLVideoElement | null;
+  videoPresentationToken?: string;
   executionKey: string;
   active: boolean;
   onStatusChange: (status: PreviewPixelateCanvasStatus) => void;
@@ -37,7 +34,7 @@ interface PreviewPixelateCanvasProps<T extends PreviewPixelateBackdropLayer> {
 type RasterSource = HTMLImageElement | HTMLVideoElement;
 
 const MAX_PENDING_SOURCE_RETRIES = 120;
-const MAX_VIDEO_OPACITY_PROOF_RETRIES = 60;
+const MAX_VIDEO_PRESENTATION_RETRIES = 120;
 
 /**
  * Exact deterministic pixelate surface for the deliberately narrow backdrop
@@ -48,12 +45,11 @@ const MAX_VIDEO_OPACITY_PROOF_RETRIES = 60;
  * canonical geometry, then run preview-pixelate-raster-v1 on the composed RGB
  * backdrop.
  *
- * Transparent/partial-alpha images are therefore handled by browser Canvas
- * source-over composition rather than by inspecting or unpremultiplying their
- * source bytes. Decoded video retains the existing source-only alpha/readiness
- * proof before composition because Chromium can report HAVE_CURRENT_DATA before
- * a newly sought frame is rasterizable. Exact alpha 255 is still required for
- * video in this slice; transparent video remains fail-closed.
+ * Images and transparent/partial-alpha video therefore share the same Canvas
+ * source-over path. Video is admitted only after VideoPreviewCanvasLegacy has
+ * proved with requestVideoFrameCallback that the mounted decoder presented the
+ * exact canonical source-time request. Missing/unsupported/mismatched proof is
+ * bounded and fail-closed to the existing CSS approximation.
  *
  * Canvas bitmap dimensions and placement are owned imperatively by draw().
  * React deliberately keeps static 1x1 virtual width/height props so a status
@@ -67,13 +63,14 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   canvasBackground,
   stageScale,
   sourceForClip,
+  videoPresentationToken,
   executionKey,
   active,
   onStatusChange,
 }: PreviewPixelateCanvasProps<T>) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pendingRetryRef = useRef(0);
-  const opacityProofRetryRef = useRef(0);
+  const presentationRetryRef = useRef(0);
   const [sourceRevision, setSourceRevision] = useState(0);
   const [sourceFailed, setSourceFailed] = useState(false);
   const [status, setStatus] = useState<PreviewPixelateCanvasStatusKind>('pending');
@@ -83,7 +80,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
 
   useEffect(() => {
     pendingRetryRef.current = 0;
-    opacityProofRetryRef.current = 0;
+    presentationRetryRef.current = 0;
     setSourceFailed(false);
     setStatus('pending');
     setReason(undefined);
@@ -94,14 +91,13 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
     if (!source) return;
     const onSeeking = () => {
       pendingRetryRef.current = 0;
-      opacityProofRetryRef.current = 0;
+      presentationRetryRef.current = 0;
       setSourceFailed(false);
       setStatus('pending');
       setReason(undefined);
       bumpSourceRevision();
     };
     const onSettled = () => {
-      opacityProofRetryRef.current = 0;
       setSourceFailed(false);
       bumpSourceRevision();
     };
@@ -144,6 +140,18 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
     const targetState = plan.target.canonicalState;
     if (!targetState) return { status: 'failed', reason: 'pixelate-target-state-missing' };
 
+    if (source instanceof HTMLVideoElement) {
+      const presentation = resolvePreviewVideoPresentation(source, videoPresentationToken);
+      if (presentation.status !== 'ready') {
+        output.getContext('2d')?.clearRect(0, 0, output.width, output.height);
+        if (presentation.status === 'pending'
+          && presentationRetryRef.current >= MAX_VIDEO_PRESENTATION_RETRIES) {
+          return { status: 'deferred', reason: 'decoded-video-presentation-timeout' };
+        }
+        return presentation;
+      }
+    }
+
     const resolvedRegion = resolvePreviewPixelateCanvasRegion(targetState, canvasWidth, canvasHeight);
     const [intrinsicWidth, intrinsicHeight] = intrinsicSize(source);
     const mediaPlan = resolvePreviewCanvasMediaLayerPlan(
@@ -153,32 +161,6 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
     );
 
     setOutputGeometry(output, resolvedRegion.x, resolvedRegion.y, resolvedRegion.width, resolvedRegion.height, stageScale);
-
-    if (source instanceof HTMLVideoElement) {
-      const sourceOnly = document.createElement('canvas');
-      sourceOnly.width = canvasWidth;
-      sourceOnly.height = canvasHeight;
-      const sourceOnlyContext = sourceOnly.getContext('2d', { willReadFrequently: true });
-      if (!sourceOnlyContext) throw new Error('pixelate Canvas could not create video proof 2D context');
-      sourceOnlyContext.clearRect(0, 0, canvasWidth, canvasHeight);
-      paintPreviewCanvasMediaLayer(sourceOnlyContext, source, mediaPlan);
-      const sourceOnlyInput = sourceOnlyContext.getImageData(
-        resolvedRegion.x,
-        resolvedRegion.y,
-        resolvedRegion.width,
-        resolvedRegion.height,
-      );
-      const opacityProof = resolvePreviewPixelateOpacityProof(
-        sourceOnlyInput.data,
-        true,
-        opacityProofRetryRef.current,
-        MAX_VIDEO_OPACITY_PROOF_RETRIES,
-      );
-      if (opacityProof.status !== 'ready') {
-        output.getContext('2d')?.clearRect(0, 0, output.width, output.height);
-        return opacityProof;
-      }
-    }
 
     const backdrop = document.createElement('canvas');
     backdrop.width = canvasWidth;
@@ -205,7 +187,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
       0,
     );
     return { status: 'ready' };
-  }, [canvasHeight, canvasWidth, plan.backdrop, plan.target.canonicalState, resolvedCanvasBackground, sourceFailed, sourceForClip, stageScale]);
+  }, [canvasHeight, canvasWidth, plan.backdrop, plan.target.canonicalState, resolvedCanvasBackground, sourceFailed, sourceForClip, stageScale, videoPresentationToken]);
 
   useEffect(() => {
     let retryFrame: number | null = null;
@@ -213,10 +195,10 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
       const result = draw();
       setStatus(result.status);
       setReason(result.reason);
-      if (result.status === 'pending' && result.reason === 'decoded-video-opacity-pending') {
+      if (result.status === 'pending' && result.reason === 'decoded-video-presentation-pending') {
         pendingRetryRef.current = 0;
-        if (opacityProofRetryRef.current < MAX_VIDEO_OPACITY_PROOF_RETRIES) {
-          opacityProofRetryRef.current += 1;
+        if (presentationRetryRef.current < MAX_VIDEO_PRESENTATION_RETRIES) {
+          presentationRetryRef.current += 1;
           retryFrame = window.requestAnimationFrame(bumpSourceRevision);
         }
       } else if (result.status === 'pending' && pendingRetryRef.current < MAX_PENDING_SOURCE_RETRIES) {
@@ -224,7 +206,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
         retryFrame = window.requestAnimationFrame(bumpSourceRevision);
       } else if (result.status !== 'pending') {
         pendingRetryRef.current = 0;
-        opacityProofRetryRef.current = 0;
+        presentationRetryRef.current = 0;
       }
     } catch (error) {
       setStatus('failed');
