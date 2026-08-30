@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PreviewPixelateBackdropLayer, PreviewPixelateBackdropReady } from './previewPixelateBackdrop';
+import { resolvePreviewCanvasBackgroundColor } from './previewCanvasBackground';
 import {
   pixelatePreviewRgba,
 } from './previewPixelateRaster';
@@ -25,6 +26,7 @@ interface PreviewPixelateCanvasProps<T extends PreviewPixelateBackdropLayer> {
   plan: PreviewPixelateBackdropReady<T>;
   canvasWidth: number;
   canvasHeight: number;
+  canvasBackground: string;
   stageScale: number;
   sourceForClip: (clipId: string) => HTMLImageElement | HTMLVideoElement | null;
   executionKey: string;
@@ -40,16 +42,18 @@ const MAX_VIDEO_OPACITY_PROOF_RETRIES = 60;
 /**
  * Exact deterministic pixelate surface for the deliberately narrow backdrop
  * admission in preview-pixelate-backdrop-plan-v1. The existing preview media
- * element remains the sole decoder/source-time authority. This consumer paints
- * that decoded frame through canonical media geometry, proves the entire target
- * region opaque, then runs preview-pixelate-raster-v1. Any missing readiness,
- * alpha, or runtime error leaves the CSS compatibility painter available.
+ * element remains the sole decoder/source-time authority. This consumer mirrors
+ * renderer composition order for the admitted one-media-layer path: paint the
+ * opaque canonical project background, source-over the decoded media through
+ * canonical geometry, then run preview-pixelate-raster-v1 on the composed RGB
+ * backdrop.
  *
- * A newly sought video can report HAVE_CURRENT_DATA before Chromium can
- * rasterize the requested decoded frame. Video-only opacity misses therefore
- * remain pending for a bounded paint window; exact alpha 255 is still required
- * before activation, and an exhausted window falls back rather than assuming
- * the source is opaque.
+ * Transparent/partial-alpha images are therefore handled by browser Canvas
+ * source-over composition rather than by inspecting or unpremultiplying their
+ * source bytes. Decoded video retains the existing source-only alpha/readiness
+ * proof before composition because Chromium can report HAVE_CURRENT_DATA before
+ * a newly sought frame is rasterizable. Exact alpha 255 is still required for
+ * video in this slice; transparent video remains fail-closed.
  *
  * Canvas bitmap dimensions and placement are owned imperatively by draw().
  * React deliberately keeps static 1x1 virtual width/height props so a status
@@ -60,6 +64,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   plan,
   canvasWidth,
   canvasHeight,
+  canvasBackground,
   stageScale,
   sourceForClip,
   executionKey,
@@ -74,6 +79,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   const [status, setStatus] = useState<PreviewPixelateCanvasStatusKind>('pending');
   const [reason, setReason] = useState<string | undefined>();
   const bumpSourceRevision = useCallback(() => setSourceRevision((value) => value + 1), []);
+  const resolvedCanvasBackground = resolvePreviewCanvasBackgroundColor(canvasBackground);
 
   useEffect(() => {
     pendingRetryRef.current = 0;
@@ -139,19 +145,48 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
     if (!targetState) return { status: 'failed', reason: 'pixelate-target-state-missing' };
 
     const resolvedRegion = resolvePreviewPixelateCanvasRegion(targetState, canvasWidth, canvasHeight);
-    const backdrop = document.createElement('canvas');
-    backdrop.width = canvasWidth;
-    backdrop.height = canvasHeight;
-    const backdropContext = backdrop.getContext('2d', { willReadFrequently: true });
-    if (!backdropContext) throw new Error('pixelate Canvas could not create backdrop 2D context');
-    backdropContext.clearRect(0, 0, canvasWidth, canvasHeight);
-
     const [intrinsicWidth, intrinsicHeight] = intrinsicSize(source);
     const mediaPlan = resolvePreviewCanvasMediaLayerPlan(
       plan.backdrop,
       intrinsicWidth,
       intrinsicHeight,
     );
+
+    setOutputGeometry(output, resolvedRegion.x, resolvedRegion.y, resolvedRegion.width, resolvedRegion.height, stageScale);
+
+    if (source instanceof HTMLVideoElement) {
+      const sourceOnly = document.createElement('canvas');
+      sourceOnly.width = canvasWidth;
+      sourceOnly.height = canvasHeight;
+      const sourceOnlyContext = sourceOnly.getContext('2d', { willReadFrequently: true });
+      if (!sourceOnlyContext) throw new Error('pixelate Canvas could not create video proof 2D context');
+      sourceOnlyContext.clearRect(0, 0, canvasWidth, canvasHeight);
+      paintPreviewCanvasMediaLayer(sourceOnlyContext, source, mediaPlan);
+      const sourceOnlyInput = sourceOnlyContext.getImageData(
+        resolvedRegion.x,
+        resolvedRegion.y,
+        resolvedRegion.width,
+        resolvedRegion.height,
+      );
+      const opacityProof = resolvePreviewPixelateOpacityProof(
+        sourceOnlyInput.data,
+        true,
+        opacityProofRetryRef.current,
+        MAX_VIDEO_OPACITY_PROOF_RETRIES,
+      );
+      if (opacityProof.status !== 'ready') {
+        output.getContext('2d')?.clearRect(0, 0, output.width, output.height);
+        return opacityProof;
+      }
+    }
+
+    const backdrop = document.createElement('canvas');
+    backdrop.width = canvasWidth;
+    backdrop.height = canvasHeight;
+    const backdropContext = backdrop.getContext('2d', { willReadFrequently: true });
+    if (!backdropContext) throw new Error('pixelate Canvas could not create backdrop 2D context');
+    backdropContext.fillStyle = resolvedCanvasBackground;
+    backdropContext.fillRect(0, 0, canvasWidth, canvasHeight);
     paintPreviewCanvasMediaLayer(backdropContext, source, mediaPlan);
     const input = backdropContext.getImageData(
       resolvedRegion.x,
@@ -159,18 +194,6 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
       resolvedRegion.width,
       resolvedRegion.height,
     );
-
-    setOutputGeometry(output, resolvedRegion.x, resolvedRegion.y, resolvedRegion.width, resolvedRegion.height, stageScale);
-    const opacityProof = resolvePreviewPixelateOpacityProof(
-      input.data,
-      source instanceof HTMLVideoElement,
-      opacityProofRetryRef.current,
-      MAX_VIDEO_OPACITY_PROOF_RETRIES,
-    );
-    if (opacityProof.status !== 'ready') {
-      output.getContext('2d')?.clearRect(0, 0, output.width, output.height);
-      return opacityProof;
-    }
 
     const pixelated = pixelatePreviewRgba(resolvedRegion.raster, input.data);
     const outputContext = output.getContext('2d');
@@ -182,7 +205,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
       0,
     );
     return { status: 'ready' };
-  }, [canvasHeight, canvasWidth, plan.backdrop, plan.target.canonicalState, sourceFailed, sourceForClip, stageScale]);
+  }, [canvasHeight, canvasWidth, plan.backdrop, plan.target.canonicalState, resolvedCanvasBackground, sourceFailed, sourceForClip, stageScale]);
 
   useEffect(() => {
     let retryFrame: number | null = null;
@@ -226,6 +249,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
       data-preview-pixelate-execution="canvas"
       data-preview-pixelate-target-clip={plan.target.clip.id}
       data-preview-pixelate-backdrop-clip={plan.backdrop.clip.id}
+      data-preview-pixelate-background={resolvedCanvasBackground}
       data-preview-pixelate-status={status}
       data-preview-pixelate-reason={reason}
       className="pointer-events-none absolute inset-0"
