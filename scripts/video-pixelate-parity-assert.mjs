@@ -66,6 +66,7 @@ try {
       target_host: host?.getAttribute('data-preview-pixelate-host') ?? null,
       surface_status: surface?.getAttribute('data-preview-pixelate-status') ?? null,
       surface_reason: surface?.getAttribute('data-preview-pixelate-reason') ?? null,
+      surface_background: surface?.getAttribute('data-preview-pixelate-background') ?? null,
       css_fallback_marker_present: Boolean(fallback),
     };
   });
@@ -282,7 +283,7 @@ try {
 
 await fs.mkdir(path.dirname(output), { recursive: true });
 await fs.writeFile(output, `${JSON.stringify({
-  schema_version: 3,
+  schema_version: 4,
   fixture: fixture.name,
   timeline_sha256: seedResult.timeline_sha256,
   snapshot_id: seedResult.snapshot_id,

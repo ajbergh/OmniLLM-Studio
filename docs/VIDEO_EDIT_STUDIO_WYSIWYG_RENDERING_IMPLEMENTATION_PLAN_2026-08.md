@@ -50,7 +50,7 @@ Current implementation PR: **#294 — Compose pixelate alpha sources over canoni
 
 ### #293 merged decoded-frame identity
 
-#292 closes the decoded-video frame-selection debt before promoting the measured codec/color envelope into a gate:
+The validated #292 implementation tree, merged unchanged by #293, closes the decoded-video frame-selection debt before promoting the measured codec/color envelope into a gate:
 
 - Keep canonical `source_time_ms` unchanged. For paused deterministic `<video>` seeks only, request a point just inside the rational frame boundary so a Float64 value infinitesimally below the source PTS cannot select the preceding decoded frame. Audio and free-running playback remain untouched.
 - Keep the nudge below the existing 0.5 ms deterministic seek tolerance and well inside one output-frame interval.
@@ -73,6 +73,10 @@ Current implementation PR: **#294 — Compose pixelate alpha sources over canoni
 - Keep decoded-video source-only alpha/readiness proof unchanged before background composition. Transparent video remains fail-closed in this slice because the existing proof also guards Chromium's post-seek rasterizability race.
 - Add deterministic `parity-pixelate-alpha-png-v1` evidence over non-black `#19324A`, using an NRGBA PNG with hidden RGB and alpha `0/64/128/192/255`, the established `403x307` region/block-20 raster, and frames `0/15/30/59`.
 - Preserve #289's byte-exact opaque-PNG gate and #293's H.264 requested/presented frame-identity plus focused ±3 RGB gate as independent controls.
+- First retained alpha evidence on head `d2825fc7f679d668d71cf9c02b4e348afc52797f` succeeded in Video Pixelate Alpha Parity Evidence #1. Artifact `9727309505` is 10,861,044 bytes with SHA-256 `853f9d6d8ccd19b1f2a6d3105441d9d9bd68446e9bef03f6f51a252e9fd30273`; timeline SHA-256 is `e4b77a9f0c019618ee801e76f33a63944102d998d6710e43b2db833524fa7976`.
+- Browser evidence proves `canonical-canvas`, a ready surface/normalized target host, no structural/runtime deferral or CSS fallback, on all four samples. The project background is `#19324A`; the retained evidence schema is extended to record the Canvas surface's resolved background so the next exact-head run proves that consumer value directly.
+- Every alpha pixelate region covers `[71,94)-[474,401)` = `123,721` pixels. Frames `0/15/30/59` are static-source identical and each reports `pixel_pass_rate=1`, `max_channel_delta=1`, `SSIM=0.9999377268`, `MAE=0.3303723701`, and `RMSE=0.5747802798`. The whole-frame and region reports both pass repository defaults.
+- Because this lossless alpha path differs only by one RGB code value after browser-vs-FFmpeg source-over rounding, #294 freezes a **fixture-specific ±1 RGB gate with 100% pixel pass**. It does not weaken #289's zero-tolerance opaque PNG gate, #293's H.264 ±3 gate, or repository-global ±2/99.9% diagnostics.
 
 ## Phase tracker
 
@@ -260,14 +264,14 @@ Hosted CI is authoritative for platform/toolchain cases unavailable in the curre
 | FFmpeg/static-region behavior is confused with canonical transform support | The pixelate planner explicitly defers target transform keyframes and explicit axis scale that diverges from legacy scalar `scale`. |
 | Evidence accidentally measures CSS fallback instead of Canvas | Browser assertion requires `canonical-canvas`, ready surface/host markers, no deferred/error markers, and absence of `pixelate-css-approximation` for every sampled frame. |
 | A diagnostic `--allow-fail` report is mistaken for exact parity | Reports retain pass rate, SSIM, MAE/RMSE, max-channel delta, and exact consumer identity. Workflow success proves evidence completeness unless an explicit threshold gate is configured. |
-| Alpha/pixel-format conversion is assumed byte-identical across browser and FFmpeg | #294 mirrors renderer order for transparent images by compositing the decoded image over the canonical opaque project background before pixelate; the NRGBA fixture carries hidden RGB and partial alpha specifically to catch premultiplication/source-over mistakes. Transparent video remains deferred. |
+| Alpha/pixel-format conversion is assumed byte-identical across browser and FFmpeg | #294 mirrors renderer order for transparent images by compositing the decoded image over the canonical opaque project background before pixelate. The NRGBA fixture carries hidden RGB and partial alpha specifically to catch premultiplication/source-over mistakes; retained evidence bounds browser↔FFmpeg source-over rounding to ±1 RGB at 100% pixel pass. Transparent video remains deferred. |
 | Codec-noisy decoded equality is treated as structural parity | PNG structural exactness remains independent; #293 gates decoded-video color at ±3 only after source-frame identity is proven, while repository-default ±2 diagnostics remain unchanged. |
 | CI scheduling hides code state | Only actually executed checks count. |
 
 ## Next recommended slice
 
-1. **Execute #294: transparent-image project-background composition.** Retain alpha PNG browser↔renderer region evidence proving hidden RGB under alpha `0` does not leak and partial-alpha pixels follow the same source-over result before pixelate.
-2. Keep transparent decoded video fail-closed until a reliable presentation/readiness proof can distinguish legitimate transparent decoded pixels from Chromium's post-seek not-yet-rasterizable state. Do not remove the H.264 source-only guard just to broaden alpha support.
+1. **Finish #294's exact-head gate.** Enforce the retained alpha PNG contract at `max_channel_delta <= 1` and 100% pixels within that envelope, while also retaining the resolved `#19324A` Canvas background value. Re-run the independent opaque-PNG zero-tolerance and H.264 frame-identity/±3 controls on the same exact head before merge.
+2. **Next slice after #294: transparent decoded-video readiness/alpha proof.** Keep transparent decoded video fail-closed until a reliable presentation/readiness signal can distinguish legitimate transparent decoded pixels from Chromium's post-seek not-yet-rasterizable state. Do not remove the H.264 source-only guard merely to broaden alpha support.
 3. After #294 is retained and green, broaden pixelate/weighted-Canvas raster eligibility only for painter/source classes whose source-over ordering is explicit and independently evidenced.
 4. Add resource-font fixture coverage and retain parity evidence on a second supported OS/FFmpeg environment before calling cross-machine Phase 0 visual identity closed.
 5. Continue Phase 3 with normal-playback canonicalization, explicit diagnostics/rollback, then shared AudioGraph consumption.
