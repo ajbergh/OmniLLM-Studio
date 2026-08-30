@@ -81,9 +81,11 @@ func ParityPixelateAlphaFixture() (TimelineDocument, []ParityFixtureAsset) {
 // non-black project background used by the PNG alpha control. The source is a
 // two-second VP9 WebM carrying alpha_mode=1. Frame content changes continuously
 // so stale presentation identity and alpha loss cannot accidentally pass on a
-// static raster.
+// static raster. Its visual clip is muted because the generated WebM is
+// intentionally silent; muting removes only the nonexistent audio contribution
+// and keeps preview/export audio evidence on the dedicated harness WAV.
 func ParityPixelateAlphaVideoFixture() (TimelineDocument, []ParityFixtureAsset) {
-	return parityPixelateFixture(
+	doc, assets := parityPixelateFixture(
 		ParityPixelateAlphaVideoFixtureName,
 		parityPixelateOpaqueCanvasWidth,
 		parityPixelateOpaqueCanvasHeight,
@@ -92,6 +94,8 @@ func ParityPixelateAlphaVideoFixture() (TimelineDocument, []ParityFixtureAsset) 
 		ParityFixtureAsset{ID: "asset-alpha-video", Kind: "video", Width: 512, Height: 512, DurationMS: parityPixelateDurationMS, Description: "deterministic changing VP9 WebM with alpha_mode=1 and partial-alpha moving regions"},
 		"Partial-alpha VP9 pixelate source",
 	)
+	doc.Tracks[0].Clips[0].Muted = true
+	return doc, assets
 }
 
 func parityPixelateFixture(name string, canvasWidth, canvasHeight int, background, assetID string, sourceAsset ParityFixtureAsset, sourceTrackName string) (TimelineDocument, []ParityFixtureAsset) {
