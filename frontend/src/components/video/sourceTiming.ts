@@ -70,12 +70,15 @@ export function sourceTimeForPreviewMediaMs(
  * Convert an exact canonical source-time boundary into a browser video seek
  * target that is safely inside the requested frame interval. JavaScript's
  * nearest Float64 representation of a rational PTS can sit infinitesimally
- * below that boundary (for example 59/30), which lets Chromium display the
- * previous decoded frame even though canonical frame identity is correct.
+ * below that boundary (for example 59/30), and containers such as WebM can
+ * quantize frame timestamps to milliseconds (for example 1.967 s). A seek that
+ * remains below that quantized PTS can legitimately present the prior frame.
  *
  * The nudge is browser-consumer policy only: it never changes canonical source
- * time, never applies to free-running playback/audio, stays below the strict
- * deterministic seek tolerance, and remains far inside one output-frame span.
+ * time, never applies to free-running playback/audio, remains strictly below
+ * the 0.5 ms deterministic presentation tolerance, and is capped to a small
+ * fraction of the output-frame interval. Presentation identity is still keyed
+ * to canonical source time rather than treating project FPS as source FPS.
  */
 export function deterministicVideoSeekTargetSeconds(
   address: TimelineSourceAddress,
@@ -85,7 +88,9 @@ export function deterministicVideoSeekTargetSeconds(
     return canonicalTargetSeconds;
   }
   const fps = Math.max(1, Math.trunc(address.fps));
-  const nudgeSeconds = Math.min(0.00025, 1 / (fps * 16));
+  // 0.49 ms clears a 1 ms container timestamp rounded to the nearest tick at
+  // 30/60/120 fps while staying below the strict 0.5 ms presentation tolerance.
+  const nudgeSeconds = Math.min(0.00049, 1 / (fps * 16));
   return canonicalTargetSeconds + nudgeSeconds;
 }
 
