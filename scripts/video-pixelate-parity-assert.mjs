@@ -26,6 +26,9 @@ const canvasWidth = fixture.timeline.canvas.width;
 const canvasHeight = fixture.timeline.canvas.height;
 const fps = fixture.timeline.canvas.fps;
 const decodedVideoFixture = fixture.name === 'parity-pixelate-decoded-video-v1';
+const alphaVideoFixture = fixture.name === 'parity-pixelate-alpha-video-v1';
+const presentationVideoFixture = decodedVideoFixture || alphaVideoFixture;
+const codecColorChannelTolerance = decodedVideoFixture ? 3 : (alphaVideoFixture ? 4 : null);
 const evidence = [];
 
 const browser = await chromium.launch({ headless: true });
@@ -55,6 +58,7 @@ try {
     const host = stage.querySelector('[data-preview-pixelate-host="canonical-canvas"]');
     const surface = stage.querySelector('[data-preview-pixelate-execution="canvas"]');
     const fallback = stage.querySelector('[data-preview-shape-painter-deferred="pixelate-css-approximation"]');
+    const video = stage.querySelector('[data-video-preview-media="true"]');
     return {
       parity_frame_index: stage.dataset.parityFrameIndex ?? null,
       pixelate_frame_index: stage.dataset.previewPixelateFrameIndex ?? null,
@@ -68,6 +72,11 @@ try {
       surface_reason: surface?.getAttribute('data-preview-pixelate-reason') ?? null,
       surface_background: surface?.getAttribute('data-preview-pixelate-background') ?? null,
       css_fallback_marker_present: Boolean(fallback),
+      video_presentation_request_token: video?.dataset.videoPreviewPresentationRequestToken ?? null,
+      video_presentation_ready_token: video?.dataset.videoPreviewPresentationReadyToken ?? null,
+      video_presentation_status: video?.dataset.videoPreviewPresentationStatus ?? null,
+      video_presentation_media_time: video?.dataset.videoPreviewPresentationMediaTime ?? null,
+      video_presentation_attempts: video?.dataset.videoPreviewPresentationAttempts ?? null,
     };
   });
 
@@ -192,7 +201,12 @@ try {
       throw new Error(`frame ${sample.frame_index} did not prove exact pixelate Canvas execution: ${JSON.stringify(state)}`);
     }
 
-    if (decodedVideoFixture) {
+    if (presentationVideoFixture) {
+      if (state.video_presentation_status !== 'ready'
+        || !state.video_presentation_request_token
+        || state.video_presentation_ready_token !== state.video_presentation_request_token) {
+        throw new Error(`frame ${sample.frame_index} did not retain matching preview presentation-token proof: ${JSON.stringify(state)}`);
+      }
       if (presentations.length === 0) {
         throw new Error(`frame ${sample.frame_index} has no decoded-video presentation evidence`);
       }
@@ -207,8 +221,8 @@ try {
       }
     }
 
-    const codecRegion = decodedVideoFixture
-      ? await page.evaluate(async ({ frameIndex, snapshotID, canvasWidth }) => {
+    const codecRegion = presentationVideoFixture
+      ? await page.evaluate(async ({ frameIndex, snapshotID, canvasWidth, channelTolerance }) => {
         const stage = document.querySelector('[data-testid="video-preview-program"]');
         if (!(stage instanceof HTMLElement)) throw new Error('preview program missing while measuring codec region');
         const output = stage.querySelector('[data-preview-pixelate-execution="canvas"] canvas');
@@ -245,7 +259,7 @@ try {
             let pixelWithin = true;
             for (let channel = 0; channel < 3; channel += 1) {
               const delta = Math.abs(preview[offset + channel] - rendered[offset + channel]);
-              if (delta > 3) pixelWithin = false;
+              if (delta > channelTolerance) pixelWithin = false;
               if (delta > maxChannelDelta) maxChannelDelta = delta;
             }
             if (pixelWithin) pixelsWithinTolerance += 1;
@@ -253,7 +267,7 @@ try {
           return {
             bounds: { min_x: minX, min_y: minY, max_x: minX + width, max_y: minY + height },
             compared_pixels: comparedPixels,
-            channel_tolerance: 3,
+            channel_tolerance: channelTolerance,
             pixels_within_tolerance: pixelsWithinTolerance,
             pixel_pass_rate: pixelsWithinTolerance / comparedPixels,
             max_channel_delta: maxChannelDelta,
@@ -261,11 +275,17 @@ try {
         } finally {
           bitmap.close();
         }
-      }, { frameIndex: sample.frame_index, snapshotID: seedResult.snapshot_id, canvasWidth })
+      }, {
+        frameIndex: sample.frame_index,
+        snapshotID: seedResult.snapshot_id,
+        canvasWidth,
+        channelTolerance: codecColorChannelTolerance,
+      })
       : null;
 
-    if (codecRegion && (codecRegion.max_channel_delta > 3 || codecRegion.pixel_pass_rate !== 1)) {
-      throw new Error(`frame ${sample.frame_index} exceeded decoded H.264 ±3 RGB gate: ${JSON.stringify(codecRegion)}`);
+    if (codecRegion && (codecRegion.max_channel_delta > codecColorChannelTolerance || codecRegion.pixel_pass_rate !== 1)) {
+      const sourceKind = alphaVideoFixture ? 'transparent VP9' : 'decoded H.264';
+      throw new Error(`frame ${sample.frame_index} exceeded ${sourceKind} ±${codecColorChannelTolerance} RGB gate: ${JSON.stringify(codecRegion)}`);
     }
 
     evidence.push({
@@ -288,8 +308,9 @@ await fs.writeFile(output, `${JSON.stringify({
   timeline_sha256: seedResult.timeline_sha256,
   snapshot_id: seedResult.snapshot_id,
   fps,
-  decoded_frame_identity_gate: decodedVideoFixture,
-  codec_color_channel_tolerance: decodedVideoFixture ? 3 : null,
+  decoded_frame_identity_gate: presentationVideoFixture,
+  transparent_video_alpha_gate: alphaVideoFixture,
+  codec_color_channel_tolerance: codecColorChannelTolerance,
   frames: evidence,
 }, null, 2)}\n`);
 console.log(`pixelate Canvas evidence: ${output} (${evidence.length} frames)`);

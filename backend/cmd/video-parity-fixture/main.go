@@ -70,6 +70,10 @@ func generateFixtureMedia(outputDir string) error {
 		{"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=24", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=24", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", filepath.Join(mediaDir, "asset-landscape.mp4")},
 		{"-f", "lavfi", "-i", "smptebars=size=360x640:rate=30:duration=24", "-f", "lavfi", "-i", "sine=frequency=660:sample_rate=48000:duration=24", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", filepath.Join(mediaDir, "asset-portrait.mp4")},
 		{"-f", "lavfi", "-i", "testsrc2=size=512x512:rate=1:duration=1", "-frames:v", "1", filepath.Join(mediaDir, "asset-square.png")},
+		// Two moving partial-alpha regions over transparent RGB prove both frame
+		// presentation identity and alpha preservation. WebM advertises
+		// alpha_mode=1 even though ffprobe's native VP9 path reports yuv420p.
+		{"-f", "lavfi", "-i", "nullsrc=s=512x512:r=30:d=2,format=rgba,geq=r='mod(X+N*7,256)':g='mod(Y+N*11,256)':b='mod(X+Y+N*13,256)':a='if(between(mod(X+N*5,512),60,240)*between(Y,70,230),160,if(between(mod(X+N*3,512),280,430)*between(Y,270,450),230,0))'", "-c:v", "libvpx-vp9", "-lossless", "1", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-metadata:s:v:0", "alpha_mode=1", filepath.Join(mediaDir, "asset-alpha-video.webm")},
 		// A swept tone plus deterministic one-second impulses makes sample-offset
 		// correlation unambiguous; a constant sine aliases at many offsets and can
 		// make a correct mix appear shifted by a whole number of periods.

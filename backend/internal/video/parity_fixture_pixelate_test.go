@@ -56,6 +56,24 @@ func TestParityPixelateAlphaFixtureIsValidAndUsesNonBlackBackground(t *testing.T
 	assertIsolatedPixelateFixture(t, validated)
 }
 
+func TestParityPixelateAlphaVideoFixtureIsValidAndUsesChangingVideoSource(t *testing.T) {
+	doc, assets := ParityPixelateAlphaVideoFixture()
+	validated, err := ValidateTimelineDocument(doc)
+	if err != nil {
+		t.Fatalf("ValidateTimelineDocument() error = %v", err)
+	}
+	if validated.Canvas.Width != 512 || validated.Canvas.Height != 512 || validated.Canvas.FPS != 30 {
+		t.Fatalf("canvas = %dx%d@%d, want 512x512@30", validated.Canvas.Width, validated.Canvas.Height, validated.Canvas.FPS)
+	}
+	if validated.Canvas.Background != "#19324A" {
+		t.Fatalf("background = %q, want #19324A", validated.Canvas.Background)
+	}
+	if len(assets) != 2 || assets[0].ID != "asset-alpha-video" || assets[0].Kind != "video" || assets[0].Width != 512 || assets[0].Height != 512 || assets[0].DurationMS != 2000 || assets[1].ID != "asset-audio" {
+		t.Fatalf("assets = %#v, want changing alpha VP9 plus audio harness asset", assets)
+	}
+	assertIsolatedPixelateFixture(t, validated)
+}
+
 func assertIsolatedPixelateFixture(t *testing.T, validated TimelineDocument) {
 	t.Helper()
 	visualClips := 0
@@ -119,6 +137,19 @@ func TestParityPixelateAlphaSamplesAndRegionsStayFrameBound(t *testing.T) {
 		t.Fatalf("bounds = %#v, want %#v", bounds, wantBounds)
 	}
 	assertPixelateRegionFrames(t, samples, bounds, ParityPixelateAlphaRegionFrames(samples))
+}
+
+func TestParityPixelateAlphaVideoSamplesAndRegionsStayFrameBound(t *testing.T) {
+	samples := ParityPixelateAlphaVideoFrameSamples()
+	wantFrames := []int64{0, 15, 30, 59}
+	assertPixelateFrames(t, samples, wantFrames)
+
+	bounds := ParityPixelateAlphaVideoRegionBounds()
+	wantBounds := (ParityBounds{MinX: 71, MinY: 94, MaxX: 474, MaxY: 401})
+	if bounds != wantBounds {
+		t.Fatalf("bounds = %#v, want %#v", bounds, wantBounds)
+	}
+	assertPixelateRegionFrames(t, samples, bounds, ParityPixelateAlphaVideoRegionFrames(samples))
 }
 
 func assertPixelateFrames(t *testing.T, samples []ParityFrameSample, wantFrames []int64) {

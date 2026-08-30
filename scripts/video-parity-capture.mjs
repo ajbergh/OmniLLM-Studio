@@ -205,6 +205,7 @@ async function seedFixtureProject({ context, fixture, mediaDir, baseURL, headers
     'asset-portrait': ['asset-portrait.mp4', 'video/mp4'],
     'asset-square': ['asset-square.png', 'image/png'],
     'asset-alpha': ['asset-alpha.png', 'image/png'],
+    'asset-alpha-video': ['asset-alpha-video.webm', 'video/webm'],
     'asset-audio': ['asset-audio.wav', 'audio/wav'],
   };
   const assetIDs = {};
