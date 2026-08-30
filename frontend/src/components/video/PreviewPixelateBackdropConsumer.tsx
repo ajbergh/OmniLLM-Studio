@@ -36,8 +36,10 @@ const IDLE_RUNTIME: RuntimeState = { executionKey: '', status: 'pending' };
 /**
  * Deterministic pixelate Canvas consumer layered onto VideoPreviewCanvas.
  * Structural admission and runtime decoded-pixel proof both fail closed: normal
- * playback, poster-budget sources, transparent target regions, and unsupported
- * canonical state leave the established CSS approximation untouched.
+ * playback, poster-budget sources, unsupported canonical state, and decoded
+ * video that cannot prove its source frame opaque leave the established CSS
+ * approximation untouched. Transparent/partial-alpha images are admitted only
+ * after canonical project-background composition in PreviewPixelateCanvas.
  */
 export function PreviewPixelateBackdropConsumer() {
   const timeline = useVideoStudioStore((state) => state.timeline);
@@ -89,6 +91,7 @@ export function PreviewPixelateBackdropConsumer() {
   const fps = timeline?.canvas.fps || 30;
   const canvasWidth = timeline?.canvas.width || 1920;
   const canvasHeight = timeline?.canvas.height || 1080;
+  const canvasBackground = timeline?.canvas.background || '#000000';
   const stageScale = stageSize.width > 0 ? stageSize.width / canvasWidth : 0;
   const deterministicFrame = !isPlaying
     && frameAddress !== null
@@ -124,7 +127,7 @@ export function PreviewPixelateBackdropConsumer() {
     : undefined;
   const consume = plan.mode === 'canonical-ready' && !posterDeferredReason;
   const executionKey = consume
-    ? `${deterministicFrame}:${plan.target.clip.id}:${plan.backdrop.clip.id}:${canvasWidth}x${canvasHeight}`
+    ? `${deterministicFrame}:${plan.target.clip.id}:${plan.backdrop.clip.id}:${canvasWidth}x${canvasHeight}:${canvasBackground}`
     : '';
   const runtimeStatus = consume && runtime.executionKey === executionKey ? runtime.status : 'pending';
   const runtimeReason = consume && runtime.executionKey === executionKey ? runtime.reason : undefined;
@@ -314,6 +317,7 @@ export function PreviewPixelateBackdropConsumer() {
       plan={plan}
       canvasWidth={canvasWidth}
       canvasHeight={canvasHeight}
+      canvasBackground={canvasBackground}
       stageScale={stageScale}
       sourceForClip={sourceForClip}
       executionKey={executionKey}

@@ -71,7 +71,7 @@ export function resolvePreviewPixelateCanvasRegion(
   };
 }
 
-/** Prove every decoded pixel in one candidate backdrop region has straight alpha 255. */
+/** Prove every decoded source pixel in one video candidate region has straight alpha 255. */
 export function previewPixelateRegionIsOpaque(rgba: Uint8ClampedArray): boolean {
   if (rgba.length === 0 || rgba.length % 4 !== 0) {
     throw new Error('preview pixelate opacity proof requires a non-empty RGBA byte buffer');
@@ -83,12 +83,14 @@ export function previewPixelateRegionIsOpaque(rgba: Uint8ClampedArray): boolean 
 }
 
 /**
- * Classify one opacity proof attempt. A newly sought HTMLVideoElement can report
- * HAVE_CURRENT_DATA before Chromium has made that decoded frame rasterizable to
- * Canvas, so an initial non-opaque read is not sufficient evidence of authored
- * transparency. Video consumers may retry for a caller-bounded number of paint
- * frames; images and exhausted video retries still fail closed to compatibility
- * rendering. The proof itself remains exact: only alpha 255 reaches ready.
+ * Classify one decoded-video opacity/readiness proof attempt. A newly sought
+ * HTMLVideoElement can report HAVE_CURRENT_DATA before Chromium has made that
+ * decoded frame rasterizable to Canvas, so an initial non-opaque read is not
+ * sufficient evidence of authored transparency. Video consumers may retry for a
+ * caller-bounded number of paint frames; exhausted retries still fail closed.
+ * Images do not use this proof once their source-over project-background
+ * composition is authoritative. The proof itself remains exact: only alpha 255
+ * reaches ready.
  */
 export function resolvePreviewPixelateOpacityProof(
   rgba: Uint8ClampedArray,

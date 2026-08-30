@@ -1,7 +1,7 @@
 # Video Edit Studio WYSIWYG Rendering Implementation Plan
 
 **Status:** In progress  
-**Last updated:** 2026-08-29  
+**Last updated:** 2026-08-30  
 **Scope:** Video Edit Studio preview, timeline evaluation, render jobs, visual composition, audio mix, export, validation, packaging, and parity testing.  
 **Primary goal:** The authoritative editor preview and final decoded export must represent the same immutable timeline revision with identical frame identity, active-layer ordering, timing, geometry, styling, effects, transitions, camera state, font resources, and audio decisions.
 
@@ -9,9 +9,9 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG program PR: **#291 — Merge validated codec-decoded pixelate parity evidence** — squash merge `7d5f36c3230d23eef46de310d6ac785b1b998c33` (2026-08-29). #291 contains the exact validated head from draft #290; #290 was closed only because the connector's ready-for-review mutation failed against GitHub's current GraphQL schema.
+Latest merged WYSIWYG program PR: **#293 — Merge validated decoded-video frame identity** — squash merge `9850370c2aa25a076f3272077062aeab08c1f326` (2026-08-30). #293 points at the exact validated head from draft #292; #292 was closed only because GitHub still refused to merge the draft through the connector.
 
-Current implementation PR: **#292 — Prove deterministic decoded-video frame identity** on branch `fix/video-wysiwyg-phase3-decoded-frame-identity`, created directly from #291's actual squash result `7d5f36c3230d23eef46de310d6ac785b1b998c33`.
+Current implementation PR: **#294 — Compose pixelate alpha sources over canonical background** on branch `fix/video-wysiwyg-phase3-pixelate-alpha-composition`, created directly from #293's actual squash result `9850370c2aa25a076f3272077062aeab08c1f326`.
 
 **Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** Renderer-independent contracts own authored semantics. Browser/FFmpeg consumers may produce renderer-specific evidence, but they must not silently redefine canonical intent.
 
@@ -48,7 +48,7 @@ Current implementation PR: **#292 — Prove deterministic decoded-video frame id
 - The existing 103-sample longitudinal baseline remains unchanged and additive to both focused pixelate fixtures.
 - #291 squash-merged that exact validated head as `7d5f36c3230d23eef46de310d6ac785b1b998c33`.
 
-### #292 current scope
+### #293 merged decoded-frame identity
 
 #292 closes the decoded-video frame-selection debt before promoting the measured codec/color envelope into a gate:
 
@@ -61,16 +61,27 @@ Current implementation PR: **#292 — Prove deterministic decoded-video frame id
 - Retained decoded artifact `9725989461` is 14,087,302 bytes with SHA-256 `1189464ee9067b55271bc507ce604843f258a338102481a84c2d53c435c6ed7f`; retained exact-PNG artifact `9725990152` is 8,632,756 bytes with SHA-256 `6e0d3a407e5ccedefa7f03f9a267d23cbdc53f9d9b3474c6dbf4f5c8d60962ea`.
 - Chromium presentation identity is now explicit: frame `0` retains the allowed initial-current-time proof at `0`; frame `15` presents `mediaTime=0.5` after seeking to `currentTime=0.50025`; frame `30` presents `mediaTime=1.0` after seeking to `currentTime=1.00025`; frame `59` presents `mediaTime=1.966667` after seeking to `currentTime=1.966916`. The requested/presented frame indices are `0/15/30/59` exactly.
 - Every corrected decoded pixelate region covers `[135,18)-[538,325)` = `123,721` pixels. All `123,721` pixels pass the focused ±3 RGB envelope on every sample and every sample has `max_channel_delta=3`. Frame `59`'s repository-default ±2 diagnostic improves from the pre-fix gross mismatch to `pixel_pass_rate=0.9967669191`, `SSIM=0.9999361828`, and `MAE=0.8941570146`, confirming the remaining difference is ordinary codec/color conversion rather than frame identity.
-- Preserve the original 103-sample longitudinal baseline and transparent/premultiplied-alpha deferral. Final tracker-bearing merge validation must still pass the complete exact-head Quality, Security, Pixelate Evidence, and platform/sandbox workflow set.
+- Preserve the original 103-sample longitudinal baseline and transparent/premultiplied-alpha deferral. Final tracker-bearing head `f255243bc36da8d13efaf55ee770b4f20503723d` passed Quality #1716, Security #1721, Video Pixelate Parity Evidence #45, Chromium smoke, the full renderer parity baseline, and all applicable platform/sandbox assurances. #293 squash-merged that exact validated tree as `9850370c2aa25a076f3272077062aeab08c1f326`.
+
+### #294 current scope
+
+#294 closes the first transparent-image pixelate composition gap without broadening canonical authored semantics:
+
+- Mirror FFmpeg's admitted renderer order for the one-media-layer pixelate path: start from the opaque project canvas background, source-over the decoded media through canonical media geometry, then sample/pixelate the already-composited RGB backdrop.
+- Match the renderer's background grammar exactly: six-digit RGB with or without `#`; anything else falls back to black.
+- Admit transparent and partial-alpha **images** by Canvas source-over composition. Do not inspect, unpremultiply, or reinterpret image source bytes. Hidden RGB under alpha `0` must never leak into the composed backdrop.
+- Keep decoded-video source-only alpha/readiness proof unchanged before background composition. Transparent video remains fail-closed in this slice because the existing proof also guards Chromium's post-seek rasterizability race.
+- Add deterministic `parity-pixelate-alpha-png-v1` evidence over non-black `#19324A`, using an NRGBA PNG with hidden RGB and alpha `0/64/128/192/255`, the established `403x307` region/block-20 raster, and frames `0/15/30/59`.
+- Preserve #289's byte-exact opaque-PNG gate and #293's H.264 requested/presented frame-identity plus focused ±3 RGB gate as independent controls.
 
 ## Phase tracker
 
 | Phase | Status | Progress / exit work |
 |---|---|---|
-| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #266 merged fail-closed frame-indexed region-policy inputs. #289 added the byte-exact opaque-PNG gate; #291 merged retained H.264 decoded-video measurement. #292 implementation evidence now proves decoded frame identity on 0/15/30/59 and enforces the focused ±3 H.264/yuv420p color envelope only after that identity proof. Resource-font fixture coverage and second-platform retained evidence remain. |
+| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #289 added the byte-exact opaque-PNG gate; #291 added H.264 measurement; #293 proves decoded frame identity on 0/15/30/59 and gates the focused ±3 H.264/yuv420p envelope only after identity proof. #294 adds a deterministic partial-alpha PNG/background-composition control. Resource-font fixture coverage and second-platform retained evidence remain. |
 | Phase 1 — Immutable submission | **Complete** | Revision/hash binding, immutable snapshots/source bytes, decode preflight, snapshot-only execution/recovery, identity metadata, stale rejection, Strict Parity diagnostics, and frontend dirty/concurrency behavior are implemented. |
 | Phase 2 — Canonical contract | **Complete** | Frame/range/source/order, curves, transforms/geometry/projection, transitions, effects, text/fonts, shapes, cursor, immutable source provenance, and AudioGraph semantics are versioned and cross-runtime checked. #260 closed the final contract gap. |
-| Phase 3 — Shared preview composition | **In progress** | #261–#289 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, exact browser font readiness, Chromium text-layout snapshots, deterministic pixelate raster/backdrop semantics, runtime-proven opaque Canvas consumption, byte-exact opaque-PNG evidence, and sampled-render source fan-out. #291 extends retained evidence to decoded H.264; #292 implementation evidence closes deterministic decoded-video frame identity while preserving fail-closed alpha behavior. Transparent-alpha semantics, weighted-raster broadening, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |
+| Phase 3 — Shared preview composition | **In progress** | #261–#289 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, font readiness/layout snapshots, deterministic pixelate semantics, exact opaque-PNG evidence, and sampled-render fan-out. #291/#293 close retained H.264 measurement and deterministic frame identity. #294 implements renderer-ordered project-background/source-over composition for transparent images while keeping transparent video fail-closed. Weighted-raster broadening, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |
 | Phase 4 — Shared Chromium render worker | Not started | Deterministic browser renderer consumes the same canonical composition package; FFmpeg remains decode/encode/mux where appropriate. |
 | Phase 5 — Visual parity closure | Not started | Close decoded visual thresholds for media, transforms, Chromium text metrics/fonts, shapes, transitions, effects, cursor, camera, color space, and deterministic asset loading. |
 | Phase 6 — Audio parity closure | Not started | Make preview/Chromium/export obey AudioGraph exactly, including pitch, gain/fades, channels, program processing, processed stems, and decoded delivery. |
@@ -182,6 +193,7 @@ Unsupported/deferred painter sources stay explicit debt and do not become canoni
 | #288 | Runtime-proven opaque pixelate Canvas consumption | `7be8e86f9ded0b31b265844e804a92bca3c1b81c` |
 | #289 | Retained byte-exact opaque-PNG pixelate evidence and immutable-source fan-out | `86dc6a6eaa4eb5f494f8d935f5535da8fb517b0b` |
 | #291 | Retained H.264 decoded-video pixelate evidence and bounded video Canvas readiness | `7d5f36c3230d23eef46de310d6ac785b1b998c33` |
+| #293 | Deterministic decoded-video frame identity and focused ±3 H.264 pixelate gate | `9850370c2aa25a076f3272077062aeab08c1f326` |
 
 ## Safe stacked-branch normalization
 
@@ -195,13 +207,13 @@ Every stacked slice starts from the **actual squash result on current `main`**:
 6. Audit comments/reviews/threads and merge with expected-head protection.
 7. Create the next slice from the new actual squash result.
 
-Recent lineage: #284 from #283 squash `3543ddf7...`; #285 from #284 `7884fef8...`; #286 from #285 `64e34450...`; #287 from #286 `40e895ee...`; #288 from #287 `2774ee76...`; #289 from #288 `7be8e86f...`; #290 validated directly from #289 squash `86dc6a6eaa4eb5f494f8d935f5535da8fb517b0b`; #291 mirrored that exact validated #290 head because the ready-for-review connector mutation failed, then squash-merged as `7d5f36c3230d23eef46de310d6ac785b1b998c33`; **#292 is directly from #291 squash `7d5f36c3230d23eef46de310d6ac785b1b998c33`**.
+Recent lineage: #284 from #283 squash `3543ddf7...`; #285 from #284 `7884fef8...`; #286 from #285 `64e34450...`; #287 from #286 `40e895ee...`; #288 from #287 `2774ee76...`; #289 from #288 `7be8e86f...`; #290 validated from #289 squash; #291 mirrored that exact validated #290 head and merged as `7d5f36c3...`; #292 validated directly from #291; #293 mirrored exact validated #292 head and squash-merged as `9850370c2aa25a076f3272077062aeab08c1f326`; **#294 is directly from #293 squash `9850370c2aa25a076f3272077062aeab08c1f326`**.
 
 ## Phase 0 parity baseline
 
 The deterministic `parity-torture-v1` fixture covers 20 seconds at 640×360/30 fps with 103 named samples spanning boundaries, rates, transforms, curves, text, shapes, effects, transitions, camera, captions, cursor, and audio.
 
-The focused `parity-pixelate-opaque-v1` fixture is a byte-exact non-regression gate for the isolated opaque-PNG static pixelate path. `parity-pixelate-decoded-video-v1` is additive decoded-media evidence: #292 proves deterministic decoded-frame identity first and then applies the explicit ±3 RGB H.264/yuv420p pixelate-region envelope without changing repository-global parity defaults.
+The focused `parity-pixelate-opaque-v1` fixture is a byte-exact non-regression gate for the isolated opaque-PNG static pixelate path. `parity-pixelate-decoded-video-v1` is additive decoded-media evidence: #293 proves deterministic decoded-frame identity first and then applies the explicit ±3 RGB H.264/yuv420p pixelate-region envelope without changing repository-global parity defaults. `parity-pixelate-alpha-png-v1` is #294's additive straight-alpha/source-over project-background control.
 
 The torture baseline does not yet include a project font resource. Add resource-font fixture coverage before treating cross-machine glyph identity as proven. Retained visual evidence remains diagnostic until structural zero-tolerance policy and codec-aware decoded thresholds are frozen and retained on a second supported OS/FFmpeg environment.
 
@@ -238,25 +250,24 @@ Hosted CI is authoritative for platform/toolchain cases unavailable in the curre
 | Intrinsic size changes after dimensions are frozen | Require a second Chromium pass with stable width/height and line-fragment count before parity-ready. |
 | Family-name-only text is mistaken for deterministic face identity | Snapshot records provenance/runtime; exact cross-machine identity still requires a resource-backed face. |
 | Text-layout gate bypasses weighted/pixelate Canvas readiness | Independent resume flags preserve traversal through each deterministic readiness gate. |
-| Pixelate raster math is confused with backdrop-source parity | #285 owns grid/sample-index math; #286 owns structural backdrop admission; #287 owns FFmpeg scaler selection; #288 owns browser runtime acquisition/opaque proof; #289 owns byte-exact PNG evidence; #291 owns decoded-video measurement; #292 owns decoded-frame identity and the focused codec/color acceptance gate. None is substituted for another. |
-| MIME type or codec is treated as proof of an opaque backdrop | #288/#291 scan the sampled RGBA target rectangle and activate exact Canvas only when every alpha byte is `255`; no MIME-only or codec-only shortcut exists. |
+| Pixelate raster math is confused with backdrop-source parity | #285 owns grid/sample-index math; #286 owns structural admission; #287 owns FFmpeg scaler selection; #288 owns runtime acquisition; #289 owns byte-exact PNG evidence; #291 owns decoded-video measurement; #293 owns decoded-frame identity/codec acceptance; #294 owns project-background/source-over image-alpha composition. None is substituted for another. |
+| MIME type or codec is treated as proof of an opaque backdrop | #294 does not infer image opacity from MIME: images are source-over composited onto the renderer-matched opaque project background. Decoded video still requires the exact source-only alpha/readiness proof; no MIME/codec shortcut exists. |
 | Newly sought video reports data before its frame is Canvas-rasterizable | #291 keeps video-only opacity misses pending for a bounded retry window, still requiring exact alpha before activation and failing closed after exhaustion. |
 | A second decoder becomes a competing source-time authority | The exact Canvas path reuses the already-mounted preview `<video>`/`<img>` and paints only that existing decoded frame. |
-| Browser seek lands on a neighboring decoded frame at an exact boundary | #291 retained frame 59 as timing debt. #292 implementation evidence applies a 0.25 ms-or-smaller video-only boundary nudge and proves `requestVideoFrameCallback` presents the requested 0/15/30/59 frames before the ±3 codec/color gate is accepted. |
+| Browser seek lands on a neighboring decoded frame at an exact boundary | #291 retained frame 59 as timing debt. #293 applies the 0.25 ms-or-smaller video-only boundary nudge and proves `requestVideoFrameCallback` presents requested 0/15/30/59 before the ±3 codec/color gate is accepted. |
 | Sampled fidelity expansion multiplies FFmpeg decoder instances | #289 indexes immutable source paths once and uses deterministic `split` / `asplit` fan-out so hundreds of sampled consumers preserve independent semantics without reopening the same asset hundreds of times. |
 | Pixelate target host applies a second transform to exact bytes | The Canvas stays hidden while proving readiness; only then is the existing target host normalized to full-stage geometry and the CSS painter hidden. |
 | FFmpeg/static-region behavior is confused with canonical transform support | The pixelate planner explicitly defers target transform keyframes and explicit axis scale that diverges from legacy scalar `scale`. |
 | Evidence accidentally measures CSS fallback instead of Canvas | Browser assertion requires `canonical-canvas`, ready surface/host markers, no deferred/error markers, and absence of `pixelate-css-approximation` for every sampled frame. |
 | A diagnostic `--allow-fail` report is mistaken for exact parity | Reports retain pass rate, SSIM, MAE/RMSE, max-channel delta, and exact consumer identity. Workflow success proves evidence completeness unless an explicit threshold gate is configured. |
-| Alpha/pixel-format conversion is assumed byte-identical across browser and FFmpeg | Transparent-source execution stays deferred until decoded RGBA/premultiplication/compositing semantics are defined and retained. |
-| Codec-noisy decoded equality is treated as structural parity | PNG structural exactness remains independent; #292 gates decoded-video color at ±3 only after source-frame identity is proven, while repository-default ±2 diagnostics remain unchanged. |
+| Alpha/pixel-format conversion is assumed byte-identical across browser and FFmpeg | #294 mirrors renderer order for transparent images by compositing the decoded image over the canonical opaque project background before pixelate; the NRGBA fixture carries hidden RGB and partial alpha specifically to catch premultiplication/source-over mistakes. Transparent video remains deferred. |
+| Codec-noisy decoded equality is treated as structural parity | PNG structural exactness remains independent; #293 gates decoded-video color at ±3 only after source-frame identity is proven, while repository-default ±2 diagnostics remain unchanged. |
 | CI scheduling hides code state | Only actually executed checks count. |
 
 ## Next recommended slice
 
-1. **Finish and merge #292 after the tracker-bearing exact-head workflow wave is green.** The implementation evidence already proves requested/presented decoded frame identity on 0/15/30/59 and a 100% pixel pass at the focused ±3 H.264/yuv420p envelope, while the byte-exact PNG control remains independent.
-2. **Next slice: define transparent/premultiplied-alpha pixelate semantics.** Keep current fail-closed behavior until canonical decoded RGBA representation, browser Canvas premultiplication, FFmpeg alpha handling, and source-over compositing order are explicit and cross-runtime testable.
-3. Add a deterministic transparent/partial-alpha fixture with retained browser↔renderer region evidence. Do not infer opacity or compositing semantics from MIME type, codec, or container.
-4. Broaden pixelate and weighted-Canvas raster eligibility only after each additional painter/source has exact composition semantics and retained evidence; preserve the opaque PNG and H.264 controls as independent non-regression gates.
-5. Add resource-font fixture coverage and retain parity evidence on a second supported OS/FFmpeg environment before calling cross-machine Phase 0 visual identity closed.
-6. Continue Phase 3 with normal-playback canonicalization, explicit diagnostics/rollback, then shared AudioGraph consumption.
+1. **Execute #294: transparent-image project-background composition.** Retain alpha PNG browser↔renderer region evidence proving hidden RGB under alpha `0` does not leak and partial-alpha pixels follow the same source-over result before pixelate.
+2. Keep transparent decoded video fail-closed until a reliable presentation/readiness proof can distinguish legitimate transparent decoded pixels from Chromium's post-seek not-yet-rasterizable state. Do not remove the H.264 source-only guard just to broaden alpha support.
+3. After #294 is retained and green, broaden pixelate/weighted-Canvas raster eligibility only for painter/source classes whose source-over ordering is explicit and independently evidenced.
+4. Add resource-font fixture coverage and retain parity evidence on a second supported OS/FFmpeg environment before calling cross-machine Phase 0 visual identity closed.
+5. Continue Phase 3 with normal-playback canonicalization, explicit diagnostics/rollback, then shared AudioGraph consumption.

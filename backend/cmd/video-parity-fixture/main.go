@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -79,7 +82,37 @@ func generateFixtureMedia(outputDir string) error {
 			return fmt.Errorf("%v: %w: %s", args, err, output)
 		}
 	}
+	if err := writeAlphaFixturePNG(filepath.Join(mediaDir, "asset-alpha.png")); err != nil {
+		return fmt.Errorf("generate alpha PNG: %w", err)
+	}
 	return nil
+}
+
+func writeAlphaFixturePNG(path string) error {
+	img := image.NewNRGBA(image.Rect(0, 0, 512, 512))
+	alphaBands := [...]uint8{0, 64, 128, 192, 255}
+	for y := 0; y < 512; y++ {
+		for x := 0; x < 512; x++ {
+			alpha := alphaBands[((x/64)+(y/64))%len(alphaBands)]
+			// Keep RGB deliberately non-zero and spatially varying even when
+			// alpha is zero. Correct source-over composition must discard those
+			// hidden channels instead of leaking them into the project background.
+			pixel := color.NRGBA{
+				R: uint8((x*37 + y*17 + 91) & 0xff),
+				G: uint8((x*11 + y*29 + 53) & 0xff),
+				B: uint8((x*23 + y*7 + 211) & 0xff),
+				A: alpha,
+			}
+			img.SetNRGBA(x, y, pixel)
+		}
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	encoder := png.Encoder{CompressionLevel: png.BestCompression}
+	return encoder.Encode(file, img)
 }
 
 func exitf(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...); os.Exit(1) }
