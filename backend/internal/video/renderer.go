@@ -57,6 +57,7 @@ type resolvedClip struct {
 	isImage         bool
 	isAudio         bool
 	audioChannels   int
+	inputDecoder    string
 	// hasAudio reports whether a video asset carries an audio stream that
 	// should join the mixdown (always true for audio assets).
 	hasAudio bool
@@ -485,6 +486,9 @@ func resolveMediaClips(req RenderRequest) []resolvedClip {
 				isImage:    strings.HasPrefix(mime, "image/"),
 				isAudio:    strings.HasPrefix(mime, "audio/"),
 			}
+			if rc.isVideo {
+				rc.inputDecoder = videoAssetInputDecoder(asset)
+			}
 			if rc.isAudio {
 				rc.hasAudio = true
 			} else if rc.isVideo {
@@ -575,6 +579,12 @@ func appendResolvedClipInputs(args []string, clips []resolvedClip, nextIdx int) 
 		nextIdx = 1
 	}
 	sourceByPath := map[string]int{}
+	decoderByPath := map[string]string{}
+	for _, clip := range clips {
+		if clip.inputDecoder != "" {
+			decoderByPath[clip.filePath] = clip.inputDecoder
+		}
+	}
 	visualBySource := map[int][]int{}
 	audioBySource := map[int][]int{}
 	for i := range clips {
@@ -584,6 +594,9 @@ func appendResolvedClipInputs(args []string, clips []resolvedClip, nextIdx int) 
 			sourceIdx = nextIdx
 			nextIdx++
 			sourceByPath[clips[i].filePath] = sourceIdx
+			if decoder := decoderByPath[clips[i].filePath]; decoder != "" {
+				args = append(args, "-c:v", decoder)
+			}
 			args = append(args, "-i", clips[i].filePath)
 		}
 		clips[i].sourceInputIdx = sourceIdx
@@ -675,6 +688,32 @@ func clipZIndex(clip TimelineClip) int {
 		return *clip.ZIndex
 	}
 	return 0
+}
+
+// videoAssetInputDecoder selects an input decoder only when immutable stream
+// facts require one for fidelity. FFmpeg's native VP9 decoder discards WebM
+// alpha, while libvpx-vp9 preserves alpha_mode=1 streams.
+func videoAssetInputDecoder(asset models.VideoAsset) string {
+	if strings.TrimSpace(asset.MetadataJSON) == "" {
+		return ""
+	}
+	var metadata struct {
+		VideoCodec       string `json:"video_codec"`
+		VideoPixelFormat string `json:"video_pixel_format"`
+		VideoAlphaMode   string `json:"video_alpha_mode"`
+	}
+	if err := json.Unmarshal([]byte(asset.MetadataJSON), &metadata); err != nil {
+		return ""
+	}
+	probe := &MediaProbe{
+		VideoCodec:       metadata.VideoCodec,
+		VideoPixelFormat: metadata.VideoPixelFormat,
+		VideoAlphaMode:   metadata.VideoAlphaMode,
+	}
+	if strings.EqualFold(strings.TrimSpace(probe.VideoCodec), "vp9") && probe.VideoHasAlpha() {
+		return "libvpx-vp9"
+	}
+	return ""
 }
 
 // videoAssetHasAudio reports whether a video asset carries an audio stream.

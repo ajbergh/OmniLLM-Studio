@@ -3,6 +3,8 @@ package video
 import (
 	"strings"
 	"testing"
+
+	"github.com/ajbergh/omnillm-studio/internal/models"
 )
 
 func TestAppendResolvedClipInputsDeduplicatesSourcesAndFansOutStreams(t *testing.T) {
@@ -39,6 +41,36 @@ func TestAppendResolvedClipInputsDeduplicatesSourcesAndFansOutStreams(t *testing
 	}
 	if !strings.Contains(graph, "[1:a]asplit=2[input1_a0][input1_a1]") {
 		t.Fatalf("missing deterministic audio fanout: %s", graph)
+	}
+}
+
+func TestAppendResolvedClipInputsSelectsAlphaPreservingVP9DecoderOnce(t *testing.T) {
+	clips := []resolvedClip{
+		{filePath: "input-alpha.webm", isVideo: true, inputDecoder: "libvpx-vp9"},
+		{filePath: "input-alpha.webm", isVideo: true},
+		{filePath: "input-opaque.mp4", isVideo: true},
+	}
+	args, _ := appendResolvedClipInputs(nil, clips, 1)
+	joined := strings.Join(args, " ")
+	if strings.Count(joined, "-c:v libvpx-vp9") != 1 {
+		t.Fatalf("alpha decoder should be applied once to the shared source: %s", joined)
+	}
+	if !strings.Contains(joined, "-c:v libvpx-vp9 -i input-alpha.webm") {
+		t.Fatalf("alpha decoder must be scoped before its input: %s", joined)
+	}
+	if strings.Contains(joined, "libvpx-vp9 -i input-opaque.mp4") {
+		t.Fatalf("opaque input must not inherit alpha decoder: %s", joined)
+	}
+}
+
+func TestVideoAssetInputDecoderUsesFrozenAlphaFacts(t *testing.T) {
+	asset := models.VideoAsset{MetadataJSON: `{"video_codec":"vp9","video_pixel_format":"yuv420p","video_alpha_mode":"1"}`}
+	if got := videoAssetInputDecoder(asset); got != "libvpx-vp9" {
+		t.Fatalf("decoder = %q, want libvpx-vp9", got)
+	}
+	asset.MetadataJSON = `{"video_codec":"vp9","video_pixel_format":"yuv420p"}`
+	if got := videoAssetInputDecoder(asset); got != "" {
+		t.Fatalf("opaque decoder = %q, want default", got)
 	}
 }
 
