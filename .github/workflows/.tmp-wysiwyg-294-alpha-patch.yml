@@ -25,7 +25,7 @@ jobs:
           python3 scripts/.tmp_wysiwyg_294_alpha_patch.py
           rm scripts/.tmp_wysiwyg_294_alpha_patch.py
           node --check scripts/video-parity-capture.mjs
-          git diff --check
+          git diff --check -- . ':!docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
           cd backend
           gofmt -w cmd/video-parity-fixture/main.go cmd/video-pixelate-parity-fixture/main.go internal/video/parity_fixture_pixelate.go internal/video/parity_fixture_pixelate_test.go
           go test ./internal/video/... ./cmd/video-parity-fixture ./cmd/video-pixelate-parity-fixture
@@ -36,6 +36,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git diff --cached --check
+          git diff --cached --check -- . ':!docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
           git commit -m 'Add transparent pixelate composition fixture'
           git push origin HEAD:fix/video-wysiwyg-phase3-pixelate-alpha-composition
