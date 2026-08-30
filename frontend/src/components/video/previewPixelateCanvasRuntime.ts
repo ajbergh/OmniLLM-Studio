@@ -15,6 +15,11 @@ export interface PreviewPixelateCanvasRegion {
   raster: PreviewPixelateRasterPlan;
 }
 
+export interface PreviewPixelateOpacityProofDecision {
+  status: 'ready' | 'pending' | 'deferred';
+  reason?: 'decoded-video-opacity-pending' | 'opaque-region-proof';
+}
+
 /**
  * Resolve the exact static FFmpeg pixelate crop/overlay rectangle in canonical
  * canvas pixels. The structural backdrop planner must run first: this helper
@@ -75,6 +80,33 @@ export function previewPixelateRegionIsOpaque(rgba: Uint8ClampedArray): boolean 
     if (rgba[index] !== 255) return false;
   }
   return true;
+}
+
+/**
+ * Classify one opacity proof attempt. A newly sought HTMLVideoElement can report
+ * HAVE_CURRENT_DATA before Chromium has made that decoded frame rasterizable to
+ * Canvas, so an initial non-opaque read is not sufficient evidence of authored
+ * transparency. Video consumers may retry for a caller-bounded number of paint
+ * frames; images and exhausted video retries still fail closed to compatibility
+ * rendering. The proof itself remains exact: only alpha 255 reaches ready.
+ */
+export function resolvePreviewPixelateOpacityProof(
+  rgba: Uint8ClampedArray,
+  retryableVideo: boolean,
+  retryAttempt: number,
+  retryLimit: number,
+): PreviewPixelateOpacityProofDecision {
+  if (!Number.isInteger(retryAttempt) || retryAttempt < 0) {
+    throw new Error('preview pixelate opacity retry attempt must be a non-negative integer');
+  }
+  if (!Number.isInteger(retryLimit) || retryLimit < 0) {
+    throw new Error('preview pixelate opacity retry limit must be a non-negative integer');
+  }
+  if (previewPixelateRegionIsOpaque(rgba)) return { status: 'ready' };
+  if (retryableVideo && retryAttempt < retryLimit) {
+    return { status: 'pending', reason: 'decoded-video-opacity-pending' };
+  }
+  return { status: 'deferred', reason: 'opaque-region-proof' };
 }
 
 function requirePositiveInteger(name: string, value: number): void {
