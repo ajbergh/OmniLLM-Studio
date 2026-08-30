@@ -7,7 +7,7 @@ require (
 	github.com/chinmaykhachane/espn-go v0.1.1
 	github.com/cyphar/filepath-securejoin v0.7.0
 	github.com/drumkitai/go-word v1.0.1
-	github.com/go-chi/chi/v5 v5.3.1
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-chi/cors v1.2.2
 	github.com/go-git/go-billy/v5 v5.9.1
 	github.com/go-git/go-git/v5 v5.19.2
@@ -18,13 +18,13 @@ require (
 	github.com/philippgille/chromem-go v0.7.0
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/tsawler/tabula v1.6.14
-	github.com/wailsapp/wails/v2 v2.14.0
+	github.com/wailsapp/wails/v2 v2.15.0
 	github.com/xuri/excelize/v2 v2.11.0
 	golang.org/x/crypto v0.55.0
 	golang.org/x/net v0.58.0
 	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.56.0
+	modernc.org/sqlite v1.57.0
 )
 
 require (
