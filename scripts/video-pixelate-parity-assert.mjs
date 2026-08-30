@@ -89,12 +89,14 @@ try {
       const matched = new Map();
       let readySeen = false;
       let initialFallbackTimer = null;
+      let timeout = null;
       const callbackIDs = new Map();
       const deadline = performance.now() + 10_000;
 
       const cleanup = () => {
         window.removeEventListener('omnillm:video-parity-ready', ready);
         if (initialFallbackTimer !== null) window.clearTimeout(initialFallbackTimer);
+        if (timeout !== null) window.clearTimeout(timeout);
         for (const [video, callbackID] of callbackIDs.entries()) {
           video.cancelVideoFrameCallback?.(callbackID);
         }
@@ -146,13 +148,12 @@ try {
 
       for (const [index, video] of videos.entries()) observe(video, index);
 
-      const timeout = window.setTimeout(() => {
+      timeout = window.setTimeout(() => {
         cleanup();
         reject(new Error(`parity-ready/presented-frame timed out for frame ${frameIndex}`));
       }, 10_000);
       const ready = (event) => {
         if (event.detail?.requestId !== id) return;
-        window.clearTimeout(timeout);
         readySeen = true;
         if (videos.length === 0) {
           cleanup();
