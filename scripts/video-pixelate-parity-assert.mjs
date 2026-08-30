@@ -21,6 +21,7 @@ const output = path.resolve(args.output);
 const editorURL = new URL(`/video/${encodeURIComponent(seedResult.project_id)}/edit`, args.url).toString();
 const canvasWidth = fixture.timeline.canvas.width;
 const canvasHeight = fixture.timeline.canvas.height;
+const fps = fixture.timeline.canvas.fps;
 const evidence = [];
 
 const browser = await chromium.launch({ headless: true });
@@ -63,26 +64,97 @@ try {
 
   for (const sample of fixture.samples) {
     const requestId = `pixelate-evidence-${sample.frame_index}`;
-    await page.evaluate(({ frameIndex, id }) => new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
+    const presentations = await page.evaluate(({ frameIndex, id, fps }) => new Promise((resolve, reject) => {
+      const videos = [...document.querySelectorAll('[data-video-preview-media="true"]')]
+        .filter((media) => media instanceof HTMLVideoElement);
+      const expectedMediaTimeSeconds = frameIndex / fps;
+      const matched = new Map();
+      let readySeen = false;
+      let initialFallbackTimer = null;
+      const deadline = performance.now() + 10_000;
+
+      const cleanup = () => {
         window.removeEventListener('omnillm:video-parity-ready', ready);
-        reject(new Error(`parity-ready timed out for frame ${frameIndex}`));
+        if (initialFallbackTimer !== null) window.clearTimeout(initialFallbackTimer);
+      };
+      const snapshot = (video, index, method, metadata) => {
+        const mediaTime = metadata?.mediaTime ?? video.currentTime;
+        return {
+          video_index: index,
+          method,
+          requested_frame_index: frameIndex,
+          requested_media_time_seconds: expectedMediaTimeSeconds,
+          element_current_time_seconds: video.currentTime,
+          presented_media_time_seconds: mediaTime,
+          presented_frame_index: Math.round(mediaTime * fps),
+          presented_frames: metadata?.presentedFrames ?? null,
+          width: metadata?.width ?? video.videoWidth,
+          height: metadata?.height ?? video.videoHeight,
+        };
+      };
+      const finishIfComplete = () => {
+        if (!readySeen || matched.size !== videos.length) return;
+        cleanup();
+        resolve([...matched.entries()].sort((a, b) => a[0] - b[0]).map(([, value]) => value));
+      };
+      const observe = (video, index) => {
+        if (typeof video.requestVideoFrameCallback !== 'function') {
+          cleanup();
+          reject(new Error(`requestVideoFrameCallback unavailable for video ${index}`));
+          return;
+        }
+        video.requestVideoFrameCallback((_now, metadata) => {
+          const current = snapshot(video, index, 'requestVideoFrameCallback', metadata);
+          if (current.presented_frame_index === frameIndex) {
+            matched.set(index, current);
+            finishIfComplete();
+            return;
+          }
+          if (performance.now() >= deadline) {
+            cleanup();
+            reject(new Error(`video ${index} presented frame ${current.presented_frame_index}, want ${frameIndex}`));
+            return;
+          }
+          observe(video, index);
+        });
+      };
+
+      for (const [index, video] of videos.entries()) observe(video, index);
+
+      const timeout = window.setTimeout(() => {
+        cleanup();
+        reject(new Error(`parity-ready/presented-frame timed out for frame ${frameIndex}`));
       }, 10_000);
       const ready = (event) => {
         if (event.detail?.requestId !== id) return;
         window.clearTimeout(timeout);
-        window.removeEventListener('omnillm:video-parity-ready', ready);
-        resolve();
+        readySeen = true;
+        if (videos.length === 0) {
+          cleanup();
+          resolve([]);
+          return;
+        }
+        if (frameIndex === 0 && matched.size !== videos.length) {
+          initialFallbackTimer = window.setTimeout(() => {
+            for (const [index, video] of videos.entries()) {
+              if (!matched.has(index)) matched.set(index, snapshot(video, index, 'initial-current-time', null));
+            }
+            finishIfComplete();
+          }, 250);
+        }
+        finishIfComplete();
       };
       window.addEventListener('omnillm:video-parity-ready', ready);
       window.dispatchEvent(new CustomEvent('omnillm:video-parity-seek', { detail: { frameIndex, requestId: id } }));
-    }), { frameIndex: sample.frame_index, id: requestId });
+    }), { frameIndex: sample.frame_index, id: requestId, fps });
 
     try {
       await page.waitForFunction((frameIndex) => {
         const stage = document.querySelector('[data-testid="video-preview-program"]');
+        const surface = stage?.querySelector('[data-preview-pixelate-execution="canvas"]');
         return stage?.dataset.parityFrameIndex === String(frameIndex)
-          && stage?.dataset.previewPixelateConsumer === 'canonical-canvas';
+          && stage?.dataset.previewPixelateConsumer === 'canonical-canvas'
+          && surface?.getAttribute('data-preview-pixelate-status') === 'ready';
       }, sample.frame_index, { timeout: 5000 });
     } catch (error) {
       const state = await readPixelateState();
@@ -104,6 +176,7 @@ try {
       frame_index: sample.frame_index,
       time_ms: sample.time_ms,
       name: sample.name,
+      presentations,
       ...state,
     });
   }
@@ -113,9 +186,10 @@ try {
 
 await fs.mkdir(path.dirname(output), { recursive: true });
 await fs.writeFile(output, `${JSON.stringify({
-  schema_version: 1,
+  schema_version: 2,
   fixture: fixture.name,
   timeline_sha256: seedResult.timeline_sha256,
+  fps,
   frames: evidence,
 }, null, 2)}\n`);
 console.log(`pixelate Canvas evidence: ${output} (${evidence.length} frames)`);
