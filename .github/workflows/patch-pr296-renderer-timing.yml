@@ -1,0 +1,135 @@
+name: Apply PR 296 renderer timing patch
+
+on:
+  push:
+    branches:
+      - fix/video-wysiwyg-phase3-transparent-video-presentation
+    paths:
+      - .github/workflows/patch-pr296-renderer-timing.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/video-wysiwyg-phase3-transparent-video-presentation
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.25.13
+          cache-dependency-path: backend/go.sum
+      - name: Apply visual presentation-boundary patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          renderer = Path('backend/internal/video/renderer.go')
+          text = renderer.read_text()
+
+          type_marker = '''type FFmpegRenderer struct {
+          \tbinary string
+          }
+          '''
+          type_replacement = '''const deterministicVideoPresentationBiasSeconds = 0.00049
+
+          // deterministicVideoPresentationSetPTS mirrors deterministic browser video
+          // seeking at exact source-frame boundaries. Some containers quantize PTS to
+          // milliseconds, so a canonical rational time can fall just below the next
+          // decoded frame. Advancing only the visual presentation decision by 0.49 ms
+          // keeps FFmpeg inside the same strict 0.5 ms tolerance without changing
+          // canonical source time, audio timing, or free-running preview semantics.
+          func deterministicVideoPresentationSetPTS(playbackRate float64) string {
+          \tif playbackRate <= 0 || math.IsNaN(playbackRate) || math.IsInf(playbackRate, 0) {
+          \t\tplaybackRate = 1
+          \t}
+          \tif math.Abs(playbackRate-1) <= 1e-9 {
+          \t\treturn fmt.Sprintf("setpts=PTS-STARTPTS-%.6f/TB", deterministicVideoPresentationBiasSeconds)
+          \t}
+          \treturn fmt.Sprintf("setpts=(PTS-STARTPTS-%.6f/TB)/%.6f", deterministicVideoPresentationBiasSeconds, playbackRate)
+          }
+
+          type FFmpegRenderer struct {
+          \tbinary string
+          }
+          '''
+          if 'deterministicVideoPresentationBiasSeconds' not in text:
+              if text.count(type_marker) != 1:
+                  raise SystemExit('renderer type insertion marker mismatch')
+              text = text.replace(type_marker, type_replacement, 1)
+
+          timing_marker = '''\t\t} else {
+          \t\t\tchain = append(chain, fmt.Sprintf("trim=start=%.3f:duration=%.3f", trimInS, sourceDurS))
+          \t\t\tif playbackRate == 1 {
+          \t\t\t\tchain = append(chain, "setpts=PTS-STARTPTS")
+          \t\t\t} else {
+          \t\t\t\tchain = append(chain, fmt.Sprintf("setpts=(PTS-STARTPTS)/%.6f", playbackRate))
+          \t\t\t}
+          \t\t}
+          '''
+          timing_replacement = '''\t\t} else {
+          \t\t\tchain = append(chain, fmt.Sprintf("trim=start=%.3f:duration=%.3f", trimInS, sourceDurS))
+          \t\t\tchain = append(chain, deterministicVideoPresentationSetPTS(playbackRate))
+          \t\t}
+          '''
+          if timing_marker in text:
+              if text.count(timing_marker) != 1:
+                  raise SystemExit('renderer timing replacement marker count mismatch')
+              text = text.replace(timing_marker, timing_replacement, 1)
+          elif 'chain = append(chain, deterministicVideoPresentationSetPTS(playbackRate))' not in text:
+              raise SystemExit('renderer timing replacement marker missing')
+
+          renderer.write_text(text)
+
+          test_path = Path('backend/internal/video/renderer_pixelate_sampling_test.go')
+          tests = test_path.read_text()
+          marker = 'TestDeterministicVideoPresentationSetPTSUsesInsideBoundaryBias'
+          if marker not in tests:
+              tests += r'''
+
+          func TestDeterministicVideoPresentationSetPTSUsesInsideBoundaryBias(t *testing.T) {
+          \tif got, want := deterministicVideoPresentationSetPTS(1), "setpts=PTS-STARTPTS-0.000490/TB"; got != want {
+          \t\tt.Fatalf("deterministic video presentation expression mismatch: got %q want %q", got, want)
+          \t}
+          \tif got, want := deterministicVideoPresentationSetPTS(2), "setpts=(PTS-STARTPTS-0.000490/TB)/2.000000"; got != want {
+          \t\tt.Fatalf("playback-rate presentation expression mismatch: got %q want %q", got, want)
+          \t}
+          }
+
+          func TestBuildFilterComplexAppliesDeterministicVideoPresentationBias(t *testing.T) {
+          \tclip := TimelineClip{ID: "video", StartMS: 0, DurationMS: 2000}
+          \tgraph, _, _ := buildFilterComplexWithAudio(
+          \t\tTimelineDocument{},
+          \t\t[]resolvedClip{{inputIdx: 1, trackIndex: 0, clip: clip, isVideo: true}},
+          \t\t512,
+          \t\t512,
+          \t\tfalse,
+          \t)
+          \tif !strings.Contains(graph, "trim=start=0.000:duration=2.000,setpts=PTS-STARTPTS-0.000490/TB") {
+          \t\tt.Fatalf("video visual chain must apply the bounded presentation bias: %s", graph)
+          \t}
+          }
+          '''
+              test_path.write_text(tests)
+          PY
+          gofmt -w backend/internal/video/renderer.go backend/internal/video/renderer_pixelate_sampling_test.go
+          cd backend
+          go test ./internal/video
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- backend/internal/video/renderer.go backend/internal/video/renderer_pixelate_sampling_test.go; then
+            echo 'Patch already present; nothing to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/internal/video/renderer.go backend/internal/video/renderer_pixelate_sampling_test.go
+          git commit -m 'fix(video): align FFmpeg boundary frame presentation'
+          git push origin HEAD:fix/video-wysiwyg-phase3-transparent-video-presentation
