@@ -11,7 +11,10 @@
  * explicit apply/cancel, and a cursor-metadata overlay. Drags preview via
  * liveTransform and commit once on pointer-up; playback advances the store
  * playhead via rAF and keeps muted visual <video> plus managed <audio>
- * elements synchronized to the timeline.
+ * elements synchronized to the timeline. During normal playback, visual layers
+ * consume authoritative canonical output-frame state when the complete frame can
+ * be represented exactly; unsupported projection/transition cases automatically
+ * fall back to the established continuous-time painter.
  */
 import { Check, Crop, Crosshair, Grid3x3, Maximize2, Minimize2, Pause, Play, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -20,8 +23,7 @@ import { getAuthToken, videoApi } from '../../api';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import { ContextMenu } from '../common/ContextMenu';
 import type { ContextMenuEntry } from '../common/ContextMenu';
-import { composePreviewFilter } from './effects/effectRegistry';
-import { resolvePreviewFrameEffectPaint } from './previewFrameEffects';
+import { resolvePreviewFrameEffectPaint, resolvePreviewFrameSceneEffectPaint } from './previewFrameEffects';
 import { resolvePreviewFrameOwnerTransitionPaint } from './previewFrameTransitionPaint';
 import {
   planPreviewFrameTransitionPairs,
@@ -32,9 +34,9 @@ import { evaluateCameraProperty, evaluateClipProperty } from '../../video/render
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 import { ShapePreview } from './ShapePreview';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineTrack } from '../../types/video';
-import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips, queryActiveClipsAtFrame } from './pro/timelineIndex';
+import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips, queryActiveClipsAtFrameWithState } from './pro/timelineIndex';
 import { renderPreviewPCM } from './parity/previewAudioRenderer';
-import { deterministicVideoSeekTargetSeconds, frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForPreviewMediaMs } from './sourceTiming';
+import { deterministicVideoSeekTargetSeconds, frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, playbackVisualFrameIndex, sourceTimeForPreviewMediaMs, type TimelineSourceAddress } from './sourceTiming';
 import { ensurePreviewVideoPresentation, previewVideoPresentationToken, resetPreviewVideoPresentation } from './previewVideoPresentation';
 import { resolvePreviewFrameTransform } from './previewFrameTransform';
 import { resolvePreviewFrameViewTransform } from './previewFrameViewTransform';
@@ -313,12 +315,41 @@ export function VideoPreviewCanvas() {
     && frameAddressMatchesTimelineMs(frameAddress, fps, playheadMs)
     ? frameAddress
     : null;
-  const activeIndexed = (deterministicFrame !== null
-    ? queryActiveClipsAtFrame(intervalIndex, deterministicFrame, fps)
-    : queryActiveClips(intervalIndex, playheadMs))
+  const playbackFrame = isPlaying ? playbackVisualFrameIndex(playheadMs, fps) : null;
+  const frameQuery = deterministicFrame !== null || playbackFrame !== null
+    ? queryActiveClipsAtFrameWithState(
+      intervalIndex,
+      deterministicFrame ?? playbackFrame ?? 0,
+      fps,
+    )
+    : null;
+  const frameIndexed = (frameQuery?.clips ?? [])
     .filter(({ track }) => track.visible)
     .sort(compareIndexedTimelineClipOrder);
-  const visualIndexed = activeIndexed.filter(({ clip, asset }) => (
+  const timeIndexed = queryActiveClips(intervalIndex, playheadMs)
+    .filter(({ track }) => track.visible)
+    .sort(compareIndexedTimelineClipOrder);
+  const playbackFrameVisualCandidates = playbackFrame !== null && frameQuery?.frameState
+    ? frameIndexed.filter(({ clip, asset }) => (
+      !clip.audio_only && (Boolean(clip.text) || Boolean(clip.shape) || !asset || !asset.mime_type.startsWith('audio/'))
+    ))
+    : [];
+  const playbackTransitionPlan = playbackFrame !== null && frameQuery?.frameState
+    ? planPreviewFrameTransitionPairs(playbackFrame, playbackFrameVisualCandidates)
+    : null;
+  const playbackCanonicalReady = playbackFrame !== null
+    && Boolean(frameQuery?.frameState)
+    && playbackTransitionPlan !== null
+    && playbackTransitionPlan.mode !== 'legacy'
+    && playbackTransitionPlan.mode !== 'canonical-weighted-deferred'
+    && playbackTransitionPlan.mode !== 'canonical-mixed'
+    && playbackTransitionPlan.deferredReasons.length === 0;
+  // Playback consumes canonical visual state only as an all-frame decision. If
+  // strict projection or exact transition composition is unavailable, retain
+  // the established time-domain painter for the complete visual frame.
+  const canonicalVisualFrame = deterministicFrame ?? (playbackCanonicalReady ? playbackFrame : null);
+  const activeVisualIndexed = canonicalVisualFrame !== null ? frameIndexed : timeIndexed;
+  const visualIndexed = activeVisualIndexed.filter(({ clip, asset }) => (
     !clip.audio_only && (Boolean(clip.text) || Boolean(clip.shape) || !asset || !asset.mime_type.startsWith('audio/'))
   ));
   const decoderLimit = Math.max(1, Math.min(12, Number(window.localStorage.getItem('omnillm-video-decoder-budget') || 4)));
@@ -329,21 +360,27 @@ export function VideoPreviewCanvas() {
   const previewLayers = [...layers, ...posterLayers]
     .sort(compareIndexedTimelineClipOrder);
   const transitionPairPlan = planPreviewFrameTransitionPairs(
-    deterministicFrame !== null && !liveTransform && !cropMode && !editingTextClipId
-      ? deterministicFrame
+    canonicalVisualFrame !== null && !liveTransform && !cropMode && !editingTextClipId
+      ? canonicalVisualFrame
       : null,
     previewLayers,
   );
   const consumeSourceOverTransitionPairs = shouldConsumePreviewFrameSourceOverPairs(transitionPairPlan);
   const useCanonicalPerspective = shouldUseCanonicalPreviewPerspective(
-    deterministicFrame,
+    canonicalVisualFrame,
     previewLayers.map((entry) => entry.canonicalState),
     Boolean(liveTransform),
   );
+  const sceneEffectPaint = resolvePreviewFrameSceneEffectPaint(
+    canonicalVisualFrame !== null ? frameQuery?.frameState : undefined,
+    activeScene?.effects,
+  );
 
-  // Audio uses the same interval index as visuals, eliminating full timeline
-  // scans and repeated asset lookups on every playhead update.
-  const audioLayers = activeIndexed
+  // Normal playback keeps audio activity on continuous playhead time even when
+  // visual layers consume an integer canonical output frame. Deterministic parity
+  // seeks retain their prior frame-addressed audio membership.
+  const audioIndexed = deterministicFrame !== null ? frameIndexed : timeIndexed;
+  const audioLayers = audioIndexed
     .filter(({ track }) => !track.muted && (!soloTrackId || track.id === soloTrackId))
     .filter((entry): entry is LayerEntry & { asset: VideoAsset } => Boolean(
       entry.asset && !entry.clip.muted &&
@@ -427,18 +464,21 @@ export function VideoPreviewCanvas() {
   }, [isPlaying, setPlayhead, setPlaying]);
 
   // Keep every mounted media element in sync with output-timeline time on every
-  // tick. Deterministic visual media consumes canonical FrameState source time
-  // when the strict preview projection succeeds; free-running playback and the
-  // explicit compatibility fallback keep the established address evaluator.
-  // Audio remains outside visual FrameState until AudioGraph consumption lands.
+  // tick. Canonical visual playback addresses media by output frame when strict
+  // projection succeeds, while the UI and audio clocks remain continuous. Exact
+  // paused video presentation proof remains limited to deterministic parity seeks.
   useEffect(() => {
-    const address = deterministicFrame !== null
-      ? { kind: 'frame' as const, frameIndex: deterministicFrame, fps }
-      : { kind: 'time' as const, timelineMs: playheadMs };
+    const visualAddress: TimelineSourceAddress = canonicalVisualFrame !== null
+      ? { kind: 'frame', frameIndex: canonicalVisualFrame, fps }
+      : { kind: 'time', timelineMs: playheadMs };
+    const audioAddress: TimelineSourceAddress = deterministicFrame !== null
+      ? { kind: 'frame', frameIndex: deterministicFrame, fps }
+      : { kind: 'time', timelineMs: playheadMs };
 
     const syncElement = (
       element: HTMLMediaElement,
       clip: VideoTimelineClip,
+      address: TimelineSourceAddress,
       canonicalState?: CanonicalFrameLayerState,
     ) => {
       const playbackRate = Math.min(4, Math.max(0.25, clip.playback_rate ?? 1));
@@ -483,7 +523,7 @@ export function VideoPreviewCanvas() {
     };
     for (const [clipId, video] of videoRefs.current) {
       const entry = layersRef.current.find((layer) => layer.clip.id === clipId);
-      if (entry) syncElement(video, entry.clip, entry.canonicalState);
+      if (entry) syncElement(video, entry.clip, visualAddress, entry.canonicalState);
     }
     for (const [clipId, audio] of audioRefs.current) {
       const entry = audioLayersRef.current.find((layer) => layer.clip.id === clipId);
@@ -492,9 +532,9 @@ export function VideoPreviewCanvas() {
       const clipVolume = evaluateClipProperty(entry.clip, 'volume', clipTimeMs);
       // Element volume caps at 1; gains above unity remain export-only.
       audio.volume = Math.min(1, Math.max(0, clipVolume * fadeFactor(entry.clip, playheadMs) * previewVolume));
-      syncElement(audio, entry.clip);
+      syncElement(audio, entry.clip, audioAddress);
     }
-  }, [deterministicFrame, fps, playheadMs, isPlaying, previewVolume]);
+  }, [canonicalVisualFrame, deterministicFrame, fps, playheadMs, isPlaying, previewVolume]);
 
   /** Alignment candidates in client coordinates, captured once per drag. */
   const collectSnapCandidates = (excludeClipId: string) => {
@@ -818,7 +858,7 @@ export function VideoPreviewCanvas() {
       ? `inset(${(crop.top || 0) * 100}% ${(crop.right || 0) * 100}% ${(crop.bottom || 0) * 100}% ${(crop.left || 0) * 100}%)`
       : undefined;
     const canonicalMediaGeometry = resolveCanonicalPreviewMediaGeometry(
-      deterministicFrame,
+      canonicalVisualFrame,
       entry.canonicalState,
       isMedia,
       hasLiveOverride,
@@ -1248,8 +1288,18 @@ export function VideoPreviewCanvas() {
         <div
           ref={stageRef}
           data-testid="video-preview-program"
-          data-parity-frame-index={deterministicFrame ?? Math.floor((playheadMs * fps) / 1000)}
+          data-parity-frame-index={canonicalVisualFrame ?? Math.floor((playheadMs * fps) / 1000)}
           data-parity-time-ms={Math.round(playheadMs)}
+          data-preview-visual-frame-mode={deterministicFrame !== null
+            ? 'deterministic-canonical'
+            : isPlaying && canonicalVisualFrame !== null
+              ? 'canonical-playback'
+              : isPlaying && playbackFrame !== null
+                ? 'legacy-time-fallback'
+                : 'legacy-time'}
+          data-preview-visual-frame-index={canonicalVisualFrame ?? undefined}
+          data-preview-playback-frame-candidate={isPlaying && playbackFrame !== null ? playbackFrame : undefined}
+          data-preview-scene-effect-state-mode={sceneEffectPaint.mode}
           data-preview-perspective-mode={useCanonicalPerspective ? 'canonical-per-layer' : 'legacy-shared'}
           data-preview-transition-pair-plan-mode={transitionPairPlan.mode}
           data-preview-transition-pair-consumer={consumeSourceOverTransitionPairs ? 'canonical-source-over' : 'legacy-independent-layers'}
@@ -1264,7 +1314,7 @@ export function VideoPreviewCanvas() {
               : `${Math.max(100, activeScene?.camera ? (canvasHeight / (2 * Math.tan(Math.max(1, Math.min(179, camera.field_of_view)) * Math.PI / 360))) * stageScale : 1200 * stageScale)}px`,
             perspectiveOrigin: '50% 50%',
             transformStyle: 'preserve-3d',
-            filter: composePreviewFilter(activeScene?.effects),
+            filter: sceneEffectPaint.filter,
           }}
           onPointerDown={(event) => {
             // Clicking empty stage space deselects.

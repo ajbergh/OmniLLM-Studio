@@ -1,4 +1,4 @@
-import { sourceTimeMs } from '../../video/renderContract';
+import { sourceTimeMs, startFrame } from '../../video/renderContract';
 import { sourceTimeAtFrameMs } from '../../video/renderContractEvaluation';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 
@@ -16,6 +16,18 @@ export function frameAddressMatchesTimelineMs(
 ): boolean {
   if (frameIndex < 0 || fps <= 0 || !Number.isFinite(timelineMs)) return false;
   return Math.abs(timelineMs - (Math.trunc(frameIndex) * 1000) / Math.trunc(fps)) <= 1e-6;
+}
+
+/**
+ * Return the canonical output-frame identity containing a free-running visual
+ * playhead. The UI/audio clock remains continuous; only visual evaluation is
+ * projected into the same integer frame domain used by export. Invalid or
+ * negative playheads fail closed so callers can retain their time-domain path.
+ */
+export function playbackVisualFrameIndex(timelineMs: number, fps: number): number | null {
+  const normalizedFPS = Math.trunc(fps);
+  if (!Number.isFinite(timelineMs) || timelineMs < 0 || !Number.isFinite(fps) || normalizedFPS <= 0) return null;
+  return startFrame(timelineMs, normalizedFPS);
 }
 
 /**
@@ -48,10 +60,11 @@ export function sourceTimeForAddressMs(
  * Resolve source time for visual preview media.
  *
  * A successful canonical frame-addressed preview projection already contains
- * the evaluated source time and therefore owns that deterministic decision.
- * Free-running playback and explicit compatibility/fail-closed fallback keep
- * using the established address evaluator. Audio intentionally does not pass a
- * visual FrameState here; its timing migrates with AudioGraph consumption.
+ * the evaluated source time and therefore owns that visual decision, including
+ * free-running playback after it has been projected into an authoritative output
+ * frame. Explicit compatibility/fail-closed fallback keeps the established time
+ * evaluator. Audio intentionally receives a separate time-domain address until
+ * AudioGraph consumption lands.
  */
 export function sourceTimeForPreviewMediaMs(
   address: TimelineSourceAddress,

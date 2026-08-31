@@ -5,6 +5,7 @@ import {
   deterministicVideoSeekTargetSeconds,
   frameAddressMatchesTimelineMs,
   mediaSeekToleranceSeconds,
+  playbackVisualFrameIndex,
   sourceTimeForAddressMs,
   sourceTimeForPreviewMediaMs,
 } from './sourceTiming';
@@ -17,6 +18,17 @@ describe('media source timing', () => {
       100,
       1.25,
     )).toBeCloseTo(725.625, 9);
+  });
+
+  it('maps a free-running visual playhead to the containing canonical output frame', () => {
+    const frameDurationMs = 1000 / 30;
+    expect(playbackVisualFrameIndex(0, 30)).toBe(0);
+    expect(playbackVisualFrameIndex(frameDurationMs - 0.0001, 30)).toBe(0);
+    expect(playbackVisualFrameIndex(frameDurationMs, 30)).toBe(1);
+    expect(playbackVisualFrameIndex(1000.5, 120)).toBe(120);
+    expect(playbackVisualFrameIndex(-0.001, 30)).toBeNull();
+    expect(playbackVisualFrameIndex(Number.NaN, 30)).toBeNull();
+    expect(playbackVisualFrameIndex(100, 0)).toBeNull();
   });
 
   it('derives deterministic source time directly from output-frame identity', () => {
@@ -117,7 +129,7 @@ describe('media source timing', () => {
     )).toBe(0);
   });
 
-  it('keeps free-running visual media on timeline-time evaluation', () => {
+  it('keeps the explicit time-address compatibility path sub-frame responsive', () => {
     expect(sourceTimeForPreviewMediaMs(
       { kind: 'time', timelineMs: 1000.5 },
       { source_time_ms: 9999 },
