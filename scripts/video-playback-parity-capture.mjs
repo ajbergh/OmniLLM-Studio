@@ -41,12 +41,15 @@ try {
   await fs.writeFile(path.join(output, 'seed-result.json'), `${JSON.stringify(seedResult, null, 2)}\n`);
 
   const editorURL = new URL(`/video/${encodeURIComponent(seedResult.project_id)}/edit`, args.url).toString();
-  await page.goto(editorURL, { waitUntil: 'networkidle' });
   const program = page.getByTestId('video-preview-program');
-  await program.waitFor({ state: 'visible' });
-
   const results = [];
   for (const testCase of fixture.cases) {
+    // Each retained observation starts from a fresh editor instance. Normal
+    // playback intentionally mutates transient playhead/media state; reloading
+    // prevents one case's decoder/store lifecycle from becoming the next
+    // case's readiness authority while keeping the same immutable saved timeline.
+    await page.goto(editorURL, { waitUntil: 'networkidle' });
+    await program.waitFor({ state: 'visible' });
     await seekParityFrame(page, testCase.frame_index);
     await page.getByRole('button', { name: 'Play preview' }).click();
     await page.getByRole('button', { name: 'Pause preview' }).waitFor({ state: 'visible', timeout: 5_000 });
@@ -91,6 +94,10 @@ try {
     await page.getByRole('button', { name: 'Pause preview' }).click();
     const result = gateCase(testCase, observations, fixture.timeline.canvas.fps);
     results.push(result);
+    await fs.writeFile(
+      path.join(output, 'playback-evidence-progress.json'),
+      `${JSON.stringify({ schema_version: 1, fixture: fixture.name, cases: results }, null, 2)}\n`,
+    );
   }
 
   const summary = {
