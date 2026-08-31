@@ -27,41 +27,27 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Apply exact normal-playback patch
+      - name: Apply exact media-only playback gate
         run: |
           set -euo pipefail
-          python3 scripts/patch-normal-playback-canonicalization-v2.py
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('frontend/src/components/video/VideoPreviewCanvasLegacy.tsx')
-          text = path.read_text()
-          old = "import { composePreviewFilter } from './effects/effectRegistry';\n"
-          if text.count(old) != 1:
-              raise SystemExit(f"stale preview filter import: expected one match, found {text.count(old)}")
-          path.write_text(text.replace(old, '', 1))
-          PY
+          python3 scripts/patch-normal-playback-media-gate.py
           git diff --check
-          grep -q "playbackVisualFrameIndex" frontend/src/components/video/sourceTiming.ts
-          grep -q "canonical-playback" frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
-          grep -q "legacy-time-fallback" frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
-          ! grep -q "composePreviewFilter" frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
+          grep -q "resolvePreviewPlaybackCanonicalization" frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
+          grep -q "data-preview-playback-canonical-deferred" frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
       - name: Validate frontend
         working-directory: frontend
         run: |
           set -euo pipefail
           npm ci
-          npx vitest run src/components/video/sourceTiming.test.ts src/components/video/pro/timelineIndex.test.ts src/components/video/previewFrameMediaGeometry.test.ts src/components/video/previewFrameTransform.test.ts src/components/video/previewFrameViewTransform.test.ts src/components/video/previewFramePerspectiveProjection.test.ts src/components/video/previewFrameTransitionPaint.test.ts src/components/video/previewFrameEffects.test.ts
+          npx vitest run src/components/video/previewPlaybackCanonicalization.test.ts src/components/video/sourceTiming.test.ts src/components/video/pro/timelineIndex.test.ts src/components/video/previewFrameMediaGeometry.test.ts src/components/video/previewFrameTransform.test.ts src/components/video/previewFrameViewTransform.test.ts src/components/video/previewFramePerspectiveProjection.test.ts src/components/video/previewFrameTransitionPaint.test.ts src/components/video/previewFrameEffects.test.ts
           npm run lint
           npm run build
-      - name: Commit validated implementation
+      - name: Commit validated media-only gate
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            frontend/src/components/video/sourceTiming.ts \
-            frontend/src/components/video/sourceTiming.test.ts \
-            frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
+          git add frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
           git diff --cached --check
-          git commit -m "feat(video): canonicalize normal playback visual frames"
+          git commit -m "fix(video): fail closed unsupported playback painters"
           git push origin HEAD:feat/video-wysiwyg-phase3-normal-playback-canonicalization
