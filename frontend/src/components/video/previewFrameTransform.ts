@@ -11,11 +11,11 @@ export interface ResolvedPreviewFrameTransform {
 /**
  * Resolve the transform values consumed by the existing preview painter.
  *
- * Explicit frame-addressed canonical state owns deterministic transform and
- * opacity decisions. Interactive/free-running playback keeps the established
- * property evaluator. An in-flight direct-manipulation gesture deliberately
- * bypasses canonical state so the existing responsive live overlay remains the
- * interaction authority until the gesture commits.
+ * Frame-addressed canonical state owns transform and opacity decisions for both
+ * deterministic capture and admitted media-only normal-playback frames. Missing
+ * canonical projection retains the established time-domain property evaluator.
+ * An in-flight direct-manipulation gesture deliberately bypasses canonical state
+ * so the responsive live overlay remains the interaction authority until commit.
  */
 export function resolvePreviewFrameTransform(
   clip: VideoTimelineClip,

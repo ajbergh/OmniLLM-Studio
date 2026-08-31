@@ -9,19 +9,18 @@ import type { TimelineV2ContentBounds } from '../../video/renderContractTypes';
 type CanonicalMediaGeometryState = Pick<CanonicalFrameLayerState, 'media_geometry'>;
 
 /**
- * Resolve canonical media placement only for deterministic, non-interactive
- * preview frames. Free-running playback and direct manipulation/crop editing
- * intentionally retain the established browser painter until those paths are
- * canonicalized separately.
+ * Resolve canonical media placement for an admitted canonical visual frame.
+ * Deterministic capture and media-only normal playback may both consume it;
+ * direct manipulation/crop editing retain the established browser painter.
  */
 export function resolveCanonicalPreviewMediaGeometry(
-  deterministicFrame: number | null,
+  canonicalFrame: number | null,
   state: CanonicalMediaGeometryState | undefined,
   isMedia: boolean,
   hasLiveOverride: boolean,
   inCropEdit: boolean,
 ): CanonicalMediaGeometry | null {
-  if (deterministicFrame === null || !isMedia || hasLiveOverride || inCropEdit) return null;
+  if (canonicalFrame === null || !isMedia || hasLiveOverride || inCropEdit) return null;
   const geometry = state?.media_geometry;
   if (!geometry || geometry.contract_version !== MEDIA_GEOMETRY_CONTRACT_V1) return null;
   return validCanonicalMediaGeometry(geometry) ? geometry : null;

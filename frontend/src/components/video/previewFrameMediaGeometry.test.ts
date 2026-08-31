@@ -92,7 +92,7 @@ describe('canonical preview media geometry', () => {
       .toBe(canonicalState.media_geometry);
   });
 
-  it('uses canonical geometry only for deterministic non-interactive media', () => {
+  it('uses canonical geometry only for an admitted non-interactive visual frame', () => {
     expect(resolveCanonicalPreviewMediaGeometry(null, state(), true, false, false)).toBeNull();
     expect(resolveCanonicalPreviewMediaGeometry(12, state(), false, false, false)).toBeNull();
     expect(resolveCanonicalPreviewMediaGeometry(12, state(), true, true, false)).toBeNull();

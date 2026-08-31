@@ -22,11 +22,10 @@ export interface ResolvedPreviewViewTransform {
 /**
  * Resolve the camera-relative transform consumed by the current preview painter.
  *
- * Deterministic canonical frames already contain `view_transform`, so the
- * preview must not independently subtract/interpolate camera state again. The
- * established local camera subtraction remains the explicit compatibility path
- * for free-running playback, unavailable canonical projection, and live direct
- * manipulation while a gesture is in progress.
+ * Canonical visual frames already contain `view_transform`, so the preview must
+ * not independently subtract/interpolate camera state again, including admitted
+ * media-only normal playback. Established local camera subtraction remains the
+ * compatibility path for unavailable projection and live direct manipulation.
  */
 export function resolvePreviewFrameViewTransform(
   transform: VideoTimelineTransform,

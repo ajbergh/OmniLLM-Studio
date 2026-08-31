@@ -39,8 +39,9 @@ const IDENTITY: Omit<ResolvedPreviewFrameOwnerTransitionPaint, 'mode'> = {
  * approximating a two-input blend with independent CSS opacity.
  *
  * Canonical omission is authoritative: an evaluated layer with no active
- * transition_paint returns identity canonical paint. Live manipulation stays
- * on the established interactive path until normal-playback canonicalization.
+ * transition_paint returns identity canonical paint. Live manipulation stays on
+ * the established interactive path; admitted media-only normal-playback frames
+ * may consume this same canonical paint contract.
  */
 export function resolvePreviewFrameOwnerTransitionPaint(
   canonicalState: CanonicalTransitionLayerState | undefined,
