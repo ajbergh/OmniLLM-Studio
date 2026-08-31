@@ -30,10 +30,11 @@ jobs:
       - name: Align playback contract naming and comments
         run: |
           set -euo pipefail
-          python3 scripts/patch-normal-playback-comments.py
+          python3 scripts/patch-normal-playback-comments-v2.py
           git diff --check
           ! grep -q "until normal-playback canonicalization" frontend/src/components/video/previewFrameTransitionPaint.ts
           ! grep -q "Free-running playback and direct manipulation" frontend/src/components/video/previewFrameMediaGeometry.ts
+          ! grep -q "free-running playback or fail-closed" frontend/src/components/video/previewFrameEffects.ts
       - name: Validate frontend
         working-directory: frontend
         run: |
