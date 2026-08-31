@@ -40,6 +40,7 @@ import { deterministicVideoSeekTargetSeconds, frameAddressMatchesTimelineMs, med
 import { ensurePreviewVideoPresentation, previewVideoPresentationToken, resetPreviewVideoPresentation } from './previewVideoPresentation';
 import { resolvePreviewFrameTransform } from './previewFrameTransform';
 import { resolvePreviewFrameViewTransform } from './previewFrameViewTransform';
+import { resolvePreviewPlaybackCanonicalization } from './previewPlaybackCanonicalization';
 import {
   canonicalPreviewMediaClipPath,
   canonicalPreviewMediaElementStyle,
@@ -337,17 +338,16 @@ export function VideoPreviewCanvas() {
   const playbackTransitionPlan = playbackFrame !== null && frameQuery?.frameState
     ? planPreviewFrameTransitionPairs(playbackFrame, playbackFrameVisualCandidates)
     : null;
-  const playbackCanonicalReady = playbackFrame !== null
-    && Boolean(frameQuery?.frameState)
-    && playbackTransitionPlan !== null
-    && playbackTransitionPlan.mode !== 'legacy'
-    && playbackTransitionPlan.mode !== 'canonical-weighted-deferred'
-    && playbackTransitionPlan.mode !== 'canonical-mixed'
-    && playbackTransitionPlan.deferredReasons.length === 0;
+  const playbackDecision = resolvePreviewPlaybackCanonicalization(
+    playbackFrame,
+    frameQuery?.frameState,
+    playbackFrameVisualCandidates,
+    playbackTransitionPlan,
+  );
   // Playback consumes canonical visual state only as an all-frame decision. If
-  // strict projection or exact transition composition is unavailable, retain
-  // the established time-domain painter for the complete visual frame.
-  const canonicalVisualFrame = deterministicFrame ?? (playbackCanonicalReady ? playbackFrame : null);
+  // strict projection, an exact playback painter, or transition composition is
+  // unavailable, retain the established time-domain painter for the whole frame.
+  const canonicalVisualFrame = deterministicFrame ?? playbackDecision.canonicalFrame;
   const activeVisualIndexed = canonicalVisualFrame !== null ? frameIndexed : timeIndexed;
   const visualIndexed = activeVisualIndexed.filter(({ clip, asset }) => (
     !clip.audio_only && (Boolean(clip.text) || Boolean(clip.shape) || !asset || !asset.mime_type.startsWith('audio/'))
@@ -1292,13 +1292,10 @@ export function VideoPreviewCanvas() {
           data-parity-time-ms={Math.round(playheadMs)}
           data-preview-visual-frame-mode={deterministicFrame !== null
             ? 'deterministic-canonical'
-            : isPlaying && canonicalVisualFrame !== null
-              ? 'canonical-playback'
-              : isPlaying && playbackFrame !== null
-                ? 'legacy-time-fallback'
-                : 'legacy-time'}
+            : playbackDecision.mode}
           data-preview-visual-frame-index={canonicalVisualFrame ?? undefined}
           data-preview-playback-frame-candidate={isPlaying && playbackFrame !== null ? playbackFrame : undefined}
+          data-preview-playback-canonical-deferred={isPlaying ? playbackDecision.deferredReason : undefined}
           data-preview-scene-effect-state-mode={sceneEffectPaint.mode}
           data-preview-perspective-mode={useCanonicalPerspective ? 'canonical-per-layer' : 'legacy-shared'}
           data-preview-transition-pair-plan-mode={transitionPairPlan.mode}
