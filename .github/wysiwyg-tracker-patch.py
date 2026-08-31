@@ -1,0 +1,86 @@
+from pathlib import Path
+
+path = Path('docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md')
+text = path.read_text()
+
+
+def replace_once(old: str, new: str) -> None:
+    global text
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f'expected exactly one tracker match, found {count}: {old[:160]!r}')
+    text = text.replace(old, new, 1)
+
+
+replace_once(
+    "Latest merged WYSIWYG program PR: **#299 — Admit project background as deterministic pixelate raster** — squash merge `f225175e9404762b872944cd2a0ddda0e8e8284f` (2026-08-31), directly from #296's actual squash result.\n\nCurrent implementation PR: **#300 — Canonicalize media-only normal playback visual frames** on branch `feat/video-wysiwyg-phase3-normal-playback-canonicalization`, created directly from #299's actual squash result `f225175e9404762b872944cd2a0ddda0e8e8284f`.",
+    "Latest merged WYSIWYG program PR: **#300 — Canonicalize media-only normal playback visual frames** — squash merge `d4049105d49ce4bc8337a3c5236593f503869d5d` (2026-08-31), directly from #299's actual squash result.\n\nCurrent implementation PR: **#301 — Retain normal playback canonicalization browser evidence** on branch `feat/video-wysiwyg-phase3-playback-evidence`, created directly from #300's actual squash result `d4049105d49ce4bc8337a3c5236593f503869d5d`. Pre-tracker evidence head `c2effbfe6973f0f039d5651c68075f11798dfd8f` passed the retained seven-case browser gate; this tracker update intentionally creates a new exact head that must re-run repository gates before merge."
+)
+
+anchor = "- All temporary patch workflows/scripts were removed before PR creation. Clean pre-tracker head `e3aa6db4a4c13ec193f0c84df277b0a6ad395dff` is directly ahead of #299's actual squash result and behind `main` by zero."
+section = anchor + """
+
+### #301 retained normal-playback browser evidence
+
+#301 adds retained decoded-browser evidence for #300's normal-playback admission contract without broadening any painter or raster-source class.
+
+- `parity-playback-canonical-v1` is a backend-validated 18,000 ms / 640×360 / 30 fps timeline with one continuously active audio source and seven isolated playback windows: admitted video, admitted image, text fallback, cursor fallback, weighted-transition fallback, mixed-transition fallback, and a valid non-adjacent pair-transition deferral.
+- The capture harness seeds the project through the production Video API, reloads the same immutable saved timeline before each case, issues the established parity-seek command until the editor itself reports the requested deterministic canonical frame, proves any mounted video decoder is settled, then starts ordinary free-running playback and samples the real preview DOM on `requestAnimationFrame`.
+- The strict gate requires exact playback mode, exact fallback reason, actual consumer transition-plan mode, advancing continuous timeline/audio clocks, canonical frame candidate/consumer identity equality for admitted cases, multiple advancing canonical frames, and explicit proof that UI/audio time is not quantized to visual-frame boundaries. Fallback cases must publish no canonical visual-frame identity.
+- Initial retained attempts exposed harness-observability debt rather than product semantic mismatches: run #1 blocked on a redundant expected-state pre-wait; runs #2/#4 exposed a route/effect-listener readiness race after earlier cases. The final harness removes the redundant pre-wait and acknowledges seeks from editor DOM state while retaining the same production seek command and strict semantic assertions.
+- Retained **Video Playback Canonical Parity Evidence #5**, run `33399397597`, passed on pre-tracker head `c2effbfe6973f0f039d5651c68075f11798dfd8f`. Artifact `9760787171` is 11,684,163 bytes with SHA-256 `ed95b4b4a6f1334ce6f35863c2a7a0c1f82f549d69604ef8831869bb73cf6b2d`; retained timeline SHA-256 is `1a58a82698ef40f3c5e2b4c4c47b5f1ca07fd3a56cb4785126923a7202fc8110`.
+- The retained toolchain is Go `1.25.13`, Node `24.19.0`, npm `11.17.0`, Playwright `1.62.1`, and FFmpeg/ffprobe `6.1.1-3ubuntu5` on Ubuntu 24.04.
+- `video-canonical-playback` passed 38 observations: timeline advanced 713 ms, audio advanced 0.756792 s, and canonical visual identity advanced through 20 unique frames (`9`–`30`) with candidate/consumer/parity frame equality and non-quantized UI/audio clocks.
+- `image-canonical-playback` passed 40 observations: timeline advanced 626 ms, audio advanced 0.639121 s, and canonical visual identity advanced through 17 unique frames (`69`–`87`) with the same clock-independence guarantees.
+- `text-fallback` passed 27 observations with no canonical visual-frame publication, legacy consumer transition mode, timeline/audio advances of 430 ms / 0.425134 s, and exact reason `unsupported-playback-painter:playback-text`.
+- `cursor-fallback` passed 27 observations with no canonical visual-frame publication, legacy consumer transition mode, timeline/audio advances of 426 ms / 0.431586 s, and exact reason `unsupported-playback-painter:playback-cursor`.
+- `weighted-transition-fallback` passed 28 observations with timeline/audio advances of 450 ms / 0.461262 s and exact reason `transition-plan-weighted-deferred`; `mixed-transition-fallback` passed 19 observations with 417 ms / 0.429671 s and exact reason `transition-plan-mixed`; `deferred-transition-fallback` passed 28 observations with 432 ms / 0.432273 s and exact reason `transition-deferred:deferred-slide:pair-inputs-not-adjacent`. All three correctly expose legacy consumer transition mode after whole-frame fallback.
+- #301 remains evidence-only: no product painter, canonical contract, playback admission, or renderer capability is broadened. The next implementation slice must separately prove runtime readiness before weighted-pair Canvas can become normal-playback visual authority.
+"""
+replace_once(anchor, section)
+
+replace_once(
+    "| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #289 added the byte-exact opaque-PNG gate; #291 added H.264 measurement; #293 proves decoded frame identity on 0/15/30/59 and gates the focused ±3 H.264/yuv420p envelope only after identity proof. #295 adds deterministic partial-alpha PNG/background-composition evidence; #296 adds retained VP9 alpha-decoder, requested/presented-frame, and focused ±4 transparent-video evidence; #299 adds retained zero-readiness project-background evidence at focused ±1. Resource-font fixture coverage and second-platform retained evidence remain. |",
+    "| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #289 added the byte-exact opaque-PNG gate; #291 added H.264 measurement; #293 proves decoded frame identity on 0/15/30/59 and gates the focused ±3 H.264/yuv420p envelope only after identity proof. #295 adds deterministic partial-alpha PNG/background-composition evidence; #296 adds retained VP9 alpha-decoder, requested/presented-frame, and focused ±4 transparent-video evidence; #299 adds retained zero-readiness project-background evidence at focused ±1; #301 adds retained seven-window free-running browser playback evidence with independent continuous UI/audio clocks. Resource-font fixture coverage and second-platform retained evidence remain. |"
+)
+replace_once(
+    "| Phase 3 — Shared preview composition | **In progress** | #261–#289 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, font readiness/layout snapshots, deterministic pixelate semantics, exact opaque-PNG evidence, and sampled-render fan-out. #291/#293 close retained H.264 measurement and deterministic frame identity. #295 merges renderer-ordered project-background/source-over composition for transparent images; #296 adds mounted-video presentation tokens, transparent VP9 alpha preservation, source-over video composition, and browser/FFmpeg boundary alignment without changing canonical source/audio time; #299 admits project background itself as an explicit zero-readiness pixelate raster source while leaving shared weighted-pair and unsupported painter classes fail-closed. #300 is now moving authoritative media-only normal playback into the canonical output-frame domain with explicit whole-frame fallback diagnostics; weighted/mixed transition playback, canonical text/shape/cursor playback painters, further independently evidenced raster classes, and audio consumption remain. |",
+    "| Phase 3 — Shared preview composition | **In progress** | #261–#289 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, font readiness/layout snapshots, deterministic pixelate semantics, exact opaque-PNG evidence, and sampled-render fan-out. #291/#293 close retained H.264 measurement and deterministic frame identity. #295 merges renderer-ordered project-background/source-over composition for transparent images; #296 adds mounted-video presentation tokens, transparent VP9 alpha preservation, source-over video composition, and browser/FFmpeg boundary alignment without changing canonical source/audio time; #299 admits project background itself as an explicit zero-readiness pixelate raster source. #300 merged authoritative media-only normal playback in the canonical output-frame domain with whole-frame fail-closed diagnostics, and #301 now retains real browser evidence for that contract. Weighted-pair normal-playback execution, mixed/deferred transition playback, canonical text/shape/cursor playback painters, further independently evidenced raster classes, and AudioGraph consumption remain. |"
+)
+
+replace_once(
+    "| #299 | Explicit zero-readiness project-background pixelate raster and focused ±1 gate | `f225175e9404762b872944cd2a0ddda0e8e8284f` |",
+    "| #299 | Explicit zero-readiness project-background pixelate raster and focused ±1 gate | `f225175e9404762b872944cd2a0ddda0e8e8284f` |\n| #300 | Media-only normal-playback canonical output-frame admission with whole-frame fallback | `d4049105d49ce4bc8337a3c5236593f503869d5d` |"
+)
+
+replace_once(
+    "#296 was directly from #295 and squash-merged as `7e2888fc4ef2eaadff883d3b0b5d1542710c06d9`; #299 was directly from #296 and squash-merged as `f225175e9404762b872944cd2a0ddda0e8e8284f`; **#300 is directly from #299 squash `f225175e9404762b872944cd2a0ddda0e8e8284f`**.",
+    "#296 was directly from #295 and squash-merged as `7e2888fc4ef2eaadff883d3b0b5d1542710c06d9`; #299 was directly from #296 and squash-merged as `f225175e9404762b872944cd2a0ddda0e8e8284f`; #300 was directly from #299 and squash-merged as `d4049105d49ce4bc8337a3c5236593f503869d5d`; **#301 is directly from #300 squash `d4049105d49ce4bc8337a3c5236593f503869d5d`**."
+)
+
+baseline = "The focused `parity-pixelate-opaque-v1` fixture is a byte-exact non-regression gate for the isolated opaque-PNG static pixelate path. `parity-pixelate-decoded-video-v1` is additive decoded-media evidence: #293 proves deterministic decoded-frame identity first and then applies the explicit ±3 RGB H.264/yuv420p pixelate-region envelope without changing repository-global parity defaults. `parity-pixelate-alpha-png-v1` is #295's additive straight-alpha/source-over project-background control. `parity-pixelate-alpha-video-v1` is #296's additive transparent VP9 control: it freezes the decoder-alpha contract, requires mounted-video presentation-token identity on frames `0/15/30/59`, and gates the pixelate region at 100% within ±4 RGB. `parity-pixelate-background-v1` is #299's zero-media control: it requires the explicit `project-background` raster source, no decoder/presentation token, and 100% of the retained region within ±1 RGB."
+replace_once(
+    baseline,
+    baseline + "\n\n`parity-playback-canonical-v1` is #301's retained free-running browser control for #300. It proves admitted image/video windows consume advancing canonical output-frame identity while the store/UI and audio clocks remain continuous, and separately proves text, cursor, weighted, mixed, and canonically deferred transition windows fail the whole visual frame back to legacy time with exact reasons and no canonical visual-frame publication."
+)
+
+replace_once(
+    "| Normal playback mixes canonical and legacy semantics inside one visual frame | #300 admits canonical playback only for an authoritative media-only whole frame with clean none/source-over transition composition. Text/shape/cursor, non-authoritative state, weighted/mixed/deferred transitions, and unsupported raster sources roll the whole visual frame back to the continuous-time painter with an explicit diagnostic reason. UI playhead/audio remain continuous. |",
+    "| Normal playback mixes canonical and legacy semantics inside one visual frame | #300 admits canonical playback only for an authoritative media-only whole frame with clean none/source-over transition composition. Text/shape/cursor, non-authoritative state, weighted/mixed/deferred transitions, and unsupported raster sources roll the whole visual frame back to the continuous-time painter with an explicit diagnostic reason. #301 retains real browser proof that admitted video/image visual frames advance canonically while UI/audio clocks remain continuous and that every covered unsupported class publishes no canonical visual frame. |"
+)
+
+old_next = """1. **Merge #300 only after its tracker-bearing exact head passes Quality/Security, the full Playwright smoke suite, the 103-sample renderer baseline, existing pixelate parity controls, and platform/sandbox assurances.** Do not interpret unit-level playback admission tests as decoded browser playback evidence.
+2. **Immediately after #300, add a retained browser playback evidence fixture/harness for the new media-only contract.** Prove that continuously advancing image/video frames report `canonical-playback` with canonical frame identity while text/cursor and weighted/mixed/deferred transition cases report `legacy-time-fallback` with the expected reason. Preserve continuous UI/audio time independently.
+3. Only after that evidence is retained, evaluate the next normal-playback consumer expansion. Prefer an already-defined media-only canonical consumer such as weighted pair Canvas over introducing a new renderer-specific painter grammar; keep unsupported weighted/mixed cases fail-closed until runtime readiness can be proven during playback.
+4. Keep cursor raster admission deferred until export implements corresponding cursor rendering semantics. Keep general shape raster admission deferred until legacy FFmpeg approximations are removed or replaced by a shared deterministic painter.
+5. Add resource-font fixture coverage and second-supported-OS/FFmpeg retained evidence before calling cross-machine Phase 0 visual identity closed.
+6. Then make preview/export consume `audio-graph-v1` exactly as the entry point to Phase 6 audio parity closure."""
+new_next = """1. **Merge #301 only after the tracker-bearing exact head passes the retained Video Playback Canonical Parity Evidence workflow, Quality/Security, the full Playwright smoke suite and renderer baseline included by Quality, and all applicable platform/sandbox assurances.** The retained pre-tracker run #5 is evidence for the implementation tree, not permission to skip exact-head validation after this tracker commit.
+2. **Start the next Phase 3 slice directly from #301's actual squash result and wire the already-defined media-only weighted-pair Canvas consumer into normal playback as a complete-frame authority.** Reuse the mounted preview media nodes and canonical pair-pixel kernel; do not introduce a second decoder or a new source-time clock.
+3. Make weighted playback admission depend on explicit runtime surface readiness. Until every active weighted pair is ready for the candidate frame, fail the complete visual frame closed to legacy time; preserve mixed and structurally deferred transition cases as fallback. Retain browser evidence for ready weighted crossfade/zoom/dip execution plus not-ready/mixed/deferred fallback before broadening further.
+4. Keep cursor raster admission deferred until export implements corresponding cursor rendering semantics. Keep general shape raster admission deferred until legacy FFmpeg approximations are removed or replaced by a shared deterministic painter. Text playback should not be promoted merely because deterministic Chromium text exists; it needs a normal-playback readiness/ownership contract first.
+5. Add resource-font fixture coverage and second-supported-OS/FFmpeg retained evidence before calling cross-machine Phase 0 visual identity closed.
+6. Then make preview/export consume `audio-graph-v1` exactly as the entry point to Phase 6 audio parity closure."""
+replace_once(old_next, new_next)
+
+path.write_text(text)
