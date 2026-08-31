@@ -31,10 +31,20 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/patch-normal-playback-canonicalization-v2.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/src/components/video/VideoPreviewCanvasLegacy.tsx')
+          text = path.read_text()
+          old = "import { composePreviewFilter } from './effects/effectRegistry';\n"
+          if text.count(old) != 1:
+              raise SystemExit(f"stale preview filter import: expected one match, found {text.count(old)}")
+          path.write_text(text.replace(old, '', 1))
+          PY
           git diff --check
           grep -q "playbackVisualFrameIndex" frontend/src/components/video/sourceTiming.ts
           grep -q "canonical-playback" frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
           grep -q "legacy-time-fallback" frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
+          ! grep -q "composePreviewFilter" frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
       - name: Validate frontend
         working-directory: frontend
         run: |
