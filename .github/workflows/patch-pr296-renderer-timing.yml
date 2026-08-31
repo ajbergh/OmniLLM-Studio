@@ -90,7 +90,7 @@ jobs:
           tests = test_path.read_text()
           marker = 'TestDeterministicVideoPresentationSetPTSUsesInsideBoundaryBias'
           if marker not in tests:
-              tests += r'''
+              tests += '''
 
           func TestDeterministicVideoPresentationSetPTSUsesInsideBoundaryBias(t *testing.T) {
           \tif got, want := deterministicVideoPresentationSetPTS(1), "setpts=PTS-STARTPTS-0.000490/TB"; got != want {
