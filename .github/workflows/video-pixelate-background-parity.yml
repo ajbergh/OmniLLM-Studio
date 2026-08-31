@@ -1,0 +1,246 @@
+name: Video Pixelate Background Parity Evidence
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/video-pixelate-background-parity.yml'
+      - 'backend/cmd/video-parity-fixture/**'
+      - 'backend/cmd/video-parity-region-report/**'
+      - 'backend/cmd/video-pixelate-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_pixelate.go'
+      - 'backend/internal/video/parity_fixture_pixelate_test.go'
+      - 'backend/internal/video/renderer.go'
+      - 'backend/internal/video/renderer_pixelate_sampling_test.go'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+      - 'frontend/src/components/video/PreviewPixelateBackdropConsumer.tsx'
+      - 'frontend/src/components/video/PreviewPixelateCanvas.tsx'
+      - 'frontend/src/components/video/previewCanvasBackground.ts'
+      - 'frontend/src/components/video/previewCanvasBackground.test.ts'
+      - 'frontend/src/components/video/previewPixelateBackdrop.ts'
+      - 'frontend/src/components/video/previewPixelateBackdrop.test.ts'
+      - 'frontend/src/components/video/previewPixelateCanvasRuntime.ts'
+      - 'frontend/src/components/video/previewPixelateRaster.ts'
+      - 'scripts/video-parity-capture.mjs'
+      - 'scripts/video-pixelate-parity-assert.mjs'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/video-pixelate-background-parity.yml'
+      - 'backend/cmd/video-parity-fixture/**'
+      - 'backend/cmd/video-parity-region-report/**'
+      - 'backend/cmd/video-pixelate-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_pixelate.go'
+      - 'backend/internal/video/parity_fixture_pixelate_test.go'
+      - 'backend/internal/video/renderer.go'
+      - 'backend/internal/video/renderer_pixelate_sampling_test.go'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+      - 'frontend/src/components/video/PreviewPixelateBackdropConsumer.tsx'
+      - 'frontend/src/components/video/PreviewPixelateCanvas.tsx'
+      - 'frontend/src/components/video/previewCanvasBackground.ts'
+      - 'frontend/src/components/video/previewCanvasBackground.test.ts'
+      - 'frontend/src/components/video/previewPixelateBackdrop.ts'
+      - 'frontend/src/components/video/previewPixelateBackdrop.test.ts'
+      - 'frontend/src/components/video/previewPixelateCanvasRuntime.ts'
+      - 'frontend/src/components/video/previewPixelateRaster.ts'
+      - 'scripts/video-parity-capture.mjs'
+      - 'scripts/video-pixelate-parity-assert.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-pixelate-background-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25.13'
+  NODE_VERSION: '24'
+
+jobs:
+  background-evidence:
+    name: Project-background pixelate preview-render evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+      - working-directory: frontend
+        run: npm ci
+      - name: Install parity dependencies
+        run: |
+          bash scripts/ci-apt-install.sh ffmpeg
+          bash scripts/ci-playwright-install.sh
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Generate background fixture and shared deterministic media
+        run: |
+          set -euo pipefail
+          (
+            cd backend
+            go run ./cmd/video-parity-fixture \
+              --output-dir ../output/video-pixelate-background/fixture \
+              --random-samples 0 \
+              --generate-media
+            go run ./cmd/video-pixelate-parity-fixture \
+              --output-dir ../output/video-pixelate-background/fixture \
+              --variant background
+          )
+      - name: Capture and gate project-background pixelate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/output/video-pixelate-background/runtime"
+          mkdir -p "$runtime/attachments"
+          export OMNILLM_PORT=18095
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          (
+            cd backend
+            go run ./cmd/server >"$runtime/backend.log" 2>"$runtime/backend.err.log"
+          ) &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18095 npm run dev -- --host 127.0.0.1 --port 14178 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18095/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14178/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "background pixelate parity servers did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          fixture=output/video-pixelate-background/fixture/parity-pixelate-background-v1.json
+          regions=output/video-pixelate-background/fixture/parity-pixelate-background-v1.regions.json
+          capture=output/video-pixelate-background/capture
+          node scripts/video-parity-capture.mjs \
+            --url http://127.0.0.1:14178 \
+            --fixture "$fixture" \
+            --media-dir output/video-pixelate-background/fixture/media \
+            --output "$capture"
+          node scripts/video-pixelate-parity-assert.mjs \
+            --url http://127.0.0.1:14178 \
+            --fixture "$fixture" \
+            --seed-result "$capture/seed-result.json" \
+            --output "$capture/pixelate-canvas-evidence.json"
+
+          timeline_hash="$(node -p "require('./$capture/seed-result.json').timeline_sha256")"
+          (
+            cd backend
+            go run ./cmd/video-parity-report \
+              --preview-dir ../$capture/preview \
+              --rendered-dir ../$capture/rendered \
+              --output-dir ../$capture/whole-frame-report \
+              --fps 30 \
+              --fixture parity-pixelate-background-v1 \
+              --timeline-sha256 "$timeline_hash" \
+              --allow-fail
+            go run ./cmd/video-parity-region-report \
+              --preview-dir ../$capture/preview \
+              --rendered-dir ../$capture/rendered \
+              --regions ../$regions \
+              --output ../$capture/pixelate-region-report.json \
+              --fixture parity-pixelate-background-v1 \
+              --fps 30 \
+              --allow-fail
+          )
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const fixture = JSON.parse(fs.readFileSync('output/video-pixelate-background/fixture/parity-pixelate-background-v1.json', 'utf8'));
+          const consumer = JSON.parse(fs.readFileSync('output/video-pixelate-background/capture/pixelate-canvas-evidence.json', 'utf8'));
+          const whole = JSON.parse(fs.readFileSync('output/video-pixelate-background/capture/whole-frame-report/parity-report.json', 'utf8'));
+          const region = JSON.parse(fs.readFileSync('output/video-pixelate-background/capture/pixelate-region-report.json', 'utf8'));
+          const backgroundChannelTolerance = 2;
+          if (fixture.timeline.canvas.background !== '#19324A') throw new Error(`background fixture canvas ${fixture.timeline.canvas.background}, want #19324A`);
+          const visualClips = fixture.timeline.tracks
+            .filter((track) => track.visible !== false && track.type !== 'audio')
+            .flatMap((track) => track.clips);
+          if (visualClips.length !== 1 || visualClips[0]?.shape?.kind !== 'pixelate') {
+            throw new Error(`background fixture must contain only the pixelate visual clip: ${JSON.stringify(visualClips)}`);
+          }
+          if (consumer.frames.length !== fixture.samples.length) throw new Error('background pixelate consumer evidence sample count mismatch');
+          if (whole.frames.length !== fixture.samples.length) throw new Error('background whole-frame report sample count mismatch');
+          if (region.regions.length !== fixture.samples.length) throw new Error('background pixelate region report sample count mismatch');
+          for (const frame of consumer.frames) {
+            if (frame.consumer !== 'canonical-canvas'
+              || frame.surface_status !== 'ready'
+              || frame.surface_background !== '#19324A'
+              || frame.surface_backdrop_clip !== 'project-background'
+              || frame.video_presentation_request_token
+              || frame.video_presentation_ready_token) {
+              throw new Error(`frame ${frame.frame_index} did not consume zero-readiness project background: ${JSON.stringify(frame)}`);
+            }
+          }
+          const backgroundFrames = region.regions.map((entry) => ({
+            frame_index: entry.frame_index,
+            compared_pixels: entry.metric.compared_pixels,
+            pixel_pass_rate_at_repository_default: entry.metric.pixel_pass_rate,
+            ssim: entry.metric.ssim,
+            mean_absolute_error: entry.metric.mean_absolute_error,
+            root_mean_square_error: entry.metric.root_mean_square_error,
+            max_channel_delta: entry.metric.max_channel_delta,
+            pass_at_repository_default: entry.metric.pass,
+            all_pixels_within_background_tolerance: entry.metric.max_channel_delta <= backgroundChannelTolerance,
+          }));
+          const backgroundGatePass = backgroundFrames.every((frame) => frame.all_pixels_within_background_tolerance);
+          const summary = {
+            schema_version: 1,
+            fixture: fixture.name,
+            project_background: fixture.timeline.canvas.background,
+            raster_source: 'project-background',
+            runtime_requirements: [],
+            samples: fixture.samples.length,
+            whole_frame_pass_at_repository_default: whole.pass,
+            pixelate_region_pass_at_repository_default: region.pass,
+            repository_default_thresholds: region.thresholds,
+            background_channel_tolerance: backgroundChannelTolerance,
+            background_gate_pass: backgroundGatePass,
+            frames: backgroundFrames,
+          };
+          fs.writeFileSync('output/video-pixelate-background/capture/pixelate-background-evidence-summary.json', `${JSON.stringify(summary, null, 2)}\n`);
+          console.log(JSON.stringify(summary));
+          if (!backgroundGatePass) throw new Error('project-background pixelate ±2 RGB gate failed');
+          NODE
+      - name: Record toolchain
+        if: always()
+        run: |
+          mkdir -p output/video-pixelate-background
+          {
+            go version
+            node --version
+            npm --version
+            ffmpeg -version | head -n 1
+            ffprobe -version | head -n 1
+            node -e "console.log('playwright ' + require('playwright/package.json').version)"
+          } > output/video-pixelate-background/toolchain.txt
+      - name: Upload project-background pixelate parity evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-pixelate-background-parity-evidence
+          path: output/video-pixelate-background
+          if-no-files-found: error
+          retention-days: 14
