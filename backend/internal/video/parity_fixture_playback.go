@@ -182,7 +182,10 @@ func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, [
 		{Name: "cursor-fallback", FrameIndex: 186, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "unsupported-playback-painter:playback-cursor", ExpectedTransitionMode: "legacy"},
 		{Name: "weighted-transition-fallback", FrameIndex: 276, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-plan-weighted-deferred", ExpectedTransitionMode: "legacy"},
 		{Name: "mixed-transition-fallback", FrameIndex: 381, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-plan-mixed", ExpectedTransitionMode: "legacy"},
-		{Name: "deferred-transition-fallback", FrameIndex: 471, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-deferred:deferred-slide:pair-inputs-not-adjacent", ExpectedTransitionMode: "legacy"},
+		// The canonical between-transition window is frames [465, 489). Start
+		// comfortably inside it and retain only 300ms so ordinary playback startup
+		// latency cannot carry the observation across frame 489 on a busy runner.
+		{Name: "deferred-transition-fallback", FrameIndex: 466, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-deferred:deferred-slide:pair-inputs-not-adjacent", ExpectedTransitionMode: "legacy"},
 	}
 	return doc, assets, cases
 }
