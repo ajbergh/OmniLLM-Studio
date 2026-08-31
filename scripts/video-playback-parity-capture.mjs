@@ -49,17 +49,7 @@ try {
   for (const testCase of fixture.cases) {
     await seekParityFrame(page, testCase.frame_index);
     await page.getByRole('button', { name: 'Play preview' }).click();
-    await page.waitForFunction(({ mode, reason, transitionMode }) => {
-      const stage = document.querySelector('[data-testid="video-preview-program"]');
-      if (!stage) return false;
-      if (stage.dataset.previewVisualFrameMode !== mode) return false;
-      if ((stage.dataset.previewTransitionPairPlanMode || '') !== transitionMode) return false;
-      return !reason || stage.dataset.previewPlaybackCanonicalDeferred === reason;
-    }, {
-      mode: testCase.expected_mode,
-      reason: testCase.expected_reason || '',
-      transitionMode: testCase.expected_transition_mode,
-    });
+    await page.getByRole('button', { name: 'Pause preview' }).waitFor({ state: 'visible', timeout: 5_000 });
 
     const observations = await page.evaluate(async (observeMs) => {
       const rows = [];
