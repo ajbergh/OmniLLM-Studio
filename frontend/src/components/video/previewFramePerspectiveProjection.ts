@@ -3,7 +3,7 @@ import type { CanonicalFrameLayerState } from '../../video/renderContractFrameSt
 type CanonicalPerspectiveState = Pick<CanonicalFrameLayerState, 'perspective_projection'>;
 
 /**
- * Decide whether one deterministic preview frame can leave the legacy shared
+ * Decide whether one admitted canonical visual frame can leave the legacy shared
  * stage perspective and consume canonical per-layer projection instead.
  *
  * Canonical preview evaluation is all-or-fallback for visual layers, but the
@@ -13,11 +13,11 @@ type CanonicalPerspectiveState = Pick<CanonicalFrameLayerState, 'perspective_pro
  * projection contexts mid-gesture.
  */
 export function shouldUseCanonicalPreviewPerspective(
-  deterministicFrame: number | null,
+  canonicalFrame: number | null,
   canonicalStates: Array<CanonicalPerspectiveState | undefined>,
   hasLiveOverride: boolean,
 ): boolean {
-  if (deterministicFrame === null || hasLiveOverride || canonicalStates.length === 0) return false;
+  if (canonicalFrame === null || hasLiveOverride || canonicalStates.length === 0) return false;
   return canonicalStates.every((state) => {
     const distance = state?.perspective_projection.distance;
     return typeof distance === 'number' && Number.isFinite(distance) && distance > 0;

@@ -30,7 +30,7 @@ type CanonicalSceneEffectState = Pick<CanonicalVisualFrameState, 'scene_effects'
  * The presence of canonical layer state is authoritative even when `effects`
  * is omitted, because omission means the canonical enabled stack is empty.
  * Legacy authored effects are consulted only when canonical FrameState itself
- * is unavailable (free-running playback or fail-closed projection fallback).
+ * is unavailable through the explicit fail-closed projection fallback.
  */
 export function resolvePreviewFrameEffectPaint(
   canonicalState: CanonicalEffectState | undefined,
@@ -52,8 +52,8 @@ export function resolvePreviewFrameEffectPaint(
 /**
  * Resolve the existing stage-level CSS scene-effect painter from already
  * evaluated visual-frame-state-v1. Canonical omission is authoritative zero
- * enabled scene effects; authored scene effects remain the free-running/fallback
- * path only when the top-level canonical frame itself is unavailable.
+ * enabled scene effects; authored scene effects remain the explicit fallback path
+ * only when the top-level canonical frame itself is unavailable.
  */
 export function resolvePreviewFrameSceneEffectPaint(
   canonicalState: CanonicalSceneEffectState | undefined,
