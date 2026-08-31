@@ -172,14 +172,17 @@ func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, [
 		{ID: "asset-square", Kind: "image", Width: 512, Height: 512, DurationMS: 18000, Description: "deterministic square PNG"},
 		{ID: "asset-audio", Kind: "audio", DurationMS: 24000, Description: "deterministic continuous mono playback clock"},
 	}
+	// Once the whole visual frame fails closed, the consumer pair plan is
+	// intentionally legacy. The admission decision's deferred reason remains the
+	// authoritative proof of the canonical plan that caused fallback.
 	cases := []PlaybackParityCase{
 		{Name: "video-canonical-playback", FrameIndex: 6, ObserveMS: 650, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-none", RequireAdvancingFrames: true},
 		{Name: "image-canonical-playback", FrameIndex: 66, ObserveMS: 650, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-none", RequireAdvancingFrames: true},
-		{Name: "text-fallback", FrameIndex: 126, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "unsupported-playback-painter:playback-text", ExpectedTransitionMode: "canonical-none"},
-		{Name: "cursor-fallback", FrameIndex: 186, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "unsupported-playback-painter:playback-cursor", ExpectedTransitionMode: "canonical-none"},
-		{Name: "weighted-transition-fallback", FrameIndex: 276, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-plan-weighted-deferred", ExpectedTransitionMode: "canonical-weighted-deferred"},
-		{Name: "mixed-transition-fallback", FrameIndex: 381, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-plan-mixed", ExpectedTransitionMode: "canonical-mixed"},
-		{Name: "deferred-transition-fallback", FrameIndex: 471, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-deferred:deferred-slide:pair-inputs-not-adjacent", ExpectedTransitionMode: "canonical-none"},
+		{Name: "text-fallback", FrameIndex: 126, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "unsupported-playback-painter:playback-text", ExpectedTransitionMode: "legacy"},
+		{Name: "cursor-fallback", FrameIndex: 186, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "unsupported-playback-painter:playback-cursor", ExpectedTransitionMode: "legacy"},
+		{Name: "weighted-transition-fallback", FrameIndex: 276, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-plan-weighted-deferred", ExpectedTransitionMode: "legacy"},
+		{Name: "mixed-transition-fallback", FrameIndex: 381, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-plan-mixed", ExpectedTransitionMode: "legacy"},
+		{Name: "deferred-transition-fallback", FrameIndex: 471, ObserveMS: 450, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-deferred:deferred-slide:pair-inputs-not-adjacent", ExpectedTransitionMode: "legacy"},
 	}
 	return doc, assets, cases
 }
