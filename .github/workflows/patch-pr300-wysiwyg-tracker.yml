@@ -31,6 +31,15 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/patch-pr300-wysiwyg-tracker.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md')
+          text = path.read_text()
+          old = '**Last updated:** 2026-08-31  \n'
+          if text.count(old) != 1:
+              raise SystemExit(f'last-updated whitespace: expected one match, found {text.count(old)}')
+          path.write_text(text.replace(old, '**Last updated:** 2026-08-31\n', 1))
+          PY
           git diff --check
           grep -q 'Latest merged WYSIWYG program PR: \*\*#299' docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
           grep -q 'Current implementation PR: \*\*#300' docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
