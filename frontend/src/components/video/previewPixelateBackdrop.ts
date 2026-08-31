@@ -42,12 +42,22 @@ export interface PreviewPixelateBackdropLayer {
   canonicalState?: CanonicalFrameLayerState;
 }
 
+export interface PreviewPixelateProjectBackgroundRasterSource {
+  supported: true;
+  clipId: 'project-background';
+  kind: 'project-background';
+}
+
+export type PreviewPixelateBackdropRasterSource =
+  | PreviewWeightedPairRasterSourceSupported
+  | PreviewPixelateProjectBackgroundRasterSource;
+
 export interface PreviewPixelateBackdropReady<T extends PreviewPixelateBackdropLayer> {
   contract_version: typeof PREVIEW_PIXELATE_BACKDROP_PLAN_V1;
   mode: 'canonical-ready';
   target: T;
-  backdrop: T;
-  rasterSource: PreviewWeightedPairRasterSourceSupported;
+  backdrop?: T;
+  rasterSource: PreviewPixelateBackdropRasterSource;
   runtimeRequirements: readonly PreviewPixelateBackdropRuntimeRequirement[];
   deferredReasons: [];
 }
@@ -107,11 +117,13 @@ const PIXELATE_STATIC_RENDERER_TRANSFORM_PROPERTIES = new Set([
  * raster eligibility. Layers are bottom-to-top, matching canonical preview
  * stack order.
  *
- * V1 deliberately admits only one pixelate region over exactly one clean media
- * layer. The structural plan is separate from runtime decoded-pixel evidence:
- * images must be decoded, while video must additionally prove that the mounted
- * decoder presented the exact canonical source-time request before Canvas can
- * replace the CSS approximation. Alpha is then handled by source-over composition.
+ * V1 deliberately admits only one pixelate region over either the canonical
+ * project background alone or exactly one clean media layer. The structural
+ * plan is separate from runtime decoded-pixel evidence: project background has
+ * no readiness dependency, images must be decoded, and video must additionally
+ * prove that the mounted decoder presented the exact canonical source-time request
+ * before Canvas can replace the CSS approximation. Alpha is then handled by
+ * source-over composition.
  */
 export function planPreviewPixelateBackdrop<T extends PreviewPixelateBackdropLayer>(
   frameIndex: number | null,
@@ -146,6 +158,17 @@ export function planPreviewPixelateBackdrop<T extends PreviewPixelateBackdropLay
   const targetReasons = targetDeferredReasons(target);
 
   const lowerLayers = layers.slice(0, targetIndex);
+  if (lowerLayers.length === 0) {
+    if (targetReasons.length > 0) return deferred(target, undefined, targetReasons);
+    return {
+      contract_version: PREVIEW_PIXELATE_BACKDROP_PLAN_V1,
+      mode: 'canonical-ready',
+      target,
+      rasterSource: { supported: true, clipId: 'project-background', kind: 'project-background' },
+      runtimeRequirements: [],
+      deferredReasons: [],
+    };
+  }
   if (lowerLayers.length !== 1) {
     return deferred(target, undefined, [...targetReasons, 'backdrop-layer-count-deferred']);
   }

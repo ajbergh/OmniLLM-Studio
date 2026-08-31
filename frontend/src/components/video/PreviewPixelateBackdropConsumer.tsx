@@ -39,8 +39,9 @@ const IDLE_RUNTIME: RuntimeState = { executionKey: '', status: 'pending' };
  * Structural admission and runtime decoded-pixel proof both fail closed: normal
  * playback, poster-budget sources, unsupported canonical state, and decoded
  * video without an exact canonical presentation proof leave the established CSS
- * approximation untouched. Images and alpha video are consumed only after
- * canonical project-background source-over composition in PreviewPixelateCanvas.
+ * approximation untouched. The canonical project background can now be an
+ * exact zero-readiness raster source by itself; images and alpha video remain
+ * consumed only after project-background source-over composition in PreviewPixelateCanvas.
  */
 export function PreviewPixelateBackdropConsumer() {
   const timeline = useVideoStudioStore((state) => state.timeline);
@@ -122,24 +123,26 @@ export function PreviewPixelateBackdropConsumer() {
     () => planPreviewPixelateBackdrop(deterministicFrame, previewFrame.layers),
     [deterministicFrame, previewFrame.layers],
   );
+  const backdrop = plan.mode === 'canonical-ready' ? plan.backdrop : undefined;
   const posterDeferredReason = plan.mode === 'canonical-ready'
-    && previewFrame.posterClipIds.has(plan.backdrop.clip.id)
-    ? `${plan.backdrop.clip.id}:decoder-budget-poster`
+    && backdrop
+    && previewFrame.posterClipIds.has(backdrop.clip.id)
+    ? `${backdrop.clip.id}:decoder-budget-poster`
     : undefined;
   const consume = plan.mode === 'canonical-ready' && !posterDeferredReason;
   const videoPresentationToken = plan.mode === 'canonical-ready'
     && !posterDeferredReason
     && deterministicFrame !== null
     && plan.rasterSource.kind === 'video'
-    && plan.backdrop.canonicalState
+    && backdrop?.canonicalState
     ? previewVideoPresentationToken(
-      plan.backdrop.clip.id,
+      backdrop.clip.id,
       deterministicFrame,
-      plan.backdrop.canonicalState.source_time_ms,
+      backdrop.canonicalState.source_time_ms,
     )
     : undefined;
   const executionKey = consume
-    ? `${deterministicFrame}:${plan.target.clip.id}:${plan.backdrop.clip.id}:${canvasWidth}x${canvasHeight}:${canvasBackground}:${videoPresentationToken ?? 'image'}`
+    ? `${deterministicFrame}:${plan.target.clip.id}:${plan.rasterSource.clipId}:${canvasWidth}x${canvasHeight}:${canvasBackground}:${videoPresentationToken ?? plan.rasterSource.kind}`
     : '';
   const runtimeStatus = consume && runtime.executionKey === executionKey ? runtime.status : 'pending';
   const runtimeReason = consume && runtime.executionKey === executionKey ? runtime.reason : undefined;
