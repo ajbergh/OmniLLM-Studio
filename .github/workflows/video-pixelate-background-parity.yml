@@ -173,7 +173,7 @@ jobs:
           const consumer = JSON.parse(fs.readFileSync('output/video-pixelate-background/capture/pixelate-canvas-evidence.json', 'utf8'));
           const whole = JSON.parse(fs.readFileSync('output/video-pixelate-background/capture/whole-frame-report/parity-report.json', 'utf8'));
           const region = JSON.parse(fs.readFileSync('output/video-pixelate-background/capture/pixelate-region-report.json', 'utf8'));
-          const backgroundChannelTolerance = 2;
+          const backgroundChannelTolerance = 1;
           if (fixture.timeline.canvas.background !== '#19324A') throw new Error(`background fixture canvas ${fixture.timeline.canvas.background}, want #19324A`);
           const visualClips = fixture.timeline.tracks
             .filter((track) => track.visible !== false && track.type !== 'audio')
@@ -222,7 +222,7 @@ jobs:
           };
           fs.writeFileSync('output/video-pixelate-background/capture/pixelate-background-evidence-summary.json', `${JSON.stringify(summary, null, 2)}\n`);
           console.log(JSON.stringify(summary));
-          if (!backgroundGatePass) throw new Error('project-background pixelate ±2 RGB gate failed');
+          if (!backgroundGatePass) throw new Error('project-background pixelate ±1 RGB gate failed');
           NODE
       - name: Record toolchain
         if: always()
