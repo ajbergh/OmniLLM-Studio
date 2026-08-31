@@ -226,11 +226,18 @@ describe('planPreviewPixelateBackdrop', () => {
     expect(plan).toMatchObject({ mode: 'canonical-ready' });
   });
 
-  it('requires exactly one lower visual layer before runtime raster acquisition', () => {
+  it('admits the canonical project background as the zero-readiness raster source', () => {
     expect(planPreviewPixelateBackdrop(0, [layer('pixelate', pixelateState())])).toMatchObject({
-      mode: 'canonical-deferred',
-      deferredReasons: ['backdrop-layer-count-deferred'],
+      contract_version: PREVIEW_PIXELATE_BACKDROP_PLAN_V1,
+      mode: 'canonical-ready',
+      target: { clip: { id: 'pixelate' } },
+      rasterSource: { supported: true, clipId: 'project-background', kind: 'project-background' },
+      runtimeRequirements: [],
+      deferredReasons: [],
     });
+  });
+
+  it('still defers more than one lower visual layer before runtime raster acquisition', () => {
     expect(planPreviewPixelateBackdrop(0, [
       layer('lower-a', mediaState(), 'image/png'),
       layer('lower-b', mediaState(), 'video/mp4'),

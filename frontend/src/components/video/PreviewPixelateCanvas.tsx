@@ -40,10 +40,10 @@ const MAX_VIDEO_PRESENTATION_RETRIES = 120;
  * Exact deterministic pixelate surface for the deliberately narrow backdrop
  * admission in preview-pixelate-backdrop-plan-v1. The existing preview media
  * element remains the sole decoder/source-time authority. This consumer mirrors
- * renderer composition order for the admitted one-media-layer path: paint the
- * opaque canonical project background, source-over the decoded media through
+ * renderer composition order for the admitted paths: paint the opaque canonical
+ * project background, optionally source-over one decoded media layer through
  * canonical geometry, then run preview-pixelate-raster-v1 on the composed RGB
- * backdrop.
+ * backdrop. A background-only plan therefore has no mounted-source dependency.
  *
  * Images and transparent/partial-alpha video therefore share the same Canvas
  * source-over path. Video is admitted only after VideoPreviewCanvasLegacy has
@@ -87,6 +87,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
   }, [executionKey]);
 
   useEffect(() => {
+    if (!plan.backdrop) return;
     const source = sourceForClip(plan.backdrop.clip.id);
     if (!source) return;
     const onSeeking = () => {
@@ -127,18 +128,20 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
         source.removeEventListener('error', onError);
       }
     };
-  }, [bumpSourceRevision, plan.backdrop.clip.id, sourceForClip]);
+  }, [bumpSourceRevision, plan.backdrop?.clip.id, sourceForClip]);
 
   const draw = useCallback((): { status: PreviewPixelateCanvasStatusKind; reason?: string } => {
     const output = canvasRef.current;
     if (!output || canvasWidth <= 0 || canvasHeight <= 0 || stageScale <= 0) {
       return { status: 'pending' };
     }
-    if (sourceFailed) return { status: 'failed', reason: 'decoded-frame-error' };
-    const source = sourceForClip(plan.backdrop.clip.id);
-    if (!source || !sourceReady(source)) return { status: 'pending' };
     const targetState = plan.target.canonicalState;
     if (!targetState) return { status: 'failed', reason: 'pixelate-target-state-missing' };
+    if (sourceFailed) return { status: 'failed', reason: 'decoded-frame-error' };
+    const source = plan.backdrop ? sourceForClip(plan.backdrop.clip.id) : null;
+    if (plan.rasterSource.kind !== 'project-background' && (!source || !sourceReady(source))) {
+      return { status: 'pending' };
+    }
 
     if (source instanceof HTMLVideoElement) {
       const presentation = resolvePreviewVideoPresentation(source, videoPresentationToken);
@@ -153,12 +156,6 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
     }
 
     const resolvedRegion = resolvePreviewPixelateCanvasRegion(targetState, canvasWidth, canvasHeight);
-    const [intrinsicWidth, intrinsicHeight] = intrinsicSize(source);
-    const mediaPlan = resolvePreviewCanvasMediaLayerPlan(
-      plan.backdrop,
-      intrinsicWidth,
-      intrinsicHeight,
-    );
 
     setOutputGeometry(output, resolvedRegion.x, resolvedRegion.y, resolvedRegion.width, resolvedRegion.height, stageScale);
 
@@ -169,7 +166,15 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
     if (!backdropContext) throw new Error('pixelate Canvas could not create backdrop 2D context');
     backdropContext.fillStyle = resolvedCanvasBackground;
     backdropContext.fillRect(0, 0, canvasWidth, canvasHeight);
-    paintPreviewCanvasMediaLayer(backdropContext, source, mediaPlan);
+    if (plan.backdrop && source) {
+      const [intrinsicWidth, intrinsicHeight] = intrinsicSize(source);
+      const mediaPlan = resolvePreviewCanvasMediaLayerPlan(
+        plan.backdrop,
+        intrinsicWidth,
+        intrinsicHeight,
+      );
+      paintPreviewCanvasMediaLayer(backdropContext, source, mediaPlan);
+    }
     const input = backdropContext.getImageData(
       resolvedRegion.x,
       resolvedRegion.y,
@@ -230,7 +235,7 @@ export function PreviewPixelateCanvas<T extends PreviewPixelateBackdropLayer>({
     <div
       data-preview-pixelate-execution="canvas"
       data-preview-pixelate-target-clip={plan.target.clip.id}
-      data-preview-pixelate-backdrop-clip={plan.backdrop.clip.id}
+      data-preview-pixelate-backdrop-clip={plan.backdrop?.clip.id ?? plan.rasterSource.clipId}
       data-preview-pixelate-background={resolvedCanvasBackground}
       data-preview-pixelate-status={status}
       data-preview-pixelate-reason={reason}
