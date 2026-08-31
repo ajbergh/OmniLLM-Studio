@@ -94,6 +94,35 @@ type RenderResult struct {
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
+const (
+	deterministicVideoPresentationTimebaseHz = 1_000_000
+	deterministicVideoPresentationBiasMicros = 490
+)
+
+// deterministicVideoPresentationTimingFilters mirrors deterministic browser
+// video seeking at exact source-frame boundaries. Some containers quantize
+// PTS to milliseconds, so a canonical rational time can fall just below the
+// next decoded frame. The visual stream first receives a microsecond timebase
+// so the 490 microsecond source-time bias is representable, then advances only
+// presentation timestamps. Canonical source time, audio timing, and
+// free-running preview semantics remain unchanged.
+func deterministicVideoPresentationTimingFilters(playbackRate float64) []string {
+	if playbackRate <= 0 || math.IsNaN(playbackRate) || math.IsInf(playbackRate, 0) {
+		playbackRate = 1
+	}
+	setTimebase := fmt.Sprintf("settb=expr=1/%d", deterministicVideoPresentationTimebaseHz)
+	if math.Abs(playbackRate-1) <= 1e-9 {
+		return []string{
+			setTimebase,
+			fmt.Sprintf("setpts=PTS-STARTPTS-%d", deterministicVideoPresentationBiasMicros),
+		}
+	}
+	return []string{
+		setTimebase,
+		fmt.Sprintf("setpts=(PTS-STARTPTS-%d)/%.6f", deterministicVideoPresentationBiasMicros, playbackRate),
+	}
+}
+
 type FFmpegRenderer struct {
 	binary string
 }
@@ -860,11 +889,7 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 			chain = append(chain, "loop=loop=-1:size=1:start=0", fmt.Sprintf("trim=duration=%.3f", durS), "setpts=PTS-STARTPTS")
 		} else {
 			chain = append(chain, fmt.Sprintf("trim=start=%.3f:duration=%.3f", trimInS, sourceDurS))
-			if playbackRate == 1 {
-				chain = append(chain, "setpts=PTS-STARTPTS")
-			} else {
-				chain = append(chain, fmt.Sprintf("setpts=(PTS-STARTPTS)/%.6f", playbackRate))
-			}
+			chain = append(chain, deterministicVideoPresentationTimingFilters(playbackRate)...)
 		}
 		if tr.hasCrop {
 			chain = append(chain, fmt.Sprintf("crop=iw*%.4f:ih*%.4f:iw*%.4f:ih*%.4f",
