@@ -120,27 +120,39 @@ try {
 
 async function seekParityFrame(page, frameIndex) {
   const requestId = `playback-${frameIndex}-${Date.now()}`;
+  // The editor's parity event is the production seek command, but its separate
+  // ready event is intentionally not used as the acknowledgement here. A fresh
+  // route can expose the preview DOM one turn before the effect listener is
+  // registered. Re-issue the idempotent seek command until the editor's own DOM
+  // state reports the requested deterministic canonical frame, then separately
+  // prove any mounted video decoder has settled.
   await page.evaluate(({ frameIndex: targetFrame, requestId: id }) => new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      window.removeEventListener('omnillm:video-parity-ready', ready);
-      reject(new Error(`playback parity seek ${targetFrame} timed out`));
-    }, 10_000);
-    const ready = (event) => {
-      if (event.detail?.requestId !== id) return;
-      window.clearTimeout(timeout);
-      window.removeEventListener('omnillm:video-parity-ready', ready);
-      resolve();
+    const deadline = performance.now() + 10_000;
+    const attempt = () => {
+      const stage = document.querySelector('[data-testid="video-preview-program"]');
+      if (stage?.dataset.previewVisualFrameMode === 'deterministic-canonical'
+        && stage.dataset.parityFrameIndex === String(targetFrame)) {
+        resolve();
+        return;
+      }
+      if (performance.now() >= deadline) {
+        reject(new Error(`playback parity seek ${targetFrame} did not reach deterministic frame: ${JSON.stringify({
+          mode: stage?.dataset.previewVisualFrameMode || '',
+          parity_frame_index: stage?.dataset.parityFrameIndex || '',
+          parity_time_ms: stage?.dataset.parityTimeMs || '',
+        })}`));
+        return;
+      }
+      window.dispatchEvent(new CustomEvent('omnillm:video-parity-seek', {
+        detail: { frameIndex: targetFrame, requestId: id },
+      }));
+      window.setTimeout(attempt, 100);
     };
-    window.addEventListener('omnillm:video-parity-ready', ready);
-    window.dispatchEvent(new CustomEvent('omnillm:video-parity-seek', {
-      detail: { frameIndex: targetFrame, requestId: id },
-    }));
+    attempt();
   }), { frameIndex, requestId });
-  await page.waitForFunction((targetFrame) => {
-    const stage = document.querySelector('[data-testid="video-preview-program"]');
-    return stage?.dataset.previewVisualFrameMode === 'deterministic-canonical'
-      && stage.dataset.parityFrameIndex === String(targetFrame);
-  }, frameIndex);
+
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-video-preview-media="true"]')]
+    .every((media) => media instanceof HTMLVideoElement && media.readyState >= 2 && !media.seeking), null, { timeout: 5_000 });
 }
 
 function gateCase(testCase, observations, fps) {
