@@ -56,6 +56,39 @@ func TestParityPixelateAlphaFixtureIsValidAndUsesNonBlackBackground(t *testing.T
 	assertIsolatedPixelateFixture(t, validated)
 }
 
+func TestParityPixelateBackgroundFixtureIsValidAndHasNoLowerVisualSource(t *testing.T) {
+	doc, assets := ParityPixelateBackgroundFixture()
+	validated, err := ValidateTimelineDocument(doc)
+	if err != nil {
+		t.Fatalf("ValidateTimelineDocument() error = %v", err)
+	}
+	if validated.Canvas.Width != 512 || validated.Canvas.Height != 512 || validated.Canvas.FPS != 30 {
+		t.Fatalf("canvas = %dx%d@%d, want 512x512@30", validated.Canvas.Width, validated.Canvas.Height, validated.Canvas.FPS)
+	}
+	if validated.Canvas.Background != "#19324A" {
+		t.Fatalf("background = %q, want #19324A", validated.Canvas.Background)
+	}
+	if len(assets) != 1 || assets[0].ID != "asset-audio" {
+		t.Fatalf("assets = %#v, want audio harness only", assets)
+	}
+	visualClips := 0
+	pixelateClips := 0
+	for _, track := range validated.Tracks {
+		if !track.Visible || track.Type == TrackTypeAudio {
+			continue
+		}
+		for _, clip := range track.Clips {
+			visualClips++
+			if clip.Shape != nil && clip.Shape.Kind == ShapeKindPixelate {
+				pixelateClips++
+			}
+		}
+	}
+	if visualClips != 1 || pixelateClips != 1 {
+		t.Fatalf("visual clips = %d pixelate clips = %d, want pixelate-only visual fixture", visualClips, pixelateClips)
+	}
+}
+
 func TestParityPixelateAlphaVideoFixtureIsValidAndUsesChangingVideoSource(t *testing.T) {
 	doc, assets := ParityPixelateAlphaVideoFixture()
 	validated, err := ValidateTimelineDocument(doc)
@@ -137,6 +170,19 @@ func TestParityPixelateAlphaSamplesAndRegionsStayFrameBound(t *testing.T) {
 		t.Fatalf("bounds = %#v, want %#v", bounds, wantBounds)
 	}
 	assertPixelateRegionFrames(t, samples, bounds, ParityPixelateAlphaRegionFrames(samples))
+}
+
+func TestParityPixelateBackgroundSamplesAndRegionsStayFrameBound(t *testing.T) {
+	samples := ParityPixelateBackgroundFrameSamples()
+	wantFrames := []int64{0, 15, 30, 59}
+	assertPixelateFrames(t, samples, wantFrames)
+
+	bounds := ParityPixelateBackgroundRegionBounds()
+	wantBounds := (ParityBounds{MinX: 71, MinY: 94, MaxX: 474, MaxY: 401})
+	if bounds != wantBounds {
+		t.Fatalf("bounds = %#v, want %#v", bounds, wantBounds)
+	}
+	assertPixelateRegionFrames(t, samples, bounds, ParityPixelateBackgroundRegionFrames(samples))
 }
 
 func TestParityPixelateAlphaVideoSamplesAndRegionsStayFrameBound(t *testing.T) {

@@ -72,6 +72,7 @@ try {
       surface_status: surface?.getAttribute('data-preview-pixelate-status') ?? null,
       surface_reason: surface?.getAttribute('data-preview-pixelate-reason') ?? null,
       surface_background: surface?.getAttribute('data-preview-pixelate-background') ?? null,
+      surface_backdrop_clip: surface?.getAttribute('data-preview-pixelate-backdrop-clip') ?? null,
       css_fallback_marker_present: Boolean(fallback),
       video_presentation_request_token: video?.dataset.videoPreviewPresentationRequestToken ?? null,
       video_presentation_ready_token: video?.dataset.videoPreviewPresentationReadyToken ?? null,

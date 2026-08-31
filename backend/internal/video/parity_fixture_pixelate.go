@@ -5,6 +5,7 @@ const (
 	ParityPixelateDecodedVideoFixtureName = "parity-pixelate-decoded-video-v1"
 	ParityPixelateAlphaFixtureName        = "parity-pixelate-alpha-png-v1"
 	ParityPixelateAlphaVideoFixtureName   = "parity-pixelate-alpha-video-v1"
+	ParityPixelateBackgroundFixtureName   = "parity-pixelate-background-v1"
 
 	parityPixelateOpaqueCanvasWidth   = 512
 	parityPixelateOpaqueCanvasHeight  = 512
@@ -84,6 +85,28 @@ func ParityPixelateAlphaFixture() (TimelineDocument, []ParityFixtureAsset) {
 // static raster. Its visual clip is muted because the generated WebM is
 // intentionally silent; muting removes only the nonexistent audio contribution
 // and keeps preview/export audio evidence on the dedicated harness WAV.
+// ParityPixelateBackgroundFixture proves that the canonical project canvas
+// itself is a deterministic pixelate raster source. There is intentionally no
+// lower visual clip: FFmpeg starts from the same opaque canvas color and the
+// browser Canvas samples that background directly before pixelation.
+func ParityPixelateBackgroundFixture() (TimelineDocument, []ParityFixtureAsset) {
+	doc, assets := parityPixelateFixture(
+		ParityPixelateBackgroundFixtureName,
+		parityPixelateOpaqueCanvasWidth,
+		parityPixelateOpaqueCanvasHeight,
+		"#19324A",
+		"asset-unused-background-source",
+		ParityFixtureAsset{ID: "asset-unused-background-source", Kind: "image", Width: 512, Height: 512, DurationMS: parityPixelateDurationMS, Description: "removed placeholder used only to share fixture construction"},
+		"Removed background placeholder",
+	)
+	// parityPixelateFixture creates source, pixelate, and audio tracks in that
+	// order. Remove the source track and its asset so the retained fixture has
+	// exactly one visual layer: the pixelate region over project background.
+	doc.Tracks = doc.Tracks[1:]
+	assets = assets[1:]
+	return doc, assets
+}
+
 func ParityPixelateAlphaVideoFixture() (TimelineDocument, []ParityFixtureAsset) {
 	doc, assets := parityPixelateFixture(
 		ParityPixelateAlphaVideoFixtureName,
@@ -204,6 +227,12 @@ func ParityPixelateAlphaVideoFrameSamples() []ParityFrameSample {
 	return parityPixelateFrameSamples("pixelate-alpha-video")
 }
 
+// ParityPixelateBackgroundFrameSamples retains the same structural frame
+// identities while changing the backdrop source class to project background.
+func ParityPixelateBackgroundFrameSamples() []ParityFrameSample {
+	return parityPixelateFrameSamples("pixelate-background")
+}
+
 func parityPixelateFrameSamples(prefix string) []ParityFrameSample {
 	return []ParityFrameSample{
 		{Name: prefix + "-start", FrameIndex: 0, TimeMS: 0, Reason: "pixelate region start"},
@@ -234,6 +263,12 @@ func ParityPixelateAlphaRegionBounds() ParityBounds {
 // ParityPixelateAlphaVideoRegionBounds shares the transparent-PNG rectangle so
 // the retained video evidence changes only source codec/presentation semantics.
 func ParityPixelateAlphaVideoRegionBounds() ParityBounds {
+	return parityPixelateRegionBounds(parityPixelateOpaqueCanvasWidth, parityPixelateOpaqueCanvasHeight)
+}
+
+// ParityPixelateBackgroundRegionBounds uses the same non-divisible rectangle
+// so evidence changes only the raster source class.
+func ParityPixelateBackgroundRegionBounds() ParityBounds {
 	return parityPixelateRegionBounds(parityPixelateOpaqueCanvasWidth, parityPixelateOpaqueCanvasHeight)
 }
 
@@ -271,6 +306,12 @@ func ParityPixelateAlphaRegionFrames(samples []ParityFrameSample) []ParityFixtur
 // to exact canonical frame identities and the established pixelate rectangle.
 func ParityPixelateAlphaVideoRegionFrames(samples []ParityFrameSample) []ParityFixtureRegionFrame {
 	return parityPixelateRegionFrames(samples, ParityPixelateAlphaVideoRegionBounds())
+}
+
+// ParityPixelateBackgroundRegionFrames binds background-only raster evidence to
+// exact canonical frame identities and the established pixelate rectangle.
+func ParityPixelateBackgroundRegionFrames(samples []ParityFrameSample) []ParityFixtureRegionFrame {
+	return parityPixelateRegionFrames(samples, ParityPixelateBackgroundRegionBounds())
 }
 
 func parityPixelateRegionFrames(samples []ParityFrameSample, bounds ParityBounds) []ParityFixtureRegionFrame {
