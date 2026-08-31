@@ -27,13 +27,13 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Apply exact media-only playback gate
+      - name: Align playback contract naming and comments
         run: |
           set -euo pipefail
-          python3 scripts/patch-normal-playback-media-gate.py
+          python3 scripts/patch-normal-playback-comments.py
           git diff --check
-          grep -q "resolvePreviewPlaybackCanonicalization" frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
-          grep -q "data-preview-playback-canonical-deferred" frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
+          ! grep -q "until normal-playback canonicalization" frontend/src/components/video/previewFrameTransitionPaint.ts
+          ! grep -q "Free-running playback and direct manipulation" frontend/src/components/video/previewFrameMediaGeometry.ts
       - name: Validate frontend
         working-directory: frontend
         run: |
@@ -42,12 +42,19 @@ jobs:
           npx vitest run src/components/video/previewPlaybackCanonicalization.test.ts src/components/video/sourceTiming.test.ts src/components/video/pro/timelineIndex.test.ts src/components/video/previewFrameMediaGeometry.test.ts src/components/video/previewFrameTransform.test.ts src/components/video/previewFrameViewTransform.test.ts src/components/video/previewFramePerspectiveProjection.test.ts src/components/video/previewFrameTransitionPaint.test.ts src/components/video/previewFrameEffects.test.ts
           npm run lint
           npm run build
-      - name: Commit validated media-only gate
+      - name: Commit validated contract cleanup
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add frontend/src/components/video/VideoPreviewCanvasLegacy.tsx
+          git add \
+            frontend/src/components/video/previewFrameTransform.ts \
+            frontend/src/components/video/previewFrameViewTransform.ts \
+            frontend/src/components/video/previewFrameMediaGeometry.ts \
+            frontend/src/components/video/previewFrameMediaGeometry.test.ts \
+            frontend/src/components/video/previewFramePerspectiveProjection.ts \
+            frontend/src/components/video/previewFrameTransitionPaint.ts \
+            frontend/src/components/video/previewFrameEffects.ts
           git diff --cached --check
-          git commit -m "fix(video): fail closed unsupported playback painters"
+          git commit -m "docs(video): align canonical playback contracts"
           git push origin HEAD:feat/video-wysiwyg-phase3-normal-playback-canonicalization
