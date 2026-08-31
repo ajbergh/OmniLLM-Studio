@@ -268,6 +268,7 @@ func (s *Service) buildRenderAssetManifest(ctx context.Context, projectID, snaps
 			if renderAssetRequiresVideo(stagedAsset) && media.VideoCodec == "" && media.Width == 0 && media.Height == 0 {
 				return nil, "", "", fmt.Errorf("timeline clips %s reference asset %q without a decodable visual stream", strings.Join(references[assetID], ", "), assetID)
 			}
+			stagedAsset.MetadataJSON = mergeProbeMetadataJSON(stagedAsset.MetadataJSON, media)
 		}
 		entries = append(entries, RenderAssetManifestEntry{
 			Asset: stagedAsset, ClipIDs: append([]string(nil), references[assetID]...),

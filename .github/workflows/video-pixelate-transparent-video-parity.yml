@@ -1,0 +1,342 @@
+name: Video Transparent Pixelate Parity Evidence
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/video-pixelate-transparent-video-parity.yml'
+      - 'backend/cmd/video-parity-fixture/**'
+      - 'backend/cmd/video-parity-region-report/**'
+      - 'backend/cmd/video-pixelate-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_pixelate.go'
+      - 'backend/internal/video/parity_fixture_pixelate_test.go'
+      - 'backend/internal/video/probe.go'
+      - 'backend/internal/video/probe_test.go'
+      - 'backend/internal/video/render_snapshot.go'
+      - 'backend/internal/video/renderer.go'
+      - 'backend/internal/video/renderer_input_fanout_test.go'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+      - 'frontend/src/components/video/PreviewPixelateBackdropConsumer.tsx'
+      - 'frontend/src/components/video/PreviewPixelateCanvas.tsx'
+      - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
+      - 'frontend/src/components/video/previewCanvasBackground.ts'
+      - 'frontend/src/components/video/previewFrameWeightedPairCanvas.tsx'
+      - 'frontend/src/components/video/previewPixelateBackdrop.ts'
+      - 'frontend/src/components/video/previewPixelateRaster.ts'
+      - 'frontend/src/components/video/previewVideoPresentation.ts'
+      - 'frontend/src/components/video/previewVideoPresentation.test.ts'
+      - 'frontend/src/components/video/sourceTiming.ts'
+      - 'scripts/video-parity-capture.mjs'
+      - 'scripts/video-pixelate-parity-assert.mjs'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/video-pixelate-transparent-video-parity.yml'
+      - 'backend/cmd/video-parity-fixture/**'
+      - 'backend/cmd/video-parity-region-report/**'
+      - 'backend/cmd/video-pixelate-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_pixelate.go'
+      - 'backend/internal/video/parity_fixture_pixelate_test.go'
+      - 'backend/internal/video/probe.go'
+      - 'backend/internal/video/probe_test.go'
+      - 'backend/internal/video/render_snapshot.go'
+      - 'backend/internal/video/renderer.go'
+      - 'backend/internal/video/renderer_input_fanout_test.go'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+      - 'frontend/src/components/video/PreviewPixelateBackdropConsumer.tsx'
+      - 'frontend/src/components/video/PreviewPixelateCanvas.tsx'
+      - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
+      - 'frontend/src/components/video/previewCanvasBackground.ts'
+      - 'frontend/src/components/video/previewFrameWeightedPairCanvas.tsx'
+      - 'frontend/src/components/video/previewPixelateBackdrop.ts'
+      - 'frontend/src/components/video/previewPixelateRaster.ts'
+      - 'frontend/src/components/video/previewVideoPresentation.ts'
+      - 'frontend/src/components/video/previewVideoPresentation.test.ts'
+      - 'frontend/src/components/video/sourceTiming.ts'
+      - 'scripts/video-parity-capture.mjs'
+      - 'scripts/video-pixelate-parity-assert.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-transparent-pixelate-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25.13'
+  NODE_VERSION: '24'
+
+jobs:
+  transparent-vp9-evidence:
+    name: Transparent VP9 presentation and alpha parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+      - working-directory: frontend
+        run: npm ci
+      - name: Install parity dependencies
+        run: |
+          bash scripts/ci-apt-install.sh ffmpeg
+          bash scripts/ci-playwright-install.sh
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Generate transparent VP9 fixture and shared deterministic media
+        run: |
+          set -euo pipefail
+          (
+            cd backend
+            go run ./cmd/video-parity-fixture \
+              --output-dir ../output/video-pixelate-transparent-video/fixture \
+              --random-samples 0 \
+              --generate-media
+            go run ./cmd/video-pixelate-parity-fixture \
+              --output-dir ../output/video-pixelate-transparent-video/fixture \
+              --variant alpha-video
+          )
+      - name: Prove VP9 alpha stream and decoder contract
+        run: |
+          set -euo pipefail
+          root=output/video-pixelate-transparent-video
+          media="$root/fixture/media/asset-alpha-video.webm"
+          ffprobe -v error -print_format json -show_streams "$media" > "$root/alpha-video-probe.json"
+          ffmpeg -hide_banner -loglevel error -y \
+            -ss 1.0 -i "$media" -frames:v 1 -f rawvideo -pix_fmt rgba "$root/native-vp9-frame.rgba"
+          ffmpeg -hide_banner -loglevel error -y \
+            -c:v libvpx-vp9 -ss 1.0 -i "$media" -frames:v 1 -f rawvideo -pix_fmt rgba "$root/libvpx-vp9-frame.rgba"
+          node - <<'NODE'
+          const fs = require('fs');
+          const root = 'output/video-pixelate-transparent-video';
+          const probe = JSON.parse(fs.readFileSync(`${root}/alpha-video-probe.json`, 'utf8'));
+          const stream = probe.streams?.find((entry) => entry.codec_type === 'video');
+          if (!stream) throw new Error('transparent fixture has no video stream');
+          const alphaMode = stream.tags?.alpha_mode ?? stream.tags?.ALPHA_MODE;
+          if (stream.codec_name !== 'vp9') throw new Error(`transparent fixture codec ${stream.codec_name}, want vp9`);
+          if (String(alphaMode) !== '1') throw new Error(`transparent fixture alpha_mode ${alphaMode}, want 1`);
+          const analyzeAlpha = (path) => {
+            const bytes = fs.readFileSync(path);
+            let min = 255;
+            let max = 0;
+            let transparent = 0;
+            let partial = 0;
+            let opaque = 0;
+            for (let offset = 3; offset < bytes.length; offset += 4) {
+              const alpha = bytes[offset];
+              min = Math.min(min, alpha);
+              max = Math.max(max, alpha);
+              if (alpha === 0) transparent += 1;
+              else if (alpha === 255) opaque += 1;
+              else partial += 1;
+            }
+            return { min, max, transparent, partial, opaque };
+          };
+          const native = analyzeAlpha(`${root}/native-vp9-frame.rgba`);
+          const libvpx = analyzeAlpha(`${root}/libvpx-vp9-frame.rgba`);
+          const summary = {
+            codec: stream.codec_name,
+            ffprobe_pixel_format: stream.pix_fmt,
+            alpha_mode: String(alphaMode),
+            default_decoder_alpha: native,
+            libvpx_vp9_alpha: libvpx,
+          };
+          fs.writeFileSync(`${root}/decoder-alpha-contract.json`, `${JSON.stringify(summary, null, 2)}\n`);
+          console.log(JSON.stringify(summary));
+          if (native.min !== 255 || native.max !== 255) {
+            throw new Error('native VP9 negative control unexpectedly preserved alpha');
+          }
+          if (libvpx.transparent === 0 || libvpx.partial === 0) {
+            throw new Error('libvpx-vp9 did not preserve transparent and partial-alpha pixels');
+          }
+          NODE
+      - name: Capture transparent-video preview and renderer evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/output/video-pixelate-transparent-video"
+          runtime="$root/runtime"
+          mkdir -p "$runtime/attachments"
+          export OMNILLM_PORT=18094
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          (
+            cd backend
+            go run ./cmd/server >"$runtime/backend.log" 2>"$runtime/backend.err.log"
+          ) &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18094 npm run dev -- --host 127.0.0.1 --port 14177 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18094/v1/health >/dev/null \
+              && curl --fail --silent http://127.0.0.1:14177/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "transparent-video parity servers did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          fixture=output/video-pixelate-transparent-video/fixture/parity-pixelate-alpha-video-v1.json
+          regions=output/video-pixelate-transparent-video/fixture/parity-pixelate-alpha-video-v1.regions.json
+          capture=output/video-pixelate-transparent-video/capture
+          node scripts/video-parity-capture.mjs \
+            --url http://127.0.0.1:14177 \
+            --fixture "$fixture" \
+            --media-dir output/video-pixelate-transparent-video/fixture/media \
+            --output "$capture"
+          node scripts/video-pixelate-parity-assert.mjs \
+            --url http://127.0.0.1:14177 \
+            --fixture "$fixture" \
+            --seed-result "$capture/seed-result.json" \
+            --output "$capture/pixelate-canvas-evidence.json"
+
+          timeline_hash="$(node -p "require('./$capture/seed-result.json').timeline_sha256")"
+          (
+            cd backend
+            go run ./cmd/video-parity-report \
+              --preview-dir ../$capture/preview \
+              --rendered-dir ../$capture/rendered \
+              --output-dir ../$capture/whole-frame-report \
+              --fps 30 \
+              --fixture parity-pixelate-alpha-video-v1 \
+              --timeline-sha256 "$timeline_hash" \
+              --allow-fail
+            go run ./cmd/video-parity-region-report \
+              --preview-dir ../$capture/preview \
+              --rendered-dir ../$capture/rendered \
+              --regions ../$regions \
+              --output ../$capture/pixelate-region-report.json \
+              --fixture parity-pixelate-alpha-video-v1 \
+              --fps 30 \
+              --allow-fail
+          )
+      - name: Gate retained transparent-video evidence
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const root = 'output/video-pixelate-transparent-video';
+          const fixture = JSON.parse(fs.readFileSync(`${root}/fixture/parity-pixelate-alpha-video-v1.json`, 'utf8'));
+          const consumer = JSON.parse(fs.readFileSync(`${root}/capture/pixelate-canvas-evidence.json`, 'utf8'));
+          const decoder = JSON.parse(fs.readFileSync(`${root}/decoder-alpha-contract.json`, 'utf8'));
+          const whole = JSON.parse(fs.readFileSync(`${root}/capture/whole-frame-report/parity-report.json`, 'utf8'));
+          const region = JSON.parse(fs.readFileSync(`${root}/capture/pixelate-region-report.json`, 'utf8'));
+          const tolerance = 4;
+          if (fixture.name !== 'parity-pixelate-alpha-video-v1') throw new Error(`unexpected fixture ${fixture.name}`);
+          if (fixture.timeline.canvas.background !== '#19324A') throw new Error(`transparent-video background ${fixture.timeline.canvas.background}, want #19324A`);
+          if (fixture.samples.length !== 4 || consumer.frames.length !== 4) throw new Error('transparent-video evidence must retain four canonical samples');
+          if (!consumer.decoded_frame_identity_gate || !consumer.transparent_video_alpha_gate) {
+            throw new Error('transparent-video evidence did not enable presentation/alpha gates');
+          }
+          if (consumer.codec_color_channel_tolerance !== tolerance) {
+            throw new Error(`transparent-video tolerance ${consumer.codec_color_channel_tolerance}, want ${tolerance}`);
+          }
+          if (decoder.codec !== 'vp9' || decoder.alpha_mode !== '1') throw new Error(`decoder contract missing VP9 alpha_mode=1: ${JSON.stringify(decoder)}`);
+          if (decoder.default_decoder_alpha.min !== 255 || decoder.default_decoder_alpha.max !== 255) {
+            throw new Error('default VP9 negative control no longer demonstrates alpha loss');
+          }
+          if (decoder.libvpx_vp9_alpha.transparent === 0 || decoder.libvpx_vp9_alpha.partial === 0) {
+            throw new Error('libvpx-vp9 alpha control lacks transparent/partial pixels');
+          }
+          const expectedFrames = fixture.samples.map((sample) => sample.frame_index);
+          for (let index = 0; index < consumer.frames.length; index += 1) {
+            const frame = consumer.frames[index];
+            const expected = expectedFrames[index];
+            if (frame.frame_index !== expected) throw new Error(`evidence frame ${frame.frame_index}, want ${expected}`);
+            if (frame.consumer !== 'canonical-canvas'
+              || frame.surface_status !== 'ready'
+              || frame.surface_background !== '#19324A'
+              || frame.structural_deferred
+              || frame.runtime_deferred
+              || frame.runtime_error
+              || frame.css_fallback_marker_present) {
+              throw new Error(`frame ${expected} did not retain exact Canvas execution: ${JSON.stringify(frame)}`);
+            }
+            if (frame.video_presentation_status !== 'ready'
+              || !frame.video_presentation_request_token
+              || frame.video_presentation_ready_token !== frame.video_presentation_request_token) {
+              throw new Error(`frame ${expected} did not retain matching presentation tokens: ${JSON.stringify(frame)}`);
+            }
+            if (!Array.isArray(frame.presentations) || frame.presentations.length === 0) {
+              throw new Error(`frame ${expected} has no requestVideoFrameCallback presentation evidence`);
+            }
+            for (const presentation of frame.presentations) {
+              if (presentation.presented_frame_index !== expected) {
+                throw new Error(`frame ${expected} presented ${presentation.presented_frame_index}`);
+              }
+            }
+            if (!frame.codec_region
+              || frame.codec_region.channel_tolerance !== tolerance
+              || frame.codec_region.pixel_pass_rate !== 1
+              || frame.codec_region.max_channel_delta > tolerance) {
+              throw new Error(`frame ${expected} exceeded transparent VP9 ±${tolerance} RGB gate: ${JSON.stringify(frame.codec_region)}`);
+            }
+          }
+          if (whole.frames.length !== fixture.samples.length || region.regions.length !== fixture.samples.length) {
+            throw new Error('diagnostic reports do not cover every transparent-video sample');
+          }
+          const summary = {
+            schema_version: 1,
+            fixture: fixture.name,
+            timeline_sha256: consumer.timeline_sha256,
+            project_background: fixture.timeline.canvas.background,
+            samples: fixture.samples.length,
+            presentation_frames: expectedFrames,
+            codec_color_channel_tolerance: tolerance,
+            transparent_video_gate_pass: true,
+            decoder_contract: decoder,
+            whole_frame_pass_at_repository_default: whole.pass,
+            region_pass_at_repository_default: region.pass,
+            frames: consumer.frames.map((frame) => ({
+              frame_index: frame.frame_index,
+              presentation_status: frame.video_presentation_status,
+              presentation_media_time: frame.video_presentation_media_time,
+              presentation_attempts: frame.video_presentation_attempts,
+              codec_region: frame.codec_region,
+            })),
+          };
+          fs.writeFileSync(`${root}/transparent-video-evidence-summary.json`, `${JSON.stringify(summary, null, 2)}\n`);
+          console.log(JSON.stringify(summary));
+          NODE
+      - name: Record toolchain
+        if: always()
+        run: |
+          root=output/video-pixelate-transparent-video
+          mkdir -p "$root"
+          {
+            go version
+            node --version
+            npm --version
+            ffmpeg -version | head -n 1
+            ffprobe -version | head -n 1
+            node -e "console.log('playwright ' + require('playwright/package.json').version)"
+          } > "$root/toolchain.txt"
+      - name: Upload transparent-video parity evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-pixelate-transparent-video-parity-evidence
+          path: output/video-pixelate-transparent-video
+          if-no-files-found: error
+          retention-days: 14

@@ -20,12 +20,16 @@ const seedResult = JSON.parse(await fs.readFile(path.resolve(args['seed-result']
 if (!seedResult.project_id || !seedResult.timeline_sha256 || !seedResult.snapshot_id) {
   throw new Error('seed result is missing project/timeline/snapshot identity');
 }
+
 const output = path.resolve(args.output);
 const editorURL = new URL(`/video/${encodeURIComponent(seedResult.project_id)}/edit`, args.url).toString();
 const canvasWidth = fixture.timeline.canvas.width;
 const canvasHeight = fixture.timeline.canvas.height;
 const fps = fixture.timeline.canvas.fps;
 const decodedVideoFixture = fixture.name === 'parity-pixelate-decoded-video-v1';
+const alphaVideoFixture = fixture.name === 'parity-pixelate-alpha-video-v1';
+const presentationVideoFixture = decodedVideoFixture || alphaVideoFixture;
+const codecColorChannelTolerance = decodedVideoFixture ? 3 : (alphaVideoFixture ? 4 : null);
 const evidence = [];
 
 const browser = await chromium.launch({ headless: true });
@@ -55,6 +59,7 @@ try {
     const host = stage.querySelector('[data-preview-pixelate-host="canonical-canvas"]');
     const surface = stage.querySelector('[data-preview-pixelate-execution="canvas"]');
     const fallback = stage.querySelector('[data-preview-shape-painter-deferred="pixelate-css-approximation"]');
+    const video = stage.querySelector('[data-video-preview-media="true"]');
     return {
       parity_frame_index: stage.dataset.parityFrameIndex ?? null,
       pixelate_frame_index: stage.dataset.previewPixelateFrameIndex ?? null,
@@ -68,104 +73,42 @@ try {
       surface_reason: surface?.getAttribute('data-preview-pixelate-reason') ?? null,
       surface_background: surface?.getAttribute('data-preview-pixelate-background') ?? null,
       css_fallback_marker_present: Boolean(fallback),
+      video_presentation_request_token: video?.dataset.videoPreviewPresentationRequestToken ?? null,
+      video_presentation_ready_token: video?.dataset.videoPreviewPresentationReadyToken ?? null,
+      video_presentation_status: video?.dataset.videoPreviewPresentationStatus ?? null,
+      video_presentation_media_time: video?.dataset.videoPreviewPresentationMediaTime ?? null,
+      video_presentation_attempts: video?.dataset.videoPreviewPresentationAttempts ?? null,
     };
   });
 
   for (const sample of fixture.samples) {
     const requestId = `pixelate-evidence-${sample.frame_index}`;
-    const presentations = await page.evaluate(({ frameIndex, id, fps }) => new Promise((resolve, reject) => {
-      const videos = [...document.querySelectorAll('[data-video-preview-media="true"]')]
-        .filter((media) => media instanceof HTMLVideoElement);
-      const expectedMediaTimeSeconds = frameIndex / fps;
-      const matched = new Map();
-      let readySeen = false;
-      let initialFallbackTimer = null;
-      const callbackIDs = new Map();
-      const deadline = performance.now() + 10_000;
 
+    // The mounted preview video owns presentation synchronization. Its
+    // ensurePreviewVideoPresentation contract registers requestVideoFrameCallback
+    // before deterministic seeking and publishes request/ready tokens plus the
+    // callback metadata mediaTime onto the actual element sampled by Canvas.
+    // Waiting for the parity-ready event here intentionally avoids registering a
+    // second rVFC that can miss the final paused frame after the component has
+    // already proven and consumed it.
+    await page.evaluate(({ frameIndex, id }) => new Promise((resolve, reject) => {
+      let timeout = null;
       const cleanup = () => {
         window.removeEventListener('omnillm:video-parity-ready', ready);
-        if (initialFallbackTimer !== null) window.clearTimeout(initialFallbackTimer);
-        for (const [video, callbackID] of callbackIDs.entries()) {
-          video.cancelVideoFrameCallback?.(callbackID);
-        }
-        callbackIDs.clear();
+        if (timeout !== null) window.clearTimeout(timeout);
       };
-      const snapshot = (video, index, method, metadata) => {
-        const mediaTime = metadata?.mediaTime ?? video.currentTime;
-        return {
-          video_index: index,
-          method,
-          requested_frame_index: frameIndex,
-          requested_media_time_seconds: expectedMediaTimeSeconds,
-          element_current_time_seconds: video.currentTime,
-          presented_media_time_seconds: mediaTime,
-          presented_frame_index: Math.round(mediaTime * fps),
-          presented_frames: metadata?.presentedFrames ?? null,
-          width: metadata?.width ?? video.videoWidth,
-          height: metadata?.height ?? video.videoHeight,
-        };
-      };
-      const finishIfComplete = () => {
-        if (!readySeen || matched.size !== videos.length) return;
-        cleanup();
-        resolve([...matched.entries()].sort((a, b) => a[0] - b[0]).map(([, value]) => value));
-      };
-      const observe = (video, index) => {
-        if (typeof video.requestVideoFrameCallback !== 'function') {
-          cleanup();
-          reject(new Error(`requestVideoFrameCallback unavailable for video ${index}`));
-          return;
-        }
-        const callbackID = video.requestVideoFrameCallback((_now, metadata) => {
-          callbackIDs.delete(video);
-          const current = snapshot(video, index, 'requestVideoFrameCallback', metadata);
-          if (current.presented_frame_index === frameIndex) {
-            matched.set(index, current);
-            finishIfComplete();
-            return;
-          }
-          if (performance.now() >= deadline) {
-            cleanup();
-            reject(new Error(`video ${index} presented frame ${current.presented_frame_index}, want ${frameIndex}`));
-            return;
-          }
-          observe(video, index);
-        });
-        callbackIDs.set(video, callbackID);
-      };
-
-      for (const [index, video] of videos.entries()) observe(video, index);
-
-      const timeout = window.setTimeout(() => {
-        cleanup();
-        reject(new Error(`parity-ready/presented-frame timed out for frame ${frameIndex}`));
-      }, 10_000);
       const ready = (event) => {
         if (event.detail?.requestId !== id) return;
-        window.clearTimeout(timeout);
-        readySeen = true;
-        if (videos.length === 0) {
-          cleanup();
-          resolve([]);
-          return;
-        }
-        // The initial decoded frame can already be current before an rVFC is
-        // registered. Retain that one explicit zero-frame fallback only; every
-        // later deterministic sample must be proven by presentation metadata.
-        if (frameIndex === 0 && matched.size !== videos.length) {
-          initialFallbackTimer = window.setTimeout(() => {
-            for (const [index, video] of videos.entries()) {
-              if (!matched.has(index)) matched.set(index, snapshot(video, index, 'initial-current-time', null));
-            }
-            finishIfComplete();
-          }, 250);
-        }
-        finishIfComplete();
+        cleanup();
+        resolve();
       };
+      timeout = window.setTimeout(() => {
+        cleanup();
+        reject(new Error(`parity-ready timed out for frame ${frameIndex}`));
+      }, 10_000);
       window.addEventListener('omnillm:video-parity-ready', ready);
       window.dispatchEvent(new CustomEvent('omnillm:video-parity-seek', { detail: { frameIndex, requestId: id } }));
-    }), { frameIndex: sample.frame_index, id: requestId, fps });
+    }), { frameIndex: sample.frame_index, id: requestId });
 
     try {
       await page.waitForFunction((frameIndex) => {
@@ -180,6 +123,30 @@ try {
       throw new Error(`frame ${sample.frame_index} did not activate canonical pixelate Canvas: ${JSON.stringify(state)}`, { cause: error });
     }
 
+    if (presentationVideoFixture) {
+      try {
+        await page.waitForFunction(({ frameIndex, fps }) => {
+          const video = document.querySelector('[data-testid="video-preview-program"] [data-video-preview-media="true"]');
+          if (!(video instanceof HTMLVideoElement)) return false;
+          const requestToken = video.dataset.videoPreviewPresentationRequestToken;
+          const readyToken = video.dataset.videoPreviewPresentationReadyToken;
+          const mediaTime = Number(video.dataset.videoPreviewPresentationMediaTime);
+          const attempts = Number.parseInt(video.dataset.videoPreviewPresentationAttempts ?? '', 10);
+          return video.dataset.videoPreviewPresentationStatus === 'ready'
+            && Boolean(requestToken)
+            && readyToken === requestToken
+            && Number.isFinite(mediaTime)
+            && Math.round(mediaTime * fps) === frameIndex
+            && Number.isInteger(attempts)
+            && attempts >= 1
+            && attempts <= 3;
+        }, { frameIndex: sample.frame_index, fps }, { timeout: 5000 });
+      } catch (error) {
+        const state = await readPixelateState();
+        throw new Error(`frame ${sample.frame_index} did not retain component rVFC presentation proof: ${JSON.stringify(state)}`, { cause: error });
+      }
+    }
+
     const state = await readPixelateState();
     if (state.plan_mode !== 'canonical-ready'
       || state.consumer !== 'canonical-canvas'
@@ -192,23 +159,37 @@ try {
       throw new Error(`frame ${sample.frame_index} did not prove exact pixelate Canvas execution: ${JSON.stringify(state)}`);
     }
 
-    if (decodedVideoFixture) {
-      if (presentations.length === 0) {
-        throw new Error(`frame ${sample.frame_index} has no decoded-video presentation evidence`);
+    let presentations = [];
+    if (presentationVideoFixture) {
+      if (state.video_presentation_status !== 'ready'
+        || !state.video_presentation_request_token
+        || state.video_presentation_ready_token !== state.video_presentation_request_token) {
+        throw new Error(`frame ${sample.frame_index} did not retain matching preview presentation-token proof: ${JSON.stringify(state)}`);
       }
-      for (const presentation of presentations) {
-        if (presentation.presented_frame_index !== sample.frame_index) {
-          throw new Error(`frame ${sample.frame_index} presented decoded frame ${presentation.presented_frame_index}`);
-        }
-        if (sample.frame_index > 0
-          && presentation.element_current_time_seconds <= presentation.requested_media_time_seconds) {
-          throw new Error(`frame ${sample.frame_index} did not seek inside the requested decoded-frame interval: ${JSON.stringify(presentation)}`);
-        }
+
+      const presentedMediaTime = Number(state.video_presentation_media_time);
+      const presentedFrameIndex = Math.round(presentedMediaTime * fps);
+      const attempts = Number.parseInt(state.video_presentation_attempts ?? '', 10);
+      if (!Number.isFinite(presentedMediaTime) || presentedFrameIndex !== sample.frame_index) {
+        throw new Error(`frame ${sample.frame_index} retained presented mediaTime ${state.video_presentation_media_time}: ${JSON.stringify(state)}`);
       }
+      if (!Number.isInteger(attempts) || attempts < 1 || attempts > 3) {
+        throw new Error(`frame ${sample.frame_index} retained invalid presentation attempts ${state.video_presentation_attempts}: ${JSON.stringify(state)}`);
+      }
+
+      presentations = [{
+        video_index: 0,
+        method: 'component-requestVideoFrameCallback',
+        requested_frame_index: sample.frame_index,
+        requested_media_time_seconds: sample.frame_index / fps,
+        presented_media_time_seconds: presentedMediaTime,
+        presented_frame_index: presentedFrameIndex,
+        attempts,
+      }];
     }
 
-    const codecRegion = decodedVideoFixture
-      ? await page.evaluate(async ({ frameIndex, snapshotID, canvasWidth }) => {
+    const codecRegion = presentationVideoFixture
+      ? await page.evaluate(async ({ frameIndex, snapshotID, canvasWidth, channelTolerance }) => {
         const stage = document.querySelector('[data-testid="video-preview-program"]');
         if (!(stage instanceof HTMLElement)) throw new Error('preview program missing while measuring codec region');
         const output = stage.querySelector('[data-preview-pixelate-execution="canvas"] canvas');
@@ -245,7 +226,7 @@ try {
             let pixelWithin = true;
             for (let channel = 0; channel < 3; channel += 1) {
               const delta = Math.abs(preview[offset + channel] - rendered[offset + channel]);
-              if (delta > 3) pixelWithin = false;
+              if (delta > channelTolerance) pixelWithin = false;
               if (delta > maxChannelDelta) maxChannelDelta = delta;
             }
             if (pixelWithin) pixelsWithinTolerance += 1;
@@ -253,7 +234,7 @@ try {
           return {
             bounds: { min_x: minX, min_y: minY, max_x: minX + width, max_y: minY + height },
             compared_pixels: comparedPixels,
-            channel_tolerance: 3,
+            channel_tolerance: channelTolerance,
             pixels_within_tolerance: pixelsWithinTolerance,
             pixel_pass_rate: pixelsWithinTolerance / comparedPixels,
             max_channel_delta: maxChannelDelta,
@@ -261,11 +242,17 @@ try {
         } finally {
           bitmap.close();
         }
-      }, { frameIndex: sample.frame_index, snapshotID: seedResult.snapshot_id, canvasWidth })
+      }, {
+        frameIndex: sample.frame_index,
+        snapshotID: seedResult.snapshot_id,
+        canvasWidth,
+        channelTolerance: codecColorChannelTolerance,
+      })
       : null;
 
-    if (codecRegion && (codecRegion.max_channel_delta > 3 || codecRegion.pixel_pass_rate !== 1)) {
-      throw new Error(`frame ${sample.frame_index} exceeded decoded H.264 ±3 RGB gate: ${JSON.stringify(codecRegion)}`);
+    if (codecRegion && (codecRegion.max_channel_delta > codecColorChannelTolerance || codecRegion.pixel_pass_rate !== 1)) {
+      const sourceKind = alphaVideoFixture ? 'transparent VP9' : 'decoded H.264';
+      throw new Error(`frame ${sample.frame_index} exceeded ${sourceKind} ±${codecColorChannelTolerance} RGB gate: ${JSON.stringify(codecRegion)}`);
     }
 
     evidence.push({
@@ -283,13 +270,14 @@ try {
 
 await fs.mkdir(path.dirname(output), { recursive: true });
 await fs.writeFile(output, `${JSON.stringify({
-  schema_version: 4,
+  schema_version: 5,
   fixture: fixture.name,
   timeline_sha256: seedResult.timeline_sha256,
   snapshot_id: seedResult.snapshot_id,
   fps,
-  decoded_frame_identity_gate: decodedVideoFixture,
-  codec_color_channel_tolerance: decodedVideoFixture ? 3 : null,
+  decoded_frame_identity_gate: presentationVideoFixture,
+  transparent_video_alpha_gate: alphaVideoFixture,
+  codec_color_channel_tolerance: codecColorChannelTolerance,
   frames: evidence,
 }, null, 2)}\n`);
 console.log(`pixelate Canvas evidence: ${output} (${evidence.length} frames)`);

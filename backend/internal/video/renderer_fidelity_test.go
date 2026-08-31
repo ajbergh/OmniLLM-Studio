@@ -196,7 +196,7 @@ func TestBuildFilterComplexConstantPlaybackRate(t *testing.T) {
 	}}
 	filterStr, _, audioLabel := buildFilterComplex(doc, clips, 1920, 1080)
 	for _, expected := range []string{
-		"trim=start=0.500:duration=8.000,setpts=(PTS-STARTPTS)/2.000000",
+		"trim=start=0.500:duration=8.000,settb=expr=1/1000000,setpts=(PTS-STARTPTS-490)/2.000000",
 		"atrim=start=0.500:duration=8.000,asetpts=PTS-STARTPTS,atempo=2.000000",
 	} {
 		if !strings.Contains(filterStr, expected) {

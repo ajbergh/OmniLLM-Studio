@@ -75,3 +75,26 @@ func TestBuildFilterComplexKeepsVisualCompositionInRGB(t *testing.T) {
 		t.Fatalf("media overlay must preserve RGB until the output/codec boundary: %s", graph)
 	}
 }
+
+func TestDeterministicVideoPresentationTimingFiltersUseFineTimebase(t *testing.T) {
+	if got, want := strings.Join(deterministicVideoPresentationTimingFilters(1), ","), "settb=expr=1/1000000,setpts=PTS-STARTPTS-490"; got != want {
+		t.Fatalf("deterministic video presentation filters mismatch: got %q want %q", got, want)
+	}
+	if got, want := strings.Join(deterministicVideoPresentationTimingFilters(2), ","), "settb=expr=1/1000000,setpts=(PTS-STARTPTS-490)/2.000000"; got != want {
+		t.Fatalf("playback-rate presentation filters mismatch: got %q want %q", got, want)
+	}
+}
+
+func TestBuildFilterComplexAppliesDeterministicVideoPresentationBias(t *testing.T) {
+	clip := TimelineClip{ID: "video", StartMS: 0, DurationMS: 2000}
+	graph, _, _ := buildFilterComplexWithAudio(
+		TimelineDocument{},
+		[]resolvedClip{{inputIdx: 1, trackIndex: 0, clip: clip, isVideo: true}},
+		512,
+		512,
+		false,
+	)
+	if !strings.Contains(graph, "trim=start=0.000:duration=2.000,settb=expr=1/1000000,setpts=PTS-STARTPTS-490") {
+		t.Fatalf("video visual chain must apply the bounded presentation bias: %s", graph)
+	}
+}

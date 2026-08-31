@@ -35,6 +35,7 @@ import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineT
 import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips, queryActiveClipsAtFrame } from './pro/timelineIndex';
 import { renderPreviewPCM } from './parity/previewAudioRenderer';
 import { deterministicVideoSeekTargetSeconds, frameAddressMatchesTimelineMs, mediaSeekToleranceSeconds, sourceTimeForPreviewMediaMs } from './sourceTiming';
+import { ensurePreviewVideoPresentation, previewVideoPresentationToken, resetPreviewVideoPresentation } from './previewVideoPresentation';
 import { resolvePreviewFrameTransform } from './previewFrameTransform';
 import { resolvePreviewFrameViewTransform } from './previewFrameViewTransform';
 import {
@@ -452,6 +453,7 @@ export function VideoPreviewCanvas() {
       element.playbackRate = playbackRate;
       element.preservesPitch = true;
       if (isPlaying) {
+        if (element instanceof HTMLVideoElement) resetPreviewVideoPresentation(element);
         if (element.paused && !element.ended) {
           element.currentTime = target;
           element.play().catch(() => { /* autoplay policy */ });
@@ -461,6 +463,17 @@ export function VideoPreviewCanvas() {
         }
       } else {
         if (!element.paused) element.pause();
+        if (element instanceof HTMLVideoElement && address.kind === 'frame' && canonicalState) {
+          ensurePreviewVideoPresentation({
+            video: element,
+            token: previewVideoPresentationToken(clip.id, address.frameIndex, targetMs),
+            sourceTimeMs: targetMs,
+            seekSeconds: deterministicVideoSeekTargetSeconds(address, target),
+            toleranceSeconds: mediaSeekToleranceSeconds(address),
+          });
+          return;
+        }
+        if (element instanceof HTMLVideoElement) resetPreviewVideoPresentation(element);
         if (Math.abs(element.currentTime - target) > mediaSeekToleranceSeconds(address)) {
           element.currentTime = element instanceof HTMLVideoElement
             ? deterministicVideoSeekTargetSeconds(address, target)

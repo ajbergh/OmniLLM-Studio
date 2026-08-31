@@ -12,12 +12,14 @@ import (
 
 // MediaProbe holds metadata extracted from a media file via ffprobe.
 type MediaProbe struct {
-	DurationMS int64   `json:"duration_ms,omitempty"`
-	Width      int     `json:"width,omitempty"`
-	Height     int     `json:"height,omitempty"`
-	FPS        float64 `json:"fps,omitempty"`
-	VideoCodec string  `json:"video_codec,omitempty"`
-	AudioCodec string  `json:"audio_codec,omitempty"`
+	DurationMS       int64   `json:"duration_ms,omitempty"`
+	Width            int     `json:"width,omitempty"`
+	Height           int     `json:"height,omitempty"`
+	FPS              float64 `json:"fps,omitempty"`
+	VideoCodec       string  `json:"video_codec,omitempty"`
+	VideoPixelFormat string  `json:"video_pixel_format,omitempty"`
+	VideoAlphaMode   string  `json:"video_alpha_mode,omitempty"`
+	AudioCodec       string  `json:"audio_codec,omitempty"`
 	// Channels and SampleRate describe the first audio stream, if any.
 	AudioChannels   int  `json:"audio_channels,omitempty"`
 	AudioSampleRate int  `json:"audio_sample_rate,omitempty"`
@@ -84,8 +86,12 @@ func parseProbePayload(output []byte) (*MediaProbe, error) {
 			RFrameRate   string `json:"r_frame_rate"`
 			AvgFrameRate string `json:"avg_frame_rate"`
 			Duration     string `json:"duration"`
-			Channels     int    `json:"channels"`
-			SampleRate   string `json:"sample_rate"`
+			PixFmt       string `json:"pix_fmt"`
+			Tags         struct {
+				AlphaMode string `json:"alpha_mode"`
+			} `json:"tags"`
+			Channels   int    `json:"channels"`
+			SampleRate string `json:"sample_rate"`
 		} `json:"streams"`
 	}
 	if err := json.Unmarshal(output, &payload); err != nil {
@@ -104,6 +110,8 @@ func parseProbePayload(output []byte) (*MediaProbe, error) {
 			probe.Width = stream.Width
 			probe.Height = stream.Height
 			probe.VideoCodec = strings.TrimSpace(stream.CodecName)
+			probe.VideoPixelFormat = strings.TrimSpace(stream.PixFmt)
+			probe.VideoAlphaMode = strings.TrimSpace(stream.Tags.AlphaMode)
 			probe.FPS = parseFrameRate(stream.AvgFrameRate)
 			if probe.FPS == 0 {
 				probe.FPS = parseFrameRate(stream.RFrameRate)
@@ -146,6 +154,12 @@ func ProbeMetadataJSON(probe *MediaProbe) string {
 	if probe.VideoCodec != "" {
 		meta["video_codec"] = probe.VideoCodec
 	}
+	if probe.VideoPixelFormat != "" {
+		meta["video_pixel_format"] = probe.VideoPixelFormat
+	}
+	if probe.VideoAlphaMode != "" {
+		meta["video_alpha_mode"] = probe.VideoAlphaMode
+	}
 	if probe.AudioCodec != "" {
 		meta["audio_codec"] = probe.AudioCodec
 	}
@@ -161,6 +175,55 @@ func ProbeMetadataJSON(probe *MediaProbe) string {
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return ""
+	}
+	return string(data)
+}
+
+// VideoHasAlpha reports stream-level alpha facts advertised by ffprobe. VP9
+// WebM commonly reports yuv420p while carrying alpha_mode=1, so pixel format
+// alone is not a sufficient signal.
+func (p *MediaProbe) VideoHasAlpha() bool {
+	if p == nil {
+		return false
+	}
+	if strings.TrimSpace(p.VideoAlphaMode) == "1" {
+		return true
+	}
+	return videoPixelFormatHasAlpha(p.VideoPixelFormat)
+}
+
+func videoPixelFormatHasAlpha(value string) bool {
+	pixelFormat := strings.ToLower(strings.TrimSpace(value))
+	if strings.HasPrefix(pixelFormat, "yuva") || strings.HasPrefix(pixelFormat, "gbrap") {
+		return true
+	}
+	switch pixelFormat {
+	case "rgba", "bgra", "argb", "abgr", "ya8", "ya16le", "ya16be":
+		return true
+	default:
+		return false
+	}
+}
+
+// mergeProbeMetadataJSON freezes current stream facts into an immutable staged
+// asset while preserving unrelated authored/import metadata.
+func mergeProbeMetadataJSON(existing string, probe *MediaProbe) string {
+	metadata := map[string]any{}
+	if strings.TrimSpace(existing) != "" {
+		_ = json.Unmarshal([]byte(existing), &metadata)
+	}
+	probeJSON := ProbeMetadataJSON(probe)
+	if probeJSON != "" {
+		probeMetadata := map[string]any{}
+		if json.Unmarshal([]byte(probeJSON), &probeMetadata) == nil {
+			for key, value := range probeMetadata {
+				metadata[key] = value
+			}
+		}
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return existing
 	}
 	return string(data)
 }

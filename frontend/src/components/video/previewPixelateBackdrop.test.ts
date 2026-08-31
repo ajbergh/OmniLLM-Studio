@@ -104,7 +104,7 @@ function layer(
 }
 
 describe('planPreviewPixelateBackdrop', () => {
-  it('admits exactly one clean media backdrop beneath one simple pixelate region', () => {
+  it('admits exactly one clean image backdrop beneath one simple pixelate region', () => {
     const plan = planPreviewPixelateBackdrop(12, [
       layer('backdrop', mediaState(), 'image/png'),
       layer('pixelate', pixelateState()),
@@ -116,8 +116,20 @@ describe('planPreviewPixelateBackdrop', () => {
       target: { clip: { id: 'pixelate' } },
       backdrop: { clip: { id: 'backdrop' } },
       rasterSource: { supported: true, clipId: 'backdrop', kind: 'image' },
-      runtimeRequirements: ['decoded-frame-ready', 'opaque-region-proof'],
+      runtimeRequirements: ['decoded-frame-ready'],
       deferredReasons: [],
+    });
+  });
+
+  it('requires exact decoder presentation only for video backdrops', () => {
+    const plan = planPreviewPixelateBackdrop(12, [
+      layer('backdrop', mediaState({ source_time_ms: 400 }), 'video/webm'),
+      layer('pixelate', pixelateState()),
+    ]);
+    expect(plan).toMatchObject({
+      mode: 'canonical-ready',
+      rasterSource: { supported: true, kind: 'video' },
+      runtimeRequirements: ['decoded-frame-ready', 'decoded-frame-presented'],
     });
   });
 

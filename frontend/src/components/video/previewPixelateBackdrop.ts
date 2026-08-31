@@ -8,7 +8,7 @@ export const PREVIEW_PIXELATE_BACKDROP_PLAN_V1 = 'preview-pixelate-backdrop-plan
 
 export type PreviewPixelateBackdropRuntimeRequirement =
   | 'decoded-frame-ready'
-  | 'opaque-region-proof';
+  | 'decoded-frame-presented';
 
 export type PreviewPixelateBackdropDeferredReason =
   | 'multiple-pixelate-layers-deferred'
@@ -80,9 +80,12 @@ export type PreviewPixelateBackdropPlan<T extends PreviewPixelateBackdropLayer> 
   | PreviewPixelateBackdropLegacy<T>
   | PreviewPixelateBackdropDeferred<T>;
 
-const RUNTIME_REQUIREMENTS: readonly PreviewPixelateBackdropRuntimeRequirement[] = [
+const IMAGE_RUNTIME_REQUIREMENTS: readonly PreviewPixelateBackdropRuntimeRequirement[] = [
   'decoded-frame-ready',
-  'opaque-region-proof',
+];
+const VIDEO_RUNTIME_REQUIREMENTS: readonly PreviewPixelateBackdropRuntimeRequirement[] = [
+  'decoded-frame-ready',
+  'decoded-frame-presented',
 ];
 
 const PIXELATE_STATIC_RENDERER_TRANSFORM_PROPERTIES = new Set([
@@ -106,8 +109,9 @@ const PIXELATE_STATIC_RENDERER_TRANSFORM_PROPERTIES = new Set([
  *
  * V1 deliberately admits only one pixelate region over exactly one clean media
  * layer. The structural plan is separate from runtime decoded-pixel evidence:
- * a consumer must still prove that the media frame is ready and that the
- * sampled region is opaque before replacing the CSS approximation.
+ * images must be decoded, while video must additionally prove that the mounted
+ * decoder presented the exact canonical source-time request before Canvas can
+ * replace the CSS approximation. Alpha is then handled by source-over composition.
  */
 export function planPreviewPixelateBackdrop<T extends PreviewPixelateBackdropLayer>(
   frameIndex: number | null,
@@ -177,7 +181,9 @@ export function planPreviewPixelateBackdrop<T extends PreviewPixelateBackdropLay
     target,
     backdrop,
     rasterSource,
-    runtimeRequirements: RUNTIME_REQUIREMENTS,
+    runtimeRequirements: rasterSource.kind === 'video'
+      ? VIDEO_RUNTIME_REQUIREMENTS
+      : IMAGE_RUNTIME_REQUIREMENTS,
     deferredReasons: [],
   };
 }

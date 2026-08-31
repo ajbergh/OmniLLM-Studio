@@ -8,6 +8,7 @@ import {
   queryActiveClipsAtFrameWithState,
 } from './pro/timelineIndex';
 import { frameAddressMatchesTimelineMs } from './sourceTiming';
+import { previewVideoPresentationToken } from './previewVideoPresentation';
 import {
   planPreviewPixelateBackdrop,
   type PreviewPixelateBackdropLayer,
@@ -37,9 +38,9 @@ const IDLE_RUNTIME: RuntimeState = { executionKey: '', status: 'pending' };
  * Deterministic pixelate Canvas consumer layered onto VideoPreviewCanvas.
  * Structural admission and runtime decoded-pixel proof both fail closed: normal
  * playback, poster-budget sources, unsupported canonical state, and decoded
- * video that cannot prove its source frame opaque leave the established CSS
- * approximation untouched. Transparent/partial-alpha images are admitted only
- * after canonical project-background composition in PreviewPixelateCanvas.
+ * video without an exact canonical presentation proof leave the established CSS
+ * approximation untouched. Images and alpha video are consumed only after
+ * canonical project-background source-over composition in PreviewPixelateCanvas.
  */
 export function PreviewPixelateBackdropConsumer() {
   const timeline = useVideoStudioStore((state) => state.timeline);
@@ -126,8 +127,19 @@ export function PreviewPixelateBackdropConsumer() {
     ? `${plan.backdrop.clip.id}:decoder-budget-poster`
     : undefined;
   const consume = plan.mode === 'canonical-ready' && !posterDeferredReason;
+  const videoPresentationToken = plan.mode === 'canonical-ready'
+    && !posterDeferredReason
+    && deterministicFrame !== null
+    && plan.rasterSource.kind === 'video'
+    && plan.backdrop.canonicalState
+    ? previewVideoPresentationToken(
+      plan.backdrop.clip.id,
+      deterministicFrame,
+      plan.backdrop.canonicalState.source_time_ms,
+    )
+    : undefined;
   const executionKey = consume
-    ? `${deterministicFrame}:${plan.target.clip.id}:${plan.backdrop.clip.id}:${canvasWidth}x${canvasHeight}:${canvasBackground}`
+    ? `${deterministicFrame}:${plan.target.clip.id}:${plan.backdrop.clip.id}:${canvasWidth}x${canvasHeight}:${canvasBackground}:${videoPresentationToken ?? 'image'}`
     : '';
   const runtimeStatus = consume && runtime.executionKey === executionKey ? runtime.status : 'pending';
   const runtimeReason = consume && runtime.executionKey === executionKey ? runtime.reason : undefined;
@@ -320,6 +332,7 @@ export function PreviewPixelateBackdropConsumer() {
       canvasBackground={canvasBackground}
       stageScale={stageScale}
       sourceForClip={sourceForClip}
+      videoPresentationToken={videoPresentationToken}
       executionKey={executionKey}
       active={canvasReady}
       onStatusChange={onStatusChange}
