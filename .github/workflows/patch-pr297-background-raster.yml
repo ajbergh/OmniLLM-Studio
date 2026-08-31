@@ -1,0 +1,118 @@
+name: Patch project-background pixelate raster
+
+on:
+  push:
+    branches:
+      - feat/video-wysiwyg-phase3-project-background-raster
+    paths:
+      - .github/workflows/patch-pr297-background-raster.yml
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/video-wysiwyg-phase3-project-background-raster
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - name: Apply guarded frontend patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def patch(path_s, replacements):
+              path = Path(path_s)
+              text = path.read_text()
+              for label, old, new in replacements:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f'{path_s} {label}: expected one match, found {count}')
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+          patch('frontend/src/components/video/previewPixelateBackdrop.ts', [
+              ('raster type',
+               "export interface PreviewPixelateBackdropReady<T extends PreviewPixelateBackdropLayer> {\n  contract_version: typeof PREVIEW_PIXELATE_BACKDROP_PLAN_V1;\n  mode: 'canonical-ready';\n  target: T;\n  backdrop: T;\n  rasterSource: PreviewWeightedPairRasterSourceSupported;\n",
+               "export interface PreviewPixelateProjectBackgroundRasterSource {\n  supported: true;\n  clipId: 'project-background';\n  kind: 'project-background';\n}\n\nexport type PreviewPixelateBackdropRasterSource =\n  | PreviewWeightedPairRasterSourceSupported\n  | PreviewPixelateProjectBackgroundRasterSource;\n\nexport interface PreviewPixelateBackdropReady<T extends PreviewPixelateBackdropLayer> {\n  contract_version: typeof PREVIEW_PIXELATE_BACKDROP_PLAN_V1;\n  mode: 'canonical-ready';\n  target: T;\n  backdrop?: T;\n  rasterSource: PreviewPixelateBackdropRasterSource;\n"),
+              ('zero lower layers',
+               "  const lowerLayers = layers.slice(0, targetIndex);\n  if (lowerLayers.length !== 1) {\n    return deferred(target, undefined, [...targetReasons, 'backdrop-layer-count-deferred']);\n  }\n\n  const backdrop = lowerLayers[0];\n",
+               "  const lowerLayers = layers.slice(0, targetIndex);\n  if (lowerLayers.length === 0) {\n    if (targetReasons.length > 0) return deferred(target, undefined, targetReasons);\n    return {\n      contract_version: PREVIEW_PIXELATE_BACKDROP_PLAN_V1,\n      mode: 'canonical-ready',\n      target,\n      rasterSource: { supported: true, clipId: 'project-background', kind: 'project-background' },\n      runtimeRequirements: [],\n      deferredReasons: [],\n    };\n  }\n  if (lowerLayers.length !== 1) {\n    return deferred(target, undefined, [...targetReasons, 'backdrop-layer-count-deferred']);\n  }\n\n  const backdrop = lowerLayers[0];\n"),
+              ('doc',
+               " * V1 deliberately admits only one pixelate region over exactly one clean media\n * layer. The structural plan is separate from runtime decoded-pixel evidence:\n * images must be decoded, while video must additionally prove that the mounted\n * decoder presented the exact canonical source-time request before Canvas can\n * replace the CSS approximation. Alpha is then handled by source-over composition.\n",
+               " * V1 deliberately admits only one pixelate region over either the canonical\n * project background alone or exactly one clean media layer. The structural\n * plan is separate from runtime decoded-pixel evidence: project background has\n * no readiness dependency, images must be decoded, and video must additionally\n * prove that the mounted decoder presented the exact canonical source-time request\n * before Canvas can replace the CSS approximation. Alpha is then handled by\n * source-over composition.\n"),
+          ])
+
+          patch('frontend/src/components/video/PreviewPixelateBackdropConsumer.tsx', [
+              ('backdrop local',
+               "  const plan = useMemo(\n    () => planPreviewPixelateBackdrop(deterministicFrame, previewFrame.layers),\n    [deterministicFrame, previewFrame.layers],\n  );\n  const posterDeferredReason = plan.mode === 'canonical-ready'\n    && previewFrame.posterClipIds.has(plan.backdrop.clip.id)\n    ? `${plan.backdrop.clip.id}:decoder-budget-poster`\n    : undefined;\n",
+               "  const plan = useMemo(\n    () => planPreviewPixelateBackdrop(deterministicFrame, previewFrame.layers),\n    [deterministicFrame, previewFrame.layers],\n  );\n  const backdrop = plan.mode === 'canonical-ready' ? plan.backdrop : undefined;\n  const posterDeferredReason = plan.mode === 'canonical-ready'\n    && backdrop\n    && previewFrame.posterClipIds.has(backdrop.clip.id)\n    ? `${backdrop.clip.id}:decoder-budget-poster`\n    : undefined;\n"),
+              ('presentation token',
+               "  const videoPresentationToken = plan.mode === 'canonical-ready'\n    && !posterDeferredReason\n    && deterministicFrame !== null\n    && plan.rasterSource.kind === 'video'\n    && plan.backdrop.canonicalState\n    ? previewVideoPresentationToken(\n      plan.backdrop.clip.id,\n      deterministicFrame,\n      plan.backdrop.canonicalState.source_time_ms,\n    )\n    : undefined;\n  const executionKey = consume\n    ? `${deterministicFrame}:${plan.target.clip.id}:${plan.backdrop.clip.id}:${canvasWidth}x${canvasHeight}:${canvasBackground}:${videoPresentationToken ?? 'image'}`\n    : '';\n",
+               "  const videoPresentationToken = plan.mode === 'canonical-ready'\n    && !posterDeferredReason\n    && deterministicFrame !== null\n    && plan.rasterSource.kind === 'video'\n    && backdrop?.canonicalState\n    ? previewVideoPresentationToken(\n      backdrop.clip.id,\n      deterministicFrame,\n      backdrop.canonicalState.source_time_ms,\n    )\n    : undefined;\n  const executionKey = consume\n    ? `${deterministicFrame}:${plan.target.clip.id}:${plan.rasterSource.clipId}:${canvasWidth}x${canvasHeight}:${canvasBackground}:${videoPresentationToken ?? plan.rasterSource.kind}`\n    : '';\n"),
+              ('doc',
+               " * approximation untouched. Images and alpha video are consumed only after\n * canonical project-background source-over composition in PreviewPixelateCanvas.\n",
+               " * approximation untouched. The canonical project background can now be an\n * exact zero-readiness raster source by itself; images and alpha video remain\n * consumed only after project-background source-over composition in PreviewPixelateCanvas.\n"),
+          ])
+
+          patch('frontend/src/components/video/PreviewPixelateCanvas.tsx', [
+              ('listener optional backdrop',
+               "  useEffect(() => {\n    const source = sourceForClip(plan.backdrop.clip.id);\n    if (!source) return;\n",
+               "  useEffect(() => {\n    if (!plan.backdrop) return;\n    const source = sourceForClip(plan.backdrop.clip.id);\n    if (!source) return;\n"),
+              ('listener deps',
+               "  }, [bumpSourceRevision, plan.backdrop.clip.id, sourceForClip]);\n",
+               "  }, [bumpSourceRevision, plan.backdrop?.clip.id, sourceForClip]);\n"),
+              ('draw source',
+               "    if (sourceFailed) return { status: 'failed', reason: 'decoded-frame-error' };\n    const source = sourceForClip(plan.backdrop.clip.id);\n    if (!source || !sourceReady(source)) return { status: 'pending' };\n    const targetState = plan.target.canonicalState;\n    if (!targetState) return { status: 'failed', reason: 'pixelate-target-state-missing' };\n",
+               "    const targetState = plan.target.canonicalState;\n    if (!targetState) return { status: 'failed', reason: 'pixelate-target-state-missing' };\n    if (sourceFailed) return { status: 'failed', reason: 'decoded-frame-error' };\n    const source = plan.backdrop ? sourceForClip(plan.backdrop.clip.id) : null;\n    if (plan.rasterSource.kind !== 'project-background' && (!source || !sourceReady(source))) {\n      return { status: 'pending' };\n    }\n"),
+              ('media plan',
+               "    const resolvedRegion = resolvePreviewPixelateCanvasRegion(targetState, canvasWidth, canvasHeight);\n    const [intrinsicWidth, intrinsicHeight] = intrinsicSize(source);\n    const mediaPlan = resolvePreviewCanvasMediaLayerPlan(\n      plan.backdrop,\n      intrinsicWidth,\n      intrinsicHeight,\n    );\n\n    setOutputGeometry(output, resolvedRegion.x, resolvedRegion.y, resolvedRegion.width, resolvedRegion.height, stageScale);\n",
+               "    const resolvedRegion = resolvePreviewPixelateCanvasRegion(targetState, canvasWidth, canvasHeight);\n\n    setOutputGeometry(output, resolvedRegion.x, resolvedRegion.y, resolvedRegion.width, resolvedRegion.height, stageScale);\n"),
+              ('paint optional media',
+               "    backdropContext.fillStyle = resolvedCanvasBackground;\n    backdropContext.fillRect(0, 0, canvasWidth, canvasHeight);\n    paintPreviewCanvasMediaLayer(backdropContext, source, mediaPlan);\n    const input = backdropContext.getImageData(\n",
+               "    backdropContext.fillStyle = resolvedCanvasBackground;\n    backdropContext.fillRect(0, 0, canvasWidth, canvasHeight);\n    if (plan.backdrop && source) {\n      const [intrinsicWidth, intrinsicHeight] = intrinsicSize(source);\n      const mediaPlan = resolvePreviewCanvasMediaLayerPlan(\n        plan.backdrop,\n        intrinsicWidth,\n        intrinsicHeight,\n      );\n      paintPreviewCanvasMediaLayer(backdropContext, source, mediaPlan);\n    }\n    const input = backdropContext.getImageData(\n"),
+              ('data backdrop',
+               "      data-preview-pixelate-backdrop-clip={plan.backdrop.clip.id}\n",
+               "      data-preview-pixelate-backdrop-clip={plan.backdrop?.clip.id ?? plan.rasterSource.clipId}\n"),
+              ('doc',
+               " * renderer composition order for the admitted one-media-layer path: paint the\n * opaque canonical project background, source-over the decoded media through\n * canonical geometry, then run preview-pixelate-raster-v1 on the composed RGB\n * backdrop.\n",
+               " * renderer composition order for the admitted paths: paint the opaque canonical\n * project background, optionally source-over one decoded media layer through\n * canonical geometry, then run preview-pixelate-raster-v1 on the composed RGB\n * backdrop. A background-only plan therefore has no mounted-source dependency.\n"),
+          ])
+
+          patch('frontend/src/components/video/previewPixelateBackdrop.test.ts', [
+              ('zero lower test',
+               "  it('requires exactly one lower visual layer before runtime raster acquisition', () => {\n    expect(planPreviewPixelateBackdrop(0, [layer('pixelate', pixelateState())])).toMatchObject({\n      mode: 'canonical-deferred',\n      deferredReasons: ['backdrop-layer-count-deferred'],\n    });\n    expect(planPreviewPixelateBackdrop(0, [\n      layer('lower-a', mediaState(), 'image/png'),\n      layer('lower-b', mediaState(), 'video/mp4'),\n      layer('pixelate', pixelateState()),\n    ])).toMatchObject({\n      mode: 'canonical-deferred',\n      deferredReasons: ['backdrop-layer-count-deferred'],\n    });\n  });\n",
+               "  it('admits the canonical project background as the zero-readiness raster source', () => {\n    expect(planPreviewPixelateBackdrop(0, [layer('pixelate', pixelateState())])).toMatchObject({\n      contract_version: PREVIEW_PIXELATE_BACKDROP_PLAN_V1,\n      mode: 'canonical-ready',\n      target: { clip: { id: 'pixelate' } },\n      rasterSource: { supported: true, clipId: 'project-background', kind: 'project-background' },\n      runtimeRequirements: [],\n      deferredReasons: [],\n    });\n  });\n\n  it('still defers more than one lower visual layer before runtime raster acquisition', () => {\n    expect(planPreviewPixelateBackdrop(0, [\n      layer('lower-a', mediaState(), 'image/png'),\n      layer('lower-b', mediaState(), 'video/mp4'),\n      layer('pixelate', pixelateState()),\n    ])).toMatchObject({\n      mode: 'canonical-deferred',\n      deferredReasons: ['backdrop-layer-count-deferred'],\n    });\n  });\n"),
+          ])
+          PY
+          cd frontend
+          npm ci
+          npx vitest run src/components/video/previewPixelateBackdrop.test.ts
+          npm run build
+      - name: Commit implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/components/video/previewPixelateBackdrop.ts \
+            frontend/src/components/video/PreviewPixelateBackdropConsumer.tsx \
+            frontend/src/components/video/PreviewPixelateCanvas.tsx \
+            frontend/src/components/video/previewPixelateBackdrop.test.ts
+          git diff --cached --check
+          git commit -m "feat(video): admit project background pixelate raster"
+          git push origin HEAD:feat/video-wysiwyg-phase3-project-background-raster
