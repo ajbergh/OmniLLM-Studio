@@ -1,0 +1,184 @@
+name: Update PR 296 WYSIWYG tracker
+
+on:
+  push:
+    branches:
+      - fix/video-wysiwyg-phase3-transparent-video-presentation
+    paths:
+      - .github/workflows/patch-pr296-tracker.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/video-wysiwyg-phase3-transparent-video-presentation
+          fetch-depth: 0
+      - name: Update durable WYSIWYG tracker
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md')
+          text = path.read_text()
+
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+          '''Latest merged WYSIWYG program PR: **#293 — Merge validated decoded-video frame identity** — squash merge `9850370c2aa25a076f3272077062aeab08c1f326` (2026-08-30). #293 points at the exact validated head from draft #292; #292 was closed only because GitHub still refused to merge the draft through the connector.
+
+          Current implementation PR: **#294 — Compose pixelate alpha sources over canonical background** on branch `fix/video-wysiwyg-phase3-pixelate-alpha-composition`, created directly from #293's actual squash result `9850370c2aa25a076f3272077062aeab08c1f326`.
+          ''',
+          '''Latest merged WYSIWYG program PR: **#295 — Merge validated pixelate alpha composition** — squash merge `f6a08f72910677ed538e356d544a1d5d1b59d620` (2026-08-30). #295 promoted the exact validated #294 implementation head `66722d2cc863fd2b6eea17ed48abd714bbf783d7` without implementation or documentation changes.
+
+          Current implementation PR: **#296 — Prove transparent video presentation and preserve VP9 alpha** on branch `fix/video-wysiwyg-phase3-transparent-video-presentation`, created directly from #295's actual squash result `f6a08f72910677ed538e356d544a1d5d1b59d620`.
+          ''', 'handoff')
+
+          replace_once(
+          '''### #294 current scope
+
+          #294 closes the first transparent-image pixelate composition gap without broadening canonical authored semantics:
+          ''',
+          '''### #295 merged alpha-image composition
+
+          #294 implemented the first transparent-image pixelate composition slice without broadening canonical authored semantics; #295 promoted that exact validated implementation tree to `main`:
+          ''', '295 heading')
+
+          anchor = '''- The same exact head also passed Video Pixelate Parity Evidence #59 (opaque-PNG byte-exact control plus H.264 decoded-frame identity/±3 control), Security Scan #1735, Quality Gate #1730 including frontend lint/unit/build, backend tests/vet/race detector, Playwright smoke, and the full 103-frame renderer parity baseline, plus all applicable Linux/macOS/browser/container assurance workflows. No PR comments, reviews, or unresolved review threads are present.
+
+          ## Phase tracker
+          '''
+          insertion = '''- The same exact head also passed Video Pixelate Parity Evidence #59 (opaque-PNG byte-exact control plus H.264 decoded-frame identity/±3 control), Security Scan #1735, Quality Gate #1730 including frontend lint/unit/build, backend tests/vet/race detector, Playwright smoke, and the full 103-frame renderer parity baseline, plus all applicable Linux/macOS/browser/container assurance workflows. No PR comments, reviews, or unresolved review threads are present.
+- #295 promoted exact validated head `66722d2cc863fd2b6eea17ed48abd714bbf783d7` and squash-merged it unchanged as `f6a08f72910677ed538e356d544a1d5d1b59d620`.
+
+### #296 transparent-video presentation and VP9 alpha scope
+
+#296 removes the remaining blanket transparent-video deferral for the admitted pixelate Canvas path while keeping canonical source time and decoder ownership unchanged:
+
+- `VideoPreviewCanvasLegacy` now owns deterministic decoded-video presentation readiness. Each deterministic seek clears a request token and only a matching post-seek `requestVideoFrameCallback` can fulfill it; `PreviewPixelateCanvas` must observe that exact ready token before sampling the mounted `<video>`.
+- Presentation readiness is now independent of pixel alpha. Once the mounted decoder proves the requested frame is presented, transparent and partial-alpha video is source-over composited against the renderer-matched project background exactly like the admitted alpha-image path; alpha is content semantics rather than a readiness proxy.
+- Immutable probe metadata freezes video codec, pixel format, and alpha mode. VP9 WebM with `alpha_mode=1` selects `libvpx-vp9` explicitly because the hosted FFmpeg default VP9 decoder discards alpha even though the stream advertises it.
+- `parity-pixelate-alpha-video-v1` is a deterministic changing 512×512/30 fps transparent VP9 fixture over `#19324A` with canonical frames `0`, `15`, `30`, and `59`. The workflow retains a decoder negative control: the default VP9 decoder produces 262,144 fully opaque alpha samples, while `libvpx-vp9` preserves 205,672 fully transparent and 56,472 partial-alpha samples in the sampled frame.
+- Hosted VP9 evidence exposed millisecond-quantized source PTS (`...1.900, 1.933, 1.967`). Browser deterministic seeks therefore use a bounded `0.49 ms` inside-frame nudge, still below the strict `0.5 ms` seek tolerance. The legacy FFmpeg visual stream mirrors that presentation choice using a 1 MHz filter timebase plus a `490 µs` visual-only PTS bias before playback-rate retiming. Canonical `source_time_ms`, audio timestamps, and free-running preview semantics are unchanged; no CFR regridding assumption is introduced.
+- Implementation head `2129b30cd733ba042a98509e000fd2473680a505` passed Video Transparent Pixelate Parity Evidence #12. Retained artifact `9742745036` is 17,396,905 bytes with SHA-256 `f633fce66386b595db9ceb2dfa1c6c70e6c457f1fe0916b78bbe6da8c5a260d0`; retained timeline SHA-256 is `57b940883b59f9319ba38cd9f5f38301707bdebf947e54e64fe9c9600b81865c`.
+- All four transparent-video samples prove matching presentation identity in one attempt: media times are `0.000000000`, `0.500000000`, `1.000000000`, and `1.967000000` for frames `0/15/30/59`. Every `[71,94)-[474,401)` pixelate region contains `123,721` pixels, all `123,721` pass the focused ±4 RGB gate, and every sample reports `max_channel_delta=3`.
+- The repository-default ±2 whole-frame and region diagnostics remain measurement-oriented and report `pass=false` for this VP9 fixture; #296 does not broaden repository-global thresholds. The explicit transparent-video acceptance contract is presentation identity first, then 100% of region pixels within ±4 RGB.
+- Independent controls remain green on the same implementation head: Video Pixelate Parity Evidence #78 passes both the byte-exact opaque-PNG job and H.264 decoded-frame/±3 job; Video Pixelate Alpha Parity Evidence #25 preserves the partial-alpha PNG ±1 gate; Security Scan #1758 and the applicable Linux/macOS/browser/container assurance workflows also pass.
+- PR #296 has no comments, reviews, or unresolved review threads.
+
+## Phase tracker
+          '''
+          replace_once(anchor, insertion, '296 section')
+
+          replace_once(
+          '''| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #289 added the byte-exact opaque-PNG gate; #291 added H.264 measurement; #293 proves decoded frame identity on 0/15/30/59 and gates the focused ±3 H.264/yuv420p envelope only after identity proof. #294 adds a deterministic partial-alpha PNG/background-composition control. Resource-font fixture coverage and second-platform retained evidence remain. |''',
+          '''| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #289 added the byte-exact opaque-PNG gate; #291 added H.264 measurement; #293 proves decoded frame identity on 0/15/30/59 and gates the focused ±3 H.264/yuv420p envelope only after identity proof. #295 adds deterministic partial-alpha PNG/background-composition evidence; #296 adds retained VP9 alpha-decoder, requested/presented-frame, and focused ±4 transparent-video evidence. Resource-font fixture coverage and second-platform retained evidence remain. |''', 'phase 0')
+
+          replace_once(
+          '''| Phase 3 — Shared preview composition | **In progress** | #261–#289 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, font readiness/layout snapshots, deterministic pixelate semantics, exact opaque-PNG evidence, and sampled-render fan-out. #291/#293 close retained H.264 measurement and deterministic frame identity. #294 implements renderer-ordered project-background/source-over composition for transparent images while keeping transparent video fail-closed. Weighted-raster broadening, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |''',
+          '''| Phase 3 — Shared preview composition | **In progress** | #261–#289 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, font readiness/layout snapshots, deterministic pixelate semantics, exact opaque-PNG evidence, and sampled-render fan-out. #291/#293 close retained H.264 measurement and deterministic frame identity. #295 merges renderer-ordered project-background/source-over composition for transparent images; #296 adds mounted-video presentation tokens, transparent VP9 alpha preservation, source-over video composition, and browser/FFmpeg boundary alignment without changing canonical source/audio time. Weighted-raster broadening, normal-playback canonicalization, diagnostics/rollback, and audio consumption remain. |''', 'phase 3')
+
+          replace_once(
+          '''- `shape-state-v1` owns shape geometry/style. #285 defines `preview-pixelate-raster-v1`; #286 defines fail-closed backdrop admission; #287 aligns both FFmpeg scale passes; #288 consumes only decoded opaque browser regions that pass structural/runtime proof; #289 proves byte-exact retained output for the isolated opaque-PNG static path; #291 extends retained evidence to decoded H.264 without weakening alpha or PNG exactness; #292 proves decoded frame identity before freezing the codec/color gate.''',
+          '''- `shape-state-v1` owns shape geometry/style. #285 defines `preview-pixelate-raster-v1`; #286 defines fail-closed backdrop admission; #287 aligns both FFmpeg scale passes; #288 consumes only decoded opaque browser regions that pass structural/runtime proof; #289 proves byte-exact retained output for the isolated opaque-PNG static path; #291 extends retained evidence to decoded H.264 without weakening alpha or PNG exactness; #293 freezes decoded H.264 frame identity/color acceptance; #295 admits renderer-ordered transparent-image source-over composition; #296 proves mounted transparent-video presentation readiness, alpha-preserving VP9 decode, and focused ±4 browser↔FFmpeg output.''', 'shape history')
+
+          replace_once(
+          '''| #293 | Deterministic decoded-video frame identity and focused ±3 H.264 pixelate gate | `9850370c2aa25a076f3272077062aeab08c1f326` |''',
+          '''| #293 | Deterministic decoded-video frame identity and focused ±3 H.264 pixelate gate | `9850370c2aa25a076f3272077062aeab08c1f326` |
+| #295 | Renderer-ordered partial-alpha image composition and focused ±1 PNG gate | `f6a08f72910677ed538e356d544a1d5d1b59d620` |''', 'merged sequence')
+
+          replace_once(
+          '''Recent lineage: #284 from #283 squash `3543ddf7...`; #285 from #284 `7884fef8...`; #286 from #285 `64e34450...`; #287 from #286 `40e895ee...`; #288 from #287 `2774ee76...`; #289 from #288 `7be8e86f...`; #290 validated from #289 squash; #291 mirrored that exact validated #290 head and merged as `7d5f36c3...`; #292 validated directly from #291; #293 mirrored exact validated #292 head and squash-merged as `9850370c2aa25a076f3272077062aeab08c1f326`; **#294 is directly from #293 squash `9850370c2aa25a076f3272077062aeab08c1f326`**.''',
+          '''Recent lineage: #284 from #283 squash `3543ddf7...`; #285 from #284 `7884fef8...`; #286 from #285 `64e34450...`; #287 from #286 `40e895ee...`; #288 from #287 `2774ee76...`; #289 from #288 `7be8e86f...`; #290 validated from #289 squash; #291 mirrored that exact validated #290 head and merged as `7d5f36c3...`; #292 validated directly from #291; #293 mirrored exact validated #292 head and squash-merged as `9850370c2aa25a076f3272077062aeab08c1f326`; #294 validated directly from #293; #295 promoted exact validated #294 head `66722d2c...` and squash-merged as `f6a08f72910677ed538e356d544a1d5d1b59d620`; **#296 is directly from #295 squash `f6a08f72910677ed538e356d544a1d5d1b59d620`**.''', 'lineage')
+
+          replace_once(
+          '''The focused `parity-pixelate-opaque-v1` fixture is a byte-exact non-regression gate for the isolated opaque-PNG static pixelate path. `parity-pixelate-decoded-video-v1` is additive decoded-media evidence: #293 proves deterministic decoded-frame identity first and then applies the explicit ±3 RGB H.264/yuv420p pixelate-region envelope without changing repository-global parity defaults. `parity-pixelate-alpha-png-v1` is #294's additive straight-alpha/source-over project-background control.''',
+          '''The focused `parity-pixelate-opaque-v1` fixture is a byte-exact non-regression gate for the isolated opaque-PNG static pixelate path. `parity-pixelate-decoded-video-v1` is additive decoded-media evidence: #293 proves deterministic decoded-frame identity first and then applies the explicit ±3 RGB H.264/yuv420p pixelate-region envelope without changing repository-global parity defaults. `parity-pixelate-alpha-png-v1` is #295's additive straight-alpha/source-over project-background control. `parity-pixelate-alpha-video-v1` is #296's additive transparent VP9 control: it freezes the decoder-alpha contract, requires mounted-video presentation-token identity on frames `0/15/30/59`, and gates the pixelate region at 100% within ±4 RGB.''', 'phase 0 fixtures')
+
+          replace_once(
+          '''| Pixelate raster math is confused with backdrop-source parity | #285 owns grid/sample-index math; #286 owns structural admission; #287 owns FFmpeg scaler selection; #288 owns runtime acquisition; #289 owns byte-exact PNG evidence; #291 owns decoded-video measurement; #293 owns decoded-frame identity/codec acceptance; #294 owns project-background/source-over image-alpha composition. None is substituted for another. |''',
+          '''| Pixelate raster math is confused with backdrop-source parity | #285 owns grid/sample-index math; #286 owns structural admission; #287 owns FFmpeg scaler selection; #288 owns runtime acquisition; #289 owns byte-exact PNG evidence; #291 owns decoded-video measurement; #293 owns decoded-frame identity/codec acceptance; #295 owns project-background/source-over image-alpha composition; #296 owns mounted-video presentation readiness and transparent VP9 alpha evidence. None is substituted for another. |''', 'pixelate risk')
+
+          replace_once(
+          '''| MIME type or codec is treated as proof of an opaque backdrop | #294 does not infer image opacity from MIME: images are source-over composited onto the renderer-matched opaque project background. Decoded video still requires the exact source-only alpha/readiness proof; no MIME/codec shortcut exists. |''',
+          '''| MIME type or codec is treated as proof of an opaque backdrop | #295 does not infer image opacity from MIME. #296 separates video presentation readiness from alpha content: the exact mounted `<video>` must present the matching request token first, then decoded alpha is source-over composited. Codec metadata selects `libvpx-vp9` only to preserve an already-probed VP9 alpha stream; it is not an opacity shortcut. |''', 'mime risk')
+
+          replace_once(
+          '''| Newly sought video reports data before its frame is Canvas-rasterizable | #291 keeps video-only opacity misses pending for a bounded retry window, still requiring exact alpha before activation and failing closed after exhaustion. |''',
+          '''| Newly sought video reports data before its frame is Canvas-rasterizable | #296 moves proof to the mounted video owner: every deterministic seek clears a presentation request token and only a matching post-seek `requestVideoFrameCallback` can mark it ready. Pixelate Canvas stays fail-closed until that token matches. |''', 'readiness risk')
+
+          replace_once(
+          '''| Browser seek lands on a neighboring decoded frame at an exact boundary | #291 retained frame 59 as timing debt. #293 applies the 0.25 ms-or-smaller video-only boundary nudge and proves `requestVideoFrameCallback` presents requested 0/15/30/59 before the ±3 codec/color gate is accepted. |''',
+          '''| Browser or FFmpeg selects a neighboring decoded frame at a quantized source boundary | #296 keeps canonical source time unchanged but aligns deterministic visual presentation on both consumers: browser seeks use a bounded 0.49 ms inside-frame target; FFmpeg visuals use a 1 MHz filter timebase plus 490 µs PTS bias before rate retiming. Audio remains unchanged. Retained VP9 frame 59 presents `mediaTime=1.967000000` and passes the focused ±4 gate. |''', 'boundary risk')
+
+          replace_once(
+          '''| Alpha/pixel-format conversion is assumed byte-identical across browser and FFmpeg | #294 mirrors renderer order for transparent images by compositing the decoded image over the canonical opaque project background before pixelate. The NRGBA fixture carries hidden RGB and partial alpha specifically to catch premultiplication/source-over mistakes; retained evidence bounds browser↔FFmpeg source-over rounding to ±1 RGB at 100% pixel pass. Transparent video remains deferred. |''',
+          '''| Alpha/pixel-format conversion is assumed byte-identical across browser and FFmpeg | #295 bounds lossless image source-over rounding to ±1 RGB at 100% pixel pass. #296 separately proves VP9 alpha preservation requires explicit `libvpx-vp9` in the hosted FFmpeg toolchain and freezes a focused ±4 transparent-video region envelope after exact presentation identity; repository-global ±2 diagnostics remain unchanged. |''', 'alpha risk')
+
+          old_next = '''## Next recommended slice
+
+1. **Merge #294 after the tracker-bearing exact-head wave repeats the already-green implementation evidence.** The implementation/evidence head proves renderer-ordered project-background/source-over image-alpha composition at `surface_background=#19324A`, 100% of sampled region pixels within ±1 RGB, unchanged opaque-PNG byte exactness, and unchanged H.264 frame-identity/±3 behavior.
+2. **Next slice: transparent decoded-video presentation readiness.** Move rasterizability proof to the existing mounted `<video>` owner in `VideoPreviewCanvasLegacy`: clear a presentation token on each deterministic seek, fulfill it only from a post-seek `requestVideoFrameCallback` on that same element, and key it to the canonical requested source-time target/request serial rather than assuming project FPS equals source FPS.
+3. Let `PreviewPixelateCanvas` require that matching presentation token before painting decoded video; once readiness is independent of pixel alpha, alpha becomes content semantics and transparent video can be source-over composited like images. Keep the mounted `<video>` as the sole decoder and source-time authority.
+4. Add a deterministic transparent-video fixture only after verifying a Chromium+FFmpeg alpha-capable codec/container in the hosted toolchain; retain presentation-token identity plus browser↔renderer region evidence and fail closed when the codec/path is not deterministic.
+5. Broaden pixelate/weighted-Canvas raster eligibility only for painter/source classes whose source-over ordering is explicit and independently evidenced. Add resource-font fixture coverage and second-supported-OS/FFmpeg retained evidence before calling cross-machine Phase 0 visual identity closed.
+6. Continue Phase 3 with normal-playback canonicalization, explicit diagnostics/rollback, then shared AudioGraph consumption.'''
+          new_next = '''## Next recommended slice
+
+1. **Merge #296 after the tracker-bearing exact-head wave repeats the already-green transparent VP9, H.264 decoded-video, opaque-PNG, and partial-alpha PNG evidence.** Preserve the explicit focused thresholds independently: PNG exact/±1, H.264 ±3 after frame identity, and transparent VP9 ±4 after presentation identity; do not convert any of them into a repository-global tolerance.
+2. **Next Phase 3 slice: broaden deterministic Canvas raster eligibility by one independently evidenceable painter/source class.** Inspect the current weighted/pixelate source classifier and choose the smallest class whose source-over order, mounted-source readiness, and canonical geometry are already explicit; keep unsupported classes fail-closed.
+3. Add retained evidence for that one broadened class before admitting another. The evidence must prove canonical consumer identity, readiness/token state where media is involved, structural region identity, and browser↔renderer pixels under an explicit fixture-specific acceptance contract.
+4. Add resource-font fixture coverage and second-supported-OS/FFmpeg retained evidence before calling cross-machine Phase 0 visual identity closed.
+5. Continue Phase 3 with normal-playback canonicalization and explicit diagnostics/rollback after deterministic raster-source coverage is no longer the primary blocker.
+6. Then make preview/export consume `audio-graph-v1` exactly as the entry point to Phase 6 audio parity closure.'''
+          replace_once(old_next, new_next, 'next slice')
+
+          path.write_text(text)
+
+          required = [
+              '#295 — Merge validated pixelate alpha composition',
+              '#296 — Prove transparent video presentation and preserve VP9 alpha',
+              '9742745036',
+              'f633fce66386b595db9ceb2dfa1c6c70e6c457f1fe0916b78bbe6da8c5a260d0',
+              '1.967000000',
+              'deterministic Canvas raster eligibility',
+          ]
+          for needle in required:
+              if needle not in text:
+                  raise SystemExit(f'missing required tracker marker: {needle}')
+          for stale in [
+              'Current implementation PR: **#294',
+              '### #294 current scope',
+              'Transparent video remains deferred.',
+              'Next slice: transparent decoded-video presentation readiness.',
+          ]:
+              if stale in text:
+                  raise SystemExit(f'stale tracker marker remains: {stale}')
+          PY
+
+      - name: Commit tracker update
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff --exit-code -- . ':!.github/workflows/patch-pr296-tracker.yml' || true
+          if git diff --quiet -- docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md; then
+            echo 'Tracker already current; nothing to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
+          git commit -m 'docs(video): update WYSIWYG transparent-video evidence'
+          git push origin HEAD:fix/video-wysiwyg-phase3-transparent-video-presentation
