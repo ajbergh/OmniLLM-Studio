@@ -1,4 +1,4 @@
-name: Patch project-background pixelate raster
+name: Patch project-background pixelate evidence
 
 on:
   push:
@@ -11,6 +11,7 @@ permissions:
   contents: write
 
 env:
+  GO_VERSION: '1.25.13'
   NODE_VERSION: '24'
 
 jobs:
@@ -21,14 +22,16 @@ jobs:
         with:
           ref: feat/video-wysiwyg-phase3-project-background-raster
           fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            frontend/package-lock.json
-      - name: Apply guarded frontend patch
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply guarded fixture and evidence patch
         shell: bash
         run: |
           set -euo pipefail
@@ -45,74 +48,68 @@ jobs:
                   text = text.replace(old, new, 1)
               path.write_text(text)
 
-          patch('frontend/src/components/video/previewPixelateBackdrop.ts', [
-              ('raster type',
-               "export interface PreviewPixelateBackdropReady<T extends PreviewPixelateBackdropLayer> {\n  contract_version: typeof PREVIEW_PIXELATE_BACKDROP_PLAN_V1;\n  mode: 'canonical-ready';\n  target: T;\n  backdrop: T;\n  rasterSource: PreviewWeightedPairRasterSourceSupported;\n",
-               "export interface PreviewPixelateProjectBackgroundRasterSource {\n  supported: true;\n  clipId: 'project-background';\n  kind: 'project-background';\n}\n\nexport type PreviewPixelateBackdropRasterSource =\n  | PreviewWeightedPairRasterSourceSupported\n  | PreviewPixelateProjectBackgroundRasterSource;\n\nexport interface PreviewPixelateBackdropReady<T extends PreviewPixelateBackdropLayer> {\n  contract_version: typeof PREVIEW_PIXELATE_BACKDROP_PLAN_V1;\n  mode: 'canonical-ready';\n  target: T;\n  backdrop?: T;\n  rasterSource: PreviewPixelateBackdropRasterSource;\n"),
-              ('zero lower layers',
-               "  const lowerLayers = layers.slice(0, targetIndex);\n  if (lowerLayers.length !== 1) {\n    return deferred(target, undefined, [...targetReasons, 'backdrop-layer-count-deferred']);\n  }\n\n  const backdrop = lowerLayers[0];\n",
-               "  const lowerLayers = layers.slice(0, targetIndex);\n  if (lowerLayers.length === 0) {\n    if (targetReasons.length > 0) return deferred(target, undefined, targetReasons);\n    return {\n      contract_version: PREVIEW_PIXELATE_BACKDROP_PLAN_V1,\n      mode: 'canonical-ready',\n      target,\n      rasterSource: { supported: true, clipId: 'project-background', kind: 'project-background' },\n      runtimeRequirements: [],\n      deferredReasons: [],\n    };\n  }\n  if (lowerLayers.length !== 1) {\n    return deferred(target, undefined, [...targetReasons, 'backdrop-layer-count-deferred']);\n  }\n\n  const backdrop = lowerLayers[0];\n"),
-              ('doc',
-               " * V1 deliberately admits only one pixelate region over exactly one clean media\n * layer. The structural plan is separate from runtime decoded-pixel evidence:\n * images must be decoded, while video must additionally prove that the mounted\n * decoder presented the exact canonical source-time request before Canvas can\n * replace the CSS approximation. Alpha is then handled by source-over composition.\n",
-               " * V1 deliberately admits only one pixelate region over either the canonical\n * project background alone or exactly one clean media layer. The structural\n * plan is separate from runtime decoded-pixel evidence: project background has\n * no readiness dependency, images must be decoded, and video must additionally\n * prove that the mounted decoder presented the exact canonical source-time request\n * before Canvas can replace the CSS approximation. Alpha is then handled by\n * source-over composition.\n"),
+          patch('backend/internal/video/parity_fixture_pixelate.go', [
+              ('fixture constant',
+               '\tParityPixelateAlphaVideoFixtureName   = "parity-pixelate-alpha-video-v1"\n',
+               '\tParityPixelateAlphaVideoFixtureName   = "parity-pixelate-alpha-video-v1"\n\tParityPixelateBackgroundFixtureName   = "parity-pixelate-background-v1"\n'),
+              ('fixture function',
+               'func ParityPixelateAlphaVideoFixture() (TimelineDocument, []ParityFixtureAsset) {\n\tdoc, assets := parityPixelateFixture(\n\t\tParityPixelateAlphaVideoFixtureName,\n',
+               '// ParityPixelateBackgroundFixture proves that the canonical project canvas\n// itself is a deterministic pixelate raster source. There is intentionally no\n// lower visual clip: FFmpeg starts from the same opaque canvas color and the\n// browser Canvas samples that background directly before pixelation.\nfunc ParityPixelateBackgroundFixture() (TimelineDocument, []ParityFixtureAsset) {\n\tdoc, assets := parityPixelateFixture(\n\t\tParityPixelateBackgroundFixtureName,\n\t\tparityPixelateOpaqueCanvasWidth,\n\t\tparityPixelateOpaqueCanvasHeight,\n\t\t"#19324A",\n\t\t"asset-unused-background-source",\n\t\tParityFixtureAsset{ID: "asset-unused-background-source", Kind: "image", Width: 512, Height: 512, DurationMS: parityPixelateDurationMS, Description: "removed placeholder used only to share fixture construction"},\n\t\t"Removed background placeholder",\n\t)\n\t// parityPixelateFixture creates source, pixelate, and audio tracks in that\n\t// order. Remove the source track and its asset so the retained fixture has\n\t// exactly one visual layer: the pixelate region over project background.\n\tdoc.Tracks = doc.Tracks[1:]\n\tassets = assets[1:]\n\treturn doc, assets\n}\n\nfunc ParityPixelateAlphaVideoFixture() (TimelineDocument, []ParityFixtureAsset) {\n\tdoc, assets := parityPixelateFixture(\n\t\tParityPixelateAlphaVideoFixtureName,\n'),
+              ('sample function',
+               '// ParityPixelateAlphaVideoFrameSamples uses the same canonical output-frame\n// identities while requiring the changing transparent decoder to present each\n// requested source frame.\nfunc ParityPixelateAlphaVideoFrameSamples() []ParityFrameSample {\n\treturn parityPixelateFrameSamples("pixelate-alpha-video")\n}\n',
+               '// ParityPixelateAlphaVideoFrameSamples uses the same canonical output-frame\n// identities while requiring the changing transparent decoder to present each\n// requested source frame.\nfunc ParityPixelateAlphaVideoFrameSamples() []ParityFrameSample {\n\treturn parityPixelateFrameSamples("pixelate-alpha-video")\n}\n\n// ParityPixelateBackgroundFrameSamples retains the same structural frame\n// identities while changing the backdrop source class to project background.\nfunc ParityPixelateBackgroundFrameSamples() []ParityFrameSample {\n\treturn parityPixelateFrameSamples("pixelate-background")\n}\n'),
+              ('bounds function',
+               '// ParityPixelateAlphaVideoRegionBounds shares the transparent-PNG rectangle so\n// the retained video evidence changes only source codec/presentation semantics.\nfunc ParityPixelateAlphaVideoRegionBounds() ParityBounds {\n\treturn parityPixelateRegionBounds(parityPixelateOpaqueCanvasWidth, parityPixelateOpaqueCanvasHeight)\n}\n',
+               '// ParityPixelateAlphaVideoRegionBounds shares the transparent-PNG rectangle so\n// the retained video evidence changes only source codec/presentation semantics.\nfunc ParityPixelateAlphaVideoRegionBounds() ParityBounds {\n\treturn parityPixelateRegionBounds(parityPixelateOpaqueCanvasWidth, parityPixelateOpaqueCanvasHeight)\n}\n\n// ParityPixelateBackgroundRegionBounds uses the same non-divisible rectangle\n// so evidence changes only the raster source class.\nfunc ParityPixelateBackgroundRegionBounds() ParityBounds {\n\treturn parityPixelateRegionBounds(parityPixelateOpaqueCanvasWidth, parityPixelateOpaqueCanvasHeight)\n}\n'),
+              ('regions function',
+               '// ParityPixelateAlphaVideoRegionFrames binds changing transparent-video output\n// to exact canonical frame identities and the established pixelate rectangle.\nfunc ParityPixelateAlphaVideoRegionFrames(samples []ParityFrameSample) []ParityFixtureRegionFrame {\n\treturn parityPixelateRegionFrames(samples, ParityPixelateAlphaVideoRegionBounds())\n}\n',
+               '// ParityPixelateAlphaVideoRegionFrames binds changing transparent-video output\n// to exact canonical frame identities and the established pixelate rectangle.\nfunc ParityPixelateAlphaVideoRegionFrames(samples []ParityFrameSample) []ParityFixtureRegionFrame {\n\treturn parityPixelateRegionFrames(samples, ParityPixelateAlphaVideoRegionBounds())\n}\n\n// ParityPixelateBackgroundRegionFrames binds background-only raster evidence to\n// exact canonical frame identities and the established pixelate rectangle.\nfunc ParityPixelateBackgroundRegionFrames(samples []ParityFrameSample) []ParityFixtureRegionFrame {\n\treturn parityPixelateRegionFrames(samples, ParityPixelateBackgroundRegionBounds())\n}\n'),
           ])
 
-          patch('frontend/src/components/video/PreviewPixelateBackdropConsumer.tsx', [
-              ('backdrop local',
-               "  const plan = useMemo(\n    () => planPreviewPixelateBackdrop(deterministicFrame, previewFrame.layers),\n    [deterministicFrame, previewFrame.layers],\n  );\n  const posterDeferredReason = plan.mode === 'canonical-ready'\n    && previewFrame.posterClipIds.has(plan.backdrop.clip.id)\n    ? `${plan.backdrop.clip.id}:decoder-budget-poster`\n    : undefined;\n",
-               "  const plan = useMemo(\n    () => planPreviewPixelateBackdrop(deterministicFrame, previewFrame.layers),\n    [deterministicFrame, previewFrame.layers],\n  );\n  const backdrop = plan.mode === 'canonical-ready' ? plan.backdrop : undefined;\n  const posterDeferredReason = plan.mode === 'canonical-ready'\n    && backdrop\n    && previewFrame.posterClipIds.has(backdrop.clip.id)\n    ? `${backdrop.clip.id}:decoder-budget-poster`\n    : undefined;\n"),
-              ('presentation token',
-               "  const videoPresentationToken = plan.mode === 'canonical-ready'\n    && !posterDeferredReason\n    && deterministicFrame !== null\n    && plan.rasterSource.kind === 'video'\n    && plan.backdrop.canonicalState\n    ? previewVideoPresentationToken(\n      plan.backdrop.clip.id,\n      deterministicFrame,\n      plan.backdrop.canonicalState.source_time_ms,\n    )\n    : undefined;\n  const executionKey = consume\n    ? `${deterministicFrame}:${plan.target.clip.id}:${plan.backdrop.clip.id}:${canvasWidth}x${canvasHeight}:${canvasBackground}:${videoPresentationToken ?? 'image'}`\n    : '';\n",
-               "  const videoPresentationToken = plan.mode === 'canonical-ready'\n    && !posterDeferredReason\n    && deterministicFrame !== null\n    && plan.rasterSource.kind === 'video'\n    && backdrop?.canonicalState\n    ? previewVideoPresentationToken(\n      backdrop.clip.id,\n      deterministicFrame,\n      backdrop.canonicalState.source_time_ms,\n    )\n    : undefined;\n  const executionKey = consume\n    ? `${deterministicFrame}:${plan.target.clip.id}:${plan.rasterSource.clipId}:${canvasWidth}x${canvasHeight}:${canvasBackground}:${videoPresentationToken ?? plan.rasterSource.kind}`\n    : '';\n"),
-              ('doc',
-               " * approximation untouched. Images and alpha video are consumed only after\n * canonical project-background source-over composition in PreviewPixelateCanvas.\n",
-               " * approximation untouched. The canonical project background can now be an\n * exact zero-readiness raster source by itself; images and alpha video remain\n * consumed only after project-background source-over composition in PreviewPixelateCanvas.\n"),
+          patch('backend/cmd/video-pixelate-parity-fixture/main.go', [
+              ('variant help',
+               '\tvariant := flag.String("variant", "opaque-png", "fixture variant: opaque-png, decoded-video, alpha-png, or alpha-video")\n',
+               '\tvariant := flag.String("variant", "opaque-png", "fixture variant: opaque-png, decoded-video, alpha-png, alpha-video, or background")\n'),
+              ('switch variant',
+               '\tcase "alpha-video":\n\t\tname = video.ParityPixelateAlphaVideoFixtureName\n\t\tdoc, assets = video.ParityPixelateAlphaVideoFixture()\n\t\tsamples = video.ParityPixelateAlphaVideoFrameSamples()\n\t\tframes = video.ParityPixelateAlphaVideoRegionFrames(samples)\n\tdefault:\n\t\texitf("unknown --variant %q (want opaque-png, decoded-video, alpha-png, or alpha-video)", *variant)\n',
+               '\tcase "alpha-video":\n\t\tname = video.ParityPixelateAlphaVideoFixtureName\n\t\tdoc, assets = video.ParityPixelateAlphaVideoFixture()\n\t\tsamples = video.ParityPixelateAlphaVideoFrameSamples()\n\t\tframes = video.ParityPixelateAlphaVideoRegionFrames(samples)\n\tcase "background":\n\t\tname = video.ParityPixelateBackgroundFixtureName\n\t\tdoc, assets = video.ParityPixelateBackgroundFixture()\n\t\tsamples = video.ParityPixelateBackgroundFrameSamples()\n\t\tframes = video.ParityPixelateBackgroundRegionFrames(samples)\n\tdefault:\n\t\texitf("unknown --variant %q (want opaque-png, decoded-video, alpha-png, alpha-video, or background)", *variant)\n'),
           ])
 
-          patch('frontend/src/components/video/PreviewPixelateCanvas.tsx', [
-              ('listener optional backdrop',
-               "  useEffect(() => {\n    const source = sourceForClip(plan.backdrop.clip.id);\n    if (!source) return;\n",
-               "  useEffect(() => {\n    if (!plan.backdrop) return;\n    const source = sourceForClip(plan.backdrop.clip.id);\n    if (!source) return;\n"),
-              ('listener deps',
-               "  }, [bumpSourceRevision, plan.backdrop.clip.id, sourceForClip]);\n",
-               "  }, [bumpSourceRevision, plan.backdrop?.clip.id, sourceForClip]);\n"),
-              ('draw source',
-               "    if (sourceFailed) return { status: 'failed', reason: 'decoded-frame-error' };\n    const source = sourceForClip(plan.backdrop.clip.id);\n    if (!source || !sourceReady(source)) return { status: 'pending' };\n    const targetState = plan.target.canonicalState;\n    if (!targetState) return { status: 'failed', reason: 'pixelate-target-state-missing' };\n",
-               "    const targetState = plan.target.canonicalState;\n    if (!targetState) return { status: 'failed', reason: 'pixelate-target-state-missing' };\n    if (sourceFailed) return { status: 'failed', reason: 'decoded-frame-error' };\n    const source = plan.backdrop ? sourceForClip(plan.backdrop.clip.id) : null;\n    if (plan.rasterSource.kind !== 'project-background' && (!source || !sourceReady(source))) {\n      return { status: 'pending' };\n    }\n"),
-              ('media plan',
-               "    const resolvedRegion = resolvePreviewPixelateCanvasRegion(targetState, canvasWidth, canvasHeight);\n    const [intrinsicWidth, intrinsicHeight] = intrinsicSize(source);\n    const mediaPlan = resolvePreviewCanvasMediaLayerPlan(\n      plan.backdrop,\n      intrinsicWidth,\n      intrinsicHeight,\n    );\n\n    setOutputGeometry(output, resolvedRegion.x, resolvedRegion.y, resolvedRegion.width, resolvedRegion.height, stageScale);\n",
-               "    const resolvedRegion = resolvePreviewPixelateCanvasRegion(targetState, canvasWidth, canvasHeight);\n\n    setOutputGeometry(output, resolvedRegion.x, resolvedRegion.y, resolvedRegion.width, resolvedRegion.height, stageScale);\n"),
-              ('paint optional media',
-               "    backdropContext.fillStyle = resolvedCanvasBackground;\n    backdropContext.fillRect(0, 0, canvasWidth, canvasHeight);\n    paintPreviewCanvasMediaLayer(backdropContext, source, mediaPlan);\n    const input = backdropContext.getImageData(\n",
-               "    backdropContext.fillStyle = resolvedCanvasBackground;\n    backdropContext.fillRect(0, 0, canvasWidth, canvasHeight);\n    if (plan.backdrop && source) {\n      const [intrinsicWidth, intrinsicHeight] = intrinsicSize(source);\n      const mediaPlan = resolvePreviewCanvasMediaLayerPlan(\n        plan.backdrop,\n        intrinsicWidth,\n        intrinsicHeight,\n      );\n      paintPreviewCanvasMediaLayer(backdropContext, source, mediaPlan);\n    }\n    const input = backdropContext.getImageData(\n"),
-              ('data backdrop',
-               "      data-preview-pixelate-backdrop-clip={plan.backdrop.clip.id}\n",
-               "      data-preview-pixelate-backdrop-clip={plan.backdrop?.clip.id ?? plan.rasterSource.clipId}\n"),
-              ('doc',
-               " * renderer composition order for the admitted one-media-layer path: paint the\n * opaque canonical project background, source-over the decoded media through\n * canonical geometry, then run preview-pixelate-raster-v1 on the composed RGB\n * backdrop.\n",
-               " * renderer composition order for the admitted paths: paint the opaque canonical\n * project background, optionally source-over one decoded media layer through\n * canonical geometry, then run preview-pixelate-raster-v1 on the composed RGB\n * backdrop. A background-only plan therefore has no mounted-source dependency.\n"),
+          patch('backend/internal/video/parity_fixture_pixelate_test.go', [
+              ('background fixture test',
+               'func TestParityPixelateAlphaVideoFixtureIsValidAndUsesChangingVideoSource(t *testing.T) {\n',
+               'func TestParityPixelateBackgroundFixtureIsValidAndHasNoLowerVisualSource(t *testing.T) {\n\tdoc, assets := ParityPixelateBackgroundFixture()\n\tvalidated, err := ValidateTimelineDocument(doc)\n\tif err != nil {\n\t\tt.Fatalf("ValidateTimelineDocument() error = %v", err)\n\t}\n\tif validated.Canvas.Width != 512 || validated.Canvas.Height != 512 || validated.Canvas.FPS != 30 {\n\t\tt.Fatalf("canvas = %dx%d@%d, want 512x512@30", validated.Canvas.Width, validated.Canvas.Height, validated.Canvas.FPS)\n\t}\n\tif validated.Canvas.Background != "#19324A" {\n\t\tt.Fatalf("background = %q, want #19324A", validated.Canvas.Background)\n\t}\n\tif len(assets) != 1 || assets[0].ID != "asset-audio" {\n\t\tt.Fatalf("assets = %#v, want audio harness only", assets)\n\t}\n\tvisualClips := 0\n\tpixelateClips := 0\n\tfor _, track := range validated.Tracks {\n\t\tif !track.Visible || track.Type == TrackTypeAudio {\n\t\t\tcontinue\n\t\t}\n\t\tfor _, clip := range track.Clips {\n\t\t\tvisualClips++\n\t\t\tif clip.Shape != nil && clip.Shape.Kind == ShapeKindPixelate {\n\t\t\t\tpixelateClips++\n\t\t\t}\n\t\t}\n\t}\n\tif visualClips != 1 || pixelateClips != 1 {\n\t\tt.Fatalf("visual clips = %d pixelate clips = %d, want pixelate-only visual fixture", visualClips, pixelateClips)\n\t}\n}\n\nfunc TestParityPixelateAlphaVideoFixtureIsValidAndUsesChangingVideoSource(t *testing.T) {\n'),
+              ('background samples',
+               'func TestParityPixelateAlphaVideoSamplesAndRegionsStayFrameBound(t *testing.T) {\n',
+               'func TestParityPixelateBackgroundSamplesAndRegionsStayFrameBound(t *testing.T) {\n\tsamples := ParityPixelateBackgroundFrameSamples()\n\twantFrames := []int64{0, 15, 30, 59}\n\tassertPixelateFrames(t, samples, wantFrames)\n\n\tbounds := ParityPixelateBackgroundRegionBounds()\n\twantBounds := (ParityBounds{MinX: 71, MinY: 94, MaxX: 474, MaxY: 401})\n\tif bounds != wantBounds {\n\t\tt.Fatalf("bounds = %#v, want %#v", bounds, wantBounds)\n\t}\n\tassertPixelateRegionFrames(t, samples, bounds, ParityPixelateBackgroundRegionFrames(samples))\n}\n\nfunc TestParityPixelateAlphaVideoSamplesAndRegionsStayFrameBound(t *testing.T) {\n'),
           ])
 
-          patch('frontend/src/components/video/previewPixelateBackdrop.test.ts', [
-              ('zero lower test',
-               "  it('requires exactly one lower visual layer before runtime raster acquisition', () => {\n    expect(planPreviewPixelateBackdrop(0, [layer('pixelate', pixelateState())])).toMatchObject({\n      mode: 'canonical-deferred',\n      deferredReasons: ['backdrop-layer-count-deferred'],\n    });\n    expect(planPreviewPixelateBackdrop(0, [\n      layer('lower-a', mediaState(), 'image/png'),\n      layer('lower-b', mediaState(), 'video/mp4'),\n      layer('pixelate', pixelateState()),\n    ])).toMatchObject({\n      mode: 'canonical-deferred',\n      deferredReasons: ['backdrop-layer-count-deferred'],\n    });\n  });\n",
-               "  it('admits the canonical project background as the zero-readiness raster source', () => {\n    expect(planPreviewPixelateBackdrop(0, [layer('pixelate', pixelateState())])).toMatchObject({\n      contract_version: PREVIEW_PIXELATE_BACKDROP_PLAN_V1,\n      mode: 'canonical-ready',\n      target: { clip: { id: 'pixelate' } },\n      rasterSource: { supported: true, clipId: 'project-background', kind: 'project-background' },\n      runtimeRequirements: [],\n      deferredReasons: [],\n    });\n  });\n\n  it('still defers more than one lower visual layer before runtime raster acquisition', () => {\n    expect(planPreviewPixelateBackdrop(0, [\n      layer('lower-a', mediaState(), 'image/png'),\n      layer('lower-b', mediaState(), 'video/mp4'),\n      layer('pixelate', pixelateState()),\n    ])).toMatchObject({\n      mode: 'canonical-deferred',\n      deferredReasons: ['backdrop-layer-count-deferred'],\n    });\n  });\n"),
+          patch('scripts/video-pixelate-parity-assert.mjs', [
+              ('backdrop evidence',
+               "      surface_background: surface?.getAttribute('data-preview-pixelate-background') ?? null,\n",
+               "      surface_background: surface?.getAttribute('data-preview-pixelate-background') ?? null,\n      surface_backdrop_clip: surface?.getAttribute('data-preview-pixelate-backdrop-clip') ?? null,\n"),
           ])
           PY
-          cd frontend
+          gofmt -w backend/internal/video/parity_fixture_pixelate.go \
+            backend/internal/video/parity_fixture_pixelate_test.go \
+            backend/cmd/video-pixelate-parity-fixture/main.go
+          cd backend
+          go test ./internal/video -run 'TestParityPixelate(Background|Opaque|Decoded|Alpha)'
+          go run ./cmd/video-pixelate-parity-fixture --output-dir ../output/background-fixture-check --variant background
+          cd ../frontend
           npm ci
           npx vitest run src/components/video/previewPixelateBackdrop.test.ts
-          npm run build
-      - name: Commit implementation
+          node --check ../scripts/video-pixelate-parity-assert.mjs
+      - name: Commit evidence plumbing
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add frontend/src/components/video/previewPixelateBackdrop.ts \
-            frontend/src/components/video/PreviewPixelateBackdropConsumer.tsx \
-            frontend/src/components/video/PreviewPixelateCanvas.tsx \
-            frontend/src/components/video/previewPixelateBackdrop.test.ts
+          git add backend/internal/video/parity_fixture_pixelate.go \
+            backend/internal/video/parity_fixture_pixelate_test.go \
+            backend/cmd/video-pixelate-parity-fixture/main.go \
+            scripts/video-pixelate-parity-assert.mjs
           git diff --cached --check
-          git commit -m "feat(video): admit project background pixelate raster"
+          git commit -m "test(video): add background pixelate parity fixture"
           git push origin HEAD:feat/video-wysiwyg-phase3-project-background-raster
