@@ -29,11 +29,17 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Update retained gate and durable WYSIWYG tracker
+      - name: Update durable WYSIWYG tracker
         run: |
           set -euo pipefail
+          # The connector already tightened the permanent workflow to ±1. Recreate
+          # the pre-tightening text only in the runner worktree so the exact-match
+          # tracker script can validate its complete transformation, then restore
+          # the permanent workflow to the checked-in ±1 contents before commit.
+          sed -i 's/const backgroundChannelTolerance = 1;/const backgroundChannelTolerance = 2;/' .github/workflows/video-pixelate-background-parity.yml
+          sed -i 's/project-background pixelate ±1 RGB gate failed/project-background pixelate ±2 RGB gate failed/' .github/workflows/video-pixelate-background-parity.yml
           python3 scripts/patch-pr299-tracker.py
-          grep -q 'const backgroundChannelTolerance = 1;' .github/workflows/video-pixelate-background-parity.yml
+          git diff --exit-code -- .github/workflows/video-pixelate-background-parity.yml
           grep -q 'Current implementation PR: \*\*#299' docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
           grep -q 'artifact `9744150134`' docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
           cd backend
@@ -41,12 +47,12 @@ jobs:
           cd ../frontend
           npm ci
           npx vitest run src/components/video/previewPixelateBackdrop.test.ts
-      - name: Commit tracker and tightened retained gate
+      - name: Commit tracker update
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/video-pixelate-background-parity.yml docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
+          git add docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
           git diff --cached --check
           git commit -m "docs(video): record project-background raster evidence"
           git push origin HEAD:feat/video-wysiwyg-phase3-project-background-raster
