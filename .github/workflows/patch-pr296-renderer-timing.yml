@@ -36,29 +36,40 @@ jobs:
           \tbinary string
           }
           '''
-          type_replacement = '''const deterministicVideoPresentationBiasSeconds = 0.00049
+          type_replacement = '''const (
+          \tdeterministicVideoPresentationTimebaseHz  = 1_000_000
+          \tdeterministicVideoPresentationBiasMicros = 490
+          )
 
-          // deterministicVideoPresentationSetPTS mirrors deterministic browser video
-          // seeking at exact source-frame boundaries. Some containers quantize PTS to
-          // milliseconds, so a canonical rational time can fall just below the next
-          // decoded frame. Advancing only the visual presentation decision by 0.49 ms
-          // keeps FFmpeg inside the same strict 0.5 ms tolerance without changing
-          // canonical source time, audio timing, or free-running preview semantics.
-          func deterministicVideoPresentationSetPTS(playbackRate float64) string {
+          // deterministicVideoPresentationTimingFilters mirrors deterministic browser
+          // video seeking at exact source-frame boundaries. Some containers quantize
+          // PTS to milliseconds, so a canonical rational time can fall just below the
+          // next decoded frame. The visual stream first receives a microsecond timebase
+          // so the 490 microsecond source-time bias is representable, then advances only
+          // presentation timestamps. Canonical source time, audio timing, and
+          // free-running preview semantics remain unchanged.
+          func deterministicVideoPresentationTimingFilters(playbackRate float64) []string {
           \tif playbackRate <= 0 || math.IsNaN(playbackRate) || math.IsInf(playbackRate, 0) {
           \t\tplaybackRate = 1
           \t}
+          \tsetTimebase := fmt.Sprintf("settb=expr=1/%d", deterministicVideoPresentationTimebaseHz)
           \tif math.Abs(playbackRate-1) <= 1e-9 {
-          \t\treturn fmt.Sprintf("setpts=PTS-STARTPTS-%.6f/TB", deterministicVideoPresentationBiasSeconds)
+          \t\treturn []string{
+          \t\t\tsetTimebase,
+          \t\t\tfmt.Sprintf("setpts=PTS-STARTPTS-%d", deterministicVideoPresentationBiasMicros),
+          \t\t}
           \t}
-          \treturn fmt.Sprintf("setpts=(PTS-STARTPTS-%.6f/TB)/%.6f", deterministicVideoPresentationBiasSeconds, playbackRate)
+          \treturn []string{
+          \t\tsetTimebase,
+          \t\tfmt.Sprintf("setpts=(PTS-STARTPTS-%d)/%.6f", deterministicVideoPresentationBiasMicros, playbackRate),
+          \t}
           }
 
           type FFmpegRenderer struct {
           \tbinary string
           }
           '''
-          if 'deterministicVideoPresentationBiasSeconds' not in text:
+          if 'deterministicVideoPresentationTimingFilters' not in text:
               if text.count(type_marker) != 1:
                   raise SystemExit('renderer type insertion marker mismatch')
               text = text.replace(type_marker, type_replacement, 1)
@@ -74,30 +85,30 @@ jobs:
           '''
           timing_replacement = '''\t\t} else {
           \t\t\tchain = append(chain, fmt.Sprintf("trim=start=%.3f:duration=%.3f", trimInS, sourceDurS))
-          \t\t\tchain = append(chain, deterministicVideoPresentationSetPTS(playbackRate))
+          \t\t\tchain = append(chain, deterministicVideoPresentationTimingFilters(playbackRate)...)
           \t\t}
           '''
           if timing_marker in text:
               if text.count(timing_marker) != 1:
                   raise SystemExit('renderer timing replacement marker count mismatch')
               text = text.replace(timing_marker, timing_replacement, 1)
-          elif 'chain = append(chain, deterministicVideoPresentationSetPTS(playbackRate))' not in text:
+          elif 'chain = append(chain, deterministicVideoPresentationTimingFilters(playbackRate)...)' not in text:
               raise SystemExit('renderer timing replacement marker missing')
 
           renderer.write_text(text)
 
           test_path = Path('backend/internal/video/renderer_pixelate_sampling_test.go')
           tests = test_path.read_text()
-          marker = 'TestDeterministicVideoPresentationSetPTSUsesInsideBoundaryBias'
+          marker = 'TestDeterministicVideoPresentationTimingFiltersUseFineTimebase'
           if marker not in tests:
               tests += '''
 
-          func TestDeterministicVideoPresentationSetPTSUsesInsideBoundaryBias(t *testing.T) {
-          \tif got, want := deterministicVideoPresentationSetPTS(1), "setpts=PTS-STARTPTS-0.000490/TB"; got != want {
-          \t\tt.Fatalf("deterministic video presentation expression mismatch: got %q want %q", got, want)
+          func TestDeterministicVideoPresentationTimingFiltersUseFineTimebase(t *testing.T) {
+          \tif got, want := strings.Join(deterministicVideoPresentationTimingFilters(1), ","), "settb=expr=1/1000000,setpts=PTS-STARTPTS-490"; got != want {
+          \t\tt.Fatalf("deterministic video presentation filters mismatch: got %q want %q", got, want)
           \t}
-          \tif got, want := deterministicVideoPresentationSetPTS(2), "setpts=(PTS-STARTPTS-0.000490/TB)/2.000000"; got != want {
-          \t\tt.Fatalf("playback-rate presentation expression mismatch: got %q want %q", got, want)
+          \tif got, want := strings.Join(deterministicVideoPresentationTimingFilters(2), ","), "settb=expr=1/1000000,setpts=(PTS-STARTPTS-490)/2.000000"; got != want {
+          \t\tt.Fatalf("playback-rate presentation filters mismatch: got %q want %q", got, want)
           \t}
           }
 
@@ -110,26 +121,47 @@ jobs:
           \t\t512,
           \t\tfalse,
           \t)
-          \tif !strings.Contains(graph, "trim=start=0.000:duration=2.000,setpts=PTS-STARTPTS-0.000490/TB") {
+          \tif !strings.Contains(graph, "trim=start=0.000:duration=2.000,settb=expr=1/1000000,setpts=PTS-STARTPTS-490") {
           \t\tt.Fatalf("video visual chain must apply the bounded presentation bias: %s", graph)
           \t}
           }
           '''
               test_path.write_text(tests)
+
+          fidelity_path = Path('backend/internal/video/renderer_fidelity_test.go')
+          fidelity = fidelity_path.read_text()
+          old = '"trim=start=0.500:duration=8.000,setpts=(PTS-STARTPTS)/2.000000",'
+          new = '"trim=start=0.500:duration=8.000,settb=expr=1/1000000,setpts=(PTS-STARTPTS-490)/2.000000",'
+          if old in fidelity:
+              if fidelity.count(old) != 1:
+                  raise SystemExit('renderer fidelity expectation count mismatch')
+              fidelity = fidelity.replace(old, new, 1)
+          elif new not in fidelity:
+              raise SystemExit('renderer fidelity expectation marker missing')
+          fidelity_path.write_text(fidelity)
           PY
-          gofmt -w backend/internal/video/renderer.go backend/internal/video/renderer_pixelate_sampling_test.go
+          gofmt -w \
+            backend/internal/video/renderer.go \
+            backend/internal/video/renderer_pixelate_sampling_test.go \
+            backend/internal/video/renderer_fidelity_test.go
           cd backend
           go test ./internal/video
       - name: Commit patch
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- backend/internal/video/renderer.go backend/internal/video/renderer_pixelate_sampling_test.go; then
+          if git diff --quiet -- \
+            backend/internal/video/renderer.go \
+            backend/internal/video/renderer_pixelate_sampling_test.go \
+            backend/internal/video/renderer_fidelity_test.go; then
             echo 'Patch already present; nothing to commit.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/internal/video/renderer.go backend/internal/video/renderer_pixelate_sampling_test.go
+          git add \
+            backend/internal/video/renderer.go \
+            backend/internal/video/renderer_pixelate_sampling_test.go \
+            backend/internal/video/renderer_fidelity_test.go
           git commit -m 'fix(video): align FFmpeg boundary frame presentation'
           git push origin HEAD:fix/video-wysiwyg-phase3-transparent-video-presentation
