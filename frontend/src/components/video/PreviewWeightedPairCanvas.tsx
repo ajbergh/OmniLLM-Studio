@@ -68,6 +68,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
   const [sourceRevision, setSourceRevision] = useState(0);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingReason, setPendingReason] = useState<string | null>(null);
   const bumpSourceRevision = useCallback(() => setSourceRevision((value) => value + 1), []);
 
   useEffect(() => () => {
@@ -219,16 +220,20 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
   useLayoutEffect(() => {
     try {
       const rendered = draw();
+      const pending = rendered ? null : weightedPairPendingReason(slot, sourceForClip);
       setError(null);
+      setPendingReason(pending);
       setReady(rendered);
       onStatusChange?.({
         executionKey,
         transitionId: slot.surface.transition_id,
         status: rendered ? 'ready' : 'pending',
+        ...(pending ? { reason: pending } : {}),
       });
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason);
       setError(message);
+      setPendingReason(null);
       setReady(false);
       onStatusChange?.({
         executionKey,
@@ -237,7 +242,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
         reason: message,
       });
     }
-  }, [draw, executionKey, onStatusChange, slot.surface.transition_id, sourceRevision]);
+  }, [draw, executionKey, onStatusChange, slot, slot.surface.transition_id, sourceForClip, sourceRevision]);
 
   return (
     <div
@@ -249,7 +254,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
       data-preview-transition-pair-lower-clip={slot.surface.lower_clip_id}
       data-preview-transition-pair-upper-clip={slot.surface.upper_clip_id}
       data-preview-transition-pair-ready={ready ? 'true' : 'false'}
-      data-preview-transition-pair-error={error ?? undefined}
+      data-preview-transition-pair-error={error ?? pendingReason ?? undefined}
       className="pointer-events-none absolute inset-0"
       style={{ visibility: active ? 'visible' : 'hidden' }}
     >
@@ -289,6 +294,27 @@ function sourceReady(source: RasterSource): boolean {
       && source.videoHeight > 0;
   }
   return source.complete && source.naturalWidth > 0 && source.naturalHeight > 0;
+}
+
+function weightedPairPendingReason<T extends PreviewWeightedPairCanvasLayer>(
+  slot: PreviewTransitionPairSlot<T>,
+  sourceForClip: (clipId: string) => RasterSource | null,
+): string | null {
+  for (const layer of [slot.lower, slot.upper]) {
+    const source = sourceForClip(layer.clip.id);
+    if (!source) return `${layer.clip.id}:source-missing`;
+    if (source instanceof HTMLVideoElement) {
+      const blockers: string[] = [];
+      if (source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) blockers.push(`ready-state-${source.readyState}`);
+      if (source.seeking) blockers.push('seeking');
+      if (source.videoWidth <= 0 || source.videoHeight <= 0) blockers.push('intrinsic-size-missing');
+      if (blockers.length > 0) return `${layer.clip.id}:video-${blockers.join('+')}`;
+      continue;
+    }
+    if (!source.complete) return `${layer.clip.id}:image-loading`;
+    if (source.naturalWidth <= 0 || source.naturalHeight <= 0) return `${layer.clip.id}:image-intrinsic-size-missing`;
+  }
+  return 'weighted-canvas-pending-with-ready-sources';
 }
 
 function intrinsicSize(source: RasterSource): [number, number] {
