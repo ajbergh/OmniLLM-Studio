@@ -98,7 +98,7 @@ export interface PreviewWeightedPairWebGLCompositor {
 export function createPreviewWeightedPairWebGLCompositor(
   canvas: HTMLCanvasElement,
 ): PreviewWeightedPairWebGLCompositor | null {
-  const gl = canvas.getContext('webgl2', {
+  const maybeGL = canvas.getContext('webgl2', {
     alpha: true,
     antialias: false,
     depth: false,
@@ -106,7 +106,8 @@ export function createPreviewWeightedPairWebGLCompositor(
     premultipliedAlpha: false,
     preserveDrawingBuffer: true,
   });
-  if (!gl) return null;
+  if (!maybeGL) return null;
+  const gl: WebGL2RenderingContext = maybeGL;
 
   const vertexShader = compileShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SOURCE);
   const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER_SOURCE);
