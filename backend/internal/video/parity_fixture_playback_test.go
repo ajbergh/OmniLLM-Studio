@@ -32,12 +32,18 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 		if testCase.ExpectedMode == "legacy-time-fallback" && testCase.ExpectedReason == "" {
 			t.Fatalf("fallback case %q is missing an expected reason", testCase.Name)
 		}
+		if testCase.ExpectedWeightedRuntime != "" && testCase.ExpectedWeightedPairID == "" {
+			t.Fatalf("weighted runtime case %q is missing an expected pair id", testCase.Name)
+		}
 		if testCase.RequireWeightedCanvas {
 			if testCase.ExpectedMode != "canonical-playback" {
 				t.Fatalf("weighted Canvas case %q must be canonical playback", testCase.Name)
 			}
 			if testCase.ExpectedWeightedRuntime != "ready" || testCase.ExpectedWeightedConsumer != "canonical-weighted-canvas" {
 				t.Fatalf("weighted Canvas case %q is missing ready consumer expectations", testCase.Name)
+			}
+			if testCase.ExpectedWeightedPairID == "" {
+				t.Fatalf("weighted Canvas case %q is missing pair identity", testCase.Name)
 			}
 		}
 		if testCase.DecoderBudget < 0 {
