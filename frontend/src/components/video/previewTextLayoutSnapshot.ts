@@ -176,9 +176,11 @@ export function installPreviewTextLayoutReadinessGate(): void {
  * exact Chromium measurement/freeze/stability contract on hidden prewarm
  * surfaces; deterministic parity keeps the default selector. Intrinsic layout
  * is allowed one auto-size -> explicit-size quantization only when its line
- * topology is unchanged. A second explicit -> explicit pass must then satisfy
- * the strict geometry tolerance and exact fragment count. The resulting stable
- * snapshots remain browser-consumer evidence and never mutate authored state.
+ * topology is unchanged. The same explicit style is then observed on a second
+ * frame and must satisfy the strict geometry tolerance and exact fragment count;
+ * readiness never rewrites a measured explicit width back into CSS because that
+ * serialization is itself a new layout mutation. The resulting stable snapshots
+ * remain browser-consumer evidence and never mutate authored state.
  */
 export async function settlePreviewTextLayouts(
   stage: HTMLElement,
@@ -223,7 +225,6 @@ export async function settlePreviewTextLayouts(
       );
     }
     annotateTextLayoutSnapshot(nodes[index], explicit);
-    freezeIntrinsicTextLayout(nodes[index], explicit, stageScale);
   }
 
   await nextAnimationFrame();
