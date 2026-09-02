@@ -104,7 +104,7 @@ export function buildPreviewTextLayoutSnapshot(
   };
 }
 
-/** True when freezing intrinsic dimensions did not perturb Chromium layout. */
+/** True when two explicit Chromium layout passes have stable geometry/topology. */
 export function previewTextLayoutSnapshotStable(
   before: PreviewTextLayoutSnapshot,
   after: Pick<PreviewTextLayoutSnapshot, 'border_box_width' | 'border_box_height' | 'line_fragment_count'>,
@@ -112,13 +112,24 @@ export function previewTextLayoutSnapshotStable(
 ): boolean {
   return Math.abs(before.border_box_width - after.border_box_width) <= tolerance
     && Math.abs(before.border_box_height - after.border_box_height) <= tolerance
-    && before.line_fragment_count === after.line_fragment_count;
+    && previewTextLayoutTopologyStable(before, after);
+}
+
+/**
+ * Intrinsic auto-size may quantize once when converted to explicit CSS pixels,
+ * but that conversion may never change line topology.
+ */
+export function previewTextLayoutTopologyStable(
+  before: Pick<PreviewTextLayoutSnapshot, 'line_fragment_count'>,
+  after: Pick<PreviewTextLayoutSnapshot, 'line_fragment_count'>,
+): boolean {
+  return before.line_fragment_count === after.line_fragment_count;
 }
 
 /**
  * Install the deterministic parity gate once per browser document. It snapshots
  * canonical text only after exact font readiness, freezes intrinsic dimensions,
- * verifies a second Chromium layout pass is stable, then resumes parity-ready.
+ * verifies explicit Chromium layout is stable, then resumes parity-ready.
  */
 export function installPreviewTextLayoutReadinessGate(): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -163,7 +174,10 @@ export function installPreviewTextLayoutReadinessGate(): void {
 /**
  * Settle one scoped set of canonical text nodes. Normal playback reuses this
  * exact Chromium measurement/freeze/stability contract on hidden prewarm
- * surfaces; deterministic parity keeps the default selector. The resulting
+ * surfaces; deterministic parity keeps the default selector. Intrinsic layout
+ * is allowed one auto-size -> explicit-size quantization only when its line
+ * topology is unchanged. A second explicit -> explicit pass must then satisfy
+ * the strict geometry tolerance and exact fragment count. The resulting stable
  * snapshots remain browser-consumer evidence and never mutate authored state.
  */
 export async function settlePreviewTextLayouts(
@@ -188,7 +202,7 @@ export async function settlePreviewTextLayouts(
   if (nodes.length === 0) return [];
 
   const stageScale = resolveCanvasStageScale(stage);
-  const snapshots = nodes.map((node) => {
+  const intrinsicSnapshots = nodes.map((node) => {
     const snapshot = capturePreviewTextLayoutSnapshot(node, stageScale);
     annotateTextLayoutSnapshot(node, snapshot);
     freezeIntrinsicTextLayout(node, snapshot, stageScale);
@@ -196,18 +210,39 @@ export async function settlePreviewTextLayouts(
   });
 
   await nextAnimationFrame();
+  const explicitSnapshots = nodes.map((node, index) => (
+    capturePreviewTextLayoutSnapshot(node, stageScale, intrinsicSnapshots[index])
+  ));
   for (let index = 0; index < nodes.length; index += 1) {
-    const after = capturePreviewTextLayoutSnapshot(nodes[index], stageScale, snapshots[index]);
-    if (!previewTextLayoutSnapshotStable(snapshots[index], after)) {
-      const before = snapshots[index];
+    const intrinsic = intrinsicSnapshots[index];
+    const explicit = explicitSnapshots[index];
+    if (!previewTextLayoutTopologyStable(intrinsic, explicit)) {
       throw new Error(
-        `text-layout-unstable:${before.input_fingerprint}`
-          + `:before=${before.border_box_width}x${before.border_box_height}/${before.line_fragment_count}`
-          + `:after=${after.border_box_width}x${after.border_box_height}/${after.line_fragment_count}`,
+        `text-layout-topology-changed:${intrinsic.input_fingerprint}`
+          + `:before=${intrinsic.line_fragment_count}:after=${explicit.line_fragment_count}`,
       );
     }
+    annotateTextLayoutSnapshot(nodes[index], explicit);
+    freezeIntrinsicTextLayout(nodes[index], explicit, stageScale);
   }
-  return snapshots;
+
+  await nextAnimationFrame();
+  const stableSnapshots = nodes.map((node, index) => (
+    capturePreviewTextLayoutSnapshot(node, stageScale, explicitSnapshots[index])
+  ));
+  for (let index = 0; index < nodes.length; index += 1) {
+    const explicit = explicitSnapshots[index];
+    const stable = stableSnapshots[index];
+    if (!previewTextLayoutSnapshotStable(explicit, stable)) {
+      throw new Error(
+        `text-layout-unstable:${explicit.input_fingerprint}`
+          + `:before=${explicit.border_box_width}x${explicit.border_box_height}/${explicit.line_fragment_count}`
+          + `:after=${stable.border_box_width}x${stable.border_box_height}/${stable.line_fragment_count}`,
+      );
+    }
+    annotateTextLayoutSnapshot(nodes[index], stable);
+  }
+  return stableSnapshots;
 }
 
 /**
@@ -233,7 +268,7 @@ export function resolvePreviewCanvasStageScale(
 }
 
 function canonicalTextNodes(stage: HTMLElement, selector: string): HTMLElement[] {
-  return [...stage.querySelectorAll<HTMLElement>(selector)];
+  return [...stage.querySelectorAll<HTMLElement>>(selector)];
 }
 
 function capturePreviewTextLayoutSnapshot(
