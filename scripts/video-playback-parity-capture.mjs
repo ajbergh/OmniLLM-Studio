@@ -48,11 +48,30 @@ try {
     // playback intentionally mutates transient playhead/media state; reloading
     // prevents one case's decoder/store lifecycle from becoming the next
     // case's readiness authority while keeping the same immutable saved timeline.
+    await page.evaluate((decoderBudget) => {
+      if (Number.isInteger(decoderBudget) && decoderBudget > 0) {
+        window.localStorage.setItem('omnillm-video-decoder-budget', String(decoderBudget));
+      } else {
+        window.localStorage.removeItem('omnillm-video-decoder-budget');
+      }
+    }, Number(testCase.decoder_budget || 0));
     await page.goto(editorURL, { waitUntil: 'networkidle' });
     await program.waitFor({ state: 'visible' });
     await seekParityFrame(page, testCase.frame_index);
     await page.getByRole('button', { name: 'Play preview' }).click();
     await page.getByRole('button', { name: 'Pause preview' }).waitFor({ state: 'visible', timeout: 5_000 });
+
+    if (testCase.expected_weighted_runtime || testCase.expected_weighted_consumer) {
+      await page.waitForFunction((expected) => {
+        const stage = document.querySelector('[data-testid="video-preview-program"]');
+        if (!stage) return false;
+        return (!expected.runtime || stage.dataset.previewWeightedPlaybackRuntime === expected.runtime)
+          && (!expected.consumer || stage.dataset.previewWeightedPlaybackConsumer === expected.consumer);
+      }, {
+        runtime: testCase.expected_weighted_runtime || '',
+        consumer: testCase.expected_weighted_consumer || '',
+      }, { timeout: 3_000 });
+    }
 
     const observations = await page.evaluate(async (observeMs) => {
       const rows = [];
@@ -63,6 +82,7 @@ try {
         if (!stage) throw new Error('video preview program disappeared during playback evidence');
         const audio = document.querySelector('audio');
         const videos = [...stage.querySelectorAll('video')];
+        const weightedSurfaces = [...stage.querySelectorAll('[data-preview-transition-pair-surface-role="playback"]')];
         rows.push({
           performance_ms: performance.now(),
           timeline_ms: Number(stage.dataset.parityTimeMs),
@@ -73,6 +93,17 @@ try {
           playback_deferred_reason: stage.dataset.previewPlaybackCanonicalDeferred || '',
           transition_plan_mode: stage.dataset.previewTransitionPairPlanMode || '',
           transition_deferred: stage.dataset.previewTransitionPairDeferred || '',
+          weighted_playback_runtime: stage.dataset.previewWeightedPlaybackRuntime || '',
+          weighted_playback_consumer: stage.dataset.previewWeightedPlaybackConsumer || '',
+          weighted_playback_deferred: stage.dataset.previewWeightedPlaybackDeferred || '',
+          weighted_surface_count: weightedSurfaces.length,
+          weighted_surface_ready_count: weightedSurfaces.filter((surface) => surface.dataset.previewTransitionPairReady === 'true').length,
+          weighted_surface_errors: weightedSurfaces
+            .map((surface) => surface.dataset.previewTransitionPairError || '')
+            .filter(Boolean),
+          weighted_surface_runtime_keys: weightedSurfaces
+            .map((surface) => surface.dataset.previewTransitionPairRuntimeKey || '')
+            .filter(Boolean),
           audio_current_time: audio ? audio.currentTime : null,
           audio_paused: audio ? audio.paused : null,
           video_current_times: videos.map((video) => ({
@@ -96,12 +127,13 @@ try {
     results.push(result);
     await fs.writeFile(
       path.join(output, 'playback-evidence-progress.json'),
-      `${JSON.stringify({ schema_version: 1, fixture: fixture.name, cases: results }, null, 2)}\n`,
+      `${JSON.stringify({ schema_version: 2, fixture: fixture.name, cases: results }, null, 2)}\n`,
     );
   }
+  await page.evaluate(() => window.localStorage.removeItem('omnillm-video-decoder-budget'));
 
   const summary = {
-    schema_version: 1,
+    schema_version: 2,
     fixture: fixture.name,
     project_id: seedResult.project_id,
     timeline_id: seedResult.timeline_id,
@@ -173,6 +205,34 @@ function gateCase(testCase, observations, fps) {
       errors.push(`deferred reason ${row.playback_deferred_reason}, want ${testCase.expected_reason || '<empty>'}`);
       break;
     }
+    if (testCase.expected_weighted_runtime
+      && row.weighted_playback_runtime !== testCase.expected_weighted_runtime) {
+      errors.push(`weighted runtime ${row.weighted_playback_runtime}, want ${testCase.expected_weighted_runtime}`);
+      break;
+    }
+    if (testCase.expected_weighted_consumer
+      && row.weighted_playback_consumer !== testCase.expected_weighted_consumer) {
+      errors.push(`weighted consumer ${row.weighted_playback_consumer}, want ${testCase.expected_weighted_consumer}`);
+      break;
+    }
+    if (testCase.require_weighted_canvas) {
+      if (row.weighted_surface_count < 1) {
+        errors.push('weighted canonical playback has no playback Canvas surface');
+        break;
+      }
+      if (row.weighted_surface_ready_count !== row.weighted_surface_count) {
+        errors.push(`weighted Canvas ready ${row.weighted_surface_ready_count}/${row.weighted_surface_count}`);
+        break;
+      }
+      if (row.weighted_surface_errors.length > 0) {
+        errors.push(`weighted Canvas errors: ${row.weighted_surface_errors.join(',')}`);
+        break;
+      }
+      if (row.weighted_surface_runtime_keys.length !== row.weighted_surface_count) {
+        errors.push('weighted Canvas runtime key is missing');
+        break;
+      }
+    }
   }
 
   const timelineTimes = stable.map((row) => row.timeline_ms);
@@ -222,6 +282,9 @@ function gateCase(testCase, observations, fps) {
     expected_mode: testCase.expected_mode,
     expected_reason: testCase.expected_reason || '',
     expected_transition_mode: testCase.expected_transition_mode,
+    expected_weighted_runtime: testCase.expected_weighted_runtime || '',
+    expected_weighted_consumer: testCase.expected_weighted_consumer || '',
+    decoder_budget: testCase.decoder_budget || 0,
     observations: stable,
     timeline_advance_ms: timelineAdvanceMs,
     audio_advance_seconds: audioAdvanceSeconds,
