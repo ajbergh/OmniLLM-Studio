@@ -1,5 +1,6 @@
 import type { CanonicalFrameLayerState, CanonicalVisualFrameState } from '../../video/renderContractFrameState';
 import type { PreviewTransitionPairPlan } from './previewFrameTransitionPairs';
+import { resolvePreviewWeightedPlaybackRuntime } from './previewWeightedPlaybackRuntime';
 
 export type PreviewPlaybackVisualMode = 'legacy-time' | 'legacy-time-fallback' | 'canonical-playback';
 
@@ -21,17 +22,22 @@ type PlaybackLayer = {
 };
 
 type PlaybackFrameState = Pick<CanonicalVisualFrameState, 'authoritative'>;
-type PlaybackTransitionPlan = Pick<PreviewTransitionPairPlan<PlaybackLayer>, 'mode' | 'deferredReasons'>;
+type PlaybackTransitionPlan = Pick<
+  PreviewTransitionPairPlan<PlaybackLayer>,
+  'mode' | 'slots' | 'deferredReasons' | 'weightedRasterDeferredReasons'
+>;
 
 /**
  * Admit normal playback into canonical frame-domain visual evaluation only when
  * the complete frame is representable by consumers already proven in playback.
  *
- * This first slice deliberately admits media-only layers. Text, shapes, cursor,
- * missing raster sources, non-authoritative FrameState, and weighted/deferred
- * transition composition fail the whole visual frame back to the established
- * continuous-time painter. The UI playhead and audio clock are not part of this
- * decision and remain continuous.
+ * Media-only none/source-over frames are admitted immediately. All-weighted
+ * media pairs are admitted only when the renderer-runtime registry proves that
+ * the exact current-frame Canvas surfaces are ready. Text, shapes, cursor,
+ * missing raster sources, non-authoritative FrameState, mixed/deferred
+ * transition composition, and stale/not-ready weighted surfaces fail the whole
+ * visual frame back to the established continuous-time painter. The UI playhead
+ * and audio clock are not part of this decision and remain continuous.
  */
 export function resolvePreviewPlaybackCanonicalization(
   playbackFrame: number | null,
@@ -51,12 +57,16 @@ export function resolvePreviewPlaybackCanonicalization(
 
   if (!transitionPlan) return fallback('transition-plan-unavailable');
   if (transitionPlan.mode === 'legacy') return fallback('transition-plan-legacy');
-  if (transitionPlan.mode === 'canonical-weighted-deferred') {
-    return fallback('transition-plan-weighted-deferred');
-  }
   if (transitionPlan.mode === 'canonical-mixed') return fallback('transition-plan-mixed');
   if (transitionPlan.deferredReasons.length > 0) {
     return fallback(`transition-deferred:${transitionPlan.deferredReasons.join(',')}`);
+  }
+  if (transitionPlan.mode === 'canonical-weighted-deferred') {
+    if (transitionPlan.weightedRasterDeferredReasons.length > 0) {
+      return fallback(`transition-weighted-raster-deferred:${transitionPlan.weightedRasterDeferredReasons.join(',')}`);
+    }
+    const runtime = resolvePreviewWeightedPlaybackRuntime(playbackFrame, transitionPlan);
+    if (!runtime.ready) return fallback(runtime.deferredReason ?? 'transition-weighted-runtime-not-ready');
   }
 
   return { mode: 'canonical-playback', canonicalFrame: playbackFrame };

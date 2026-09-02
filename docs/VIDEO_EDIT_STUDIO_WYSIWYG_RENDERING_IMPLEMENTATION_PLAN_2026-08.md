@@ -1,7 +1,7 @@
 # Video Edit Studio WYSIWYG Rendering Implementation Plan
 
 **Status:** In progress  
-**Last updated:** 2026-08-31
+**Last updated:** 2026-09-02
 **Scope:** Video Edit Studio preview, timeline evaluation, render jobs, visual composition, audio mix, export, validation, packaging, and parity testing.  
 **Primary goal:** The authoritative editor preview and final decoded export must represent the same immutable timeline revision with identical frame identity, active-layer ordering, timing, geometry, styling, effects, transitions, camera state, font resources, and audio decisions.
 
@@ -9,9 +9,9 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG program PR: **#300 — Canonicalize media-only normal playback visual frames** — squash merge `d4049105d49ce4bc8337a3c5236593f503869d5d` (2026-08-31), directly from #299's actual squash result.
+Latest merged WYSIWYG program PR: **#301 — Retain normal playback canonicalization browser evidence** — squash merge `1f891dc4338853357dcfdead8c073c9c81516bba`, directly from #300's actual squash result `d4049105d49ce4bc8337a3c5236593f503869d5d`.
 
-Current implementation PR: **#301 — Retain normal playback canonicalization browser evidence** on branch `feat/video-wysiwyg-phase3-playback-evidence`, created directly from #300's actual squash result `d4049105d49ce4bc8337a3c5236593f503869d5d`. Pre-tracker evidence head `c2effbfe6973f0f039d5651c68075f11798dfd8f` passed the retained seven-case browser gate; this tracker update intentionally creates a new exact head that must re-run repository gates before merge.
+Current implementation PR: **#302 — Promote ready weighted transitions during normal playback** on branch `feat/video-wysiwyg-phase3-weighted-playback`, created directly from #301's actual squash result `1f891dc4338853357dcfdead8c073c9c81516bba`. Pre-tracker exact head `630f71526b3ae4e01a84d34553520d90b3304ac1` passed all 11 PR workflows, including retained 10-case weighted playback browser evidence. This tracker update intentionally creates a new exact head that must re-run repository gates before merge.
 
 **Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** Renderer-independent contracts own authored semantics. Browser/FFmpeg consumers may produce renderer-specific evidence, but they must not silently redefine canonical intent.
 
@@ -232,6 +232,25 @@ Unsupported/deferred painter sources stay explicit debt and do not become canoni
 | #252–#255 | Font-resource provenance, authored binding, upload/storage/snapshot packaging, static-face enforcement |
 | #260 | `audio-graph-v1`; Phase 2 completion |
 
+### #302 ready weighted normal-playback Canvas promotion
+
+#302 promotes the already-defined media-only weighted transition Canvas consumer into ordinary free-running playback while preserving one source-time/decoder authority and complete-frame fail-closed semantics.
+
+- The branch starts directly from #301's actual squash result `1f891dc4338853357dcfdead8c073c9c81516bba`; no stale stacked base was carried forward.
+- A playback-only runtime registry binds stable weighted-pair topology identity to exact canonical output-frame execution keys. Candidate weighted frames remain on complete-frame legacy-time fallback until every active weighted surface proves readiness for the matching execution key.
+- The consumer reuses the already-mounted preview `<video>` / `<img>` nodes and the existing canonical weighted linear-sRGB pair-pixel kernel. It does not introduce a second decoder, seek loop, or source-time clock.
+- Weighted crossfade, zoom, and dip surfaces are promoted only as `canonical-weighted-canvas` while the preview owns the matching `canonical-playback` frame. Decoder-budget posters, mixed plans, structural transition deferrals, unsupported painters, and Canvas/readiness failures remain explicit fallback paths.
+- Retained debugging exposed a real lifecycle defect rather than a slow-GPU problem: canonical per-layer perspective changed `renderLayer()`'s React root shape, which recreated the mounted `<video>` after admission and reset decoder readiness. The final implementation keeps one stable perspective host across fallback/canonical promotion so media DOM identity and decoder state survive the transition; the evidence gate was not weakened.
+- `parity-playback-canonical-v2` expands retained browser coverage to 10 cases: admitted video, admitted image, text fallback, cursor fallback, ready weighted crossfade, ready weighted zoom, ready weighted dip, forced decoder-budget weighted fallback, mixed-transition fallback, and non-adjacent structural transition deferral.
+- Pre-tracker exact head `630f71526b3ae4e01a84d34553520d90b3304ac1` passed Video Playback Canonical Parity Evidence #50, Quality Gate #1826, Security Scan #1832, Video Transparent Pixelate Parity Evidence #64, and every applicable Linux/macOS/browser/container assurance workflow — 11/11 PR workflows successful.
+- Playback evidence #50 retained timeline SHA-256 `dc42912f52e09986df18ca962ea1c0b5688aabc765e214daf62a1a70e7d26f97`. Artifact `9851179481` is 11,690,312 bytes with SHA-256 `8447638c4b3aa831ce527d242e79838cf67ba063af9f77be4ba3a1c342e8c330`.
+- All three weighted canonical windows proved runtime `ready`, consumer `canonical-weighted-canvas`, exactly 1/1 weighted surface ready, no weighted errors or pending reasons, matching frame execution keys, and advancing canonical visual-frame identity while the continuous timeline/audio clocks advanced. Crossfade observed canonical frames `209–219`, zoom `286–297`, and dip `365–376` within their sampled windows.
+- The forced decoder-budget case remained `legacy-time-fallback` with exact reason `transition-weighted-runtime-deferred:weighted-budget-crossfade-out:decoder-budget-poster`; mixed composition remained fallback with `transition-plan-mixed`; the non-adjacent pair remained fallback with `transition-deferred:deferred-slide:pair-inputs-not-adjacent`. Text and cursor remain deliberately unsupported for normal-playback canonical promotion in this slice.
+- Quality #1826 passed frontend lint/unit/performance/build, backend formatting/vet/tests/race detector, the complete Playwright smoke suite, Windows/macOS platform checks, and the renderer parity baseline. Retained `video-parity-baseline` artifact `9851748601` is 53,867,919 bytes with SHA-256 `25b8e0f1ccf31bf518f7844b1ca95791d7f0fe5e4fc53e8544b2ce8002656bc0`.
+- Security #1832 passed Go and JavaScript/TypeScript CodeQL plus Go/root-npm/frontend-npm dependency audits. The branch also moves the vulnerable transitive `browserslist` 4.28.6 lock entry to the fixed 4.28.8 release using npm-generated lock metadata.
+- Transparent-video parity #64 retained artifact `9851138935` (17,396,827 bytes, SHA-256 `c2afb92d74d52cecb265124c182c947bcab5cb8dd3e4288f2c44dfe088ba55ed`), preserving the previously gated VP9-alpha path while this playback work changes media host structure.
+- This documentation commit changes the exact PR head. The successful `630f7152...` run is implementation-tree evidence only; the tracker-bearing exact head must repeat the full applicable gate set before #302 is marked ready or merged.
+
 ## Phase 3 merged consumer sequence
 
 | PR | Consumer step | Merge SHA |
@@ -270,6 +289,7 @@ Unsupported/deferred painter sources stay explicit debt and do not become canoni
 | #296 | Mounted-video presentation tokens, VP9 alpha preservation, and focused ±4 transparent-video gate | `7e2888fc4ef2eaadff883d3b0b5d1542710c06d9` |
 | #299 | Explicit zero-readiness project-background pixelate raster and focused ±1 gate | `f225175e9404762b872944cd2a0ddda0e8e8284f` |
 | #300 | Media-only normal-playback canonical output-frame admission with whole-frame fallback | `d4049105d49ce4bc8337a3c5236593f503869d5d` |
+| #301 | Retained normal-playback canonicalization browser evidence | `1f891dc4338853357dcfdead8c073c9c81516bba` |
 
 ## Safe stacked-branch normalization
 
@@ -283,7 +303,7 @@ Every stacked slice starts from the **actual squash result on current `main`**:
 6. Audit comments/reviews/threads and merge with expected-head protection.
 7. Create the next slice from the new actual squash result.
 
-Recent lineage: #284 from #283 squash `3543ddf7...`; #285 from #284 `7884fef8...`; #286 from #285 `64e34450...`; #287 from #286 `40e895ee...`; #288 from #287 `2774ee76...`; #289 from #288 `7be8e86f...`; #290 validated from #289 squash; #291 mirrored that exact validated #290 head and merged as `7d5f36c3...`; #292 validated directly from #291; #293 mirrored exact validated #292 head and squash-merged as `9850370c2aa25a076f3272077062aeab08c1f326`; #294 validated directly from #293; #295 promoted exact validated #294 head `66722d2c...` and squash-merged as `f6a08f72910677ed538e356d544a1d5d1b59d620`; #296 was directly from #295 and squash-merged as `7e2888fc4ef2eaadff883d3b0b5d1542710c06d9`; #299 was directly from #296 and squash-merged as `f225175e9404762b872944cd2a0ddda0e8e8284f`; #300 was directly from #299 and squash-merged as `d4049105d49ce4bc8337a3c5236593f503869d5d`; **#301 is directly from #300 squash `d4049105d49ce4bc8337a3c5236593f503869d5d`**.
+Recent lineage: #284 from #283 squash `3543ddf7...`; #285 from #284 `7884fef8...`; #286 from #285 `64e34450...`; #287 from #286 `40e895ee...`; #288 from #287 `2774ee76...`; #289 from #288 `7be8e86f...`; #290 validated from #289 squash; #291 mirrored that exact validated #290 head and merged as `7d5f36c3...`; #292 validated directly from #291; #293 mirrored exact validated #292 head and squash-merged as `9850370c2aa25a076f3272077062aeab08c1f326`; #294 validated directly from #293; #295 promoted exact validated #294 head `66722d2c...` and squash-merged as `f6a08f72910677ed538e356d544a1d5d1b59d620`; #296 was directly from #295 and squash-merged as `7e2888fc4ef2eaadff883d3b0b5d1542710c06d9`; #299 was directly from #296 and squash-merged as `f225175e9404762b872944cd2a0ddda0e8e8284f`; #300 was directly from #299 and squash-merged as `d4049105d49ce4bc8337a3c5236593f503869d5d`; #301 was directly from #300 and squash-merged as `1f891dc4338853357dcfdead8c073c9c81516bba`; **#302 is directly from #301 squash `1f891dc4338853357dcfdead8c073c9c81516bba`**.
 
 ## Phase 0 parity baseline
 
@@ -292,6 +312,8 @@ The deterministic `parity-torture-v1` fixture covers 20 seconds at 640×360/30 f
 The focused `parity-pixelate-opaque-v1` fixture is a byte-exact non-regression gate for the isolated opaque-PNG static pixelate path. `parity-pixelate-decoded-video-v1` is additive decoded-media evidence: #293 proves deterministic decoded-frame identity first and then applies the explicit ±3 RGB H.264/yuv420p pixelate-region envelope without changing repository-global parity defaults. `parity-pixelate-alpha-png-v1` is #295's additive straight-alpha/source-over project-background control. `parity-pixelate-alpha-video-v1` is #296's additive transparent VP9 control: it freezes the decoder-alpha contract, requires mounted-video presentation-token identity on frames `0/15/30/59`, and gates the pixelate region at 100% within ±4 RGB. `parity-pixelate-background-v1` is #299's zero-media control: it requires the explicit `project-background` raster source, no decoder/presentation token, and 100% of the retained region within ±1 RGB.
 
 `parity-playback-canonical-v1` is #301's retained free-running browser control for #300. It proves admitted image/video windows consume advancing canonical output-frame identity while the store/UI and audio clocks remain continuous, and separately proves text, cursor, weighted, mixed, and canonically deferred transition windows fail the whole visual frame back to legacy time with exact reasons and no canonical visual-frame publication.
+
+`parity-playback-canonical-v2` is #302's additive normal-playback authority/readiness control. It preserves the admitted video/image and text/cursor fallback cases, promotes ready media-only weighted crossfade/zoom/dip through the existing Canvas consumer with exact per-frame execution-key evidence, and separately proves decoder-budget-not-ready, mixed, and structurally deferred weighted cases still fail the complete visual frame closed. This is structural/runtime browser evidence; it does not redefine the independent pixel-equality gates for deterministic rendered-media fixtures.
 
 The torture baseline does not yet include a project font resource. Add resource-font fixture coverage before treating cross-machine glyph identity as proven. Retained visual evidence remains diagnostic until structural zero-tolerance policy and codec-aware decoded thresholds are frozen and retained on a second supported OS/FFmpeg environment.
 
@@ -346,9 +368,7 @@ Hosted CI is authoritative for platform/toolchain cases unavailable in the curre
 
 ## Next recommended slice
 
-1. **Merge #301 only after the tracker-bearing exact head passes the retained Video Playback Canonical Parity Evidence workflow, Quality/Security, the full Playwright smoke suite and renderer baseline included by Quality, and all applicable platform/sandbox assurances.** The retained pre-tracker run #5 is evidence for the implementation tree, not permission to skip exact-head validation after this tracker commit.
-2. **Start the next Phase 3 slice directly from #301's actual squash result and wire the already-defined media-only weighted-pair Canvas consumer into normal playback as a complete-frame authority.** Reuse the mounted preview media nodes and canonical pair-pixel kernel; do not introduce a second decoder or a new source-time clock.
-3. Make weighted playback admission depend on explicit runtime surface readiness. Until every active weighted pair is ready for the candidate frame, fail the complete visual frame closed to legacy time; preserve mixed and structurally deferred transition cases as fallback. Retain browser evidence for ready weighted crossfade/zoom/dip execution plus not-ready/mixed/deferred fallback before broadening further.
-4. Keep cursor raster admission deferred until export implements corresponding cursor rendering semantics. Keep general shape raster admission deferred until legacy FFmpeg approximations are removed or replaced by a shared deterministic painter. Text playback should not be promoted merely because deterministic Chromium text exists; it needs a normal-playback readiness/ownership contract first.
-5. Add resource-font fixture coverage and second-supported-OS/FFmpeg retained evidence before calling cross-machine Phase 0 visual identity closed.
-6. Then make preview/export consume `audio-graph-v1` exactly as the entry point to Phase 6 audio parity closure.
+1. **Merge #302 only after this tracker-bearing exact head re-passes Video Playback Canonical Parity Evidence, Quality/Security, the full Playwright smoke and renderer baseline included by Quality, transparent-video parity, and all applicable platform/sandbox assurances.** The successful pre-tracker #50 run proves the implementation tree; it is not permission to skip exact-head validation after this documentation update.
+2. **Start the next Phase 3 slice directly from #302's actual squash result and establish normal-playback text readiness/ownership before promoting text.** Reuse the existing canonical text painter, exact `FontFace` resource readiness, and Chromium text-layout stabilization contract; do not turn browser layout output into a second authored text semantic contract.
+3. Retain normal-playback browser evidence for a ready resource-backed text case plus explicit face-not-ready/layout-not-ready/failure and mixed-frame fallback cases. Keep whole-frame authority fail-closed so one visual frame never mixes canonical text with legacy-time media semantics.
+4. Keep cursor normal-playback admission deferred until export implements matching cursor rendering semantics. Keep general shape playback deferred until the current FFmpeg approximations are removed or replaced by a shared deterministic painter. Family-name-only text also remains insufficient evidence for cross-machine face identity; resource-backed provenance stays the deterministic path.

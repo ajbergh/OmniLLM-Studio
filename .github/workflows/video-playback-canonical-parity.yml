@@ -9,8 +9,15 @@ on:
       - 'backend/internal/video/parity_fixture_playback.go'
       - 'backend/internal/video/parity_fixture_playback_test.go'
       - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
+      - 'frontend/src/components/video/PreviewWeightedPairCanvas.tsx'
+      - 'frontend/src/components/video/PreviewWeightedPlaybackConsumer.tsx'
+      - 'frontend/src/components/video/previewFrameTransitionPairs.ts'
+      - 'frontend/src/components/video/previewFrameWeightedPairCanvas.ts'
+      - 'frontend/src/components/video/previewFrameWeightedPairRaster.ts'
       - 'frontend/src/components/video/previewPlaybackCanonicalization.ts'
       - 'frontend/src/components/video/previewPlaybackCanonicalization.test.ts'
+      - 'frontend/src/components/video/previewWeightedPlaybackRuntime.ts'
+      - 'frontend/src/components/video/previewWeightedPlaybackRuntime.test.ts'
       - 'frontend/src/components/video/sourceTiming.ts'
       - 'frontend/src/components/video/sourceTiming.test.ts'
       - 'scripts/video-playback-parity-capture.mjs'
@@ -24,8 +31,15 @@ on:
       - 'backend/internal/video/parity_fixture_playback.go'
       - 'backend/internal/video/parity_fixture_playback_test.go'
       - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
+      - 'frontend/src/components/video/PreviewWeightedPairCanvas.tsx'
+      - 'frontend/src/components/video/PreviewWeightedPlaybackConsumer.tsx'
+      - 'frontend/src/components/video/previewFrameTransitionPairs.ts'
+      - 'frontend/src/components/video/previewFrameWeightedPairCanvas.ts'
+      - 'frontend/src/components/video/previewFrameWeightedPairRaster.ts'
       - 'frontend/src/components/video/previewPlaybackCanonicalization.ts'
       - 'frontend/src/components/video/previewPlaybackCanonicalization.test.ts'
+      - 'frontend/src/components/video/previewWeightedPlaybackRuntime.ts'
+      - 'frontend/src/components/video/previewWeightedPlaybackRuntime.test.ts'
       - 'frontend/src/components/video/sourceTiming.ts'
       - 'frontend/src/components/video/sourceTiming.test.ts'
       - 'scripts/video-playback-parity-capture.mjs'
@@ -81,6 +95,10 @@ jobs:
             cd frontend
             npx vitest run \
               src/components/video/previewPlaybackCanonicalization.test.ts \
+              src/components/video/previewWeightedPlaybackRuntime.test.ts \
+              src/components/video/previewFrameTransitionPairs.test.ts \
+              src/components/video/previewFrameWeightedPairCanvas.test.ts \
+              src/components/video/previewFrameWeightedPairRaster.test.ts \
               src/components/video/sourceTiming.test.ts
           )
           node --check scripts/video-playback-parity-capture.mjs
@@ -132,7 +150,7 @@ jobs:
           done
           node scripts/video-playback-parity-capture.mjs \
             --url http://127.0.0.1:14179 \
-            --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v1.json \
+            --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v2.json \
             --media-dir output/video-playback-canonical/fixture/media \
             --output output/video-playback-canonical/capture
       - name: Record toolchain

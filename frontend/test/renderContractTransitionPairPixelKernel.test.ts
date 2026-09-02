@@ -70,6 +70,23 @@ describe('weighted transition pair pixel kernel', () => {
     expect([...result]).toEqual([188, 188, 0, 255, 0, 0, 255, 128]);
   });
 
+  it('preserves the original transfer-function bytes across varied RGBA inputs and weights', () => {
+    const pixelCount = 2048;
+    const outgoing = deterministicBytes(pixelCount * 4, 0x12345678);
+    const incoming = deterministicBytes(pixelCount * 4, 0x9abcdef0);
+    const cases = [
+      weightedComposition('pair-crossfade', 0.5, 0.5),
+      weightedComposition('pair-zoom', 0.83, 0.17),
+      weightedComposition('dip-to-black', 0.2, 0.35, 0.45),
+    ];
+
+    for (const composition of cases) {
+      expect(composeWeightedTransitionPairRgba(composition, outgoing, incoming)).toEqual(
+        composeWeightedTransitionPairRgbaReference(composition, outgoing, incoming),
+      );
+    }
+  });
+
   it('rejects source-over pair contracts instead of approximating them as weighted pixels', () => {
     const composition = weightedComposition('pair-crossfade', 0.5, 0.5);
     composition.blend_operator = TRANSITION_PAIR_PIXEL_BLEND_SOURCE_OVER_STACK;
@@ -166,4 +183,64 @@ function weightedComposition(
       black_source: TRANSITION_PAIR_PIXEL_BLACK_OPAQUE,
     }),
   };
+}
+
+function deterministicBytes(length: number, initialSeed: number): Uint8ClampedArray {
+  const result = new Uint8ClampedArray(length);
+  let seed = initialSeed >>> 0;
+  for (let index = 0; index < result.length; index += 1) {
+    seed = ((seed * 1664525) + 1013904223) >>> 0;
+    result[index] = seed >>> 24;
+  }
+  return result;
+}
+
+function composeWeightedTransitionPairRgbaReference(
+  composition: CanonicalTransitionPairPixelComposition,
+  outgoing: Uint8ClampedArray,
+  incoming: Uint8ClampedArray,
+): Uint8ClampedArray {
+  const result = new Uint8ClampedArray(outgoing.length);
+  const outgoingWeight = composition.outgoing_weight;
+  const incomingWeight = composition.incoming_weight;
+  const blackWeight = composition.black_weight ?? 0;
+  for (let index = 0; index < outgoing.length; index += 4) {
+    const outgoingAlpha = outgoing[index + 3] / 255;
+    const incomingAlpha = incoming[index + 3] / 255;
+    const outputAlpha = clampUnitReference(
+      outgoingWeight * outgoingAlpha
+      + incomingWeight * incomingAlpha
+      + blackWeight,
+    );
+    if (outputAlpha === 0) continue;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const premultipliedLinear =
+        outgoingWeight * outgoingAlpha * decodeSrgbByteReference(outgoing[index + channel])
+        + incomingWeight * incomingAlpha * decodeSrgbByteReference(incoming[index + channel]);
+      const straightLinear = clampUnitReference(premultipliedLinear / outputAlpha);
+      result[index + channel] = encodeLinearSrgbReference(straightLinear) * 255;
+    }
+    result[index + 3] = outputAlpha * 255;
+  }
+  return result;
+}
+
+function decodeSrgbByteReference(value: number): number {
+  const srgb = value / 255;
+  return srgb <= 0.04045
+    ? srgb / 12.92
+    : ((srgb + 0.055) / 1.055) ** 2.4;
+}
+
+function encodeLinearSrgbReference(linear: number): number {
+  const srgb = linear <= 0.0031308
+    ? 12.92 * linear
+    : (1.055 * (linear ** (1 / 2.4))) - 0.055;
+  return clampUnitReference(srgb);
+}
+
+function clampUnitReference(value: number): number {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
 }

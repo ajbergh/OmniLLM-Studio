@@ -1,0 +1,531 @@
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import { createPortal } from 'react-dom';
+import { useVideoStudioStore } from '../../stores/videoStudio';
+import {
+  applyDecoderBudget,
+  buildTimelineIntervalIndex,
+  compareIndexedTimelineClipOrder,
+  queryActiveClipsAtFrameWithState,
+} from './pro/timelineIndex';
+import { playbackVisualFrameIndex } from './sourceTiming';
+import { planPreviewFrameTransitionPairs } from './previewFrameTransitionPairs';
+import {
+  shouldConsumePreviewFrameWeightedPairs,
+  weightedPairCanvasClipIds,
+} from './previewFrameWeightedPairCanvas';
+import {
+  PreviewWeightedPairCanvas,
+  type PreviewWeightedPairCanvasStatus,
+} from './PreviewWeightedPairCanvas';
+import {
+  clearPreviewWeightedPlaybackRuntime,
+  previewWeightedPlaybackPlanIdentity,
+  previewWeightedPlaybackPlanKey,
+  previewWeightedPlaybackRuntimeRevision,
+  previewWeightedPlaybackRuntimeState,
+  publishPreviewWeightedPlaybackRuntime,
+  subscribePreviewWeightedPlaybackRuntime,
+} from './previewWeightedPlaybackRuntime';
+
+interface SurfaceStatusState {
+  executionKey: string;
+  byTransitionId: Record<string, PreviewWeightedPairCanvasStatus>;
+}
+
+const EMPTY_SURFACE_STATUS: SurfaceStatusState = { executionKey: '', byTransitionId: {} };
+
+/**
+ * Normal-playback bridge for already-defined weighted pair Canvas semantics.
+ * It never owns media time: sources are the mounted legacy preview nodes. The
+ * first frame of a pair topology is rasterized into hidden Canvas surfaces and
+ * must prove readiness before canonical admission. Once that topology is warm,
+ * each later frame still redraws exact frame-evaluated weights and geometry in a
+ * layout effect before paint. Missing/poster/failed surfaces revoke readiness
+ * and keep the complete visual frame on legacy time.
+ */
+export function PreviewWeightedPlaybackConsumer() {
+  const timeline = useVideoStudioStore((state) => state.timeline);
+  const assets = useVideoStudioStore((state) => state.assets);
+  const playheadMs = useVideoStudioStore((state) => state.playheadMs);
+  const isPlaying = useVideoStudioStore((state) => state.isPlaying);
+  const selectedClipId = useVideoStudioStore((state) => state.selectedClipId);
+  const [stage, setStage] = useState<HTMLElement | null>(null);
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+  const [surfaceStatus, setSurfaceStatus] = useState<SurfaceStatusState>(EMPTY_SURFACE_STATUS);
+  const surfaceStatusRef = useRef<SurfaceStatusState>(EMPTY_SURFACE_STATUS);
+  const runtimeRevision = useSyncExternalStore(
+    subscribePreviewWeightedPlaybackRuntime,
+    previewWeightedPlaybackRuntimeRevision,
+    previewWeightedPlaybackRuntimeRevision,
+  );
+
+  useLayoutEffect(() => {
+    const resolveStage = () => {
+      const next = document.querySelector<HTMLElement>('[data-testid="video-preview-program"]');
+      setStage((current) => current === next ? current : next);
+    };
+    resolveStage();
+    const observer = new MutationObserver(resolveStage);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!stage) {
+      setStageSize({ width: 0, height: 0 });
+      return;
+    }
+    const update = () => setStageSize({ width: stage.clientWidth, height: stage.clientHeight });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [stage]);
+
+  useEffect(() => () => clearPreviewWeightedPlaybackRuntime(), []);
+
+  const fps = timeline?.canvas.fps || 30;
+  const canvasWidth = timeline?.canvas.width || 1920;
+  const canvasHeight = timeline?.canvas.height || 1080;
+  const playbackFrame = isPlaying ? playbackVisualFrameIndex(playheadMs, fps) : null;
+  const intervalIndex = useMemo(() => buildTimelineIntervalIndex(timeline, assets), [timeline, assets]);
+  const previewFrame = useMemo(() => {
+    if (playbackFrame === null) {
+      return { layers: [], posterClipIds: new Set<string>() };
+    }
+    const frameQuery = queryActiveClipsAtFrameWithState(intervalIndex, playbackFrame, fps);
+    const visualIndexed = frameQuery.clips
+      .filter(({ track }) => track.visible)
+      .filter(({ clip, asset }) => (
+        !clip.audio_only && (Boolean(clip.text) || Boolean(clip.shape) || !asset || !asset.mime_type.startsWith('audio/'))
+      ))
+      .sort(compareIndexedTimelineClipOrder);
+    const decoderLimit = Math.max(1, Math.min(12, Number(window.localStorage.getItem('omnillm-video-decoder-budget') || 4)));
+    const budgeted = applyDecoderBudget(visualIndexed, decoderLimit, selectedClipId);
+    return {
+      layers: [...budgeted.mounted, ...budgeted.posters].sort(compareIndexedTimelineClipOrder),
+      posterClipIds: new Set(budgeted.posters.map(({ clip }) => clip.id)),
+    };
+  }, [fps, intervalIndex, playbackFrame, selectedClipId]);
+  const transitionPlan = useMemo(
+    () => planPreviewFrameTransitionPairs(playbackFrame, previewFrame.layers),
+    [playbackFrame, previewFrame.layers],
+  );
+  const weightedClipIds = useMemo(
+    () => weightedPairCanvasClipIds(transitionPlan),
+    [transitionPlan],
+  );
+  const posterDeferredReasons = useMemo(
+    () => weightedClipIds
+      .filter((clipId) => previewFrame.posterClipIds.has(clipId))
+      .map((clipId) => `${clipId}:decoder-budget-poster`),
+    [previewFrame.posterClipIds, weightedClipIds],
+  );
+  const structurallyConsumable = shouldConsumePreviewFrameWeightedPairs(transitionPlan);
+  const planIdentity = previewWeightedPlaybackPlanIdentity(transitionPlan);
+  const executionKey = previewWeightedPlaybackPlanKey(playbackFrame, transitionPlan);
+  const weightedSlots = useMemo(
+    () => structurallyConsumable && posterDeferredReasons.length === 0
+      ? transitionPlan.slots.filter((slot) => slot.kind === 'pair')
+      : [],
+    [posterDeferredReasons.length, structurallyConsumable, transitionPlan.slots],
+  );
+
+  const onStatusChange = useCallback((status: PreviewWeightedPairCanvasStatus) => {
+    if (!status.executionKey) return;
+    const current = surfaceStatusRef.current;
+    const byTransitionId = current.executionKey === status.executionKey
+      ? current.byTransitionId
+      : {};
+    const previous = byTransitionId[status.transitionId];
+    const next: SurfaceStatusState = {
+      executionKey: status.executionKey,
+      byTransitionId: {
+        ...byTransitionId,
+        [status.transitionId]: status,
+      },
+    };
+    surfaceStatusRef.current = next;
+    if (current.executionKey !== status.executionKey
+      || previous?.status !== status.status
+      || previous?.reason !== status.reason) {
+      setSurfaceStatus(next);
+    }
+
+    // Child Canvas layout effects run before the parent can reveal the frame.
+    // Publish their exact execution-key result directly so admission never has
+    // to wait for a React state round-trip that can lose the current output frame.
+    if (status.executionKey !== executionKey || playbackFrame === null || !planIdentity) return;
+    const statuses = weightedSlots.map((slot) => next.byTransitionId[slot.surface.transition_id]);
+    const failed = statuses.find((entry) => entry?.status === 'failed');
+    if (failed) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'failed',
+        reason: failed.reason || `${failed.transitionId}:weighted-canvas-failed`,
+      });
+      return;
+    }
+    if (statuses.length === weightedSlots.length
+      && weightedSlots.length > 0
+      && statuses.every((entry) => entry?.status === 'ready')) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'ready',
+      });
+      return;
+    }
+    if (statuses.some((entry) => entry?.status === 'pending')) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'pending',
+      });
+    }
+  }, [executionKey, planIdentity, playbackFrame, weightedSlots]);
+
+  const currentStatuses = surfaceStatus.executionKey === executionKey
+    ? weightedSlots.map((slot) => surfaceStatus.byTransitionId[slot.surface.transition_id])
+    : [];
+  const allReady = Boolean(
+    executionKey
+    && weightedSlots.length > 0
+    && currentStatuses.length === weightedSlots.length
+    && currentStatuses.every((status) => status?.status === 'ready'),
+  );
+  const failedStatus = currentStatuses.find((status) => status?.status === 'failed');
+  const hasPendingStatus = currentStatuses.some((status) => status?.status === 'pending');
+  const runtimeState = previewWeightedPlaybackRuntimeState();
+  const exactFrameReady = Boolean(
+    executionKey
+    && runtimeState.planKey === executionKey
+    && runtimeState.planIdentity === planIdentity
+    && runtimeState.status === 'ready',
+  );
+  const topologyWarm = Boolean(
+    planIdentity
+    && runtimeState.planIdentity === planIdentity
+    && runtimeState.status === 'ready',
+  );
+
+  useLayoutEffect(() => {
+    if (!isPlaying || playbackFrame === null || transitionPlan.mode !== 'canonical-weighted-deferred' || !executionKey || !planIdentity) {
+      clearPreviewWeightedPlaybackRuntime();
+      return;
+    }
+    if (posterDeferredReasons.length > 0) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'deferred',
+        reason: posterDeferredReasons.join(','),
+      });
+      return;
+    }
+    if (!structurallyConsumable) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'deferred',
+        reason: 'weighted-canvas-plan-not-consumable',
+      });
+      return;
+    }
+
+    // Prefer the exact status published synchronously by the child Canvas in
+    // this same layout phase. Render-derived status may still describe the
+    // previous key until React processes the diagnostic state update.
+    const liveRuntime = previewWeightedPlaybackRuntimeState();
+    if (liveRuntime.planKey === executionKey
+      && liveRuntime.planIdentity === planIdentity
+      && (liveRuntime.status === 'ready'
+        || liveRuntime.status === 'pending'
+        || liveRuntime.status === 'failed')) {
+      return;
+    }
+    if (failedStatus) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'failed',
+        reason: failedStatus.reason || `${failedStatus.transitionId}:weighted-canvas-failed`,
+      });
+      return;
+    }
+    if (hasPendingStatus) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'pending',
+      });
+      return;
+    }
+    if (allReady) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'ready',
+      });
+      return;
+    }
+    // A new exact-frame execution key has no status until its child Canvas
+    // layout effects have attempted the redraw. Do not revoke a topology that
+    // has already proved ready merely because that key changed. If the redraw
+    // reports pending/failed, the branches above revoke readiness synchronously
+    // before paint. The first frame of a topology still publishes pending until
+    // it proves one successful exact draw.
+    if (!topologyWarm) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'pending',
+      });
+    }
+  }, [
+    allReady,
+    executionKey,
+    failedStatus,
+    hasPendingStatus,
+    isPlaying,
+    planIdentity,
+    playbackFrame,
+    playheadMs,
+    posterDeferredReasons,
+    structurallyConsumable,
+    topologyWarm,
+    transitionPlan.mode,
+  ]);
+
+  const sourceForClip = useCallback((clipId: string): HTMLImageElement | HTMLVideoElement | null => {
+    if (!stage) return null;
+    const host = findPreviewClipNode(stage, clipId);
+    if (!host) return null;
+    return host.querySelector<HTMLVideoElement>('video')
+      ?? host.querySelector<HTMLImageElement>('img');
+  }, [stage]);
+
+  useLayoutEffect(() => {
+    if (!isPlaying
+      || playbackFrame === null
+      || !stage
+      || !structurallyConsumable
+      || posterDeferredReasons.length > 0) return;
+
+    // A paused preview has already synchronized mounted media to the authored
+    // playhead. Resume those settled video elements during layout so the legacy
+    // passive media-sync effect sees a running decoder and does not issue a
+    // redundant currentTime assignment on play. This bridge never changes
+    // source time or playback rate; the legacy preview remains the time owner.
+    for (const clipId of weightedClipIds) {
+      const source = sourceForClip(clipId);
+      if (!(source instanceof HTMLVideoElement)
+        || !source.paused
+        || source.ended
+        || source.seeking
+        || source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) continue;
+      void source.play().catch(() => { /* muted preview; legacy sync retains fallback behavior */ });
+    }
+  }, [
+    isPlaying,
+    playbackFrame,
+    posterDeferredReasons.length,
+    sourceForClip,
+    stage,
+    structurallyConsumable,
+    weightedClipIds,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!stage) return;
+    const previousFrame = stage.getAttribute('data-preview-weighted-playback-frame-index');
+    const previousKey = stage.getAttribute('data-preview-weighted-playback-plan-key');
+    const previousRuntime = stage.getAttribute('data-preview-weighted-playback-runtime');
+    const previousConsumer = stage.getAttribute('data-preview-weighted-playback-consumer');
+    const previousDeferred = stage.getAttribute('data-preview-weighted-playback-deferred');
+
+    if (playbackFrame !== null && transitionPlan.mode === 'canonical-weighted-deferred') {
+      const canonicalPlaybackActive = exactFrameReady
+        && stage.dataset.previewVisualFrameMode === 'canonical-playback'
+        && stage.dataset.previewVisualFrameIndex === String(playbackFrame);
+      stage.setAttribute('data-preview-weighted-playback-frame-index', String(playbackFrame));
+      if (executionKey) stage.setAttribute('data-preview-weighted-playback-plan-key', executionKey);
+      else stage.removeAttribute('data-preview-weighted-playback-plan-key');
+      stage.setAttribute(
+        'data-preview-weighted-playback-runtime',
+        posterDeferredReasons.length > 0
+          ? 'deferred'
+          : runtimeState.planKey === executionKey && runtimeState.planIdentity === planIdentity
+            ? runtimeState.status
+            : failedStatus
+              ? 'failed'
+              : hasPendingStatus
+                ? 'pending'
+                : allReady || topologyWarm
+                  ? 'ready'
+                  : 'pending',
+      );
+      stage.setAttribute(
+        'data-preview-weighted-playback-consumer',
+        canonicalPlaybackActive ? 'canonical-weighted-canvas' : 'legacy-time-fallback',
+      );
+      const deferred = posterDeferredReasons.length > 0
+        ? posterDeferredReasons.join(',')
+        : runtimeState.planKey === executionKey && runtimeState.reason
+          ? runtimeState.reason
+          : failedStatus?.reason;
+      if (deferred) stage.setAttribute('data-preview-weighted-playback-deferred', deferred);
+      else stage.removeAttribute('data-preview-weighted-playback-deferred');
+    } else {
+      stage.removeAttribute('data-preview-weighted-playback-frame-index');
+      stage.removeAttribute('data-preview-weighted-playback-plan-key');
+      stage.removeAttribute('data-preview-weighted-playback-runtime');
+      stage.removeAttribute('data-preview-weighted-playback-consumer');
+      stage.removeAttribute('data-preview-weighted-playback-deferred');
+    }
+
+    return () => {
+      restoreAttribute(stage, 'data-preview-weighted-playback-frame-index', previousFrame);
+      restoreAttribute(stage, 'data-preview-weighted-playback-plan-key', previousKey);
+      restoreAttribute(stage, 'data-preview-weighted-playback-runtime', previousRuntime);
+      restoreAttribute(stage, 'data-preview-weighted-playback-consumer', previousConsumer);
+      restoreAttribute(stage, 'data-preview-weighted-playback-deferred', previousDeferred);
+    };
+  }, [
+    allReady,
+    exactFrameReady,
+    executionKey,
+    failedStatus,
+    hasPendingStatus,
+    planIdentity,
+    playbackFrame,
+    playheadMs,
+    posterDeferredReasons,
+    runtimeRevision,
+    runtimeState,
+    stage,
+    topologyWarm,
+    transitionPlan.mode,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!exactFrameReady || !stage || !executionKey || playbackFrame === null) return;
+    if (stage.dataset.previewVisualFrameMode !== 'canonical-playback'
+      || stage.dataset.previewVisualFrameIndex !== String(playbackFrame)) return;
+    const restorers: Array<() => void> = [];
+    for (const slot of weightedSlots) {
+      const lower = findPreviewClipNode(stage, slot.lower.clip.id);
+      const upper = findPreviewClipNode(stage, slot.upper.clip.id);
+      if (!lower || !upper) continue;
+      const lowerStyle = lower.getAttribute('style');
+      const upperStyle = upper.getAttribute('style');
+      const previousHost = lower.getAttribute('data-preview-weighted-playback-host');
+      const childPaint = [...lower.children].map((child) => ({
+        child: child as HTMLElement,
+        opacity: (child as HTMLElement).style.opacity,
+        visibility: (child as HTMLElement).style.visibility,
+      }));
+
+      lower.setAttribute('data-preview-weighted-playback-host', slot.surface.transition_id);
+      lower.style.left = '0';
+      lower.style.top = '0';
+      lower.style.width = '100%';
+      lower.style.height = '100%';
+      lower.style.maxWidth = 'none';
+      lower.style.transform = 'none';
+      lower.style.transformOrigin = '50% 50%';
+      lower.style.opacity = '1';
+      lower.style.clipPath = 'none';
+      lower.style.filter = 'none';
+      lower.style.pointerEvents = 'none';
+      lower.style.outline = 'none';
+      for (const child of [...lower.children]) {
+        const element = child as HTMLElement;
+        const isCurrentPlaybackCanvas = element.dataset.previewTransitionPairSurfaceRole === 'playback'
+          && element.dataset.previewTransitionPairRuntimeKey === executionKey;
+        element.style.visibility = 'visible';
+        element.style.opacity = isCurrentPlaybackCanvas ? '1' : '0';
+      }
+      // Keep peer media render-active too. opacity:0 removes all visual
+      // contribution while avoiding visibility:hidden decoder throttling that can
+      // drop HAVE_CURRENT_DATA and revoke the next weighted frame's readiness.
+      upper.style.visibility = 'visible';
+      upper.style.opacity = '0';
+
+      restorers.push(() => {
+        restoreAttribute(lower, 'style', lowerStyle);
+        restoreAttribute(upper, 'style', upperStyle);
+        restoreAttribute(lower, 'data-preview-weighted-playback-host', previousHost);
+        for (const { child, opacity, visibility } of childPaint) {
+          child.style.opacity = opacity;
+          child.style.visibility = visibility;
+        }
+      });
+    }
+    return () => restorers.reverse().forEach((restore) => restore());
+  }, [exactFrameReady, executionKey, playbackFrame, playheadMs, runtimeRevision, stage, weightedSlots]);
+
+  if (!isPlaying
+    || playbackFrame === null
+    || !structurallyConsumable
+    || posterDeferredReasons.length > 0
+    || !executionKey
+    || !stage) {
+    return null;
+  }
+
+  return (
+    <>
+      {weightedSlots.map((slot) => {
+        const host = findPreviewClipNode(stage, slot.lower.clip.id);
+        if (!host) return null;
+        return createPortal(
+          <PreviewWeightedPairCanvas
+            slot={slot}
+            canvasWidth={canvasWidth}
+            canvasHeight={canvasHeight}
+            stageWidth={stageSize.width}
+            stageHeight={stageSize.height}
+            sourceForClip={sourceForClip}
+            executionKey={executionKey}
+            active={false}
+            surfaceRole="playback"
+            onStatusChange={onStatusChange}
+          />,
+          host,
+          `playback-weighted-pair-${slot.surface.transition_id}`,
+        );
+      })}
+    </>
+  );
+}
+
+function findPreviewClipNode(stage: HTMLElement, clipId: string): HTMLElement | null {
+  for (const node of stage.querySelectorAll<HTMLElement>('[data-preview-clip-id]')) {
+    if (node.dataset.previewClipId === clipId) return node;
+  }
+  return null;
+}
+
+function restoreAttribute(node: HTMLElement, name: string, value: string | null): void {
+  if (value === null) node.removeAttribute(name);
+  else node.setAttribute(name, value);
+}
