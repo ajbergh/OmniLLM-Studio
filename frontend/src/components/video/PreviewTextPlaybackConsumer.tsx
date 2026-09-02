@@ -84,7 +84,10 @@ export function PreviewTextPlaybackConsumer() {
       setStageSize({ width: 0, height: 0 });
       return;
     }
-    const update = () => setStageSize({ width: stage.clientWidth, height: stage.clientHeight });
+    const update = () => {
+      const rect = stage.getBoundingClientRect();
+      setStageSize({ width: rect.width, height: rect.height });
+    };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(stage);
