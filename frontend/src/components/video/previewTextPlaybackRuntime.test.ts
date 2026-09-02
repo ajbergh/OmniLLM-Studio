@@ -55,9 +55,9 @@ describe('normal playback text runtime', () => {
   });
 
   it('keeps family-name-only and missing font assets explicitly deferred', () => {
-    expect(previewTextPlaybackStructuralDeferredReason([textLayer('family', undefined)]))
+    expect(previewTextPlaybackStructuralDeferredReason([textLayer('family', '')]))
       .toBe('family:resource-font-required');
-    expect(resolvePreviewTextPlaybackRuntime(5, [textLayer('family', undefined)])).toEqual({
+    expect(resolvePreviewTextPlaybackRuntime(5, [textLayer('family', '')])).toEqual({
       ready: false,
       deferredReason: 'text-playback-runtime-deferred:family:resource-font-required',
     });
