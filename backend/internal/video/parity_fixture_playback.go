@@ -181,7 +181,7 @@ func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, [
 		{Name: "weighted-dip-canonical", FrameIndex: 354, ObserveMS: 350, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-weighted-deferred", ExpectedWeightedRuntime: "ready", ExpectedWeightedConsumer: "canonical-weighted-canvas", ExpectedWeightedPairID: "weighted-dip", RequireWeightedCanvas: true, RequireAdvancingFrames: true},
 		{Name: "weighted-decoder-budget-fallback", FrameIndex: 432, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-weighted-runtime-deferred:weighted-budget-crossfade-out:decoder-budget-poster", ExpectedTransitionMode: "legacy", ExpectedWeightedRuntime: "deferred", ExpectedWeightedConsumer: "legacy-time-fallback", ExpectedWeightedPairID: "weighted-budget-crossfade", DecoderBudget: 1},
 		{Name: "mixed-transition-fallback", FrameIndex: 510, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-plan-mixed", ExpectedTransitionMode: "legacy"},
-		{Name: "deferred-transition-fallback", FrameIndex: 588, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-deferred:deferred-slide:pair-inputs-not-adjacent", ExpectedTransitionMode: "legacy"},
+		{Name: "deferred-transition-fallback", FrameIndex: 582, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-deferred:deferred-slide:pair-inputs-not-adjacent", ExpectedTransitionMode: "legacy"},
 	}
 	return doc, assets, cases
 }
