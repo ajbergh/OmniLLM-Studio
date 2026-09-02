@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPreviewTextLayoutSnapshot,
   previewTextLayoutSnapshotStable,
+  previewTextLayoutTopologyStable,
   resolvePreviewCanvasStageScale,
   type PreviewTextLayoutMeasurement,
 } from './previewTextLayoutSnapshot';
@@ -100,7 +101,27 @@ describe('preview text layout snapshot', () => {
     expect(() => resolvePreviewCanvasStageScale(renderedWidth, 250, 640, 360)).toThrow('text-layout-stage-scale-nonuniform');
   });
 
-  it('requires a stable second Chromium pass after intrinsic dimensions are frozen', () => {
+  it('allows one intrinsic-to-explicit quantization only when line topology is unchanged', () => {
+    const intrinsic = buildPreviewTextLayoutSnapshot(measurement({
+      borderBoxWidthPx: 319.192428,
+      borderBoxHeightPx: 188.407678,
+      lineFragmentCount: 6,
+    }), 1);
+    const explicit = {
+      border_box_width: 319.179542,
+      border_box_height: 188.407678,
+      line_fragment_count: 6,
+    };
+
+    expect(previewTextLayoutTopologyStable(intrinsic, explicit)).toBe(true);
+    expect(previewTextLayoutSnapshotStable(intrinsic, explicit)).toBe(false);
+    expect(previewTextLayoutTopologyStable(intrinsic, {
+      ...explicit,
+      line_fragment_count: 7,
+    })).toBe(false);
+  });
+
+  it('requires a stable explicit-to-explicit Chromium pass with the existing strict tolerance', () => {
     const before = buildPreviewTextLayoutSnapshot(measurement(), 1);
     expect(previewTextLayoutSnapshotStable(before, before)).toBe(true);
     expect(previewTextLayoutSnapshotStable(before, {
