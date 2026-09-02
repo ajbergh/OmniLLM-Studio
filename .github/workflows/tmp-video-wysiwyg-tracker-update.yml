@@ -1,0 +1,139 @@
+name: Temporary WYSIWYG tracker update
+
+on:
+  push:
+    branches:
+      - feat/video-wysiwyg-phase3-text-playback-readiness
+    paths:
+      - .github/workflows/tmp-video-wysiwyg-tracker-update.yml
+
+permissions:
+  contents: write
+
+jobs:
+  update-tracker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/video-wysiwyg-phase3-text-playback-readiness
+          fetch-depth: 0
+      - name: Update durable WYSIWYG tracker
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md')
+          text = path.read_text()
+
+          def replace_once(old: str, new: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one match, found {count}: {old[:120]!r}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "Latest merged WYSIWYG program PR: **#301 — Retain normal playback canonicalization browser evidence** — squash merge `1f891dc4338853357dcfdead8c073c9c81516bba`, directly from #300's actual squash result `d4049105d49ce4bc8337a3c5236593f503869d5d`.\n\nCurrent implementation PR: **#302 — Promote ready weighted transitions during normal playback** on branch `feat/video-wysiwyg-phase3-weighted-playback`, created directly from #301's actual squash result `1f891dc4338853357dcfdead8c073c9c81516bba`. Pre-tracker exact head `630f71526b3ae4e01a84d34553520d90b3304ac1` passed all 11 PR workflows, including retained 10-case weighted playback browser evidence. This tracker update intentionally creates a new exact head that must re-run repository gates before merge.",
+              "Latest merged WYSIWYG program PR: **#303 — Promote ready weighted transitions during normal playback** — squash merge `1acb20edbdc80f77c4a21e8e337379a30fc8beff`, a merge-only mirror of exact validated #302 head `a1a1db81ed908d4153c4c4188ce3aac786bf1ed7`.\n\nCurrent implementation PR: **#304 — Promote resource-backed text during canonical playback** on branch `feat/video-wysiwyg-phase3-text-playback-readiness`, created directly from #303's actual squash result `1acb20edbdc80f77c4a21e8e337379a30fc8beff`. Implementation head `3c8caa3960d832dec73c5192b9f6552c798a0dcb` passed all 10 triggered PR workflows, including Video Playback Canonical Parity Evidence #75, Quality Gate #1851, Security Scan #1857, and every triggered platform/sandbox assurance. Retained playback artifact `9863002982` is 12,424,522 bytes with SHA-256 `470d1b312dc1bd7f129015f1001fd514644bfe61110e92958549c4ba7409e74b`. This tracker update intentionally creates a new exact head that must re-run the applicable repository gates before merge."
+          )
+
+          replace_once(
+              "- This documentation commit changes the exact PR head. The successful `630f7152...` run is implementation-tree evidence only; the tracker-bearing exact head must repeat the full applicable gate set before #302 is marked ready or merged.",
+              "- Final exact weighted-playback head `a1a1db81ed908d4153c4c4188ce3aac786bf1ed7` passed all 14 applicable PR workflows, including Quality Gate #1831, Security Scan #1837, Video Playback Canonical Parity Evidence #55, transparent-video parity #69, opaque pixelate #104, alpha pixelate #51, background pixelate #21, and all platform/sandbox assurances. Playback artifact `9854866443` is 11,688,793 bytes with SHA-256 `d1700669ed7612ad5e227b2a1e0428f180ab1b4e1e8192abec2a1f35b03bb0a9`; renderer-baseline artifact `9855837204` is 53,868,122 bytes with SHA-256 `649e5a2951b35a84e6ba932cb49bdfb044687466fe915b1c08c9721ef93b40e8`.\n- Because the connected ready-for-review GraphQL mutation failed on an upstream schema field, #303 mirrored the identical validated #302 tree and squash-merged it unchanged as `1acb20edbdc80f77c4a21e8e337379a30fc8beff`. #302 is superseded by that merge path."
+          )
+
+          insert_marker = "\n## Phase 3 merged consumer sequence\n"
+          section = r'''
+### #304 resource-backed text normal-playback promotion
+
+#304 promotes exact resource-backed text into ordinary canonical playback without changing authored text semantics or introducing browser measurements into `text-state-v1`.
+
+- The branch starts directly from #303's actual squash result `1acb20edbdc80f77c4a21e8e337379a30fc8beff`; no stale stacked base is carried forward.
+- A transient playback-only text runtime binds active canonical text inputs to exact resource-font identity and Chromium layout readiness. It prewarms the exact project font bytes, waits for the isolated `FontFace`, reuses the established Chromium text-layout snapshot/stability contract, and publishes readiness only for the matching canonical output frame.
+- `PreviewTextPlaybackConsumer` is the normal-playback consumer for ready text and reports `canonical-text-dom`. Browser layout remains consumer evidence: authored `text-state-v1` is not mutated with measured width, height, line fragments, or other renderer-specific output.
+- Normal-playback admission stays whole-frame fail-closed. Family-name-only text defers with `resource-font-required`; font-load or layout failure remains explicit runtime failure; cursor, shape, mixed unsupported frames, non-authoritative state, and unsupported transition composition stay on the continuous-time painter.
+- A Chromium stability defect discovered by retained evidence was fixed without relaxing the contract: intrinsic text width is frozen to explicit CSS once, then the same explicit state is observed on the next frame. The strict `0.01` canonical-pixel geometry tolerance and exact line-fragment-count requirement remain unchanged.
+- `parity-playback-canonical-v3` expands retained normal-playback coverage to 13 cases: admitted video, admitted image, ready resource-backed text, family-name-only text fallback, invalid-font failure fallback, cursor fallback, ready text plus unsupported cursor whole-frame fallback, ready weighted crossfade/zoom/dip, forced decoder-budget weighted fallback, mixed-transition fallback, and structural transition deferral.
+- Exact implementation head `3c8caa3960d832dec73c5192b9f6552c798a0dcb` passed Video Playback Canonical Parity Evidence #75, Quality Gate #1851, Security Scan #1857, and every triggered Linux/macOS/browser/container assurance — 10/10 triggered PR workflows successful.
+- Playback evidence #75 retained timeline SHA-256 `827e3f160ec04f7a8ed7d0fe74d26c8e81a7e394cffba6e28ee29fb4d4c5b508`. Artifact `9863002982` is 12,424,522 bytes with SHA-256 `470d1b312dc1bd7f129015f1001fd514644bfe61110e92958549c4ba7409e74b`. The retained toolchain is Go `1.25.13`, Node `24.19.0`, npm `11.17.0`, Playwright `1.62.1`, and FFmpeg/ffprobe `6.1.1-3ubuntu5` on Ubuntu 24.04.
+- `resource-text-canonical-playback` proved `canonical-playback` with consumer `canonical-text-dom`, exactly 1/1 text surface ready/visible/layout-ready/font-ready, and the required readiness trace `font-face-not-ready → font-face-ready → text-layout-not-ready → ready` while canonical frame identity continued to advance.
+- `family-text-fallback` remained `legacy-time-fallback` with exact reason `text-playback-runtime-deferred:playback-text-family:resource-font-required`. `invalid-font-text-fallback` remained fail-closed with exact reason `text-playback-runtime-failed:playback-text-invalid-font:font-face-load-failed`.
+- `mixed-text-cursor-fallback` deliberately warmed its supported resource-backed text runtime to `ready` but kept the complete visual frame on `legacy-time-fallback` because `playback-mixed-cursor` is unsupported. This proves runtime readiness cannot partially promote one painter inside an otherwise unsupported frame.
+- The prior v2 media/weighted contracts remain intact in v3: ready crossfade/zoom/dip still use `canonical-weighted-canvas`; forced decoder-budget, mixed-transition, and non-adjacent structural deferral cases retain their exact legacy fallback reasons.
+- This documentation update changes the exact PR head. Run #75 proves the implementation tree; the tracker-bearing exact head must repeat every workflow triggered by the final PR diff before #304 is merged.
+'''
+          replace_once(insert_marker, "\n" + section.strip() + insert_marker)
+
+          replace_once(
+              "| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #289 added the byte-exact opaque-PNG gate; #291 added H.264 measurement; #293 proves decoded frame identity on 0/15/30/59 and gates the focused ±3 H.264/yuv420p envelope only after identity proof. #295 adds deterministic partial-alpha PNG/background-composition evidence; #296 adds retained VP9 alpha-decoder, requested/presented-frame, and focused ±4 transparent-video evidence; #299 adds retained zero-readiness project-background evidence at focused ±1; #301 adds retained seven-window free-running browser playback evidence with independent continuous UI/audio clocks. Resource-font fixture coverage and second-platform retained evidence remain. |",
+              "| Phase 0 — Reproducible parity baseline | **In progress** | Deterministic 103-frame visual/audio/delivery evidence exists. #289 added the byte-exact opaque-PNG gate; #291 added H.264 measurement; #293 proves decoded frame identity on 0/15/30/59 and gates the focused ±3 H.264/yuv420p envelope only after identity proof. #295 adds deterministic partial-alpha PNG/background-composition evidence; #296 adds retained VP9 alpha-decoder, requested/presented-frame, and focused ±4 transparent-video evidence; #299 adds retained zero-readiness project-background evidence at focused ±1; #301 adds retained free-running browser playback evidence; #303 adds ready weighted-pair playback evidence; #304 adds deterministic project-font resource readiness/layout/ownership evidence during free-running playback. The 103-frame torture fixture still lacks a project-font resource, browser↔export glyph-pixel acceptance, and second-platform retained evidence. |"
+          )
+
+          replace_once(
+              "| Phase 3 — Shared preview composition | **In progress** | #261–#289 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painters, font readiness/layout snapshots, deterministic pixelate semantics, exact opaque-PNG evidence, and sampled-render fan-out. #291/#293 close retained H.264 measurement and deterministic frame identity. #295 merges renderer-ordered project-background/source-over composition for transparent images; #296 adds mounted-video presentation tokens, transparent VP9 alpha preservation, source-over video composition, and browser/FFmpeg boundary alignment without changing canonical source/audio time; #299 admits project background itself as an explicit zero-readiness pixelate raster source. #300 merged authoritative media-only normal playback in the canonical output-frame domain with whole-frame fail-closed diagnostics, and #301 now retains real browser evidence for that contract. Weighted-pair normal-playback execution, mixed/deferred transition playback, canonical text/shape/cursor playback painters, further independently evidenced raster classes, and AudioGraph consumption remain. |",
+              "| Phase 3 — Shared preview composition | **In progress** | #261–#289 merged deterministic activity/source/transform/view/perspective/media geometry/effects/transitions, canonical text/shape/cursor painter inputs, font readiness/layout snapshots, deterministic pixelate semantics, exact opaque-PNG evidence, and sampled-render fan-out. #291/#293 close retained H.264 measurement and deterministic frame identity. #295 merges renderer-ordered project-background/source-over composition for transparent images; #296 adds mounted-video presentation tokens, transparent VP9 alpha preservation, source-over video composition, and browser/FFmpeg boundary alignment without changing canonical source/audio time; #299 admits project background itself as an explicit zero-readiness pixelate raster source. #300/#301 establish and retain authoritative media normal playback; #303 promotes ready weighted crossfade/zoom/dip Canvas pairs during normal playback; current #304 promotes ready resource-backed text through the canonical DOM consumer with whole-frame fallback on unsupported/failing text states. Mixed/deferred transition expansion, shape/cursor normal-playback authority, further independently evidenced raster classes, and AudioGraph consumption remain. |"
+          )
+
+          replace_once(
+              "| #301 | Retained normal-playback canonicalization browser evidence | `1f891dc4338853357dcfdead8c073c9c81516bba` |",
+              "| #301 | Retained normal-playback canonicalization browser evidence | `1f891dc4338853357dcfdead8c073c9c81516bba` |\n| #303 | Ready weighted crossfade/zoom/dip Canvas authority during normal playback | `1acb20edbdc80f77c4a21e8e337379a30fc8beff` |"
+          )
+
+          replace_once(
+              "Recent lineage: #284 from #283 squash `3543ddf7...`; #285 from #284 `7884fef8...`; #286 from #285 `64e34450...`; #287 from #286 `40e895ee...`; #288 from #287 `2774ee76...`; #289 from #288 `7be8e86f...`; #290 validated from #289 squash; #291 mirrored that exact validated #290 head and merged as `7d5f36c3...`; #292 validated directly from #291; #293 mirrored exact validated #292 head and squash-merged as `9850370c2aa25a076f3272077062aeab08c1f326`; #294 validated directly from #293; #295 promoted exact validated #294 head `66722d2c...` and squash-merged as `f6a08f72910677ed538e356d544a1d5d1b59d620`; #296 was directly from #295 and squash-merged as `7e2888fc4ef2eaadff883d3b0b5d1542710c06d9`; #299 was directly from #296 and squash-merged as `f225175e9404762b872944cd2a0ddda0e8e8284f`; #300 was directly from #299 and squash-merged as `d4049105d49ce4bc8337a3c5236593f503869d5d`; #301 was directly from #300 and squash-merged as `1f891dc4338853357dcfdead8c073c9c81516bba`; **#302 is directly from #301 squash `1f891dc4338853357dcfdead8c073c9c81516bba`**.",
+              "Recent lineage: #284 from #283 squash `3543ddf7...`; #285 from #284 `7884fef8...`; #286 from #285 `64e34450...`; #287 from #286 `40e895ee...`; #288 from #287 `2774ee76...`; #289 from #288 `7be8e86f...`; #290 validated from #289 squash; #291 mirrored that exact validated #290 head and merged as `7d5f36c3...`; #292 validated directly from #291; #293 mirrored exact validated #292 head and squash-merged as `9850370c2aa25a076f3272077062aeab08c1f326`; #294 validated directly from #293; #295 promoted exact validated #294 head `66722d2c...` and squash-merged as `f6a08f72910677ed538e356d544a1d5d1b59d620`; #296 was directly from #295 and squash-merged as `7e2888fc4ef2eaadff883d3b0b5d1542710c06d9`; #299 was directly from #296 and squash-merged as `f225175e9404762b872944cd2a0ddda0e8e8284f`; #300 was directly from #299 and squash-merged as `d4049105d49ce4bc8337a3c5236593f503869d5d`; #301 was directly from #300 and squash-merged as `1f891dc4338853357dcfdead8c073c9c81516bba`; #302 validated directly from #301; #303 mirrored exact validated #302 head `a1a1db81...` and squash-merged as `1acb20edbdc80f77c4a21e8e337379a30fc8beff`; **#304 is directly from #303 squash `1acb20edbdc80f77c4a21e8e337379a30fc8beff`**."
+          )
+
+          v2 = "`parity-playback-canonical-v2` is #302's additive normal-playback authority/readiness control. It preserves the admitted video/image and text/cursor fallback cases, promotes ready media-only weighted crossfade/zoom/dip through the existing Canvas consumer with exact per-frame execution-key evidence, and separately proves decoder-budget-not-ready, mixed, and structurally deferred weighted cases still fail the complete visual frame closed. This is structural/runtime browser evidence; it does not redefine the independent pixel-equality gates for deterministic rendered-media fixtures."
+          v3 = "`parity-playback-canonical-v3` is #304's additive resource-text authority/readiness control. It preserves the admitted media and ready weighted cases from v2, adds a deterministic resource-backed text success path with exact face/layout readiness trace and `canonical-text-dom` ownership, and separately proves family-name-only text, invalid font bytes, cursor, ready-text-plus-unsupported-cursor, decoder-budget, mixed transition, and structural transition deferral all keep the complete visual frame fail-closed. This remains structural/runtime browser evidence; it does not redefine authored `text-state-v1` or substitute for browser↔export glyph-pixel parity."
+          replace_once(v2, v2 + "\n\n" + v3)
+
+          replace_once(
+              "The torture baseline does not yet include a project font resource. Add resource-font fixture coverage before treating cross-machine glyph identity as proven. Retained visual evidence remains diagnostic until structural zero-tolerance policy and codec-aware decoded thresholds are frozen and retained on a second supported OS/FFmpeg environment.",
+              "Normal-playback v3 now includes deterministic project-font bytes and proves exact Chromium `FontFace` readiness, stabilized layout evidence, and consumer ownership for that fixture. The 103-sample torture baseline still does not include a project font resource, and no browser↔export glyph-pixel acceptance gate or second supported OS/FFmpeg retained run exists yet. Do not treat cross-machine glyph identity as closed. Retained visual evidence remains diagnostic until structural zero-tolerance policy and codec-aware decoded thresholds are frozen and retained on a second supported environment."
+          )
+
+          replace_once(
+              "| Resource font is measured before exact face readiness | #284 listener waits on #283 readiness before snapshotting and does not bypass the font gate on resume. |",
+              "| Resource font is measured before exact face readiness | #284 deterministic evidence and #304 normal-playback runtime both wait on exact resource `FontFace` readiness before Chromium layout can become ready; playback prewarms the immutable project bytes and never bypasses the face gate on resume. |"
+          )
+          replace_once(
+              "| Intrinsic size changes after dimensions are frozen | Require a second Chromium pass with stable width/height and line-fragment count before parity-ready. |",
+              "| Intrinsic size changes after dimensions are frozen | #304 freezes intrinsic width to explicit CSS once, then observes that same explicit state on the next frame; readiness still requires ≤0.01 canonical-pixel width/height drift and exact line-fragment-count stability. |"
+          )
+          replace_once(
+              "| Family-name-only text is mistaken for deterministic face identity | Snapshot records provenance/runtime; exact cross-machine identity still requires a resource-backed face. |",
+              "| Family-name-only text is mistaken for deterministic face identity | Snapshot records provenance/runtime; #304 explicitly defers normal-playback family-only text with `resource-font-required`. Exact cross-machine identity still requires a resource-backed face. |"
+          )
+          replace_once(
+              "| Normal playback mixes canonical and legacy semantics inside one visual frame | #300 admits canonical playback only for an authoritative media-only whole frame with clean none/source-over transition composition. Text/shape/cursor, non-authoritative state, weighted/mixed/deferred transitions, and unsupported raster sources roll the whole visual frame back to the continuous-time painter with an explicit diagnostic reason. #301 retains real browser proof that admitted video/image visual frames advance canonically while UI/audio clocks remain continuous and that every covered unsupported class publishes no canonical visual frame. |",
+              "| Normal playback mixes canonical and legacy semantics inside one visual frame | #300/#301 establish whole-frame media admission/fallback; #303 adds weighted Canvas authority only after exact runtime readiness; #304 adds resource-backed text only after face/layout readiness. Mixed unsupported frames still fall back as a unit: v3 proves a ready text surface plus unsupported cursor remains entirely `legacy-time-fallback` with no partial canonical painter promotion. |"
+          )
+
+          old_next = """## Next recommended slice
+
+1. **Merge #302 only after this tracker-bearing exact head re-passes Video Playback Canonical Parity Evidence, Quality/Security, the full Playwright smoke and renderer baseline included by Quality, transparent-video parity, and all applicable platform/sandbox assurances.** The successful pre-tracker #50 run proves the implementation tree; it is not permission to skip exact-head validation after this documentation update.
+2. **Start the next Phase 3 slice directly from #302's actual squash result and establish normal-playback text readiness/ownership before promoting text.** Reuse the existing canonical text painter, exact `FontFace` resource readiness, and Chromium text-layout stabilization contract; do not turn browser layout output into a second authored text semantic contract.
+3. Retain normal-playback browser evidence for a ready resource-backed text case plus explicit face-not-ready/layout-not-ready/failure and mixed-frame fallback cases. Keep whole-frame authority fail-closed so one visual frame never mixes canonical text with legacy-time media semantics.
+4. Keep cursor normal-playback admission deferred until export implements matching cursor rendering semantics. Keep general shape playback deferred until the current FFmpeg approximations are removed or replaced by a shared deterministic painter. Family-name-only text also remains insufficient evidence for cross-machine face identity; resource-backed provenance stays the deterministic path."""
+          new_next = """## Next recommended slice
+
+1. **Merge #304 only after this tracker-bearing exact head re-passes every workflow triggered by the final PR diff, including Video Playback Canonical Parity Evidence, Quality/Security, the Playwright/renderer gates included by Quality, and applicable platform/sandbox assurances.** Successful implementation-tree run #75 is retained evidence, not permission to skip exact-head validation after this documentation update.
+2. **Start the next Phase 3 slice directly from #304's actual squash result and prove supported mixed canonical composition rather than broadening an unproven painter.** Add retained normal-playback cases where ready resource-backed text coexists with admitted media and, where the transition planner permits it, a ready weighted media pair. Prove stacking/consumer ownership and that all supported surfaces share the same canonical frame identity.
+3. Add readiness-revocation/failure controls for those mixed supported frames so a text face/layout failure or weighted-runtime failure rolls the complete visual frame back to legacy time; never leave canonical text over legacy-time media or vice versa.
+4. Keep cursor normal-playback admission deferred until export implements matching cursor rendering semantics. Keep general shape playback deferred until the current FFmpeg approximations are removed or replaced by a shared deterministic painter. Family-name-only text remains insufficient for deterministic face identity; resource-backed provenance stays the required path."""
+          replace_once(old_next, new_next)
+
+          path.write_text(text)
+          PY
+
+          git rm .github/workflows/tmp-video-wysiwyg-tracker-update.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m "docs: update WYSIWYG tracker for text playback"
+          git push origin HEAD:feat/video-wysiwyg-phase3-text-playback-readiness
