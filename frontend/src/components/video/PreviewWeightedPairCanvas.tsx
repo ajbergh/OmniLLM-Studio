@@ -6,6 +6,10 @@ import {
   resolvePreviewWeightedPairCanvasLayerPlan,
   type PreviewWeightedPairCanvasLayer,
 } from './previewFrameWeightedPairCanvas';
+import {
+  createPreviewWeightedPairWebGLCompositor,
+  type PreviewWeightedPairWebGLCompositor,
+} from './previewWeightedPairWebGL';
 
 export type PreviewWeightedPairCanvasStatusKind = 'pending' | 'ready' | 'failed';
 
@@ -36,9 +40,11 @@ type RasterSource = HTMLImageElement | HTMLVideoElement;
 /**
  * Deterministic weighted pair surface. The source elements are the already
  * mounted image/video nodes owned and synchronized by the existing preview, so
- * this consumer adds no decoder and no second source-time authority. It owns
- * only readiness, isolated canonical 2D rasterization, and the exact #277
- * weighted pixel kernel.
+ * this consumer adds no decoder and no second source-time authority. Geometry
+ * always uses the shared canonical 2D painter. Deterministic/static rendering
+ * keeps the byte-exact CPU #277 kernel; normal playback uses the equivalent
+ * WebGL2 linear-sRGB compositor so full-resolution composition does not stall
+ * the media/UI clock.
  */
 export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLayer>({
   slot,
@@ -53,10 +59,17 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
   onStatusChange,
 }: PreviewWeightedPairCanvasProps<T>) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isolatedSurfacesRef = useRef<[HTMLCanvasElement | null, HTMLCanvasElement | null]>([null, null]);
+  const playbackCompositorRef = useRef<PreviewWeightedPairWebGLCompositor | null>(null);
   const [sourceRevision, setSourceRevision] = useState(0);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bumpSourceRevision = useCallback(() => setSourceRevision((value) => value + 1), []);
+
+  useEffect(() => () => {
+    playbackCompositorRef.current?.dispose();
+    playbackCompositorRef.current = null;
+  }, []);
 
   useEffect(() => {
     const sources = [
@@ -101,9 +114,10 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
     if (!canvas || canvasWidth <= 0 || canvasHeight <= 0) return false;
     if (slot.execution !== 'weighted-canvas-deferred' || !slot.weightedRasterSource?.supported) return false;
     const pairLayers = [slot.lower, slot.upper] as const;
-    const isolated = new Map<string, ImageData>();
+    const isolated = new Map<string, HTMLCanvasElement>();
 
-    for (const layer of pairLayers) {
+    for (let index = 0; index < pairLayers.length; index += 1) {
+      const layer = pairLayers[index];
       const source = sourceForClip(layer.clip.id);
       if (!source || !sourceReady(source)) return false;
       const [intrinsicWidth, intrinsicHeight] = intrinsicSize(source);
@@ -113,14 +127,17 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
         intrinsicWidth,
         intrinsicHeight,
       );
-      const surface = document.createElement('canvas');
-      surface.width = canvasWidth;
-      surface.height = canvasHeight;
-      const context = surface.getContext('2d', { willReadFrequently: true });
+      const surface = ensureIsolatedSurface(
+        isolatedSurfacesRef.current,
+        index,
+        canvasWidth,
+        canvasHeight,
+      );
+      const context = surface.getContext('2d', { willReadFrequently: surfaceRole !== 'playback' });
       if (!context) throw new Error('weighted pair Canvas could not create isolated 2D context');
       context.clearRect(0, 0, canvasWidth, canvasHeight);
       paintPreviewWeightedPairCanvasLayer(context, source, layerPlan);
-      isolated.set(layer.clip.id, context.getImageData(0, 0, canvasWidth, canvasHeight));
+      isolated.set(layer.clip.id, surface);
     }
 
     const outgoing = isolated.get(slot.pixel.outgoing_clip_id);
@@ -128,13 +145,34 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
     if (!outgoing || !incoming) {
       throw new Error(`weighted pair ${JSON.stringify(slot.surface.transition_id)} raster inputs do not match canonical outgoing/incoming ids`);
     }
-    const output = composeWeightedTransitionPairRgba(slot.pixel, outgoing.data, incoming.data);
+
+    if (surfaceRole === 'playback') {
+      let compositor = playbackCompositorRef.current;
+      if (!compositor) {
+        compositor = createPreviewWeightedPairWebGLCompositor(canvas);
+        if (!compositor) {
+          throw new Error('weighted playback WebGL2 compositor is unavailable');
+        }
+        playbackCompositorRef.current = compositor;
+      }
+      compositor.render(outgoing, incoming, slot.pixel);
+      return true;
+    }
+
+    const outgoingContext = outgoing.getContext('2d', { willReadFrequently: true });
+    const incomingContext = incoming.getContext('2d', { willReadFrequently: true });
+    if (!outgoingContext || !incomingContext) {
+      throw new Error('weighted pair Canvas could not read deterministic isolated surfaces');
+    }
+    const outgoingImage = outgoingContext.getImageData(0, 0, canvasWidth, canvasHeight);
+    const incomingImage = incomingContext.getImageData(0, 0, canvasWidth, canvasHeight);
+    const output = composeWeightedTransitionPairRgba(slot.pixel, outgoingImage.data, incomingImage.data);
     const context = canvas.getContext('2d');
     if (!context) throw new Error('weighted pair Canvas could not create output 2D context');
     context.clearRect(0, 0, canvasWidth, canvasHeight);
     context.putImageData(new ImageData(new Uint8ClampedArray(output), canvasWidth, canvasHeight), 0, 0);
     return true;
-  }, [canvasHeight, canvasWidth, slot, sourceForClip]);
+  }, [canvasHeight, canvasWidth, slot, sourceForClip, surfaceRole]);
 
   // Playback readiness must settle before paint: the caller keeps this surface
   // hidden while pending, then publishes exact-frame readiness and re-renders
@@ -166,6 +204,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
     <div
       data-preview-transition-pair-id={slot.surface.transition_id}
       data-preview-transition-pair-execution="weighted-canvas"
+      data-preview-transition-pair-backend={surfaceRole === 'playback' ? 'webgl2' : 'cpu-exact'}
       data-preview-transition-pair-surface-role={surfaceRole}
       data-preview-transition-pair-runtime-key={executionKey || undefined}
       data-preview-transition-pair-lower-clip={slot.surface.lower_clip_id}
@@ -185,6 +224,22 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
       />
     </div>
   );
+}
+
+function ensureIsolatedSurface(
+  surfaces: [HTMLCanvasElement | null, HTMLCanvasElement | null],
+  index: number,
+  width: number,
+  height: number,
+): HTMLCanvasElement {
+  let surface = surfaces[index];
+  if (!surface) {
+    surface = document.createElement('canvas');
+    surfaces[index] = surface;
+  }
+  if (surface.width !== width) surface.width = width;
+  if (surface.height !== height) surface.height = height;
+  return surface;
 }
 
 function sourceReady(source: RasterSource): boolean {
