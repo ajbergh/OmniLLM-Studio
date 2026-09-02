@@ -1,5 +1,4 @@
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
-import { TEXT_FONT_FACE_SOURCE_PACKAGED_RESOURCE } from '../../video/renderContractText';
 
 export type PreviewTextPlaybackRuntimeStatus = 'idle' | 'pending' | 'ready' | 'deferred' | 'failed';
 
@@ -49,8 +48,12 @@ export function isPreviewTextPlaybackLayer(layer: PreviewTextPlaybackLayer): boo
 
 /**
  * Return deterministic readiness debt that can be decided without browser
- * runtime state. Family-name-only text deliberately remains renderer-dependent;
- * normal playback is admitted only for an exact project font resource.
+ * runtime state. Editor FrameState deliberately keeps font_face_source at
+ * family-name-only even when a current project font_resource_id is bound; the
+ * browser FontFace loader is the consumer that proves that exact face. Normal
+ * playback therefore requires the resource id plus its exact current font asset,
+ * not render-manifest packaged-resource provenance. A family name with no
+ * resource id deliberately remains renderer-dependent and fail-closed.
  */
 export function previewTextPlaybackStructuralDeferredReason(
   layers: readonly PreviewTextPlaybackLayer[],
@@ -59,9 +62,7 @@ export function previewTextPlaybackStructuralDeferredReason(
     if (!isPreviewTextPlaybackLayer(layer)) continue;
     const text = layer.canonicalState?.text;
     if (!text) return `${layer.clip.id}:canonical-text-state-unavailable`;
-    if (!text.font_resource_id || text.font_face_source !== TEXT_FONT_FACE_SOURCE_PACKAGED_RESOURCE) {
-      return `${layer.clip.id}:resource-font-required`;
-    }
+    if (!text.font_resource_id) return `${layer.clip.id}:resource-font-required`;
     if (!layer.fontAsset) return `${layer.clip.id}:font-asset-unavailable`;
     if (layer.fontAsset.kind !== 'font') return `${layer.clip.id}:font-asset-kind-${layer.fontAsset.kind || 'unknown'}`;
   }
@@ -115,7 +116,7 @@ export function clearPreviewTextPlaybackRuntime(): void {
 }
 
 /**
- * Gate canonical playback on exact font provenance plus proven browser
+ * Gate canonical playback on exact font-resource binding plus proven browser
  * FontFace/layout readiness. Once one static text topology is ready, readiness
  * remains warm across later output frames carrying identical canonical text/font
  * inputs. Any pending/deferred/failed state revokes that authority.
