@@ -28,6 +28,7 @@ import {
   weightedPairCanvasClipIds,
 } from './previewFrameWeightedPairCanvas';
 import { PreviewWeightedPairCanvas } from './PreviewWeightedPairCanvas';
+import { PreviewWeightedPlaybackConsumer } from './PreviewWeightedPlaybackConsumer';
 import { PreviewPixelateBackdropConsumer } from './PreviewPixelateBackdropConsumer';
 import { VideoPreviewCanvas as LegacyVideoPreviewCanvas } from './VideoPreviewCanvasLegacy';
 
@@ -39,10 +40,12 @@ interface PreviewFontFaceReadinessState {
 
 /**
  * Canonical deterministic consumer layered around the established interactive
- * preview. Free-running playback and editor gestures remain owned by the legacy
- * surface; explicit frame-addressed weighted transition pairs replace their two
- * adjacent DOM inputs in-place with one exact Canvas surface. Scene effects and
- * text/shape/cursor painter inputs consume the same already-evaluated FrameState.
+ * preview. The legacy surface remains the sole playback/source-time and editor
+ * gesture owner. Explicit frame-addressed weighted transition pairs replace
+ * their two adjacent DOM inputs in deterministic capture, while the playback
+ * bridge prepares the same Canvas kernel hidden and promotes only exact ready
+ * weighted frames. Scene effects and text/shape/cursor painter inputs consume
+ * the same already-evaluated FrameState.
  */
 export function VideoPreviewCanvas() {
   const timeline = useVideoStudioStore((state) => state.timeline);
@@ -533,6 +536,7 @@ export function VideoPreviewCanvas() {
         }
         return portals;
       })}
+      <PreviewWeightedPlaybackConsumer />
       <PreviewPixelateBackdropConsumer />
     </div>
   );
