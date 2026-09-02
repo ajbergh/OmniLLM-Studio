@@ -35,9 +35,11 @@ export function previewWeightedPlaybackPlanIdentity<T extends RuntimeLayer>(
   plan: RuntimePlan<T> | null,
 ): string {
   if (!plan || plan.mode !== 'canonical-weighted-deferred') return '';
-  const pairs = plan.slots
-    .filter((slot) => slot.kind === 'pair' && slot.execution === 'weighted-canvas-deferred')
-    .map((slot) => `${slot.surface.transition_id}:${slot.surface.lower_clip_id}>${slot.surface.upper_clip_id}`);
+  const pairs: string[] = [];
+  for (const slot of plan.slots) {
+    if (slot.kind !== 'pair' || slot.execution !== 'weighted-canvas-deferred') continue;
+    pairs.push(`${slot.surface.transition_id}:${slot.surface.lower_clip_id}>${slot.surface.upper_clip_id}`);
+  }
   return pairs.join('|');
 }
 
