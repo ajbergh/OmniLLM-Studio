@@ -26,6 +26,7 @@ import {
 } from './PreviewWeightedPairCanvas';
 import {
   clearPreviewWeightedPlaybackRuntime,
+  previewWeightedPlaybackPlanIdentity,
   previewWeightedPlaybackPlanKey,
   previewWeightedPlaybackRuntimeRevision,
   publishPreviewWeightedPlaybackRuntime,
@@ -41,12 +42,12 @@ const EMPTY_SURFACE_STATUS: SurfaceStatusState = { executionKey: '', byTransitio
 
 /**
  * Normal-playback bridge for already-defined weighted pair Canvas semantics.
- * It never owns media time: sources are the mounted legacy preview nodes. Each
- * candidate output frame is first rasterized into hidden Canvas surfaces; only
- * after every pair reports ready for the exact frame/plan key does the runtime
- * registry authorize canonical playback and this consumer replace the legacy
- * pair DOM. Any missing/poster/failed surface keeps the complete visual frame on
- * legacy time.
+ * It never owns media time: sources are the mounted legacy preview nodes. The
+ * first frame of a pair topology is rasterized into hidden Canvas surfaces and
+ * must prove readiness before canonical admission. Once that topology is warm,
+ * each later frame still redraws exact frame-evaluated weights and geometry in a
+ * layout effect before paint. Missing/poster/failed surfaces revoke readiness
+ * and keep the complete visual frame on legacy time.
  */
 export function PreviewWeightedPlaybackConsumer() {
   const timeline = useVideoStudioStore((state) => state.timeline);
@@ -126,6 +127,7 @@ export function PreviewWeightedPlaybackConsumer() {
     [previewFrame.posterClipIds, weightedClipIds],
   );
   const structurallyConsumable = shouldConsumePreviewFrameWeightedPairs(transitionPlan);
+  const planIdentity = previewWeightedPlaybackPlanIdentity(transitionPlan);
   const executionKey = previewWeightedPlaybackPlanKey(playbackFrame, transitionPlan);
   const weightedSlots = useMemo(
     () => structurallyConsumable && posterDeferredReasons.length === 0
@@ -169,7 +171,7 @@ export function PreviewWeightedPlaybackConsumer() {
     : undefined;
 
   useLayoutEffect(() => {
-    if (!isPlaying || playbackFrame === null || transitionPlan.mode !== 'canonical-weighted-deferred' || !executionKey) {
+    if (!isPlaying || playbackFrame === null || transitionPlan.mode !== 'canonical-weighted-deferred' || !executionKey || !planIdentity) {
       clearPreviewWeightedPlaybackRuntime();
       return;
     }
@@ -177,6 +179,7 @@ export function PreviewWeightedPlaybackConsumer() {
       publishPreviewWeightedPlaybackRuntime({
         frameIndex: playbackFrame,
         planKey: executionKey,
+        planIdentity,
         status: 'deferred',
         reason: posterDeferredReasons.join(','),
       });
@@ -186,6 +189,7 @@ export function PreviewWeightedPlaybackConsumer() {
       publishPreviewWeightedPlaybackRuntime({
         frameIndex: playbackFrame,
         planKey: executionKey,
+        planIdentity,
         status: 'deferred',
         reason: 'weighted-canvas-plan-not-consumable',
       });
@@ -195,6 +199,7 @@ export function PreviewWeightedPlaybackConsumer() {
       publishPreviewWeightedPlaybackRuntime({
         frameIndex: playbackFrame,
         planKey: executionKey,
+        planIdentity,
         status: 'failed',
         reason: failedStatus.reason || `${failedStatus.transitionId}:weighted-canvas-failed`,
       });
@@ -203,6 +208,7 @@ export function PreviewWeightedPlaybackConsumer() {
     publishPreviewWeightedPlaybackRuntime({
       frameIndex: playbackFrame,
       planKey: executionKey,
+      planIdentity,
       status: allReady ? 'ready' : 'pending',
     });
   }, [
@@ -210,6 +216,7 @@ export function PreviewWeightedPlaybackConsumer() {
     executionKey,
     failedStatus,
     isPlaying,
+    planIdentity,
     playbackFrame,
     playheadMs,
     posterDeferredReasons,
