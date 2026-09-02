@@ -268,7 +268,7 @@ export function resolvePreviewCanvasStageScale(
 }
 
 function canonicalTextNodes(stage: HTMLElement, selector: string): HTMLElement[] {
-  return [...stage.querySelectorAll<HTMLElement>>(selector)];
+  return [...stage.querySelectorAll<HTMLElement>(selector)];
 }
 
 function capturePreviewTextLayoutSnapshot(
