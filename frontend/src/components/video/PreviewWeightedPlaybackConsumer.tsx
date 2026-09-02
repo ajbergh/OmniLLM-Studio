@@ -3,6 +3,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
@@ -59,6 +60,7 @@ export function PreviewWeightedPlaybackConsumer() {
   const [stage, setStage] = useState<HTMLElement | null>(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [surfaceStatus, setSurfaceStatus] = useState<SurfaceStatusState>(EMPTY_SURFACE_STATUS);
+  const surfaceStatusRef = useRef<SurfaceStatusState>(EMPTY_SURFACE_STATUS);
   const runtimeRevision = useSyncExternalStore(
     subscribePreviewWeightedPlaybackRuntime,
     previewWeightedPlaybackRuntimeRevision,
@@ -139,25 +141,61 @@ export function PreviewWeightedPlaybackConsumer() {
 
   const onStatusChange = useCallback((status: PreviewWeightedPairCanvasStatus) => {
     if (!status.executionKey) return;
-    setSurfaceStatus((current) => {
-      const byTransitionId = current.executionKey === status.executionKey
-        ? current.byTransitionId
-        : {};
-      const previous = byTransitionId[status.transitionId];
-      if (current.executionKey === status.executionKey
-        && previous?.status === status.status
-        && previous?.reason === status.reason) {
-        return current;
-      }
-      return {
-        executionKey: status.executionKey,
-        byTransitionId: {
-          ...byTransitionId,
-          [status.transitionId]: status,
-        },
-      };
-    });
-  }, []);
+    const current = surfaceStatusRef.current;
+    const byTransitionId = current.executionKey === status.executionKey
+      ? current.byTransitionId
+      : {};
+    const previous = byTransitionId[status.transitionId];
+    const next: SurfaceStatusState = {
+      executionKey: status.executionKey,
+      byTransitionId: {
+        ...byTransitionId,
+        [status.transitionId]: status,
+      },
+    };
+    surfaceStatusRef.current = next;
+    if (current.executionKey !== status.executionKey
+      || previous?.status !== status.status
+      || previous?.reason !== status.reason) {
+      setSurfaceStatus(next);
+    }
+
+    // Child Canvas layout effects run before the parent can reveal the frame.
+    // Publish their exact execution-key result directly so admission never has
+    // to wait for a React state round-trip that can lose the current output frame.
+    if (status.executionKey !== executionKey || playbackFrame === null || !planIdentity) return;
+    const statuses = weightedSlots.map((slot) => next.byTransitionId[slot.surface.transition_id]);
+    const failed = statuses.find((entry) => entry?.status === 'failed');
+    if (failed) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'failed',
+        reason: failed.reason || `${failed.transitionId}:weighted-canvas-failed`,
+      });
+      return;
+    }
+    if (statuses.length === weightedSlots.length
+      && weightedSlots.length > 0
+      && statuses.every((entry) => entry?.status === 'ready')) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'ready',
+      });
+      return;
+    }
+    if (statuses.some((entry) => entry?.status === 'pending')) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'pending',
+      });
+    }
+  }, [executionKey, planIdentity, playbackFrame, weightedSlots]);
 
   const currentStatuses = surfaceStatus.executionKey === executionKey
     ? weightedSlots.map((slot) => surfaceStatus.byTransitionId[slot.surface.transition_id])
@@ -171,6 +209,12 @@ export function PreviewWeightedPlaybackConsumer() {
   const failedStatus = currentStatuses.find((status) => status?.status === 'failed');
   const hasPendingStatus = currentStatuses.some((status) => status?.status === 'pending');
   const runtimeState = previewWeightedPlaybackRuntimeState();
+  const exactFrameReady = Boolean(
+    executionKey
+    && runtimeState.planKey === executionKey
+    && runtimeState.planIdentity === planIdentity
+    && runtimeState.status === 'ready',
+  );
   const topologyWarm = Boolean(
     planIdentity
     && runtimeState.planIdentity === planIdentity
@@ -200,6 +244,18 @@ export function PreviewWeightedPlaybackConsumer() {
         status: 'deferred',
         reason: 'weighted-canvas-plan-not-consumable',
       });
+      return;
+    }
+
+    // Prefer the exact status published synchronously by the child Canvas in
+    // this same layout phase. Render-derived status may still describe the
+    // previous key until React processes the diagnostic state update.
+    const liveRuntime = previewWeightedPlaybackRuntimeState();
+    if (liveRuntime.planKey === executionKey
+      && liveRuntime.planIdentity === planIdentity
+      && (liveRuntime.status === 'ready'
+        || liveRuntime.status === 'pending'
+        || liveRuntime.status === 'failed')) {
       return;
     }
     if (failedStatus) {
@@ -276,7 +332,7 @@ export function PreviewWeightedPlaybackConsumer() {
     const previousDeferred = stage.getAttribute('data-preview-weighted-playback-deferred');
 
     if (playbackFrame !== null && transitionPlan.mode === 'canonical-weighted-deferred') {
-      const canonicalPlaybackActive = allReady
+      const canonicalPlaybackActive = exactFrameReady
         && stage.dataset.previewVisualFrameMode === 'canonical-playback'
         && stage.dataset.previewVisualFrameIndex === String(playbackFrame);
       stage.setAttribute('data-preview-weighted-playback-frame-index', String(playbackFrame));
@@ -286,13 +342,15 @@ export function PreviewWeightedPlaybackConsumer() {
         'data-preview-weighted-playback-runtime',
         posterDeferredReasons.length > 0
           ? 'deferred'
-          : failedStatus
-            ? 'failed'
-            : hasPendingStatus
-              ? 'pending'
-              : allReady || topologyWarm
-                ? 'ready'
-                : 'pending',
+          : runtimeState.planKey === executionKey && runtimeState.planIdentity === planIdentity
+            ? runtimeState.status
+            : failedStatus
+              ? 'failed'
+              : hasPendingStatus
+                ? 'pending'
+                : allReady || topologyWarm
+                  ? 'ready'
+                  : 'pending',
       );
       stage.setAttribute(
         'data-preview-weighted-playback-consumer',
@@ -300,7 +358,9 @@ export function PreviewWeightedPlaybackConsumer() {
       );
       const deferred = posterDeferredReasons.length > 0
         ? posterDeferredReasons.join(',')
-        : failedStatus?.reason;
+        : runtimeState.planKey === executionKey && runtimeState.reason
+          ? runtimeState.reason
+          : failedStatus?.reason;
       if (deferred) stage.setAttribute('data-preview-weighted-playback-deferred', deferred);
       else stage.removeAttribute('data-preview-weighted-playback-deferred');
     } else {
@@ -320,20 +380,23 @@ export function PreviewWeightedPlaybackConsumer() {
     };
   }, [
     allReady,
+    exactFrameReady,
     executionKey,
     failedStatus,
     hasPendingStatus,
+    planIdentity,
     playbackFrame,
     playheadMs,
     posterDeferredReasons,
     runtimeRevision,
+    runtimeState,
     stage,
     topologyWarm,
     transitionPlan.mode,
   ]);
 
   useLayoutEffect(() => {
-    if (!allReady || !stage || !executionKey || playbackFrame === null) return;
+    if (!exactFrameReady || !stage || !executionKey || playbackFrame === null) return;
     if (stage.dataset.previewVisualFrameMode !== 'canonical-playback'
       || stage.dataset.previewVisualFrameIndex !== String(playbackFrame)) return;
     const restorers: Array<() => void> = [];
@@ -378,7 +441,7 @@ export function PreviewWeightedPlaybackConsumer() {
       });
     }
     return () => restorers.reverse().forEach((restore) => restore());
-  }, [allReady, executionKey, playbackFrame, playheadMs, runtimeRevision, stage, weightedSlots]);
+  }, [exactFrameReady, executionKey, playbackFrame, playheadMs, runtimeRevision, stage, weightedSlots]);
 
   if (!isPlaying
     || playbackFrame === null
