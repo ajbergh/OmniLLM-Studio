@@ -58,7 +58,7 @@ function weightedPlan(): Plan {
       pixel: {} as never,
       execution: 'weighted-canvas-deferred',
       layerPaintByClipId: new Map(),
-      weightedRasterSource: { supported: true, reasons: [] },
+      weightedRasterSource: { supported: true } as never,
     }],
   };
 }
