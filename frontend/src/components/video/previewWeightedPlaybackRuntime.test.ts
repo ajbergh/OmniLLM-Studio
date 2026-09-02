@@ -3,6 +3,7 @@ import type { CanonicalFrameLayerState } from '../../video/renderContractFrameSt
 import type { PreviewTransitionPairPlan } from './previewFrameTransitionPairs';
 import {
   clearPreviewWeightedPlaybackRuntime,
+  previewWeightedPlaybackPlanIdentity,
   previewWeightedPlaybackPlanKey,
   previewWeightedPlaybackRuntimeRevision,
   publishPreviewWeightedPlaybackRuntime,
@@ -49,34 +50,42 @@ function weightedPlan(transitionId = 'crossfade'): PreviewTransitionPairPlan<Lay
 afterEach(() => resetPreviewWeightedPlaybackRuntimeForTests());
 
 describe('weighted playback runtime registry', () => {
-  it('keys readiness by exact frame and pair identity', () => {
+  it('keys execution by exact frame while retaining stable pair topology identity', () => {
     const plan = weightedPlan();
     const key = previewWeightedPlaybackPlanKey(42, plan);
     expect(key).toBe('42|crossfade:lower>upper');
+    expect(previewWeightedPlaybackPlanIdentity(plan)).toBe('crossfade:lower>upper');
     expect(previewWeightedPlaybackPlanKey(43, plan)).not.toBe(key);
     expect(previewWeightedPlaybackPlanKey(42, weightedPlan('zoom'))).not.toBe(key);
   });
 
-  it('admits only matching ready runtime state', () => {
+  it('keeps ready source/runtime capability warm across frames of the same pair topology', () => {
     const plan = weightedPlan();
+    const planIdentity = previewWeightedPlaybackPlanIdentity(plan);
     const planKey = previewWeightedPlaybackPlanKey(42, plan);
-    publishPreviewWeightedPlaybackRuntime({ frameIndex: 42, planKey, status: 'pending' });
+    publishPreviewWeightedPlaybackRuntime({ frameIndex: 42, planKey, planIdentity, status: 'pending' });
     expect(resolvePreviewWeightedPlaybackRuntime(42, plan)).toEqual({
       ready: false,
       deferredReason: 'transition-weighted-runtime-not-ready',
     });
 
-    publishPreviewWeightedPlaybackRuntime({ frameIndex: 42, planKey, status: 'ready' });
+    publishPreviewWeightedPlaybackRuntime({ frameIndex: 42, planKey, planIdentity, status: 'ready' });
     expect(resolvePreviewWeightedPlaybackRuntime(42, plan)).toEqual({ ready: true });
-    expect(resolvePreviewWeightedPlaybackRuntime(43, plan).ready).toBe(false);
+    expect(resolvePreviewWeightedPlaybackRuntime(43, plan)).toEqual({ ready: true });
+    expect(resolvePreviewWeightedPlaybackRuntime(42, weightedPlan('zoom'))).toEqual({
+      ready: false,
+      deferredReason: 'transition-weighted-runtime-not-ready',
+    });
   });
 
   it('preserves deferred and failed renderer reasons', () => {
     const plan = weightedPlan();
+    const planIdentity = previewWeightedPlaybackPlanIdentity(plan);
     const planKey = previewWeightedPlaybackPlanKey(42, plan);
     publishPreviewWeightedPlaybackRuntime({
       frameIndex: 42,
       planKey,
+      planIdentity,
       status: 'deferred',
       reason: 'upper:decoder-budget-poster',
     });
@@ -86,6 +95,7 @@ describe('weighted playback runtime registry', () => {
     publishPreviewWeightedPlaybackRuntime({
       frameIndex: 42,
       planKey,
+      planIdentity,
       status: 'failed',
       reason: 'weighted-canvas-readback-failed',
     });
@@ -95,12 +105,13 @@ describe('weighted playback runtime registry', () => {
 
   it('notifies only when runtime state actually changes', () => {
     const plan = weightedPlan();
+    const planIdentity = previewWeightedPlaybackPlanIdentity(plan);
     const planKey = previewWeightedPlaybackPlanKey(42, plan);
     const before = previewWeightedPlaybackRuntimeRevision();
-    publishPreviewWeightedPlaybackRuntime({ frameIndex: 42, planKey, status: 'pending' });
+    publishPreviewWeightedPlaybackRuntime({ frameIndex: 42, planKey, planIdentity, status: 'pending' });
     const afterPending = previewWeightedPlaybackRuntimeRevision();
     expect(afterPending).toBe(before + 1);
-    publishPreviewWeightedPlaybackRuntime({ frameIndex: 42, planKey, status: 'pending' });
+    publishPreviewWeightedPlaybackRuntime({ frameIndex: 42, planKey, planIdentity, status: 'pending' });
     expect(previewWeightedPlaybackRuntimeRevision()).toBe(afterPending);
     clearPreviewWeightedPlaybackRuntime();
     expect(previewWeightedPlaybackRuntimeRevision()).toBe(afterPending + 1);
