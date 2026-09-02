@@ -199,7 +199,12 @@ export async function settlePreviewTextLayouts(
   for (let index = 0; index < nodes.length; index += 1) {
     const after = capturePreviewTextLayoutSnapshot(nodes[index], stageScale, snapshots[index]);
     if (!previewTextLayoutSnapshotStable(snapshots[index], after)) {
-      throw new Error(`text-layout-unstable:${snapshots[index].input_fingerprint}`);
+      const before = snapshots[index];
+      throw new Error(
+        `text-layout-unstable:${before.input_fingerprint}`
+          + `:before=${before.border_box_width}x${before.border_box_height}/${before.line_fragment_count}`
+          + `:after=${after.border_box_width}x${after.border_box_height}/${after.line_fragment_count}`,
+      );
     }
   }
   return snapshots;
