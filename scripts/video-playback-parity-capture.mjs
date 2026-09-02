@@ -61,15 +61,17 @@ try {
     await page.getByRole('button', { name: 'Play preview' }).click();
     await page.getByRole('button', { name: 'Pause preview' }).waitFor({ state: 'visible', timeout: 5_000 });
 
-    if (testCase.expected_weighted_runtime || testCase.expected_weighted_consumer) {
+    if (testCase.expected_weighted_runtime || testCase.expected_weighted_consumer || testCase.expected_weighted_pair_id) {
       await page.waitForFunction((expected) => {
         const stage = document.querySelector('[data-testid="video-preview-program"]');
         if (!stage) return false;
         return (!expected.runtime || stage.dataset.previewWeightedPlaybackRuntime === expected.runtime)
-          && (!expected.consumer || stage.dataset.previewWeightedPlaybackConsumer === expected.consumer);
+          && (!expected.consumer || stage.dataset.previewWeightedPlaybackConsumer === expected.consumer)
+          && (!expected.pairId || (stage.dataset.previewWeightedPlaybackPlanKey || '').includes(`${expected.pairId}:`));
       }, {
         runtime: testCase.expected_weighted_runtime || '',
         consumer: testCase.expected_weighted_consumer || '',
+        pairId: testCase.expected_weighted_pair_id || '',
       }, { timeout: 3_000 });
     }
 
@@ -95,6 +97,7 @@ try {
           transition_deferred: stage.dataset.previewTransitionPairDeferred || '',
           weighted_playback_runtime: stage.dataset.previewWeightedPlaybackRuntime || '',
           weighted_playback_consumer: stage.dataset.previewWeightedPlaybackConsumer || '',
+          weighted_playback_plan_key: stage.dataset.previewWeightedPlaybackPlanKey || '',
           weighted_playback_deferred: stage.dataset.previewWeightedPlaybackDeferred || '',
           weighted_surface_count: weightedSurfaces.length,
           weighted_surface_ready_count: weightedSurfaces.filter((surface) => surface.dataset.previewTransitionPairReady === 'true').length,
@@ -215,6 +218,11 @@ function gateCase(testCase, observations, fps) {
       errors.push(`weighted consumer ${row.weighted_playback_consumer}, want ${testCase.expected_weighted_consumer}`);
       break;
     }
+    if (testCase.expected_weighted_pair_id
+      && !row.weighted_playback_plan_key.includes(`${testCase.expected_weighted_pair_id}:`)) {
+      errors.push(`weighted pair ${row.weighted_playback_plan_key || '<empty>'}, want ${testCase.expected_weighted_pair_id}`);
+      break;
+    }
     if (testCase.require_weighted_canvas) {
       if (row.weighted_surface_count < 1) {
         errors.push('weighted canonical playback has no playback Canvas surface');
@@ -230,6 +238,11 @@ function gateCase(testCase, observations, fps) {
       }
       if (row.weighted_surface_runtime_keys.length !== row.weighted_surface_count) {
         errors.push('weighted Canvas runtime key is missing');
+        break;
+      }
+      if (testCase.expected_weighted_pair_id
+        && row.weighted_surface_runtime_keys.some((key) => !key.includes(`${testCase.expected_weighted_pair_id}:`))) {
+        errors.push(`weighted Canvas runtime key does not match ${testCase.expected_weighted_pair_id}`);
         break;
       }
     }
@@ -284,6 +297,7 @@ function gateCase(testCase, observations, fps) {
     expected_transition_mode: testCase.expected_transition_mode,
     expected_weighted_runtime: testCase.expected_weighted_runtime || '',
     expected_weighted_consumer: testCase.expected_weighted_consumer || '',
+    expected_weighted_pair_id: testCase.expected_weighted_pair_id || '',
     decoder_budget: testCase.decoder_budget || 0,
     observations: stable,
     timeline_advance_ms: timelineAdvanceMs,
