@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPreviewTextLayoutSnapshot,
   previewTextLayoutSnapshotStable,
+  resolvePreviewCanvasStageScale,
   type PreviewTextLayoutMeasurement,
 } from './previewTextLayoutSnapshot';
 
@@ -88,6 +89,17 @@ describe('preview text layout snapshot', () => {
     expect(half.border_box_height).toBe(full.border_box_height);
   });
 
+  it('uses fractional rendered geometry so integer client-size rounding cannot create a false nonuniform stage', () => {
+    const renderedWidth = 456.32;
+    const renderedHeight = 256.68;
+    expect(resolvePreviewCanvasStageScale(renderedWidth, renderedHeight, 640, 360)).toBeCloseTo(0.713, 10);
+
+    const integerScaleX = Math.round(renderedWidth) / 640;
+    const integerScaleY = Math.round(renderedHeight) / 360;
+    expect(Math.abs(integerScaleX - integerScaleY)).toBeGreaterThan(0.001);
+    expect(() => resolvePreviewCanvasStageScale(renderedWidth, 250, 640, 360)).toThrow('text-layout-stage-scale-nonuniform');
+  });
+
   it('requires a stable second Chromium pass after intrinsic dimensions are frozen', () => {
     const before = buildPreviewTextLayoutSnapshot(measurement(), 1);
     expect(previewTextLayoutSnapshotStable(before, before)).toBe(true);
@@ -106,5 +118,6 @@ describe('preview text layout snapshot', () => {
   it('fails closed on invalid scale or negative browser measurements', () => {
     expect(() => buildPreviewTextLayoutSnapshot(measurement(), 0)).toThrow(/stage scale/);
     expect(() => buildPreviewTextLayoutSnapshot(measurement({ borderBoxWidthPx: -1 }), 1)).toThrow(/finite and non-negative/);
+    expect(() => resolvePreviewCanvasStageScale(0, 100, 640, 360)).toThrow(/rendered width/);
   });
 });
