@@ -1,5 +1,10 @@
 import type { CanonicalFrameLayerState, CanonicalVisualFrameState } from '../../video/renderContractFrameState';
 import type { PreviewTransitionPairPlan } from './previewFrameTransitionPairs';
+import {
+  isPreviewTextPlaybackLayer,
+  resolvePreviewTextPlaybackRuntime,
+  type PreviewTextPlaybackLayer,
+} from './previewTextPlaybackRuntime';
 import { resolvePreviewWeightedPlaybackRuntime } from './previewWeightedPlaybackRuntime';
 
 export type PreviewPlaybackVisualMode = 'legacy-time' | 'legacy-time-fallback' | 'canonical-playback';
@@ -10,15 +15,9 @@ export interface PreviewPlaybackCanonicalizationDecision {
   deferredReason?: string;
 }
 
-type PlaybackLayer = {
-  clip: {
-    id: string;
-    text?: unknown;
-    shape?: unknown;
-    cursor?: unknown;
-  };
-  asset?: { mime_type: string };
-  canonicalState?: Pick<CanonicalFrameLayerState, 'authoritative'>;
+type PlaybackLayer = PreviewTextPlaybackLayer & {
+  clip: PreviewTextPlaybackLayer['clip'] & { id: string };
+  canonicalState?: Pick<CanonicalFrameLayerState, 'authoritative' | 'text'>;
 };
 
 type PlaybackFrameState = Pick<CanonicalVisualFrameState, 'authoritative'>;
@@ -31,13 +30,15 @@ type PlaybackTransitionPlan = Pick<
  * Admit normal playback into canonical frame-domain visual evaluation only when
  * the complete frame is representable by consumers already proven in playback.
  *
- * Media-only none/source-over frames are admitted immediately. All-weighted
- * media pairs are admitted only when the renderer-runtime registry proves that
- * the exact current-frame Canvas surfaces are ready. Text, shapes, cursor,
- * missing raster sources, non-authoritative FrameState, mixed/deferred
- * transition composition, and stale/not-ready weighted surfaces fail the whole
- * visual frame back to the established continuous-time painter. The UI playhead
- * and audio clock are not part of this decision and remain continuous.
+ * Media-only none/source-over frames are admitted immediately. Standalone text
+ * joins them only after exact resource-font and Chromium layout readiness has
+ * been proved for the active canonical text inputs. All-weighted media pairs are
+ * admitted only when the renderer-runtime registry proves that the exact Canvas
+ * topology is ready. Shapes, cursor, missing raster sources, non-authoritative
+ * FrameState, mixed/deferred transition composition, and stale/not-ready runtime
+ * consumers fail the whole visual frame back to the established continuous-time
+ * painter. The UI playhead and audio clock are not part of this decision and
+ * remain continuous.
  */
 export function resolvePreviewPlaybackCanonicalization(
   playbackFrame: number | null,
@@ -49,10 +50,23 @@ export function resolvePreviewPlaybackCanonicalization(
   if (!frameState) return fallback('canonical-frame-state-unavailable');
   if (frameState.authoritative !== true) return fallback('canonical-frame-state-nonauthoritative');
 
+  let hasPlaybackText = false;
   for (const layer of layers) {
     if (!layer.canonicalState) return fallback(`canonical-layer-state-unavailable:${layer.clip.id}`);
     if (layer.canonicalState.authoritative !== true) return fallback(`canonical-layer-state-nonauthoritative:${layer.clip.id}`);
-    if (!isPlaybackMediaLayer(layer)) return fallback(`unsupported-playback-painter:${layer.clip.id}`);
+    if (isPlaybackMediaLayer(layer)) continue;
+    if (isPreviewTextPlaybackLayer(layer)) {
+      hasPlaybackText = true;
+      continue;
+    }
+    return fallback(`unsupported-playback-painter:${layer.clip.id}`);
+  }
+
+  // Painter support is decided before runtime readiness so a mixed frame never
+  // changes its fallback reason merely because a supported text surface warms.
+  if (hasPlaybackText) {
+    const textRuntime = resolvePreviewTextPlaybackRuntime(playbackFrame, layers);
+    if (!textRuntime.ready) return fallback(textRuntime.deferredReason ?? 'text-playback-runtime-not-ready');
   }
 
   if (!transitionPlan) return fallback('transition-plan-unavailable');
