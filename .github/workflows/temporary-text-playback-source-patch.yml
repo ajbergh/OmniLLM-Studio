@@ -1,0 +1,44 @@
+name: Temporary text playback source integration patch
+
+on:
+  push:
+    branches:
+      - feat/video-wysiwyg-phase3-text-playback-readiness
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/video-wysiwyg-phase3-text-playback-readiness
+          fetch-depth: 0
+      - name: Correct patch assertion and apply
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/temporary-text-playback-patch.py')
+          text = path.read_text()
+          old = "    3,\n)\nreplace_once(\n    consumer,\n"
+          new = "    4,\n)\nreplace_once(\n    consumer,\n"
+          if text.count(old) != 1:
+              raise SystemExit(f'cancelled-check anchor count = {text.count(old)}, want 1')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          python3 scripts/temporary-text-playback-patch.py
+      - name: Validate source patch
+        run: git diff --check
+      - name: Commit source integration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            frontend/src/components/video/PreviewTextPlaybackConsumer.tsx \
+            frontend/src/components/video/VideoPreviewCanvas.tsx \
+            scripts/video-playback-parity-capture.mjs
+          git commit -m 'feat(video): integrate text playback readiness'
+          git push origin HEAD:feat/video-wysiwyg-phase3-text-playback-readiness
