@@ -29,10 +29,15 @@ import {
 } from './previewFrameWeightedPairCanvas';
 import { PreviewWeightedPairCanvas } from './PreviewWeightedPairCanvas';
 import { PreviewWeightedPlaybackConsumer } from './PreviewWeightedPlaybackConsumer';
+import { PreviewTextPlaybackConsumer } from './PreviewTextPlaybackConsumer';
 import {
   previewWeightedPlaybackRuntimeRevision,
   subscribePreviewWeightedPlaybackRuntime,
 } from './previewWeightedPlaybackRuntime';
+import {
+  previewTextPlaybackRuntimeRevision,
+  subscribePreviewTextPlaybackRuntime,
+} from './previewTextPlaybackRuntime';
 import { PreviewPixelateBackdropConsumer } from './PreviewPixelateBackdropConsumer';
 import { VideoPreviewCanvas as LegacyVideoPreviewCanvas } from './VideoPreviewCanvasLegacy';
 
@@ -47,9 +52,9 @@ interface PreviewFontFaceReadinessState {
  * preview. The legacy surface remains the sole playback/source-time and editor
  * gesture owner. Explicit frame-addressed weighted transition pairs replace
  * their two adjacent DOM inputs in deterministic capture, while the playback
- * bridge prepares the same Canvas kernel hidden and promotes only exact ready
- * weighted frames. Scene effects and text/shape/cursor painter inputs consume
- * the same already-evaluated FrameState.
+ * bridge prepares weighted Canvas and resource-backed text surfaces hidden,
+ * then promotes only exact ready canonical frames. Scene effects and deterministic
+ * text/shape/cursor painter inputs consume the same already-evaluated FrameState.
  */
 export function VideoPreviewCanvas() {
   const timeline = useVideoStudioStore((state) => state.timeline);
@@ -61,6 +66,11 @@ export function VideoPreviewCanvas() {
     subscribePreviewWeightedPlaybackRuntime,
     previewWeightedPlaybackRuntimeRevision,
     previewWeightedPlaybackRuntimeRevision,
+  );
+  useSyncExternalStore(
+    subscribePreviewTextPlaybackRuntime,
+    previewTextPlaybackRuntimeRevision,
+    previewTextPlaybackRuntimeRevision,
   );
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [frameAddress, setFrameAddress] = useState<number | null>(null);
@@ -545,6 +555,7 @@ export function VideoPreviewCanvas() {
         }
         return portals;
       })}
+      <PreviewTextPlaybackConsumer />
       <PreviewWeightedPlaybackConsumer />
       <PreviewPixelateBackdropConsumer />
     </div>

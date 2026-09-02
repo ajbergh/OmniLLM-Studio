@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import { CanonicalPreviewText } from './PreviewCanonicalPainters';
@@ -56,16 +56,17 @@ export function PreviewTextPlaybackConsumer() {
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [preparation, setPreparation] = useState<PreparationState>(IDLE_PREPARATION);
   const preparationRef = useRef<PreparationState>(IDLE_PREPARATION);
+  const layoutSettlementIdentityRef = useRef('');
   const runtimeRevision = useSyncExternalStore(
     subscribePreviewTextPlaybackRuntime,
     previewTextPlaybackRuntimeRevision,
     previewTextPlaybackRuntimeRevision,
   );
 
-  const updatePreparation = (next: PreparationState) => {
+  const updatePreparation = useCallback((next: PreparationState) => {
     preparationRef.current = next;
     setPreparation(next);
-  };
+  }, []);
 
   useLayoutEffect(() => {
     const resolveStage = () => {
@@ -145,11 +146,13 @@ export function PreviewTextPlaybackConsumer() {
   useEffect(() => {
     if (!isPlaying || playbackFrame === null || textLayers.length === 0 || !planIdentity || !executionKey) {
       clearPreviewTextPlaybackRuntime();
+      layoutSettlementIdentityRef.current = '';
       if (preparationRef.current.status !== 'idle') updatePreparation(IDLE_PREPARATION);
       return;
     }
     const current = preparationRef.current;
     if (current.planIdentity === planIdentity && current.status !== 'idle') return;
+    layoutSettlementIdentityRef.current = '';
 
     if (structuralDeferred) {
       publishPreviewTextPlaybackRuntime({
@@ -174,7 +177,6 @@ export function PreviewTextPlaybackConsumer() {
       return;
     }
 
-    let cancelled = false;
     publishPreviewTextPlaybackRuntime({
       frameIndex: playbackFrame,
       planKey: executionKey,
@@ -190,7 +192,7 @@ export function PreviewTextPlaybackConsumer() {
     });
     void Promise.all(bindingPlan.bindings.map((binding) => browserPreviewFontFaceLoader.ensure(binding)))
       .then(() => {
-        if (cancelled || preparationRef.current.planIdentity !== planIdentity) return;
+        if (preparationRef.current.planIdentity !== planIdentity) return;
         publishPreviewTextPlaybackRuntime({
           frameIndex: playbackFrame,
           planKey: executionKey,
@@ -206,15 +208,12 @@ export function PreviewTextPlaybackConsumer() {
         });
       })
       .catch(() => {
-        if (cancelled || preparationRef.current.planIdentity !== planIdentity) return;
+        if (preparationRef.current.planIdentity !== planIdentity) return;
         const reason = `${textLayers[0]?.clip.id || 'text'}:font-face-load-failed`;
         publishPreviewTextPlaybackRuntime({ frameIndex: playbackFrame, planKey: executionKey, planIdentity, status: 'failed', reason });
         updatePreparation({ planIdentity, status: 'failed', reason, trace: ['font-face-not-ready', `failed:${reason}`] });
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [bindingPlan.bindings, bindingPlan.errors, executionKey, isPlaying, planIdentity, playbackFrame, structuralDeferred, textLayers]);
+  }, [bindingPlan.bindings, bindingPlan.errors, executionKey, isPlaying, planIdentity, playbackFrame, structuralDeferred, textLayers, updatePreparation]);
 
   useEffect(() => {
     if (preparation.status !== 'fonts-ready'
@@ -223,11 +222,12 @@ export function PreviewTextPlaybackConsumer() {
       || stageScale <= 0
       || playbackFrame === null
       || !executionKey) return;
-    let cancelled = false;
+    if (layoutSettlementIdentityRef.current === planIdentity) return;
+    layoutSettlementIdentityRef.current = planIdentity;
     const deadline = performance.now() + 2000;
     void settlePreviewTextLayouts(stage, deadline, PLAYBACK_TEXT_SELECTOR)
       .then((snapshots) => {
-        if (cancelled || preparationRef.current.planIdentity !== planIdentity) return;
+        if (preparationRef.current.planIdentity !== planIdentity) return;
         if (snapshots.length !== textLayers.length) {
           throw new Error(`text-layout-surface-count:${snapshots.length}/${textLayers.length}`);
         }
@@ -235,7 +235,7 @@ export function PreviewTextPlaybackConsumer() {
         updatePreparation({ planIdentity, status: 'ready', trace: [...preparation.trace, 'ready'] });
       })
       .catch((reason) => {
-        if (cancelled || preparationRef.current.planIdentity !== planIdentity) return;
+        if (preparationRef.current.planIdentity !== planIdentity) return;
         const detail = reason instanceof Error ? reason.message : String(reason);
         const runtimeReason = `${textLayers[0]?.clip.id || 'text'}:${detail}`;
         publishPreviewTextPlaybackRuntime({
@@ -252,10 +252,7 @@ export function PreviewTextPlaybackConsumer() {
           trace: [...preparation.trace, `failed:${runtimeReason}`],
         });
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [executionKey, planIdentity, playbackFrame, preparation, stage, stageScale, textLayers.length]);
+  }, [executionKey, planIdentity, playbackFrame, preparation, stage, stageScale, textLayers.length, updatePreparation]);
 
   const runtimeState = previewTextPlaybackRuntimeState();
   const runtimeReady = Boolean(planIdentity && runtimeState.planIdentity === planIdentity && runtimeState.status === 'ready');
