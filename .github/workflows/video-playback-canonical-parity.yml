@@ -1,0 +1,157 @@
+name: Video Playback Canonical Parity Evidence
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/video-playback-canonical-parity.yml'
+      - 'backend/cmd/video-playback-parity-fixture/**'
+      - 'backend/cmd/video-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_playback.go'
+      - 'backend/internal/video/parity_fixture_playback_test.go'
+      - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
+      - 'frontend/src/components/video/previewPlaybackCanonicalization.ts'
+      - 'frontend/src/components/video/previewPlaybackCanonicalization.test.ts'
+      - 'frontend/src/components/video/sourceTiming.ts'
+      - 'frontend/src/components/video/sourceTiming.test.ts'
+      - 'scripts/video-playback-parity-capture.mjs'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/video-playback-canonical-parity.yml'
+      - 'backend/cmd/video-playback-parity-fixture/**'
+      - 'backend/cmd/video-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_playback.go'
+      - 'backend/internal/video/parity_fixture_playback_test.go'
+      - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
+      - 'frontend/src/components/video/previewPlaybackCanonicalization.ts'
+      - 'frontend/src/components/video/previewPlaybackCanonicalization.test.ts'
+      - 'frontend/src/components/video/sourceTiming.ts'
+      - 'frontend/src/components/video/sourceTiming.test.ts'
+      - 'scripts/video-playback-parity-capture.mjs'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-playback-canonical-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25.13'
+  NODE_VERSION: '24'
+
+jobs:
+  playback-evidence:
+    name: Normal playback canonicalization evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+      - working-directory: frontend
+        run: npm ci
+      - name: Install playback evidence dependencies
+        run: |
+          bash scripts/ci-apt-install.sh ffmpeg
+          bash scripts/ci-playwright-install.sh
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Validate playback fixture and canonicalization gates
+        run: |
+          set -euo pipefail
+          (
+            cd backend
+            go test ./internal/video -run 'TestPlaybackCanonicalParityFixtureValid'
+          )
+          (
+            cd frontend
+            npx vitest run \
+              src/components/video/previewPlaybackCanonicalization.test.ts \
+              src/components/video/sourceTiming.test.ts
+          )
+          node --check scripts/video-playback-parity-capture.mjs
+      - name: Generate playback fixture and deterministic media
+        run: |
+          set -euo pipefail
+          (
+            cd backend
+            go run ./cmd/video-parity-fixture \
+              --output-dir ../output/video-playback-canonical/fixture \
+              --random-samples 0 \
+              --generate-media
+            go run ./cmd/video-playback-parity-fixture \
+              --output-dir ../output/video-playback-canonical/fixture
+          )
+      - name: Capture and gate live playback evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/output/video-playback-canonical/runtime"
+          mkdir -p "$runtime/attachments"
+          export OMNILLM_PORT=18096
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          (
+            cd backend
+            go run ./cmd/server >"$runtime/backend.log" 2>"$runtime/backend.err.log"
+          ) &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18096 npm run dev -- --host 127.0.0.1 --port 14179 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18096/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14179/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "playback parity servers did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          node scripts/video-playback-parity-capture.mjs \
+            --url http://127.0.0.1:14179 \
+            --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v1.json \
+            --media-dir output/video-playback-canonical/fixture/media \
+            --output output/video-playback-canonical/capture
+      - name: Record toolchain
+        if: always()
+        run: |
+          mkdir -p output/video-playback-canonical
+          {
+            go version
+            node --version
+            npm --version
+            ffmpeg -version | head -n 1
+            ffprobe -version | head -n 1
+            node -e "console.log('playwright ' + require('playwright/package.json').version)"
+          } > output/video-playback-canonical/toolchain.txt
+      - name: Upload normal playback canonicalization evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-playback-canonical-parity-evidence
+          path: output/video-playback-canonical
+          if-no-files-found: error
+          retention-days: 14
