@@ -1,35 +1,39 @@
 package video
 
-const PlaybackCanonicalParityFixtureName = "parity-playback-canonical-v2"
+const PlaybackCanonicalParityFixtureName = "parity-playback-canonical-v3"
 
 // PlaybackParityCase is one live-preview observation window in the retained
 // normal-playback canonicalization fixture. FrameIndex is used only to place
 // the playhead before playback starts; evidence is collected while playback is
 // continuously advancing from that point.
 type PlaybackParityCase struct {
-	Name                     string `json:"name"`
-	FrameIndex               int64  `json:"frame_index"`
-	ObserveMS                int64  `json:"observe_ms"`
-	ExpectedMode             string `json:"expected_mode"`
-	ExpectedReason           string `json:"expected_reason,omitempty"`
-	ExpectedTransitionMode   string `json:"expected_transition_mode"`
-	ExpectedWeightedRuntime  string `json:"expected_weighted_runtime,omitempty"`
-	ExpectedWeightedConsumer string `json:"expected_weighted_consumer,omitempty"`
-	ExpectedWeightedPairID   string `json:"expected_weighted_pair_id,omitempty"`
-	RequireWeightedCanvas    bool   `json:"require_weighted_canvas,omitempty"`
-	RequireAdvancingFrames   bool   `json:"require_advancing_frames,omitempty"`
-	DecoderBudget            int    `json:"decoder_budget,omitempty"`
+	Name                     string   `json:"name"`
+	FrameIndex               int64    `json:"frame_index"`
+	ObserveMS                int64    `json:"observe_ms"`
+	ExpectedMode             string   `json:"expected_mode"`
+	ExpectedReason           string   `json:"expected_reason,omitempty"`
+	ExpectedTransitionMode   string   `json:"expected_transition_mode"`
+	ExpectedWeightedRuntime  string   `json:"expected_weighted_runtime,omitempty"`
+	ExpectedWeightedConsumer string   `json:"expected_weighted_consumer,omitempty"`
+	ExpectedWeightedPairID   string   `json:"expected_weighted_pair_id,omitempty"`
+	ExpectedTextRuntime      string   `json:"expected_text_runtime,omitempty"`
+	ExpectedTextConsumer     string   `json:"expected_text_consumer,omitempty"`
+	ExpectedTextClipID       string   `json:"expected_text_clip_id,omitempty"`
+	ExpectedTextTrace        []string `json:"expected_text_trace,omitempty"`
+	RequireWeightedCanvas    bool     `json:"require_weighted_canvas,omitempty"`
+	RequireTextLayout        bool     `json:"require_text_layout,omitempty"`
+	RequireAdvancingFrames   bool     `json:"require_advancing_frames,omitempty"`
+	DecoderBudget            int      `json:"decoder_budget,omitempty"`
 }
 
 // PlaybackCanonicalParityFixture exercises admitted normal-playback contracts
-// and fail-closed classes against one immutable authored timeline. Weighted
-// cases prove the Canvas pair consumer during ordinary free-running playback;
-// the decoder-budget case deliberately withholds one required raster source so
-// readiness revocation can be retained independently from mixed/structural
-// transition fallback.
+// and fail-closed classes against one immutable authored timeline. Text cases
+// prove resource-backed FontFace/layout readiness, family-name-only deferral,
+// font-load failure, and mixed-frame all-or-nothing authority. Weighted cases
+// continue to prove the Canvas pair consumer and its independent readiness.
 func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, []PlaybackParityCase) {
 	doc := NewEmptyTimeline(640, 360, 30)
-	doc.DurationMS = 22000
+	doc.DurationMS = 26000
 	doc.Canvas.Background = "#10131a"
 	doc.Metadata = map[string]any{"fixture": PlaybackCanonicalParityFixtureName}
 
@@ -53,6 +57,30 @@ func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, [
 			Transform:    transform(),
 			Effects:      []TimelineEffect{},
 			Keyframes:    []TimelineKeyframe{},
+		}
+	}
+	textClip := func(id, label, family, resourceID string, startMS int64) TimelineClip {
+		return TimelineClip{
+			ID:         id,
+			StartMS:    startMS,
+			DurationMS: 1200,
+			TrimOutMS:  1200,
+			Transform:  transform(),
+			Text: &TimelineText{
+				Text:           label,
+				FontFamily:     family,
+				FontResourceID: resourceID,
+				FontSize:       36,
+				FontWeight:     "700",
+				Color:          "#ffffff",
+				Background:     "#111827cc",
+				TextAlign:      "center",
+				LineHeight:     1.2,
+				LetterSpacing:  0.5,
+				BorderRadius:   8,
+			},
+			Effects:   []TimelineEffect{},
+			Keyframes: []TimelineKeyframe{},
 		}
 	}
 	track := func(id string, clip TimelineClip) TimelineTrack {
@@ -79,26 +107,29 @@ func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, [
 
 	video := mediaClip("playback-video", "asset-landscape", 0, 1200)
 	image := mediaClip("playback-image", "asset-square", 1400, 1200)
+	resourceText := textClip(
+		"playback-text-resource",
+		"Resource-backed playback text",
+		"DejaVu Sans",
+		"playback-font-v1",
+		2800,
+	)
+	familyText := textClip(
+		"playback-text-family",
+		"Family-name-only playback fallback",
+		"Inter",
+		"",
+		4200,
+	)
+	invalidFontText := textClip(
+		"playback-text-invalid-font",
+		"Invalid resource font fallback",
+		"Invalid Playback Font",
+		"playback-font-invalid-v1",
+		5600,
+	)
 
-	text := TimelineClip{
-		ID:         "playback-text",
-		StartMS:    2800,
-		DurationMS: 1200,
-		TrimOutMS:  1200,
-		Transform:  transform(),
-		Text: &TimelineText{
-			Text:       "Playback fallback text",
-			FontFamily: "Inter",
-			FontSize:   36,
-			FontWeight: "700",
-			Color:      "#ffffff",
-			TextAlign:  "center",
-		},
-		Effects:   []TimelineEffect{},
-		Keyframes: []TimelineKeyframe{},
-	}
-
-	cursor := mediaClip("playback-cursor", "asset-landscape", 4200, 1200)
+	cursor := mediaClip("playback-cursor", "asset-landscape", 7000, 1200)
 	cursor.Cursor = &TimelineCursor{
 		Visible:    true,
 		Scale:      1,
@@ -111,18 +142,35 @@ func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, [
 		},
 	}
 
-	crossfadeOut, crossfadeIn := pair("weighted-crossfade", TransitionTypeCrossfade, 5600, "asset-square")
-	zoomOut, zoomIn := pair("weighted-zoom", TransitionTypeZoom, 8200, "asset-square")
-	dipOut, dipIn := pair("weighted-dip", TransitionTypeDipToBlack, 10800, "asset-square")
-	budgetOut, budgetIn := pair("weighted-budget-crossfade", TransitionTypeCrossfade, 13400, "asset-landscape")
+	mixedText := textClip(
+		"playback-mixed-text",
+		"Ready text must not partially promote",
+		"DejaVu Sans",
+		"playback-font-v1",
+		8400,
+	)
+	mixedCursor := mediaClip("playback-mixed-cursor", "asset-landscape", 8400, 1200)
+	mixedCursor.Cursor = &TimelineCursor{
+		Visible: true,
+		Scale:   1,
+		Events: []TimelineCursorEvent{
+			{TimeMS: 0, X: 160, Y: 120},
+			{TimeMS: 1199, X: 480, Y: 240},
+		},
+	}
 
-	mixedSlideOut, mixedSlideIn := pair("mixed-slide", TransitionTypeSlide, 16000, "asset-square")
+	crossfadeOut, crossfadeIn := pair("weighted-crossfade", TransitionTypeCrossfade, 9800, "asset-square")
+	zoomOut, zoomIn := pair("weighted-zoom", TransitionTypeZoom, 12400, "asset-square")
+	dipOut, dipIn := pair("weighted-dip", TransitionTypeDipToBlack, 15000, "asset-square")
+	budgetOut, budgetIn := pair("weighted-budget-crossfade", TransitionTypeCrossfade, 17600, "asset-landscape")
+
+	mixedSlideOut, mixedSlideIn := pair("mixed-slide", TransitionTypeSlide, 20200, "asset-square")
 	mixedSlideOut.Transitions[0].Direction = "left"
-	mixedCrossOut, mixedCrossIn := pair("mixed-crossfade", TransitionTypeCrossfade, 16000, "asset-square")
+	mixedCrossOut, mixedCrossIn := pair("mixed-crossfade", TransitionTypeCrossfade, 20200, "asset-square")
 
-	deferredOut, deferredIn := pair("deferred-slide", TransitionTypeSlide, 18600, "asset-square")
+	deferredOut, deferredIn := pair("deferred-slide", TransitionTypeSlide, 22800, "asset-square")
 	deferredOut.Transitions[0].Direction = "right"
-	deferredBlocker := mediaClip("deferred-blocker", "asset-square", 19100, 1000)
+	deferredBlocker := mediaClip("deferred-blocker", "asset-square", 23300, 1000)
 
 	audio := TimelineTrack{
 		ID:      "playback-audio",
@@ -143,8 +191,12 @@ func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, [
 	doc.Tracks = []TimelineTrack{
 		track("track-video", video),
 		track("track-image", image),
-		track("track-text", text),
+		track("track-text-resource", resourceText),
+		track("track-text-family", familyText),
+		track("track-text-invalid-font", invalidFontText),
 		track("track-cursor", cursor),
+		track("track-mixed-text", mixedText),
+		track("track-mixed-cursor", mixedCursor),
 		track("track-weighted-crossfade-out", crossfadeOut),
 		track("track-weighted-crossfade-in", crossfadeIn),
 		track("track-weighted-zoom-out", zoomOut),
@@ -164,24 +216,29 @@ func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, [
 	}
 
 	assets := []ParityFixtureAsset{
-		{ID: "asset-landscape", Kind: "video", Width: 640, Height: 360, DurationMS: 24000, Description: "deterministic landscape H.264 video"},
-		{ID: "asset-square", Kind: "image", Width: 512, Height: 512, DurationMS: 22000, Description: "deterministic square PNG"},
-		{ID: "asset-audio", Kind: "audio", DurationMS: 24000, Description: "deterministic continuous mono playback clock"},
+		{ID: "asset-landscape", Kind: "video", Width: 640, Height: 360, DurationMS: 28000, Description: "deterministic landscape H.264 video"},
+		{ID: "asset-square", Kind: "image", Width: 512, Height: 512, DurationMS: 26000, Description: "deterministic square PNG"},
+		{ID: "asset-audio", Kind: "audio", DurationMS: 28000, Description: "deterministic continuous mono playback clock"},
+		{ID: "asset-font", Kind: "font", Description: "DejaVu Sans Bold resource-backed browser playback font"},
+		{ID: "asset-font-invalid", Kind: "font", Description: "intentionally invalid TTF bytes for fail-closed browser font evidence"},
 	}
 	// Once the whole visual frame fails closed, the established preview pair plan
-	// is intentionally legacy. Weighted runtime markers are retained separately so
-	// readiness failures remain distinguishable from mixed/structural deferrals.
+	// is intentionally legacy. Runtime markers are retained separately so text
+	// and weighted readiness remain distinguishable from structural deferrals.
 	cases := []PlaybackParityCase{
 		{Name: "video-canonical-playback", FrameIndex: 6, ObserveMS: 500, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-none", RequireAdvancingFrames: true},
 		{Name: "image-canonical-playback", FrameIndex: 48, ObserveMS: 500, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-none", RequireAdvancingFrames: true},
-		{Name: "text-fallback", FrameIndex: 90, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "unsupported-playback-painter:playback-text", ExpectedTransitionMode: "legacy"},
-		{Name: "cursor-fallback", FrameIndex: 132, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "unsupported-playback-painter:playback-cursor", ExpectedTransitionMode: "legacy"},
-		{Name: "weighted-crossfade-canonical", FrameIndex: 198, ObserveMS: 350, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-weighted-deferred", ExpectedWeightedRuntime: "ready", ExpectedWeightedConsumer: "canonical-weighted-canvas", ExpectedWeightedPairID: "weighted-crossfade", RequireWeightedCanvas: true, RequireAdvancingFrames: true},
-		{Name: "weighted-zoom-canonical", FrameIndex: 276, ObserveMS: 350, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-weighted-deferred", ExpectedWeightedRuntime: "ready", ExpectedWeightedConsumer: "canonical-weighted-canvas", ExpectedWeightedPairID: "weighted-zoom", RequireWeightedCanvas: true, RequireAdvancingFrames: true},
-		{Name: "weighted-dip-canonical", FrameIndex: 354, ObserveMS: 350, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-weighted-deferred", ExpectedWeightedRuntime: "ready", ExpectedWeightedConsumer: "canonical-weighted-canvas", ExpectedWeightedPairID: "weighted-dip", RequireWeightedCanvas: true, RequireAdvancingFrames: true},
-		{Name: "weighted-decoder-budget-fallback", FrameIndex: 432, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-weighted-runtime-deferred:weighted-budget-crossfade-out:decoder-budget-poster", ExpectedTransitionMode: "legacy", ExpectedWeightedRuntime: "deferred", ExpectedWeightedConsumer: "legacy-time-fallback", ExpectedWeightedPairID: "weighted-budget-crossfade", DecoderBudget: 1},
-		{Name: "mixed-transition-fallback", FrameIndex: 510, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-plan-mixed", ExpectedTransitionMode: "legacy"},
-		{Name: "deferred-transition-fallback", FrameIndex: 582, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-deferred:deferred-slide:pair-inputs-not-adjacent", ExpectedTransitionMode: "legacy"},
+		{Name: "resource-text-canonical-playback", FrameIndex: 90, ObserveMS: 450, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-none", ExpectedTextRuntime: "ready", ExpectedTextConsumer: "canonical-text-dom", ExpectedTextClipID: "playback-text-resource", ExpectedTextTrace: []string{"font-face-not-ready", "font-face-ready", "text-layout-not-ready", "ready"}, RequireTextLayout: true, RequireAdvancingFrames: true},
+		{Name: "family-text-fallback", FrameIndex: 132, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "text-playback-runtime-deferred:playback-text-family:resource-font-required", ExpectedTransitionMode: "legacy", ExpectedTextRuntime: "deferred", ExpectedTextConsumer: "legacy-time-fallback", ExpectedTextClipID: "playback-text-family", ExpectedTextTrace: []string{"deferred:playback-text-family:resource-font-required"}},
+		{Name: "invalid-font-text-fallback", FrameIndex: 174, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "text-playback-runtime-failed:playback-text-invalid-font:font-face-load-failed", ExpectedTransitionMode: "legacy", ExpectedTextRuntime: "failed", ExpectedTextConsumer: "legacy-time-fallback", ExpectedTextClipID: "playback-text-invalid-font", ExpectedTextTrace: []string{"font-face-not-ready", "failed:playback-text-invalid-font:font-face-load-failed"}},
+		{Name: "cursor-fallback", FrameIndex: 216, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "unsupported-playback-painter:playback-cursor", ExpectedTransitionMode: "legacy"},
+		{Name: "mixed-text-cursor-fallback", FrameIndex: 258, ObserveMS: 350, ExpectedMode: "legacy-time-fallback", ExpectedReason: "unsupported-playback-painter:playback-mixed-cursor", ExpectedTransitionMode: "legacy", ExpectedTextRuntime: "ready", ExpectedTextConsumer: "legacy-time-fallback", ExpectedTextClipID: "playback-mixed-text", ExpectedTextTrace: []string{"font-face-not-ready", "font-face-ready", "text-layout-not-ready", "ready"}, RequireTextLayout: true},
+		{Name: "weighted-crossfade-canonical", FrameIndex: 324, ObserveMS: 350, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-weighted-deferred", ExpectedWeightedRuntime: "ready", ExpectedWeightedConsumer: "canonical-weighted-canvas", ExpectedWeightedPairID: "weighted-crossfade", RequireWeightedCanvas: true, RequireAdvancingFrames: true},
+		{Name: "weighted-zoom-canonical", FrameIndex: 402, ObserveMS: 350, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-weighted-deferred", ExpectedWeightedRuntime: "ready", ExpectedWeightedConsumer: "canonical-weighted-canvas", ExpectedWeightedPairID: "weighted-zoom", RequireWeightedCanvas: true, RequireAdvancingFrames: true},
+		{Name: "weighted-dip-canonical", FrameIndex: 480, ObserveMS: 350, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-weighted-deferred", ExpectedWeightedRuntime: "ready", ExpectedWeightedConsumer: "canonical-weighted-canvas", ExpectedWeightedPairID: "weighted-dip", RequireWeightedCanvas: true, RequireAdvancingFrames: true},
+		{Name: "weighted-decoder-budget-fallback", FrameIndex: 558, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-weighted-runtime-deferred:weighted-budget-crossfade-out:decoder-budget-poster", ExpectedTransitionMode: "legacy", ExpectedWeightedRuntime: "deferred", ExpectedWeightedConsumer: "legacy-time-fallback", ExpectedWeightedPairID: "weighted-budget-crossfade", DecoderBudget: 1},
+		{Name: "mixed-transition-fallback", FrameIndex: 636, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-plan-mixed", ExpectedTransitionMode: "legacy"},
+		{Name: "deferred-transition-fallback", FrameIndex: 708, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-deferred:deferred-slide:pair-inputs-not-adjacent", ExpectedTransitionMode: "legacy"},
 	}
 	return doc, assets, cases
 }
