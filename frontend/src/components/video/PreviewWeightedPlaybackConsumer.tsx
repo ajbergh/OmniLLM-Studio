@@ -324,6 +324,37 @@ export function PreviewWeightedPlaybackConsumer() {
   }, [stage]);
 
   useLayoutEffect(() => {
+    if (!isPlaying
+      || playbackFrame === null
+      || !stage
+      || !structurallyConsumable
+      || posterDeferredReasons.length > 0) return;
+
+    // A paused preview has already synchronized mounted media to the authored
+    // playhead. Resume those settled video elements during layout so the legacy
+    // passive media-sync effect sees a running decoder and does not issue a
+    // redundant currentTime assignment on play. This bridge never changes
+    // source time or playback rate; the legacy preview remains the time owner.
+    for (const clipId of weightedClipIds) {
+      const source = sourceForClip(clipId);
+      if (!(source instanceof HTMLVideoElement)
+        || !source.paused
+        || source.ended
+        || source.seeking
+        || source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) continue;
+      void source.play().catch(() => { /* muted preview; legacy sync retains fallback behavior */ });
+    }
+  }, [
+    isPlaying,
+    playbackFrame,
+    posterDeferredReasons.length,
+    sourceForClip,
+    stage,
+    structurallyConsumable,
+    weightedClipIds,
+  ]);
+
+  useLayoutEffect(() => {
     if (!stage) return;
     const previousFrame = stage.getAttribute('data-preview-weighted-playback-frame-index');
     const previousKey = stage.getAttribute('data-preview-weighted-playback-plan-key');
