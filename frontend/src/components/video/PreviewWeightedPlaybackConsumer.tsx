@@ -29,6 +29,7 @@ import {
   previewWeightedPlaybackPlanIdentity,
   previewWeightedPlaybackPlanKey,
   previewWeightedPlaybackRuntimeRevision,
+  previewWeightedPlaybackRuntimeState,
   publishPreviewWeightedPlaybackRuntime,
   subscribePreviewWeightedPlaybackRuntime,
 } from './previewWeightedPlaybackRuntime';
@@ -158,17 +159,23 @@ export function PreviewWeightedPlaybackConsumer() {
     });
   }, []);
 
+  const currentStatuses = surfaceStatus.executionKey === executionKey
+    ? weightedSlots.map((slot) => surfaceStatus.byTransitionId[slot.surface.transition_id])
+    : [];
   const allReady = Boolean(
     executionKey
     && weightedSlots.length > 0
-    && surfaceStatus.executionKey === executionKey
-    && weightedSlots.every((slot) => surfaceStatus.byTransitionId[slot.surface.transition_id]?.status === 'ready'),
+    && currentStatuses.length === weightedSlots.length
+    && currentStatuses.every((status) => status?.status === 'ready'),
   );
-  const failedStatus = surfaceStatus.executionKey === executionKey
-    ? weightedSlots
-      .map((slot) => surfaceStatus.byTransitionId[slot.surface.transition_id])
-      .find((status) => status?.status === 'failed')
-    : undefined;
+  const failedStatus = currentStatuses.find((status) => status?.status === 'failed');
+  const hasPendingStatus = currentStatuses.some((status) => status?.status === 'pending');
+  const runtimeState = previewWeightedPlaybackRuntimeState();
+  const topologyWarm = Boolean(
+    planIdentity
+    && runtimeState.planIdentity === planIdentity
+    && runtimeState.status === 'ready',
+  );
 
   useLayoutEffect(() => {
     if (!isPlaying || playbackFrame === null || transitionPlan.mode !== 'canonical-weighted-deferred' || !executionKey || !planIdentity) {
@@ -205,22 +212,50 @@ export function PreviewWeightedPlaybackConsumer() {
       });
       return;
     }
-    publishPreviewWeightedPlaybackRuntime({
-      frameIndex: playbackFrame,
-      planKey: executionKey,
-      planIdentity,
-      status: allReady ? 'ready' : 'pending',
-    });
+    if (hasPendingStatus) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'pending',
+      });
+      return;
+    }
+    if (allReady) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'ready',
+      });
+      return;
+    }
+    // A new exact-frame execution key has no status until its child Canvas
+    // layout effects have attempted the redraw. Do not revoke a topology that
+    // has already proved ready merely because that key changed. If the redraw
+    // reports pending/failed, the branches above revoke readiness synchronously
+    // before paint. The first frame of a topology still publishes pending until
+    // it proves one successful exact draw.
+    if (!topologyWarm) {
+      publishPreviewWeightedPlaybackRuntime({
+        frameIndex: playbackFrame,
+        planKey: executionKey,
+        planIdentity,
+        status: 'pending',
+      });
+    }
   }, [
     allReady,
     executionKey,
     failedStatus,
+    hasPendingStatus,
     isPlaying,
     planIdentity,
     playbackFrame,
     playheadMs,
     posterDeferredReasons,
     structurallyConsumable,
+    topologyWarm,
     transitionPlan.mode,
   ]);
 
@@ -253,9 +288,11 @@ export function PreviewWeightedPlaybackConsumer() {
           ? 'deferred'
           : failedStatus
             ? 'failed'
-            : allReady
-              ? 'ready'
-              : 'pending',
+            : hasPendingStatus
+              ? 'pending'
+              : allReady || topologyWarm
+                ? 'ready'
+                : 'pending',
       );
       stage.setAttribute(
         'data-preview-weighted-playback-consumer',
@@ -285,11 +322,13 @@ export function PreviewWeightedPlaybackConsumer() {
     allReady,
     executionKey,
     failedStatus,
+    hasPendingStatus,
     playbackFrame,
     playheadMs,
     posterDeferredReasons,
     runtimeRevision,
     stage,
+    topologyWarm,
     transitionPlan.mode,
   ]);
 
