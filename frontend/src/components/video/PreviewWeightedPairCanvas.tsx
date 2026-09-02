@@ -36,6 +36,10 @@ interface PreviewWeightedPairCanvasProps<T extends PreviewWeightedPairCanvasLaye
 }
 
 type RasterSource = HTMLImageElement | HTMLVideoElement;
+type PresentationVideo = HTMLVideoElement & {
+  requestVideoFrameCallback?: (callback: (now: number, metadata: { mediaTime: number }) => void) => number;
+  cancelVideoFrameCallback?: (handle: number) => void;
+};
 
 /**
  * Deterministic weighted pair surface. The source elements are the already
@@ -71,16 +75,45 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
     playbackCompositorRef.current = null;
   }, []);
 
+  // Normal playback may begin while the deterministic pre-play seek is still
+  // settling. Resume the already-mounted decoder during layout even when it is
+  // seeking so the legacy passive sync sees a running element and cannot start
+  // a new currentTime chase. This bridge never writes source time/rate; the
+  // legacy preview remains the sole media-clock authority.
+  useLayoutEffect(() => {
+    if (surfaceRole !== 'playback') return;
+    for (const clipId of [slot.lower.clip.id, slot.upper.clip.id]) {
+      const source = sourceForClip(clipId);
+      if (!(source instanceof HTMLVideoElement) || !source.paused || source.ended) continue;
+      void source.play().catch(() => { /* muted preview; legacy sync retains fallback behavior */ });
+    }
+  }, [executionKey, slot.lower.clip.id, slot.upper.clip.id, sourceForClip, surfaceRole]);
+
   useEffect(() => {
     const sources = [
       sourceForClip(slot.lower.clip.id),
       sourceForClip(slot.upper.clip.id),
     ].filter((source): source is RasterSource => Boolean(source));
+    const presentationHandles = new Map<PresentationVideo, number>();
+    let disposed = false;
     const onSeeking = () => {
       setReady(false);
       bumpSourceRevision();
     };
     const onSettled = () => bumpSourceRevision();
+    const schedulePresentedFrame = (video: PresentationVideo) => {
+      if (disposed || typeof video.requestVideoFrameCallback !== 'function') return;
+      const handle = video.requestVideoFrameCallback(() => {
+        presentationHandles.delete(video);
+        if (disposed) return;
+        // Redraw from the frame the decoder actually submitted for presentation,
+        // rather than waiting for a seek/load event that free-running playback
+        // does not emit on every decoded frame.
+        bumpSourceRevision();
+        schedulePresentedFrame(video);
+      });
+      presentationHandles.set(video, handle);
+    };
     for (const source of sources) {
       if (source instanceof HTMLVideoElement) {
         source.addEventListener('seeking', onSeeking);
@@ -88,12 +121,18 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
         source.addEventListener('loadedmetadata', onSettled);
         source.addEventListener('loadeddata', onSettled);
         source.addEventListener('error', onSettled);
+        if (surfaceRole === 'playback') schedulePresentedFrame(source as PresentationVideo);
       } else {
         source.addEventListener('load', onSettled);
         source.addEventListener('error', onSettled);
       }
     }
     return () => {
+      disposed = true;
+      for (const [video, handle] of presentationHandles) {
+        if (typeof video.cancelVideoFrameCallback === 'function') video.cancelVideoFrameCallback(handle);
+      }
+      presentationHandles.clear();
       for (const source of sources) {
         if (source instanceof HTMLVideoElement) {
           source.removeEventListener('seeking', onSeeking);
@@ -107,7 +146,7 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
         }
       }
     };
-  }, [bumpSourceRevision, slot.lower.clip.id, slot.upper.clip.id, sourceForClip]);
+  }, [bumpSourceRevision, slot.lower.clip.id, slot.upper.clip.id, sourceForClip, surfaceRole]);
 
   const draw = useCallback((): boolean => {
     const canvas = canvasRef.current;
