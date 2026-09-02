@@ -5,6 +5,7 @@ export type PreviewWeightedPlaybackRuntimeStatus = 'idle' | 'pending' | 'ready' 
 export interface PreviewWeightedPlaybackRuntimeState {
   frameIndex: number | null;
   planKey: string;
+  planIdentity: string;
   status: PreviewWeightedPlaybackRuntimeStatus;
   reason?: string;
 }
@@ -21,6 +22,7 @@ type RuntimePlan<T extends RuntimeLayer = RuntimeLayer> = PreviewTransitionPairP
 const IDLE_RUNTIME: PreviewWeightedPlaybackRuntimeState = Object.freeze({
   frameIndex: null,
   planKey: '',
+  planIdentity: '',
   status: 'idle',
 });
 
@@ -28,21 +30,29 @@ let runtimeState: PreviewWeightedPlaybackRuntimeState = IDLE_RUNTIME;
 let runtimeRevision = 0;
 const listeners = new Set<() => void>();
 
+/** Stable pair-topology identity shared by every frame of one weighted overlap. */
+export function previewWeightedPlaybackPlanIdentity<T extends RuntimeLayer>(
+  plan: RuntimePlan<T> | null,
+): string {
+  if (!plan || plan.mode !== 'canonical-weighted-deferred') return '';
+  const pairs = plan.slots
+    .filter((slot) => slot.kind === 'pair' && slot.execution === 'weighted-canvas-deferred')
+    .map((slot) => `${slot.surface.transition_id}:${slot.surface.lower_clip_id}>${slot.surface.upper_clip_id}`);
+  return pairs.join('|');
+}
+
 /**
- * Stable exact-frame identity for one all-weighted transition plan. Frame index
- * is part of the key because pair weights/geometry are frame-evaluated, while
- * transition + clip identities prevent stale readiness from another pair layout
- * from authorizing the same frame number after a timeline change.
+ * Exact-frame execution identity. Frame-evaluated weights/geometry still get a
+ * distinct Canvas execution key even when source/runtime readiness is warm for
+ * the stable pair topology.
  */
 export function previewWeightedPlaybackPlanKey<T extends RuntimeLayer>(
   frameIndex: number | null,
   plan: RuntimePlan<T> | null,
 ): string {
-  if (frameIndex === null || !plan || plan.mode !== 'canonical-weighted-deferred') return '';
-  const pairs = plan.slots
-    .filter((slot) => slot.kind === 'pair' && slot.execution === 'weighted-canvas-deferred')
-    .map((slot) => `${slot.surface.transition_id}:${slot.surface.lower_clip_id}>${slot.surface.upper_clip_id}`);
-  return pairs.length > 0 ? `${frameIndex}|${pairs.join('|')}` : '';
+  if (frameIndex === null) return '';
+  const identity = previewWeightedPlaybackPlanIdentity(plan);
+  return identity ? `${frameIndex}|${identity}` : '';
 }
 
 /** Publish renderer-runtime readiness. This state is transient and never authored. */
@@ -50,6 +60,7 @@ export function publishPreviewWeightedPlaybackRuntime(next: PreviewWeightedPlayb
   const normalized: PreviewWeightedPlaybackRuntimeState = {
     frameIndex: next.frameIndex,
     planKey: next.planKey,
+    planIdentity: next.planIdentity,
     status: next.status,
     ...(next.reason ? { reason: next.reason } : {}),
   };
@@ -64,19 +75,20 @@ export function clearPreviewWeightedPlaybackRuntime(): void {
 }
 
 /**
- * Resolve whether the current weighted candidate frame has a matching ready
- * Canvas surface. Missing/stale/pending state fails closed; a renderer-specific
- * deferred/failed reason is preserved for diagnostics without changing authored
- * transition semantics.
+ * Resolve whether the weighted Canvas path can paint the current frame before
+ * browser paint. The first frame of a topology must prove a successful draw.
+ * After that, ready source/runtime capability stays warm across later frames of
+ * the same pair topology: the Canvas still recomputes the exact current-frame
+ * weights/geometry synchronously in a layout effect before it is revealed.
+ * Any pending/deferred/failed status for that topology revokes warm readiness.
  */
 export function resolvePreviewWeightedPlaybackRuntime<T extends RuntimeLayer>(
   frameIndex: number,
   plan: RuntimePlan<T>,
 ): PreviewWeightedPlaybackRuntimeDecision {
   const planKey = previewWeightedPlaybackPlanKey(frameIndex, plan);
-  if (!planKey
-    || runtimeState.frameIndex !== frameIndex
-    || runtimeState.planKey !== planKey) {
+  const planIdentity = previewWeightedPlaybackPlanIdentity(plan);
+  if (!planKey || !planIdentity || runtimeState.planIdentity !== planIdentity) {
     return { ready: false, deferredReason: 'transition-weighted-runtime-not-ready' };
   }
   if (runtimeState.status === 'ready') return { ready: true };
@@ -125,6 +137,7 @@ function sameRuntimeState(
 ): boolean {
   return left.frameIndex === right.frameIndex
     && left.planKey === right.planKey
+    && left.planIdentity === right.planIdentity
     && left.status === right.status
     && left.reason === right.reason;
 }
