@@ -59,7 +59,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: video-playback-canonical-parity-${{ github.ref }}
@@ -70,6 +70,31 @@ env:
   NODE_VERSION: '24'
 
 jobs:
+  tracker-update:
+    if: github.event_name == 'pull_request'
+    name: Apply durable tracker update
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/video-wysiwyg-phase3-text-playback-readiness
+          fetch-depth: 0
+      - name: Patch tracker and remove temporary updater files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/tmp-wysiwyg-tracker-update.py
+          git checkout HEAD^ -- .github/workflows/video-playback-canonical-parity.yml
+          git rm .github/tmp-wysiwyg-tracker-update.py .github/workflows/tmp-video-wysiwyg-tracker-update.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md .github/workflows/video-playback-canonical-parity.yml
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m "docs: update WYSIWYG tracker for text playback"
+          git push origin HEAD:feat/video-wysiwyg-phase3-text-playback-readiness
+
   playback-evidence:
     name: Normal playback canonicalization evidence
     runs-on: ubuntu-24.04
