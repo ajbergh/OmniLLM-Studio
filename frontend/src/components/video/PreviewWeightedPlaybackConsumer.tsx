@@ -438,8 +438,9 @@ export function PreviewWeightedPlaybackConsumer() {
       const lowerStyle = lower.getAttribute('style');
       const upperStyle = upper.getAttribute('style');
       const previousHost = lower.getAttribute('data-preview-weighted-playback-host');
-      const childVisibility = [...lower.children].map((child) => ({
+      const childPaint = [...lower.children].map((child) => ({
         child: child as HTMLElement,
+        opacity: (child as HTMLElement).style.opacity,
         visibility: (child as HTMLElement).style.visibility,
       }));
 
@@ -460,15 +461,23 @@ export function PreviewWeightedPlaybackConsumer() {
         const element = child as HTMLElement;
         const isCurrentPlaybackCanvas = element.dataset.previewTransitionPairSurfaceRole === 'playback'
           && element.dataset.previewTransitionPairRuntimeKey === executionKey;
-        element.style.visibility = isCurrentPlaybackCanvas ? 'visible' : 'hidden';
+        element.style.visibility = 'visible';
+        element.style.opacity = isCurrentPlaybackCanvas ? '1' : '0';
       }
-      upper.style.visibility = 'hidden';
+      // Keep peer media render-active too. opacity:0 removes all visual
+      // contribution while avoiding visibility:hidden decoder throttling that can
+      // drop HAVE_CURRENT_DATA and revoke the next weighted frame's readiness.
+      upper.style.visibility = 'visible';
+      upper.style.opacity = '0';
 
       restorers.push(() => {
         restoreAttribute(lower, 'style', lowerStyle);
         restoreAttribute(upper, 'style', upperStyle);
         restoreAttribute(lower, 'data-preview-weighted-playback-host', previousHost);
-        for (const { child, visibility } of childVisibility) child.style.visibility = visibility;
+        for (const { child, opacity, visibility } of childPaint) {
+          child.style.opacity = opacity;
+          child.style.visibility = visibility;
+        }
       });
     }
     return () => restorers.reverse().forEach((restore) => restore());
