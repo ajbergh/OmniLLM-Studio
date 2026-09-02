@@ -205,6 +205,28 @@ export async function settlePreviewTextLayouts(
   return snapshots;
 }
 
+/**
+ * Resolve a uniform canvas scale from fractional rendered CSS geometry.
+ * clientWidth/clientHeight are integer-rounded and can manufacture an apparent
+ * X/Y mismatch for a correctly aspect-fitted stage, so readiness must use the
+ * sub-pixel border-box dimensions Chromium actually rendered.
+ */
+export function resolvePreviewCanvasStageScale(
+  renderedWidthPx: number,
+  renderedHeightPx: number,
+  canvasWidth: number,
+  canvasHeight: number,
+): number {
+  requirePositiveFinite('rendered width', renderedWidthPx);
+  requirePositiveFinite('rendered height', renderedHeightPx);
+  requirePositiveFinite('canvas width', canvasWidth);
+  requirePositiveFinite('canvas height', canvasHeight);
+  const scaleX = renderedWidthPx / canvasWidth;
+  const scaleY = renderedHeightPx / canvasHeight;
+  if (Math.abs(scaleX - scaleY) > 0.001) throw new Error('text-layout-stage-scale-nonuniform');
+  return (scaleX + scaleY) / 2;
+}
+
 function canonicalTextNodes(stage: HTMLElement, selector: string): HTMLElement[] {
   return [...stage.querySelectorAll<HTMLElement>(selector)];
 }
@@ -269,12 +291,8 @@ function annotateTextLayoutSnapshot(node: HTMLElement, snapshot: PreviewTextLayo
 function resolveCanvasStageScale(stage: HTMLElement): number {
   const canvas = useVideoStudioStore.getState().timeline?.canvas;
   if (!canvas || canvas.width <= 0 || canvas.height <= 0) throw new Error('text-layout-canvas-unavailable');
-  const scaleX = stage.clientWidth / canvas.width;
-  const scaleY = stage.clientHeight / canvas.height;
-  requirePositiveFinite('stage scale x', scaleX);
-  requirePositiveFinite('stage scale y', scaleY);
-  if (Math.abs(scaleX - scaleY) > 0.001) throw new Error('text-layout-stage-scale-nonuniform');
-  return (scaleX + scaleY) / 2;
+  const rect = stage.getBoundingClientRect();
+  return resolvePreviewCanvasStageScale(rect.width, rect.height, canvas.width, canvas.height);
 }
 
 function usedBorderBoxPixels(style: CSSStyleDeclaration, axis: 'width' | 'height'): number {
