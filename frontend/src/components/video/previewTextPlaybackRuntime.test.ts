@@ -26,7 +26,9 @@ function textLayer(
         font_family: 'DejaVu Sans',
         font_family_source: 'authored',
         ...(resourceId ? { font_resource_id: resourceId } : {}),
-        font_face_source: resourceId ? 'packaged-resource' : 'family-name-only',
+        // Editor FrameState keeps mutable project-resource faces renderer-dependent;
+        // the playback FontFace/layout runtime is what proves browser authority.
+        font_face_source: 'family-name-only',
         font_size: 36,
         font_weight: '700',
         color: '#ffffff',
@@ -65,7 +67,7 @@ describe('normal playback text runtime', () => {
       .toBe('missing:font-asset-unavailable');
   });
 
-  it('requires one successful runtime proof and keeps identical text topology warm across frames', () => {
+  it('requires one successful runtime proof and keeps identical editor-bound text topology warm across frames', () => {
     const layers = [textLayer()];
     expect(resolvePreviewTextPlaybackRuntime(9, layers)).toEqual({
       ready: false,
