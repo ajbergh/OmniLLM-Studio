@@ -1,10 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 import type { PreviewTransitionPairPlan } from './previewFrameTransitionPairs';
 import { resolvePreviewPlaybackCanonicalization } from './previewPlaybackCanonicalization';
+import {
+  previewWeightedPlaybackPlanKey,
+  publishPreviewWeightedPlaybackRuntime,
+  resetPreviewWeightedPlaybackRuntimeForTests,
+} from './previewWeightedPlaybackRuntime';
 
 type Layer = Parameters<typeof resolvePreviewPlaybackCanonicalization>[2][number];
-type Plan = Parameters<typeof resolvePreviewPlaybackCanonicalization>[3];
+type Plan = NonNullable<Parameters<typeof resolvePreviewPlaybackCanonicalization>[3]>;
 
 function mediaLayer(id = 'media', mimeType = 'video/mp4'): Layer {
   return {
@@ -17,9 +22,48 @@ function mediaLayer(id = 'media', mimeType = 'video/mp4'): Layer {
 function plan(
   mode: PreviewTransitionPairPlan<Layer>['mode'] = 'canonical-none',
   deferredReasons: string[] = [],
+  weightedRasterDeferredReasons: string[] = [],
 ): Plan {
-  return { mode, deferredReasons };
+  return {
+    mode,
+    slots: [],
+    deferredReasons,
+    weightedRasterDeferredReasons,
+  };
 }
+
+function weightedPlan(): Plan {
+  const lower = mediaLayer('lower');
+  const upper = mediaLayer('upper', 'image/png');
+  return {
+    mode: 'canonical-weighted-deferred',
+    deferredReasons: [],
+    weightedRasterDeferredReasons: [],
+    slots: [{
+      kind: 'pair',
+      lower,
+      upper,
+      surface: {
+        transition_id: 'weighted-crossfade',
+        owner_clip_id: 'lower',
+        peer_clip_id: 'upper',
+        outgoing_clip_id: 'lower',
+        incoming_clip_id: 'upper',
+        lower_clip_id: 'lower',
+        upper_clip_id: 'upper',
+        lower_layer_index: 0,
+        upper_layer_index: 1,
+      } as never,
+      paint: {} as never,
+      pixel: {} as never,
+      execution: 'weighted-canvas-deferred',
+      layerPaintByClipId: new Map(),
+      weightedRasterSource: { supported: true, reasons: [] },
+    }],
+  };
+}
+
+afterEach(() => resetPreviewWeightedPlaybackRuntimeForTests());
 
 describe('normal playback canonicalization gate', () => {
   it('leaves a non-playing address on the legacy time path', () => {
@@ -87,7 +131,6 @@ describe('normal playback canonicalization gate', () => {
 
   it.each([
     ['legacy', 'transition-plan-legacy'],
-    ['canonical-weighted-deferred', 'transition-plan-weighted-deferred'],
     ['canonical-mixed', 'transition-plan-mixed'],
   ] as const)('fails closed for %s transition composition', (mode, reason) => {
     expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, [mediaLayer()], plan(mode))).toEqual({
@@ -97,12 +140,59 @@ describe('normal playback canonicalization gate', () => {
     });
   });
 
-  it('retains explicit canonical transition deferral reasons', () => {
+  it('fails weighted composition closed until the exact current-frame Canvas runtime is ready', () => {
+    const transitionPlan = weightedPlan();
+    const layers = [mediaLayer('lower'), mediaLayer('upper', 'image/png')];
+    expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, layers, transitionPlan)).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'transition-weighted-runtime-not-ready',
+    });
+
+    const planKey = previewWeightedPlaybackPlanKey(9, transitionPlan);
+    publishPreviewWeightedPlaybackRuntime({ frameIndex: 9, planKey, status: 'ready' });
+    expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, layers, transitionPlan)).toEqual({
+      mode: 'canonical-playback',
+      canonicalFrame: 9,
+    });
+    expect(resolvePreviewPlaybackCanonicalization(10, { authoritative: true }, layers, transitionPlan).deferredReason)
+      .toBe('transition-weighted-runtime-not-ready');
+  });
+
+  it('retains weighted raster-source and renderer-runtime deferral reasons', () => {
     expect(resolvePreviewPlaybackCanonicalization(
       9,
       { authoritative: true },
       [mediaLayer()],
-      plan('canonical-none', ['transition-1:overlap-not-adjacent']),
+      plan('canonical-weighted-deferred', [], ['weighted-crossfade:lower:unsupported-raster-source']),
+    ).deferredReason).toBe(
+      'transition-weighted-raster-deferred:weighted-crossfade:lower:unsupported-raster-source',
+    );
+
+    const transitionPlan = weightedPlan();
+    const planKey = previewWeightedPlaybackPlanKey(9, transitionPlan);
+    publishPreviewWeightedPlaybackRuntime({
+      frameIndex: 9,
+      planKey,
+      status: 'deferred',
+      reason: 'upper:decoder-budget-poster',
+    });
+    expect(resolvePreviewPlaybackCanonicalization(
+      9,
+      { authoritative: true },
+      [mediaLayer('lower'), mediaLayer('upper', 'image/png')],
+      transitionPlan,
+    ).deferredReason).toBe(
+      'transition-weighted-runtime-deferred:upper:decoder-budget-poster',
+    );
+  });
+
+  it('retains explicit canonical transition deferral reasons before runtime admission', () => {
+    expect(resolvePreviewPlaybackCanonicalization(
+      9,
+      { authoritative: true },
+      [mediaLayer()],
+      plan('canonical-weighted-deferred', ['transition-1:overlap-not-adjacent']),
     )).toEqual({
       mode: 'legacy-time-fallback',
       canonicalFrame: null,
