@@ -8,14 +8,14 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate playback parity fixture: %v", err)
 	}
-	if validated.DurationMS != 26000 || validated.Canvas.FPS != 30 {
+	if validated.DurationMS != 38000 || validated.Canvas.FPS != 30 {
 		t.Fatalf("unexpected playback parity canvas/duration: %+v / %d", validated.Canvas, validated.DurationMS)
 	}
 	if len(assets) != 5 {
 		t.Fatalf("playback parity assets = %d, want 5", len(assets))
 	}
-	if len(cases) != 13 {
-		t.Fatalf("playback parity cases = %d, want 13", len(cases))
+	if len(cases) != 17 {
+		t.Fatalf("playback parity cases = %d, want 17", len(cases))
 	}
 	seen := map[string]bool{}
 	for _, testCase := range cases {
@@ -78,6 +78,10 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 		"weighted-decoder-budget-fallback",
 		"mixed-transition-fallback",
 		"deferred-transition-fallback",
+		"media-text-canonical-playback",
+		"weighted-text-canonical-playback",
+		"weighted-invalid-text-fallback",
+		"weighted-text-decoder-budget-fallback",
 	} {
 		if !seen[required] {
 			t.Fatalf("playback parity case %q is missing", required)
