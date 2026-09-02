@@ -67,7 +67,7 @@ export function composeWeightedTransitionPairRgba(
   incoming: Uint8ClampedArray,
   target: Uint8ClampedArray = new Uint8ClampedArray(outgoing.length),
 ): Uint8ClampedArray {
-  const weights = requireWeightedPairKernelComposition(composition);
+  const weights = resolveWeightedTransitionPairKernelWeights(composition);
   requireCompatibleRgbaBuffers(outgoing, incoming, target);
 
   for (let index = 0; index < outgoing.length; index += 4) {
@@ -104,13 +104,14 @@ export function composeWeightedTransitionPairRgba(
   return target;
 }
 
-interface WeightedPairKernelWeights {
+export interface WeightedPairKernelWeights {
   outgoing: number;
   incoming: number;
   black: number;
 }
 
-function requireWeightedPairKernelComposition(
+/** Validate the v1 weighted-pair contract and return its normalized weights. */
+export function resolveWeightedTransitionPairKernelWeights(
   composition: CanonicalTransitionPairPixelComposition,
 ): WeightedPairKernelWeights {
   if (composition.contract_version !== TRANSITION_PAIR_PIXEL_COMPOSITION_V1
