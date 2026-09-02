@@ -168,7 +168,7 @@ jobs:
           done
           node scripts/video-playback-parity-capture.mjs \
             --url http://127.0.0.1:14179 \
-            --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v3.json \
+            --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v4.json \
             --media-dir output/video-playback-canonical/fixture/media \
             --output output/video-playback-canonical/capture
       - name: Record toolchain
