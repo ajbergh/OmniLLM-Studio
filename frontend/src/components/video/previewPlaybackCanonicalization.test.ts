@@ -3,6 +3,12 @@ import type { CanonicalFrameLayerState } from '../../video/renderContractFrameSt
 import type { PreviewTransitionPairPlan } from './previewFrameTransitionPairs';
 import { resolvePreviewPlaybackCanonicalization } from './previewPlaybackCanonicalization';
 import {
+  previewTextPlaybackPlanIdentity,
+  previewTextPlaybackPlanKey,
+  publishPreviewTextPlaybackRuntime,
+  resetPreviewTextPlaybackRuntimeForTests,
+} from './previewTextPlaybackRuntime';
+import {
   previewWeightedPlaybackPlanIdentity,
   previewWeightedPlaybackPlanKey,
   publishPreviewWeightedPlaybackRuntime,
@@ -16,7 +22,39 @@ function mediaLayer(id = 'media', mimeType = 'video/mp4'): Layer {
   return {
     clip: { id },
     asset: { mime_type: mimeType },
-    canonicalState: { authoritative: true } as Pick<CanonicalFrameLayerState, 'authoritative'>,
+    canonicalState: { authoritative: true } as Pick<CanonicalFrameLayerState, 'authoritative' | 'text'>,
+  };
+}
+
+function textLayer(
+  id = 'title',
+  resourceId: string | undefined = 'playback-font-v1',
+  fontAssetId = 'font-asset',
+): Layer {
+  return {
+    clip: { id, text: {} },
+    ...(fontAssetId ? { fontAsset: { id: fontAssetId, kind: 'font' } } : {}),
+    canonicalState: {
+      authoritative: true,
+      text: {
+        contract_version: 'text-state-v1',
+        text: 'Playback title',
+        font_family: 'DejaVu Sans',
+        font_family_source: 'authored',
+        ...(resourceId ? { font_resource_id: resourceId } : {}),
+        font_face_source: resourceId ? 'packaged-resource' : 'family-name-only',
+        font_size: 36,
+        font_weight: '700',
+        color: '#ffffff',
+        stroke_width: 0,
+        text_align: 'center',
+        vertical_align: 'middle',
+        line_height_mode: 'normal',
+        letter_spacing: 0,
+        border_radius: 0,
+        padding: { top: 0, right: 0, bottom: 0, left: 0 },
+      },
+    } as Pick<CanonicalFrameLayerState, 'authoritative' | 'text'>,
   };
 }
 
@@ -64,7 +102,10 @@ function weightedPlan(transitionId = 'weighted-crossfade'): Plan {
   };
 }
 
-afterEach(() => resetPreviewWeightedPlaybackRuntimeForTests());
+afterEach(() => {
+  resetPreviewTextPlaybackRuntimeForTests();
+  resetPreviewWeightedPlaybackRuntimeForTests();
+});
 
 describe('normal playback canonicalization gate', () => {
   it('leaves a non-playing address on the legacy time path', () => {
@@ -117,8 +158,57 @@ describe('normal playback canonicalization gate', () => {
       .toBe('canonical-layer-state-nonauthoritative:media');
   });
 
+  it('fails resource-backed text closed until exact font/layout runtime readiness is proven', () => {
+    const layers = [textLayer()];
+    expect(resolvePreviewPlaybackCanonicalization(8, { authoritative: true }, layers, plan())).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'text-playback-runtime-not-ready',
+    });
+
+    const planIdentity = previewTextPlaybackPlanIdentity(layers);
+    publishPreviewTextPlaybackRuntime({
+      frameIndex: 8,
+      planKey: previewTextPlaybackPlanKey(8, layers),
+      planIdentity,
+      status: 'ready',
+    });
+    expect(resolvePreviewPlaybackCanonicalization(8, { authoritative: true }, layers, plan())).toEqual({
+      mode: 'canonical-playback',
+      canonicalFrame: 8,
+    });
+    expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, layers, plan())).toEqual({
+      mode: 'canonical-playback',
+      canonicalFrame: 9,
+    });
+  });
+
+  it('keeps family-name-only text explicitly fail-closed', () => {
+    const layer = textLayer('family-only', '', '');
+    expect(resolvePreviewPlaybackCanonicalization(8, { authoritative: true }, [layer], plan())).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'text-playback-runtime-deferred:family-only:resource-font-required',
+    });
+  });
+
+  it('admits a media plus standalone text frame only after text readiness', () => {
+    const layers = [mediaLayer('background'), textLayer('title')];
+    expect(resolvePreviewPlaybackCanonicalization(11, { authoritative: true }, layers, plan()).deferredReason)
+      .toBe('text-playback-runtime-not-ready');
+
+    const planIdentity = previewTextPlaybackPlanIdentity(layers);
+    publishPreviewTextPlaybackRuntime({
+      frameIndex: 11,
+      planKey: previewTextPlaybackPlanKey(11, layers),
+      planIdentity,
+      status: 'ready',
+    });
+    expect(resolvePreviewPlaybackCanonicalization(11, { authoritative: true }, layers, plan()))
+      .toEqual({ mode: 'canonical-playback', canonicalFrame: 11 });
+  });
+
   it.each([
-    ['text', { ...mediaLayer(), clip: { id: 'text', text: {} } }],
     ['shape', { ...mediaLayer(), clip: { id: 'shape', shape: {} } }],
     ['cursor', { ...mediaLayer(), clip: { id: 'cursor', cursor: {} } }],
     ['missing-asset', { ...mediaLayer(), clip: { id: 'missing-asset' }, asset: undefined }],
@@ -128,6 +218,20 @@ describe('normal playback canonicalization gate', () => {
     expect(result.mode).toBe('legacy-time-fallback');
     expect(result.canonicalFrame).toBeNull();
     expect(result.deferredReason).toBe(`unsupported-playback-painter:${layer.clip.id}`);
+  });
+
+  it('keeps mixed supported text plus unsupported painter frames on one deterministic fallback', () => {
+    const result = resolvePreviewPlaybackCanonicalization(
+      8,
+      { authoritative: true },
+      [textLayer(), { ...mediaLayer(), clip: { id: 'cursor', cursor: {} } }],
+      plan(),
+    );
+    expect(result).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'unsupported-playback-painter:cursor',
+    });
   });
 
   it.each([

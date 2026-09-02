@@ -74,6 +74,72 @@ try {
         pairId: testCase.expected_weighted_pair_id || '',
       }, { timeout: 3_000 });
     }
+    if (testCase.expected_text_runtime || testCase.expected_text_consumer || testCase.expected_text_clip_id) {
+      const expectedText = {
+        runtime: testCase.expected_text_runtime || '',
+        consumer: testCase.expected_text_consumer || '',
+        clipId: testCase.expected_text_clip_id || '',
+      };
+      try {
+        await page.waitForFunction((expected) => {
+          const stage = document.querySelector('[data-testid="video-preview-program"]');
+          if (!stage) return false;
+          const planKey = stage.dataset.previewTextPlaybackPlanKey || '';
+          return (!expected.runtime || stage.dataset.previewTextPlaybackRuntime === expected.runtime)
+            && (!expected.consumer || stage.dataset.previewTextPlaybackConsumer === expected.consumer)
+            && (!expected.clipId || planKey.includes(`\"clip_id\":\"${expected.clipId}\"`));
+        }, expectedText, { timeout: 4_000 });
+      } catch (error) {
+        const diagnostic = await page.evaluate(() => {
+          const stage = document.querySelector('[data-testid="video-preview-program"]');
+          const surfaces = stage
+            ? [...stage.querySelectorAll('[data-preview-text-playback-surface]')].map((surface) => ({
+                clip_id: surface.dataset.previewTextPlaybackSurface || '',
+                runtime_key: surface.dataset.previewTextPlaybackRuntimeKey || '',
+                ready: surface.dataset.previewTextPlaybackReady || '',
+                pending_reason: surface.dataset.previewTextPlaybackPendingReason || '',
+                visibility: getComputedStyle(surface).visibility,
+                opacity: getComputedStyle(surface).opacity,
+                text_nodes: [...surface.querySelectorAll('[data-preview-text-state-mode="canonical-frame"]')].map((node) => ({
+                  font_face_source: node.dataset.previewTextFontFaceSource || '',
+                  font_face_runtime: node.dataset.previewTextFontFaceRuntime || '',
+                  metrics_mode: node.dataset.previewTextMetricsMode || '',
+                  layout_contract: node.dataset.previewTextLayoutContract || '',
+                  layout_input: node.dataset.previewTextLayoutInput || '',
+                  layout_width: node.dataset.previewTextLayoutWidth || '',
+                  layout_height: node.dataset.previewTextLayoutHeight || '',
+                  layout_fragments: node.dataset.previewTextLayoutLineFragments || '',
+                })),
+              }))
+            : [];
+          return {
+            stage: stage ? {
+              timeline_ms: stage.dataset.parityTimeMs || '',
+              parity_frame_index: stage.dataset.parityFrameIndex || '',
+              visual_frame_mode: stage.dataset.previewVisualFrameMode || '',
+              visual_frame_index: stage.dataset.previewVisualFrameIndex || '',
+              playback_frame_candidate: stage.dataset.previewPlaybackFrameCandidate || '',
+              playback_deferred_reason: stage.dataset.previewPlaybackCanonicalDeferred || '',
+              text_frame_index: stage.dataset.previewTextPlaybackFrameIndex || '',
+              text_plan_key: stage.dataset.previewTextPlaybackPlanKey || '',
+              text_runtime: stage.dataset.previewTextPlaybackRuntime || '',
+              text_consumer: stage.dataset.previewTextPlaybackConsumer || '',
+              text_deferred: stage.dataset.previewTextPlaybackDeferred || '',
+              text_trace: stage.dataset.previewTextPlaybackReadinessTrace || '',
+              deterministic_font_readiness: stage.dataset.previewFontFaceReadiness || '',
+              deterministic_font_error: stage.dataset.previewFontFaceRuntimeError || '',
+              deterministic_layout_readiness: stage.dataset.previewTextLayoutReadiness || '',
+              deterministic_layout_error: stage.dataset.previewTextLayoutRuntimeError || '',
+            } : null,
+            surfaces,
+          };
+        });
+        throw new Error(
+          `text playback readiness wait failed for ${testCase.name}: ${JSON.stringify(diagnostic)}`,
+          { cause: error },
+        );
+      }
+    }
 
     const observations = await page.evaluate(async (observeMs) => {
       const rows = [];
@@ -85,6 +151,7 @@ try {
         const audio = document.querySelector('audio');
         const videos = [...stage.querySelectorAll('video')];
         const weightedSurfaces = [...stage.querySelectorAll('[data-preview-transition-pair-surface-role="playback"]')];
+        const textSurfaces = [...stage.querySelectorAll('[data-preview-text-playback-surface]')];
         rows.push({
           performance_ms: performance.now(),
           timeline_ms: Number(stage.dataset.parityTimeMs),
@@ -110,6 +177,23 @@ try {
           weighted_surface_runtime_keys: weightedSurfaces
             .map((surface) => surface.dataset.previewTransitionPairRuntimeKey || '')
             .filter(Boolean),
+          text_playback_runtime: stage.dataset.previewTextPlaybackRuntime || '',
+          text_playback_consumer: stage.dataset.previewTextPlaybackConsumer || '',
+          text_playback_plan_key: stage.dataset.previewTextPlaybackPlanKey || '',
+          text_playback_deferred: stage.dataset.previewTextPlaybackDeferred || '',
+          text_playback_readiness_trace: stage.dataset.previewTextPlaybackReadinessTrace || '',
+          text_surface_count: textSurfaces.length,
+          text_surface_ready_count: textSurfaces.filter((surface) => surface.dataset.previewTextPlaybackReady === 'true').length,
+          text_surface_visible_count: textSurfaces.filter((surface) => {
+            const style = getComputedStyle(surface);
+            return style.visibility !== 'hidden' && Number.parseFloat(style.opacity || '1') > 0;
+          }).length,
+          text_surface_layout_count: textSurfaces.filter((surface) => Boolean(
+            surface.querySelector('[data-preview-text-layout-contract="preview-text-layout-snapshot-v1"]'),
+          )).length,
+          text_surface_font_ready_count: textSurfaces.filter((surface) => Boolean(
+            surface.querySelector('[data-preview-text-font-face-runtime="editor-resource-loaded"]'),
+          )).length,
           audio_current_time: audio ? audio.currentTime : null,
           audio_paused: audio ? audio.paused : null,
           video_current_times: videos.map((video) => ({
@@ -226,6 +310,53 @@ function gateCase(testCase, observations, fps) {
       errors.push(`weighted pair ${row.weighted_playback_plan_key || '<empty>'}, want ${testCase.expected_weighted_pair_id}`);
       break;
     }
+    if (testCase.expected_text_runtime && row.text_playback_runtime !== testCase.expected_text_runtime) {
+      errors.push(`text runtime ${row.text_playback_runtime}, want ${testCase.expected_text_runtime}`);
+      break;
+    }
+    if (testCase.expected_text_consumer && row.text_playback_consumer !== testCase.expected_text_consumer) {
+      errors.push(`text consumer ${row.text_playback_consumer}, want ${testCase.expected_text_consumer}`);
+      break;
+    }
+    if (testCase.expected_text_clip_id
+      && !row.text_playback_plan_key.includes(`\"clip_id\":\"${testCase.expected_text_clip_id}\"`)) {
+      errors.push(`text plan ${row.text_playback_plan_key || '<empty>'}, want ${testCase.expected_text_clip_id}`);
+      break;
+    }
+    for (const trace of testCase.expected_text_trace || []) {
+      if (!row.text_playback_readiness_trace.includes(trace)) {
+        errors.push(`text readiness trace ${row.text_playback_readiness_trace || '<empty>'} is missing ${trace}`);
+        break;
+      }
+    }
+    if (errors.length > 0) break;
+    if (testCase.require_text_layout) {
+      if (row.text_surface_count < 1) {
+        errors.push('text playback has no canonical prewarm surface');
+        break;
+      }
+      if (row.text_surface_ready_count !== row.text_surface_count) {
+        errors.push(`text surfaces ready ${row.text_surface_ready_count}/${row.text_surface_count}`);
+        break;
+      }
+      if (row.text_surface_layout_count !== row.text_surface_count) {
+        errors.push(`text layouts ready ${row.text_surface_layout_count}/${row.text_surface_count}`);
+        break;
+      }
+      if (row.text_surface_font_ready_count !== row.text_surface_count) {
+        errors.push(`text resource fonts ready ${row.text_surface_font_ready_count}/${row.text_surface_count}`);
+        break;
+      }
+      if (testCase.expected_text_consumer === 'canonical-text-dom'
+        && row.text_surface_visible_count !== row.text_surface_count) {
+        errors.push(`canonical text surfaces visible ${row.text_surface_visible_count}/${row.text_surface_count}`);
+        break;
+      }
+      if (testCase.expected_text_consumer === 'legacy-time-fallback' && row.text_surface_visible_count !== 0) {
+        errors.push(`fallback frame exposed ${row.text_surface_visible_count} canonical text surfaces`);
+        break;
+      }
+    }
     if (testCase.require_weighted_canvas) {
       if (row.weighted_surface_count < 1) {
         errors.push('weighted canonical playback has no playback Canvas surface');
@@ -305,6 +436,10 @@ function gateCase(testCase, observations, fps) {
     expected_weighted_runtime: testCase.expected_weighted_runtime || '',
     expected_weighted_consumer: testCase.expected_weighted_consumer || '',
     expected_weighted_pair_id: testCase.expected_weighted_pair_id || '',
+    expected_text_runtime: testCase.expected_text_runtime || '',
+    expected_text_consumer: testCase.expected_text_consumer || '',
+    expected_text_clip_id: testCase.expected_text_clip_id || '',
+    expected_text_trace: testCase.expected_text_trace || [],
     decoder_budget: testCase.decoder_budget || 0,
     observations: stable,
     timeline_advance_ms: timelineAdvanceMs,
@@ -339,15 +474,19 @@ async function seedFixtureProject({ context, fixture, mediaDir, baseURL, headers
     'asset-landscape': ['asset-landscape.mp4', 'video/mp4'],
     'asset-square': ['asset-square.png', 'image/png'],
     'asset-audio': ['asset-audio.wav', 'audio/wav'],
+    'asset-font': ['asset-font.ttf', 'font/ttf', 'playback-font-v1'],
+    'asset-font-invalid': ['asset-font-invalid.ttf', 'font/ttf', 'playback-font-invalid-v1'],
   };
   const assetIDs = {};
   for (const asset of fixture.assets) {
     const recipe = fileForAsset[asset.id];
     if (!recipe) throw new Error(`no generated media recipe for playback fixture asset ${asset.id}`);
     const filePath = path.join(mediaDir, recipe[0]);
+    const multipart = { file: { name: recipe[0], mimeType: recipe[1], buffer: await fs.readFile(filePath) } };
+    if (recipe[2]) multipart.font_resource_id = recipe[2];
     const response = await context.request.post(apiURL(`/video/projects/${encodeURIComponent(project.id)}/assets/upload`), {
       headers,
-      multipart: { file: { name: recipe[0], mimeType: recipe[1], buffer: await fs.readFile(filePath) } },
+      multipart,
     });
     if (!response.ok()) throw new Error(`upload ${asset.id}: HTTP ${response.status()} ${await response.text()}`);
     const uploaded = await response.json();

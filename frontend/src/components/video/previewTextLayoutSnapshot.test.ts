@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPreviewTextLayoutSnapshot,
   previewTextLayoutSnapshotStable,
+  previewTextLayoutTopologyStable,
+  resolvePreviewCanvasStageScale,
   type PreviewTextLayoutMeasurement,
 } from './previewTextLayoutSnapshot';
 
@@ -88,7 +90,38 @@ describe('preview text layout snapshot', () => {
     expect(half.border_box_height).toBe(full.border_box_height);
   });
 
-  it('requires a stable second Chromium pass after intrinsic dimensions are frozen', () => {
+  it('uses fractional rendered geometry so integer client-size rounding cannot create a false nonuniform stage', () => {
+    const renderedWidth = 456.32;
+    const renderedHeight = 256.68;
+    expect(resolvePreviewCanvasStageScale(renderedWidth, renderedHeight, 640, 360)).toBeCloseTo(0.713, 10);
+
+    const integerScaleX = Math.round(renderedWidth) / 640;
+    const integerScaleY = Math.round(renderedHeight) / 360;
+    expect(Math.abs(integerScaleX - integerScaleY)).toBeGreaterThan(0.001);
+    expect(() => resolvePreviewCanvasStageScale(renderedWidth, 250, 640, 360)).toThrow('text-layout-stage-scale-nonuniform');
+  });
+
+  it('allows one intrinsic-to-explicit quantization only when line topology is unchanged', () => {
+    const intrinsic = buildPreviewTextLayoutSnapshot(measurement({
+      borderBoxWidthPx: 319.192428,
+      borderBoxHeightPx: 188.407678,
+      lineFragmentCount: 6,
+    }), 1);
+    const explicit = {
+      border_box_width: 319.179542,
+      border_box_height: 188.407678,
+      line_fragment_count: 6,
+    };
+
+    expect(previewTextLayoutTopologyStable(intrinsic, explicit)).toBe(true);
+    expect(previewTextLayoutSnapshotStable(intrinsic, explicit)).toBe(false);
+    expect(previewTextLayoutTopologyStable(intrinsic, {
+      ...explicit,
+      line_fragment_count: 7,
+    })).toBe(false);
+  });
+
+  it('requires a stable explicit-to-explicit Chromium pass with the existing strict tolerance', () => {
     const before = buildPreviewTextLayoutSnapshot(measurement(), 1);
     expect(previewTextLayoutSnapshotStable(before, before)).toBe(true);
     expect(previewTextLayoutSnapshotStable(before, {
@@ -106,5 +139,6 @@ describe('preview text layout snapshot', () => {
   it('fails closed on invalid scale or negative browser measurements', () => {
     expect(() => buildPreviewTextLayoutSnapshot(measurement(), 0)).toThrow(/stage scale/);
     expect(() => buildPreviewTextLayoutSnapshot(measurement({ borderBoxWidthPx: -1 }), 1)).toThrow(/finite and non-negative/);
+    expect(() => resolvePreviewCanvasStageScale(0, 100, 640, 360)).toThrow(/rendered width/);
   });
 });

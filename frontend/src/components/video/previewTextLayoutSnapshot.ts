@@ -104,7 +104,7 @@ export function buildPreviewTextLayoutSnapshot(
   };
 }
 
-/** True when freezing intrinsic dimensions did not perturb Chromium layout. */
+/** True when two explicit Chromium layout passes have stable geometry/topology. */
 export function previewTextLayoutSnapshotStable(
   before: PreviewTextLayoutSnapshot,
   after: Pick<PreviewTextLayoutSnapshot, 'border_box_width' | 'border_box_height' | 'line_fragment_count'>,
@@ -112,13 +112,24 @@ export function previewTextLayoutSnapshotStable(
 ): boolean {
   return Math.abs(before.border_box_width - after.border_box_width) <= tolerance
     && Math.abs(before.border_box_height - after.border_box_height) <= tolerance
-    && before.line_fragment_count === after.line_fragment_count;
+    && previewTextLayoutTopologyStable(before, after);
+}
+
+/**
+ * Intrinsic auto-size may quantize once when converted to explicit CSS pixels,
+ * but that conversion may never change line topology.
+ */
+export function previewTextLayoutTopologyStable(
+  before: Pick<PreviewTextLayoutSnapshot, 'line_fragment_count'>,
+  after: Pick<PreviewTextLayoutSnapshot, 'line_fragment_count'>,
+): boolean {
+  return before.line_fragment_count === after.line_fragment_count;
 }
 
 /**
  * Install the deterministic parity gate once per browser document. It snapshots
  * canonical text only after exact font readiness, freezes intrinsic dimensions,
- * verifies a second Chromium layout pass is stable, then resumes parity-ready.
+ * verifies explicit Chromium layout is stable, then resumes parity-ready.
  */
 export function installPreviewTextLayoutReadinessGate(): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -160,9 +171,21 @@ export function installPreviewTextLayoutReadinessGate(): void {
   window.addEventListener('omnillm:video-parity-ready', onParityReady, true);
 }
 
-async function settlePreviewTextLayouts(
+/**
+ * Settle one scoped set of canonical text nodes. Normal playback reuses this
+ * exact Chromium measurement/freeze/stability contract on hidden prewarm
+ * surfaces; deterministic parity keeps the default selector. Intrinsic layout
+ * is allowed one auto-size -> explicit-size quantization only when its line
+ * topology is unchanged. The same explicit style is then observed on a second
+ * frame and must satisfy the strict geometry tolerance and exact fragment count;
+ * readiness never rewrites a measured explicit width back into CSS because that
+ * serialization is itself a new layout mutation. The resulting stable snapshots
+ * remain browser-consumer evidence and never mutate authored state.
+ */
+export async function settlePreviewTextLayouts(
   stage: HTMLElement,
   deadline: number,
+  selector = '[data-preview-text-state-mode="canonical-frame"]',
 ): Promise<PreviewTextLayoutSnapshot[]> {
   while (stage.dataset.previewFontFaceReadiness === 'loading') {
     if (performance.now() >= deadline) throw new Error('text-layout-font-not-ready');
@@ -172,16 +195,16 @@ async function settlePreviewTextLayouts(
     throw new Error('text-layout-font-load-failed');
   }
 
-  let nodes = canonicalTextNodes(stage);
+  let nodes = canonicalTextNodes(stage, selector);
   while (nodes.length === 0 && stage.hasAttribute('data-preview-font-face-readiness')) {
     if (performance.now() >= deadline) throw new Error('text-layout-painter-not-ready');
     await nextAnimationFrame();
-    nodes = canonicalTextNodes(stage);
+    nodes = canonicalTextNodes(stage, selector);
   }
   if (nodes.length === 0) return [];
 
   const stageScale = resolveCanvasStageScale(stage);
-  const snapshots = nodes.map((node) => {
+  const intrinsicSnapshots = nodes.map((node) => {
     const snapshot = capturePreviewTextLayoutSnapshot(node, stageScale);
     annotateTextLayoutSnapshot(node, snapshot);
     freezeIntrinsicTextLayout(node, snapshot, stageScale);
@@ -189,17 +212,64 @@ async function settlePreviewTextLayouts(
   });
 
   await nextAnimationFrame();
+  const explicitSnapshots = nodes.map((node, index) => (
+    capturePreviewTextLayoutSnapshot(node, stageScale, intrinsicSnapshots[index])
+  ));
   for (let index = 0; index < nodes.length; index += 1) {
-    const after = capturePreviewTextLayoutSnapshot(nodes[index], stageScale, snapshots[index]);
-    if (!previewTextLayoutSnapshotStable(snapshots[index], after)) {
-      throw new Error(`text-layout-unstable:${snapshots[index].input_fingerprint}`);
+    const intrinsic = intrinsicSnapshots[index];
+    const explicit = explicitSnapshots[index];
+    if (!previewTextLayoutTopologyStable(intrinsic, explicit)) {
+      throw new Error(
+        `text-layout-topology-changed:${intrinsic.input_fingerprint}`
+          + `:before=${intrinsic.line_fragment_count}:after=${explicit.line_fragment_count}`,
+      );
     }
+    annotateTextLayoutSnapshot(nodes[index], explicit);
   }
-  return snapshots;
+
+  await nextAnimationFrame();
+  const stableSnapshots = nodes.map((node, index) => (
+    capturePreviewTextLayoutSnapshot(node, stageScale, explicitSnapshots[index])
+  ));
+  for (let index = 0; index < nodes.length; index += 1) {
+    const explicit = explicitSnapshots[index];
+    const stable = stableSnapshots[index];
+    if (!previewTextLayoutSnapshotStable(explicit, stable)) {
+      throw new Error(
+        `text-layout-unstable:${explicit.input_fingerprint}`
+          + `:before=${explicit.border_box_width}x${explicit.border_box_height}/${explicit.line_fragment_count}`
+          + `:after=${stable.border_box_width}x${stable.border_box_height}/${stable.line_fragment_count}`,
+      );
+    }
+    annotateTextLayoutSnapshot(nodes[index], stable);
+  }
+  return stableSnapshots;
 }
 
-function canonicalTextNodes(stage: HTMLElement): HTMLElement[] {
-  return [...stage.querySelectorAll<HTMLElement>('[data-preview-text-state-mode="canonical-frame"]')];
+/**
+ * Resolve a uniform canvas scale from fractional rendered CSS geometry.
+ * clientWidth/clientHeight are integer-rounded and can manufacture an apparent
+ * X/Y mismatch for a correctly aspect-fitted stage, so readiness must use the
+ * sub-pixel border-box dimensions Chromium actually rendered.
+ */
+export function resolvePreviewCanvasStageScale(
+  renderedWidthPx: number,
+  renderedHeightPx: number,
+  canvasWidth: number,
+  canvasHeight: number,
+): number {
+  requirePositiveFinite('rendered width', renderedWidthPx);
+  requirePositiveFinite('rendered height', renderedHeightPx);
+  requirePositiveFinite('canvas width', canvasWidth);
+  requirePositiveFinite('canvas height', canvasHeight);
+  const scaleX = renderedWidthPx / canvasWidth;
+  const scaleY = renderedHeightPx / canvasHeight;
+  if (Math.abs(scaleX - scaleY) > 0.001) throw new Error('text-layout-stage-scale-nonuniform');
+  return (scaleX + scaleY) / 2;
+}
+
+function canonicalTextNodes(stage: HTMLElement, selector: string): HTMLElement[] {
+  return [...stage.querySelectorAll<HTMLElement>(selector)];
 }
 
 function capturePreviewTextLayoutSnapshot(
@@ -262,12 +332,8 @@ function annotateTextLayoutSnapshot(node: HTMLElement, snapshot: PreviewTextLayo
 function resolveCanvasStageScale(stage: HTMLElement): number {
   const canvas = useVideoStudioStore.getState().timeline?.canvas;
   if (!canvas || canvas.width <= 0 || canvas.height <= 0) throw new Error('text-layout-canvas-unavailable');
-  const scaleX = stage.clientWidth / canvas.width;
-  const scaleY = stage.clientHeight / canvas.height;
-  requirePositiveFinite('stage scale x', scaleX);
-  requirePositiveFinite('stage scale y', scaleY);
-  if (Math.abs(scaleX - scaleY) > 0.001) throw new Error('text-layout-stage-scale-nonuniform');
-  return (scaleX + scaleY) / 2;
+  const rect = stage.getBoundingClientRect();
+  return resolvePreviewCanvasStageScale(rect.width, rect.height, canvas.width, canvas.height);
 }
 
 function usedBorderBoxPixels(style: CSSStyleDeclaration, axis: 'width' | 'height'): number {
