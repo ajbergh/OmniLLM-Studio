@@ -3,6 +3,7 @@ import type { CanonicalFrameLayerState } from '../../video/renderContractFrameSt
 import type { PreviewTransitionPairPlan } from './previewFrameTransitionPairs';
 import { resolvePreviewPlaybackCanonicalization } from './previewPlaybackCanonicalization';
 import {
+  previewWeightedPlaybackPlanIdentity,
   previewWeightedPlaybackPlanKey,
   publishPreviewWeightedPlaybackRuntime,
   resetPreviewWeightedPlaybackRuntimeForTests,
@@ -32,7 +33,7 @@ function plan(
   };
 }
 
-function weightedPlan(): Plan {
+function weightedPlan(transitionId = 'weighted-crossfade'): Plan {
   const lower = mediaLayer('lower');
   const upper = mediaLayer('upper', 'image/png');
   return {
@@ -44,7 +45,7 @@ function weightedPlan(): Plan {
       lower,
       upper,
       surface: {
-        transition_id: 'weighted-crossfade',
+        transition_id: transitionId,
         owner_clip_id: 'lower',
         peer_clip_id: 'upper',
         outgoing_clip_id: 'lower',
@@ -140,7 +141,7 @@ describe('normal playback canonicalization gate', () => {
     });
   });
 
-  it('fails weighted composition closed until the exact current-frame Canvas runtime is ready', () => {
+  it('fails weighted composition closed until the pair topology is proven ready, then stays warm across frames', () => {
     const transitionPlan = weightedPlan();
     const layers = [mediaLayer('lower'), mediaLayer('upper', 'image/png')];
     expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, layers, transitionPlan)).toEqual({
@@ -150,13 +151,22 @@ describe('normal playback canonicalization gate', () => {
     });
 
     const planKey = previewWeightedPlaybackPlanKey(9, transitionPlan);
-    publishPreviewWeightedPlaybackRuntime({ frameIndex: 9, planKey, status: 'ready' });
+    const planIdentity = previewWeightedPlaybackPlanIdentity(transitionPlan);
+    publishPreviewWeightedPlaybackRuntime({ frameIndex: 9, planKey, planIdentity, status: 'ready' });
     expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, layers, transitionPlan)).toEqual({
       mode: 'canonical-playback',
       canonicalFrame: 9,
     });
-    expect(resolvePreviewPlaybackCanonicalization(10, { authoritative: true }, layers, transitionPlan).deferredReason)
-      .toBe('transition-weighted-runtime-not-ready');
+    expect(resolvePreviewPlaybackCanonicalization(10, { authoritative: true }, layers, transitionPlan)).toEqual({
+      mode: 'canonical-playback',
+      canonicalFrame: 10,
+    });
+    expect(resolvePreviewPlaybackCanonicalization(
+      10,
+      { authoritative: true },
+      layers,
+      weightedPlan('weighted-zoom'),
+    ).deferredReason).toBe('transition-weighted-runtime-not-ready');
   });
 
   it('retains weighted raster-source and renderer-runtime deferral reasons', () => {
@@ -171,9 +181,11 @@ describe('normal playback canonicalization gate', () => {
 
     const transitionPlan = weightedPlan();
     const planKey = previewWeightedPlaybackPlanKey(9, transitionPlan);
+    const planIdentity = previewWeightedPlaybackPlanIdentity(transitionPlan);
     publishPreviewWeightedPlaybackRuntime({
       frameIndex: 9,
       planKey,
+      planIdentity,
       status: 'deferred',
       reason: 'upper:decoder-budget-poster',
     });
