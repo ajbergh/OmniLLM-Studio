@@ -8,14 +8,14 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate playback parity fixture: %v", err)
 	}
-	if validated.DurationMS != 22000 || validated.Canvas.FPS != 30 {
+	if validated.DurationMS != 26000 || validated.Canvas.FPS != 30 {
 		t.Fatalf("unexpected playback parity canvas/duration: %+v / %d", validated.Canvas, validated.DurationMS)
 	}
-	if len(assets) != 3 {
-		t.Fatalf("playback parity assets = %d, want 3", len(assets))
+	if len(assets) != 5 {
+		t.Fatalf("playback parity assets = %d, want 5", len(assets))
 	}
-	if len(cases) != 10 {
-		t.Fatalf("playback parity cases = %d, want 10", len(cases))
+	if len(cases) != 13 {
+		t.Fatalf("playback parity cases = %d, want 13", len(cases))
 	}
 	seen := map[string]bool{}
 	for _, testCase := range cases {
@@ -46,6 +46,20 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 				t.Fatalf("weighted Canvas case %q is missing pair identity", testCase.Name)
 			}
 		}
+		if testCase.ExpectedTextRuntime != "" && testCase.ExpectedTextClipID == "" {
+			t.Fatalf("text runtime case %q is missing an expected clip id", testCase.Name)
+		}
+		if testCase.RequireTextLayout {
+			if testCase.ExpectedTextRuntime != "ready" {
+				t.Fatalf("text layout case %q must expect a ready text runtime", testCase.Name)
+			}
+			if testCase.ExpectedTextConsumer != "canonical-text-dom" && testCase.ExpectedTextConsumer != "legacy-time-fallback" {
+				t.Fatalf("text layout case %q has invalid consumer %q", testCase.Name, testCase.ExpectedTextConsumer)
+			}
+			if len(testCase.ExpectedTextTrace) == 0 {
+				t.Fatalf("text layout case %q is missing readiness trace expectations", testCase.Name)
+			}
+		}
 		if testCase.DecoderBudget < 0 {
 			t.Fatalf("playback parity case %q has invalid decoder budget %d", testCase.Name, testCase.DecoderBudget)
 		}
@@ -53,8 +67,11 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 	for _, required := range []string{
 		"video-canonical-playback",
 		"image-canonical-playback",
-		"text-fallback",
+		"resource-text-canonical-playback",
+		"family-text-fallback",
+		"invalid-font-text-fallback",
 		"cursor-fallback",
+		"mixed-text-cursor-fallback",
 		"weighted-crossfade-canonical",
 		"weighted-zoom-canonical",
 		"weighted-dip-canonical",
@@ -64,6 +81,20 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 	} {
 		if !seen[required] {
 			t.Fatalf("playback parity case %q is missing", required)
+		}
+	}
+
+	resourceIDs := map[string]bool{}
+	for _, track := range validated.Tracks {
+		for _, clip := range track.Clips {
+			if clip.Text != nil && clip.Text.FontResourceID != "" {
+				resourceIDs[clip.Text.FontResourceID] = true
+			}
+		}
+	}
+	for _, resourceID := range []string{"playback-font-v1", "playback-font-invalid-v1"} {
+		if !resourceIDs[resourceID] {
+			t.Fatalf("playback parity font resource %q is missing", resourceID)
 		}
 	}
 }
