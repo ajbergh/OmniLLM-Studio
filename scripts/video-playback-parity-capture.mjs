@@ -104,6 +104,9 @@ try {
           weighted_surface_errors: weightedSurfaces
             .map((surface) => surface.dataset.previewTransitionPairError || '')
             .filter(Boolean),
+          weighted_surface_pending_reasons: weightedSurfaces
+            .map((surface) => surface.dataset.previewTransitionPairPendingReason || '')
+            .filter(Boolean),
           weighted_surface_runtime_keys: weightedSurfaces
             .map((surface) => surface.dataset.previewTransitionPairRuntimeKey || '')
             .filter(Boolean),
@@ -234,6 +237,10 @@ function gateCase(testCase, observations, fps) {
       }
       if (row.weighted_surface_errors.length > 0) {
         errors.push(`weighted Canvas errors: ${row.weighted_surface_errors.join(',')}`);
+        break;
+      }
+      if (row.weighted_surface_pending_reasons.length > 0) {
+        errors.push(`weighted Canvas pending: ${row.weighted_surface_pending_reasons.join(',')}`);
         break;
       }
       if (row.weighted_surface_runtime_keys.length !== row.weighted_surface_count) {

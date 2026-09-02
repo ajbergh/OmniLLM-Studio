@@ -810,7 +810,6 @@ export function VideoPreviewCanvas() {
     entry: LayerEntry,
     poster = false,
     pairPaint?: PreviewTransitionPairLayerPaint,
-    inPairSurface = false,
   ) => {
     const { clip, track, asset } = entry;
     const clipTimeMs = playheadMs - clip.start_ms;
@@ -884,7 +883,10 @@ export function VideoPreviewCanvas() {
       opacity,
       clipPath: pairPaint?.clipPath ?? transitionPaint.clipPath,
       filter: effectPaint.filter,
-      pointerEvents: inPairSurface || perspectiveDistance !== null ? 'auto' : undefined,
+      // The stable perspective host below is pointer-events:none so it never
+      // intercepts empty-stage gestures. Keep the actual clip host explicitly
+      // targetable in both legacy and canonical projection modes.
+      pointerEvents: 'auto',
     };
 
     const isEditingText = editingTextClipId === clip.id;
@@ -1155,13 +1157,19 @@ export function VideoPreviewCanvas() {
         })()}
       </div>
     );
-    if (perspectiveDistance === null) return layer;
+    // Keep one stable outer host for the lifetime of the clip. Canonical
+    // admission can toggle per-layer perspective frame-by-frame; changing the
+    // root shape here would make React repurpose the legacy clip host as the
+    // perspective wrapper and recreate its <video>, resetting decoder state.
     return (
       <div
         key={clip.id}
+        data-preview-layer-perspective-host={clip.id}
         className="pointer-events-none absolute inset-0"
         style={{
-          perspective: `${canonicalPreviewPerspectiveCSSPixels(perspectiveDistance, stageScale)}px`,
+          perspective: perspectiveDistance === null
+            ? undefined
+            : `${canonicalPreviewPerspectiveCSSPixels(perspectiveDistance, stageScale)}px`,
           perspectiveOrigin: '50% 50%',
           transformStyle: 'preserve-3d',
         }}
@@ -1196,8 +1204,8 @@ export function VideoPreviewCanvas() {
         // makes this structural wrapper an exact source-over pair replacement.
         style={{ pointerEvents: 'none', transformStyle: 'preserve-3d' }}
       >
-        {renderLayer(slot.lower, posterClipIds.has(slot.lower.clip.id), lowerPaint, true)}
-        {renderLayer(slot.upper, posterClipIds.has(slot.upper.clip.id), upperPaint, true)}
+        {renderLayer(slot.lower, posterClipIds.has(slot.lower.clip.id), lowerPaint)}
+        {renderLayer(slot.upper, posterClipIds.has(slot.upper.clip.id), upperPaint)}
       </div>
     );
   };

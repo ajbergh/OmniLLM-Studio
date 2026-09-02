@@ -254,7 +254,8 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
       data-preview-transition-pair-lower-clip={slot.surface.lower_clip_id}
       data-preview-transition-pair-upper-clip={slot.surface.upper_clip_id}
       data-preview-transition-pair-ready={ready ? 'true' : 'false'}
-      data-preview-transition-pair-error={error ?? pendingReason ?? undefined}
+      data-preview-transition-pair-error={error ?? undefined}
+      data-preview-transition-pair-pending-reason={pendingReason ?? undefined}
       className="pointer-events-none absolute inset-0"
       style={{ visibility: active ? 'visible' : 'hidden' }}
     >
