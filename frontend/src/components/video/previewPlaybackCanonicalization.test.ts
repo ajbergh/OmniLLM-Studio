@@ -184,7 +184,7 @@ describe('normal playback canonicalization gate', () => {
   });
 
   it('keeps family-name-only text explicitly fail-closed', () => {
-    const layer = textLayer('family-only', undefined, '');
+    const layer = textLayer('family-only', '', '');
     expect(resolvePreviewPlaybackCanonicalization(8, { authoritative: true }, [layer], plan())).toEqual({
       mode: 'legacy-time-fallback',
       canonicalFrame: null,
