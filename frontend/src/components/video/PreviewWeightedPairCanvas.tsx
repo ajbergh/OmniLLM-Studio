@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { composeWeightedTransitionPairRgba } from '../../video/renderContractTransitionPairPixelKernel';
 import type { PreviewTransitionPairSlot } from './previewFrameTransitionPairs';
 import {
@@ -7,6 +7,15 @@ import {
   type PreviewWeightedPairCanvasLayer,
 } from './previewFrameWeightedPairCanvas';
 
+export type PreviewWeightedPairCanvasStatusKind = 'pending' | 'ready' | 'failed';
+
+export interface PreviewWeightedPairCanvasStatus {
+  executionKey: string;
+  transitionId: string;
+  status: PreviewWeightedPairCanvasStatusKind;
+  reason?: string;
+}
+
 interface PreviewWeightedPairCanvasProps<T extends PreviewWeightedPairCanvasLayer> {
   slot: PreviewTransitionPairSlot<T>;
   canvasWidth: number;
@@ -14,6 +23,12 @@ interface PreviewWeightedPairCanvasProps<T extends PreviewWeightedPairCanvasLaye
   stageWidth: number;
   stageHeight: number;
   sourceForClip: (clipId: string) => HTMLImageElement | HTMLVideoElement | null;
+  /** Exact-frame runtime key. Deterministic parity callers may omit it. */
+  executionKey?: string;
+  /** Hidden preparation is used by normal playback until every pair is ready. */
+  active?: boolean;
+  surfaceRole?: 'deterministic' | 'playback';
+  onStatusChange?: (status: PreviewWeightedPairCanvasStatus) => void;
 }
 
 type RasterSource = HTMLImageElement | HTMLVideoElement;
@@ -32,6 +47,10 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
   stageWidth,
   stageHeight,
   sourceForClip,
+  executionKey = '',
+  active = true,
+  surfaceRole = 'deterministic',
+  onStatusChange,
 }: PreviewWeightedPairCanvasProps<T>) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [sourceRevision, setSourceRevision] = useState(0);
@@ -117,27 +136,44 @@ export function PreviewWeightedPairCanvas<T extends PreviewWeightedPairCanvasLay
     return true;
   }, [canvasHeight, canvasWidth, slot, sourceForClip]);
 
-  useEffect(() => {
-    setReady(false);
+  // Playback readiness must settle before paint: the caller keeps this surface
+  // hidden while pending, then publishes exact-frame readiness and re-renders
+  // the legacy owner into canonical frame mode before this Canvas is revealed.
+  useLayoutEffect(() => {
     try {
       const rendered = draw();
       setError(null);
       setReady(rendered);
+      onStatusChange?.({
+        executionKey,
+        transitionId: slot.surface.transition_id,
+        status: rendered ? 'ready' : 'pending',
+      });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setError(message);
       setReady(false);
+      onStatusChange?.({
+        executionKey,
+        transitionId: slot.surface.transition_id,
+        status: 'failed',
+        reason: message,
+      });
     }
-  }, [draw, sourceRevision]);
+  }, [draw, executionKey, onStatusChange, slot.surface.transition_id, sourceRevision]);
 
   return (
     <div
       data-preview-transition-pair-id={slot.surface.transition_id}
       data-preview-transition-pair-execution="weighted-canvas"
+      data-preview-transition-pair-surface-role={surfaceRole}
+      data-preview-transition-pair-runtime-key={executionKey || undefined}
       data-preview-transition-pair-lower-clip={slot.surface.lower_clip_id}
       data-preview-transition-pair-upper-clip={slot.surface.upper_clip_id}
       data-preview-transition-pair-ready={ready ? 'true' : 'false'}
       data-preview-transition-pair-error={error ?? undefined}
       className="pointer-events-none absolute inset-0"
+      style={{ visibility: active ? 'visible' : 'hidden' }}
     >
       <canvas
         ref={canvasRef}
