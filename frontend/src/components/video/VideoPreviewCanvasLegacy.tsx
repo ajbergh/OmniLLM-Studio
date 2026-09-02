@@ -889,11 +889,15 @@ export function VideoPreviewCanvas() {
 
     const isEditingText = editingTextClipId === clip.id;
 
-    const wrapCanonicalMedia = (media: React.ReactNode) => canonicalMediaGeometry ? (
-      <div className="absolute inset-0" style={{ clipPath: canonicalMediaClipPath }}>
+    // Keep one stable host around media in both legacy and canonical modes.
+    // Weighted playback readiness may promote/fallback frame by frame; changing
+    // the subtree root here would remount <video>, reset its decoder, and create
+    // a readiness feedback loop. Only host clipping and child paint styles vary.
+    const wrapCanonicalMedia = (media: React.ReactNode) => (
+      <div className="absolute inset-0" style={canonicalMediaGeometry ? { clipPath: canonicalMediaClipPath } : undefined}>
         {media}
       </div>
-    ) : media;
+    );
     const mediaClassName = canonicalMediaGeometry ? undefined : 'h-full w-full object-contain';
     const mediaStyle = canonicalMediaElementStyle ?? { clipPath };
 
