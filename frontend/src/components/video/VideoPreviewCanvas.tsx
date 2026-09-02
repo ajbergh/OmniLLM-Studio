@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useVideoStudioStore } from '../../stores/videoStudio';
 import {
@@ -29,6 +29,10 @@ import {
 } from './previewFrameWeightedPairCanvas';
 import { PreviewWeightedPairCanvas } from './PreviewWeightedPairCanvas';
 import { PreviewWeightedPlaybackConsumer } from './PreviewWeightedPlaybackConsumer';
+import {
+  previewWeightedPlaybackRuntimeRevision,
+  subscribePreviewWeightedPlaybackRuntime,
+} from './previewWeightedPlaybackRuntime';
 import { PreviewPixelateBackdropConsumer } from './PreviewPixelateBackdropConsumer';
 import { VideoPreviewCanvas as LegacyVideoPreviewCanvas } from './VideoPreviewCanvasLegacy';
 
@@ -53,6 +57,11 @@ export function VideoPreviewCanvas() {
   const playheadMs = useVideoStudioStore((state) => state.playheadMs);
   const isPlaying = useVideoStudioStore((state) => state.isPlaying);
   const selectedClipId = useVideoStudioStore((state) => state.selectedClipId);
+  useSyncExternalStore(
+    subscribePreviewWeightedPlaybackRuntime,
+    previewWeightedPlaybackRuntimeRevision,
+    previewWeightedPlaybackRuntimeRevision,
+  );
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [frameAddress, setFrameAddress] = useState<number | null>(null);
   const [stage, setStage] = useState<HTMLElement | null>(null);
