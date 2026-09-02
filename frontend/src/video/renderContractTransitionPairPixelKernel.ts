@@ -16,6 +16,8 @@ import {
 const SRGB_DECODE_THRESHOLD = 0.04045;
 const SRGB_ENCODE_THRESHOLD = 0.0031308;
 const UNIT_SUM_EPSILON = 1e-9;
+const LINEAR_TO_SRGB_BUCKET_COUNT = 4096;
+const LINEAR_TO_SRGB_REFERENCE_REQUIRED = -1;
 
 const SRGB_BYTE_TO_LINEAR = new Float64Array(256);
 for (let value = 0; value < SRGB_BYTE_TO_LINEAR.length; value += 1) {
@@ -23,6 +25,30 @@ for (let value = 0; value < SRGB_BYTE_TO_LINEAR.length; value += 1) {
   SRGB_BYTE_TO_LINEAR[value] = srgb <= SRGB_DECODE_THRESHOLD
     ? srgb / 12.92
     : ((srgb + 0.055) / 1.055) ** 2.4;
+}
+
+/**
+ * Exact-output acceleration for the inverse transfer function.
+ *
+ * The kernel ultimately writes into Uint8ClampedArray, so many contiguous
+ * linear-light values quantize to the same byte. Cache only buckets whose
+ * complete half-open interval provably maps to one identical byte. The 255
+ * buckets that straddle an 8-bit quantization boundary stay marked with the
+ * sentinel and execute the original transfer-function math at runtime. This
+ * removes the millions of exponentiations on ordinary 1080p weighted frames
+ * without approximating or changing any byte at a quantization boundary.
+ */
+const LINEAR_TO_SRGB_BYTE = new Int16Array(LINEAR_TO_SRGB_BUCKET_COUNT);
+LINEAR_TO_SRGB_BYTE.fill(LINEAR_TO_SRGB_REFERENCE_REQUIRED);
+for (let bucket = 0; bucket < LINEAR_TO_SRGB_BUCKET_COUNT; bucket += 1) {
+  const lower = bucket / LINEAR_TO_SRGB_BUCKET_COUNT;
+  const upperExclusive = (bucket + 1) / LINEAR_TO_SRGB_BUCKET_COUNT;
+  const upperInside = bucket === LINEAR_TO_SRGB_BUCKET_COUNT - 1
+    ? 1
+    : upperExclusive - Number.EPSILON;
+  const lowerByte = toUint8Clamp(encodeLinearSrgbToByteReference(lower));
+  const upperByte = toUint8Clamp(encodeLinearSrgbToByteReference(upperInside));
+  if (lowerByte === upperByte) LINEAR_TO_SRGB_BYTE[bucket] = lowerByte;
 }
 
 /**
@@ -62,11 +88,14 @@ export function composeWeightedTransitionPairRgba(
       continue;
     }
 
+    const outgoingPremultipliedWeight = weights.outgoing * outgoingAlpha;
+    const incomingPremultipliedWeight = weights.incoming * incomingAlpha;
+    const inverseOutputAlpha = 1 / outputAlpha;
     for (let channel = 0; channel < 3; channel += 1) {
       const premultipliedLinear =
-        (weights.outgoing * outgoingAlpha * SRGB_BYTE_TO_LINEAR[outgoing[index + channel]])
-        + (weights.incoming * incomingAlpha * SRGB_BYTE_TO_LINEAR[incoming[index + channel]]);
-      const straightLinear = clampUnit(premultipliedLinear / outputAlpha);
+        (outgoingPremultipliedWeight * SRGB_BYTE_TO_LINEAR[outgoing[index + channel]])
+        + (incomingPremultipliedWeight * SRGB_BYTE_TO_LINEAR[incoming[index + channel]]);
+      const straightLinear = clampUnit(premultipliedLinear * inverseOutputAlpha);
       target[index + channel] = encodeLinearSrgbToByte(straightLinear);
     }
     target[index + 3] = outputAlpha * 255;
@@ -151,10 +180,34 @@ function requireUnitWeight(transitionId: string, label: string, value: number | 
 }
 
 function encodeLinearSrgbToByte(linear: number): number {
+  if (linear <= 0) return 0;
+  if (linear >= 1) return 255;
+  const bucket = Math.min(
+    LINEAR_TO_SRGB_BUCKET_COUNT - 1,
+    Math.floor(linear * LINEAR_TO_SRGB_BUCKET_COUNT),
+  );
+  const cached = LINEAR_TO_SRGB_BYTE[bucket];
+  return cached === LINEAR_TO_SRGB_REFERENCE_REQUIRED
+    ? encodeLinearSrgbToByteReference(linear)
+    : cached;
+}
+
+function encodeLinearSrgbToByteReference(linear: number): number {
   const srgb = linear <= SRGB_ENCODE_THRESHOLD
     ? 12.92 * linear
     : (1.055 * (linear ** (1 / 2.4))) - 0.055;
   return clampUnit(srgb) * 255;
+}
+
+/** ECMAScript ToUint8Clamp, used only while proving cache buckets at startup. */
+function toUint8Clamp(value: number): number {
+  if (value <= 0 || Number.isNaN(value)) return 0;
+  if (value >= 255) return 255;
+  const floor = Math.floor(value);
+  const fraction = value - floor;
+  if (fraction < 0.5) return floor;
+  if (fraction > 0.5) return floor + 1;
+  return floor % 2 === 0 ? floor : floor + 1;
 }
 
 function clampUnit(value: number): number {
