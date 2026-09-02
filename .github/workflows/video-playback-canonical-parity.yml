@@ -8,7 +8,13 @@ on:
       - 'backend/cmd/video-parity-fixture/**'
       - 'backend/internal/video/parity_fixture_playback.go'
       - 'backend/internal/video/parity_fixture_playback_test.go'
+      - 'frontend/src/components/video/VideoPreviewCanvas.tsx'
       - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
+      - 'frontend/src/components/video/PreviewTextPlaybackConsumer.tsx'
+      - 'frontend/src/components/video/previewTextPlaybackRuntime.ts'
+      - 'frontend/src/components/video/previewTextPlaybackRuntime.test.ts'
+      - 'frontend/src/components/video/previewTextLayoutSnapshot.ts'
+      - 'frontend/src/components/video/previewFontFaceReadiness.ts'
       - 'frontend/src/components/video/PreviewWeightedPairCanvas.tsx'
       - 'frontend/src/components/video/PreviewWeightedPlaybackConsumer.tsx'
       - 'frontend/src/components/video/previewFrameTransitionPairs.ts'
@@ -30,7 +36,13 @@ on:
       - 'backend/cmd/video-parity-fixture/**'
       - 'backend/internal/video/parity_fixture_playback.go'
       - 'backend/internal/video/parity_fixture_playback_test.go'
+      - 'frontend/src/components/video/VideoPreviewCanvas.tsx'
       - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
+      - 'frontend/src/components/video/PreviewTextPlaybackConsumer.tsx'
+      - 'frontend/src/components/video/previewTextPlaybackRuntime.ts'
+      - 'frontend/src/components/video/previewTextPlaybackRuntime.test.ts'
+      - 'frontend/src/components/video/previewTextLayoutSnapshot.ts'
+      - 'frontend/src/components/video/previewFontFaceReadiness.ts'
       - 'frontend/src/components/video/PreviewWeightedPairCanvas.tsx'
       - 'frontend/src/components/video/PreviewWeightedPlaybackConsumer.tsx'
       - 'frontend/src/components/video/previewFrameTransitionPairs.ts'
@@ -80,7 +92,7 @@ jobs:
         run: npm ci
       - name: Install playback evidence dependencies
         run: |
-          bash scripts/ci-apt-install.sh ffmpeg
+          bash scripts/ci-apt-install.sh ffmpeg fonts-dejavu-core
           bash scripts/ci-playwright-install.sh
           command -v ffmpeg
           command -v ffprobe
@@ -95,6 +107,7 @@ jobs:
             cd frontend
             npx vitest run \
               src/components/video/previewPlaybackCanonicalization.test.ts \
+              src/components/video/previewTextPlaybackRuntime.test.ts \
               src/components/video/previewWeightedPlaybackRuntime.test.ts \
               src/components/video/previewFrameTransitionPairs.test.ts \
               src/components/video/previewFrameWeightedPairCanvas.test.ts \
@@ -114,6 +127,11 @@ jobs:
             go run ./cmd/video-playback-parity-fixture \
               --output-dir ../output/video-playback-canonical/fixture
           )
+          cp /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf \
+            output/video-playback-canonical/fixture/media/asset-font.ttf
+          dd if=/dev/zero \
+            of=output/video-playback-canonical/fixture/media/asset-font-invalid.ttf \
+            bs=1024 count=1 status=none
       - name: Capture and gate live playback evidence
         shell: bash
         run: |
@@ -150,7 +168,7 @@ jobs:
           done
           node scripts/video-playback-parity-capture.mjs \
             --url http://127.0.0.1:14179 \
-            --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v2.json \
+            --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v3.json \
             --media-dir output/video-playback-canonical/fixture/media \
             --output output/video-playback-canonical/capture
       - name: Record toolchain
