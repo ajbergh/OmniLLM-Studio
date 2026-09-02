@@ -168,6 +168,34 @@ describe('planPreviewFrameTransitionPairs', () => {
     });
   });
 
+  it('keeps a weighted pair adjacent beneath a standalone canonical text overlay', () => {
+    const title = {
+      clip: { id: 'title', text: {} },
+      canonicalState: state('title', undefined, {
+        text: { contract_version: 'text-state-v1' } as CanonicalFrameLayerState['text'],
+      }),
+    };
+    const result = planPreviewFrameTransitionPairs(30, [
+      layer('clip-a', [paint({
+        type: 'crossfade',
+        composition: TRANSITION_PAINT_CROSSFADE,
+        outgoing_weight: 0.6,
+        incoming_weight: 0.4,
+      })]),
+      layer('clip-b', undefined, {}, 'video/mp4'),
+      title,
+    ]);
+
+    expect(result.mode).toBe('canonical-weighted-deferred');
+    expect(result.deferredReasons).toEqual([]);
+    expect(result.weightedRasterDeferredReasons).toEqual([]);
+    expect(result.slots.map((slot) => slot.kind)).toEqual(['pair', 'single']);
+    const overlay = result.slots[1];
+    expect(overlay.kind).toBe('single');
+    if (overlay.kind !== 'single') return;
+    expect(overlay.layer.clip.id).toBe('title');
+  });
+
   it('records consumer-specific weighted raster blockers separately from pair-surface deferrals', () => {
     const result = planPreviewFrameTransitionPairs(31, [
       layer('clip-a', [paint({
