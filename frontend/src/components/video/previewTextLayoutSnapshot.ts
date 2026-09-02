@@ -160,9 +160,16 @@ export function installPreviewTextLayoutReadinessGate(): void {
   window.addEventListener('omnillm:video-parity-ready', onParityReady, true);
 }
 
-async function settlePreviewTextLayouts(
+/**
+ * Settle one scoped set of canonical text nodes. Normal playback reuses this
+ * exact Chromium measurement/freeze/stability contract on hidden prewarm
+ * surfaces; deterministic parity keeps the default selector. The resulting
+ * snapshots remain browser-consumer evidence and never mutate authored state.
+ */
+export async function settlePreviewTextLayouts(
   stage: HTMLElement,
   deadline: number,
+  selector = '[data-preview-text-state-mode="canonical-frame"]',
 ): Promise<PreviewTextLayoutSnapshot[]> {
   while (stage.dataset.previewFontFaceReadiness === 'loading') {
     if (performance.now() >= deadline) throw new Error('text-layout-font-not-ready');
@@ -172,11 +179,11 @@ async function settlePreviewTextLayouts(
     throw new Error('text-layout-font-load-failed');
   }
 
-  let nodes = canonicalTextNodes(stage);
+  let nodes = canonicalTextNodes(stage, selector);
   while (nodes.length === 0 && stage.hasAttribute('data-preview-font-face-readiness')) {
     if (performance.now() >= deadline) throw new Error('text-layout-painter-not-ready');
     await nextAnimationFrame();
-    nodes = canonicalTextNodes(stage);
+    nodes = canonicalTextNodes(stage, selector);
   }
   if (nodes.length === 0) return [];
 
@@ -198,8 +205,8 @@ async function settlePreviewTextLayouts(
   return snapshots;
 }
 
-function canonicalTextNodes(stage: HTMLElement): HTMLElement[] {
-  return [...stage.querySelectorAll<HTMLElement>('[data-preview-text-state-mode="canonical-frame"]')];
+function canonicalTextNodes(stage: HTMLElement, selector: string): HTMLElement[] {
+  return [...stage.querySelectorAll<HTMLElement>(selector)];
 }
 
 function capturePreviewTextLayoutSnapshot(
