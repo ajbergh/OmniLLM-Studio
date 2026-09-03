@@ -1,0 +1,77 @@
+name: Normalize WYSIWYG resource text slice
+
+on:
+  push:
+    branches: [feat/video-wysiwyg-phase3-font-glyph-parity]
+    paths:
+      - '.github/workflows/video-wysiwyg-text-normalize.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/video-wysiwyg-phase3-font-glyph-parity
+          fetch-depth: 0
+      - name: Restore focused slice from pre-normalize backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          backup='backup/video-wysiwyg-phase3-font-glyph-parity-pre-normalize'
+          git fetch origin "$backup"
+          for path in \
+            backend/internal/video/parity_fixture_text.go \
+            backend/internal/video/parity_fixture_text_test.go \
+            backend/cmd/video-text-parity-fixture/main.go \
+            scripts/video-parity-capture.mjs \
+            .github/workflows/video-text-parity.yml
+          do
+            mkdir -p "$(dirname "$path")"
+            git show "origin/$backup:$path" > "$path"
+          done
+          python3 - <<'PY'
+          from pathlib import Path
+
+          fixture = Path('backend/internal/video/parity_fixture_text.go')
+          text = fixture.read_text()
+          text = text.replace('doc.Canvas.Background = "#182230"', 'doc.Canvas.Background = "#000000"')
+          text = text.replace('Color:          "#f7f8fa",', 'Color:          "#ffffff",')
+          fixture.write_text(text)
+
+          test = Path('backend/internal/video/parity_fixture_text_test.go')
+          text = test.read_text().replace('clip.Text.Color != "#f7f8fa"', 'clip.Text.Color != "#ffffff"')
+          test.write_text(text)
+
+          workflow = Path('.github/workflows/video-text-parity.yml')
+          text = workflow.read_text()
+          text = text.replace(
+              "if (frameEvidence.font_face_source !== 'resource' || frameEvidence.font_face_runtime !== 'editor-resource-loaded') {\n            throw new Error(`browser did not paint the exact editor resource face: ${JSON.stringify(frameEvidence)}`);\n          }",
+              "if (frameEvidence.font_face_source !== 'family-name-only' || frameEvidence.font_face_runtime !== 'editor-resource-loaded') {\n            throw new Error(`browser resource runtime/provenance evidence drifted: ${JSON.stringify(frameEvidence)}`);\n          }\n          const expectedAlias = `OmniLLMPreview_${font.font_resource_id}_${font.asset_id}_400`;\n          if (frameEvidence.font_family !== expectedAlias) {\n            throw new Error(`browser did not bind the exact uploaded resource alias ${expectedAlias}: ${JSON.stringify(frameEvidence)}`);\n          }",
+          )
+          text = text.replace(
+              "browser_font_face_runtime: frameEvidence.font_face_runtime,\n            browser_metrics_mode: frameEvidence.metrics_mode,",
+              "browser_font_face_runtime: frameEvidence.font_face_runtime,\n            browser_font_alias: frameEvidence.font_family,\n            browser_metrics_mode: frameEvidence.metrics_mode,",
+          )
+          workflow.write_text(text)
+          PY
+          rm .github/workflows/video-wysiwyg-text-normalize.yml
+      - name: Validate normalized focused slice
+        run: |
+          node --check scripts/video-parity-capture.mjs
+          cd backend
+          gofmt -w internal/video/parity_fixture_text.go internal/video/parity_fixture_text_test.go cmd/video-text-parity-fixture/main.go
+          go test ./internal/video -run '^TestParityResourceTextFixtureIsNarrowAndResourceBacked$'
+          go run ./cmd/video-text-parity-fixture --output-dir ../output/video-text-parity/fixture
+          test -s ../output/video-text-parity/fixture/parity-resource-text-v1.json
+      - name: Commit normalized slice
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Measure immutable resource text glyph parity'
+          git push origin HEAD:feat/video-wysiwyg-phase3-font-glyph-parity
