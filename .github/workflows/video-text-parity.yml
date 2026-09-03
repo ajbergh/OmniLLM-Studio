@@ -1,0 +1,241 @@
+name: Video Resource Text Parity Evidence
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/video-text-parity.yml'
+      - 'backend/cmd/video-text-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_text.go'
+      - 'backend/internal/video/parity_fixture_text_test.go'
+      - 'backend/internal/video/render_snapshot.go'
+      - 'backend/internal/video/renderer.go'
+      - 'backend/internal/video/renderer_font_resources.go'
+      - 'backend/internal/video/renderer_font_resources_test.go'
+      - 'frontend/src/components/video/PreviewCanonicalPainters.tsx'
+      - 'frontend/src/components/video/VideoPreviewCanvas.tsx'
+      - 'frontend/src/components/video/previewFontFaceReadiness.ts'
+      - 'frontend/src/video/renderContractText.ts'
+      - 'scripts/video-parity-capture.mjs'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+  push:
+    branches: [main, feat/video-wysiwyg-phase3-font-glyph-parity]
+    paths:
+      - '.github/workflows/video-text-parity.yml'
+      - 'backend/cmd/video-text-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_text.go'
+      - 'backend/internal/video/parity_fixture_text_test.go'
+      - 'backend/internal/video/render_snapshot.go'
+      - 'backend/internal/video/renderer.go'
+      - 'backend/internal/video/renderer_font_resources.go'
+      - 'backend/internal/video/renderer_font_resources_test.go'
+      - 'frontend/src/components/video/PreviewCanonicalPainters.tsx'
+      - 'frontend/src/components/video/VideoPreviewCanvas.tsx'
+      - 'frontend/src/components/video/previewFontFaceReadiness.ts'
+      - 'frontend/src/video/renderContractText.ts'
+      - 'scripts/video-parity-capture.mjs'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-resource-text-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25.13'
+  NODE_VERSION: '24'
+
+jobs:
+  resource-text-evidence:
+    name: Immutable resource text glyph evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+      - working-directory: frontend
+        run: npm ci
+      - name: Install parity dependencies and immutable fixture face
+        run: |
+          set -euo pipefail
+          bash scripts/ci-apt-install.sh ffmpeg fonts-dejavu-core
+          bash scripts/ci-playwright-install.sh
+          test -s /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Generate focused fixture and shared deterministic audio
+        run: |
+          set -euo pipefail
+          (
+            cd backend
+            go test ./internal/video -run '^TestParityResourceTextFixtureIsNarrowAndResourceBacked$'
+            go run ./cmd/video-parity-fixture \
+              --output-dir ../output/video-text-parity/fixture \
+              --random-samples 0 \
+              --generate-media
+            go run ./cmd/video-text-parity-fixture \
+              --output-dir ../output/video-text-parity/fixture
+          )
+          cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
+            output/video-text-parity/fixture/media/asset-font.ttf
+          sha256sum output/video-text-parity/fixture/media/asset-font.ttf \
+            > output/video-text-parity/fixture/font-source.sha256
+      - name: Capture exact-frame browser and FFmpeg text evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/output/video-text-parity/runtime"
+          mkdir -p "$runtime/attachments"
+          export OMNILLM_PORT=18097
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          (
+            cd backend
+            go run ./cmd/server >"$runtime/backend.log" 2>"$runtime/backend.err.log"
+          ) &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18097 npm run dev -- --host 127.0.0.1 --port 14180 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18097/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14180/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "resource text parity servers did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          fixture=output/video-text-parity/fixture/parity-resource-text-v1.json
+          capture=output/video-text-parity/capture
+          node scripts/video-parity-capture.mjs \
+            --url http://127.0.0.1:14180 \
+            --fixture "$fixture" \
+            --media-dir output/video-text-parity/fixture/media \
+            --output "$capture"
+
+          timeline_hash="$(node -p "require('./$capture/seed-result.json').timeline_sha256")"
+          (
+            cd backend
+            go run ./cmd/video-parity-report \
+              --preview-dir ../$capture/preview \
+              --rendered-dir ../$capture/rendered \
+              --output-dir ../$capture/text-report \
+              --fps 30 \
+              --fixture parity-resource-text-v1 \
+              --timeline-sha256 "$timeline_hash" \
+              --allow-fail
+          )
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const fixture = JSON.parse(fs.readFileSync('output/video-text-parity/fixture/parity-resource-text-v1.json', 'utf8'));
+          const seed = JSON.parse(fs.readFileSync('output/video-text-parity/capture/seed-result.json', 'utf8'));
+          const browser = JSON.parse(fs.readFileSync('output/video-text-parity/capture/font-frame-evidence.json', 'utf8'));
+          const report = JSON.parse(fs.readFileSync('output/video-text-parity/capture/text-report/parity-report.json', 'utf8'));
+
+          if (fixture.name !== 'parity-resource-text-v1') throw new Error(`unexpected fixture ${fixture.name}`);
+          if (fixture.samples.length !== 1 || fixture.samples[0].frame_index !== 15 || fixture.samples[0].time_ms !== 500) {
+            throw new Error(`resource text fixture must bind exactly frame 15 at 500ms: ${JSON.stringify(fixture.samples)}`);
+          }
+          if (!Array.isArray(seed.font_resources) || seed.font_resources.length !== 1) {
+            throw new Error(`expected one uploaded font resource: ${JSON.stringify(seed.font_resources)}`);
+          }
+          const font = seed.font_resources[0];
+          if (font.fixture_asset_id !== 'asset-font' || font.font_resource_id !== 'parity-text-face-v1') {
+            throw new Error(`unexpected font resource identity: ${JSON.stringify(font)}`);
+          }
+          if (!font.source_sha256 || font.source_sha256 !== font.downloaded_sha256 || font.byte_length <= 0) {
+            throw new Error(`uploaded font bytes differ from fixture source: ${JSON.stringify(font)}`);
+          }
+          if (browser.fixture !== fixture.name || browser.frames.length !== 1) {
+            throw new Error(`browser font evidence does not bind the focused fixture: ${JSON.stringify(browser)}`);
+          }
+          const frameEvidence = browser.frames[0];
+          if (frameEvidence.frame_index !== 15 || !String(frameEvidence.request_id).includes('000015-resource-text-static')) {
+            throw new Error(`browser evidence is not the requested output frame: ${JSON.stringify(frameEvidence)}`);
+          }
+          if (frameEvidence.text !== 'WYSIWYG 42' || frameEvidence.state_mode !== 'canonical-frame') {
+            throw new Error(`browser text did not consume canonical state: ${JSON.stringify(frameEvidence)}`);
+          }
+          if (frameEvidence.font_face_source !== 'resource' || frameEvidence.font_face_runtime !== 'editor-resource-loaded') {
+            throw new Error(`browser did not paint the exact editor resource face: ${JSON.stringify(frameEvidence)}`);
+          }
+          if (frameEvidence.font_size !== '48px' || frameEvidence.font_weight !== '400') {
+            throw new Error(`browser text style drifted: ${JSON.stringify(frameEvidence)}`);
+          }
+          if (report.frames.length !== 1 || report.frames[0].frame_index !== 15) {
+            throw new Error(`FFmpeg parity report is not bound to output frame 15: ${JSON.stringify(report.frames)}`);
+          }
+          const measured = report.frames[0];
+          const summary = {
+            schema_version: 1,
+            fixture: fixture.name,
+            frame_index: 15,
+            time_ms: 500,
+            timeline_sha256: seed.timeline_sha256,
+            snapshot_id: seed.snapshot_id,
+            font_resource_id: font.font_resource_id,
+            font_source_sha256: font.source_sha256,
+            font_downloaded_sha256: font.downloaded_sha256,
+            font_byte_length: font.byte_length,
+            browser_font_face_source: frameEvidence.font_face_source,
+            browser_font_face_runtime: frameEvidence.font_face_runtime,
+            browser_metrics_mode: frameEvidence.metrics_mode,
+            whole_frame_report_pass: report.pass,
+            measured: {
+              pixel_pass_rate: measured.pixel_pass_rate,
+              mae: measured.mae,
+              rmse: measured.rmse,
+              ssim: measured.ssim,
+              max_channel_delta: measured.max_channel_delta,
+              changed_bounds: measured.changed_bounds,
+            },
+            gate_mode: 'measure-first-no-pixel-envelope',
+          };
+          fs.writeFileSync('output/video-text-parity/capture/text-evidence-summary.json', `${JSON.stringify(summary, null, 2)}\n`);
+          console.log(JSON.stringify(summary));
+          NODE
+      - name: Record toolchain
+        if: always()
+        run: |
+          mkdir -p output/video-text-parity
+          {
+            go version
+            node --version
+            npm --version
+            ffmpeg -version | head -n 1
+            ffprobe -version | head -n 1
+            node -e "console.log('playwright ' + require('playwright/package.json').version)"
+            fc-scan --format '%{family}|%{style}|%{file}\n' /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf | head -n 1
+          } > output/video-text-parity/toolchain.txt
+      - name: Upload resource text parity evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-resource-text-parity-evidence
+          path: output/video-text-parity
+          if-no-files-found: error
+          retention-days: 14
