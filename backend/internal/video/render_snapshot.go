@@ -488,6 +488,22 @@ func (s *Service) assetsFromRenderSnapshot(snapshot *models.VideoRenderSnapshot)
 	if err := s.verifyFontsFromRenderSnapshot(snapshot); err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(snapshot.FontManifestJSON) != "" {
+		var fontEntries []RenderFontManifestEntry
+		if err := json.Unmarshal([]byte(snapshot.FontManifestJSON), &fontEntries); err != nil {
+			return nil, fmt.Errorf("parse render font manifest: %w", err)
+		}
+		for _, entry := range fontEntries {
+			resourceID := strings.TrimSpace(fontResourceIDFromMetadata(entry.Asset))
+			if resourceID == "" {
+				return nil, fmt.Errorf("snapshot font asset %q is missing font_resource_id metadata", entry.Asset.ID)
+			}
+			if _, exists := assets[entry.Asset.ID]; exists {
+				return nil, fmt.Errorf("snapshot font asset %q collides with a media asset id", entry.Asset.ID)
+			}
+			assets[entry.Asset.ID] = entry.Asset
+		}
+	}
 	return assets, nil
 }
 

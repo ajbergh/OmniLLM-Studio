@@ -1,7 +1,7 @@
 # Video Edit Studio WYSIWYG Rendering Implementation Plan
 
 **Status:** In progress  
-**Last updated:** 2026-09-02
+**Last updated:** 2026-09-03
 **Scope:** Video Edit Studio preview, timeline evaluation, render jobs, visual composition, audio mix, export, validation, packaging, and parity testing.  
 **Primary goal:** The authoritative editor preview and final decoded export must represent the same immutable timeline revision with identical frame identity, active-layer ordering, timing, geometry, styling, effects, transitions, camera state, font resources, and audio decisions.
 
@@ -9,9 +9,9 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG program PR: **#304 — Promote resource-backed text during canonical playback** — squash merge `2633b51c94d0077902b0cf2a11e925277ec78582` from the exact validated tracker-bearing implementation tree.
+Latest merged WYSIWYG program PR: **#305 — Prove mixed canonical playback composition** — squash merge `9ed56ddaa3a142b2a3747bf850233597a2e43f18`. The merged v4 browser fixture retains supported media+resource-text and weighted-pair+resource-text frame-atomic canonical playback evidence; it remains structural/runtime evidence rather than browser↔export glyph-pixel proof.
 
-Current implementation PR: **#305 — Prove mixed canonical playback composition** on branch `feat/video-wysiwyg-phase3-mixed-canonical-composition`, created directly from #304's actual squash result `2633b51c94d0077902b0cf2a11e925277ec78582`. Implementation head `576b9be925256ae9bbdddfc34655d5d0123aa8ef` passed all 10 triggered PR workflows, including Video Playback Canonical Parity Evidence #85, Quality Gate #1861, Security Scan #1867, and every triggered platform/sandbox assurance. Retained playback artifact `9870725882` is 12,425,794 bytes with SHA-256 `1d03366f14123cf5439c0754d22c0dd892ba5acdc4d422206809b7296062d993`. This tracker update intentionally creates a new exact head that must re-run every workflow triggered by the final PR diff before #305 is merged.
+Current implementation branch: **`feat/video-wysiwyg-phase3-font-resource-rendering`**, created directly from #305's actual squash result. This slice closes the prerequisite export bug exposed by the next recommended glyph-pixel work: render snapshots already stage and hash exact font bytes, but the FFmpeg renderer currently verifies those bytes without selecting them. The branch threads staged font entries into renderer inputs, fails closed when a declared resource is absent, and emits `drawtext fontfile=` against the immutable staged face while preserving family-name fallback only for non-resource text. Focused browser↔FFmpeg glyph measurement follows only after this invariant is merged and validated.
 
 **Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** Renderer-independent contracts own authored semantics. Browser/FFmpeg consumers may produce renderer-specific evidence, but they must not silently redefine canonical intent.
 

@@ -143,6 +143,9 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 	if err != nil {
 		return nil, err
 	}
+	if err := validateRenderFontResources(req); err != nil {
+		return nil, err
+	}
 	// Export range: slice the validated document so the filtergraph only sees
 	// the requested window (clip trims, keyframes, and markers rebase).
 	if req.Settings.RangeEndMS > req.Settings.RangeStartMS && req.Settings.RangeStartMS >= 0 {
@@ -259,7 +262,7 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		if req.Settings.DiagnosticAudio {
 			filterStr, audioLabel = buildAudioFilterComplex(req.Timeline, resolved)
 		} else {
-			filterStr, videoLabel, audioLabel = buildFilterComplexWithAudio(req.Timeline, resolved, width, height, req.Settings.IncludeAudio)
+			filterStr, videoLabel, audioLabel = buildFilterComplexWithAudio(req.Timeline, resolved, width, height, req.Settings.IncludeAudio, renderFontResources{attachmentsDir: req.AttachmentsDir, assets: req.Assets})
 		}
 		filterName := "filter-complex.txt"
 		if err := os.WriteFile(filepath.Join(workDir, filterName), []byte(filterStr), 0o600); err != nil {
@@ -282,7 +285,7 @@ func (r *FFmpegRenderer) Render(ctx context.Context, req RenderRequest, progress
 		if req.Settings.IncludeAudio {
 			args = append(args, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000")
 		}
-		if filters := ffmpegVideoFilters(req.Timeline, width, height); filters != "" {
+		if filters := ffmpegVideoFilters(req.Timeline, width, height, renderFontResources{attachmentsDir: req.AttachmentsDir, assets: req.Assets}); filters != "" {
 			args = append(args, "-vf", filters)
 		}
 		args = append(args, "-t", fmt.Sprintf("%.3f", durationSeconds), "-r", fmt.Sprintf("%d", fps))
@@ -797,7 +800,7 @@ func buildFilterComplex(doc TimelineDocument, clips []resolvedClip, width, heigh
 // buildFilterComplexWithAudio lets audio-disabled exports omit audio filter
 // outputs entirely. FFmpeg rejects a labeled filter output that is not mapped,
 // so building the audio branch and then mapping video alone is not valid.
-func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, width, height int, includeAudio bool) (filterStr, videoLabel, audioLabel string) {
+func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, width, height int, includeAudio bool, fontResources ...renderFontResources) (filterStr, videoLabel, audioLabel string) {
 	parts := resolvedInputFanoutParts(clips, true, includeAudio)
 
 	// ── Visual chain: media overlays and text interleaved in layer order ────
@@ -864,7 +867,7 @@ func buildFilterComplexWithAudio(doc TimelineDocument, clips []resolvedClip, wid
 				}
 			}
 			if item.clip.Text != nil && strings.TrimSpace(item.clip.Text.Text) != "" {
-				if filter := drawTextFilter(item.clip, *item.clip.Text, width, height); filter != "" {
+				if filter := drawTextFilterWithFontResources(item.clip, *item.clip.Text, width, height, fontResources...); filter != "" {
 					outLabel := fmt.Sprintf("[t%d_v]", textIdx)
 					parts = append(parts, prevV+filter+outLabel)
 					prevV = outLabel
@@ -1026,7 +1029,7 @@ func audioFilterParts(doc TimelineDocument, clips []resolvedClip) ([]string, str
 	return parts, ""
 }
 
-func ffmpegVideoFilters(doc TimelineDocument, width, height int) string {
+func ffmpegVideoFilters(doc TimelineDocument, width, height int, fontResources ...renderFontResources) string {
 	var filters []string
 	for _, track := range doc.Tracks {
 		if !track.Visible {
@@ -1041,7 +1044,7 @@ func ffmpegVideoFilters(doc TimelineDocument, width, height int) string {
 			if clip.Text == nil || strings.TrimSpace(clip.Text.Text) == "" {
 				continue
 			}
-			filter := drawTextFilter(clip, *clip.Text, width, height)
+			filter := drawTextFilterWithFontResources(clip, *clip.Text, width, height, fontResources...)
 			if filter != "" {
 				filters = append(filters, filter)
 			}
