@@ -67,6 +67,7 @@ try {
     return Boolean(rect && Math.abs(rect.width - width) < 0.01 && Math.abs(rect.height - height) < 0.01);
   }, { width: canvasWidth, height: canvasHeight });
 
+  const fontFrameEvidence = [];
   for (const sample of samples) {
     let safeName = `${String(sample.frame_index).padStart(6, '0')}-${sample.name.replace(/[^a-zA-Z0-9._-]+/g, '-')}`;
     if (safeName.length > 112) safeName = `${safeName.slice(0, 96)}-${createHash('sha256').update(safeName).digest('hex').slice(0, 12)}`;
@@ -81,6 +82,25 @@ try {
       window.dispatchEvent(new CustomEvent('omnillm:video-parity-seek', { detail: { frameIndex, requestId: id } }));
     }), { frameIndex: sample.frame_index, id: requestId });
     await page.waitForFunction((frameIndex) => document.querySelector('[data-testid="video-preview-program"]')?.dataset.parityFrameIndex === String(frameIndex), sample.frame_index);
+    if (fixture.assets.some((asset) => asset.kind === 'font')) {
+      const textNodes = page.locator('[data-preview-canonical-content="text"]');
+      if (await textNodes.count() !== 1) throw new Error(`expected exactly one canonical resource-text node at frame ${sample.frame_index}`);
+      const evidence = await textNodes.first().evaluate((node) => {
+        const style = getComputedStyle(node);
+        return {
+          text: node.textContent || '',
+          state_mode: node.dataset.previewTextStateMode || '',
+          font_face_source: node.dataset.previewTextFontFaceSource || '',
+          font_face_runtime: node.dataset.previewTextFontFaceRuntime || '',
+          metrics_mode: node.dataset.previewTextMetricsMode || '',
+          font_family: style.fontFamily,
+          font_size: style.fontSize,
+          font_weight: style.fontWeight,
+          color: style.color,
+        };
+      });
+      fontFrameEvidence.push({ frame_index: sample.frame_index, request_id: requestId, ...evidence });
+    }
     const box = await program.boundingBox();
     if (!box) throw new Error(`preview program has no bounding box for frame ${sample.frame_index}`);
     if (Math.abs(box.width - canvasWidth) >= 0.01 || Math.abs(box.height - canvasHeight) >= 0.01) {
@@ -98,6 +118,9 @@ try {
     const response = await context.request.get(endpoint, { headers: requestHeaders });
     if (!response.ok()) throw new Error(`diagnostic frame ${sample.frame_index}: HTTP ${response.status()} ${await response.text()}`);
     await fs.writeFile(path.join(renderedDir, `${safeName}.png`), await response.body());
+  }
+  if (fontFrameEvidence.length > 0) {
+    await fs.writeFile(path.join(output, 'font-frame-evidence.json'), `${JSON.stringify({ fixture: fixture.name, frames: fontFrameEvidence }, null, 2)}\n`);
   }
   const previewAudioRequestID = `preview-audio-${snapshotID}`;
   const previewAudioResult = await page.evaluate((requestId) => new Promise((resolve, reject) => {
@@ -207,19 +230,37 @@ async function seedFixtureProject({ context, fixture, mediaDir, baseURL, headers
     'asset-alpha': ['asset-alpha.png', 'image/png'],
     'asset-alpha-video': ['asset-alpha-video.webm', 'video/webm'],
     'asset-audio': ['asset-audio.wav', 'audio/wav'],
+    'asset-font': ['asset-font.ttf', 'font/ttf', 'parity-text-face-v1'],
   };
   const assetIDs = {};
+  const fontResources = [];
   for (const asset of fixture.assets) {
     const recipe = fileForAsset[asset.id];
     if (!recipe) throw new Error(`no generated media recipe for fixture asset ${asset.id}`);
     const filePath = path.join(mediaDir, recipe[0]);
+    const sourceBytes = await fs.readFile(filePath);
+    const multipart = { file: { name: recipe[0], mimeType: recipe[1], buffer: sourceBytes } };
+    if (recipe[2]) multipart.font_resource_id = recipe[2];
     const response = await context.request.post(apiURL(`/video/projects/${encodeURIComponent(project.id)}/assets/upload`), {
       headers,
-      multipart: { file: { name: recipe[0], mimeType: recipe[1], buffer: await fs.readFile(filePath) } },
+      multipart,
     });
     if (!response.ok()) throw new Error(`upload ${asset.id}: HTTP ${response.status()} ${await response.text()}`);
     const uploaded = await response.json();
     assetIDs[asset.id] = uploaded.id;
+    if (recipe[2]) {
+      const download = await context.request.get(apiURL(`/video/assets/${encodeURIComponent(uploaded.id)}/download`), { headers });
+      if (!download.ok()) throw new Error(`download uploaded font ${asset.id}: HTTP ${download.status()} ${await download.text()}`);
+      const downloadedBytes = await download.body();
+      fontResources.push({
+        fixture_asset_id: asset.id,
+        asset_id: uploaded.id,
+        font_resource_id: recipe[2],
+        source_sha256: createHash('sha256').update(sourceBytes).digest('hex'),
+        downloaded_sha256: createHash('sha256').update(downloadedBytes).digest('hex'),
+        byte_length: sourceBytes.length,
+      });
+    }
   }
 
   const timeline = structuredClone(fixture.timeline);
@@ -250,5 +291,6 @@ async function seedFixtureProject({ context, fixture, mediaDir, baseURL, headers
     render_job_id: render.id,
     snapshot_id: render.snapshot_id,
     asset_ids: assetIDs,
+    font_resources: fontResources,
   };
 }
