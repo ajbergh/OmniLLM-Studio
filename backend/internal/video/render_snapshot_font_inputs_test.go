@@ -20,11 +20,11 @@ func TestAssetsFromRenderSnapshotIncludesVerifiedFontEntries(t *testing.T) {
 		t.Fatalf("build font manifest: %v", err)
 	}
 	snapshot := &models.VideoRenderSnapshot{
-		ID:                     "snap-font-inputs",
-		AssetManifestJSON:      "[]",
-		AssetManifestSHA256:    contentSHA256([]byte("[]")),
-		FontManifestJSON:       fontManifestJSON,
-		FontManifestSHA256:     fontManifestSHA256,
+		ID:                  "snap-font-inputs",
+		AssetManifestJSON:   "[]",
+		AssetManifestSHA256: contentSHA256([]byte("[]")),
+		FontManifestJSON:    fontManifestJSON,
+		FontManifestSHA256:  fontManifestSHA256,
 	}
 	inputs, err := service.assetsFromRenderSnapshot(snapshot)
 	if err != nil {
