@@ -1,0 +1,40 @@
+name: Video Cursor Export Parity Patch
+
+on:
+  push:
+    branches: [feat/video-wysiwyg-phase3-cursor-export-parity]
+    paths:
+      - '.github/workflows/video-cursor-export-parity-patch.yml'
+      - 'scripts/patch-video-cursor-export-parity.py'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/video-wysiwyg-phase3-cursor-export-parity
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Apply cursor parity integration
+        run: python3 scripts/patch-video-cursor-export-parity.py
+      - name: Format cursor renderer sources
+        working-directory: backend
+        run: gofmt -w internal/video/renderer_fidelity.go internal/video/renderer_cursor.go internal/video/renderer_cursor_test.go internal/video/renderer_capabilities.go
+      - name: Verify diff hygiene
+        run: git diff --check
+      - name: Run focused video renderer tests
+        working-directory: backend
+        run: go test ./internal/video/...
+      - name: Commit integrated cursor renderer
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/internal/video/renderer_fidelity.go backend/internal/video/renderer_cursor.go backend/internal/video/renderer_cursor_test.go backend/internal/video/renderer_capabilities.go
+          git commit -m 'Align cursor export with canonical frame state'
+          git push origin HEAD:feat/video-wysiwyg-phase3-cursor-export-parity
