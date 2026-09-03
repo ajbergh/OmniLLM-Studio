@@ -90,7 +90,7 @@ jobs:
             output/video-text-parity/fixture/media/asset-font.ttf
           sha256sum output/video-text-parity/fixture/media/asset-font.ttf \
             > output/video-text-parity/fixture/font-source.sha256
-      - name: Capture exact-frame browser and FFmpeg text evidence
+      - name: Capture and gate exact-frame browser and FFmpeg text evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -158,8 +158,8 @@ jobs:
           }
           if (fixture.timeline.canvas.background !== '#000000') throw new Error(`fixture background drifted: ${fixture.timeline.canvas.background}`);
           if (seed.font_resource_id !== 'parity-text-face-v1' || !seed.font_asset_id) throw new Error(`font identity missing: ${JSON.stringify(seed)}`);
-          if (!seed.font_source_sha256 || seed.font_source_sha256 !== seed.font_downloaded_sha256 || seed.font_byte_length <= 0) {
-            throw new Error(`uploaded font bytes differ from source: ${JSON.stringify(seed)}`);
+          if (!seed.font_source_sha256 || seed.font_source_sha256 !== seed.font_downloaded_sha256 || seed.font_byte_length !== 759720) {
+            throw new Error(`immutable font-byte identity drifted: ${JSON.stringify(seed)}`);
           }
           if (browser.fixture !== fixture.name || browser.frame_index !== 15 || !String(browser.request_id).includes('000015-resource-text-static')) {
             throw new Error(`browser evidence is not canonical frame 15: ${JSON.stringify(browser)}`);
@@ -175,10 +175,28 @@ jobs:
           if (browser.font_size !== '48px' || browser.font_weight !== '400' || browser.color !== 'rgb(255, 255, 255)') {
             throw new Error(`browser text style drifted: ${JSON.stringify(browser)}`);
           }
-          if (report.frames.length !== 1 || report.frames[0].frame_index !== 15) {
-            throw new Error(`FFmpeg parity report is not bound to frame 15: ${JSON.stringify(report.frames)}`);
+          if (report.frames.length !== 1 || report.frames[0].frame_index !== 15 || report.frames[0].compared_pixels !== 640 * 360) {
+            throw new Error(`FFmpeg parity report is not bound to the complete canonical frame: ${JSON.stringify(report.frames)}`);
           }
+
           const measured = report.frames[0];
+          const expectedBounds = { min_x: 165, min_y: 161, max_x: 471, max_y: 199 };
+          const bounds = measured.changed_bounds || {};
+          const boundsPass = Object.entries(expectedBounds).every(([key, value]) => bounds[key] === value);
+          const thresholds = {
+            minimum_pixel_pass_rate_at_global_tolerance: 0.988,
+            minimum_ssim: 0.900,
+            maximum_mean_absolute_error: 1.20,
+            maximum_root_mean_square_error: 13.20,
+            expected_changed_bounds: expectedBounds,
+          };
+          const focusedPass =
+            measured.pixel_pass_rate >= thresholds.minimum_pixel_pass_rate_at_global_tolerance &&
+            measured.ssim >= thresholds.minimum_ssim &&
+            measured.mean_absolute_error <= thresholds.maximum_mean_absolute_error &&
+            measured.root_mean_square_error <= thresholds.maximum_root_mean_square_error &&
+            boundsPass;
+
           const summary = {
             schema_version: 1,
             fixture: fixture.name,
@@ -196,19 +214,22 @@ jobs:
             browser_font_alias: browser.font_family,
             browser_metrics_mode: browser.metrics_mode,
             browser_rect: browser.rect,
-            whole_frame_report_pass: report.pass,
+            repository_global_report_pass: report.pass,
             measured: {
               pixel_pass_rate: measured.pixel_pass_rate,
-              mae: measured.mae,
-              rmse: measured.rmse,
+              mean_absolute_error: measured.mean_absolute_error,
+              root_mean_square_error: measured.root_mean_square_error,
               ssim: measured.ssim,
               max_channel_delta: measured.max_channel_delta,
               changed_bounds: measured.changed_bounds,
             },
-            gate_mode: 'measure-first-no-pixel-envelope',
+            thresholds,
+            focused_pass: focusedPass,
+            gate_mode: 'fixture-specific-chromium-ffmpeg-glyph-v1',
           };
           fs.writeFileSync('output/video-text-parity/capture/text-evidence-summary.json', `${JSON.stringify(summary, null, 2)}\n`);
           console.log(JSON.stringify(summary));
+          if (!focusedPass) throw new Error(`resource text focused parity gate failed: ${JSON.stringify(summary)}`);
           NODE
       - name: Record toolchain
         if: always()
