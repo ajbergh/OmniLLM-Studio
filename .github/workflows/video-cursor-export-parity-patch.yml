@@ -76,7 +76,7 @@ jobs:
           text = test_path.read_text()
           if 'TestCanonicalCursorRasterUsesPinnedSRGBPalette' not in text:
               text = text.replace('import (\n\t"image/png"', 'import (\n\t"image/color"\n\t"image/png"', 1)
-              text += '''\nfunc TestCanonicalCursorRasterUsesPinnedSRGBPalette(t *testing.T) {\n\tspec := cursorRasterSpec{Scale: 1, Highlight: true, ClickRing: true}\n\thighlight := supersampledCursorPixel(320, 180, 320, 180, spec)\n\tif want := (color.NRGBA{R: 255, G: 223, B: 32, A: 77}); highlight != want {\n\t\tt.Fatalf("cursor highlight pixel = %+v, want %+v", highlight, want)\n\t}\n\tring := supersampledCursorPixel(402, 180, 320, 180, spec)\n\tif want := (color.NRGBA{R: 0, G: 188, B: 255, A: 204}); ring != want {\n\t\tt.Fatalf("cursor ring pixel = %+v, want %+v", ring, want)\n\t}\n}\n'''
+              text += '''\nfunc TestCanonicalCursorRasterUsesPinnedSRGBPalette(t *testing.T) {\n\tspec := cursorRasterSpec{Scale: 1, Highlight: true, ClickRing: true}\n\thighlight := supersampledCursorPixel(320, 180, 320, 180, spec)\n\tif want := (color.NRGBA{R: 255, G: 223, B: 32, A: 76}); highlight != want {\n\t\tt.Fatalf("cursor highlight pixel = %+v, want %+v", highlight, want)\n\t}\n\tring := supersampledCursorPixel(402, 180, 320, 180, spec)\n\tif want := (color.NRGBA{R: 0, G: 188, B: 255, A: 204}); ring != want {\n\t\tt.Fatalf("cursor ring pixel = %+v, want %+v", ring, want)\n\t}\n}\n'''
               test_path.write_text(text)
           PY
       - name: Format and verify diff
