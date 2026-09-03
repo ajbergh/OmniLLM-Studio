@@ -8,14 +8,14 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate playback parity fixture: %v", err)
 	}
-	if validated.DurationMS != 26000 || validated.Canvas.FPS != 30 {
+	if validated.DurationMS != 38000 || validated.Canvas.FPS != 30 {
 		t.Fatalf("unexpected playback parity canvas/duration: %+v / %d", validated.Canvas, validated.DurationMS)
 	}
 	if len(assets) != 5 {
 		t.Fatalf("playback parity assets = %d, want 5", len(assets))
 	}
-	if len(cases) != 13 {
-		t.Fatalf("playback parity cases = %d, want 13", len(cases))
+	if len(cases) != 17 {
+		t.Fatalf("playback parity cases = %d, want 17", len(cases))
 	}
 	seen := map[string]bool{}
 	for _, testCase := range cases {
@@ -36,14 +36,17 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 			t.Fatalf("weighted runtime case %q is missing an expected pair id", testCase.Name)
 		}
 		if testCase.RequireWeightedCanvas {
-			if testCase.ExpectedMode != "canonical-playback" {
-				t.Fatalf("weighted Canvas case %q must be canonical playback", testCase.Name)
-			}
-			if testCase.ExpectedWeightedRuntime != "ready" || testCase.ExpectedWeightedConsumer != "canonical-weighted-canvas" {
-				t.Fatalf("weighted Canvas case %q is missing ready consumer expectations", testCase.Name)
+			if testCase.ExpectedWeightedRuntime != "ready" {
+				t.Fatalf("weighted Canvas case %q must expect a ready weighted runtime", testCase.Name)
 			}
 			if testCase.ExpectedWeightedPairID == "" {
 				t.Fatalf("weighted Canvas case %q is missing pair identity", testCase.Name)
+			}
+			if testCase.ExpectedMode == "canonical-playback" && testCase.ExpectedWeightedConsumer != "canonical-weighted-canvas" {
+				t.Fatalf("canonical weighted Canvas case %q is missing canonical consumer expectation", testCase.Name)
+			}
+			if testCase.ExpectedMode == "legacy-time-fallback" && testCase.ExpectedWeightedConsumer != "legacy-time-fallback" {
+				t.Fatalf("fallback weighted Canvas case %q must keep the consumer hidden", testCase.Name)
 			}
 		}
 		if testCase.ExpectedTextRuntime != "" && testCase.ExpectedTextClipID == "" {
@@ -78,6 +81,10 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 		"weighted-decoder-budget-fallback",
 		"mixed-transition-fallback",
 		"deferred-transition-fallback",
+		"media-text-canonical-playback",
+		"weighted-text-canonical-playback",
+		"weighted-invalid-text-fallback",
+		"weighted-text-decoder-budget-fallback",
 	} {
 		if !seen[required] {
 			t.Fatalf("playback parity case %q is missing", required)
