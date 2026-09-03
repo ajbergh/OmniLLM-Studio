@@ -1,0 +1,90 @@
+name: WYSIWYG Text Glyph Patch
+
+on:
+  push:
+    branches: [feat/video-wysiwyg-phase3-font-glyph-parity]
+    paths:
+      - '.github/workflows/video-wysiwyg-text-glyph-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/video-wysiwyg-phase3-font-glyph-parity
+      - name: Patch generic parity capture
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('scripts/video-parity-capture.mjs')
+          text = p.read_text()
+
+          def replace_once(old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one occurrence, found {count}: {old!r}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "    'asset-audio': ['asset-audio.wav', 'audio/wav'],\n",
+              "    'asset-audio': ['asset-audio.wav', 'audio/wav'],\n    'asset-font': ['asset-font.ttf', 'font/ttf', 'parity-text-face-v1'],\n",
+          )
+          replace_once(
+              "  const assetIDs = {};\n  for (const asset of fixture.assets) {\n",
+              "  const assetIDs = {};\n  const fontResources = [];\n  for (const asset of fixture.assets) {\n",
+          )
+          replace_once(
+              "    const response = await context.request.post(apiURL(`/video/projects/${encodeURIComponent(project.id)}/assets/upload`), {\n      headers,\n      multipart: { file: { name: recipe[0], mimeType: recipe[1], buffer: await fs.readFile(filePath) } },\n    });\n",
+              "    const sourceBytes = await fs.readFile(filePath);\n    const multipart = { file: { name: recipe[0], mimeType: recipe[1], buffer: sourceBytes } };\n    if (recipe[2]) multipart.font_resource_id = recipe[2];\n    const response = await context.request.post(apiURL(`/video/projects/${encodeURIComponent(project.id)}/assets/upload`), {\n      headers,\n      multipart,\n    });\n",
+          )
+          replace_once(
+              "    const uploaded = await response.json();\n    assetIDs[asset.id] = uploaded.id;\n",
+              "    const uploaded = await response.json();\n    assetIDs[asset.id] = uploaded.id;\n    if (recipe[2]) {\n      const download = await context.request.get(apiURL(`/video/assets/${encodeURIComponent(uploaded.id)}/download`), { headers });\n      if (!download.ok()) throw new Error(`download uploaded font ${asset.id}: HTTP ${download.status()} ${await download.text()}`);\n      const downloadedBytes = await download.body();\n      fontResources.push({\n        fixture_asset_id: asset.id,\n        asset_id: uploaded.id,\n        font_resource_id: recipe[2],\n        source_sha256: createHash('sha256').update(sourceBytes).digest('hex'),\n        downloaded_sha256: createHash('sha256').update(downloadedBytes).digest('hex'),\n        byte_length: sourceBytes.length,\n      });\n    }\n",
+          )
+          replace_once(
+              "    asset_ids: assetIDs,\n  };\n}\n",
+              "    asset_ids: assetIDs,\n    font_resources: fontResources,\n  };\n}\n",
+          )
+
+          replace_once(
+              "  for (const sample of samples) {\n",
+              "  const fontFrameEvidence = [];\n  for (const sample of samples) {\n",
+          )
+          replace_once(
+              "    await page.waitForFunction((frameIndex) => document.querySelector('[data-testid=\"video-preview-program\"]')?.dataset.parityFrameIndex === String(frameIndex), sample.frame_index);\n",
+              "    await page.waitForFunction((frameIndex) => document.querySelector('[data-testid=\"video-preview-program\"]')?.dataset.parityFrameIndex === String(frameIndex), sample.frame_index);\n    if (fixture.assets.some((asset) => asset.kind === 'font')) {\n      const textNodes = page.locator('[data-preview-canonical-content=\"text\"]');\n      if (await textNodes.count() !== 1) throw new Error(`expected exactly one canonical resource-text node at frame ${sample.frame_index}`);\n      const evidence = await textNodes.first().evaluate((node) => {\n        const style = getComputedStyle(node);\n        return {\n          text: node.textContent || '',\n          state_mode: node.dataset.previewTextStateMode || '',\n          font_face_source: node.dataset.previewTextFontFaceSource || '',\n          font_face_runtime: node.dataset.previewTextFontFaceRuntime || '',\n          metrics_mode: node.dataset.previewTextMetricsMode || '',\n          font_family: style.fontFamily,\n          font_size: style.fontSize,\n          font_weight: style.fontWeight,\n          color: style.color,\n        };\n      });\n      fontFrameEvidence.push({ frame_index: sample.frame_index, request_id: requestId, ...evidence });\n    }\n",
+          )
+          replace_once(
+              "  const previewAudioRequestID = `preview-audio-${snapshotID}`;\n",
+              "  if (fontFrameEvidence.length > 0) {\n    await fs.writeFile(path.join(output, 'font-frame-evidence.json'), `${JSON.stringify({ fixture: fixture.name, frames: fontFrameEvidence }, null, 2)}\\n`);\n  }\n  const previewAudioRequestID = `preview-audio-${snapshotID}`;\n",
+          )
+
+          p.write_text(text)
+          PY
+      - name: Validate focused fixture and capture syntax
+        run: |
+          node --check scripts/video-parity-capture.mjs
+          cd backend
+          gofmt -w internal/video/parity_fixture_text.go internal/video/parity_fixture_text_test.go cmd/video-text-parity-fixture/main.go
+          go test ./internal/video -run TestParityResourceTextFixtureIsNarrowAndResourceBacked
+          go run ./cmd/video-text-parity-fixture --output-dir ../output/video-text-parity/fixture
+          test -s ../output/video-text-parity/fixture/parity-resource-text-v1.json
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/video-parity-capture.mjs backend/internal/video/parity_fixture_text.go backend/internal/video/parity_fixture_text_test.go backend/cmd/video-text-parity-fixture/main.go
+          if git diff --cached --quiet; then
+            echo 'No patch changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Capture immutable project font parity evidence'
+          git push origin HEAD:feat/video-wysiwyg-phase3-font-glyph-parity
