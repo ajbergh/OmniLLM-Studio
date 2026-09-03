@@ -1,4 +1,4 @@
-name: Video Cursor Export Parity Measurement
+name: Video Cursor Export Parity Patch
 
 on:
   push:
@@ -7,144 +7,35 @@ on:
       - '.github/workflows/video-cursor-export-parity-patch.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  measure:
+  patch-and-test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
           ref: feat/video-wysiwyg-phase3-cursor-export-parity
-      - uses: actions/setup-go@v7
-        with:
-          go-version: '1.25.13'
-          cache-dependency-path: backend/go.sum
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            frontend/package-lock.json
-      - run: npm ci
-      - working-directory: frontend
-        run: npm ci
-      - name: Install parity dependencies
+      - name: Make cursor evidence color-space independent
         run: |
-          set -euo pipefail
-          bash scripts/ci-apt-install.sh ffmpeg
-          bash scripts/ci-playwright-install.sh
-      - name: Generate focused cursor fixture
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/video-cursor-parity-capture.mjs')
+          text = path.read_text()
+          old = """    const highlight = cursorEvidence.child_divs.find((item) => item.background_color === 'rgba(253, 224, 71, 0.3)');\n    const ring = cursorEvidence.child_divs.find((item) => item.border_top_color === 'rgba(56, 189, 248, 0.8)' && item.border_top_width === '2px');"""
+          new = """    const highlight = cursorEvidence.child_divs.find((item) =>\n      item.border_top_width === '0px'\n      && Math.abs(Number.parseFloat(item.width) - cursorEvidence.svg_width * 2.2) < 0.05\n      && Math.abs(Number.parseFloat(item.height) - cursorEvidence.svg_height * 2.2) < 0.05);\n    const ring = cursorEvidence.child_divs.find((item) =>\n      item.border_top_width === '2px'\n      && Math.abs(Number.parseFloat(item.width) - cursorEvidence.svg_width * 2.6) < 0.05\n      && Math.abs(Number.parseFloat(item.height) - cursorEvidence.svg_height * 2.6) < 0.05);"""
+          if old not in text:
+              raise SystemExit('cursor evidence color assertion anchor not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Validate capture script
         run: |
-          set -euo pipefail
-          (
-            cd backend
-            go test ./internal/video -run '^TestParityCursorFixtureIsNarrowAndBoundaryAddressed$|^TestCanonicalCursorRaster'
-            go run ./cmd/video-cursor-parity-fixture --output-dir ../output/video-cursor-parity/fixture
-          )
-          mkdir -p output/video-cursor-parity/fixture/media
-          ffmpeg -hide_banner -loglevel error -y -f lavfi -i color=c=black:s=640x360:r=1 -frames:v 1 -c:v png -threads 1 output/video-cursor-parity/fixture/media/cursor-backdrop.png
-          test -s output/video-cursor-parity/fixture/media/cursor-backdrop.png
-          sha256sum output/video-cursor-parity/fixture/media/cursor-backdrop.png > output/video-cursor-parity/fixture/backdrop-source.sha256
-      - name: Capture browser and FFmpeg cursor frames
-        shell: bash
+          node --check scripts/video-cursor-parity-capture.mjs
+          git diff --check
+      - name: Commit evidence assertion fix
         run: |
-          set -euo pipefail
-          runtime="$GITHUB_WORKSPACE/output/video-cursor-parity/runtime"
-          mkdir -p "$runtime/attachments"
-          export OMNILLM_PORT=18098
-          export OMNILLM_DB_PATH="$runtime/parity.db"
-          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
-          (
-            cd backend
-            go run ./cmd/server >"$runtime/backend.log" 2>"$runtime/backend.err.log"
-          ) &
-          backend_pid=$!
-          (
-            cd frontend
-            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18098 npm run dev -- --host 127.0.0.1 --port 14181 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
-          ) &
-          frontend_pid=$!
-          cleanup() {
-            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
-            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
-          }
-          trap cleanup EXIT
-          for attempt in {1..60}; do
-            if curl --fail --silent http://127.0.0.1:18098/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14181/ >/dev/null; then
-              break
-            fi
-            if [ "$attempt" -eq 60 ]; then
-              echo "cursor parity servers did not become ready" >&2
-              exit 1
-            fi
-            sleep 1
-          done
-          fixture=output/video-cursor-parity/fixture/parity-cursor-v1.json
-          capture=output/video-cursor-parity/capture
-          node scripts/video-cursor-parity-capture.mjs --url http://127.0.0.1:14181 --fixture "$fixture" --image-file output/video-cursor-parity/fixture/media/cursor-backdrop.png --output "$capture"
-          timeline_hash="$(node -p "require('./$capture/seed-result.json').timeline_sha256")"
-          (
-            cd backend
-            go run ./cmd/video-parity-report --preview-dir ../$capture/preview --rendered-dir ../$capture/rendered --output-dir ../$capture/cursor-report --fps 100 --fixture parity-cursor-v1 --timeline-sha256 "$timeline_hash" --allow-fail
-          )
-          node - <<'NODE'
-          const fs = require('fs');
-          const seed = JSON.parse(fs.readFileSync('output/video-cursor-parity/capture/seed-result.json', 'utf8'));
-          const browser = JSON.parse(fs.readFileSync('output/video-cursor-parity/capture/cursor-frame-evidence.json', 'utf8'));
-          const report = JSON.parse(fs.readFileSync('output/video-cursor-parity/capture/cursor-report/parity-report.json', 'utf8'));
-          const expectedFrames = [20, 21, 50, 79, 80];
-          const expectedRings = [false, true, true, true, false];
-          if (!seed.image_source_sha256 || seed.image_source_sha256 !== seed.image_downloaded_sha256) throw new Error(`immutable backdrop drifted: ${JSON.stringify(seed)}`);
-          if (browser.frames.length !== 5) throw new Error(`browser evidence incomplete: ${JSON.stringify(browser)}`);
-          browser.frames.forEach((frame, index) => {
-            if (frame.frame_index !== expectedFrames[index] || frame.state_mode !== 'canonical-frame' || frame.highlight_present !== true || frame.ring_present !== expectedRings[index]) {
-              throw new Error(`browser structural evidence drifted at ${index}: ${JSON.stringify(frame)}`);
-            }
-          });
-          if (report.frames.length !== 5 || report.frames.some((frame, index) => frame.frame_index !== expectedFrames[index] || frame.compared_pixels !== 640 * 360)) {
-            throw new Error(`report identity drifted: ${JSON.stringify(report.frames)}`);
-          }
-          const summary = {
-            schema_version: 1,
-            mode: 'measurement',
-            fixture: 'parity-cursor-v1',
-            timeline_sha256: seed.timeline_sha256,
-            snapshot_id: seed.snapshot_id,
-            image_source_sha256: seed.image_source_sha256,
-            repository_global_report_pass: report.pass,
-            frames: report.frames.map((frame) => ({
-              frame_index: frame.frame_index,
-              pixel_pass_rate: frame.pixel_pass_rate,
-              mean_absolute_error: frame.mean_absolute_error,
-              root_mean_square_error: frame.root_mean_square_error,
-              ssim: frame.ssim,
-              max_channel_delta: frame.max_channel_delta,
-              changed_bounds: frame.changed_bounds,
-            })),
-          };
-          fs.writeFileSync('output/video-cursor-parity/capture/cursor-evidence-summary.json', `${JSON.stringify(summary, null, 2)}\n`);
-          console.log(`CURSOR_PARITY_MEASUREMENT=${JSON.stringify(summary)}`);
-          NODE
-      - name: Record toolchain
-        if: always()
-        run: |
-          mkdir -p output/video-cursor-parity
-          {
-            go version
-            node --version
-            npm --version
-            ffmpeg -version | head -n 1
-            ffprobe -version | head -n 1
-            node -e "console.log('playwright ' + require('playwright/package.json').version)"
-          } > output/video-cursor-parity/toolchain.txt
-      - name: Upload cursor parity evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: video-cursor-parity-measurement
-          path: output/video-cursor-parity
-          if-no-files-found: error
-          retention-days: 14
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/video-cursor-parity-capture.mjs
+          git commit -m 'Make cursor evidence color-space independent'
+          git push origin HEAD:feat/video-wysiwyg-phase3-cursor-export-parity
