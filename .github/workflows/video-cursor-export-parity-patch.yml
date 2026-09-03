@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/video-cursor-export-parity-patch.yml'
       - 'scripts/patch-video-cursor-export-parity.py'
+      - 'scripts/patch-video-cursor-export-parity-test-expectations.py'
 
 permissions:
   contents: write
@@ -22,10 +23,12 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
       - name: Apply cursor parity integration
-        run: python3 scripts/patch-video-cursor-export-parity.py
+        run: |
+          python3 scripts/patch-video-cursor-export-parity.py
+          python3 scripts/patch-video-cursor-export-parity-test-expectations.py
       - name: Format cursor renderer sources
         working-directory: backend
-        run: gofmt -w internal/video/renderer_fidelity.go internal/video/renderer_cursor.go internal/video/renderer_cursor_test.go internal/video/renderer_capabilities.go
+        run: gofmt -w internal/video/renderer_fidelity.go internal/video/renderer_cursor.go internal/video/renderer_cursor_test.go internal/video/renderer_advanced_test.go internal/video/renderer_capabilities.go
       - name: Verify diff hygiene
         run: git diff --check
       - name: Run focused video renderer tests
@@ -35,6 +38,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/internal/video/renderer_fidelity.go backend/internal/video/renderer_cursor.go backend/internal/video/renderer_cursor_test.go backend/internal/video/renderer_capabilities.go
+          git add backend/internal/video/renderer_fidelity.go backend/internal/video/renderer_cursor.go backend/internal/video/renderer_cursor_test.go backend/internal/video/renderer_advanced_test.go backend/internal/video/renderer_capabilities.go
           git commit -m 'Align cursor export with canonical frame state'
           git push origin HEAD:feat/video-wysiwyg-phase3-cursor-export-parity
