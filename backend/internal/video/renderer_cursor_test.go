@@ -1,6 +1,7 @@
 package video
 
 import (
+	"image/color"
 	"image/png"
 	"math"
 	"os"
@@ -155,5 +156,17 @@ func TestMaterializeCanonicalCursorRasterAssets(t *testing.T) {
 	cleanup()
 	if _, err := os.Stat(rasterPath); !os.IsNotExist(err) {
 		t.Fatalf("cursor raster cleanup left %q: %v", rasterPath, err)
+	}
+}
+
+func TestCanonicalCursorRasterUsesPinnedSRGBPalette(t *testing.T) {
+	spec := cursorRasterSpec{Scale: 1, Highlight: true, ClickRing: true}
+	highlight := supersampledCursorPixel(320, 180, 320, 180, spec)
+	if want := (color.NRGBA{R: 255, G: 223, B: 32, A: 76}); highlight != want {
+		t.Fatalf("cursor highlight pixel = %+v, want %+v", highlight, want)
+	}
+	ring := supersampledCursorPixel(402, 180, 320, 180, spec)
+	if want := (color.NRGBA{R: 0, G: 188, B: 255, A: 204}); ring != want {
+		t.Fatalf("cursor ring pixel = %+v, want %+v", ring, want)
 	}
 }

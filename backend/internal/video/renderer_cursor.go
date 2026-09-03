@@ -471,13 +471,14 @@ func cursorSample(x, y float64, spec cursorRasterSpec) premultipliedPixel {
 	var out premultipliedPixel
 	size := cursorPointerBaseSize * spec.Scale
 	if spec.Highlight && math.Hypot(x, y) <= cursorHighlightRadiusFactor*size {
-		out = overPixel(out, 253.0/255, 224.0/255, 71.0/255, 0.30)
+		// Pinned sRGB cursor palette; keep in sync with CanonicalPreviewCursor.
+		out = overPixel(out, 1, 223.0/255, 32.0/255, 0.30)
 	}
 	if spec.ClickRing {
 		radius := cursorClickRingRadiusFactor * size
 		distance := math.Hypot(x, y)
 		if distance <= radius && distance >= radius-cursorClickRingBorderPixels {
-			out = overPixel(out, 56.0/255, 189.0/255, 248.0/255, 0.80)
+			out = overPixel(out, 0, 188.0/255, 1, 0.80)
 		}
 	}
 	points := cursorPointerPolygon(spec.Scale)
