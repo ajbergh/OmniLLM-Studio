@@ -1,12 +1,12 @@
 package video
 
 const (
-	ParityCursorFixtureName      = "parity-cursor-v1"
-	ParityCursorBackdropAssetID  = "asset-cursor-backdrop"
-	parityCursorWidth            = 640
-	parityCursorHeight           = 360
-	parityCursorFPS              = 100
-	parityCursorDurationMS int64 = 1000
+	ParityCursorFixtureName           = "parity-cursor-v1"
+	ParityCursorBackdropAssetID       = "asset-cursor-backdrop"
+	parityCursorWidth                 = 640
+	parityCursorHeight                = 360
+	parityCursorFPS                   = 100
+	parityCursorDurationMS      int64 = 1000
 )
 
 // ParityCursorFixture isolates cursor-state-v1 visual semantics on a lossless,
