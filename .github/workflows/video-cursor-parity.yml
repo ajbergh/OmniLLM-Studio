@@ -14,6 +14,7 @@ on:
       - 'backend/internal/video/rendercontract/cursor_state.go'
       - 'frontend/src/components/video/PreviewCanonicalPainters.tsx'
       - 'frontend/src/components/video/VideoPreviewCanvas.tsx'
+      - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
       - 'frontend/src/video/renderContractCursor.ts'
       - 'scripts/video-cursor-parity-capture.mjs'
       - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
@@ -31,6 +32,7 @@ on:
       - 'backend/internal/video/rendercontract/cursor_state.go'
       - 'frontend/src/components/video/PreviewCanonicalPainters.tsx'
       - 'frontend/src/components/video/VideoPreviewCanvas.tsx'
+      - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
       - 'frontend/src/video/renderContractCursor.ts'
       - 'scripts/video-cursor-parity-capture.mjs'
       - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
@@ -91,7 +93,7 @@ jobs:
           test -s output/video-cursor-parity/fixture/media/cursor-backdrop.png
           sha256sum output/video-cursor-parity/fixture/media/cursor-backdrop.png \
             > output/video-cursor-parity/fixture/backdrop-source.sha256
-      - name: Capture exact-frame browser and FFmpeg cursor evidence
+      - name: Capture and gate exact-frame browser and FFmpeg cursor evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -155,6 +157,29 @@ jobs:
           const report = JSON.parse(fs.readFileSync('output/video-cursor-parity/capture/cursor-report/parity-report.json', 'utf8'));
           const expectedFrames = [20, 21, 50, 79, 80];
           const expectedRings = [false, true, true, true, false];
+          const expectedBounds = {
+            20: { min_x: 153, min_y: 73, max_x: 295, max_y: 215 },
+            21: { min_x: 143, min_y: 61, max_x: 311, max_y: 229 },
+            50: { min_x: 236, min_y: 96, max_x: 404, max_y: 264 },
+            79: { min_x: 329, min_y: 131, max_x: 497, max_y: 299 },
+            80: { min_x: 345, min_y: 145, max_x: 487, max_y: 287 },
+          };
+          const thresholds = {
+            no_ring: {
+              minimum_pixel_pass_rate_at_global_tolerance: 0.990,
+              minimum_ssim: 0.985,
+              maximum_mean_absolute_error: 0.31,
+              maximum_root_mean_square_error: 3.80,
+            },
+            ring: {
+              minimum_pixel_pass_rate_at_global_tolerance: 0.984,
+              minimum_ssim: 0.982,
+              maximum_mean_absolute_error: 0.45,
+              maximum_root_mean_square_error: 4.50,
+            },
+            maximum_channel_delta: 180,
+            expected_changed_bounds: expectedBounds,
+          };
           if (fixture.name !== 'parity-cursor-v1' || fixture.timeline.canvas.fps !== 100) throw new Error(`fixture identity drifted: ${JSON.stringify(fixture)}`);
           if (!seed.image_source_sha256 || seed.image_source_sha256 !== seed.image_downloaded_sha256) throw new Error(`immutable backdrop identity drifted: ${JSON.stringify(seed)}`);
           if (browser.frames.length !== 5) throw new Error(`browser frame evidence incomplete: ${JSON.stringify(browser)}`);
@@ -162,31 +187,63 @@ jobs:
             if (frame.frame_index !== expectedFrames[index] || frame.state_mode !== 'canonical-frame' || frame.highlight_present !== true || frame.ring_present !== expectedRings[index]) {
               throw new Error(`browser cursor structural evidence drifted at index ${index}: ${JSON.stringify(frame)}`);
             }
+            const highlight = frame.child_divs.find((item) => item.border_top_width === '0px');
+            if (!highlight || highlight.background_color !== 'rgba(255, 223, 32, 0.3)') {
+              throw new Error(`browser pinned highlight palette drifted at frame ${frame.frame_index}: ${JSON.stringify(frame.child_divs)}`);
+            }
+            const ring = frame.child_divs.find((item) => item.border_top_width === '2px');
+            if (expectedRings[index] && (!ring || ring.border_top_color !== 'rgba(0, 188, 255, 0.8)')) {
+              throw new Error(`browser pinned ring palette drifted at frame ${frame.frame_index}: ${JSON.stringify(frame.child_divs)}`);
+            }
+            if (!expectedRings[index] && ring) {
+              throw new Error(`browser emitted a ring at strict 300ms boundary frame ${frame.frame_index}: ${JSON.stringify(frame.child_divs)}`);
+            }
           });
           if (report.frames.length !== 5 || report.frames.some((frame, index) => frame.frame_index !== expectedFrames[index] || frame.compared_pixels !== 640 * 360)) {
             throw new Error(`FFmpeg report is not bound to the five complete canonical frames: ${JSON.stringify(report.frames)}`);
           }
-          const summary = {
-            schema_version: 1,
-            mode: 'measurement',
-            fixture: fixture.name,
-            timeline_sha256: seed.timeline_sha256,
-            snapshot_id: seed.snapshot_id,
-            image_source_sha256: seed.image_source_sha256,
-            image_downloaded_sha256: seed.image_downloaded_sha256,
-            repository_global_report_pass: report.pass,
-            frames: report.frames.map((frame) => ({
+          const frameResults = report.frames.map((frame, index) => {
+            const envelope = expectedRings[index] ? thresholds.ring : thresholds.no_ring;
+            const expected = expectedBounds[frame.frame_index];
+            const boundsPass = JSON.stringify(frame.changed_bounds || {}) === JSON.stringify(expected);
+            const pass =
+              frame.pixel_pass_rate >= envelope.minimum_pixel_pass_rate_at_global_tolerance &&
+              frame.ssim >= envelope.minimum_ssim &&
+              frame.mean_absolute_error <= envelope.maximum_mean_absolute_error &&
+              frame.root_mean_square_error <= envelope.maximum_root_mean_square_error &&
+              frame.max_channel_delta <= thresholds.maximum_channel_delta &&
+              boundsPass;
+            return {
               frame_index: frame.frame_index,
+              ring_expected: expectedRings[index],
               pixel_pass_rate: frame.pixel_pass_rate,
               mean_absolute_error: frame.mean_absolute_error,
               root_mean_square_error: frame.root_mean_square_error,
               ssim: frame.ssim,
               max_channel_delta: frame.max_channel_delta,
               changed_bounds: frame.changed_bounds,
-            })),
+              envelope,
+              expected_bounds: expected,
+              pass,
+            };
+          });
+          const focusedPass = frameResults.every((frame) => frame.pass);
+          const summary = {
+            schema_version: 1,
+            mode: 'fixture-specific-chromium-go-cursor-v1',
+            fixture: fixture.name,
+            timeline_sha256: seed.timeline_sha256,
+            snapshot_id: seed.snapshot_id,
+            image_source_sha256: seed.image_source_sha256,
+            image_downloaded_sha256: seed.image_downloaded_sha256,
+            repository_global_report_pass: report.pass,
+            thresholds,
+            frames: frameResults,
+            focused_pass: focusedPass,
           };
           fs.writeFileSync('output/video-cursor-parity/capture/cursor-evidence-summary.json', `${JSON.stringify(summary, null, 2)}\n`);
-          console.log(`CURSOR_PARITY_MEASUREMENT=${JSON.stringify(summary)}`);
+          console.log(`CURSOR_PARITY_GATE=${JSON.stringify(summary)}`);
+          if (!focusedPass) throw new Error(`cursor focused parity gate failed: ${JSON.stringify(summary)}`);
           NODE
       - name: Record toolchain
         if: always()
