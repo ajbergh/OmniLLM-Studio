@@ -1,3 +1,5 @@
+// Command video-cursor-parity-fixture emits the focused parity-cursor-v1 timeline
+// used to compare canonical browser cursor painting with FFmpeg diagnostic frames.
 package main
 
 import (
