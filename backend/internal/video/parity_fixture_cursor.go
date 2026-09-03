@@ -10,10 +10,13 @@ const (
 )
 
 // ParityCursorFixture isolates cursor-state-v1 visual semantics on a lossless,
-// flat backdrop. It deliberately excludes audio, effects, transitions, camera,
-// clip animation, crop, opacity, and non-identity parent transforms so retained
-// differences measure pointer/highlight/click-ring rasterization plus exact
-// output-frame cursor sampling rather than unrelated media or geometry noise.
+// flat backdrop. The preview and export paths both pin the current cursor
+// highlight/ring palette to explicit sRGB values, so this fixture measures that
+// renderer contract rather than whichever Tailwind palette happens to be active.
+// It deliberately excludes audio, effects, transitions, camera, clip animation,
+// crop, opacity, and non-identity parent transforms so retained differences
+// measure pointer/highlight/click-ring rasterization plus exact output-frame
+// cursor sampling rather than unrelated media or geometry noise.
 func ParityCursorFixture() (TimelineDocument, []ParityFixtureAsset) {
 	doc := NewEmptyTimeline(parityCursorWidth, parityCursorHeight, parityCursorFPS)
 	doc.DurationMS = parityCursorDurationMS
