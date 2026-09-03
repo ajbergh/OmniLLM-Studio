@@ -15,18 +15,18 @@ import (
 )
 
 const (
-	cursorRasterContractVersion   = "cursor-raster-v1"
-	cursorRasterMetadataKey       = "_omnillm_cursor_raster_version"
-	cursorRasterScaleMetadataKey  = "_omnillm_cursor_raster_scale"
-	cursorRasterHighlightKey      = "_omnillm_cursor_raster_highlight"
-	cursorRasterClickRingKey      = "_omnillm_cursor_raster_click_ring"
-	cursorRasterAssetPrefix       = "__omnillm_cursor_raster_v1_"
-	cursorRasterSupersample       = 4
-	cursorRasterMaxExactFPS       = 999
-	cursorPointerBaseSize         = 64.0
-	cursorHighlightRadiusFactor   = 1.1
-	cursorClickRingRadiusFactor   = 1.3
-	cursorClickRingBorderPixels   = 2.0
+	cursorRasterContractVersion  = "cursor-raster-v1"
+	cursorRasterMetadataKey      = "_omnillm_cursor_raster_version"
+	cursorRasterScaleMetadataKey = "_omnillm_cursor_raster_scale"
+	cursorRasterHighlightKey     = "_omnillm_cursor_raster_highlight"
+	cursorRasterClickRingKey     = "_omnillm_cursor_raster_click_ring"
+	cursorRasterAssetPrefix      = "__omnillm_cursor_raster_v1_"
+	cursorRasterSupersample      = 4
+	cursorRasterMaxExactFPS      = 999
+	cursorPointerBaseSize        = 64.0
+	cursorHighlightRadiusFactor  = 1.1
+	cursorClickRingRadiusFactor  = 1.3
+	cursorClickRingBorderPixels  = 2.0
 )
 
 type cursorRasterSpec struct {

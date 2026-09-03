@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/ajbergh/omnillm-studio/internal/models"
 )
 
 func TestCanonicalCursorRasterExpansionUsesExactClickWindowAndSameTrack(t *testing.T) {
@@ -14,16 +16,17 @@ func TestCanonicalCursorRasterExpansionUsesExactClickWindowAndSameTrack(t *testi
 	doc.Tracks[0].Clips = []TimelineClip{{
 		ID: "cursor-owner", AssetID: "media", StartMS: 0, DurationMS: 1000, TrimOutMS: 1000,
 		Transform: map[string]any{"x": 0.0, "y": 0.0, "scale": 1.0, "rotation": 0.0, "opacity": 1.0},
-		Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{}, Transitions: []TimelineTransition{},
+		Effects:   []TimelineEffect{}, Keyframes: []TimelineKeyframe{}, Transitions: []TimelineTransition{},
 		Cursor: &TimelineCursor{
 			Visible: true, Scale: 1, Highlight: true, ClickRings: true,
 			Events: []TimelineCursorEvent{{TimeMS: 0, X: 100, Y: 100}, {TimeMS: 500, X: 200, Y: 140, Click: true}, {TimeMS: 999, X: 300, Y: 180}},
 		},
 	}}
 
+	initialTrackCount := len(doc.Tracks)
 	expanded := ExpandTimelineForFidelity(doc, 100, 120)
-	if len(expanded.Tracks) != 1 {
-		t.Fatalf("canonical cursor must stay on the owner track, got %d tracks", len(expanded.Tracks))
+	if len(expanded.Tracks) != initialTrackCount {
+		t.Fatalf("canonical cursor added a synthetic track: before=%d after=%d", initialTrackCount, len(expanded.Tracks))
 	}
 	if got := len(expanded.Tracks[0].Clips); got != 101 {
 		t.Fatalf("expanded clip count = %d, want owner + 100 frame-addressed cursor clips", got)
@@ -68,7 +71,7 @@ func TestCanonicalCursorRasterAppliesStaticParentAffineToOrigin(t *testing.T) {
 	doc.Tracks[0].Clips = []TimelineClip{{
 		ID: "cursor-owner", AssetID: "media", StartMS: 0, DurationMS: 10, TrimOutMS: 10,
 		Transform: map[string]any{"x": 5.0, "y": 7.0, "scale": 2.0, "rotation": 90.0, "opacity": 0.75},
-		Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{}, Transitions: []TimelineTransition{},
+		Effects:   []TimelineEffect{}, Keyframes: []TimelineKeyframe{}, Transitions: []TimelineTransition{},
 		Cursor: &TimelineCursor{Visible: true, Scale: 1, Events: []TimelineCursorEvent{{TimeMS: 0, X: 330, Y: 180}}},
 	}}
 
@@ -93,7 +96,7 @@ func TestCanonicalCursorRasterFallsBackForSmoothing(t *testing.T) {
 	doc.Tracks[0].Clips = []TimelineClip{{
 		ID: "cursor-owner", AssetID: "media", StartMS: 0, DurationMS: 1000, TrimOutMS: 1000,
 		Transform: map[string]any{"x": 0.0, "y": 0.0, "scale": 1.0, "rotation": 0.0, "opacity": 1.0},
-		Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{}, Transitions: []TimelineTransition{},
+		Effects:   []TimelineEffect{}, Keyframes: []TimelineKeyframe{}, Transitions: []TimelineTransition{},
 		Cursor: &TimelineCursor{Visible: true, Scale: 1, Smoothing: true, Events: []TimelineCursorEvent{{TimeMS: 0, X: 10, Y: 20}}},
 	}}
 
@@ -116,7 +119,7 @@ func TestMaterializeCanonicalCursorRasterAssets(t *testing.T) {
 	doc.Tracks[0].Clips = []TimelineClip{{
 		ID: "cursor-owner", AssetID: "media", StartMS: 0, DurationMS: 10, TrimOutMS: 10,
 		Transform: map[string]any{"x": 0.0, "y": 0.0, "scale": 1.0, "rotation": 0.0, "opacity": 1.0},
-		Effects: []TimelineEffect{}, Keyframes: []TimelineKeyframe{}, Transitions: []TimelineTransition{},
+		Effects:   []TimelineEffect{}, Keyframes: []TimelineKeyframe{}, Transitions: []TimelineTransition{},
 		Cursor: &TimelineCursor{Visible: true, Scale: 1, Highlight: true, ClickRings: true, Events: []TimelineCursorEvent{{TimeMS: 0, X: 320, Y: 180, Click: true}}},
 	}}
 	expanded := ExpandTimelineForFidelity(doc, 100, 10)
