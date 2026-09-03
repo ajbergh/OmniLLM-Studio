@@ -194,8 +194,14 @@ try {
     });
     const expected = expectedCursorAt(sample.time_ms);
     const ringExpected = expectedRing(sample.frame_index);
-    const highlight = cursorEvidence.child_divs.find((item) => item.background_color === 'rgba(253, 224, 71, 0.3)');
-    const ring = cursorEvidence.child_divs.find((item) => item.border_top_color === 'rgba(56, 189, 248, 0.8)' && item.border_top_width === '2px');
+    const highlight = cursorEvidence.child_divs.find((item) =>
+      item.border_top_width === '0px'
+      && Math.abs(Number.parseFloat(item.width) - cursorEvidence.svg_width * 2.2) < 0.05
+      && Math.abs(Number.parseFloat(item.height) - cursorEvidence.svg_height * 2.2) < 0.05);
+    const ring = cursorEvidence.child_divs.find((item) =>
+      item.border_top_width === '2px'
+      && Math.abs(Number.parseFloat(item.width) - cursorEvidence.svg_width * 2.6) < 0.05
+      && Math.abs(Number.parseFloat(item.height) - cursorEvidence.svg_height * 2.6) < 0.05);
     if (cursorEvidence.state_mode !== 'canonical-frame') throw new Error(`frame ${sample.frame_index}: cursor did not use canonical-frame state: ${JSON.stringify(cursorEvidence)}`);
     if (Math.abs(cursorEvidence.left - expected.x) > 0.02 || Math.abs(cursorEvidence.top - expected.y) > 0.02) {
       throw new Error(`frame ${sample.frame_index}: cursor interpolation drifted expected=${JSON.stringify(expected)} actual=${JSON.stringify(cursorEvidence)}`);
