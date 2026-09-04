@@ -1,9 +1,8 @@
 import { endFrame, startFrame } from '../../video/renderContract';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 import type {
-  VideoTimelineClip,
+  VideoTimelineCursor,
   VideoTimelineScene,
-  VideoTimelineTrack,
   VideoTimelineTransform,
 } from '../../types/video';
 
@@ -32,25 +31,35 @@ export interface PreviewCursorPlaybackContext {
   scenes: readonly Pick<VideoTimelineScene, 'start_ms' | 'duration_ms' | 'camera'>[];
 }
 
+/** Structural clip shape used only by the playback admission classifier. */
+export interface PreviewCursorPlaybackClip {
+  id: string;
+  asset_id?: string;
+  start_ms?: number;
+  duration_ms?: number;
+  audio_only?: boolean;
+  text?: unknown;
+  shape?: unknown;
+  cursor?: VideoTimelineCursor;
+  transform?: VideoTimelineTransform;
+  fade_in_ms?: number;
+  fade_out_ms?: number;
+  effects?: readonly { enabled?: boolean }[];
+  transitions?: readonly unknown[];
+  keyframes?: readonly { property: string }[];
+  animation_blocks?: readonly unknown[];
+}
+
 export type PreviewCursorPlaybackLayer = {
-  clip: Pick<VideoTimelineClip, 'id'> & Partial<Pick<
-    VideoTimelineClip,
-    | 'asset_id'
-    | 'start_ms'
-    | 'duration_ms'
-    | 'audio_only'
-    | 'text'
-    | 'shape'
-    | 'cursor'
-    | 'transform'
-    | 'fade_in_ms'
-    | 'fade_out_ms'
-    | 'effects'
-    | 'transitions'
-    | 'keyframes'
-    | 'animation_blocks'
-  >>;
-  track?: Pick<VideoTimelineTrack, 'clips'>;
+  clip: PreviewCursorPlaybackClip;
+  track?: {
+    clips: readonly Array<{
+      id: string;
+      start_ms: number;
+      duration_ms: number;
+      audio_only?: boolean;
+    }>;
+  };
   asset?: { mime_type: string };
   canonicalState?: Pick<CanonicalFrameLayerState, 'cursor'>;
 };
@@ -100,7 +109,7 @@ export function previewCursorPlaybackStructuralDeferredReason(
   if ((clip.fade_in_ms ?? 0) > 0 || (clip.fade_out_ms ?? 0) > 0) return `${clip.id}:fade-unsupported`;
   if ((clip.transitions?.length ?? 0) > 0) return `${clip.id}:transition-parent-unsupported`;
   if ((clip.animation_blocks?.length ?? 0) > 0) return `${clip.id}:animation-parent-unsupported`;
-  if (clip.effects?.some((effect) => effect.enabled)) return `${clip.id}:effect-parent-unsupported`;
+  if (clip.effects?.some((effect) => effect.enabled === true)) return `${clip.id}:effect-parent-unsupported`;
   if (clip.keyframes?.some((keyframe) => VISUAL_KEYFRAME_PROPERTIES.has(keyframe.property.trim().toLowerCase()))) {
     return `${clip.id}:animated-parent-unsupported`;
   }
@@ -126,7 +135,7 @@ export function previewCursorPlaybackStructuralDeferredReason(
 
 function cursorParentTransformSupported(transform: VideoTimelineTransform | undefined): boolean {
   if (!transform) return true;
-  for (const [key, value] of Object.entries(transform as Record<string, unknown>)) {
+  for (const [key, value] of Object.entries(transform as unknown as Record<string, unknown>)) {
     if (!SUPPORTED_TRANSFORM_KEYS.has(key)) return false;
     if (key === 'crop') continue;
     if (typeof value !== 'number' || !Number.isFinite(value)) return false;
@@ -142,8 +151,8 @@ function cursorParentTransformSupported(transform: VideoTimelineTransform | unde
 }
 
 function hasOverlappingSibling(
-  clip: PreviewCursorPlaybackLayer['clip'],
-  siblings: readonly VideoTimelineClip[],
+  clip: PreviewCursorPlaybackClip,
+  siblings: readonly Array<{ id: string; start_ms: number; duration_ms: number; audio_only?: boolean }>,
 ): boolean {
   const start = clip.start_ms ?? 0;
   const duration = clip.duration_ms ?? 0;
@@ -156,7 +165,7 @@ function hasOverlappingSibling(
 }
 
 function hasOverlappingSceneCamera(
-  clip: PreviewCursorPlaybackLayer['clip'],
+  clip: PreviewCursorPlaybackClip,
   scenes: readonly Pick<VideoTimelineScene, 'start_ms' | 'duration_ms' | 'camera'>[],
 ): boolean {
   const start = clip.start_ms ?? 0;
