@@ -76,7 +76,7 @@ jobs:
       - name: Commit validated finalization
         run: |
           set -euo pipefail
-          git rm scripts/tmp-finalize-cursor-smoothing.py
+          git rm -f scripts/tmp-finalize-cursor-smoothing.py
           git diff --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
