@@ -1,0 +1,39 @@
+name: Repair Cursor Smoothing Finalizer
+
+on:
+  push:
+    branches:
+      - feat/video-wysiwyg-phase3-cursor-smoothing-parity
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Remove stale tracker-only anchor
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/tmp-finalize-cursor-smoothing.py')
+          text = p.read_text()
+          old = '''replace_once(\n    "docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md",\n    "When the whole frame is admitted it reads the exact `cursor-state-v1` sample from canonical FrameState",\n    "When the whole frame is admitted it reads the exact `cursor-state-v1` or `cursor-state-v2` sample from canonical FrameState",\n)\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'stale tracker anchor block count={text.count(old)}, want 1')
+          p.write_text(text.replace(old, '', 1))
+          PY
+          git diff --check
+      - name: Commit repaired finalizer
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/tmp-repair-cursor-finalizer.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/tmp-finalize-cursor-smoothing.py
+          git commit -m 'Repair cursor smoothing finalizer anchor'
+          git push origin HEAD:feat/video-wysiwyg-phase3-cursor-smoothing-parity
