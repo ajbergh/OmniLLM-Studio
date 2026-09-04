@@ -59,17 +59,19 @@ jobs:
           end = text.find(phase_marker, start + len(handoff_marker))
           if start < 0 or end < 0 or text.find(handoff_marker, start + 1) >= 0:
               raise SystemExit('tracker handoff markers are not unique')
-          handoff = '''## Current handoff
-
-Latest merged WYSIWYG program PR: **#308 — Canonical cursor export parity** — squash merge `5d465b107f0a91846a9c5ebe853657977767dfb3`. Its exact final PR head `c740e4e2` passed the complete 16/16 triggered Quality/Security/browser/renderer/platform matrix before merge, including the renderer parity baseline. `parity-cursor-v1` remains the retained Chromium↔Go/FFmpeg cursor export hard gate for the supported static-2D media subset.
-
-Current implementation slice: **canonical cursor normal-playback parity** on branch `feat/video-wysiwyg-phase3-cursor-playback-parity`, created directly from #308's squash result. Normal playback now admits only the already-export-proven cursor subset: <=999 fps, <=300 exact frame segments, static uniform 2D parent transform, no fades/effects/transitions/animation/visual keyframes, no same-track overlap, no scene camera, and bounded cursor raster. Unsupported cursor cases revoke canonical authority for the whole visual frame and stay on the established continuous-time compatibility painter.
-
-The existing cursor DOM overlay is the canonical playback consumer; no second cursor runtime or duplicate overlay tree was introduced. When the whole frame is admitted it reads the exact `cursor-state-v1` sample from canonical FrameState, including x/y, scale, highlight, click-ring state, and strict `<300 ms` click-window semantics. In fallback mode it retains the prior continuous-time sampler.
-
-`parity-playback-canonical-v5` extends the retained normal-playback fixture with four cursor classes: standalone cursor canonical playback; resource-text + cursor all-frame canonical playback; weighted transition + resource text + cursor composition; and an unsupported fade-parent cursor that must fail closed with `cursor-playback-deferred:<clip>:fade-unsupported`. Browser evidence records per-frame cursor consumer/state mode and exact x/y/click/scale/highlight/click-ring values, independently recomputes the expected rational-time sample from the immutable fixture, requires canonical cursor motion, and crosses both sides of the click-ring window.
-
-Isolated hosted evidence run `33840939201` passed contract/build validation, deterministic fixture generation, live browser capture, and the v5 evidence gate before committing the proven product/evidence changes as `501a65f7bbe604aaad5b2d63f46f778770f69414`. The primary branch was then fast-forwarded to that validated commit. Permanent playback CI now explicitly watches and executes `previewCursorPlayback.ts`, `previewCursorPlayback.test.ts`, and `previewPlaybackCursorCanonicalization.test.ts`; the final PR head still requires the complete triggered repository matrix before merge.'''
+          handoff = '\n'.join([
+              '## Current handoff',
+              '',
+              'Latest merged WYSIWYG program PR: **#308 — Canonical cursor export parity** — squash merge `5d465b107f0a91846a9c5ebe853657977767dfb3`. Its exact final PR head `c740e4e2` passed the complete 16/16 triggered Quality/Security/browser/renderer/platform matrix before merge, including the renderer parity baseline. `parity-cursor-v1` remains the retained Chromium↔Go/FFmpeg cursor export hard gate for the supported static-2D media subset.',
+              '',
+              'Current implementation slice: **canonical cursor normal-playback parity** on branch `feat/video-wysiwyg-phase3-cursor-playback-parity`, created directly from #308\'s squash result. Normal playback now admits only the already-export-proven cursor subset: <=999 fps, <=300 exact frame segments, static uniform 2D parent transform, no fades/effects/transitions/animation/visual keyframes, no same-track overlap, no scene camera, and bounded cursor raster. Unsupported cursor cases revoke canonical authority for the whole visual frame and stay on the established continuous-time compatibility painter.',
+              '',
+              'The existing cursor DOM overlay is the canonical playback consumer; no second cursor runtime or duplicate overlay tree was introduced. When the whole frame is admitted it reads the exact `cursor-state-v1` sample from canonical FrameState, including x/y, scale, highlight, click-ring state, and strict `<300 ms` click-window semantics. In fallback mode it retains the prior continuous-time sampler.',
+              '',
+              '`parity-playback-canonical-v5` extends the retained normal-playback fixture with four cursor classes: standalone cursor canonical playback; resource-text + cursor all-frame canonical playback; weighted transition + resource text + cursor composition; and an unsupported fade-parent cursor that must fail closed with `cursor-playback-deferred:<clip>:fade-unsupported`. Browser evidence records per-frame cursor consumer/state mode and exact x/y/click/scale/highlight/click-ring values, independently recomputes the expected rational-time sample from the immutable fixture, requires canonical cursor motion, and crosses both sides of the click-ring window.',
+              '',
+              'Isolated hosted evidence run `33840939201` passed contract/build validation, deterministic fixture generation, live browser capture, and the v5 evidence gate before committing the proven product/evidence changes as `501a65f7bbe604aaad5b2d63f46f778770f69414`. The primary branch was then fast-forwarded to that validated commit. Permanent playback CI now explicitly watches and executes `previewCursorPlayback.ts`, `previewCursorPlayback.test.ts`, and `previewPlaybackCursorCanonicalization.test.ts`; the final PR head still requires the complete triggered repository matrix before merge.',
+          ])
           text = text[:start] + handoff + text[end:]
 
           section_title = '### Canonical cursor normal-playback parity slice'
@@ -78,19 +80,20 @@ Isolated hosted evidence run `33840939201` passed contract/build validation, det
           export_tail = '- Renderer capability remains `Partial`: this slice deliberately does not synthesize click audio and does not admit smoothing/animated/3D/camera/effect/transition parents or unbounded cursor expansion.\n'
           if text.count(export_tail) != 1:
               raise SystemExit(f'cursor export-tail anchor count={text.count(export_tail)}, want 1')
-          playback_section = '''
-
-### Canonical cursor normal-playback parity slice
-
-- `previewCursorPlayback.ts` is a fail-closed browser admission classifier aligned to the supported export subset rather than the broader authored cursor schema. It does not mutate persisted timeline data or `cursor-state-v1`.
-- Whole-frame playback canonicalization treats supported cursor painting as a synchronous canonical consumer. Any cursor structural debt revokes the entire visual frame before text or weighted runtime readiness can partially promote other surfaces.
-- `VideoPreviewCanvasLegacy.tsx` reuses the existing overlay and consumes `entry.canonicalState.cursor` only when a canonical visual frame is active; compatibility playback retains the legacy time-domain cursor sampler.
-- Cursor playback evidence exposes stable DOM diagnostics for state mode, consumer, clip id, x/y, click, scale, highlight, and click-ring flags. These are evidence-only observability fields, not authored semantics.
-- Focused unit coverage locks the export-aligned admission boundary and whole-frame interaction with resource-backed text and other canonical surfaces.
-- `parity-playback-canonical-v5` proves exact rational-time samples during continuously advancing playback, cursor motion, click-window state changes, resource-text + cursor atomic authority, weighted-transition + text + cursor composition, and explicit unsupported fade-parent fallback.
-- Isolated evidence run `33840939201` completed successfully before commit `501a65f7bbe604aaad5b2d63f46f778770f69414`. Merge remains gated on exact-head PR validation after this tracker/CI update.
-- Deliberate remaining cursor debt is unchanged from export: click audio is not synthesized; smoothing and animated/3D/camera/effect/transition/fade parents remain compatibility-only. The next cursor-specific expansion should be justified by matching export support and retained browser/export evidence, not by preview-only admission.
-'''
+          playback_section = '\n'.join([
+              '',
+              '### Canonical cursor normal-playback parity slice',
+              '',
+              '- `previewCursorPlayback.ts` is a fail-closed browser admission classifier aligned to the supported export subset rather than the broader authored cursor schema. It does not mutate persisted timeline data or `cursor-state-v1`.',
+              '- Whole-frame playback canonicalization treats supported cursor painting as a synchronous canonical consumer. Any cursor structural debt revokes the entire visual frame before text or weighted runtime readiness can partially promote other surfaces.',
+              '- `VideoPreviewCanvasLegacy.tsx` reuses the existing overlay and consumes `entry.canonicalState.cursor` only when a canonical visual frame is active; compatibility playback retains the legacy time-domain cursor sampler.',
+              '- Cursor playback evidence exposes stable DOM diagnostics for state mode, consumer, clip id, x/y, click, scale, highlight, and click-ring flags. These are evidence-only observability fields, not authored semantics.',
+              '- Focused unit coverage locks the export-aligned admission boundary and whole-frame interaction with resource-backed text and other canonical surfaces.',
+              '- `parity-playback-canonical-v5` proves exact rational-time samples during continuously advancing playback, cursor motion, click-window state changes, resource-text + cursor atomic authority, weighted-transition + text + cursor composition, and explicit unsupported fade-parent fallback.',
+              '- Isolated evidence run `33840939201` completed successfully before commit `501a65f7bbe604aaad5b2d63f46f778770f69414`. Merge remains gated on exact-head PR validation after this tracker/CI update.',
+              '- Deliberate remaining cursor debt is unchanged from export: click audio is not synthesized; smoothing and animated/3D/camera/effect/transition/fade parents remain compatibility-only. The next cursor-specific expansion should be justified by matching export support and retained browser/export evidence, not by preview-only admission.',
+              '',
+          ])
           text = text.replace(export_tail, export_tail + playback_section)
           tracker.write_text(text)
           PY
