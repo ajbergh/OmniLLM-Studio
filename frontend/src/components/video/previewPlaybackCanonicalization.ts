@@ -1,6 +1,12 @@
 import type { CanonicalFrameLayerState, CanonicalVisualFrameState } from '../../video/renderContractFrameState';
 import type { PreviewTransitionPairPlan } from './previewFrameTransitionPairs';
 import {
+  hasPreviewCursorPlaybackMetadata,
+  previewCursorPlaybackStructuralDeferredReason,
+  type PreviewCursorPlaybackContext,
+  type PreviewCursorPlaybackLayer,
+} from './previewCursorPlayback';
+import {
   isPreviewTextPlaybackLayer,
   resolvePreviewTextPlaybackRuntime,
   type PreviewTextPlaybackLayer,
@@ -15,9 +21,9 @@ export interface PreviewPlaybackCanonicalizationDecision {
   deferredReason?: string;
 }
 
-type PlaybackLayer = PreviewTextPlaybackLayer & {
-  clip: PreviewTextPlaybackLayer['clip'] & { id: string };
-  canonicalState?: Pick<CanonicalFrameLayerState, 'authoritative' | 'text'>;
+type PlaybackLayer = PreviewTextPlaybackLayer & PreviewCursorPlaybackLayer & {
+  clip: PreviewTextPlaybackLayer['clip'] & PreviewCursorPlaybackLayer['clip'] & { id: string };
+  canonicalState?: Pick<CanonicalFrameLayerState, 'authoritative' | 'text' | 'cursor'>;
 };
 
 type PlaybackFrameState = Pick<CanonicalVisualFrameState, 'authoritative'>;
@@ -28,13 +34,18 @@ type PlaybackTransitionPlan = Pick<
 
 /**
  * Admit normal playback into canonical frame-domain visual evaluation only when
- * the complete frame is representable by consumers already proven in playback.
+ * the complete frame is representable by consumers already proven in playback
+ * or by the exact static-2D cursor subset already proven against export.
  *
  * Media-only none/source-over frames are admitted immediately. Standalone text
  * joins them only after exact resource-font and Chromium layout readiness has
- * been proved for the active canonical text inputs. All-weighted media pairs are
- * admitted only when the renderer-runtime registry proves that the exact Canvas
- * topology is ready. Shapes, cursor, missing raster sources, non-authoritative
+ * been proved for the active canonical text inputs. Static cursor owners are
+ * admitted synchronously only when previewCursorPlayback mirrors every relevant
+ * FidelityRenderer cursor-raster exclusion and the exact canonical cursor sample
+ * is present. All-weighted media pairs are admitted only when the renderer-runtime
+ * registry proves that exact Canvas topology is ready.
+ *
+ * Shapes, unsupported cursor parents, missing raster sources, non-authoritative
  * FrameState, mixed/deferred transition composition, and stale/not-ready runtime
  * consumers fail the whole visual frame back to the established continuous-time
  * painter. The UI playhead and audio clock are not part of this decision and
@@ -45,6 +56,7 @@ export function resolvePreviewPlaybackCanonicalization(
   frameState: PlaybackFrameState | undefined,
   layers: readonly PlaybackLayer[],
   transitionPlan: PlaybackTransitionPlan | null,
+  cursorContext: PreviewCursorPlaybackContext | null = null,
 ): PreviewPlaybackCanonicalizationDecision {
   if (playbackFrame === null) return { mode: 'legacy-time', canonicalFrame: null };
   if (!frameState) return fallback('canonical-frame-state-unavailable');
@@ -54,6 +66,12 @@ export function resolvePreviewPlaybackCanonicalization(
   for (const layer of layers) {
     if (!layer.canonicalState) return fallback(`canonical-layer-state-unavailable:${layer.clip.id}`);
     if (layer.canonicalState.authoritative !== true) return fallback(`canonical-layer-state-nonauthoritative:${layer.clip.id}`);
+    if (hasPreviewCursorPlaybackMetadata(layer)) {
+      if (!cursorContext) return fallback(`cursor-playback-deferred:${layer.clip.id}:context-unavailable`);
+      const cursorDeferred = previewCursorPlaybackStructuralDeferredReason(layer, cursorContext);
+      if (cursorDeferred) return fallback(`cursor-playback-deferred:${cursorDeferred}`);
+      continue;
+    }
     if (isPlaybackMediaLayer(layer)) continue;
     if (isPreviewTextPlaybackLayer(layer)) {
       hasPlaybackText = true;

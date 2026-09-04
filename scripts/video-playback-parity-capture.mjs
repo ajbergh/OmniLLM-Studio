@@ -141,6 +141,17 @@ try {
       }
     }
 
+    if (testCase.expected_cursor_consumer || testCase.expected_cursor_clip_id) {
+      await page.waitForFunction((expected) => {
+        const surfaces = [...document.querySelectorAll('[data-preview-cursor-playback-clip-id]')];
+        return surfaces.some((surface) => (!expected.clipId || surface.dataset.previewCursorPlaybackClipId === expected.clipId)
+          && (!expected.consumer || surface.dataset.previewCursorPlaybackConsumer === expected.consumer));
+      }, {
+        consumer: testCase.expected_cursor_consumer || '',
+        clipId: testCase.expected_cursor_clip_id || '',
+      }, { timeout: 3_000 });
+    }
+
     const observations = await page.evaluate(async (observeMs) => {
       const rows = [];
       const deadline = performance.now() + observeMs;
@@ -152,6 +163,7 @@ try {
         const videos = [...stage.querySelectorAll('video')];
         const weightedSurfaces = [...stage.querySelectorAll('[data-preview-transition-pair-surface-role="playback"]')];
         const textSurfaces = [...stage.querySelectorAll('[data-preview-text-playback-surface]')];
+        const cursorSurfaces = [...stage.querySelectorAll('[data-preview-cursor-playback-clip-id]')];
         rows.push({
           performance_ms: performance.now(),
           timeline_ms: Number(stage.dataset.parityTimeMs),
@@ -194,6 +206,17 @@ try {
           text_surface_font_ready_count: textSurfaces.filter((surface) => Boolean(
             surface.querySelector('[data-preview-text-font-face-runtime="editor-resource-loaded"]'),
           )).length,
+          cursor_surfaces: cursorSurfaces.map((surface) => ({
+            clip_id: surface.dataset.previewCursorPlaybackClipId || '',
+            state_mode: surface.dataset.previewCursorStateMode || '',
+            consumer: surface.dataset.previewCursorPlaybackConsumer || '',
+            x: numberOrNull(surface.dataset.previewCursorX),
+            y: numberOrNull(surface.dataset.previewCursorY),
+            click: surface.dataset.previewCursorClick === 'true',
+            scale: numberOrNull(surface.dataset.previewCursorScale),
+            highlight: surface.dataset.previewCursorHighlight === 'true',
+            click_rings: surface.dataset.previewCursorClickRings === 'true',
+          })),
           audio_current_time: audio ? audio.currentTime : null,
           audio_paused: audio ? audio.paused : null,
           video_current_times: videos.map((video) => ({
@@ -213,17 +236,17 @@ try {
     }, testCase.observe_ms);
 
     await page.getByRole('button', { name: 'Pause preview' }).click();
-    const result = gateCase(testCase, observations, fixture.timeline.canvas.fps);
+    const result = gateCase(testCase, observations, fixture.timeline);
     results.push(result);
     await fs.writeFile(
       path.join(output, 'playback-evidence-progress.json'),
-      `${JSON.stringify({ schema_version: 2, fixture: fixture.name, cases: results }, null, 2)}\n`,
+      `${JSON.stringify({ schema_version: 3, fixture: fixture.name, cases: results }, null, 2)}\n`,
     );
   }
   await page.evaluate(() => window.localStorage.removeItem('omnillm-video-decoder-budget'));
 
   const summary = {
-    schema_version: 2,
+    schema_version: 3,
     fixture: fixture.name,
     project_id: seedResult.project_id,
     timeline_id: seedResult.timeline_id,
@@ -277,8 +300,9 @@ async function seekParityFrame(page, frameIndex) {
     .every((media) => media instanceof HTMLVideoElement && media.readyState >= 2 && !media.seeking), null, { timeout: 5_000 });
 }
 
-function gateCase(testCase, observations, fps) {
+function gateCase(testCase, observations, timeline) {
   const errors = [];
+  const fps = timeline.canvas.fps;
   const stable = observations.filter((row) => Number.isFinite(row.timeline_ms));
   if (stable.length < 5) errors.push(`captured ${stable.length} observations, want at least 5`);
 
@@ -330,6 +354,42 @@ function gateCase(testCase, observations, fps) {
       }
     }
     if (errors.length > 0) break;
+    if (testCase.require_cursor_surface) {
+      const cursor = row.cursor_surfaces.find((surface) => surface.clip_id === testCase.expected_cursor_clip_id);
+      if (!cursor) {
+        errors.push(`cursor surface ${testCase.expected_cursor_clip_id || '<unspecified>'} is missing`);
+        break;
+      }
+      if (cursor.consumer !== testCase.expected_cursor_consumer) {
+        errors.push(`cursor consumer ${cursor.consumer || '<empty>'}, want ${testCase.expected_cursor_consumer}`);
+        break;
+      }
+      const expectedStateMode = testCase.expected_mode === 'canonical-playback' ? 'canonical-frame' : 'legacy-time';
+      if (cursor.state_mode !== expectedStateMode) {
+        errors.push(`cursor state mode ${cursor.state_mode || '<empty>'}, want ${expectedStateMode}`);
+        break;
+      }
+      if (testCase.expected_mode === 'canonical-playback') {
+        const expected = expectedCursorSampleAtFrame(timeline, testCase.expected_cursor_clip_id, row.visual_frame_index);
+        if (!expected) {
+          errors.push(`canonical cursor expectation ${testCase.expected_cursor_clip_id} is unavailable`);
+          break;
+        }
+        if (!Number.isFinite(cursor.x) || Math.abs(cursor.x - expected.x) > 1e-6
+          || !Number.isFinite(cursor.y) || Math.abs(cursor.y - expected.y) > 1e-6) {
+          errors.push(`cursor sample (${cursor.x},${cursor.y}), want (${expected.x},${expected.y}) at frame ${row.visual_frame_index}`);
+          break;
+        }
+        if (cursor.click !== expected.click
+          || cursor.highlight !== expected.highlight
+          || cursor.click_rings !== expected.click_rings
+          || !Number.isFinite(cursor.scale)
+          || Math.abs(cursor.scale - expected.scale) > 1e-9) {
+          errors.push(`cursor state ${JSON.stringify(cursor)}, want ${JSON.stringify(expected)}`);
+          break;
+        }
+      }
+    }
     if (testCase.require_text_layout) {
       if (row.text_surface_count < 1) {
         errors.push('text playback has no canonical prewarm surface');
@@ -383,6 +443,24 @@ function gateCase(testCase, observations, fps) {
         errors.push(`weighted Canvas runtime key does not match ${testCase.expected_weighted_pair_id}`);
         break;
       }
+    }
+  }
+
+  if (testCase.require_cursor_surface) {
+    const cursorRows = stable
+      .map((row) => row.cursor_surfaces.find((surface) => surface.clip_id === testCase.expected_cursor_clip_id))
+      .filter(Boolean);
+    if (cursorRows.length !== stable.length) errors.push(`cursor surface observed ${cursorRows.length}/${stable.length} frames`);
+    if (testCase.require_cursor_motion && cursorRows.length > 1) {
+      const motion = Math.max(range(cursorRows.map((row) => row.x).filter(Number.isFinite)), range(cursorRows.map((row) => row.y).filter(Number.isFinite)));
+      if (motion < 1) errors.push(`cursor motion advanced only ${motion}px in canonical sample space`);
+    }
+    if (testCase.require_cursor_highlight && !cursorRows.every((row) => row.highlight === true)) {
+      errors.push('cursor highlight was not retained for every observation');
+    }
+    if (testCase.require_cursor_click_toggle) {
+      const clickStates = new Set(cursorRows.map((row) => row.click));
+      if (!clickStates.has(false) || !clickStates.has(true)) errors.push('cursor click-ring window did not cross both false and true states');
     }
   }
 
@@ -440,6 +518,8 @@ function gateCase(testCase, observations, fps) {
     expected_text_consumer: testCase.expected_text_consumer || '',
     expected_text_clip_id: testCase.expected_text_clip_id || '',
     expected_text_trace: testCase.expected_text_trace || [],
+    expected_cursor_consumer: testCase.expected_cursor_consumer || '',
+    expected_cursor_clip_id: testCase.expected_cursor_clip_id || '',
     decoder_budget: testCase.decoder_budget || 0,
     observations: stable,
     timeline_advance_ms: timelineAdvanceMs,
@@ -447,6 +527,50 @@ function gateCase(testCase, observations, fps) {
     unique_visual_frames: [...new Set(visualFrames)],
     pass: errors.length === 0,
     errors,
+  };
+}
+
+function expectedCursorSampleAtFrame(timeline, clipId, frameIndex) {
+  if (!Number.isFinite(frameIndex)) return null;
+  let clip = null;
+  for (const track of timeline.tracks || []) {
+    const found = (track.clips || []).find((candidate) => candidate.id === clipId);
+    if (found) { clip = found; break; }
+  }
+  const cursor = clip?.cursor;
+  const events = cursor?.events || [];
+  if (!clip || cursor?.visible === false || events.length === 0) return null;
+  const fps = timeline.canvas.fps;
+  const numerator = frameIndex * 1000 - clip.start_ms * fps;
+  const denominator = fps;
+  let previous = events[0];
+  let x = previous.x;
+  let y = previous.y;
+  if (numerator > previous.time_ms * denominator) {
+    for (let index = 1; index < events.length; index += 1) {
+      const next = events[index];
+      if (numerator <= next.time_ms * denominator) {
+        const span = Math.max(1, next.time_ms - previous.time_ms);
+        const progress = (numerator - previous.time_ms * denominator) / (span * denominator);
+        x = previous.x + (next.x - previous.x) * progress;
+        y = previous.y + (next.y - previous.y) * progress;
+        previous = null;
+        break;
+      }
+      previous = next;
+    }
+    if (previous) { x = previous.x; y = previous.y; }
+  }
+  const clickWindow = 300 * denominator;
+  const click = events.some((event) => event.click === true
+    && Math.abs(event.time_ms * denominator - numerator) < clickWindow);
+  return {
+    x,
+    y,
+    click,
+    scale: cursor.scale ?? 1,
+    highlight: cursor.highlight === true,
+    click_rings: cursor.click_rings === true,
   };
 }
 

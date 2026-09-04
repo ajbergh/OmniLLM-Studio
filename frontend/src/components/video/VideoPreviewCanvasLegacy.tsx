@@ -343,6 +343,12 @@ export function VideoPreviewCanvas() {
     frameQuery?.frameState,
     playbackFrameVisualCandidates,
     playbackTransitionPlan,
+    {
+      fps,
+      canvasWidth,
+      canvasHeight,
+      scenes: timeline?.scenes ?? [],
+    },
   );
   // Playback consumes canonical visual state only as an all-frame decision. If
   // strict projection, an exact playback painter, or transition composition is
@@ -1061,20 +1067,36 @@ export function VideoPreviewCanvas() {
         {content}
         {/* Cursor-effect overlay for clips carrying recorded cursor metadata */}
         {clip.cursor && (() => {
-          const sample = sampleCursor(clip.cursor, clipTimeMs);
+          const canonicalCursor = canonicalVisualFrame !== null ? entry.canonicalState?.cursor : undefined;
+          const sample = canonicalCursor ?? sampleCursor(clip.cursor, clipTimeMs);
           if (!sample) return null;
-          const size = 16 * (clip.cursor.scale || 1) * stageScale * 4;
+          const size = 16 * (canonicalCursor?.scale ?? clip.cursor.scale ?? 1) * stageScale * 4;
           const left = sample.x * stageScale;
           const top = sample.y * stageScale;
+          const highlight = canonicalCursor?.highlight ?? clip.cursor.highlight ?? false;
+          const clickRings = canonicalCursor?.click_rings ?? clip.cursor.click_rings ?? false;
           return (
-            <div className="pointer-events-none absolute" style={{ left, top }} aria-hidden="true">
-              {clip.cursor.highlight && (
+            <div
+              className="pointer-events-none absolute"
+              data-preview-cursor-state-mode={canonicalCursor ? 'canonical-frame' : 'legacy-time'}
+              data-preview-cursor-playback-consumer={isPlaying ? (canonicalCursor ? 'canonical-inline' : 'legacy-time-fallback') : undefined}
+              data-preview-cursor-playback-clip-id={clip.id}
+              data-preview-cursor-x={sample.x}
+              data-preview-cursor-y={sample.y}
+              data-preview-cursor-click={sample.click ? 'true' : 'false'}
+              data-preview-cursor-scale={canonicalCursor?.scale ?? clip.cursor.scale ?? 1}
+              data-preview-cursor-highlight={highlight ? 'true' : 'false'}
+              data-preview-cursor-click-rings={clickRings ? 'true' : 'false'}
+              style={{ left, top }}
+              aria-hidden="true"
+            >
+              {highlight && (
                 <div
                   className="absolute rounded-full"
                   style={{ width: size * 2.2, height: size * 2.2, left: -size * 1.1, top: -size * 1.1, background: 'rgba(255, 223, 32, 0.3)' }}
                 />
               )}
-              {sample.click && clip.cursor.click_rings && (
+              {sample.click && clickRings && (
                 <div
                   className="absolute rounded-full"
                   style={{ width: size * 2.6, height: size * 2.6, left: -size * 1.3, top: -size * 1.3, border: '2px solid rgba(0, 188, 255, 0.8)' }}
