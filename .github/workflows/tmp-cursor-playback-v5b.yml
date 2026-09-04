@@ -30,6 +30,29 @@ jobs:
       - name: Apply isolated guarded v5 patch
         run: |
           python scripts/tmp-cursor-playback-v5-patch.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('backend/internal/video/parity_fixture_playback.go')
+          text = path.read_text()
+          replacements = [
+              (
+                  'Name: "cursor-canonical-playback", FrameIndex: 216, ObserveMS: 380',
+                  'Name: "cursor-canonical-playback", FrameIndex: 216, ObserveMS: 600',
+                  'standalone cursor observation window',
+              ),
+              (
+                  'Name: "weighted-text-canonical-playback", FrameIndex: 852, ObserveMS: 350',
+                  'Name: "weighted-text-canonical-playback", FrameIndex: 822, ObserveMS: 250',
+                  'weighted cursor composition window',
+              ),
+          ]
+          for old, new, label in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label} anchor count={count}, want 1')
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
           gofmt -w backend/internal/video/parity_fixture_playback.go backend/internal/video/parity_fixture_playback_test.go
           git diff --check
       - name: Install dependencies
