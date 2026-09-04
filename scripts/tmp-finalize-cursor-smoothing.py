@@ -318,11 +318,6 @@ replace_once(
 )
 replace_once(
     "docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md",
-    "When the whole frame is admitted it reads the exact `cursor-state-v1` sample from canonical FrameState",
-    "When the whole frame is admitted it reads the exact `cursor-state-v1` or `cursor-state-v2` sample from canonical FrameState",
-)
-replace_once(
-    "docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md",
     "- `parity-playback-canonical-v5` proves exact rational-time samples during continuously advancing playback, cursor motion, click-window state changes, resource-text + cursor atomic authority, weighted-transition + text + cursor composition, and explicit unsupported fade-parent fallback.",
     "- `parity-playback-canonical-v6` retains every v5 case and adds continuously advancing `cursor-state-v2` smoothing evidence with an independently computed smoothstep expectation and an asymmetric non-linear sample, while preserving explicit unsupported fade-parent fallback.",
 )
