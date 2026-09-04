@@ -64,6 +64,7 @@ Isolated hosted evidence run `33840939201` passed contract/build validation, det
 - Focused unit coverage locks the export-aligned admission boundary and whole-frame interaction with resource-backed text and other canonical surfaces.
 - `parity-playback-canonical-v5` proves exact rational-time samples during continuously advancing playback, cursor motion, click-window state changes, resource-text + cursor atomic authority, weighted-transition + text + cursor composition, and explicit unsupported fade-parent fallback.
 - Isolated evidence run `33840939201` completed successfully before commit `501a65f7bbe604aaad5b2d63f46f778770f69414`. Merge remains gated on exact-head PR validation after this tracker/CI update.
+- Exact-head PR playback run `33875041935` proved all cursor/weighted/text semantics but captured only 4 samples in the 250 ms weighted+text+cursor observation window, below the unchanged 5-sample minimum. Artifact observations were canonical, numerically correct, moving, and runtime-ready; the fixture window is therefore hardened to 350 ms without weakening any semantic assertion or crossing the authored topology boundary.
 - Deliberate remaining cursor debt is unchanged from export: click audio is not synthesized; smoothing and animated/3D/camera/effect/transition/fade parents remain compatibility-only. The next cursor-specific expansion should be justified by matching export support and retained browser/export evidence, not by preview-only admission.
 
 ### #289 merged result
