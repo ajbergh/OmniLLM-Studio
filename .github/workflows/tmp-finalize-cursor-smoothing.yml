@@ -73,3 +73,5 @@ jobs:
           git add -A
           git commit -m 'Add cursor smoothing parity evidence'
           git push origin HEAD:feat/video-wysiwyg-phase3-cursor-smoothing-parity
+
+# One-shot rerun marker after repairing the stale tracker anchor.
