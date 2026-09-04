@@ -1081,6 +1081,12 @@ export function VideoPreviewCanvas() {
               data-preview-cursor-state-mode={canonicalCursor ? 'canonical-frame' : 'legacy-time'}
               data-preview-cursor-playback-consumer={isPlaying ? (canonicalCursor ? 'canonical-inline' : 'legacy-time-fallback') : undefined}
               data-preview-cursor-playback-clip-id={clip.id}
+              data-preview-cursor-x={sample.x}
+              data-preview-cursor-y={sample.y}
+              data-preview-cursor-click={sample.click ? 'true' : 'false'}
+              data-preview-cursor-scale={canonicalCursor?.scale ?? clip.cursor.scale ?? 1}
+              data-preview-cursor-highlight={highlight ? 'true' : 'false'}
+              data-preview-cursor-click-rings={clickRings ? 'true' : 'false'}
               style={{ left, top }}
               aria-hidden="true"
             >

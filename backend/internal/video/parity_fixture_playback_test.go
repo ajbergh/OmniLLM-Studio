@@ -14,7 +14,7 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 	if len(assets) != 5 {
 		t.Fatalf("playback parity assets = %d, want 5", len(assets))
 	}
-	if len(cases) != 17 {
+	if len(cases) != 18 {
 		t.Fatalf("playback parity cases = %d, want 17", len(cases))
 	}
 	seen := map[string]bool{}
@@ -52,6 +52,26 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 		if testCase.ExpectedTextRuntime != "" && testCase.ExpectedTextClipID == "" {
 			t.Fatalf("text runtime case %q is missing an expected clip id", testCase.Name)
 		}
+		if testCase.ExpectedCursorConsumer != "" && testCase.ExpectedCursorClipID == "" {
+			t.Fatalf("cursor consumer case %q is missing an expected clip id", testCase.Name)
+		}
+		if testCase.RequireCursorSurface {
+			if testCase.ExpectedCursorClipID == "" {
+				t.Fatalf("cursor surface case %q is missing cursor identity", testCase.Name)
+			}
+			if testCase.ExpectedCursorConsumer != "canonical-inline" && testCase.ExpectedCursorConsumer != "legacy-time-fallback" {
+				t.Fatalf("cursor surface case %q has invalid consumer %q", testCase.Name, testCase.ExpectedCursorConsumer)
+			}
+			if testCase.ExpectedMode == "canonical-playback" && testCase.ExpectedCursorConsumer != "canonical-inline" {
+				t.Fatalf("canonical cursor case %q is missing canonical consumer expectation", testCase.Name)
+			}
+			if testCase.ExpectedMode == "legacy-time-fallback" && testCase.ExpectedCursorConsumer != "legacy-time-fallback" {
+				t.Fatalf("fallback cursor case %q must retain legacy consumer", testCase.Name)
+			}
+		}
+		if (testCase.RequireCursorMotion || testCase.RequireCursorHighlight || testCase.RequireCursorClickToggle) && !testCase.RequireCursorSurface {
+			t.Fatalf("cursor behavior case %q must require a cursor surface", testCase.Name)
+		}
 		if testCase.RequireTextLayout {
 			if testCase.ExpectedTextRuntime != "ready" {
 				t.Fatalf("text layout case %q must expect a ready text runtime", testCase.Name)
@@ -73,8 +93,8 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 		"resource-text-canonical-playback",
 		"family-text-fallback",
 		"invalid-font-text-fallback",
-		"cursor-fallback",
-		"mixed-text-cursor-fallback",
+		"cursor-canonical-playback",
+		"mixed-text-cursor-canonical",
 		"weighted-crossfade-canonical",
 		"weighted-zoom-canonical",
 		"weighted-dip-canonical",
@@ -85,6 +105,7 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 		"weighted-text-canonical-playback",
 		"weighted-invalid-text-fallback",
 		"weighted-text-decoder-budget-fallback",
+		"unsupported-cursor-fade-fallback",
 	} {
 		if !seen[required] {
 			t.Fatalf("playback parity case %q is missing", required)
