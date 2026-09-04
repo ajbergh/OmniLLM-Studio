@@ -1070,14 +1070,14 @@ export function VideoPreviewCanvas() {
             <div className="pointer-events-none absolute" style={{ left, top }} aria-hidden="true">
               {clip.cursor.highlight && (
                 <div
-                  className="absolute rounded-full bg-yellow-300/30"
-                  style={{ width: size * 2.2, height: size * 2.2, left: -size * 1.1, top: -size * 1.1 }}
+                  className="absolute rounded-full"
+                  style={{ width: size * 2.2, height: size * 2.2, left: -size * 1.1, top: -size * 1.1, background: 'rgba(255, 223, 32, 0.3)' }}
                 />
               )}
               {sample.click && clip.cursor.click_rings && (
                 <div
-                  className="absolute rounded-full border-2 border-sky-400/80"
-                  style={{ width: size * 2.6, height: size * 2.6, left: -size * 1.3, top: -size * 1.3 }}
+                  className="absolute rounded-full"
+                  style={{ width: size * 2.6, height: size * 2.6, left: -size * 1.3, top: -size * 1.3, border: '2px solid rgba(0, 188, 255, 0.8)' }}
                 />
               )}
               <svg width={size} height={size} viewBox="0 0 16 16">

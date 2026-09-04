@@ -34,8 +34,9 @@ const (
 )
 
 // NewFidelityRenderer adds eased transform/effect keyframes, wipe/zoom
-// transitions, cursor overlays, click rings, letter-spacing approximation, and
-// annotation normalization without changing the persisted timeline document.
+// transitions, canonical cursor rasters with a bounded compatibility fallback,
+// letter-spacing approximation, and annotation normalization without changing
+// the persisted timeline document.
 func NewFidelityRenderer(delegate Renderer) Renderer {
 	return &FidelityRenderer{delegate: delegate, maxSegmentsPerClip: 300}
 }
@@ -68,6 +69,11 @@ func (r *FidelityRenderer) Render(ctx context.Context, req RenderRequest, progre
 		}
 		req.Timeline = FilterTimelineAtDiagnosticFrame(req.Timeline, *req.Settings.DiagnosticFrameIndex, fps, timelineOffsetMS)
 	}
+	cursorCleanup, err := materializeCanonicalCursorRasterAssets(&req)
+	if err != nil {
+		return nil, err
+	}
+	defer cursorCleanup()
 	return r.delegate.Render(ctx, req, progress)
 }
 
@@ -76,8 +82,9 @@ func (r *FidelityRenderer) Render(ctx context.Context, req RenderRequest, progre
 // segments are a renderer approximation, not authored layers: overlapping
 // sample segments for one parent are collapsed to the segment containing the
 // exact frame presentation time, or the earliest overlapping sample when the
-// authored clip begins partway through the output frame. Cursor overlays keep
-// their existing point-sampled behavior until cursor semantics are canonical.
+// authored clip begins partway through the output frame. Canonical cursor
+// rasters are already one exact output-frame segment each; unsupported cursor
+// combinations retain this same point-containment compatibility filtering.
 func FilterTimelineAtDiagnosticFrame(doc TimelineDocument, frameIndex int64, fps int, timelineOffsetMS int64) TimelineDocument {
 	out := doc
 	out.Tracks = make([]TimelineTrack, len(doc.Tracks))
@@ -159,27 +166,25 @@ func fidelityGeneratedIdentity(clip TimelineClip) (string, string) {
 // ExpandTimelineForFidelity returns a render-only timeline. It never mutates
 // the persisted editor document.
 func ExpandTimelineForFidelity(doc TimelineDocument, fps, maxSegments int) TimelineDocument {
-	if fps <= 0 {
-		fps = 30
+	outputFPS := fps
+	if outputFPS <= 0 {
+		outputFPS = 30
 	}
-	if fps > 60 {
-		fps = 60
+	sampleFPS := outputFPS
+	if sampleFPS > 60 {
+		sampleFPS = 60
 	}
 	if maxSegments <= 0 {
 		maxSegments = 300
 	}
 	out := cloneTimelineDocument(doc)
-	cursorTrack := TimelineTrack{
-		ID: uuid.NewString(), Type: TrackTypeLayer, Name: "Renderer cursor overlays",
-		Locked: false, Muted: true, Visible: true, Clips: []TimelineClip{},
-	}
 	for ti := range out.Tracks {
-		expanded := make([]TimelineClip, 0, len(out.Tracks[ti].Clips))
-		for _, original := range out.Tracks[ti].Clips {
+		siblings := append([]TimelineClip(nil), out.Tracks[ti].Clips...)
+		expanded := make([]TimelineClip, 0, len(siblings))
+		for _, original := range siblings {
 			clip := normalizeRenderClip(original)
-			cursorTrack.Clips = append(cursorTrack.Clips, cursorOverlayClips(clip, fps, maxSegments)...)
-			clip.Cursor = nil
 			if clip.AudioOnly || out.Tracks[ti].Type == TrackTypeAudio || out.Tracks[ti].Type == TrackTypeMusic {
+				clip.Cursor = nil
 				// The FFmpeg audio graph already evaluates trim/rate, volume
 				// keyframes, fades, mute/solo, and processing continuously. Splitting
 				// an audio clip into visual sampling segments resets its fades and
@@ -187,8 +192,10 @@ func ExpandTimelineForFidelity(doc TimelineDocument, fps, maxSegments int) Timel
 				expanded = append(expanded, clip)
 				continue
 			}
+			cursorOverlays := cursorOverlayClips(clip, siblings, out.Canvas, out.Scenes, outputFPS, maxSegments)
+			clip.Cursor = nil
 			if clipNeedsSampling(clip) || clipNeedsCameraSampling(out.Scenes, clip) {
-				segments := sampleRenderClip(clip, out.Scenes, out.Canvas, fps, maxSegments)
+				segments := sampleRenderClip(clip, out.Scenes, out.Canvas, sampleFPS, maxSegments)
 				if clip.AssetID != "" && !clip.Muted {
 					// Sampled visual segments must not each contribute a soundtrack.
 					// Keep one untouched audio-only copy so the mix remains continuous;
@@ -208,11 +215,13 @@ func ExpandTimelineForFidelity(doc TimelineDocument, fps, maxSegments int) Timel
 			} else {
 				expanded = append(expanded, applySceneCamera(clip, out.Scenes, out.Canvas, clip.StartMS+clip.DurationMS/2))
 			}
+			// Cursor pixels belong to the owner layer, not to a synthetic global
+			// topmost track. Keeping them adjacent on the same track preserves track
+			// visibility/order; the exact canonical path additionally rejects
+			// overlapping same-track siblings until that ordering case is evidenced.
+			expanded = append(expanded, cursorOverlays...)
 		}
 		out.Tracks[ti].Clips = expanded
-	}
-	if len(cursorTrack.Clips) > 0 {
-		out.Tracks = append(out.Tracks, cursorTrack)
 	}
 	return out
 }
@@ -713,7 +722,14 @@ func minInt64(a, b int64) int64 {
 	return b
 }
 
-func cursorOverlayClips(clip TimelineClip, fps, maxSegments int) []TimelineClip {
+func cursorOverlayClips(clip TimelineClip, siblings []TimelineClip, canvas TimelineCanvas, scenes []TimelineScene, fps, maxSegments int) []TimelineClip {
+	if overlays, ok := canonicalCursorRasterOverlayClips(clip, siblings, canvas, scenes, fps, maxSegments); ok {
+		return overlays
+	}
+	return legacyCursorOverlayClips(clip, fps, maxSegments)
+}
+
+func legacyCursorOverlayClips(clip TimelineClip, fps, maxSegments int) []TimelineClip {
 	cursor := clip.Cursor
 	if cursor == nil || cursor.Visible == false || len(cursor.Events) == 0 || clip.DurationMS <= 0 {
 		return nil

@@ -14,8 +14,16 @@ func TestFidelityExpansionSamplesEasingAndCursor(t *testing.T) {
 	if len(expanded.Tracks[0].Clips) < 2 {
 		t.Fatalf("expected sampled media clips")
 	}
-	if len(expanded.Tracks) < 2 || len(expanded.Tracks[len(expanded.Tracks)-1].Clips) == 0 {
-		t.Fatalf("expected cursor overlay track")
+	foundCursor := false
+	for _, expandedClip := range expanded.Tracks[0].Clips {
+		kind, _ := fidelityGeneratedIdentity(expandedClip)
+		if kind == rendererFidelityKindCursorPointer {
+			foundCursor = true
+			break
+		}
+	}
+	if !foundCursor {
+		t.Fatalf("expected cursor overlay on the owner track")
 	}
 	first := expanded.Tracks[0].Clips[0]
 	if first.Keyframes != nil {
