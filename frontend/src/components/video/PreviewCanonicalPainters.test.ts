@@ -205,8 +205,13 @@ describe('canonical shape and cursor painter inputs', () => {
     });
   });
 
-  it('uses exact sampled cursor position, scale, and click state geometry', () => {
+  it('uses exact sampled cursor position, scale, and click state geometry for v1 and v2', () => {
     expect(resolveCanonicalPreviewCursorGeometry(cursorState(), 0.5)).toEqual({
+      left: 60,
+      top: 40,
+      size: 48,
+    });
+    expect(resolveCanonicalPreviewCursorGeometry(cursorState({ contract_version: 'cursor-state-v2' }), 0.5)).toEqual({
       left: 60,
       top: 40,
       size: 48,
@@ -221,7 +226,7 @@ describe('canonical shape and cursor painter inputs', () => {
     expect(() => resolveCanonicalPreviewCursorGeometry({
       ...cursorState(),
       contract_version: 'cursor-state-v0' as never,
-    }, 1)).toThrow(/cursor-state-v1/);
+    }, 1)).toThrow(/cursor-state-v1.*cursor-state-v2/);
     expect(() => resolveCanonicalPreviewCursorGeometry(cursorState(), Number.NaN)).toThrow(/stage scale/);
   });
 });

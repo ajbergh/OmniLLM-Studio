@@ -22,7 +22,7 @@ Blur and pixelate redact the composited image beneath them in preview and export
 
 ### What are cursor effects for?
 
-Cursor metadata can store sampled positions, clicks, scale, highlight, and click-ring choices—useful for future screen-recording integrations. Preview shows an interpolated cursor; export renders sampled paths, highlights, and click rings. Click-audio synthesis is not available. Browser recording APIs do not supply cursor coordinates, so browser captures do not automatically create cursor metadata.
+Cursor metadata stores sampled positions, clicks, scale, highlight, click-ring choices, and optional smoothing for screen-recording workflows. For the bounded static-2D media subset, preview and export share exact frame-addressed cursor state: linear motion uses `cursor-state-v1`, while smoothing uses deterministic cubic smoothstep timing in `cursor-state-v2`; highlights and click rings use the same sampled state. Animated/3D/camera/effect/transition/fade parents and longer clips still use compatibility rendering, and click-audio synthesis is not available. Browser recording APIs do not supply cursor coordinates, so browser captures do not automatically create cursor metadata.
 
 ## Audio
 

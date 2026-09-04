@@ -7,6 +7,7 @@ import (
 
 const (
 	CursorStateContractV1 = "cursor-state-v1"
+	CursorStateContractV2 = "cursor-state-v2"
 	CursorClickWindowMS   = int64(300)
 	CursorMinScale        = 0.25
 	CursorMaxScale        = 4.0
@@ -27,20 +28,17 @@ type EvaluatedCursorState struct {
 	Click           bool    `json:"click"`
 }
 
-// EvaluateCursorState samples Timeline v2 cursor metadata using the current
-// editor preview's linear interpolation, endpoint hold, and strict <300ms
-// click-proximity semantics. Omitted visible means visible. Smoothing is
-// authorable but has no defined editor algorithm today, so smoothing=true
-// fails closed instead of inventing renderer-specific behavior.
+// EvaluateCursorState samples Timeline v2 cursor metadata at exact rational
+// clip-relative time. Linear interpolation remains cursor-state-v1. When
+// smoothing=true, cursor-state-v2 applies deterministic cubic smoothstep timing
+// (3t^2-2t^3) between the same authored event coordinates. Endpoint hold and
+// the strict <300ms click-proximity rule are identical in both versions.
 func EvaluateCursorState(cursor *TimelineV2Cursor, time RationalMilliseconds) (*EvaluatedCursorState, error) {
 	if cursor == nil {
 		return nil, nil
 	}
 	if time.Denominator <= 0 {
 		return nil, fmt.Errorf("canonical cursor sample denominator must be positive")
-	}
-	if cursor.Smoothing {
-		return nil, fmt.Errorf("canonical cursor smoothing is not defined for %s", CursorStateContractV1)
 	}
 	visible := cursor.Visible == nil || *cursor.Visible
 	if !visible || len(cursor.Events) == 0 {
@@ -61,10 +59,14 @@ func EvaluateCursorState(cursor *TimelineV2Cursor, time RationalMilliseconds) (*
 		return nil, err
 	}
 
-	x, y := sampleCursorPosition(cursor.Events, time)
+	x, y := sampleCursorPosition(cursor.Events, time, cursor.Smoothing)
 	click := cursorClickNearTime(cursor.Events, time)
+	contractVersion := CursorStateContractV1
+	if cursor.Smoothing {
+		contractVersion = CursorStateContractV2
+	}
 	return &EvaluatedCursorState{
-		ContractVersion: CursorStateContractV1,
+		ContractVersion: contractVersion,
 		Visible:         true,
 		Scale:           scale,
 		Highlight:       cursor.Highlight,
@@ -92,7 +94,7 @@ func validateCursorEvents(events []TimelineV2CursorEvent) error {
 	return nil
 }
 
-func sampleCursorPosition(events []TimelineV2CursorEvent, time RationalMilliseconds) (float64, float64) {
+func sampleCursorPosition(events []TimelineV2CursorEvent, time RationalMilliseconds, smoothing bool) (float64, float64) {
 	at := func(ms int64) int64 { return ms * time.Denominator }
 	first := events[0]
 	if time.Numerator <= at(first.TimeMS) {
@@ -107,11 +109,24 @@ func sampleCursorPosition(events []TimelineV2CursorEvent, time RationalMilliseco
 				span = 1
 			}
 			progress := float64(time.Numerator-at(previous.TimeMS)) / float64(span*time.Denominator)
+			if smoothing {
+				progress = smoothCursorProgress(progress)
+			}
 			return previous.X + (next.X-previous.X)*progress, previous.Y + (next.Y-previous.Y)*progress
 		}
 		previous = next
 	}
 	return previous.X, previous.Y
+}
+
+func smoothCursorProgress(progress float64) float64 {
+	if progress <= 0 {
+		return 0
+	}
+	if progress >= 1 {
+		return 1
+	}
+	return progress * progress * (3 - 2*progress)
 }
 
 func cursorClickNearTime(events []TimelineV2CursorEvent, time RationalMilliseconds) bool {

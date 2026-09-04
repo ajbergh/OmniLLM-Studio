@@ -71,6 +71,41 @@ func TestEvaluateCursorStateUsesExactRationalTimeAndEndpointHold(t *testing.T) {
 	}
 }
 
+func TestEvaluateCursorStateDefinesDeterministicSmoothstepV2(t *testing.T) {
+	cursor := &TimelineV2Cursor{
+		Smoothing: true,
+		Events: []TimelineV2CursorEvent{
+			{TimeMS: 0, X: 0, Y: 0},
+			{TimeMS: 1000, X: 100, Y: 200, Click: true},
+		},
+	}
+	for _, sample := range []struct {
+		timeMS int64
+		x      float64
+		y      float64
+	}{
+		{timeMS: 250, x: 15.625, y: 31.25},
+		{timeMS: 500, x: 50, y: 100},
+		{timeMS: 750, x: 84.375, y: 168.75},
+	} {
+		state, err := EvaluateCursorState(cursor, RationalMilliseconds{Numerator: sample.timeMS, Denominator: 1})
+		if err != nil {
+			t.Fatalf("sample %d: %v", sample.timeMS, err)
+		}
+		if state == nil || state.ContractVersion != CursorStateContractV2 || math.Abs(state.X-sample.x) > 1e-12 || math.Abs(state.Y-sample.y) > 1e-12 {
+			t.Fatalf("sample %d = %+v, want x=%v y=%v v2", sample.timeMS, state, sample.x, sample.y)
+		}
+	}
+	boundary, err := EvaluateCursorState(cursor, RationalMilliseconds{Numerator: 700, Denominator: 1})
+	if err != nil || boundary == nil || boundary.Click {
+		t.Fatalf("smooth click at exact 300ms boundary = %+v err=%v", boundary, err)
+	}
+	inside, err := EvaluateCursorState(cursor, RationalMilliseconds{Numerator: 701, Denominator: 1})
+	if err != nil || inside == nil || !inside.Click {
+		t.Fatalf("smooth click inside 300ms window = %+v err=%v", inside, err)
+	}
+}
+
 func TestEvaluateCursorStateDefaultsVisibilityAndScale(t *testing.T) {
 	cursor := &TimelineV2Cursor{Events: []TimelineV2CursorEvent{{TimeMS: 0, X: 1, Y: 2}}}
 	state, err := EvaluateCursorState(cursor, RationalMilliseconds{Numerator: 0, Denominator: 1})
@@ -102,7 +137,6 @@ func TestEvaluateCursorStateFailsClosedOnUndefinedOrInvalidState(t *testing.T) {
 		time   RationalMilliseconds
 		want   string
 	}{
-		{name: "smoothing", cursor: &TimelineV2Cursor{Smoothing: true, Events: validEvent}, time: RationalMilliseconds{Denominator: 1}, want: "smoothing"},
 		{name: "invalid denominator", cursor: &TimelineV2Cursor{Events: validEvent}, time: RationalMilliseconds{Denominator: 0}, want: "denominator"},
 		{name: "scale below range", cursor: &TimelineV2Cursor{Scale: &minBelow, Events: validEvent}, time: RationalMilliseconds{Denominator: 1}, want: "scale"},
 		{name: "scale above range", cursor: &TimelineV2Cursor{Scale: &maxAbove, Events: validEvent}, time: RationalMilliseconds{Denominator: 1}, want: "scale"},

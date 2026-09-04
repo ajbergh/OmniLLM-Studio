@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import type { VideoTimelineClip } from '../../types/video';
 import {
   CURSOR_STATE_CONTRACT_V1,
+  CURSOR_STATE_CONTRACT_V2,
   type CanonicalEvaluatedCursorState,
 } from '../../video/renderContractCursor';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
@@ -413,8 +414,10 @@ function validateCanonicalShapeState(shape: CanonicalEvaluatedShapeState): void 
 }
 
 function validateCanonicalCursorState(cursor: CanonicalEvaluatedCursorState): void {
-  if (cursor.contract_version !== CURSOR_STATE_CONTRACT_V1 || cursor.visible !== true) {
-    throw new Error(`canonical preview cursor requires visible ${CURSOR_STATE_CONTRACT_V1}`);
+  const supportedContract = cursor.contract_version === CURSOR_STATE_CONTRACT_V1
+    || cursor.contract_version === CURSOR_STATE_CONTRACT_V2;
+  if (!supportedContract || cursor.visible !== true) {
+    throw new Error(`canonical preview cursor requires visible ${CURSOR_STATE_CONTRACT_V1} or ${CURSOR_STATE_CONTRACT_V2}`);
   }
 }
 

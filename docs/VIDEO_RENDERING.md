@@ -75,7 +75,7 @@ Current export coverage includes:
 - Brightness, contrast, saturation, blur, grayscale, sharpen, vignette, chroma key, sampled effect-amount animation, and timeline-gated cinematic scene effects (film grain, bloom, color grade, edge fade, RGB split, ghost trail, motion blur, depth of field, and rack focus).
 - Text/caption/callout styling including font, size, color, line height, stroke, shadow, background, transform, opacity, fades, and deterministic alignment/letter-spacing approximation.
 - Rectangle, highlight, pixelate, blur-region, and normalized fallback annotation output. Complex geometry such as ellipse, arrow, and speech bubble currently exports as simpler deterministic primitives.
-- Cursor paths, highlights, and click rings through sampled overlays. Click audio is not synthesized.
+- Static 2D media cursors within the bounded fidelity segment limit use canonical output-frame raster overlays: `cursor-state-v1` for linear motion and `cursor-state-v2` for deterministic smoothstep motion, with matching pointer/highlight/click-ring state. Complex animated/3D/camera/effect/transition/fade parents and longer clips stay on the compatibility path. Click audio is not synthesized.
 - Multi-track audio mix with video soundtracks, persisted track solo, per-clip volume/mute, volume keyframes, fades, timeline delay, constant speed, and `amix` mixdown.
 - Optional final audio processing: denoise, EQ preset, compression, LUFS normalization, limiting, and mono/stereo conversion.
 - Render diagnostics persisted in `video_render_jobs.metadata_json` and explicit failures when FFmpeg is unavailable or encoding fails.

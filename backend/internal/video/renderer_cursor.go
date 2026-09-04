@@ -37,13 +37,13 @@ type cursorRasterSpec struct {
 
 // canonicalCursorRasterOverlayClips converts one supported static-2D cursor
 // owner into one exact synthetic image segment per output frame. Cursor x/y and
-// click state come from cursor-state-v1 at the exact rational presentation
-// time; the generated full-canvas sprite then inherits the owner's static
+// click state come from cursor-state-v1 or cursor-state-v2 at the exact rational
+// presentation time; the generated full-canvas sprite then inherits the owner's static
 // uniform scale, Z rotation, opacity, track visibility, and track ordering.
 //
 // The function intentionally returns ok=false for combinations that still need
-// a renderer-specific approximation (smoothing, animated/3D/camera/effect/
-// transition parents, overlapping same-track siblings, or clips too long for
+// a renderer-specific approximation (animated/3D/camera/effect/transition
+// parents, overlapping same-track siblings, or clips too long for
 // the bounded fidelity expansion). Those cases stay on the compatibility path.
 func canonicalCursorRasterOverlayClips(
 	clip TimelineClip,
@@ -55,13 +55,19 @@ func canonicalCursorRasterOverlayClips(
 	if clip.Cursor == nil || len(clip.Cursor.Events) == 0 || clip.DurationMS <= 0 {
 		return nil, true
 	}
+	// Timeline v1 stores visibility as a bool, so false is an explicit no-paint
+	// state on this adapter boundary. Do not convert it to the v2 omitted/default
+	// visibility semantics used by the renderer-independent contract.
+	if !clip.Cursor.Visible {
+		return nil, true
+	}
 	if clip.AssetID == "" || clip.Text != nil || clip.Shape != nil || clip.AudioOnly {
 		return nil, false
 	}
 	if fps <= 0 || fps > cursorRasterMaxExactFPS || maxSegments <= 0 {
 		return nil, false
 	}
-	if clip.Cursor.Smoothing || clip.FadeInMS > 0 || clip.FadeOutMS > 0 || len(clip.Transitions) > 0 || len(clip.AnimationBlocks) > 0 {
+	if clip.FadeInMS > 0 || clip.FadeOutMS > 0 || len(clip.Transitions) > 0 || len(clip.AnimationBlocks) > 0 {
 		return nil, false
 	}
 	for _, effect := range clip.Effects {

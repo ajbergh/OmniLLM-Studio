@@ -126,6 +126,7 @@ jobs:
       - name: Generate playback fixture and deterministic media
         run: |
           set -euo pipefail
+          mkdir -p output/video-playback-canonical/bin
           (
             cd backend
             go run ./cmd/video-parity-fixture \
@@ -134,6 +135,7 @@ jobs:
               --generate-media
             go run ./cmd/video-playback-parity-fixture \
               --output-dir ../output/video-playback-canonical/fixture
+            go build -o ../output/video-playback-canonical/bin/server ./cmd/server
           )
           cp /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf \
             output/video-playback-canonical/fixture/media/asset-font.ttf
@@ -149,10 +151,7 @@ jobs:
           export OMNILLM_PORT=18096
           export OMNILLM_DB_PATH="$runtime/parity.db"
           export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
-          (
-            cd backend
-            go run ./cmd/server >"$runtime/backend.log" 2>"$runtime/backend.err.log"
-          ) &
+          "$GITHUB_WORKSPACE/output/video-playback-canonical/bin/server" >"$runtime/backend.log" 2>"$runtime/backend.err.log" &
           backend_pid=$!
           (
             cd frontend
@@ -170,13 +169,15 @@ jobs:
             fi
             if [ "$attempt" -eq 60 ]; then
               echo "playback parity servers did not become ready" >&2
+              cat "$runtime/backend.err.log" >&2 || true
+              cat "$runtime/backend.log" >&2 || true
               exit 1
             fi
             sleep 1
           done
           node scripts/video-playback-parity-capture.mjs \
             --url http://127.0.0.1:14179 \
-            --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v5.json \
+            --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v6.json \
             --media-dir output/video-playback-canonical/fixture/media \
             --output output/video-playback-canonical/capture
       - name: Record toolchain

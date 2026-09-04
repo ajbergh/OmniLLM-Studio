@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CURSOR_STATE_CONTRACT_V1 } from '../../video/renderContractCursor';
+import { CURSOR_STATE_CONTRACT_V1, CURSOR_STATE_CONTRACT_V2 } from '../../video/renderContractCursor';
 import type { VideoTimelineClip, VideoTimelineScene, VideoTimelineTrack } from '../../types/video';
 import {
   previewCursorPlaybackStructuralDeferredReason,
@@ -74,6 +74,48 @@ describe('cursor normal-playback export-proven subset', () => {
     expect(previewCursorPlaybackStructuralDeferredReason(layer(), context())).toBeUndefined();
   });
 
+
+  it('admits smoothing when the exact cursor-state-v2 sample is available', () => {
+    const owner = clip({ cursor: { ...clip().cursor!, smoothing: true } });
+    const smoothed = layer(owner);
+    smoothed.canonicalState = {
+      cursor: {
+        contract_version: CURSOR_STATE_CONTRACT_V2,
+        visible: true,
+        scale: 1,
+        highlight: true,
+        click_rings: true,
+        x: 160,
+        y: 120,
+        click: false,
+      },
+    };
+    expect(previewCursorPlaybackStructuralDeferredReason(smoothed, context())).toBeUndefined();
+  });
+
+  it('fails closed when authored smoothing and computed cursor contract versions disagree', () => {
+    const smoothedOwner = clip({ cursor: { ...clip().cursor!, smoothing: true } });
+    const smoothedWithV1 = layer(smoothedOwner);
+    expect(previewCursorPlaybackStructuralDeferredReason(smoothedWithV1, context()))
+      .toBe('cursor-owner:canonical-cursor-contract-mismatch');
+
+    const linearWithV2 = layer();
+    linearWithV2.canonicalState = {
+      cursor: {
+        contract_version: CURSOR_STATE_CONTRACT_V2,
+        visible: true,
+        scale: 1,
+        highlight: true,
+        click_rings: true,
+        x: 160,
+        y: 120,
+        click: false,
+      },
+    };
+    expect(previewCursorPlaybackStructuralDeferredReason(linearWithV2, context()))
+      .toBe('cursor-owner:canonical-cursor-contract-mismatch');
+  });
+
   it('retains the renderer exact-frame and expansion bounds', () => {
     expect(previewCursorPlaybackStructuralDeferredReason(layer(), context({ fps: 1000 })))
       .toBe('cursor-owner:fps-out-of-range');
@@ -84,7 +126,6 @@ describe('cursor normal-playback export-proven subset', () => {
   });
 
   it.each([
-    ['smoothing', clip({ cursor: { ...clip().cursor!, smoothing: true } }), 'cursor-owner:smoothing-unsupported'],
     ['fade', clip({ fade_in_ms: 100 }), 'cursor-owner:fade-unsupported'],
     ['transition', clip({ transitions: [{ id: 't', type: 'crossfade', duration_ms: 300 }] }), 'cursor-owner:transition-parent-unsupported'],
     ['animation', clip({ animation_blocks: [{ id: 'a', block_key: 'move', family: 'during', start_ms: 0, duration_ms: 300, generated_keyframe_ids: [] }] }), 'cursor-owner:animation-parent-unsupported'],

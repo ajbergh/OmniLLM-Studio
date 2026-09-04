@@ -1,0 +1,238 @@
+name: Video Cursor Smoothing Parity Evidence
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/video-cursor-smoothing-parity.yml'
+      - 'backend/cmd/video-cursor-smoothing-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_cursor_smoothing.go'
+      - 'backend/internal/video/parity_fixture_cursor_smoothing_test.go'
+      - 'backend/internal/video/rendercontract/cursor_state.go'
+      - 'backend/internal/video/rendercontract/cursor_state_test.go'
+      - 'backend/internal/video/rendercontract/frame_state_cursor_test.go'
+      - 'backend/internal/video/renderer_cursor.go'
+      - 'backend/internal/video/renderer_cursor_test.go'
+      - 'frontend/src/video/renderContractCursor.ts'
+      - 'frontend/test/renderContractCursor.test.ts'
+      - 'frontend/test/renderContractFrameStateCursor.test.ts'
+      - 'frontend/src/components/video/PreviewCanonicalPainters.tsx'
+      - 'frontend/src/components/video/PreviewCanonicalPainters.test.ts'
+      - 'frontend/src/components/video/previewCursorPlayback.ts'
+      - 'frontend/src/components/video/previewCursorPlayback.test.ts'
+      - 'scripts/video-cursor-smoothing-parity-capture.mjs'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/video-cursor-smoothing-parity.yml'
+      - 'backend/cmd/video-cursor-smoothing-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_cursor_smoothing.go'
+      - 'backend/internal/video/parity_fixture_cursor_smoothing_test.go'
+      - 'backend/internal/video/rendercontract/cursor_state.go'
+      - 'backend/internal/video/rendercontract/cursor_state_test.go'
+      - 'backend/internal/video/rendercontract/frame_state_cursor_test.go'
+      - 'backend/internal/video/renderer_cursor.go'
+      - 'backend/internal/video/renderer_cursor_test.go'
+      - 'frontend/src/video/renderContractCursor.ts'
+      - 'frontend/test/renderContractCursor.test.ts'
+      - 'frontend/test/renderContractFrameStateCursor.test.ts'
+      - 'frontend/src/components/video/PreviewCanonicalPainters.tsx'
+      - 'frontend/src/components/video/PreviewCanonicalPainters.test.ts'
+      - 'frontend/src/components/video/previewCursorPlayback.ts'
+      - 'frontend/src/components/video/previewCursorPlayback.test.ts'
+      - 'scripts/video-cursor-smoothing-parity-capture.mjs'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-cursor-smoothing-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25.13'
+  NODE_VERSION: '24'
+
+jobs:
+  smoothing-evidence:
+    name: Cursor smoothstep browser export parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+      - working-directory: frontend
+        run: npm ci
+      - name: Install parity dependencies
+        run: |
+          set -euo pipefail
+          bash scripts/ci-apt-install.sh ffmpeg
+          bash scripts/ci-playwright-install.sh
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Validate cursor v2 contracts
+        run: |
+          set -euo pipefail
+          (
+            cd backend
+            go test ./internal/video -run '^TestParityCursorSmoothingFixtureIsNarrowAndAsymmetric$|^TestCanonicalCursorRasterSupportsSmoothstepV2$|^TestCanonicalCursorRasterKeepsHiddenCursorNoPaint$'
+            go test ./internal/video/rendercontract -run '^TestEvaluateCursorStateDefinesDeterministicSmoothstepV2$|^TestVisualFrameStateProjectsSmoothedCursorV2AtExactRationalTime$'
+          )
+          (
+            cd frontend
+            npx vitest run \
+              test/renderContractCursor.test.ts \
+              test/renderContractFrameStateCursor.test.ts \
+              src/components/video/PreviewCanonicalPainters.test.ts \
+              src/components/video/previewCursorPlayback.test.ts
+          )
+          node --check scripts/video-cursor-smoothing-parity-capture.mjs
+      - name: Generate fixture, server, and deterministic backdrop
+        run: |
+          set -euo pipefail
+          mkdir -p output/video-cursor-smoothing-parity/bin
+          (
+            cd backend
+            go run ./cmd/video-cursor-smoothing-parity-fixture --output-dir ../output/video-cursor-smoothing-parity/fixture
+            go build -o ../output/video-cursor-smoothing-parity/bin/server ./cmd/server
+          )
+          mkdir -p output/video-cursor-smoothing-parity/fixture/media
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i color=c=black:s=640x360:r=1 \
+            -frames:v 1 -c:v png -threads 1 \
+            output/video-cursor-smoothing-parity/fixture/media/cursor-smoothing-backdrop.png
+          sha256sum output/video-cursor-smoothing-parity/fixture/media/cursor-smoothing-backdrop.png \
+            > output/video-cursor-smoothing-parity/fixture/backdrop-source.sha256
+      - name: Capture and gate cursor smoothing parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/output/video-cursor-smoothing-parity/runtime"
+          mkdir -p "$runtime/attachments"
+          export OMNILLM_PORT=18108
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          "$GITHUB_WORKSPACE/output/video-cursor-smoothing-parity/bin/server" >"$runtime/backend.log" 2>"$runtime/backend.err.log" &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18108 npm run dev -- --host 127.0.0.1 --port 14191 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18108/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14191/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "cursor smoothing parity servers did not become ready" >&2
+              cat "$runtime/backend.err.log" >&2 || true
+              cat "$runtime/backend.log" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          fixture=output/video-cursor-smoothing-parity/fixture/parity-cursor-smoothing-v2.json
+          capture=output/video-cursor-smoothing-parity/capture
+          node scripts/video-cursor-smoothing-parity-capture.mjs \
+            --url http://127.0.0.1:14191 \
+            --fixture "$fixture" \
+            --image-file output/video-cursor-smoothing-parity/fixture/media/cursor-smoothing-backdrop.png \
+            --output "$capture"
+
+          timeline_hash="$(node -p "require('./$capture/seed-result.json').timeline_sha256")"
+          (
+            cd backend
+            go run ./cmd/video-parity-report \
+              --preview-dir ../$capture/preview \
+              --rendered-dir ../$capture/rendered \
+              --output-dir ../$capture/smoothing-report \
+              --fps 100 \
+              --fixture parity-cursor-smoothing-v2 \
+              --timeline-sha256 "$timeline_hash" \
+              --allow-fail
+          )
+          node - <<'NODE'
+          const fs = require('fs');
+          const evidence = JSON.parse(fs.readFileSync('output/video-cursor-smoothing-parity/capture/cursor-smoothing-frame-evidence.json', 'utf8'));
+          const report = JSON.parse(fs.readFileSync('output/video-cursor-smoothing-parity/capture/smoothing-report/parity-report.json', 'utf8'));
+          const expectedBounds = new Map([
+            [25, { min_x: 139, min_y: 54, max_x: 281, max_y: 196 }],
+            [50, { min_x: 249, min_y: 109, max_x: 391, max_y: 251 }],
+            [75, { min_x: 359, min_y: 164, max_x: 501, max_y: 306 }],
+          ]);
+          const expectedPositions = new Map([[25, [210, 125]], [50, [320, 180]], [75, [430, 235]]]);
+          const errors = [];
+          if (evidence.fixture !== 'parity-cursor-smoothing-v2') errors.push(`fixture=${evidence.fixture}`);
+          if (evidence.frames.length !== 3) errors.push(`browser frame count=${evidence.frames.length}`);
+          for (const frame of evidence.frames) {
+            const expected = expectedPositions.get(frame.frame_index);
+            if (!expected) { errors.push(`unexpected browser frame ${frame.frame_index}`); continue; }
+            if (frame.state_mode !== 'canonical-frame') errors.push(`frame ${frame.frame_index} state=${frame.state_mode}`);
+            if (Math.abs(frame.left - expected[0]) > 0.02 || Math.abs(frame.top - expected[1]) > 0.02) {
+              errors.push(`frame ${frame.frame_index} position=${frame.left},${frame.top}`);
+            }
+            if (frame.svg_width !== 64 || frame.svg_height !== 64 || !frame.highlight_present || frame.ring_present) {
+              errors.push(`frame ${frame.frame_index} cursor geometry/style drift`);
+            }
+            if ((frame.frame_index === 25 || frame.frame_index === 75)
+              && Math.max(Math.abs(frame.left - frame.linear_position.x), Math.abs(frame.top - frame.linear_position.y)) < 20) {
+              errors.push(`frame ${frame.frame_index} did not prove asymmetric smoothing`);
+            }
+          }
+          if (report.frames.length !== 3) errors.push(`report frame count=${report.frames.length}`);
+          for (const frame of report.frames) {
+            const bounds = expectedBounds.get(frame.frame_index);
+            if (!bounds) { errors.push(`unexpected report frame ${frame.frame_index}`); continue; }
+            if (frame.pixel_pass_rate < 0.990) errors.push(`frame ${frame.frame_index} pixel pass ${frame.pixel_pass_rate}`);
+            if (frame.ssim < 0.985) errors.push(`frame ${frame.frame_index} ssim ${frame.ssim}`);
+            if (frame.mean_absolute_error > 0.31) errors.push(`frame ${frame.frame_index} mae ${frame.mean_absolute_error}`);
+            if (frame.root_mean_square_error > 3.80) errors.push(`frame ${frame.frame_index} rmse ${frame.root_mean_square_error}`);
+            if (frame.max_channel_delta > 180) errors.push(`frame ${frame.frame_index} max delta ${frame.max_channel_delta}`);
+            if (JSON.stringify(frame.changed_bounds) !== JSON.stringify(bounds)) {
+              errors.push(`frame ${frame.frame_index} bounds ${JSON.stringify(frame.changed_bounds)} want ${JSON.stringify(bounds)}`);
+            }
+          }
+          const focused = { fixture: evidence.fixture, timeline_sha256: report.timeline_sha256, pass: errors.length === 0, errors, frames: report.frames };
+          fs.writeFileSync('output/video-cursor-smoothing-parity/capture/smoothing-focused-gate.json', `${JSON.stringify(focused, null, 2)}\n`);
+          console.log(`CURSOR_SMOOTHING_FOCUSED_GATE=${JSON.stringify(focused)}`);
+          if (errors.length) process.exit(1);
+          NODE
+      - name: Record toolchain
+        if: always()
+        run: |
+          mkdir -p output/video-cursor-smoothing-parity
+          {
+            go version
+            node --version
+            npm --version
+            ffmpeg -version | head -n 1
+            ffprobe -version | head -n 1
+            node -e "console.log('playwright ' + require('playwright/package.json').version)"
+          } > output/video-cursor-smoothing-parity/toolchain.txt
+      - name: Upload cursor smoothing parity evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-cursor-smoothing-parity-evidence
+          path: output/video-cursor-smoothing-parity
+          if-no-files-found: error
+          retention-days: 14

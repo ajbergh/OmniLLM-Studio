@@ -1,6 +1,7 @@
 package rendercontract
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -50,6 +51,29 @@ func TestVisualFrameStateProjectsCanonicalCursorAtExactRationalTime(t *testing.T
 	}
 }
 
+func TestVisualFrameStateProjectsSmoothedCursorV2AtExactRationalTime(t *testing.T) {
+	cursor := &TimelineV2Cursor{
+		Smoothing: true,
+		Events: []TimelineV2CursorEvent{
+			{TimeMS: 0, X: 10, Y: 20},
+			{TimeMS: 10, X: 40, Y: 50, Click: true},
+		},
+	}
+	state, err := EvaluateVisualFrameState(cursorFrameStateDocument(cursor), 1)
+	if err != nil {
+		t.Fatalf("EvaluateVisualFrameState: %v", err)
+	}
+	layer := state.Layers[0]
+	wantX := 10.0 + 30.0*(7.0/27.0)
+	wantY := 20.0 + 30.0*(7.0/27.0)
+	if layer.Cursor == nil || layer.Cursor.ContractVersion != CursorStateContractV2 || math.Abs(layer.Cursor.X-wantX) > 1e-12 || math.Abs(layer.Cursor.Y-wantY) > 1e-12 {
+		t.Fatalf("smoothed cursor = %+v want x=%v y=%v", layer.Cursor, wantX, wantY)
+	}
+	if !layer.Authoritative || !state.Authoritative || len(layer.Unresolved) != 0 || len(state.Unresolved) != 0 {
+		t.Fatalf("smoothed authority layer=%v state=%v unresolved=%v/%v", layer.Authoritative, state.Authoritative, layer.Unresolved, state.Unresolved)
+	}
+}
+
 func TestVisualFrameStateTreatsHiddenOrEmptyCursorAsResolvedNoPaint(t *testing.T) {
 	hidden := false
 	for _, cursor := range []*TimelineV2Cursor{
@@ -70,12 +94,13 @@ func TestVisualFrameStateTreatsHiddenOrEmptyCursorAsResolvedNoPaint(t *testing.T
 }
 
 func TestVisualFrameStateFailsClosedOnInvalidCursorState(t *testing.T) {
+	scale := CursorMaxScale + 1
 	cursor := &TimelineV2Cursor{
-		Smoothing: true,
-		Events:    []TimelineV2CursorEvent{{TimeMS: 0, X: 1, Y: 2}},
+		Scale:  &scale,
+		Events: []TimelineV2CursorEvent{{TimeMS: 0, X: 1, Y: 2}},
 	}
 	_, err := EvaluateVisualFrameState(cursorFrameStateDocument(cursor), 1)
-	if err == nil || !strings.Contains(err.Error(), "canonical cursor state for clip \"cursor-clip\"") || !strings.Contains(err.Error(), "smoothing") {
+	if err == nil || !strings.Contains(err.Error(), "canonical cursor state for clip \"cursor-clip\"") || !strings.Contains(err.Error(), "scale") {
 		t.Fatalf("error = %v", err)
 	}
 }

@@ -8,14 +8,14 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate playback parity fixture: %v", err)
 	}
-	if validated.DurationMS != 38000 || validated.Canvas.FPS != 30 {
+	if validated.DurationMS != 39600 || validated.Canvas.FPS != 30 {
 		t.Fatalf("unexpected playback parity canvas/duration: %+v / %d", validated.Canvas, validated.DurationMS)
 	}
 	if len(assets) != 5 {
 		t.Fatalf("playback parity assets = %d, want 5", len(assets))
 	}
-	if len(cases) != 18 {
-		t.Fatalf("playback parity cases = %d, want 17", len(cases))
+	if len(cases) != 19 {
+		t.Fatalf("playback parity cases = %d, want 19", len(cases))
 	}
 	seen := map[string]bool{}
 	for _, testCase := range cases {
@@ -69,8 +69,11 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 				t.Fatalf("fallback cursor case %q must retain legacy consumer", testCase.Name)
 			}
 		}
-		if (testCase.RequireCursorMotion || testCase.RequireCursorHighlight || testCase.RequireCursorClickToggle) && !testCase.RequireCursorSurface {
+		if (testCase.RequireCursorMotion || testCase.RequireCursorSmoothing || testCase.RequireCursorHighlight || testCase.RequireCursorClickToggle) && !testCase.RequireCursorSurface {
 			t.Fatalf("cursor behavior case %q must require a cursor surface", testCase.Name)
+		}
+		if testCase.RequireCursorSmoothing && (testCase.ExpectedMode != "canonical-playback" || !testCase.RequireCursorMotion) {
+			t.Fatalf("cursor smoothing case %q must require canonical moving cursor evidence", testCase.Name)
 		}
 		if testCase.RequireTextLayout {
 			if testCase.ExpectedTextRuntime != "ready" {
@@ -106,6 +109,7 @@ func TestPlaybackCanonicalParityFixtureValid(t *testing.T) {
 		"weighted-invalid-text-fallback",
 		"weighted-text-decoder-budget-fallback",
 		"unsupported-cursor-fade-fallback",
+		"cursor-smoothing-v2-canonical-playback",
 	} {
 		if !seen[required] {
 			t.Fatalf("playback parity case %q is missing", required)

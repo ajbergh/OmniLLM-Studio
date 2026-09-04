@@ -60,7 +60,7 @@ Important clip fields:
 - `template_slot`: persisted replaceable role such as `Logo`, `Hero Image`, or `Screenshot 1`. Empty non-text slots are validation issues in the editor/agent inspection surface.
 - `metadata`: templates use `required_asset_kind` for slot guidance.
 - `transform`: `x`, `y`, `z`, `scale`, `scale_x`, `scale_y`, `rotation`, `rotation_x`, `rotation_y`, `rotation_z`, `anchor_x`, `anchor_y`, `perspective`, `opacity`, and fractional `crop` sides (0–0.95). Legacy `scale`/`rotation` remain the fallback.
-- `text`, `shape`, and `cursor`: styled overlay, annotation, and captured cursor data. Cursor paths/click rings export through sampled overlays; click audio is not synthesized.
+- `text`, `shape`, and `cursor`: styled overlay, annotation, and captured cursor data. The bounded static-2D cursor export subset uses `cursor-state-v1` linear or `cursor-state-v2` deterministic smoothstep output-frame rasters with click rings/highlights; complex parents and longer clips retain compatibility rendering. Click audio is not synthesized.
 - `transitions`: `fade`, `crossfade`, `dip_to_black`, `slide`, `wipe`, `zoom` with positive duration.
 
 Allowed clip and scene effects are:
