@@ -37,8 +37,8 @@ type cursorRasterSpec struct {
 
 // canonicalCursorRasterOverlayClips converts one supported static-2D cursor
 // owner into one exact synthetic image segment per output frame. Cursor x/y and
-// click state come from cursor-state-v1 at the exact rational presentation
-// time; the generated full-canvas sprite then inherits the owner's static
+// click state come from cursor-state-v1 or cursor-state-v2 at the exact rational
+// presentation time; the generated full-canvas sprite then inherits the owner's static
 // uniform scale, Z rotation, opacity, track visibility, and track ordering.
 //
 // The function intentionally returns ok=false for combinations that still need
@@ -53,6 +53,12 @@ func canonicalCursorRasterOverlayClips(
 	fps, maxSegments int,
 ) ([]TimelineClip, bool) {
 	if clip.Cursor == nil || len(clip.Cursor.Events) == 0 || clip.DurationMS <= 0 {
+		return nil, true
+	}
+	// Timeline v1 stores visibility as a bool, so false is an explicit no-paint
+	// state on this adapter boundary. Do not convert it to the v2 omitted/default
+	// visibility semantics used by the renderer-independent contract.
+	if !clip.Cursor.Visible {
 		return nil, true
 	}
 	if clip.AssetID == "" || clip.Text != nil || clip.Shape != nil || clip.AudioOnly {

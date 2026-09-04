@@ -1,6 +1,6 @@
 package video
 
-const PlaybackCanonicalParityFixtureName = "parity-playback-canonical-v5"
+const PlaybackCanonicalParityFixtureName = "parity-playback-canonical-v6"
 
 // PlaybackParityCase is one live-preview observation window in the retained
 // normal-playback canonicalization fixture. FrameIndex is used only to place
@@ -24,6 +24,7 @@ type PlaybackParityCase struct {
 	ExpectedCursorClipID     string   `json:"expected_cursor_clip_id,omitempty"`
 	RequireCursorSurface     bool     `json:"require_cursor_surface,omitempty"`
 	RequireCursorMotion      bool     `json:"require_cursor_motion,omitempty"`
+	RequireCursorSmoothing   bool     `json:"require_cursor_smoothing,omitempty"`
 	RequireCursorHighlight   bool     `json:"require_cursor_highlight,omitempty"`
 	RequireCursorClickToggle bool     `json:"require_cursor_click_toggle,omitempty"`
 	RequireWeightedCanvas    bool     `json:"require_weighted_canvas,omitempty"`
@@ -37,13 +38,13 @@ type PlaybackParityCase struct {
 // prove resource-backed FontFace/layout readiness, family-name-only deferral,
 // font-load failure, and mixed-frame all-or-nothing authority. Weighted cases
 // continue to prove the Canvas pair consumer and its independent readiness.
-// Mixed v5 cases explicitly prove that supported media/text/cursor and
+// Mixed v6 cases explicitly prove that supported media/text/cursor and
 // weighted/text/cursor surfaces share one canonical frame decision. Exact cursor
 // samples must stay frame-addressed while any unsupported cursor parent or runtime
 // debt still revokes authority for the complete visual frame.
 func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, []PlaybackParityCase) {
 	doc := NewEmptyTimeline(640, 360, 30)
-	doc.DurationMS = 38000
+	doc.DurationMS = 39600
 	doc.Canvas.Background = "#10131a"
 	doc.Metadata = map[string]any{"fixture": PlaybackCanonicalParityFixtureName}
 
@@ -242,6 +243,19 @@ func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, [
 		},
 	}
 
+	cursorSmoothing := mediaClip("playback-cursor-smoothing", "asset-landscape", 38000, 1200)
+	cursorSmoothing.Cursor = &TimelineCursor{
+		Visible:    true,
+		Scale:      1,
+		Highlight:  true,
+		ClickRings: false,
+		Smoothing:  true,
+		Events: []TimelineCursorEvent{
+			{TimeMS: 0, X: 120, Y: 90},
+			{TimeMS: 1000, X: 520, Y: 270},
+		},
+	}
+
 	audio := TimelineTrack{
 		ID:      "playback-audio",
 		Type:    TrackTypeAudio,
@@ -295,6 +309,7 @@ func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, [
 		track("track-weighted-budget-text-in", weightedBudgetTextIn),
 		track("track-weighted-budget-text", weightedBudgetText),
 		track("track-cursor-unsupported-fade", unsupportedCursor),
+		track("track-cursor-smoothing", cursorSmoothing),
 		audio,
 	}
 
@@ -327,6 +342,7 @@ func PlaybackCanonicalParityFixture() (TimelineDocument, []ParityFixtureAsset, [
 		{Name: "weighted-invalid-text-fallback", FrameIndex: 948, ObserveMS: 350, ExpectedMode: "legacy-time-fallback", ExpectedReason: "text-playback-runtime-failed:playback-weighted-invalid-text:font-face-load-failed", ExpectedTransitionMode: "legacy", ExpectedWeightedRuntime: "ready", ExpectedWeightedConsumer: "legacy-time-fallback", ExpectedWeightedPairID: "weighted-invalid-text-crossfade", ExpectedTextRuntime: "failed", ExpectedTextConsumer: "legacy-time-fallback", ExpectedTextClipID: "playback-weighted-invalid-text", ExpectedTextTrace: []string{"font-face-not-ready", "failed:playback-weighted-invalid-text:font-face-load-failed"}, RequireWeightedCanvas: true},
 		{Name: "weighted-text-decoder-budget-fallback", FrameIndex: 1044, ObserveMS: 350, ExpectedMode: "legacy-time-fallback", ExpectedReason: "transition-weighted-runtime-deferred:weighted-text-budget-crossfade-out:decoder-budget-poster", ExpectedTransitionMode: "legacy", ExpectedWeightedRuntime: "deferred", ExpectedWeightedConsumer: "legacy-time-fallback", ExpectedWeightedPairID: "weighted-text-budget-crossfade", ExpectedTextRuntime: "ready", ExpectedTextConsumer: "legacy-time-fallback", ExpectedTextClipID: "playback-weighted-budget-text", ExpectedTextTrace: []string{"font-face-not-ready", "font-face-ready", "text-layout-not-ready", "ready"}, RequireTextLayout: true, DecoderBudget: 1},
 		{Name: "unsupported-cursor-fade-fallback", FrameIndex: 1092, ObserveMS: 300, ExpectedMode: "legacy-time-fallback", ExpectedReason: "cursor-playback-deferred:playback-cursor-unsupported-fade:fade-unsupported", ExpectedTransitionMode: "legacy", ExpectedCursorConsumer: "legacy-time-fallback", ExpectedCursorClipID: "playback-cursor-unsupported-fade", RequireCursorSurface: true},
+		{Name: "cursor-smoothing-v2-canonical-playback", FrameIndex: 1146, ObserveMS: 600, ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-none", ExpectedCursorConsumer: "canonical-inline", ExpectedCursorClipID: "playback-cursor-smoothing", RequireCursorSurface: true, RequireCursorMotion: true, RequireCursorSmoothing: true, RequireCursorHighlight: true, RequireAdvancingFrames: true},
 	}
 	return doc, assets, cases
 }

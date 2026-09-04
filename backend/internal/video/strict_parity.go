@@ -26,7 +26,7 @@ func StrictParityIssues(doc TimelineDocument) []StrictParityIssue {
 				issues = append(issues, StrictParityIssue{Path: path + ".shape", Feature: RendererFeatureAnnotations, Detail: "annotation geometry is partially normalized during export"})
 			}
 			if clip.Cursor != nil && len(clip.Cursor.Events) > 0 {
-				issues = append(issues, StrictParityIssue{Path: path + ".cursor", Feature: RendererFeatureCursor, Detail: "cursor paths and click rings use sampled export overlays"})
+				issues = append(issues, StrictParityIssue{Path: path + ".cursor", Feature: RendererFeatureCursor, Detail: "cursor parity is bounded to the proven static-2D raster subset; complex parents and click audio remain partial"})
 			}
 			for effectIndex, effect := range clip.Effects {
 				if effect.Enabled {

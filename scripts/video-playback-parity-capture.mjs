@@ -455,6 +455,23 @@ function gateCase(testCase, observations, timeline) {
       const motion = Math.max(range(cursorRows.map((row) => row.x).filter(Number.isFinite)), range(cursorRows.map((row) => row.y).filter(Number.isFinite)));
       if (motion < 1) errors.push(`cursor motion advanced only ${motion}px in canonical sample space`);
     }
+    if (testCase.require_cursor_smoothing) {
+      let discriminatingRows = 0;
+      for (const row of stable) {
+        const cursor = row.cursor_surfaces.find((surface) => surface.clip_id === testCase.expected_cursor_clip_id);
+        const expected = expectedCursorSampleAtFrame(timeline, testCase.expected_cursor_clip_id, row.visual_frame_index);
+        if (!cursor || !expected?.smoothing) continue;
+        const divergence = Math.max(Math.abs(expected.x - expected.linear_x), Math.abs(expected.y - expected.linear_y));
+        if (divergence < 5) continue;
+        discriminatingRows += 1;
+        const observedLinearDistance = Math.max(Math.abs(cursor.x - expected.linear_x), Math.abs(cursor.y - expected.linear_y));
+        if (observedLinearDistance < 4) {
+          errors.push(`smoothed cursor remained too close to linear position at frame ${row.visual_frame_index}`);
+          break;
+        }
+      }
+      if (discriminatingRows === 0) errors.push('cursor smoothing evidence never crossed an asymmetric smoothstep sample');
+    }
     if (testCase.require_cursor_highlight && !cursorRows.every((row) => row.highlight === true)) {
       errors.push('cursor highlight was not retained for every observation');
     }
@@ -546,12 +563,19 @@ function expectedCursorSampleAtFrame(timeline, clipId, frameIndex) {
   let previous = events[0];
   let x = previous.x;
   let y = previous.y;
+  let linearX = x;
+  let linearY = y;
   if (numerator > previous.time_ms * denominator) {
     for (let index = 1; index < events.length; index += 1) {
       const next = events[index];
       if (numerator <= next.time_ms * denominator) {
         const span = Math.max(1, next.time_ms - previous.time_ms);
-        const progress = (numerator - previous.time_ms * denominator) / (span * denominator);
+        const linearProgress = (numerator - previous.time_ms * denominator) / (span * denominator);
+        linearX = previous.x + (next.x - previous.x) * linearProgress;
+        linearY = previous.y + (next.y - previous.y) * linearProgress;
+        const progress = cursor.smoothing === true
+          ? linearProgress * linearProgress * (3 - 2 * linearProgress)
+          : linearProgress;
         x = previous.x + (next.x - previous.x) * progress;
         y = previous.y + (next.y - previous.y) * progress;
         previous = null;
@@ -559,7 +583,7 @@ function expectedCursorSampleAtFrame(timeline, clipId, frameIndex) {
       }
       previous = next;
     }
-    if (previous) { x = previous.x; y = previous.y; }
+    if (previous) { x = previous.x; y = previous.y; linearX = x; linearY = y; }
   }
   const clickWindow = 300 * denominator;
   const click = events.some((event) => event.click === true
@@ -571,6 +595,9 @@ function expectedCursorSampleAtFrame(timeline, clipId, frameIndex) {
     scale: cursor.scale ?? 1,
     highlight: cursor.highlight === true,
     click_rings: cursor.click_rings === true,
+    smoothing: cursor.smoothing === true,
+    linear_x: linearX,
+    linear_y: linearY,
   };
 }
 

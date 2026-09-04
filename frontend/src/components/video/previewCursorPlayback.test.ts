@@ -93,6 +93,29 @@ describe('cursor normal-playback export-proven subset', () => {
     expect(previewCursorPlaybackStructuralDeferredReason(smoothed, context())).toBeUndefined();
   });
 
+  it('fails closed when authored smoothing and computed cursor contract versions disagree', () => {
+    const smoothedOwner = clip({ cursor: { ...clip().cursor!, smoothing: true } });
+    const smoothedWithV1 = layer(smoothedOwner);
+    expect(previewCursorPlaybackStructuralDeferredReason(smoothedWithV1, context()))
+      .toBe('cursor-owner:canonical-cursor-contract-mismatch');
+
+    const linearWithV2 = layer();
+    linearWithV2.canonicalState = {
+      cursor: {
+        contract_version: CURSOR_STATE_CONTRACT_V2,
+        visible: true,
+        scale: 1,
+        highlight: true,
+        click_rings: true,
+        x: 160,
+        y: 120,
+        click: false,
+      },
+    };
+    expect(previewCursorPlaybackStructuralDeferredReason(linearWithV2, context()))
+      .toBe('cursor-owner:canonical-cursor-contract-mismatch');
+  });
+
   it('retains the renderer exact-frame and expansion bounds', () => {
     expect(previewCursorPlaybackStructuralDeferredReason(layer(), context({ fps: 1000 })))
       .toBe('cursor-owner:fps-out-of-range');

@@ -1,4 +1,5 @@
 import { endFrame, startFrame } from '../../video/renderContract';
+import { CURSOR_STATE_CONTRACT_V1, CURSOR_STATE_CONTRACT_V2 } from '../../video/renderContractCursor';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 import type {
   VideoTimelineCursor,
@@ -130,7 +131,12 @@ export function previewCursorPlaybackStructuralDeferredReason(
   )) {
     return `${clip.id}:cursor-raster-out-of-bounds`;
   }
-  if (!layer.canonicalState?.cursor) return `${clip.id}:canonical-cursor-state-unavailable`;
+  const canonicalCursor = layer.canonicalState?.cursor;
+  if (!canonicalCursor) return `${clip.id}:canonical-cursor-state-unavailable`;
+  const expectedContract = cursor.smoothing === true ? CURSOR_STATE_CONTRACT_V2 : CURSOR_STATE_CONTRACT_V1;
+  if (canonicalCursor.contract_version !== expectedContract) {
+    return `${clip.id}:canonical-cursor-contract-mismatch`;
+  }
   return undefined;
 }
 
