@@ -1,0 +1,137 @@
+name: Cursor Playback Branch Patch
+
+on:
+  push:
+    branches:
+      - feat/video-wysiwyg-phase3-cursor-playback-parity
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply exact cursor playback integration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/src/components/video/VideoPreviewCanvasLegacy.tsx')
+          text = path.read_text()
+
+          old_call = '''  const playbackDecision = resolvePreviewPlaybackCanonicalization(
+            playbackFrame,
+            frameQuery?.frameState,
+            playbackFrameVisualCandidates,
+            playbackTransitionPlan,
+          );'''
+          new_call = '''  const playbackDecision = resolvePreviewPlaybackCanonicalization(
+            playbackFrame,
+            frameQuery?.frameState,
+            playbackFrameVisualCandidates,
+            playbackTransitionPlan,
+            {
+              fps,
+              canvasWidth,
+              canvasHeight,
+              scenes: timeline?.scenes ?? [],
+            },
+          );'''
+          if text.count(old_call) != 1:
+              raise SystemExit(f'playback decision anchor count={text.count(old_call)}, want 1')
+          text = text.replace(old_call, new_call)
+
+          old_cursor = '''        {clip.cursor && (() => {
+                  const sample = sampleCursor(clip.cursor, clipTimeMs);
+                  if (!sample) return null;
+                  const size = 16 * (clip.cursor.scale || 1) * stageScale * 4;
+                  const left = sample.x * stageScale;
+                  const top = sample.y * stageScale;
+                  return (
+                    <div className="pointer-events-none absolute" style={{ left, top }} aria-hidden="true">
+                      {clip.cursor.highlight && (
+                        <div
+                          className="absolute rounded-full"
+                          style={{ width: size * 2.2, height: size * 2.2, left: -size * 1.1, top: -size * 1.1, background: 'rgba(255, 223, 32, 0.3)' }}
+                        />
+                      )}
+                      {sample.click && clip.cursor.click_rings && (
+                        <div
+                          className="absolute rounded-full"
+                          style={{ width: size * 2.6, height: size * 2.6, left: -size * 1.3, top: -size * 1.3, border: '2px solid rgba(0, 188, 255, 0.8)' }}
+                        />
+                      )}
+                      <svg width={size} height={size} viewBox="0 0 16 16">
+                        <path d="M2 1 L2 12 L5.5 9.5 L7.5 14 L9.5 13 L7.5 8.8 L12 8.5 Z" fill="#ffffff" stroke="#111827" strokeWidth="1" />
+                      </svg>
+                    </div>
+                  );
+                })()}'''
+          new_cursor = '''        {clip.cursor && (() => {
+                  const canonicalCursor = canonicalVisualFrame !== null ? entry.canonicalState?.cursor : undefined;
+                  const sample = canonicalCursor ?? sampleCursor(clip.cursor, clipTimeMs);
+                  if (!sample) return null;
+                  const size = 16 * (canonicalCursor?.scale ?? clip.cursor.scale ?? 1) * stageScale * 4;
+                  const left = sample.x * stageScale;
+                  const top = sample.y * stageScale;
+                  const highlight = canonicalCursor?.highlight ?? clip.cursor.highlight ?? false;
+                  const clickRings = canonicalCursor?.click_rings ?? clip.cursor.click_rings ?? false;
+                  return (
+                    <div
+                      className="pointer-events-none absolute"
+                      data-preview-cursor-state-mode={canonicalCursor ? 'canonical-frame' : 'legacy-time'}
+                      data-preview-cursor-playback-consumer={isPlaying ? (canonicalCursor ? 'canonical-inline' : 'legacy-time-fallback') : undefined}
+                      data-preview-cursor-playback-clip-id={clip.id}
+                      style={{ left, top }}
+                      aria-hidden="true"
+                    >
+                      {highlight && (
+                        <div
+                          className="absolute rounded-full"
+                          style={{ width: size * 2.2, height: size * 2.2, left: -size * 1.1, top: -size * 1.1, background: 'rgba(255, 223, 32, 0.3)' }}
+                        />
+                      )}
+                      {sample.click && clickRings && (
+                        <div
+                          className="absolute rounded-full"
+                          style={{ width: size * 2.6, height: size * 2.6, left: -size * 1.3, top: -size * 1.3, border: '2px solid rgba(0, 188, 255, 0.8)' }}
+                        />
+                      )}
+                      <svg width={size} height={size} viewBox="0 0 16 16">
+                        <path d="M2 1 L2 12 L5.5 9.5 L7.5 14 L9.5 13 L7.5 8.8 L12 8.5 Z" fill="#ffffff" stroke="#111827" strokeWidth="1" />
+                      </svg>
+                    </div>
+                  );
+                })()}'''
+          if text.count(old_cursor) != 1:
+              raise SystemExit(f'cursor overlay anchor count={text.count(old_cursor)}, want 1')
+          text = text.replace(old_cursor, new_cursor)
+          path.write_text(text)
+          PY
+      - name: Validate focused frontend contracts
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run test:unit -- src/components/video/previewCursorPlayback.test.ts src/components/video/previewPlaybackCursorCanonicalization.test.ts src/components/video/previewPlaybackCanonicalization.test.ts
+          npm run build
+      - name: Commit surgical integration and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/tmp-cursor-playback-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/components/video/VideoPreviewCanvasLegacy.tsx .github/workflows/tmp-cursor-playback-patch.yml
+          git diff --cached --check
+          git commit -m "Wire canonical cursor normal playback"
+          git push origin HEAD:feat/video-wysiwyg-phase3-cursor-playback-parity
