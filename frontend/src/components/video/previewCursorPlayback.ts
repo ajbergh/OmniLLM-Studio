@@ -53,7 +53,7 @@ export interface PreviewCursorPlaybackClip {
 export type PreviewCursorPlaybackLayer = {
   clip: PreviewCursorPlaybackClip;
   track?: {
-    clips: readonly Array<{
+    clips: ReadonlyArray<{
       id: string;
       start_ms: number;
       duration_ms: number;
@@ -152,7 +152,7 @@ function cursorParentTransformSupported(transform: VideoTimelineTransform | unde
 
 function hasOverlappingSibling(
   clip: PreviewCursorPlaybackClip,
-  siblings: readonly Array<{ id: string; start_ms: number; duration_ms: number; audio_only?: boolean }>,
+  siblings: ReadonlyArray<{ id: string; start_ms: number; duration_ms: number; audio_only?: boolean }>,
 ): boolean {
   const start = clip.start_ms ?? 0;
   const duration = clip.duration_ms ?? 0;
