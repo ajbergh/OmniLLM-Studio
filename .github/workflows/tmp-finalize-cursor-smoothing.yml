@@ -28,6 +28,16 @@ jobs:
       - name: Apply final cursor smoothing patch
         run: |
           set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/tmp-finalize-cursor-smoothing.py')
+          text = path.read_text()
+          old = '''    count = text.count(old)\n    if count != 1:\n        raise SystemExit(f"{path}: anchor count={count}, want 1 for {old[:120]!r}")\n    p.write_text(text.replace(old, new, 1))'''
+          new = '''    count = text.count(old)\n    if count == 0 and text.count(new) == 1:\n        return\n    if count != 1:\n        raise SystemExit(f"{path}: anchor count={count}, want 1 for {old[:120]!r}")\n    p.write_text(text.replace(old, new, 1))'''
+          if old not in text:
+              raise SystemExit('replace_once helper anchor changed unexpectedly')
+          path.write_text(text.replace(old, new, 1))
+          PY
           python scripts/tmp-finalize-cursor-smoothing.py
           gofmt -w \
             backend/internal/video/renderer_cursor.go \
