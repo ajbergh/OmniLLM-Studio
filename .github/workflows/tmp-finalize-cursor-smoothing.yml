@@ -66,7 +66,7 @@ jobs:
       - name: Commit validated finalization
         run: |
           set -euo pipefail
-          git rm scripts/tmp-finalize-cursor-smoothing.py .github/workflows/tmp-finalize-cursor-smoothing.yml
+          git rm scripts/tmp-finalize-cursor-smoothing.py
           git diff --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -74,4 +74,4 @@ jobs:
           git commit -m 'Add cursor smoothing parity evidence'
           git push origin HEAD:feat/video-wysiwyg-phase3-cursor-smoothing-parity
 
-# One-shot rerun marker after repairing the stale tracker anchor.
+# Workflow-file cleanup is performed through the GitHub connector after this validated commit lands.
