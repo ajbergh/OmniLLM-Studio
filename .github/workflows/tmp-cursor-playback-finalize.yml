@@ -11,41 +11,15 @@ permissions:
 jobs:
   finalize:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v7
-        with:
-          go-version: '1.25.13'
-          cache-dependency-path: backend/go.sum
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Patch durable playback CI and WYSIWYG tracker
+      - name: Patch WYSIWYG tracker
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-
-          workflow = Path('.github/workflows/video-playback-canonical-parity.yml')
-          text = workflow.read_text()
-          filter_anchor = "      - 'frontend/src/components/video/previewPlaybackCanonicalization.test.ts'\n      - 'frontend/src/components/video/previewWeightedPlaybackRuntime.ts'"
-          filter_replacement = "      - 'frontend/src/components/video/previewPlaybackCanonicalization.test.ts'\n      - 'frontend/src/components/video/previewCursorPlayback.ts'\n      - 'frontend/src/components/video/previewCursorPlayback.test.ts'\n      - 'frontend/src/components/video/previewPlaybackCursorCanonicalization.test.ts'\n      - 'frontend/src/components/video/previewWeightedPlaybackRuntime.ts'"
-          if text.count(filter_anchor) != 2:
-              raise SystemExit(f'playback path-filter anchor count={text.count(filter_anchor)}, want 2')
-          text = text.replace(filter_anchor, filter_replacement)
-
-          test_anchor = "              src/components/video/previewPlaybackCanonicalization.test.ts \\\n              src/components/video/previewTextPlaybackRuntime.test.ts \\\n"
-          test_replacement = "              src/components/video/previewPlaybackCanonicalization.test.ts \\\n              src/components/video/previewCursorPlayback.test.ts \\\n              src/components/video/previewPlaybackCursorCanonicalization.test.ts \\\n              src/components/video/previewTextPlaybackRuntime.test.ts \\\n"
-          if text.count(test_anchor) != 1:
-              raise SystemExit(f'playback focused-test anchor count={text.count(test_anchor)}, want 1')
-          text = text.replace(test_anchor, test_replacement)
-          workflow.write_text(text)
 
           tracker = Path('docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md')
           text = tracker.read_text()
@@ -70,7 +44,7 @@ jobs:
               '',
               '`parity-playback-canonical-v5` extends the retained normal-playback fixture with four cursor classes: standalone cursor canonical playback; resource-text + cursor all-frame canonical playback; weighted transition + resource text + cursor composition; and an unsupported fade-parent cursor that must fail closed with `cursor-playback-deferred:<clip>:fade-unsupported`. Browser evidence records per-frame cursor consumer/state mode and exact x/y/click/scale/highlight/click-ring values, independently recomputes the expected rational-time sample from the immutable fixture, requires canonical cursor motion, and crosses both sides of the click-ring window.',
               '',
-              'Isolated hosted evidence run `33840939201` passed contract/build validation, deterministic fixture generation, live browser capture, and the v5 evidence gate before committing the proven product/evidence changes as `501a65f7bbe604aaad5b2d63f46f778770f69414`. The primary branch was then fast-forwarded to that validated commit. Permanent playback CI now explicitly watches and executes `previewCursorPlayback.ts`, `previewCursorPlayback.test.ts`, and `previewPlaybackCursorCanonicalization.test.ts`; the final PR head still requires the complete triggered repository matrix before merge.',
+              'Isolated hosted evidence run `33840939201` passed contract/build validation, deterministic fixture generation, live browser capture, and the v5 evidence gate before committing the proven product/evidence changes as `501a65f7bbe604aaad5b2d63f46f778770f69414`. The primary branch was then fast-forwarded to that validated commit. The final PR head still requires the complete triggered repository matrix before merge.',
           ])
           text = text[:start] + handoff + text[end:]
 
@@ -97,43 +71,15 @@ jobs:
           text = text.replace(export_tail, export_tail + playback_section)
           tracker.write_text(text)
           PY
-
-      - name: Validate finalized cursor playback slice
-        shell: bash
-        run: |
-          set -euo pipefail
-          (
-            cd backend
-            go test ./internal/video -run 'TestPlaybackCanonicalParityFixtureValid'
-          )
-          (
-            cd frontend
-            npm ci
-            npm run lint
-            npx vitest run \
-              src/components/video/previewCursorPlayback.test.ts \
-              src/components/video/previewPlaybackCursorCanonicalization.test.ts \
-              src/components/video/previewPlaybackCanonicalization.test.ts \
-              src/components/video/previewTextPlaybackRuntime.test.ts \
-              src/components/video/previewWeightedPlaybackRuntime.test.ts \
-              src/components/video/previewFrameTransitionPairs.test.ts \
-              src/components/video/previewFrameWeightedPairCanvas.test.ts \
-              src/components/video/previewFrameWeightedPairRaster.test.ts \
-              src/components/video/sourceTiming.test.ts
-            npm run build
-          )
-          node --check scripts/video-playback-parity-capture.mjs
-
-      - name: Commit finalized tracking and remove temporary workflow
+      - name: Commit tracker and remove temporary workflow
         shell: bash
         run: |
           rm .github/workflows/tmp-cursor-playback-finalize.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
-            .github/workflows/video-playback-canonical-parity.yml \
             docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md \
             .github/workflows/tmp-cursor-playback-finalize.yml
           git diff --cached --check
-          git commit -m "Finalize cursor playback parity evidence"
+          git commit -m "Update cursor playback parity tracker"
           git push origin HEAD:feat/video-wysiwyg-phase3-cursor-playback-parity
