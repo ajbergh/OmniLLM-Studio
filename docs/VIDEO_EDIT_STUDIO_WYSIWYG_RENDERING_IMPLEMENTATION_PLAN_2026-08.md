@@ -1,7 +1,7 @@
 # Video Edit Studio WYSIWYG Rendering Implementation Plan
 
 **Status:** In progress  
-**Last updated:** 2026-09-03
+**Last updated:** 2026-09-04
 **Scope:** Video Edit Studio preview, timeline evaluation, render jobs, visual composition, audio mix, export, validation, packaging, and parity testing.  
 **Primary goal:** The authoritative editor preview and final decoded export must represent the same immutable timeline revision with identical frame identity, active-layer ordering, timing, geometry, styling, effects, transitions, camera state, font resources, and audio decisions.
 
@@ -9,15 +9,15 @@
 
 ## Current handoff
 
-Latest merged WYSIWYG program PR: **#307 — Gate immutable resource text glyph parity** — squash merge `0718f1069c0e4531a5a0ebd9334f74c9edb2ae68`. Its exact final PR head `8ea1c90ee41761706c797b646c37546881c84dd4` passed the complete exact-head Quality/Security/browser/renderer/platform matrix before merge. `parity-resource-text-v1` remains the retained immutable project-font Chromium↔FFmpeg acceptance gate; hard-gate artifact `9907747511` is SHA-256 `3afe45506bba1fc56a5cb8ac6f754623d6f930390607aedd5847c239ca754304`.
+Latest merged WYSIWYG program PR: **#308 — Canonical cursor export parity** — squash merge `5d465b107f0a91846a9c5ebe853657977767dfb3`. Its exact final PR head `c740e4e2` passed the complete 16/16 triggered Quality/Security/browser/renderer/platform matrix before merge, including the renderer parity baseline. `parity-cursor-v1` remains the retained Chromium↔Go/FFmpeg cursor export hard gate for the supported static-2D media subset.
 
-Current implementation slice: **canonical cursor export parity** on branch `feat/video-wysiwyg-phase3-cursor-export-parity`, created directly from #307's actual squash result. The supported static-2D media subset now evaluates `cursor-state-v1` at exact output-frame rational times, emits deterministic pointer/highlight/click-ring rasters on the owner track, preserves the strict `<300 ms` click-ring window, and inherits static x/y, uniform scale, Z rotation, and opacity. Smoothing, animated/3D/camera/effect/transition parents, ambiguous same-track overlaps, and clips beyond the bounded fidelity expansion remain on the compatibility path; click audio is still not synthesized, so renderer capability remains deliberately `Partial`.
+Current implementation slice: **canonical cursor normal-playback parity** on branch `feat/video-wysiwyg-phase3-cursor-playback-parity`, created directly from #308's squash result. Normal playback now admits only the already-export-proven cursor subset: <=999 fps, <=300 exact frame segments, static uniform 2D parent transform, no fades/effects/transitions/animation/visual keyframes, no same-track overlap, no scene camera, and bounded cursor raster. Unsupported cursor cases revoke canonical authority for the whole visual frame and stay on the established continuous-time compatibility painter.
 
-The cursor slice pins visual palette semantics instead of inheriting mutable theme tokens: highlight `rgba(255, 223, 32, 0.3)` and ring `rgba(0, 188, 255, 0.8)` are explicit in canonical and compatibility preview painters and in the Go rasterizer. Hosted validation run `33800486954` passed `go test ./internal/video/...` plus the full frontend `tsc -b && vite build` before committing the palette correction as `9fa841a8e610e0021a3d194e079a17f20b2e54cd`.
+The existing cursor DOM overlay is the canonical playback consumer; no second cursor runtime or duplicate overlay tree was introduced. When the whole frame is admitted it reads the exact `cursor-state-v1` sample from canonical FrameState, including x/y, scale, highlight, click-ring state, and strict `<300 ms` click-window semantics. In fallback mode it retains the prior continuous-time sampler.
 
-`parity-cursor-v1` isolates one lossless 640×360 black PNG, 100 fps, one static media clip, and exact frames `20/21/50/79/80` around a click at 500 ms. Frames 20 and 80 are exactly ±300 ms and must omit the ring; 21/50/79 must include it. Two independent hosted attempts on run `33800619647` reproduced every numeric metric and changed bound exactly. Artifacts `9910959242` / `9911073577` are SHA-256 `8ea87cd181e399736580ded5c785f1d169ac416a23b2d7e37281ee7c82c9183e` / `49250eafc469cbe956bb83c08d6fb3146b458f29e486de8a25d4a26699155ca0`. No-ring frames measured pixel pass `0.9911935764`, SSIM `0.9867336425`, MAE `0.2817129630`, RMSE `3.6370401899`; ring frames measured `0.9851866319`, `0.9837122720`, `0.4196397569`, `4.3971392544`; maximum channel delta is `178`.
+`parity-playback-canonical-v5` extends the retained normal-playback fixture with four cursor classes: standalone cursor canonical playback; resource-text + cursor all-frame canonical playback; weighted transition + resource text + cursor composition; and an unsupported fade-parent cursor that must fail closed with `cursor-playback-deferred:<clip>:fade-unsupported`. Browser evidence records per-frame cursor consumer/state mode and exact x/y/click/scale/highlight/click-ring values, independently recomputes the expected rational-time sample from the immutable fixture, requires canonical cursor motion, and crosses both sides of the click-ring window.
 
-Hard-gate run `33801254401` passed on head `ed58353d555db10092421c494c02ebe6c65173ce`; retained artifact `9911228698` is SHA-256 `0c41d4996d66b44582d2627036fbc0aec1ddd065d6617a14063dc26b9327c9e1`. The gate requires no-ring ≥0.990 pixel pass / ≥0.985 SSIM / ≤0.31 MAE / ≤3.80 RMSE, ring ≥0.984 / ≥0.982 / ≤0.45 / ≤4.50, max channel delta ≤180, exact per-frame changed bounds, exact pinned palette, immutable backdrop identity, canonical frame identity, and strict ring-boundary structure.
+Isolated hosted evidence run `33840939201` passed contract/build validation, deterministic fixture generation, live browser capture, and the v5 evidence gate before committing the proven product/evidence changes as `501a65f7bbe604aaad5b2d63f46f778770f69414`. The primary branch was then fast-forwarded to that validated commit. The final PR head still requires the complete triggered repository matrix before merge.
 
 **Phase 2 — Canonical contract is complete. Phase 3 — Shared preview composition is active. Phase 0 parity-evidence hardening continues in parallel.** Renderer-independent contracts own authored semantics. Browser/FFmpeg consumers may produce renderer-specific evidence, but they must not silently redefine canonical intent.
 
@@ -54,6 +54,17 @@ Hard-gate run `33801254401` passed on head `ed58353d555db10092421c494c02ebe6c651
 - Two independent measurement attempts on run `33800619647` reproduced all metrics and changed bounds exactly. Retained artifacts are `9910959242` (`8ea87cd181e399736580ded5c785f1d169ac416a23b2d7e37281ee7c82c9183e`) and `9911073577` (`49250eafc469cbe956bb83c08d6fb3146b458f29e486de8a25d4a26699155ca0`).
 - Hard-gate run `33801254401` passed with `focused_pass=true` on all five samples. Artifact `9911228698` is SHA-256 `0c41d4996d66b44582d2627036fbc0aec1ddd065d6617a14063dc26b9327c9e1`. Repository-global ±2 diagnostics remain independent; the cursor gate records the stable Chromium-vs-Go antialiasing envelope rather than weakening global thresholds.
 - Renderer capability remains `Partial`: this slice deliberately does not synthesize click audio and does not admit smoothing/animated/3D/camera/effect/transition parents or unbounded cursor expansion.
+
+### Canonical cursor normal-playback parity slice
+
+- `previewCursorPlayback.ts` is a fail-closed browser admission classifier aligned to the supported export subset rather than the broader authored cursor schema. It does not mutate persisted timeline data or `cursor-state-v1`.
+- Whole-frame playback canonicalization treats supported cursor painting as a synchronous canonical consumer. Any cursor structural debt revokes the entire visual frame before text or weighted runtime readiness can partially promote other surfaces.
+- `VideoPreviewCanvasLegacy.tsx` reuses the existing overlay and consumes `entry.canonicalState.cursor` only when a canonical visual frame is active; compatibility playback retains the legacy time-domain cursor sampler.
+- Cursor playback evidence exposes stable DOM diagnostics for state mode, consumer, clip id, x/y, click, scale, highlight, and click-ring flags. These are evidence-only observability fields, not authored semantics.
+- Focused unit coverage locks the export-aligned admission boundary and whole-frame interaction with resource-backed text and other canonical surfaces.
+- `parity-playback-canonical-v5` proves exact rational-time samples during continuously advancing playback, cursor motion, click-window state changes, resource-text + cursor atomic authority, weighted-transition + text + cursor composition, and explicit unsupported fade-parent fallback.
+- Isolated evidence run `33840939201` completed successfully before commit `501a65f7bbe604aaad5b2d63f46f778770f69414`. Merge remains gated on exact-head PR validation after this tracker/CI update.
+- Deliberate remaining cursor debt is unchanged from export: click audio is not synthesized; smoothing and animated/3D/camera/effect/transition/fade parents remain compatibility-only. The next cursor-specific expansion should be justified by matching export support and retained browser/export evidence, not by preview-only admission.
 
 ### #289 merged result
 
