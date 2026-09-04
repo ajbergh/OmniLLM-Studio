@@ -1,0 +1,75 @@
+name: Finalize Cursor Smoothing Parity
+
+on:
+  push:
+    branches:
+      - feat/video-wysiwyg-phase3-cursor-smoothing-parity
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.13'
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply final cursor smoothing patch
+        run: |
+          set -euo pipefail
+          python scripts/tmp-finalize-cursor-smoothing.py
+          gofmt -w \
+            backend/internal/video/renderer_cursor.go \
+            backend/internal/video/renderer_cursor_test.go \
+            backend/internal/video/parity_fixture_playback.go \
+            backend/internal/video/parity_fixture_playback_test.go \
+            backend/internal/video/renderer_capabilities.go \
+            backend/internal/video/strict_parity.go
+          git diff --check
+      - name: Validate backend cursor and playback contracts
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go test ./internal/video/rendercontract
+          go test ./internal/video
+      - name: Validate frontend cursor and playback contracts
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm ci
+          npx vitest run \
+            test/renderContractCursor.test.ts \
+            test/renderContractFrameStateCursor.test.ts \
+            src/components/video/PreviewCanonicalPainters.test.ts \
+            src/components/video/previewCursorPlayback.test.ts \
+            src/components/video/previewPlaybackCursorCanonicalization.test.ts
+          npm run build
+      - name: Validate evidence scripts and workflow diff
+        run: |
+          set -euo pipefail
+          node --check scripts/video-cursor-smoothing-parity-capture.mjs
+          node --check scripts/video-playback-parity-capture.mjs
+          git diff --check
+          test -f .github/workflows/video-cursor-smoothing-parity.yml
+          grep -q 'parity-playback-canonical-v6.json' .github/workflows/video-playback-canonical-parity.yml
+      - name: Commit validated finalization
+        run: |
+          set -euo pipefail
+          git rm scripts/tmp-finalize-cursor-smoothing.py .github/workflows/tmp-finalize-cursor-smoothing.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add cursor smoothing parity evidence'
+          git push origin HEAD:feat/video-wysiwyg-phase3-cursor-smoothing-parity
