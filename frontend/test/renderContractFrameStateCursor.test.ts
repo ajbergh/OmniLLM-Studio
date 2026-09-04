@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CURSOR_STATE_CONTRACT_V1 } from '../src/video/renderContractCursor';
+import { CURSOR_STATE_CONTRACT_V1, CURSOR_STATE_CONTRACT_V2 } from '../src/video/renderContractCursor';
 import { evaluateVisualFrameState } from '../src/video/renderContractFrameState';
 import type { TimelineV2Cursor, TimelineV2Document } from '../src/video/renderContractTypes';
 
@@ -49,6 +49,24 @@ describe('canonical cursor FrameState projection', () => {
     expect(state.authoritative).toBe(true);
   });
 
+
+  it('projects cursor-state-v2 smoothing at the exact rational frame time', () => {
+    const state = evaluateVisualFrameState(cursorFrameStateDocument({
+      smoothing: true,
+      events: [
+        { time_ms: 0, x: 10, y: 20 },
+        { time_ms: 10, x: 40, y: 50, click: true },
+      ],
+    }), 1);
+    const progress = 7 / 27;
+    expect(state.layers[0].cursor?.contract_version).toBe(CURSOR_STATE_CONTRACT_V2);
+    expect(state.layers[0].cursor?.x).toBeCloseTo(10 + 30 * progress, 12);
+    expect(state.layers[0].cursor?.y).toBeCloseTo(20 + 30 * progress, 12);
+    expect(state.layers[0].unresolved).toEqual([]);
+    expect(state.layers[0].authoritative).toBe(true);
+    expect(state.authoritative).toBe(true);
+  });
+
   it.each([
     ['hidden', { visible: false, events: [{ time_ms: 0, x: 1, y: 2 }] }],
     ['empty', {}],
@@ -63,8 +81,8 @@ describe('canonical cursor FrameState projection', () => {
 
   it('fails closed when invalid cursor authoring reaches FrameState', () => {
     expect(() => evaluateVisualFrameState(cursorFrameStateDocument({
-      smoothing: true,
+      scale: 5,
       events: [{ time_ms: 0, x: 1, y: 2 }],
-    }), 1)).toThrow(/smoothing/);
+    }), 1)).toThrow(/scale/);
   });
 });

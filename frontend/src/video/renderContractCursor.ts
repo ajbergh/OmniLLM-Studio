@@ -1,6 +1,7 @@
 import type { TimelineV2Cursor, TimelineV2CursorEvent } from './renderContractTypes';
 
 export const CURSOR_STATE_CONTRACT_V1 = 'cursor-state-v1' as const;
+export const CURSOR_STATE_CONTRACT_V2 = 'cursor-state-v2' as const;
 export const CURSOR_CLICK_WINDOW_MS = 300;
 export const CURSOR_MIN_SCALE = 0.25;
 export const CURSOR_MAX_SCALE = 4;
@@ -11,7 +12,7 @@ export interface CanonicalRationalMilliseconds {
 }
 
 export interface CanonicalEvaluatedCursorState {
-  contract_version: typeof CURSOR_STATE_CONTRACT_V1;
+  contract_version: typeof CURSOR_STATE_CONTRACT_V1 | typeof CURSOR_STATE_CONTRACT_V2;
   visible: true;
   scale: number;
   highlight: boolean;
@@ -23,9 +24,10 @@ export interface CanonicalEvaluatedCursorState {
 
 /**
  * Sample Timeline v2 cursor metadata at an exact clip-relative rational time.
- * Omitted visible means visible. Linear interpolation, endpoint hold, and the
- * strict <300ms click window intentionally match the current editor preview.
- * Smoothing has no defined editor algorithm yet and therefore fails closed.
+ * Omitted visible means visible. Linear interpolation remains cursor-state-v1.
+ * smoothing=true emits cursor-state-v2 and applies deterministic cubic
+ * smoothstep timing (3t²−2t³) between the same authored event coordinates.
+ * Endpoint hold and the strict <300ms click window are identical in both.
  */
 export function evaluateCursorState(
   cursor: TimelineV2Cursor | undefined,
@@ -34,9 +36,6 @@ export function evaluateCursorState(
   if (!cursor) return undefined;
   if (!Number.isInteger(time.numerator) || !Number.isInteger(time.denominator) || time.denominator <= 0) {
     throw new Error('canonical cursor sample time must use an integer numerator and positive integer denominator');
-  }
-  if (cursor.smoothing === true) {
-    throw new Error(`canonical cursor smoothing is not defined for ${CURSOR_STATE_CONTRACT_V1}`);
   }
   if (cursor.visible === false || !cursor.events || cursor.events.length === 0) return undefined;
 
@@ -47,9 +46,10 @@ export function evaluateCursorState(
   }
   validateCursorEvents(cursor.events);
 
-  const position = sampleCursorPosition(cursor.events, time);
+  const smoothing = cursor.smoothing === true;
+  const position = sampleCursorPosition(cursor.events, time, smoothing);
   return {
-    contract_version: CURSOR_STATE_CONTRACT_V1,
+    contract_version: smoothing ? CURSOR_STATE_CONTRACT_V2 : CURSOR_STATE_CONTRACT_V1,
     visible: true,
     scale,
     highlight: cursor.highlight === true,
@@ -76,7 +76,7 @@ function validateCursorEvents(events: TimelineV2CursorEvent[]): void {
   });
 }
 
-function sampleCursorPosition(events: TimelineV2CursorEvent[], time: CanonicalRationalMilliseconds): { x: number; y: number } {
+function sampleCursorPosition(events: TimelineV2CursorEvent[], time: CanonicalRationalMilliseconds, smoothing: boolean): { x: number; y: number } {
   const at = (ms: number) => ms * time.denominator;
   let previous = events[0];
   if (time.numerator <= at(previous.time_ms)) return { x: previous.x, y: previous.y };
@@ -84,7 +84,8 @@ function sampleCursorPosition(events: TimelineV2CursorEvent[], time: CanonicalRa
     const next = events[index];
     if (time.numerator <= at(next.time_ms)) {
       const span = Math.max(1, next.time_ms - previous.time_ms);
-      const progress = (time.numerator - at(previous.time_ms)) / (span * time.denominator);
+      const linearProgress = (time.numerator - at(previous.time_ms)) / (span * time.denominator);
+      const progress = smoothing ? smoothCursorProgress(linearProgress) : linearProgress;
       return {
         x: previous.x + (next.x - previous.x) * progress,
         y: previous.y + (next.y - previous.y) * progress,
@@ -93,6 +94,12 @@ function sampleCursorPosition(events: TimelineV2CursorEvent[], time: CanonicalRa
     previous = next;
   }
   return { x: previous.x, y: previous.y };
+}
+
+function smoothCursorProgress(progress: number): number {
+  if (progress <= 0) return 0;
+  if (progress >= 1) return 1;
+  return progress * progress * (3 - 2 * progress);
 }
 
 function cursorClickNearTime(events: TimelineV2CursorEvent[], time: CanonicalRationalMilliseconds): boolean {

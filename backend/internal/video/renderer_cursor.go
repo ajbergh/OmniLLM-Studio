@@ -42,8 +42,8 @@ type cursorRasterSpec struct {
 // uniform scale, Z rotation, opacity, track visibility, and track ordering.
 //
 // The function intentionally returns ok=false for combinations that still need
-// a renderer-specific approximation (smoothing, animated/3D/camera/effect/
-// transition parents, overlapping same-track siblings, or clips too long for
+// a renderer-specific approximation (animated/3D/camera/effect/transition
+// parents, overlapping same-track siblings, or clips too long for
 // the bounded fidelity expansion). Those cases stay on the compatibility path.
 func canonicalCursorRasterOverlayClips(
 	clip TimelineClip,
@@ -61,7 +61,7 @@ func canonicalCursorRasterOverlayClips(
 	if fps <= 0 || fps > cursorRasterMaxExactFPS || maxSegments <= 0 {
 		return nil, false
 	}
-	if clip.Cursor.Smoothing || clip.FadeInMS > 0 || clip.FadeOutMS > 0 || len(clip.Transitions) > 0 || len(clip.AnimationBlocks) > 0 {
+	if clip.FadeInMS > 0 || clip.FadeOutMS > 0 || len(clip.Transitions) > 0 || len(clip.AnimationBlocks) > 0 {
 		return nil, false
 	}
 	for _, effect := range clip.Effects {

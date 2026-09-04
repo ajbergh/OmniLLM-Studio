@@ -91,26 +91,38 @@ func TestCanonicalCursorRasterAppliesStaticParentAffineToOrigin(t *testing.T) {
 	}
 }
 
-func TestCanonicalCursorRasterFallsBackForSmoothing(t *testing.T) {
-	doc := NewEmptyTimeline(640, 360, 30)
-	doc.DurationMS = 1000
+func TestCanonicalCursorRasterSupportsSmoothstepV2(t *testing.T) {
+	doc := NewEmptyTimeline(640, 360, 100)
+	doc.DurationMS = 1001
 	doc.Tracks[0].Clips = []TimelineClip{{
-		ID: "cursor-owner", AssetID: "media", StartMS: 0, DurationMS: 1000, TrimOutMS: 1000,
+		ID: "cursor-owner", AssetID: "media", StartMS: 0, DurationMS: 1001, TrimOutMS: 1001,
 		Transform: map[string]any{"x": 0.0, "y": 0.0, "scale": 1.0, "rotation": 0.0, "opacity": 1.0},
 		Effects:   []TimelineEffect{}, Keyframes: []TimelineKeyframe{}, Transitions: []TimelineTransition{},
-		Cursor: &TimelineCursor{Visible: true, Scale: 1, Smoothing: true, Events: []TimelineCursorEvent{{TimeMS: 0, X: 10, Y: 20}}},
+		Cursor: &TimelineCursor{Visible: true, Scale: 1, Smoothing: true, Events: []TimelineCursorEvent{
+			{TimeMS: 0, X: 320, Y: 180},
+			{TimeMS: 1000, X: 420, Y: 280},
+		}},
 	}}
 
-	expanded := ExpandTimelineForFidelity(doc, 30, 120)
-	foundLegacy := false
-	for _, clip := range expanded.Tracks[0].Clips {
-		if clip.Text != nil && clip.Text.Text == "➤" {
-			foundLegacy = true
-			break
+	expanded := ExpandTimelineForFidelity(doc, 100, 120)
+	filtered := FilterTimelineAtDiagnosticFrame(expanded, 25, 100, 0)
+	found := false
+	for _, clip := range filtered.Tracks[0].Clips {
+		if clip.Metadata == nil || clip.Metadata[cursorRasterMetadataKey] != cursorRasterContractVersion {
+			continue
+		}
+		found = true
+		x, _ := numericTransform(clip.Transform, "x")
+		y, _ := numericTransform(clip.Transform, "y")
+		if math.Abs(x-15.625) > 1e-9 || math.Abs(y-15.625) > 1e-9 {
+			t.Fatalf("smoothed frame-25 cursor transform = x=%v y=%v, want 15.625/15.625", x, y)
+		}
+		if clip.Text != nil || clip.Shape != nil || !strings.HasPrefix(clip.AssetID, cursorRasterAssetPrefix) {
+			t.Fatalf("smoothed cursor did not use canonical raster: %+v", clip)
 		}
 	}
-	if !foundLegacy {
-		t.Fatalf("smoothing cursor did not retain compatibility fallback: %+v", expanded.Tracks[0].Clips)
+	if !found {
+		t.Fatalf("smoothed cursor did not produce a canonical v2 raster: %+v", filtered.Tracks[0].Clips)
 	}
 }
 

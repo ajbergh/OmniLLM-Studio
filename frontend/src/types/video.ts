@@ -295,7 +295,7 @@ export interface VideoTimelineCursorEvent {
   click?: boolean;
 }
 
-/** Cursor metadata captured with screen recordings; persisted, preview-only at export. */
+/** Cursor metadata captured with screen recordings; supported subsets render in canonical preview/export paths. */
 export interface VideoTimelineCursor {
   visible?: boolean;
   scale?: number;

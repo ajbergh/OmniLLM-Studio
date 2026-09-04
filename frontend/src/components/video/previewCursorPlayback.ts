@@ -76,9 +76,11 @@ export function hasPreviewCursorPlaybackMetadata(layer: PreviewCursorPlaybackLay
  * one media owner, <=999 fps and <=300 exact frame segments, static 2D parent,
  * no fades/effects/transitions/animation/visual keyframes, no overlapping
  * same-track sibling, no overlapping scene camera, and bounded cursor raster.
+ * Linear cursor motion consumes cursor-state-v1; deterministic smoothstep
+ * motion consumes cursor-state-v2.
  *
- * This is a browser admission rule only. It never mutates cursor-state-v1 or
- * persisted timeline data.
+ * This is a browser admission rule only. It never mutates computed cursor state
+ * or persisted timeline data.
  */
 export function previewCursorPlaybackStructuralDeferredReason(
   layer: PreviewCursorPlaybackLayer,
@@ -105,7 +107,6 @@ export function previewCursorPlaybackStructuralDeferredReason(
     return `${clip.id}:segment-bound-${segments}`;
   }
   if (cursor.visible === false) return `${clip.id}:hidden-cursor-not-export-proven`;
-  if (cursor.smoothing === true) return `${clip.id}:smoothing-unsupported`;
   if ((clip.fade_in_ms ?? 0) > 0 || (clip.fade_out_ms ?? 0) > 0) return `${clip.id}:fade-unsupported`;
   if ((clip.transitions?.length ?? 0) > 0) return `${clip.id}:transition-parent-unsupported`;
   if ((clip.animation_blocks?.length ?? 0) > 0) return `${clip.id}:animation-parent-unsupported`;
