@@ -35,14 +35,16 @@ jobs:
           bash scripts/ci-playwright-install.sh
           command -v ffmpeg
           command -v ffprobe
-      - name: Generate smoothing fixture and backdrop
+      - name: Generate smoothing fixture, server, and backdrop
         run: |
           set -euo pipefail
+          mkdir -p output/video-cursor-smoothing-parity/bin
           (
             cd backend
             go test ./internal/video -run '^TestParityCursorSmoothingFixtureIsNarrowAndAsymmetric$|^TestCanonicalCursorRasterSupportsSmoothstepV2$'
             go test ./internal/video/rendercontract -run '^TestEvaluateCursorStateDefinesDeterministicSmoothstepV2$|^TestVisualFrameStateProjectsSmoothedCursorV2AtExactRationalTime$'
             go run ./cmd/video-cursor-smoothing-parity-fixture --output-dir ../output/video-cursor-smoothing-parity/fixture
+            go build -o ../output/video-cursor-smoothing-parity/bin/server ./cmd/server
           )
           mkdir -p output/video-cursor-smoothing-parity/fixture/media
           ffmpeg -hide_banner -loglevel error -y \
@@ -60,10 +62,7 @@ jobs:
           export OMNILLM_PORT=18108
           export OMNILLM_DB_PATH="$runtime/parity.db"
           export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
-          (
-            cd backend
-            go run ./cmd/server >"$runtime/backend.log" 2>"$runtime/backend.err.log"
-          ) &
+          "$GITHUB_WORKSPACE/output/video-cursor-smoothing-parity/bin/server" >"$runtime/backend.log" 2>"$runtime/backend.err.log" &
           backend_pid=$!
           (
             cd frontend
@@ -81,6 +80,8 @@ jobs:
             fi
             if [ "$attempt" -eq 60 ]; then
               echo "cursor smoothing parity servers did not become ready" >&2
+              cat "$runtime/backend.err.log" >&2 || true
+              cat "$runtime/backend.log" >&2 || true
               exit 1
             fi
             sleep 1
