@@ -1,0 +1,140 @@
+name: Measure Rounded Rectangle Parity
+
+on:
+  push:
+    branches:
+      - feat/video-wysiwyg-phase3-rounded-rectangle-parity
+
+permissions:
+  contents: read
+
+concurrency:
+  group: measure-rounded-rectangle-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25.13'
+  NODE_VERSION: '24'
+
+jobs:
+  measure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+      - working-directory: frontend
+        run: npm ci
+      - name: Install parity dependencies
+        run: |
+          set -euo pipefail
+          bash scripts/ci-apt-install.sh ffmpeg
+          bash scripts/ci-playwright-install.sh
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Validate and generate focused fixture
+        run: |
+          set -euo pipefail
+          (
+            cd backend
+            go test ./internal/video -run 'TestParityRoundedRectangleFixtureValid|TestCanonicalRoundedRectangleRaster|TestWriteRoundedRectangleRasterPNG|TestMaterializeCanonicalShapeRasterAssets|TestExpandTimelineForFidelityUsesRoundedRectangleRasterAsset|TestParseShapeRasterColor'
+            go run ./cmd/video-rounded-rectangle-parity-fixture --output-dir ../output/video-rounded-rectangle-parity/fixture
+            mkdir -p ../output/video-rounded-rectangle-parity/bin
+            go build -o ../output/video-rounded-rectangle-parity/bin/server ./cmd/server
+          )
+          node --check scripts/video-rounded-rectangle-parity-capture.mjs
+      - name: Capture browser and FFmpeg frames
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/output/video-rounded-rectangle-parity/runtime"
+          mkdir -p "$runtime/attachments"
+          export OMNILLM_PORT=18101
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          "$GITHUB_WORKSPACE/output/video-rounded-rectangle-parity/bin/server" >"$runtime/backend.log" 2>"$runtime/backend.err.log" &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18101 npm run dev -- --host 127.0.0.1 --port 14184 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18101/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14184/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "rounded rectangle parity servers did not become ready" >&2
+              cat "$runtime/backend.err.log" >&2 || true
+              cat "$runtime/backend.log" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          fixture=output/video-rounded-rectangle-parity/fixture/parity-rounded-rectangle-v1.json
+          capture=output/video-rounded-rectangle-parity/capture
+          node scripts/video-rounded-rectangle-parity-capture.mjs \
+            --url http://127.0.0.1:14184 \
+            --fixture "$fixture" \
+            --output "$capture"
+
+          timeline_hash="$(node -p "require('./$capture/seed-result.json').timeline_sha256")"
+          (
+            cd backend
+            go run ./cmd/video-parity-report \
+              --preview-dir ../$capture/preview \
+              --rendered-dir ../$capture/rendered \
+              --output-dir ../$capture/shape-report \
+              --fps 30 \
+              --fixture parity-rounded-rectangle-v1 \
+              --timeline-sha256 "$timeline_hash" \
+              --allow-fail
+          )
+          node - <<'NODE'
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('output/video-rounded-rectangle-parity/capture/shape-report/parity-report.json', 'utf8'));
+          const evidence = JSON.parse(fs.readFileSync('output/video-rounded-rectangle-parity/capture/rounded-rectangle-frame-evidence.json', 'utf8'));
+          if (report.frames.length !== 1 || report.frames[0].frame_index !== 15 || report.frames[0].compared_pixels !== 640 * 360) {
+            throw new Error(`rounded rectangle report shape drifted: ${JSON.stringify(report)}`);
+          }
+          const measurement = { fixture: 'parity-rounded-rectangle-v1', evidence, frame: report.frames[0], repository_global_report_pass: report.pass };
+          fs.writeFileSync('output/video-rounded-rectangle-parity/capture/measurement.json', `${JSON.stringify(measurement, null, 2)}\n`);
+          console.log(`ROUNDED_RECTANGLE_MEASUREMENT=${JSON.stringify(measurement)}`);
+          NODE
+      - name: Record toolchain
+        if: always()
+        run: |
+          mkdir -p output/video-rounded-rectangle-parity
+          {
+            go version
+            node --version
+            npm --version
+            ffmpeg -version | head -n 1
+            ffprobe -version | head -n 1
+            node -e "console.log('playwright ' + require('playwright/package.json').version)"
+          } > output/video-rounded-rectangle-parity/toolchain.txt
+      - name: Upload rounded rectangle measurement
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-rounded-rectangle-parity-measurement
+          path: output/video-rounded-rectangle-parity
+          if-no-files-found: error
+          retention-days: 14
