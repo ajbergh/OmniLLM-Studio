@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ajbergh/omnillm-studio/internal/models"
 )
 
 func roundedRectangleTestClip() TimelineClip {
