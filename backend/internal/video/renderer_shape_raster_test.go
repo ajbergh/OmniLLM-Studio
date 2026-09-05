@@ -55,11 +55,17 @@ func TestCanonicalRoundedRectangleRasterClipFailsClosedForUnsupportedParent(t *t
 		name string
 		edit func(*TimelineClip)
 	}{
-		{"effect", func(clip *TimelineClip) { clip.Effects = []TimelineEffect{{ID: "fx", Type: EffectTypeBlur, Enabled: true}} }},
-		{"keyframe", func(clip *TimelineClip) { clip.Keyframes = []TimelineKeyframe{{ID: "kf", Property: "x", TimeMS: 0, Value: 20}} }},
+		{"effect", func(clip *TimelineClip) {
+			clip.Effects = []TimelineEffect{{ID: "fx", Type: EffectTypeBlur, Enabled: true}}
+		}},
+		{"keyframe", func(clip *TimelineClip) {
+			clip.Keyframes = []TimelineKeyframe{{ID: "kf", Property: "x", TimeMS: 0, Value: 20}}
+		}},
 		{"crop", func(clip *TimelineClip) { clip.Transform["crop"] = map[string]any{"left": 0.1} }},
 		{"3d", func(clip *TimelineClip) { clip.Transform["rotation_x"] = 12.0 }},
-		{"cursor", func(clip *TimelineClip) { clip.Cursor = &TimelineCursor{Visible: true, Events: []TimelineCursorEvent{{TimeMS: 0, X: 1, Y: 1}}} }},
+		{"cursor", func(clip *TimelineClip) {
+			clip.Cursor = &TimelineCursor{Visible: true, Events: []TimelineCursorEvent{{TimeMS: 0, X: 1, Y: 1}}}
+		}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -126,6 +132,20 @@ func TestMaterializeCanonicalShapeRasterAssetsRegistersAndCleansGeneratedPNG(t *
 	cleanup()
 	if _, err := os.Stat(asset.FilePath); !os.IsNotExist(err) {
 		t.Fatalf("generated raster path survived cleanup: %v", err)
+	}
+}
+
+func TestExpandTimelineForFidelityUsesRoundedRectangleRasterAsset(t *testing.T) {
+	doc := NewEmptyTimeline(640, 360, 30)
+	doc.DurationMS = 1000
+	doc.Tracks[0].Clips = []TimelineClip{roundedRectangleTestClip()}
+	expanded := ExpandTimelineForFidelity(doc, 30, 300)
+	if len(expanded.Tracks[0].Clips) != 1 {
+		t.Fatalf("expanded rounded rectangle clips = %d, want 1", len(expanded.Tracks[0].Clips))
+	}
+	generated := expanded.Tracks[0].Clips[0]
+	if generated.Shape != nil || !strings.HasPrefix(generated.AssetID, shapeRasterAssetPrefix) {
+		t.Fatalf("rounded rectangle did not become canonical raster media: %+v", generated)
 	}
 }
 

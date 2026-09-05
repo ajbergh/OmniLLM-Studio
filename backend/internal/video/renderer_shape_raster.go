@@ -19,16 +19,16 @@ import (
 )
 
 const (
-	shapeRasterContractVersion   = "shape-raster-v1"
-	shapeRasterMetadataKey       = "_omnillm_shape_raster_version"
-	shapeRasterWidthKey          = "_omnillm_shape_raster_width"
-	shapeRasterHeightKey         = "_omnillm_shape_raster_height"
-	shapeRasterFillKey           = "_omnillm_shape_raster_fill"
-	shapeRasterStrokeKey         = "_omnillm_shape_raster_stroke"
-	shapeRasterStrokeWidthKey    = "_omnillm_shape_raster_stroke_width"
-	shapeRasterCornerRadiusKey   = "_omnillm_shape_raster_corner_radius"
-	shapeRasterAssetPrefix       = "__omnillm_shape_raster_v1_"
-	shapeRasterSupersample       = 4
+	shapeRasterContractVersion = "shape-raster-v1"
+	shapeRasterMetadataKey     = "_omnillm_shape_raster_version"
+	shapeRasterWidthKey        = "_omnillm_shape_raster_width"
+	shapeRasterHeightKey       = "_omnillm_shape_raster_height"
+	shapeRasterFillKey         = "_omnillm_shape_raster_fill"
+	shapeRasterStrokeKey       = "_omnillm_shape_raster_stroke"
+	shapeRasterStrokeWidthKey  = "_omnillm_shape_raster_stroke_width"
+	shapeRasterCornerRadiusKey = "_omnillm_shape_raster_corner_radius"
+	shapeRasterAssetPrefix     = "__omnillm_shape_raster_v1_"
+	shapeRasterSupersample     = 4
 )
 
 type roundedRectangleRasterSpec struct {
@@ -260,7 +260,7 @@ func supersampledRoundedRectanglePixel(x, y, cx, cy float64, spec roundedRectang
 	if sum.a <= 0 {
 		return color.NRGBA{}
 	}
-	return color.NRGBA{R: uint8(math.Round(clampFloat(sum.r/sum.a, 0, 1)*255)), G: uint8(math.Round(clampFloat(sum.g/sum.a, 0, 1)*255)), B: uint8(math.Round(clampFloat(sum.b/sum.a, 0, 1)*255)), A: uint8(math.Round(clampFloat(sum.a, 0, 1)*255))}
+	return color.NRGBA{R: uint8(math.Round(clampFloat(sum.r/sum.a, 0, 1) * 255)), G: uint8(math.Round(clampFloat(sum.g/sum.a, 0, 1) * 255)), B: uint8(math.Round(clampFloat(sum.b/sum.a, 0, 1) * 255)), A: uint8(math.Round(clampFloat(sum.a, 0, 1) * 255))}
 }
 
 func roundedRectangleSample(x, y float64, spec roundedRectangleRasterSpec, fill, stroke color.NRGBA) premultipliedPixel {
