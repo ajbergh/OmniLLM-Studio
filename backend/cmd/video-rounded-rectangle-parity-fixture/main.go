@@ -1,0 +1,56 @@
+// Command video-rounded-rectangle-parity-fixture emits the focused
+// parity-rounded-rectangle-v1 timeline used to compare canonical browser shape
+// painting with FFmpeg diagnostic frames.
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/ajbergh/omnillm-studio/internal/video"
+)
+
+type fixtureBundle struct {
+	Name     string                     `json:"name"`
+	Timeline video.TimelineDocument     `json:"timeline"`
+	Assets   []video.ParityFixtureAsset `json:"assets"`
+	Samples  []video.ParityFrameSample  `json:"samples"`
+}
+
+func main() {
+	outputDir := flag.String("output-dir", "output/video-rounded-rectangle-parity/fixture", "directory for generated fixture JSON")
+	flag.Parse()
+
+	doc, assets := video.ParityRoundedRectangleFixture()
+	validated, err := video.ValidateTimelineDocument(doc)
+	if err != nil {
+		fatalf("validate rounded rectangle fixture: %v", err)
+	}
+	bundle := fixtureBundle{
+		Name:     video.ParityRoundedRectangleFixtureName,
+		Timeline: validated,
+		Assets:   assets,
+		Samples:  video.ParityRoundedRectangleFrameSamples(),
+	}
+	if err := os.MkdirAll(*outputDir, 0o755); err != nil {
+		fatalf("create output dir: %v", err)
+	}
+	body, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		fatalf("marshal fixture: %v", err)
+	}
+	body = append(body, '\n')
+	path := filepath.Join(*outputDir, video.ParityRoundedRectangleFixtureName+".json")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		fatalf("write fixture: %v", err)
+	}
+	fmt.Println(path)
+}
+
+func fatalf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}
