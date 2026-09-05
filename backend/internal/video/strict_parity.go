@@ -23,7 +23,9 @@ func StrictParityIssues(doc TimelineDocument) []StrictParityIssue {
 				issues = append(issues, StrictParityIssue{Path: path + ".text", Feature: RendererFeatureText, Detail: "browser and FFmpeg text layout are not exact"})
 			}
 			if clip.Shape != nil {
-				issues = append(issues, StrictParityIssue{Path: path + ".shape", Feature: RendererFeatureAnnotations, Detail: "annotation geometry is partially normalized during export"})
+				if _, exact := canonicalRoundedRectangleRasterClip(clip, doc.Canvas, doc.Scenes); !exact {
+					issues = append(issues, StrictParityIssue{Path: path + ".shape", Feature: RendererFeatureAnnotations, Detail: "annotation geometry is outside the proven exact rounded-rectangle raster subset and may be normalized during export"})
+				}
 			}
 			if clip.Cursor != nil && len(clip.Cursor.Events) > 0 {
 				issues = append(issues, StrictParityIssue{Path: path + ".cursor", Feature: RendererFeatureCursor, Detail: "cursor parity is bounded to the proven static-2D raster subset; complex parents and click audio remain partial"})

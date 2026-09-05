@@ -1137,8 +1137,9 @@ func drawBoxFilter(clip TimelineClip, shape TimelineShape, width, height int) st
 		color := ffmpegColor(shape.Fill, "0xFACC15")
 		return fmt.Sprintf("drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@%.3f:t=fill:%s", x, y, boxW, boxH, color, opacity, enable)
 	case ShapeKindRectangle, ShapeKindRoundedRectangle:
-		// Rounded rectangles export with square corners — drawbox cannot
-		// round; the capability matrix reports this as partial.
+		// Compatibility fallback. FidelityRenderer converts the proven static-2D
+		// rounded_rectangle subset to an exact raster asset before this point;
+		// unsupported rounded rectangles still flatten through drawbox.
 		color := ffmpegColor(shape.Stroke, "0xF59E0B")
 		thickness := int(shape.StrokeWidth + 0.5)
 		if thickness <= 0 {

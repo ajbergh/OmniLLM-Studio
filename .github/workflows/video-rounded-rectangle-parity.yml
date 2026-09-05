@@ -1,0 +1,195 @@
+name: Video Rounded Rectangle Parity Evidence
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/video-rounded-rectangle-parity.yml'
+      - 'backend/cmd/video-rounded-rectangle-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_rounded_rectangle.go'
+      - 'backend/internal/video/parity_fixture_rounded_rectangle_test.go'
+      - 'backend/internal/video/renderer_shape_raster.go'
+      - 'backend/internal/video/renderer_shape_raster_test.go'
+      - 'backend/internal/video/renderer_fidelity.go'
+      - 'backend/internal/video/rendercontract/shape_state.go'
+      - 'backend/internal/video/rendercontract/shape_state_test.go'
+      - 'frontend/src/components/video/PreviewCanonicalPainters.tsx'
+      - 'frontend/src/video/renderContractShape.ts'
+      - 'scripts/video-rounded-rectangle-parity-capture.mjs'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/video-rounded-rectangle-parity.yml'
+      - 'backend/cmd/video-rounded-rectangle-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_rounded_rectangle.go'
+      - 'backend/internal/video/parity_fixture_rounded_rectangle_test.go'
+      - 'backend/internal/video/renderer_shape_raster.go'
+      - 'backend/internal/video/renderer_shape_raster_test.go'
+      - 'backend/internal/video/renderer_fidelity.go'
+      - 'backend/internal/video/rendercontract/shape_state.go'
+      - 'backend/internal/video/rendercontract/shape_state_test.go'
+      - 'frontend/src/components/video/PreviewCanonicalPainters.tsx'
+      - 'frontend/src/video/renderContractShape.ts'
+      - 'scripts/video-rounded-rectangle-parity-capture.mjs'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-rounded-rectangle-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25.13'
+  NODE_VERSION: '24'
+
+jobs:
+  rounded-rectangle-evidence:
+    name: Rounded rectangle browser/export parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+      - working-directory: frontend
+        run: npm ci
+      - name: Install parity dependencies
+        run: |
+          set -euo pipefail
+          bash scripts/ci-apt-install.sh ffmpeg
+          bash scripts/ci-playwright-install.sh
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Validate and generate focused fixture
+        run: |
+          set -euo pipefail
+          (
+            cd backend
+            go test ./internal/video -run 'TestParityRoundedRectangleFixtureValid|TestCanonicalRoundedRectangleRaster|TestWriteRoundedRectangleRasterPNG|TestMaterializeCanonicalShapeRasterAssets|TestExpandTimelineForFidelityUsesRoundedRectangleRasterAsset|TestParseShapeRasterColor'
+            go run ./cmd/video-rounded-rectangle-parity-fixture --output-dir ../output/video-rounded-rectangle-parity/fixture
+            mkdir -p ../output/video-rounded-rectangle-parity/bin
+            go build -o ../output/video-rounded-rectangle-parity/bin/server ./cmd/server
+          )
+          node --check scripts/video-rounded-rectangle-parity-capture.mjs
+      - name: Capture and gate browser/export evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/output/video-rounded-rectangle-parity/runtime"
+          mkdir -p "$runtime/attachments"
+          export OMNILLM_PORT=18101
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          "$GITHUB_WORKSPACE/output/video-rounded-rectangle-parity/bin/server" >"$runtime/backend.log" 2>"$runtime/backend.err.log" &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18101 npm run dev -- --host 127.0.0.1 --port 14184 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18101/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14184/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "rounded rectangle parity servers did not become ready" >&2
+              cat "$runtime/backend.err.log" >&2 || true
+              cat "$runtime/backend.log" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          fixture=output/video-rounded-rectangle-parity/fixture/parity-rounded-rectangle-v1.json
+          capture=output/video-rounded-rectangle-parity/capture
+          node scripts/video-rounded-rectangle-parity-capture.mjs \
+            --url http://127.0.0.1:14184 \
+            --fixture "$fixture" \
+            --output "$capture"
+
+          timeline_hash="$(node -p "require('./$capture/seed-result.json').timeline_sha256")"
+          (
+            cd backend
+            go run ./cmd/video-parity-report \
+              --preview-dir ../$capture/preview \
+              --rendered-dir ../$capture/rendered \
+              --output-dir ../$capture/shape-report \
+              --fps 30 \
+              --fixture parity-rounded-rectangle-v1 \
+              --timeline-sha256 "$timeline_hash" \
+              --allow-fail
+          )
+          node - <<'NODE'
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('output/video-rounded-rectangle-parity/capture/shape-report/parity-report.json', 'utf8'));
+          const evidence = JSON.parse(fs.readFileSync('output/video-rounded-rectangle-parity/capture/rounded-rectangle-frame-evidence.json', 'utf8'));
+          const errors = [];
+          if (report.frames.length !== 1) errors.push(`expected 1 frame, got ${report.frames.length}`);
+          const frame = report.frames[0];
+          if (!frame || frame.frame_index !== 15 || frame.compared_pixels !== 640 * 360 || !frame.dimensions_match) {
+            errors.push(`frame identity/dimensions drifted: ${JSON.stringify(frame)}`);
+          }
+          if (frame && frame.pixel_pass_rate < 0.9985) errors.push(`pixel pass ${frame.pixel_pass_rate} < 0.9985`);
+          if (frame && frame.ssim < 0.9995) errors.push(`SSIM ${frame.ssim} < 0.9995`);
+          if (frame && frame.mean_absolute_error > 0.02) errors.push(`MAE ${frame.mean_absolute_error} > 0.02`);
+          if (frame && frame.root_mean_square_error > 0.50) errors.push(`RMSE ${frame.root_mean_square_error} > 0.50`);
+          if (frame && frame.max_channel_delta > 64) errors.push(`max channel delta ${frame.max_channel_delta} > 64`);
+          const expectedBounds = { min_x: 200, min_y: 120, max_x: 440, max_y: 240 };
+          if (frame && JSON.stringify(frame.changed_bounds) !== JSON.stringify(expectedBounds)) {
+            errors.push(`changed bounds ${JSON.stringify(frame.changed_bounds)} != ${JSON.stringify(expectedBounds)}`);
+          }
+          const shape = evidence.frame || {};
+          if (shape.state_mode !== 'canonical-frame' || shape.width !== 240 || shape.height !== 120 || shape.border_top_width !== '8px' || shape.border_top_left_radius !== '24px') {
+            errors.push(`canonical browser geometry drifted: ${JSON.stringify(shape)}`);
+          }
+          const focusedPass = errors.length === 0;
+          const gate = {
+            fixture: 'parity-rounded-rectangle-v1',
+            focused_pass: focusedPass,
+            thresholds: { pixel_pass_rate_min: 0.9985, ssim_min: 0.9995, mae_max: 0.02, rmse_max: 0.50, max_channel_delta_max: 64, changed_bounds: expectedBounds },
+            evidence,
+            frame,
+            errors,
+          };
+          fs.writeFileSync('output/video-rounded-rectangle-parity/capture/gate.json', `${JSON.stringify(gate, null, 2)}\n`);
+          console.log(`ROUNDED_RECTANGLE_GATE=${JSON.stringify(gate)}`);
+          if (!focusedPass) process.exit(1);
+          NODE
+      - name: Record toolchain
+        if: always()
+        run: |
+          mkdir -p output/video-rounded-rectangle-parity
+          {
+            go version
+            node --version
+            npm --version
+            ffmpeg -version | head -n 1
+            ffprobe -version | head -n 1
+            node -e "console.log('playwright ' + require('playwright/package.json').version)"
+          } > output/video-rounded-rectangle-parity/toolchain.txt
+      - name: Upload rounded rectangle parity evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-rounded-rectangle-parity-evidence
+          path: output/video-rounded-rectangle-parity
+          if-no-files-found: error
+          retention-days: 14
