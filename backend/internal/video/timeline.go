@@ -317,7 +317,8 @@ type TimelineShape struct {
 	// size respectively (clamped 1–50, default 12).
 	BlurRadius float64 `json:"blur_radius,omitempty"`
 	// CornerRadius applies to rounded rectangles, speech bubbles, and labels
-	// (clamped 0–200). Preview-only; exports draw square corners.
+	// (clamped 0–200). The proven static-2D rounded_rectangle export subset
+	// preserves it; speech bubbles, labels, and unsupported parents remain partial.
 	CornerRadius float64 `json:"corner_radius,omitempty"`
 }
 

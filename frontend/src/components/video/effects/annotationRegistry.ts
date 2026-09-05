@@ -17,7 +17,7 @@ export interface AnnotationDefinition {
 export const ANNOTATION_DEFINITIONS: AnnotationDefinition[] = [
   { kind: 'rectangle', label: 'Rectangle outline', category: 'callout', exportSupport: 'full' },
   { kind: 'highlight', label: 'Highlight box', category: 'callout', exportSupport: 'full' },
-  { kind: 'rounded_rectangle', label: 'Rounded rectangle', category: 'callout', exportSupport: 'partial', exportNote: 'Exports with square corners' },
+  { kind: 'rounded_rectangle', label: 'Rounded rectangle', category: 'callout', exportSupport: 'partial', exportNote: 'Static 2D cases preserve rounded geometry; animated/effect/camera/crop cases retain compatibility export' },
   { kind: 'label', label: 'Label callout', category: 'callout', exportSupport: 'partial', exportNote: 'Exports as a square-corner filled box with text' },
   { kind: 'speech_bubble', label: 'Speech bubble', category: 'callout', exportSupport: 'partial', exportNote: 'Exports as a simplified deterministic callout' },
   { kind: 'blur', label: 'Blur region', category: 'redaction', exportSupport: 'full' },

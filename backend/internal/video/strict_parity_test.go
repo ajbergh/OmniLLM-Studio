@@ -38,6 +38,30 @@ func TestStrictParityIssuesIncludeStableTimelinePaths(t *testing.T) {
 	}
 }
 
+func TestStrictParityAllowsProvenRoundedRectangleRasterSubset(t *testing.T) {
+	doc := NewEmptyTimeline(640, 360, 30)
+	doc.DurationMS = 1000
+	doc.Tracks[0].Clips = []TimelineClip{roundedRectangleTestClip()}
+	if issues := StrictParityIssues(doc); len(issues) != 0 {
+		t.Fatalf("proven rounded rectangle issues = %+v", issues)
+	}
+
+	unsupported := roundedRectangleTestClip()
+	unsupported.FadeInMS = 100
+	doc.Tracks[0].Clips = []TimelineClip{unsupported}
+	issues := StrictParityIssues(doc)
+	foundShape := false
+	for _, issue := range issues {
+		if issue.Path == "tracks[0].clips[0].shape" && issue.Feature == RendererFeatureAnnotations {
+			foundShape = true
+			break
+		}
+	}
+	if !foundShape {
+		t.Fatalf("unsupported rounded rectangle did not retain strict-parity shape issue: %+v", issues)
+	}
+}
+
 func TestStrictParityAllowsTimelineWithoutKnownLegacyMismatches(t *testing.T) {
 	doc := NewEmptyTimeline(1920, 1080, 30)
 	doc.Tracks[0].Clips = []TimelineClip{{ID: "plain-media", AssetID: "asset-1", DurationMS: 1000}}

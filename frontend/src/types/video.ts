@@ -259,8 +259,9 @@ export type VideoTimelineShapeKind =
   | 'rectangle'
   | 'highlight'
   | 'blur'
-  // Annotation kinds. blur/pixelate/rectangle/highlight/rounded_rectangle/label
-  // export (rounded corners flatten to square); the rest are preview-only.
+  // Annotation kinds. blur/pixelate/rectangle/highlight export directly. The
+  // proven static-2D rounded_rectangle subset preserves canonical rounded geometry;
+  // labels and other complex/unsupported annotation cases remain partial.
   | 'rounded_rectangle'
   | 'ellipse'
   | 'arrow'
