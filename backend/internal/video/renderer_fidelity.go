@@ -31,6 +31,7 @@ const (
 	rendererFidelityKindSample        = "sample"
 	rendererFidelityKindCursorPointer = "cursor_pointer"
 	rendererFidelityKindCursorRing    = "cursor_ring"
+	rendererFidelityKindShapeRaster   = "shape_raster"
 )
 
 // NewFidelityRenderer adds eased transform/effect keyframes, wipe/zoom
@@ -69,6 +70,11 @@ func (r *FidelityRenderer) Render(ctx context.Context, req RenderRequest, progre
 		}
 		req.Timeline = FilterTimelineAtDiagnosticFrame(req.Timeline, *req.Settings.DiagnosticFrameIndex, fps, timelineOffsetMS)
 	}
+	shapeCleanup, err := materializeCanonicalShapeRasterAssets(&req)
+	if err != nil {
+		return nil, err
+	}
+	defer shapeCleanup()
 	cursorCleanup, err := materializeCanonicalCursorRasterAssets(&req)
 	if err != nil {
 		return nil, err
@@ -183,6 +189,11 @@ func ExpandTimelineForFidelity(doc TimelineDocument, fps, maxSegments int) Timel
 		expanded := make([]TimelineClip, 0, len(siblings))
 		for _, original := range siblings {
 			clip := normalizeRenderClip(original)
+			if original.Shape != nil && normalizeTimelineToken(original.Shape.Kind) == ShapeKindRoundedRectangle {
+				if rasterClip, ok := canonicalRoundedRectangleRasterClip(original, out.Canvas, out.Scenes); ok {
+					clip = rasterClip
+				}
+			}
 			if clip.AudioOnly || out.Tracks[ti].Type == TrackTypeAudio || out.Tracks[ti].Type == TrackTypeMusic {
 				clip.Cursor = nil
 				// The FFmpeg audio graph already evaluates trim/rate, volume

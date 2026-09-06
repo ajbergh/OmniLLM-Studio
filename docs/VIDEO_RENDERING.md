@@ -74,7 +74,7 @@ Current export coverage includes:
 - Fade, dip, slide, sampled zoom, and directional wipe transitions. Crossfade remains an alpha-fade approximation rather than a true two-input blend.
 - Brightness, contrast, saturation, blur, grayscale, sharpen, vignette, chroma key, sampled effect-amount animation, and timeline-gated cinematic scene effects (film grain, bloom, color grade, edge fade, RGB split, ghost trail, motion blur, depth of field, and rack focus).
 - Text/caption/callout styling including font, size, color, line height, stroke, shadow, background, transform, opacity, fades, and deterministic alignment/letter-spacing approximation.
-- Rectangle, highlight, pixelate, blur-region, and normalized fallback annotation output. Complex geometry such as ellipse, arrow, and speech bubble currently exports as simpler deterministic primitives.
+- Rectangle, highlight, pixelate, blur-region, and normalized fallback annotation output. The proven static-2D `rounded_rectangle` subset is converted to a deterministic full-canvas `shape-state-v1` raster that preserves radius, fill, stroke, owner transform/opacity, timing, and layer order. Complex geometry such as ellipse, arrow, speech bubble, label, and unsupported rounded-rectangle parents still use simpler compatibility primitives.
 - Static 2D media cursors within the bounded fidelity segment limit use canonical output-frame raster overlays: `cursor-state-v1` for linear motion and `cursor-state-v2` for deterministic smoothstep motion, with matching pointer/highlight/click-ring state. Complex animated/3D/camera/effect/transition/fade parents and longer clips stay on the compatibility path. Click audio is not synthesized.
 - Multi-track audio mix with video soundtracks, persisted track solo, per-clip volume/mute, volume keyframes, fades, timeline delay, constant speed, and `amix` mixdown.
 - Optional final audio processing: denoise, EQ preset, compression, LUFS normalization, limiting, and mono/stereo conversion.
@@ -89,7 +89,7 @@ The capability endpoint intentionally reports partial support where output is de
 - Crossfade is an alpha-fade approximation.
 - Drop shadow and background-blur effects remain unsupported by export.
 - Curves are deterministically sampled into static render segments rather than evaluated as a continuously changing FFmpeg expression.
-- Complex annotation geometry normalizes to simpler primitives.
+- Static 2D rounded rectangles in the retained parity subset preserve canonical geometry; other complex annotation geometry and unsupported rounded-rectangle parents normalize to simpler primitives.
 - Cursor click audio is not synthesized.
 - True X/Y tilt remains an explicitly partial 3D export approximation.
 - Chroma key is applied by FFmpeg but cannot be represented faithfully by the CSS preview.

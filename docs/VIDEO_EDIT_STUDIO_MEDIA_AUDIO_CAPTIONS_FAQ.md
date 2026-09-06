@@ -18,7 +18,7 @@ Use the annotation palette or the canvas/lane context menus at the playhead. The
 
 ### Which annotations export faithfully?
 
-Blur and pixelate redact the composited image beneath them in preview and export. Rectangles, highlights, pixelate, blur regions, and normalized fallback annotations export. Rounded rectangles and labels export with square corners; complex shapes such as ellipses, arrows, and speech bubbles currently normalize to simpler primitives. Check the annotation's export badge before a final render.
+Blur and pixelate redact the composited image beneath them in preview and export. Rectangles, highlights, pixelate, blur regions, and normalized fallback annotations export. Static 2D rounded rectangles in the proven parity subset preserve their authored corner radius, fill, stroke, transform, opacity, timing, and layer order. Labels, complex shapes such as ellipses/arrows/speech bubbles, and rounded rectangles with unsupported animation/effect/camera/crop parents still normalize to compatibility primitives. Check the annotation's export badge before a final render.
 
 ### What are cursor effects for?
 
