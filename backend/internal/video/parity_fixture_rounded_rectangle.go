@@ -1,11 +1,11 @@
 package video
 
 const (
-	ParityRoundedRectangleFixtureName      = "parity-rounded-rectangle-v1"
-	parityRoundedRectangleWidth            = 640
-	parityRoundedRectangleHeight           = 360
-	parityRoundedRectangleFPS              = 30
-	parityRoundedRectangleDurationMS int64 = 1000
+	ParityRoundedRectangleFixtureName       = "parity-rounded-rectangle-v1"
+	parityRoundedRectangleWidth             = 640
+	parityRoundedRectangleHeight            = 360
+	parityRoundedRectangleFPS               = 30
+	parityRoundedRectangleDurationMS  int64 = 1000
 )
 
 // ParityRoundedRectangleFixture isolates one static shape-state-v1 rounded
