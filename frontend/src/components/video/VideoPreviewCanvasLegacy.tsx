@@ -33,6 +33,7 @@ import {
 import { evaluateCameraProperty, evaluateClipProperty } from '../../video/renderContractProperties';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
 import { ShapePreview } from './ShapePreview';
+import { CanonicalPreviewShape } from './PreviewCanonicalPainters';
 import type { VideoAsset, VideoTimelineClip, VideoTimelineCursor, VideoTimelineTrack } from '../../types/video';
 import { applyDecoderBudget, buildTimelineIntervalIndex, compareIndexedTimelineClipOrder, queryActiveClips, queryActiveClipsAtFrameWithState } from './pro/timelineIndex';
 import { renderPreviewPCM } from './parity/previewAudioRenderer';
@@ -876,6 +877,15 @@ export function VideoPreviewCanvas() {
       ? canonicalPreviewMediaClipPath(canonicalMediaGeometry, stageScale)
       : undefined;
     const effectPaint = resolvePreviewFrameEffectPaint(entry.canonicalState, clip.effects);
+    // Deterministic paused parity already paints canonical shapes through the
+    // outer portal. Normal playback consumes the same FrameState shape here
+    // only after the whole-frame admission gate has accepted the exact subset.
+    const canonicalPlaybackShape = deterministicFrame === null
+      && playbackDecision.canonicalFrame !== null
+      && clip.shape
+      && !hasLiveOverride
+      ? entry.canonicalState?.shape
+      : undefined;
 
     const wrapperStyle: CSSProperties = {
       left: '50%',
@@ -946,7 +956,9 @@ export function VideoPreviewCanvas() {
         <img src={videoApi.downloadUrl(asset.id)} alt={asset.file_name} className={mediaClassName} style={mediaStyle} />,
       );
     } else if (clip.shape) {
-      content = (
+      content = canonicalPlaybackShape ? (
+        <CanonicalPreviewShape shape={canonicalPlaybackShape} stageScale={stageScale} />
+      ) : (
         <ShapePreview
           shape={clip.shape}
           clip={clip}
@@ -1034,6 +1046,16 @@ export function VideoPreviewCanvas() {
         key={clip.id}
         data-preview-clip-id={clip.id}
         data-preview-media-geometry-mode={isMedia ? (canonicalMediaGeometry ? 'canonical-frame' : 'legacy-object-fit') : undefined}
+        data-preview-shape-state-mode={clip.shape ? (canonicalPlaybackShape ? 'canonical-frame' : 'legacy-time') : undefined}
+        data-preview-shape-playback-consumer={isPlaying && clip.shape ? (canonicalPlaybackShape ? 'canonical-inline' : 'legacy-time-fallback') : undefined}
+        data-preview-shape-playback-clip-id={clip.shape ? clip.id : undefined}
+        data-preview-shape-kind={canonicalPlaybackShape?.kind}
+        data-preview-shape-width={canonicalPlaybackShape?.width}
+        data-preview-shape-height={canonicalPlaybackShape?.height}
+        data-preview-shape-stroke-width={canonicalPlaybackShape?.stroke_width}
+        data-preview-shape-corner-radius={canonicalPlaybackShape?.corner_radius}
+        data-preview-shape-fill={canonicalPlaybackShape?.fill}
+        data-preview-shape-stroke={canonicalPlaybackShape?.stroke}
         data-preview-effect-state-mode={effectPaint.mode}
         data-preview-transition-paint-mode={transitionPaint.mode}
         data-preview-transition-paint-deferred={transitionPaint.deferredComposition}

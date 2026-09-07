@@ -18,6 +18,41 @@ import {
 type Layer = Parameters<typeof resolvePreviewPlaybackCanonicalization>[2][number];
 type Plan = NonNullable<Parameters<typeof resolvePreviewPlaybackCanonicalization>[3]>;
 
+const playbackContext: NonNullable<Parameters<typeof resolvePreviewPlaybackCanonicalization>[4]> = {
+  fps: 30,
+  canvasWidth: 640,
+  canvasHeight: 360,
+  scenes: [],
+};
+
+function roundedShapeLayer(id = 'shape'): Layer {
+  return {
+    clip: {
+      id,
+      start_ms: 0,
+      duration_ms: 1200,
+      shape: {
+        kind: 'rounded_rectangle', width: 240, height: 120,
+        fill: 'rgba(10,20,30,0.5)', stroke: '#f59e0b', stroke_width: 8, corner_radius: 24,
+      },
+      transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
+      effects: [],
+      transitions: [],
+      keyframes: [],
+      animation_blocks: [],
+    },
+    canonicalState: {
+      authoritative: true,
+      shape: {
+        contract_version: 'shape-state-v1',
+        kind: 'rounded_rectangle',
+        width: 240, height: 120, fill: 'rgba(10,20,30,0.5)', stroke: '#f59e0b',
+        stroke_width: 8, blur_radius: 12, corner_radius: 24,
+      },
+    },
+  } as Layer;
+}
+
 function mediaLayer(id = 'media', mimeType = 'video/mp4'): Layer {
   return {
     clip: { id },
@@ -127,6 +162,45 @@ describe('normal playback canonicalization gate', () => {
       [mediaLayer()],
       plan(),
     )).toEqual({ mode: 'canonical-playback', canonicalFrame: 37 });
+  });
+
+  it('admits the export-proven standalone rounded rectangle subset', () => {
+    expect(resolvePreviewPlaybackCanonicalization(
+      12,
+      { authoritative: true },
+      [roundedShapeLayer()],
+      plan(),
+      playbackContext,
+    )).toEqual({ mode: 'canonical-playback', canonicalFrame: 12 });
+  });
+
+  it('fails the whole frame closed when a rounded rectangle leaves the export-proven subset', () => {
+    const shape = roundedShapeLayer();
+    shape.clip.fade_in_ms = 100;
+    expect(resolvePreviewPlaybackCanonicalization(
+      12,
+      { authoritative: true },
+      [shape],
+      plan(),
+      playbackContext,
+    )).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'shape-playback-deferred:shape:fade-unsupported',
+    });
+  });
+
+  it('keeps other canonical shape kinds fail-closed', () => {
+    const shape = roundedShapeLayer('ellipse');
+    shape.clip.shape = { ...shape.clip.shape!, kind: 'ellipse' };
+    if (shape.canonicalState?.shape) shape.canonicalState.shape.kind = 'ellipse';
+    expect(resolvePreviewPlaybackCanonicalization(
+      12,
+      { authoritative: true },
+      [shape],
+      plan(),
+      playbackContext,
+    ).deferredReason).toBe('shape-playback-deferred:ellipse:shape-kind-unsupported');
   });
 
   it('admits a clean source-over transition plan for media-only layers', () => {
@@ -283,7 +357,6 @@ describe('normal playback canonicalization gate', () => {
   });
 
   it.each([
-    ['shape', { ...mediaLayer(), clip: { id: 'shape', shape: {} } }],
     ['cursor', { ...mediaLayer(), clip: { id: 'cursor', cursor: {} } }],
     ['missing-asset', { ...mediaLayer(), clip: { id: 'missing-asset' }, asset: undefined }],
     ['audio-asset', mediaLayer('audio-asset', 'audio/wav')],
@@ -292,6 +365,31 @@ describe('normal playback canonicalization gate', () => {
     expect(result.mode).toBe('legacy-time-fallback');
     expect(result.canonicalFrame).toBeNull();
     expect(result.deferredReason).toBe(`unsupported-playback-painter:${layer.clip.id}`);
+  });
+
+  it('keeps ready text plus an unsupported shape on one deterministic fallback', () => {
+    const title = textLayer();
+    const shape = roundedShapeLayer();
+    shape.clip.fade_in_ms = 100;
+    const layers = [title, shape];
+    const identity = previewTextPlaybackPlanIdentity(layers);
+    publishPreviewTextPlaybackRuntime({
+      frameIndex: 8,
+      planKey: previewTextPlaybackPlanKey(8, layers),
+      planIdentity: identity,
+      status: 'ready',
+    });
+    expect(resolvePreviewPlaybackCanonicalization(
+      8,
+      { authoritative: true },
+      layers,
+      plan(),
+      playbackContext,
+    )).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'shape-playback-deferred:shape:fade-unsupported',
+    });
   });
 
   it('keeps mixed supported text plus unsupported painter frames on one deterministic fallback', () => {
