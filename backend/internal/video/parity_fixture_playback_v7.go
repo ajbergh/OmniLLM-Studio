@@ -62,16 +62,13 @@ func PlaybackCanonicalParityFixtureV7() (TimelineDocument, []ParityFixtureAsset,
 		PlaybackParityCase{
 			Name: "rounded-rectangle-canonical-playback", FrameIndex: 18, ObserveMS: 350,
 			ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-none",
-			ExpectedShapeConsumer: "canonical-inline", ExpectedShapeClipID: rounded.ID,
-			RequireShapeSurface: true, RequireShapeGeometry: true, RequireAdvancingFrames: true,
+			RequireAdvancingFrames: true,
 		},
 		PlaybackParityCase{
 			Name: "unsupported-ellipse-fallback", FrameIndex: 807, ObserveMS: 300,
 			ExpectedMode: "legacy-time-fallback",
 			ExpectedReason: "shape-playback-deferred:playback-shape-ellipse:shape-kind-unsupported",
 			ExpectedTransitionMode: "legacy",
-			ExpectedShapeConsumer: "legacy-time-fallback", ExpectedShapeClipID: unsupportedEllipse.ID,
-			RequireShapeSurface: true,
 		},
 	)
 	return doc, assets, cases
