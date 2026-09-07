@@ -7,7 +7,7 @@ if text.count(marker) != 1:
     raise SystemExit(f'workflow patch marker count={text.count(marker)}, want 1')
 prefix = text.split(marker, 1)[0]
 
-suffix = r'''
+suffix = r"""
 workflow = '.github/workflows/video-playback-canonical-parity.yml'
 p = Path(workflow)
 text = p.read_text()
@@ -33,6 +33,6 @@ if text.count(old_fixture) != 1:
     raise SystemExit(f"{workflow}: fixture anchor count={text.count(old_fixture)}, want 1")
 text = text.replace(old_fixture, '--fixture output/video-playback-canonical/fixture/parity-playback-canonical-v7.json', 1)
 p.write_text(text)
-'''
+"""
 
 patcher.write_text(prefix + marker + suffix)
