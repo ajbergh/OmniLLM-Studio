@@ -81,7 +81,7 @@ describe('normal playback shape canonicalization', () => {
 
   it('revokes a mixed frame atomically when the rounded rectangle parent is unsupported', () => {
     const shape = roundedLayer();
-    shape.clip.fade_in_ms = 100;
+    Object.assign(shape.clip, { fade_in_ms: 100 });
     const media = {
       clip: { id: 'media' },
       asset: { mime_type: 'image/png' },
