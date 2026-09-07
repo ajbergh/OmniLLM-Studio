@@ -32,6 +32,7 @@ jobs:
           set -euo pipefail
           python scripts/tmp-repair-rounded-playback-evidence-patcher.py
           python scripts/tmp-add-rounded-rectangle-playback-evidence.py
+          python scripts/tmp-harden-rounded-playback-v7-windows.py
           gofmt -w backend/internal/video/parity_fixture_playback.go backend/internal/video/parity_fixture_playback_test.go
           git diff --check
       - name: Install parity dependencies
@@ -130,7 +131,7 @@ jobs:
       - name: Commit validated v7 evidence
         run: |
           set -euo pipefail
-          git rm scripts/tmp-add-rounded-rectangle-playback-evidence.py scripts/tmp-repair-rounded-playback-evidence-patcher.py
+          git rm scripts/tmp-add-rounded-rectangle-playback-evidence.py scripts/tmp-repair-rounded-playback-evidence-patcher.py scripts/tmp-harden-rounded-playback-v7-windows.py
           git diff --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
