@@ -152,10 +152,22 @@ try {
       }, { timeout: 3_000 });
     }
 
+    // Readiness checks intentionally execute under real normal playback and can
+    // consume a variable amount of wall-clock/timeline time on loaded CI hosts.
+    // Re-anchor after prewarming so every retained evidence window begins at the
+    // fixture frame it claims to measure instead of inheriting scheduler delay.
+    await page.getByRole('button', { name: 'Pause preview' }).click();
+    await seekParityFrame(page, testCase.frame_index);
+    await page.getByRole('button', { name: 'Play preview' }).click();
+    await page.getByRole('button', { name: 'Pause preview' }).waitFor({ state: 'visible', timeout: 5_000 });
+
     const observations = await page.evaluate(async (observeMs) => {
       const rows = [];
-      const deadline = performance.now() + observeMs;
-      while (performance.now() < deadline) {
+      const minimumObservations = 5;
+      const nominalDeadline = performance.now() + observeMs;
+      const graceDeadline = nominalDeadline + Math.min(250, Math.max(100, observeMs * 0.5));
+      while (performance.now() < nominalDeadline
+        || (rows.length < minimumObservations && performance.now() < graceDeadline)) {
         await new Promise((resolve) => requestAnimationFrame(resolve));
         const stage = document.querySelector('[data-testid="video-preview-program"]');
         if (!stage) throw new Error('video preview program disappeared during playback evidence');
