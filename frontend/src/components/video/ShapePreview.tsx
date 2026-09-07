@@ -185,6 +185,7 @@ export function ShapePreview({
   if (shape.kind !== 'rounded_rectangle') {
     return (
       <div
+        className="contents"
         data-preview-shape-playback-clip-id={clip.id}
         data-preview-shape-playback-consumer="legacy-time-fallback"
         data-preview-shape-state-mode="legacy-time"
