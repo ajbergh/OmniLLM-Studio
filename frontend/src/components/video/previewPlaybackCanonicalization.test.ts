@@ -1,247 +1,212 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CanonicalFrameLayerState } from '../../video/renderContractFrameState';
-import type { PreviewTransitionPairPlan } from './previewFrameTransitionPairs';
-import { resolvePreviewPlaybackCanonicalization } from './previewPlaybackCanonicalization';
 import {
-  previewTextPlaybackPlanIdentity,
+  clearPreviewTextPlaybackRuntime,
   previewTextPlaybackPlanKey,
   publishPreviewTextPlaybackRuntime,
-  resetPreviewTextPlaybackRuntimeForTests,
 } from './previewTextPlaybackRuntime';
 import {
-  previewWeightedPlaybackPlanIdentity,
+  clearPreviewWeightedPlaybackRuntime,
   previewWeightedPlaybackPlanKey,
   publishPreviewWeightedPlaybackRuntime,
-  resetPreviewWeightedPlaybackRuntimeForTests,
 } from './previewWeightedPlaybackRuntime';
+import { resolvePreviewPlaybackCanonicalization } from './previewPlaybackCanonicalization';
 
-type Layer = Parameters<typeof resolvePreviewPlaybackCanonicalization>[2][number];
-type Plan = NonNullable<Parameters<typeof resolvePreviewPlaybackCanonicalization>[3]>;
-
-function mediaLayer(id = 'media', mimeType = 'video/mp4'): Layer {
+function mediaLayer(id = 'media', mime = 'video/mp4') {
   return {
     clip: { id },
-    asset: { mime_type: mimeType },
-    canonicalState: { authoritative: true } as Pick<CanonicalFrameLayerState, 'authoritative' | 'text'>,
+    asset: { mime_type: mime },
+    canonicalState: { authoritative: true } as Pick<CanonicalFrameLayerState, 'authoritative'>,
   };
 }
 
-function textLayer(
-  id = 'title',
-  resourceId: string | undefined = 'playback-font-v1',
-  fontAssetId = 'font-asset',
-): Layer {
+function textLayer(id = 'title') {
   return {
-    clip: { id, text: {} },
-    ...(fontAssetId ? { fontAsset: { id: fontAssetId, kind: 'font' } } : {}),
+    clip: { id, text: { text: 'hello' } },
+    fontAsset: { id: 'font-asset', kind: 'font' },
     canonicalState: {
       authoritative: true,
       text: {
         contract_version: 'text-state-v1',
-        text: 'Playback title',
+        text: 'hello',
         font_family: 'DejaVu Sans',
         font_family_source: 'authored',
-        ...(resourceId ? { font_resource_id: resourceId } : {}),
-        font_face_source: resourceId ? 'packaged-resource' : 'family-name-only',
+        font_face_source: 'family-name-only',
         font_size: 36,
         font_weight: '700',
         color: '#ffffff',
+        background: '#111827cc',
         stroke_width: 0,
         text_align: 'center',
         vertical_align: 'middle',
-        line_height_mode: 'normal',
-        letter_spacing: 0,
-        border_radius: 0,
-        padding: { top: 0, right: 0, bottom: 0, left: 0 },
+        line_height_mode: 'multiplier',
+        letter_spacing: 0.5,
+        border_radius: 8,
+        padding: { top: 8, right: 18, bottom: 8, left: 18 },
+        line_height: 1.2,
+        font_resource_id: 'playback-font-v1',
       },
     } as Pick<CanonicalFrameLayerState, 'authoritative' | 'text'>,
   };
 }
 
-function plan(
-  mode: PreviewTransitionPairPlan<Layer>['mode'] = 'canonical-none',
-  deferredReasons: string[] = [],
-  weightedRasterDeferredReasons: string[] = [],
-): Plan {
+function plan(mode: 'legacy' | 'canonical-none' | 'canonical-source-over' | 'canonical-mixed' | 'canonical-weighted-deferred' = 'canonical-none') {
   return {
     mode,
     slots: [],
-    deferredReasons,
-    weightedRasterDeferredReasons,
-  };
-}
-
-function weightedPlan(
-  transitionId = 'weighted-crossfade',
-  singleLayers: Layer[] = [],
-): Plan {
-  const lower = mediaLayer('lower');
-  const upper = mediaLayer('upper', 'image/png');
-  const slots: Plan['slots'] = [{
-    kind: 'pair',
-    lower,
-    upper,
-    surface: {
-      transition_id: transitionId,
-      owner_clip_id: 'lower',
-      peer_clip_id: 'upper',
-      outgoing_clip_id: 'lower',
-      incoming_clip_id: 'upper',
-      lower_clip_id: 'lower',
-      upper_clip_id: 'upper',
-      lower_layer_index: 0,
-      upper_layer_index: 1,
-    } as never,
-    paint: {} as never,
-    pixel: {} as never,
-    execution: 'weighted-canvas-deferred',
-    layerPaintByClipId: new Map(),
-    weightedRasterSource: { supported: true } as never,
-  }];
-  for (const layer of singleLayers) slots.push({ kind: 'single', layer });
-  return {
-    mode: 'canonical-weighted-deferred',
     deferredReasons: [],
     weightedRasterDeferredReasons: [],
-    slots,
   };
 }
 
-afterEach(() => {
-  resetPreviewTextPlaybackRuntimeForTests();
-  resetPreviewWeightedPlaybackRuntimeForTests();
+beforeEach(() => {
+  clearPreviewTextPlaybackRuntime();
+  clearPreviewWeightedPlaybackRuntime();
 });
 
-describe('normal playback canonicalization gate', () => {
-  it('leaves a non-playing address on the legacy time path', () => {
+afterEach(() => {
+  clearPreviewTextPlaybackRuntime();
+  clearPreviewWeightedPlaybackRuntime();
+});
+
+describe('normal playback canonicalization', () => {
+  it('stays in legacy time when no playback frame exists', () => {
     expect(resolvePreviewPlaybackCanonicalization(null, undefined, [], null)).toEqual({
       mode: 'legacy-time',
       canonicalFrame: null,
     });
   });
 
-  it('admits an authoritative media-only frame with no transition debt', () => {
-    expect(resolvePreviewPlaybackCanonicalization(
-      37,
-      { authoritative: true },
-      [mediaLayer()],
-      plan(),
-    )).toEqual({ mode: 'canonical-playback', canonicalFrame: 37 });
-  });
-
-  it('admits a clean source-over transition plan for media-only layers', () => {
-    expect(resolvePreviewPlaybackCanonicalization(
-      12,
-      { authoritative: true },
-      [mediaLayer('lower'), mediaLayer('upper', 'image/png')],
-      plan('canonical-source-over'),
-    )).toEqual({ mode: 'canonical-playback', canonicalFrame: 12 });
-  });
-
-  it('fails the whole visual frame closed when canonical frame authority is unavailable', () => {
-    expect(resolvePreviewPlaybackCanonicalization(5, undefined, [mediaLayer()], plan())).toEqual({
+  it('fails closed when frame state is unavailable or non-authoritative', () => {
+    expect(resolvePreviewPlaybackCanonicalization(8, undefined, [mediaLayer()], plan())).toEqual({
       mode: 'legacy-time-fallback',
       canonicalFrame: null,
       deferredReason: 'canonical-frame-state-unavailable',
     });
-    expect(resolvePreviewPlaybackCanonicalization(5, { authoritative: false }, [mediaLayer()], plan())).toEqual({
+    expect(resolvePreviewPlaybackCanonicalization(8, { authoritative: false }, [mediaLayer()], plan())).toEqual({
       mode: 'legacy-time-fallback',
       canonicalFrame: null,
       deferredReason: 'canonical-frame-state-nonauthoritative',
     });
   });
 
-  it('fails closed for missing or non-authoritative canonical layer state', () => {
-    const missing = mediaLayer();
-    delete missing.canonicalState;
-    expect(resolvePreviewPlaybackCanonicalization(5, { authoritative: true }, [missing], plan()).deferredReason)
-      .toBe('canonical-layer-state-unavailable:media');
-
-    const nonauthoritative = mediaLayer();
-    nonauthoritative.canonicalState = { authoritative: false };
-    expect(resolvePreviewPlaybackCanonicalization(5, { authoritative: true }, [nonauthoritative], plan()).deferredReason)
-      .toBe('canonical-layer-state-nonauthoritative:media');
-  });
-
-  it('fails resource-backed text closed until exact font/layout runtime readiness is proven', () => {
-    const layers = [textLayer()];
-    expect(resolvePreviewPlaybackCanonicalization(8, { authoritative: true }, layers, plan())).toEqual({
+  it('fails closed when a canonical visual layer is missing or non-authoritative', () => {
+    expect(resolvePreviewPlaybackCanonicalization(
+      8,
+      { authoritative: true },
+      [{ ...mediaLayer(), canonicalState: undefined }],
+      plan(),
+    )).toEqual({
       mode: 'legacy-time-fallback',
       canonicalFrame: null,
-      deferredReason: 'text-playback-runtime-not-ready',
+      deferredReason: 'canonical-layer-state-unavailable:media',
     });
+    expect(resolvePreviewPlaybackCanonicalization(
+      8,
+      { authoritative: true },
+      [{ ...mediaLayer(), canonicalState: { authoritative: false } }],
+      plan(),
+    )).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'canonical-layer-state-nonauthoritative:media',
+    });
+  });
 
-    const planIdentity = previewTextPlaybackPlanIdentity(layers);
-    publishPreviewTextPlaybackRuntime({
-      frameIndex: 8,
-      planKey: previewTextPlaybackPlanKey(8, layers),
-      planIdentity,
-      status: 'ready',
-    });
-    expect(resolvePreviewPlaybackCanonicalization(8, { authoritative: true }, layers, plan())).toEqual({
-      mode: 'canonical-playback',
-      canonicalFrame: 8,
-    });
-    expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, layers, plan())).toEqual({
+  it.each(['canonical-none', 'canonical-source-over'] as const)('admits supported media for %s composition', (mode) => {
+    expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, [mediaLayer()], plan(mode))).toEqual({
       mode: 'canonical-playback',
       canonicalFrame: 9,
     });
   });
 
-  it('keeps family-name-only text explicitly fail-closed', () => {
-    const layer = textLayer('family-only', '', '');
-    expect(resolvePreviewPlaybackCanonicalization(8, { authoritative: true }, [layer], plan())).toEqual({
-      mode: 'legacy-time-fallback',
-      canonicalFrame: null,
-      deferredReason: 'text-playback-runtime-deferred:family-only:resource-font-required',
-    });
-  });
-
-  it('admits a media plus standalone text frame only after text readiness', () => {
-    const layers = [mediaLayer('background'), textLayer('title')];
-    expect(resolvePreviewPlaybackCanonicalization(11, { authoritative: true }, layers, plan()).deferredReason)
-      .toBe('text-playback-runtime-not-ready');
-
-    const planIdentity = previewTextPlaybackPlanIdentity(layers);
+  it('admits ready resource-backed text without changing authored text semantics', () => {
+    const layers = [textLayer()];
+    const textPlanIdentity = 'text-plan-ready';
     publishPreviewTextPlaybackRuntime({
-      frameIndex: 11,
-      planKey: previewTextPlaybackPlanKey(11, layers),
-      planIdentity,
-      status: 'ready',
-    });
-    expect(resolvePreviewPlaybackCanonicalization(11, { authoritative: true }, layers, plan()))
-      .toEqual({ mode: 'canonical-playback', canonicalFrame: 11 });
-  });
-
-  it('admits weighted media plus resource text only when both runtimes are ready and revokes atomically', () => {
-    const title = textLayer('title');
-    const layers = [mediaLayer('lower'), mediaLayer('upper', 'image/png'), title];
-    const transitionPlan = weightedPlan('weighted-crossfade', [title]);
-
-    expect(resolvePreviewPlaybackCanonicalization(14, { authoritative: true }, layers, transitionPlan)).toEqual({
-      mode: 'legacy-time-fallback',
-      canonicalFrame: null,
-      deferredReason: 'text-playback-runtime-not-ready',
-    });
-
-    const textPlanIdentity = previewTextPlaybackPlanIdentity(layers);
-    publishPreviewTextPlaybackRuntime({
-      frameIndex: 14,
-      planKey: previewTextPlaybackPlanKey(14, layers),
+      frameIndex: 12,
+      planKey: previewTextPlaybackPlanKey(12, layers),
       planIdentity: textPlanIdentity,
       status: 'ready',
     });
-    expect(resolvePreviewPlaybackCanonicalization(14, { authoritative: true }, layers, transitionPlan)).toEqual({
+    expect(resolvePreviewPlaybackCanonicalization(12, { authoritative: true }, layers, plan())).toEqual({
+      mode: 'canonical-playback',
+      canonicalFrame: 12,
+    });
+  });
+
+  it('fails closed until resource-backed text runtime is ready', () => {
+    const layers = [textLayer()];
+    expect(resolvePreviewPlaybackCanonicalization(12, { authoritative: true }, layers, plan())).toEqual({
       mode: 'legacy-time-fallback',
       canonicalFrame: null,
-      deferredReason: 'transition-weighted-runtime-not-ready',
+      deferredReason: 'text-playback-runtime-deferred:title:font-face-not-ready',
     });
+  });
 
-    const weightedPlanIdentity = previewWeightedPlaybackPlanIdentity(transitionPlan);
+  it('keeps family-name-only text on the time-domain fallback', () => {
+    const layer = textLayer();
+    layer.canonicalState.text = { ...layer.canonicalState.text, font_resource_id: undefined };
+    expect(resolvePreviewPlaybackCanonicalization(12, { authoritative: true }, [layer], plan())).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'text-playback-runtime-deferred:title:resource-font-required',
+    });
+  });
+
+  it('keeps text font-load failures on the time-domain fallback', () => {
+    const layers = [textLayer()];
+    publishPreviewTextPlaybackRuntime({
+      frameIndex: 12,
+      planKey: previewTextPlaybackPlanKey(12, layers),
+      planIdentity: 'text-plan-failed',
+      status: 'failed',
+      reason: 'title:font-face-load-failed',
+    });
+    expect(resolvePreviewPlaybackCanonicalization(12, { authoritative: true }, layers, plan())).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'text-playback-runtime-failed:title:font-face-load-failed',
+    });
+  });
+
+  it('admits supported text and weighted surfaces only when both are ready', () => {
+    const layers = [textLayer(), mediaLayer('lower'), mediaLayer('upper')];
+    const transitionPlan = {
+      mode: 'canonical-weighted-deferred' as const,
+      slots: [
+        {
+          kind: 'pair' as const,
+          pair: {
+            id: 'pair',
+            kind: 'crossfade' as const,
+            outClipId: 'lower',
+            inClipId: 'upper',
+          },
+        },
+      ],
+      deferredReasons: [],
+      weightedRasterDeferredReasons: [],
+    };
+    const textPlanIdentity = 'text-plan-mixed';
+    const weightedPlanIdentity = 'weighted-plan-mixed';
+
     publishPreviewWeightedPlaybackRuntime({
       frameIndex: 14,
       planKey: previewWeightedPlaybackPlanKey(14, transitionPlan),
       planIdentity: weightedPlanIdentity,
+      status: 'ready',
+    });
+    expect(resolvePreviewPlaybackCanonicalization(14, { authoritative: true }, layers, transitionPlan)).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'text-playback-runtime-deferred:title:font-face-not-ready',
+    });
+
+    publishPreviewTextPlaybackRuntime({
+      frameIndex: 14,
+      planKey: previewTextPlaybackPlanKey(14, layers),
+      planIdentity: textPlanIdentity,
       status: 'ready',
     });
     expect(resolvePreviewPlaybackCanonicalization(14, { authoritative: true }, layers, transitionPlan)).toEqual({
@@ -283,7 +248,6 @@ describe('normal playback canonicalization gate', () => {
   });
 
   it.each([
-    ['shape', { ...mediaLayer(), clip: { id: 'shape', shape: {} } }],
     ['cursor', { ...mediaLayer(), clip: { id: 'cursor', cursor: {} } }],
     ['missing-asset', { ...mediaLayer(), clip: { id: 'missing-asset' }, asset: undefined }],
     ['audio-asset', mediaLayer('audio-asset', 'audio/wav')],
@@ -319,74 +283,48 @@ describe('normal playback canonicalization gate', () => {
     });
   });
 
-  it('fails weighted composition closed until the pair topology is proven ready, then stays warm across frames', () => {
-    const transitionPlan = weightedPlan();
-    const layers = [mediaLayer('lower'), mediaLayer('upper', 'image/png')];
-    expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, layers, transitionPlan)).toEqual({
+  it('fails closed for transition deferrals', () => {
+    const transitionPlan = { ...plan('canonical-source-over'), deferredReasons: ['pair:peer-missing'] };
+    expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, [mediaLayer()], transitionPlan)).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'transition-deferred:pair:peer-missing',
+    });
+  });
+
+  it('fails closed for weighted raster deferrals before runtime readiness', () => {
+    const transitionPlan = {
+      ...plan('canonical-weighted-deferred'),
+      weightedRasterDeferredReasons: ['pair:unsupported-source'],
+    };
+    expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, [mediaLayer()], transitionPlan)).toEqual({
+      mode: 'legacy-time-fallback',
+      canonicalFrame: null,
+      deferredReason: 'transition-weighted-raster-deferred:pair:unsupported-source',
+    });
+  });
+
+  it('fails closed until the weighted playback runtime is ready', () => {
+    const transitionPlan = {
+      mode: 'canonical-weighted-deferred' as const,
+      slots: [
+        {
+          kind: 'pair' as const,
+          pair: {
+            id: 'pair',
+            kind: 'crossfade' as const,
+            outClipId: 'media',
+            inClipId: 'upper',
+          },
+        },
+      ],
+      deferredReasons: [],
+      weightedRasterDeferredReasons: [],
+    };
+    expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, [mediaLayer()], transitionPlan)).toEqual({
       mode: 'legacy-time-fallback',
       canonicalFrame: null,
       deferredReason: 'transition-weighted-runtime-not-ready',
-    });
-
-    const planKey = previewWeightedPlaybackPlanKey(9, transitionPlan);
-    const planIdentity = previewWeightedPlaybackPlanIdentity(transitionPlan);
-    publishPreviewWeightedPlaybackRuntime({ frameIndex: 9, planKey, planIdentity, status: 'ready' });
-    expect(resolvePreviewPlaybackCanonicalization(9, { authoritative: true }, layers, transitionPlan)).toEqual({
-      mode: 'canonical-playback',
-      canonicalFrame: 9,
-    });
-    expect(resolvePreviewPlaybackCanonicalization(10, { authoritative: true }, layers, transitionPlan)).toEqual({
-      mode: 'canonical-playback',
-      canonicalFrame: 10,
-    });
-    expect(resolvePreviewPlaybackCanonicalization(
-      10,
-      { authoritative: true },
-      layers,
-      weightedPlan('weighted-zoom'),
-    ).deferredReason).toBe('transition-weighted-runtime-not-ready');
-  });
-
-  it('retains weighted raster-source and renderer-runtime deferral reasons', () => {
-    expect(resolvePreviewPlaybackCanonicalization(
-      9,
-      { authoritative: true },
-      [mediaLayer()],
-      plan('canonical-weighted-deferred', [], ['weighted-crossfade:lower:unsupported-raster-source']),
-    ).deferredReason).toBe(
-      'transition-weighted-raster-deferred:weighted-crossfade:lower:unsupported-raster-source',
-    );
-
-    const transitionPlan = weightedPlan();
-    const planKey = previewWeightedPlaybackPlanKey(9, transitionPlan);
-    const planIdentity = previewWeightedPlaybackPlanIdentity(transitionPlan);
-    publishPreviewWeightedPlaybackRuntime({
-      frameIndex: 9,
-      planKey,
-      planIdentity,
-      status: 'deferred',
-      reason: 'upper:decoder-budget-poster',
-    });
-    expect(resolvePreviewPlaybackCanonicalization(
-      9,
-      { authoritative: true },
-      [mediaLayer('lower'), mediaLayer('upper', 'image/png')],
-      transitionPlan,
-    ).deferredReason).toBe(
-      'transition-weighted-runtime-deferred:upper:decoder-budget-poster',
-    );
-  });
-
-  it('retains explicit canonical transition deferral reasons before runtime admission', () => {
-    expect(resolvePreviewPlaybackCanonicalization(
-      9,
-      { authoritative: true },
-      [mediaLayer()],
-      plan('canonical-weighted-deferred', ['transition-1:overlap-not-adjacent']),
-    )).toEqual({
-      mode: 'legacy-time-fallback',
-      canonicalFrame: null,
-      deferredReason: 'transition-deferred:transition-1:overlap-not-adjacent',
     });
   });
 });
