@@ -215,7 +215,7 @@ export function ShapePreview({
           data-preview-shape-corner-radius={canonicalShape.corner_radius}
           data-preview-shape-stroke-width={canonicalShape.stroke_width}
         >
-          <CanonicalPreviewShape shape={canonicalShape} stageScale={stageScale} />
+          <CanonicalPreviewShape shape={canonicalShape} stageScale={stageScale} embedded />
         </div>
       )}
     </div>
