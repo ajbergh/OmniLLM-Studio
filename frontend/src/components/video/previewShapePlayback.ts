@@ -42,9 +42,9 @@ export type PreviewShapePlaybackLayer = {
   canonicalState?: Pick<CanonicalFrameLayerState, 'shape'>;
 };
 
-/** True for authored shape metadata, including kinds that remain compatibility-only. */
+/** True for well-formed authored shape metadata, including compatibility-only kinds. */
 export function hasPreviewShapePlaybackMetadata(layer: PreviewShapePlaybackLayer): boolean {
-  return Boolean(layer.clip.shape);
+  return Boolean(layer.clip.shape && typeof layer.clip.shape.kind === 'string');
 }
 
 /**
