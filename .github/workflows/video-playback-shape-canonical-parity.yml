@@ -1,0 +1,199 @@
+name: Video Playback Shape Canonical Parity Evidence
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/video-playback-shape-canonical-parity.yml'
+      - 'backend/cmd/video-playback-parity-fixture-v7/**'
+      - 'backend/cmd/video-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_playback.go'
+      - 'backend/internal/video/parity_fixture_playback_v7.go'
+      - 'backend/internal/video/parity_fixture_playback_test.go'
+      - 'backend/internal/video/parity_fixture_playback_v7_test.go'
+      - 'frontend/src/components/video/VideoPreviewCanvas.tsx'
+      - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
+      - 'frontend/src/components/video/PreviewCanonicalPainters.tsx'
+      - 'frontend/src/components/video/ShapePreview.tsx'
+      - 'frontend/src/components/video/previewPlaybackCanonicalization.ts'
+      - 'frontend/src/components/video/previewPlaybackCanonicalization.test.ts'
+      - 'frontend/src/components/video/previewPlaybackShapeCanonicalization.test.ts'
+      - 'frontend/src/components/video/previewShapePlayback.ts'
+      - 'frontend/src/components/video/previewShapePlayback.test.ts'
+      - 'frontend/src/components/video/previewCursorPlayback.ts'
+      - 'frontend/src/components/video/previewTextPlaybackRuntime.ts'
+      - 'frontend/src/components/video/previewWeightedPlaybackRuntime.ts'
+      - 'frontend/src/components/video/previewFrameTransitionPairs.ts'
+      - 'frontend/src/components/video/sourceTiming.ts'
+      - 'scripts/video-playback-parity-capture.mjs'
+      - 'scripts/video-playback-shape-parity-capture.mjs'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/video-playback-shape-canonical-parity.yml'
+      - 'backend/cmd/video-playback-parity-fixture-v7/**'
+      - 'backend/cmd/video-parity-fixture/**'
+      - 'backend/internal/video/parity_fixture_playback.go'
+      - 'backend/internal/video/parity_fixture_playback_v7.go'
+      - 'backend/internal/video/parity_fixture_playback_test.go'
+      - 'backend/internal/video/parity_fixture_playback_v7_test.go'
+      - 'frontend/src/components/video/VideoPreviewCanvas.tsx'
+      - 'frontend/src/components/video/VideoPreviewCanvasLegacy.tsx'
+      - 'frontend/src/components/video/PreviewCanonicalPainters.tsx'
+      - 'frontend/src/components/video/ShapePreview.tsx'
+      - 'frontend/src/components/video/previewPlaybackCanonicalization.ts'
+      - 'frontend/src/components/video/previewPlaybackCanonicalization.test.ts'
+      - 'frontend/src/components/video/previewPlaybackShapeCanonicalization.test.ts'
+      - 'frontend/src/components/video/previewShapePlayback.ts'
+      - 'frontend/src/components/video/previewShapePlayback.test.ts'
+      - 'frontend/src/components/video/previewCursorPlayback.ts'
+      - 'frontend/src/components/video/previewTextPlaybackRuntime.ts'
+      - 'frontend/src/components/video/previewWeightedPlaybackRuntime.ts'
+      - 'frontend/src/components/video/previewFrameTransitionPairs.ts'
+      - 'frontend/src/components/video/sourceTiming.ts'
+      - 'scripts/video-playback-parity-capture.mjs'
+      - 'scripts/video-playback-shape-parity-capture.mjs'
+      - 'docs/VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-playback-shape-canonical-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.25.13'
+  NODE_VERSION: '24'
+
+jobs:
+  shape-playback-evidence:
+    name: Rounded rectangle playback consumer evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - run: npm ci
+      - working-directory: frontend
+        run: npm ci
+      - name: Install shape playback evidence dependencies
+        run: |
+          bash scripts/ci-apt-install.sh ffmpeg fonts-dejavu-core
+          bash scripts/ci-playwright-install.sh
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Validate v7 fixture and shape playback gates
+        run: |
+          set -euo pipefail
+          (
+            cd backend
+            go test ./internal/video -run 'TestPlaybackCanonicalParityFixture(V7)?Valid'
+          )
+          (
+            cd frontend
+            npx vitest run \
+              src/components/video/previewPlaybackCanonicalization.test.ts \
+              src/components/video/previewPlaybackShapeCanonicalization.test.ts \
+              src/components/video/previewShapePlayback.test.ts \
+              src/components/video/previewCursorPlayback.test.ts \
+              src/components/video/previewTextPlaybackRuntime.test.ts \
+              src/components/video/previewWeightedPlaybackRuntime.test.ts \
+              src/components/video/previewFrameTransitionPairs.test.ts \
+              src/components/video/sourceTiming.test.ts
+          )
+          node --check scripts/video-playback-parity-capture.mjs
+          node --check scripts/video-playback-shape-parity-capture.mjs
+      - name: Generate v7 fixture and deterministic media
+        run: |
+          set -euo pipefail
+          mkdir -p output/video-playback-shape-canonical/bin
+          (
+            cd backend
+            go run ./cmd/video-parity-fixture \
+              --output-dir ../output/video-playback-shape-canonical/fixture \
+              --random-samples 0 \
+              --generate-media
+            go run ./cmd/video-playback-parity-fixture-v7 \
+              --output-dir ../output/video-playback-shape-canonical/fixture
+            go build -o ../output/video-playback-shape-canonical/bin/server ./cmd/server
+          )
+          cp /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf \
+            output/video-playback-shape-canonical/fixture/media/asset-font.ttf
+          dd if=/dev/zero \
+            of=output/video-playback-shape-canonical/fixture/media/asset-font-invalid.ttf \
+            bs=1024 count=1 status=none
+      - name: Capture and gate live v7 playback evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/output/video-playback-shape-canonical/runtime"
+          mkdir -p "$runtime/attachments"
+          export OMNILLM_PORT=18097
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          "$GITHUB_WORKSPACE/output/video-playback-shape-canonical/bin/server" >"$runtime/backend.log" 2>"$runtime/backend.err.log" &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18097 npm run dev -- --host 127.0.0.1 --port 14180 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18097/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14180/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "shape playback parity servers did not become ready" >&2
+              cat "$runtime/backend.err.log" >&2 || true
+              cat "$runtime/backend.log" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+          node scripts/video-playback-parity-capture.mjs \
+            --url http://127.0.0.1:14180 \
+            --fixture output/video-playback-shape-canonical/fixture/parity-playback-canonical-v7.json \
+            --media-dir output/video-playback-shape-canonical/fixture/media \
+            --output output/video-playback-shape-canonical/capture
+          node scripts/video-playback-shape-parity-capture.mjs \
+            --url http://127.0.0.1:14180 \
+            --fixture output/video-playback-shape-canonical/fixture/parity-playback-canonical-v7.json \
+            --seed-result output/video-playback-shape-canonical/capture/seed-result.json \
+            --output output/video-playback-shape-canonical/capture/shape
+      - name: Record toolchain
+        if: always()
+        run: |
+          mkdir -p output/video-playback-shape-canonical
+          {
+            go version
+            node --version
+            npm --version
+            ffmpeg -version | head -n 1
+            ffprobe -version | head -n 1
+            node -e "console.log('playwright ' + require('playwright/package.json').version)"
+          } > output/video-playback-shape-canonical/toolchain.txt
+      - name: Upload rounded rectangle playback evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-playback-shape-canonical-parity-evidence
+          path: output/video-playback-shape-canonical
+          if-no-files-found: error
+          retention-days: 14
