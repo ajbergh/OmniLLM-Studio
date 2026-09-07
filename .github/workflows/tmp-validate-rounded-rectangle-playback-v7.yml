@@ -1,0 +1,148 @@
+name: Validate Rounded Rectangle Playback v7
+
+on:
+  push:
+    branches:
+      - feat/video-wysiwyg-phase3-rounded-rectangle-playback-parity
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.13'
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+      - name: Apply guarded v7 evidence patch
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/tmp-add-rounded-rectangle-playback-evidence.py')
+          text = p.read_text()
+          old = '''    if count != 1:\n        raise SystemExit(f"{path}: anchor count={count}, want 1 for {old[:140]!r}")\n    p.write_text(text.replace(old, new, 1))'''
+          new = '''    if count != 1:\n        if path == '.github/workflows/video-playback-canonical-parity.yml' and count == 2 and 'previewCursorPlayback' in old:\n            p.write_text(text.replace(old, new, 1))\n            return\n        raise SystemExit(f"{path}: anchor count={count}, want 1 for {old[:140]!r}")\n    p.write_text(text.replace(old, new, 1))'''
+          if text.count(old) != 1:
+              raise SystemExit('replace_once helper anchor changed unexpectedly')
+          p.write_text(text.replace(old, new, 1))
+          PY
+          python scripts/tmp-add-rounded-rectangle-playback-evidence.py
+          gofmt -w backend/internal/video/parity_fixture_playback.go backend/internal/video/parity_fixture_playback_test.go
+          git diff --check
+      - name: Install parity dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+          (cd frontend && npm ci)
+          bash scripts/ci-apt-install.sh ffmpeg fonts-dejavu-core
+          bash scripts/ci-playwright-install.sh
+          command -v ffmpeg
+          command -v ffprobe
+      - name: Validate v7 contracts
+        run: |
+          set -euo pipefail
+          (cd backend && go test ./internal/video -run 'TestPlaybackCanonicalParityFixtureValid')
+          (cd frontend && npx vitest run \
+            src/components/video/previewPlaybackCanonicalization.test.ts \
+            src/components/video/previewCursorPlayback.test.ts \
+            src/components/video/previewShapePlayback.test.ts \
+            src/components/video/PreviewCanonicalPainters.test.ts \
+            test/renderContractFrameStateShape.test.ts \
+            src/components/video/previewPlaybackCursorCanonicalization.test.ts \
+            src/components/video/previewTextPlaybackRuntime.test.ts \
+            src/components/video/previewWeightedPlaybackRuntime.test.ts \
+            src/components/video/previewFrameTransitionPairs.test.ts \
+            src/components/video/previewFrameWeightedPairCanvas.test.ts \
+            src/components/video/previewFrameWeightedPairRaster.test.ts \
+            src/components/video/sourceTiming.test.ts)
+          node --check scripts/video-playback-parity-capture.mjs
+          (cd frontend && npm run build)
+      - name: Generate v7 fixture and deterministic media
+        run: |
+          set -euo pipefail
+          mkdir -p output/video-playback-canonical/bin
+          (
+            cd backend
+            go run ./cmd/video-parity-fixture \
+              --output-dir ../output/video-playback-canonical/fixture \
+              --random-samples 0 \
+              --generate-media
+            go run ./cmd/video-playback-parity-fixture \
+              --output-dir ../output/video-playback-canonical/fixture
+            go build -o ../output/video-playback-canonical/bin/server ./cmd/server
+          )
+          cp /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf \
+            output/video-playback-canonical/fixture/media/asset-font.ttf
+          dd if=/dev/zero \
+            of=output/video-playback-canonical/fixture/media/asset-font-invalid.ttf \
+            bs=1024 count=1 status=none
+          test -f output/video-playback-canonical/fixture/parity-playback-canonical-v7.json
+      - name: Capture and gate live v7 playback evidence
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/output/video-playback-canonical/runtime"
+          mkdir -p "$runtime/attachments"
+          export OMNILLM_PORT=18106
+          export OMNILLM_DB_PATH="$runtime/parity.db"
+          export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
+          "$GITHUB_WORKSPACE/output/video-playback-canonical/bin/server" >"$runtime/backend.log" 2>"$runtime/backend.err.log" &
+          backend_pid=$!
+          (
+            cd frontend
+            OMNILLM_API_PROXY_TARGET=http://127.0.0.1:18106 npm run dev -- --host 127.0.0.1 --port 14189 >"$runtime/frontend.log" 2>"$runtime/frontend.err.log"
+          ) &
+          frontend_pid=$!
+          cleanup() {
+            kill "$frontend_pid" "$backend_pid" 2>/dev/null || true
+            wait "$frontend_pid" "$backend_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:18106/v1/health >/dev/null && curl --fail --silent http://127.0.0.1:14189/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo 'v7 playback parity servers did not become ready' >&2
+              cat "$runtime/backend.err.log" >&2 || true
+              cat "$runtime/frontend.err.log" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+          node scripts/video-playback-parity-capture.mjs \
+            --url http://127.0.0.1:14189 \
+            --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v7.json \
+            --media-dir output/video-playback-canonical/fixture/media \
+            --output output/video-playback-canonical/capture
+      - name: Upload v7 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rounded-rectangle-playback-v7-evidence
+          path: output/video-playback-canonical
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Commit validated v7 evidence
+        run: |
+          set -euo pipefail
+          git rm scripts/tmp-add-rounded-rectangle-playback-evidence.py
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add rounded rectangle normal playback evidence'
+          git push origin HEAD:feat/video-wysiwyg-phase3-rounded-rectangle-playback-parity
