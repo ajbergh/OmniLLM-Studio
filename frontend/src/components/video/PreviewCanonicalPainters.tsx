@@ -208,11 +208,13 @@ export function CanonicalPreviewShape({
   shape,
   text,
   stageScale,
+  embedded = false,
   textFontFamilyOverride,
 }: {
   shape: CanonicalEvaluatedShapeState;
   text?: CanonicalEvaluatedTextState;
   stageScale: number;
+  embedded?: boolean;
   textFontFamilyOverride?: string;
 }) {
   const geometry = resolveCanonicalPreviewShapeGeometry(shape, stageScale);
@@ -340,7 +342,7 @@ export function CanonicalPreviewShape({
 
   return (
     <div
-      data-preview-canonical-content="shape"
+      data-preview-canonical-content={embedded ? undefined : 'shape'}
       data-preview-shape-state-mode="canonical-frame"
       data-preview-shape-painter-deferred={shape.kind === 'pixelate' ? 'pixelate-css-approximation' : undefined}
       className="relative flex items-center justify-center"
