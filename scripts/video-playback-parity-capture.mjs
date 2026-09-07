@@ -152,14 +152,25 @@ try {
       }, { timeout: 3_000 });
     }
 
-    // Readiness checks intentionally execute under real normal playback and can
-    // consume a variable amount of wall-clock/timeline time on loaded CI hosts.
-    // Re-anchor after prewarming so every retained evidence window begins at the
-    // fixture frame it claims to measure instead of inheriting scheduler delay.
-    await page.getByRole('button', { name: 'Pause preview' }).click();
-    await seekParityFrame(page, testCase.frame_index);
-    await page.getByRole('button', { name: 'Play preview' }).click();
-    await page.getByRole('button', { name: 'Pause preview' }).waitFor({ state: 'visible', timeout: 5_000 });
+    // Some retained weighted/text cases intentionally use FrameIndex as a
+    // normal-playback lead-in so asynchronous runtime readiness can become true
+    // before sampling. Preserve that pre-roll. Standalone cursor cases have no
+    // such runtime prewarm dependency, so re-anchor those after the cursor is
+    // observed to prevent scheduler delay from moving a bounded cursor window
+    // past its authored clip boundary.
+    const reanchorStandaloneCursor = Boolean(testCase.expected_cursor_clip_id)
+      && !testCase.expected_weighted_runtime
+      && !testCase.expected_weighted_consumer
+      && !testCase.expected_weighted_pair_id
+      && !testCase.expected_text_runtime
+      && !testCase.expected_text_consumer
+      && !testCase.expected_text_clip_id;
+    if (reanchorStandaloneCursor) {
+      await page.getByRole('button', { name: 'Pause preview' }).click();
+      await seekParityFrame(page, testCase.frame_index);
+      await page.getByRole('button', { name: 'Play preview' }).click();
+      await page.getByRole('button', { name: 'Pause preview' }).waitFor({ state: 'visible', timeout: 5_000 });
+    }
 
     const observations = await page.evaluate(async (observeMs) => {
       const rows = [];
