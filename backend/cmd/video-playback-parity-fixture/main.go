@@ -23,13 +23,13 @@ func main() {
 	outputDir := flag.String("output-dir", "video-renderer/test/fixtures/generated", "fixture output directory")
 	flag.Parse()
 
-	doc, assets, cases := video.PlaybackCanonicalParityFixture()
+	doc, assets, cases := video.PlaybackCanonicalParityFixtureV7()
 	validated, err := video.ValidateTimelineDocument(doc)
 	if err != nil {
 		exitf("validate playback fixture: %v", err)
 	}
 	bundle := fixtureBundle{
-		Name:     video.PlaybackCanonicalParityFixtureName,
+		Name:     video.PlaybackCanonicalParityFixtureV7Name,
 		Timeline: validated,
 		Assets:   assets,
 		Cases:    cases,
@@ -42,7 +42,7 @@ func main() {
 		exitf("marshal playback fixture: %v", err)
 	}
 	data = append(data, '\n')
-	path := filepath.Join(*outputDir, video.PlaybackCanonicalParityFixtureName+".json")
+	path := filepath.Join(*outputDir, video.PlaybackCanonicalParityFixtureV7Name+".json")
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		exitf("write playback fixture: %v", err)
 	}
