@@ -55,6 +55,15 @@ func TestPlaybackCanonicalParityFixtureV7Valid(t *testing.T) {
 	if ellipse == nil || ellipse.Shape == nil || ellipse.Shape.Kind != ShapeKindEllipse {
 		t.Fatalf("unsupported ellipse playback clip is missing or invalid: %+v", ellipse)
 	}
+	const generatedMediaDurationMS int64 = 24000
+	if ellipse.StartMS+ellipse.DurationMS > generatedMediaDurationMS {
+		t.Fatalf("unsupported ellipse playback window ends at %dms, beyond generated media duration %dms", ellipse.StartMS+ellipse.DurationMS, generatedMediaDurationMS)
+	}
+	caseStartMS := ellipseCase.FrameIndex * 1000 / int64(validated.Canvas.FPS)
+	caseEndMS := caseStartMS + ellipseCase.ObserveMS
+	if caseStartMS < ellipse.StartMS || caseEndMS > ellipse.StartMS+ellipse.DurationMS {
+		t.Fatalf("unsupported ellipse observation %d-%dms escapes clip window %d-%dms", caseStartMS, caseEndMS, ellipse.StartMS, ellipse.StartMS+ellipse.DurationMS)
+	}
 }
 
 func findPlaybackFixtureClip(doc TimelineDocument, clipID string) *TimelineClip {
