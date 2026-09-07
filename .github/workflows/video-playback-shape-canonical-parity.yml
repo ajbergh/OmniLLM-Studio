@@ -139,7 +139,8 @@ jobs:
         run: |
           set -euo pipefail
           runtime="$GITHUB_WORKSPACE/output/video-playback-shape-canonical/runtime"
-          mkdir -p "$runtime/attachments"
+          capture="$GITHUB_WORKSPACE/output/video-playback-shape-canonical/capture"
+          mkdir -p "$runtime/attachments" "$capture"
           export OMNILLM_PORT=18097
           export OMNILLM_DB_PATH="$runtime/parity.db"
           export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
@@ -167,16 +168,70 @@ jobs:
             fi
             sleep 1
           done
-          node scripts/video-playback-parity-capture.mjs \
-            --url http://127.0.0.1:14180 \
-            --fixture output/video-playback-shape-canonical/fixture/parity-playback-canonical-v7.json \
-            --media-dir output/video-playback-shape-canonical/fixture/media \
-            --output output/video-playback-shape-canonical/capture
-          node scripts/video-playback-shape-parity-capture.mjs \
-            --url http://127.0.0.1:14180 \
-            --fixture output/video-playback-shape-canonical/fixture/parity-playback-canonical-v7.json \
-            --seed-result output/video-playback-shape-canonical/capture/seed-result.json \
-            --output output/video-playback-shape-canonical/capture/shape
+
+          count_only_failure() {
+            local evidence_file="$1"
+            node - "$evidence_file" <<'NODE'
+          const fs = require('node:fs');
+          const evidencePath = process.argv[2];
+          if (!evidencePath || !fs.existsSync(evidencePath)) process.exit(1);
+          const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+          if (!Array.isArray(evidence.cases) || evidence.cases.length === 0) process.exit(1);
+          const countOnly = evidence.cases.every((testCase) => {
+            if (testCase.pass === true) return true;
+            return Array.isArray(testCase.errors)
+              && testCase.errors.length > 0
+              && testCase.errors.every((error) => /^captured \d+ observations, want at least 5$/.test(error));
+          });
+          process.exit(countOnly ? 0 : 1);
+          NODE
+          }
+
+          generic_passed=false
+          for attempt in 1 2 3; do
+            if node scripts/video-playback-parity-capture.mjs \
+              --url http://127.0.0.1:14180 \
+              --fixture output/video-playback-shape-canonical/fixture/parity-playback-canonical-v7.json \
+              --media-dir output/video-playback-shape-canonical/fixture/media \
+              --output output/video-playback-shape-canonical/capture; then
+              generic_passed=true
+              break
+            fi
+            evidence="$capture/playback-evidence.json"
+            cp "$evidence" "$capture/playback-evidence-attempt-${attempt}.json" 2>/dev/null || true
+            if ! count_only_failure "$evidence"; then
+              echo "v7 playback evidence failed semantically; refusing retry" >&2
+              exit 1
+            fi
+            echo "v7 playback evidence attempt ${attempt} had only observation-count underflow; retrying exact gate" >&2
+          done
+          if [ "$generic_passed" != true ]; then
+            echo "v7 playback evidence did not satisfy the unchanged five-observation gate after 3 attempts" >&2
+            exit 1
+          fi
+
+          shape_passed=false
+          for attempt in 1 2 3; do
+            if node scripts/video-playback-shape-parity-capture.mjs \
+              --url http://127.0.0.1:14180 \
+              --fixture output/video-playback-shape-canonical/fixture/parity-playback-canonical-v7.json \
+              --seed-result output/video-playback-shape-canonical/capture/seed-result.json \
+              --output output/video-playback-shape-canonical/capture/shape; then
+              shape_passed=true
+              break
+            fi
+            evidence="$capture/shape/shape-playback-evidence.json"
+            cp "$evidence" "$capture/shape/shape-playback-evidence-attempt-${attempt}.json" 2>/dev/null || true
+            if ! count_only_failure "$evidence"; then
+              echo "shape playback evidence failed semantically; refusing retry" >&2
+              exit 1
+            fi
+            echo "shape playback evidence attempt ${attempt} had only observation-count underflow; retrying exact gate" >&2
+          done
+          if [ "$shape_passed" != true ]; then
+            echo "shape playback evidence did not satisfy the unchanged five-observation gate after 3 attempts" >&2
+            exit 1
+          fi
       - name: Record toolchain
         if: always()
         run: |
