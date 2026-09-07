@@ -59,10 +59,29 @@ func TestPlaybackCanonicalParityFixtureV7Valid(t *testing.T) {
 	if ellipse.StartMS+ellipse.DurationMS > generatedMediaDurationMS {
 		t.Fatalf("unsupported ellipse playback window ends at %dms, beyond generated media duration %dms", ellipse.StartMS+ellipse.DurationMS, generatedMediaDurationMS)
 	}
+	if rounded.StartMS+rounded.DurationMS > ellipse.StartMS {
+		t.Fatalf("unsupported ellipse window %d-%dms overlaps rounded rectangle control ending at %dms", ellipse.StartMS, ellipse.StartMS+ellipse.DurationMS, rounded.StartMS+rounded.DurationMS)
+	}
 	caseStartMS := ellipseCase.FrameIndex * 1000 / int64(validated.Canvas.FPS)
 	caseEndMS := caseStartMS + ellipseCase.ObserveMS
 	if caseStartMS < ellipse.StartMS || caseEndMS > ellipse.StartMS+ellipse.DurationMS {
 		t.Fatalf("unsupported ellipse observation %d-%dms escapes clip window %d-%dms", caseStartMS, caseEndMS, ellipse.StartMS, ellipse.StartMS+ellipse.DurationMS)
+	}
+	beforeCase, ok := seenCases["mixed-text-cursor-canonical"]
+	if !ok {
+		t.Fatal("retained mixed text/cursor case is missing")
+	}
+	afterCase, ok := seenCases["weighted-crossfade-canonical"]
+	if !ok {
+		t.Fatal("retained weighted crossfade case is missing")
+	}
+	beforeEndMS := beforeCase.FrameIndex*1000/int64(validated.Canvas.FPS) + beforeCase.ObserveMS
+	afterStartMS := afterCase.FrameIndex * 1000 / int64(validated.Canvas.FPS)
+	if ellipse.StartMS-beforeEndMS < 750 {
+		t.Fatalf("unsupported ellipse starts only %dms after retained mixed text/cursor observation; want at least 750ms guard", ellipse.StartMS-beforeEndMS)
+	}
+	if afterStartMS-(ellipse.StartMS+ellipse.DurationMS) < 200 {
+		t.Fatalf("unsupported ellipse ends only %dms before retained weighted crossfade observation; want at least 200ms guard", afterStartMS-(ellipse.StartMS+ellipse.DurationMS))
 	}
 }
 
