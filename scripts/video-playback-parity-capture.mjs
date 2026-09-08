@@ -152,10 +152,33 @@ try {
       }, { timeout: 3_000 });
     }
 
+    // Some retained weighted/text cases intentionally use FrameIndex as a
+    // normal-playback lead-in so asynchronous runtime readiness can become true
+    // before sampling. Preserve that pre-roll. Standalone cursor cases have no
+    // such runtime prewarm dependency, so re-anchor those after the cursor is
+    // observed to prevent scheduler delay from moving a bounded cursor window
+    // past its authored clip boundary.
+    const reanchorStandaloneCursor = Boolean(testCase.expected_cursor_clip_id)
+      && !testCase.expected_weighted_runtime
+      && !testCase.expected_weighted_consumer
+      && !testCase.expected_weighted_pair_id
+      && !testCase.expected_text_runtime
+      && !testCase.expected_text_consumer
+      && !testCase.expected_text_clip_id;
+    if (reanchorStandaloneCursor) {
+      await page.getByRole('button', { name: 'Pause preview' }).click();
+      await seekParityFrame(page, testCase.frame_index);
+      await page.getByRole('button', { name: 'Play preview' }).click();
+      await page.getByRole('button', { name: 'Pause preview' }).waitFor({ state: 'visible', timeout: 5_000 });
+    }
+
     const observations = await page.evaluate(async (observeMs) => {
       const rows = [];
-      const deadline = performance.now() + observeMs;
-      while (performance.now() < deadline) {
+      const minimumObservations = 5;
+      const nominalDeadline = performance.now() + observeMs;
+      const graceDeadline = nominalDeadline + Math.min(250, Math.max(100, observeMs * 0.5));
+      while (performance.now() < nominalDeadline
+        || (rows.length < minimumObservations && performance.now() < graceDeadline)) {
         await new Promise((resolve) => requestAnimationFrame(resolve));
         const stage = document.querySelector('[data-testid="video-preview-program"]');
         if (!stage) throw new Error('video preview program disappeared during playback evidence');

@@ -7,6 +7,12 @@ import {
   type PreviewCursorPlaybackLayer,
 } from './previewCursorPlayback';
 import {
+  hasPreviewShapePlaybackMetadata,
+  previewShapePlaybackStructuralDeferredReason,
+  type PreviewShapePlaybackContext,
+  type PreviewShapePlaybackLayer,
+} from './previewShapePlayback';
+import {
   isPreviewTextPlaybackLayer,
   resolvePreviewTextPlaybackRuntime,
   type PreviewTextPlaybackLayer,
@@ -21,9 +27,9 @@ export interface PreviewPlaybackCanonicalizationDecision {
   deferredReason?: string;
 }
 
-type PlaybackLayer = PreviewTextPlaybackLayer & PreviewCursorPlaybackLayer & {
-  clip: PreviewTextPlaybackLayer['clip'] & PreviewCursorPlaybackLayer['clip'] & { id: string };
-  canonicalState?: Pick<CanonicalFrameLayerState, 'authoritative' | 'text' | 'cursor'>;
+type PlaybackLayer = PreviewTextPlaybackLayer & PreviewCursorPlaybackLayer & PreviewShapePlaybackLayer & {
+  clip: PreviewTextPlaybackLayer['clip'] & PreviewCursorPlaybackLayer['clip'] & PreviewShapePlaybackLayer['clip'] & { id: string };
+  canonicalState?: Pick<CanonicalFrameLayerState, 'authoritative' | 'text' | 'cursor' | 'shape'>;
 };
 
 type PlaybackFrameState = Pick<CanonicalVisualFrameState, 'authoritative'>;
@@ -31,32 +37,36 @@ type PlaybackTransitionPlan = Pick<
   PreviewTransitionPairPlan<PlaybackLayer>,
   'mode' | 'slots' | 'deferredReasons' | 'weightedRasterDeferredReasons'
 >;
+type PreviewPlaybackContext = PreviewCursorPlaybackContext & PreviewShapePlaybackContext;
 
 /**
  * Admit normal playback into canonical frame-domain visual evaluation only when
  * the complete frame is representable by consumers already proven in playback
- * or by the exact static-2D cursor subset already proven against export.
+ * or by exact static-2D cursor/rounded-rectangle subsets already proven against
+ * export.
  *
  * Media-only none/source-over frames are admitted immediately. Standalone text
  * joins them only after exact resource-font and Chromium layout readiness has
  * been proved for the active canonical text inputs. Static cursor owners are
  * admitted synchronously only when previewCursorPlayback mirrors every relevant
  * FidelityRenderer cursor-raster exclusion and the exact canonical cursor sample
- * is present. All-weighted media pairs are admitted only when the renderer-runtime
- * registry proves that exact Canvas topology is ready.
+ * is present. Rounded rectangles are admitted only when previewShapePlayback
+ * mirrors the renderer-generated shape-raster eligibility boundary and exact
+ * shape-state-v1 geometry is present. All-weighted media pairs are admitted only
+ * when the renderer-runtime registry proves that exact Canvas topology is ready.
  *
- * Shapes, unsupported cursor parents, missing raster sources, non-authoritative
- * FrameState, mixed/deferred transition composition, and stale/not-ready runtime
- * consumers fail the whole visual frame back to the established continuous-time
- * painter. The UI playhead and audio clock are not part of this decision and
- * remain continuous.
+ * Unsupported shapes or parents, unsupported cursor parents, missing raster
+ * sources, non-authoritative FrameState, mixed/deferred transition composition,
+ * and stale/not-ready runtime consumers fail the whole visual frame back to the
+ * established continuous-time painter. The UI playhead and audio clock are not
+ * part of this decision and remain continuous.
  */
 export function resolvePreviewPlaybackCanonicalization(
   playbackFrame: number | null,
   frameState: PlaybackFrameState | undefined,
   layers: readonly PlaybackLayer[],
   transitionPlan: PlaybackTransitionPlan | null,
-  cursorContext: PreviewCursorPlaybackContext | null = null,
+  playbackContext: PreviewPlaybackContext | null = null,
 ): PreviewPlaybackCanonicalizationDecision {
   if (playbackFrame === null) return { mode: 'legacy-time', canonicalFrame: null };
   if (!frameState) return fallback('canonical-frame-state-unavailable');
@@ -66,9 +76,15 @@ export function resolvePreviewPlaybackCanonicalization(
   for (const layer of layers) {
     if (!layer.canonicalState) return fallback(`canonical-layer-state-unavailable:${layer.clip.id}`);
     if (layer.canonicalState.authoritative !== true) return fallback(`canonical-layer-state-nonauthoritative:${layer.clip.id}`);
+    if (hasPreviewShapePlaybackMetadata(layer)) {
+      if (!playbackContext) return fallback(`shape-playback-deferred:${layer.clip.id}:context-unavailable`);
+      const shapeDeferred = previewShapePlaybackStructuralDeferredReason(layer, playbackContext);
+      if (shapeDeferred) return fallback(`shape-playback-deferred:${shapeDeferred}`);
+      continue;
+    }
     if (hasPreviewCursorPlaybackMetadata(layer)) {
-      if (!cursorContext) return fallback(`cursor-playback-deferred:${layer.clip.id}:context-unavailable`);
-      const cursorDeferred = previewCursorPlaybackStructuralDeferredReason(layer, cursorContext);
+      if (!playbackContext) return fallback(`cursor-playback-deferred:${layer.clip.id}:context-unavailable`);
+      const cursorDeferred = previewCursorPlaybackStructuralDeferredReason(layer, playbackContext);
       if (cursorDeferred) return fallback(`cursor-playback-deferred:${cursorDeferred}`);
       continue;
     }
