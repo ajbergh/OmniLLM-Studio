@@ -66,7 +66,9 @@ func PlaybackCanonicalParityFixtureV7() (TimelineDocument, []ParityFixtureAsset,
 
 	cases = append(cases,
 		PlaybackParityCase{
-			Name: "rounded-rectangle-canonical-playback", FrameIndex: 18, ObserveMS: 350,
+			// Leave a large startup/readiness guard before the 1.2s clip boundary;
+			// the dedicated live consumer capture still observes the full 350ms.
+			Name: "rounded-rectangle-canonical-playback", FrameIndex: 6, ObserveMS: 350,
 			ExpectedMode: "canonical-playback", ExpectedTransitionMode: "canonical-none",
 			RequireAdvancingFrames: true,
 		},
