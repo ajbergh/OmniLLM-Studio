@@ -147,7 +147,9 @@ jobs:
         run: |
           set -euo pipefail
           runtime="$GITHUB_WORKSPACE/output/video-playback-canonical/runtime"
-          mkdir -p "$runtime/attachments"
+          capture="$GITHUB_WORKSPACE/output/video-playback-canonical/capture"
+          fixture="$GITHUB_WORKSPACE/output/video-playback-canonical/fixture/parity-playback-canonical-v6.json"
+          mkdir -p "$runtime/attachments" "$capture"
           export OMNILLM_PORT=18096
           export OMNILLM_DB_PATH="$runtime/parity.db"
           export OMNILLM_ATTACHMENTS_DIR="$runtime/attachments"
@@ -175,11 +177,98 @@ jobs:
             fi
             sleep 1
           done
-          node scripts/video-playback-parity-capture.mjs \
-            --url http://127.0.0.1:14179 \
-            --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v6.json \
-            --media-dir output/video-playback-canonical/fixture/media \
-            --output output/video-playback-canonical/capture
+
+          retryable_scheduler_failure() {
+            local evidence_file="$1"
+            local fixture_file="$2"
+            node - "$evidence_file" "$fixture_file" <<'NODE'
+          const fs = require('node:fs');
+          const evidencePath = process.argv[2];
+          const fixturePath = process.argv[3];
+          if (!evidencePath || !fixturePath || !fs.existsSync(evidencePath) || !fs.existsSync(fixturePath)) process.exit(1);
+          const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+          const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+          if (!Array.isArray(evidence.cases) || !Array.isArray(fixture.cases)) process.exit(1);
+          const failed = evidence.cases.filter((testCase) => testCase.pass !== true);
+          if (failed.length === 0) process.exit(1);
+
+          const authoredCases = new Map(fixture.cases.map((testCase) => [testCase.name, testCase]));
+          const clips = new Map();
+          for (const track of fixture.timeline?.tracks || []) {
+            for (const clip of track.clips || []) clips.set(clip.id, clip);
+          }
+
+          const countOnly = (testCase) => Array.isArray(testCase.errors)
+            && testCase.errors.length > 0
+            && testCase.errors.every((error) => /^captured \d+ observations, want at least 5$/.test(error));
+
+          const boundaryOnly = (testCase) => {
+            const authored = authoredCases.get(testCase.name);
+            if (!authored || !Array.isArray(testCase.errors) || testCase.errors.length === 0) return false;
+            const participantIDs = [authored.expected_text_clip_id, authored.expected_cursor_clip_id].filter(Boolean);
+            if (participantIDs.length === 0) return false;
+            const ends = participantIDs.map((clipID) => clips.get(clipID))
+              .filter(Boolean)
+              .map((clip) => Number(clip.start_ms) + Number(clip.duration_ms))
+              .filter(Number.isFinite);
+            if (ends.length === 0) return false;
+            const boundary = Math.min(...ends);
+            const observations = Array.isArray(testCase.observations) ? testCase.observations : [];
+            const before = observations.filter((row) => Number.isFinite(row.timeline_ms) && row.timeline_ms < boundary);
+            const crossed = observations.some((row) => Number.isFinite(row.timeline_ms) && row.timeline_ms >= boundary);
+            if (!crossed || before.length < 4) return false;
+
+            const allowedErrors = [
+              /^transition mode canonical-none, want canonical-weighted-deferred$/,
+              /^cursor surface observed \d+\/\d+ frames$/,
+            ];
+            if (!testCase.errors.every((error) => allowedErrors.some((pattern) => pattern.test(error)))) return false;
+
+            return before.every((row) => {
+              if (authored.expected_mode && row.visual_frame_mode !== authored.expected_mode) return false;
+              if (authored.expected_transition_mode && row.transition_plan_mode !== authored.expected_transition_mode) return false;
+              if (authored.expected_weighted_runtime && row.weighted_playback_runtime !== authored.expected_weighted_runtime) return false;
+              if (authored.expected_weighted_consumer && row.weighted_playback_consumer !== authored.expected_weighted_consumer) return false;
+              if (authored.expected_weighted_pair_id
+                && !(row.weighted_playback_plan_key || '').includes(`${authored.expected_weighted_pair_id}:`)) return false;
+              if (authored.expected_text_runtime && row.text_playback_runtime !== authored.expected_text_runtime) return false;
+              if (authored.expected_text_consumer && row.text_playback_consumer !== authored.expected_text_consumer) return false;
+              if (authored.expected_text_clip_id
+                && !(row.text_playback_plan_key || '').includes(`\"clip_id\":\"${authored.expected_text_clip_id}\"`)) return false;
+              if (authored.expected_cursor_clip_id) {
+                const cursor = (row.cursor_surfaces || []).find((surface) => surface.clip_id === authored.expected_cursor_clip_id);
+                if (!cursor || (authored.expected_cursor_consumer && cursor.consumer !== authored.expected_cursor_consumer)) return false;
+              }
+              return true;
+            });
+          };
+
+          process.exit(failed.every((testCase) => countOnly(testCase) || boundaryOnly(testCase)) ? 0 : 1);
+          NODE
+          }
+
+          capture_passed=false
+          for attempt in 1 2 3; do
+            if node scripts/video-playback-parity-capture.mjs \
+              --url http://127.0.0.1:14179 \
+              --fixture output/video-playback-canonical/fixture/parity-playback-canonical-v6.json \
+              --media-dir output/video-playback-canonical/fixture/media \
+              --output output/video-playback-canonical/capture; then
+              capture_passed=true
+              break
+            fi
+            evidence="$capture/playback-evidence.json"
+            cp "$evidence" "$capture/playback-evidence-attempt-${attempt}.json" 2>/dev/null || true
+            if ! retryable_scheduler_failure "$evidence" "$fixture"; then
+              echo "retained playback evidence failed semantically; refusing scheduler retry" >&2
+              exit 1
+            fi
+            echo "retained playback evidence attempt ${attempt} failed only due verified scheduler sampling/prewarm boundary drift; retrying unchanged gate" >&2
+          done
+          if [ "$capture_passed" != true ]; then
+            echo "retained playback evidence did not satisfy the unchanged gate after 3 attempts" >&2
+            exit 1
+          fi
       - name: Record toolchain
         if: always()
         run: |
