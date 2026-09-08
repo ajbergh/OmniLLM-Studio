@@ -15,6 +15,8 @@ env:
   # Keep Go pinned to a patched toolchain because stdlib advisories are blocking audit failures.
   GO_VERSION: '1.25.13'
   NODE_VERSION: '24'
+  # v1.8.0 requires Go 1.26; keep the scanner reproducible on the repository's Go 1.25 baseline.
+  GOVULNCHECK_VERSION: 'v1.7.0'
 
 jobs:
   dependency-audit:
@@ -40,7 +42,7 @@ jobs:
         working-directory: backend
         run: |
           set -o pipefail
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
           govulncheck ./... 2>&1 | tee ../govulncheck.log
 
       - name: Root npm audit
