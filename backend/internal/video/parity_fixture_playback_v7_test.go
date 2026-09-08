@@ -50,6 +50,17 @@ func TestPlaybackCanonicalParityFixtureV7Valid(t *testing.T) {
 	if rounded.AssetID != "" || rounded.Text != nil || rounded.Cursor != nil || rounded.FadeInMS != 0 || rounded.FadeOutMS != 0 || len(rounded.Effects) != 0 || len(rounded.Keyframes) != 0 || len(rounded.Transitions) != 0 || len(rounded.AnimationBlocks) != 0 {
 		t.Fatalf("rounded rectangle playback clip escaped static standalone subset: %+v", rounded)
 	}
+	roundedCaseStartMS := roundedCase.FrameIndex * 1000 / int64(validated.Canvas.FPS)
+	roundedCaseEndMS := roundedCaseStartMS + roundedCase.ObserveMS
+	if roundedCaseStartMS < rounded.StartMS || roundedCaseEndMS > rounded.StartMS+rounded.DurationMS {
+		t.Fatalf("rounded rectangle observation %d-%dms escapes clip window %d-%dms", roundedCaseStartMS, roundedCaseEndMS, rounded.StartMS, rounded.StartMS+rounded.DurationMS)
+	}
+	if roundedCaseStartMS-rounded.StartMS < 150 {
+		t.Fatalf("rounded rectangle observation starts only %dms after clip start; want at least 150ms startup guard", roundedCaseStartMS-rounded.StartMS)
+	}
+	if rounded.StartMS+rounded.DurationMS-roundedCaseEndMS < 600 {
+		t.Fatalf("rounded rectangle observation leaves only %dms before clip end; want at least 600ms readiness guard", rounded.StartMS+rounded.DurationMS-roundedCaseEndMS)
+	}
 
 	ellipse := findPlaybackFixtureClip(validated, "playback-shape-ellipse")
 	if ellipse == nil || ellipse.Shape == nil || ellipse.Shape.Kind != ShapeKindEllipse {
