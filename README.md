@@ -131,7 +131,7 @@ Your workspace belongs to you.
 
 ## Get running
 
-You will need Go 1.25+, Node.js 24+, and a C compiler for SQLite. Linux desktop builds also require GTK3 and WebKit2GTK. See the [full prerequisites and platform notes](docs/TECHNICAL_REFERENCE.md#prerequisites) if this is your first local build.
+You will need Go 1.26+, Node.js 24+, and a C compiler for SQLite. Linux desktop builds also require GTK3 and WebKit2GTK. See the [full prerequisites and platform notes](docs/TECHNICAL_REFERENCE.md#prerequisites) if this is your first local build.
 
 ### 1. Clone the project
 

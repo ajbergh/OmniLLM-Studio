@@ -884,7 +884,7 @@ The SQLite database is tuned for performance out of the box:
 | Layer | Technologies |
 |-------|-------------|
 | **Frontend** | React 19, TypeScript 5, Vite, Tailwind CSS v4, Zustand, Framer Motion, Lucide icons, ReactMarkdown, KaTeX, Sonner |
-| **Backend** | Go 1.24+, Chi router, SQLite (WAL), SSE streaming, AES-256-GCM, go-word (.docx), excelize (.xlsx), go-pdf/fpdf (.pdf), yaml.v3 (.yaml) |
+| **Backend** | Go 1.26+, Chi router, SQLite (WAL), SSE streaming, AES-256-GCM, go-word (.docx), excelize (.xlsx), go-pdf/fpdf (.pdf), yaml.v3 (.yaml) |
 | **Desktop** | Wails v2, OS-native WebView (WebView2 / WebKitGTK / WebKit) |
 | **Search** | Brave Search API, DuckDuckGo (zero-config), Jina Reader |
 | **Sports** | ESPN public APIs through `github.com/chinmaykhachane/espn-go` |
