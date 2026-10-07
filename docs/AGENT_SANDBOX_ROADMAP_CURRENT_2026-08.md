@@ -2,7 +2,7 @@
 
 > **Status:** ACTIVE
 >
-> **Checkpoint — 2026-08-19:** Windows Phase 12 and macOS Phase 13 are complete. Cross-platform workspace hardening, cumulative Linux CPU enforcement, and the durable-task core have advanced materially. PR #231 merged as `c5adbe417b105d9fd3ce0f2229cca30ad8ec4a91`; PR #232 merged as `1d719861d0d8c1feec2250860ba9af13e3ef7c68`; PR #233 merged as `fe066d016e538d90b33bca314f4f64356fbd7fdf`.
+> **Verified checkpoint — 2026-10-07:** Windows governed-workspace hardening (#231), cumulative CPU enforcement (#232), durable sandbox task core (#233), isolated Kubernetes worker deployment (#234), and owner-scoped isolated worktrees (#235) have merged. These merge statuses do not prove that cross-platform lifecycle composition, production worker operational acceptance, forced arbitrary-process egress, or physical-disk quotas are complete. See the [0.3 execution roadmap](RELEASE_0_3_EXECUTION_PLAN_2026_10.md).
 
 ## Program invariants
 
@@ -36,8 +36,8 @@
 | 12 | Windows native confinement backend | **COMPLETE** | Protocol-v2 and persistent-extension AppContainer/Job confinement with adversarial evidence. |
 | 13 | macOS native confinement backend | **COMPLETE** | Seatbelt runtime and persistent extensions are merged; `process_tree_isolation=false` remains truthful for deliberately detached descendants. |
 | 14 | Durable sandbox-backed agent tasks | **IN PROGRESS** | #233 merged durable queue/recovery/executor core: immutable intent, owner scope, leases, attempt identities, runtime association, bounded results, and fail-closed retry/recovery. Next exit is application lifecycle composition and startup/shutdown proof. |
-| 15 | Server/Kubernetes sandbox workers | **IN PROGRESS** | Dedicated worker packaging/deployment slice is prepared for normalization after Phase 14 lifecycle composition. Target boundary remains isolated worker identity/pods, strict security context, network policy, Secret-backed auth, and explicit operator-owned cgroup delegation. |
-| 16 | Multi-agent isolated worktrees/workspaces | **IN PROGRESS** | Isolated snapshot/worktree implementation is prepared behind Phase 15. Promotion must remain digest-bound and governed; sandbox-visible workspaces never receive `.git` authority. |
+| 15 | Server/Kubernetes sandbox workers | **IN PROGRESS** | Dedicated worker packaging (#214) and Kubernetes workload slice (#234) are merged. The remaining gate is deployed end-to-end worker/lifecycle validation with isolated identity, strict security context, network policy, Secret-backed auth, and operator-owned cgroup delegation. |
+| 16 | Multi-agent isolated worktrees/workspaces | **IN PROGRESS** | Owner-scoped isolated worktrees merged in #235. Verify concurrent end-to-end admission and governed digest-bound promotion; sandbox-visible workspaces must never receive `.git` authority. |
 | 17 | Adversarial assurance suite | **IN PROGRESS** | Native Windows/macOS/Linux workspace/quota/runtime lanes plus browser egress and worker-container assurance run on applicable sandbox heads. Exact-head evidence remains mandatory. |
 
 ## Resource-control truth
@@ -88,8 +88,8 @@ Concurrent agent work must use isolated owner-scoped writable workspaces derived
 ## Remaining priority work
 
 1. Merge Phase 14 lifecycle composition after exact-head Quality, Security, container, desktop/server, and sandbox assurance passes.
-2. Normalize and validate the Phase 15 dedicated Kubernetes worker slice onto that resulting `main`; merge only after the chart and runtime boundary are proven.
-3. Normalize and validate Phase 16 isolated concurrent workspaces/worktrees after Phase 15.
+2. Validate the already-merged Phase 15 Kubernetes worker slice (#234) against the current Phase 14 lifecycle integration and real deployment boundaries.
+3. Validate the already-merged Phase 16 owner-scoped worktrees (#235) for concurrent isolation, governed promotion, and no `.git` authority leakage.
 4. Continue Phase 8/9 destination-enforced arbitrary-sandbox egress and service-specific credential consumers.
 5. Complete any remaining platform-specific governed-workspace identity/path-race hardening and teardown gaps.
 6. Design a real hard physical-storage boundary before any `disk_limit` capability is exposed.
