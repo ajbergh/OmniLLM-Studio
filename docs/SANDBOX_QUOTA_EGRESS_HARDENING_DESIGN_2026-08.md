@@ -1,8 +1,10 @@
 # Sandbox quota and egress hardening design — August 2026
 
-> **Status:** APPROVED IMPLEMENTATION CONTRACT
+> **Status:** APPROVED IMPLEMENTATION CONTRACT / PARTIALLY IMPLEMENTED (reviewed 2026-10-07)
 >
-> This document executes the design step called out by `MASTER_PLAN.md` and `AGENT_SANDBOX_ROADMAP_CURRENT_2026-08.md`. It does not mark any quota or destination-scoped egress capability complete. Capability bits remain false until the platform-native enforcement and adversarial evidence below are merged and green on the platform that advertises them.
+> This is the enforcement contract for the [0.3 execution plan](RELEASE_0_3_EXECUTION_PLAN_2026_10.md) and [sandbox roadmap](AGENT_SANDBOX_ROADMAP_CURRENT_2026-08.md). Host-mediated destination-enforced HTTP is already implemented in `backend/internal/sandbox/brokered_http.go`; it must **not** be confused with forced destination-scoped socket egress for arbitrary sandbox processes, which remains unimplemented. Arbitrary sandbox networking stays default-deny and `network_allowlist` must not be advertised until independently enforced and proven. Platform resource capability bits remain limited to native controls actually validated; hard physical-disk quotas are not currently proven.
+>
+> The implementation steps below record the original design progression. Consult current merged PRs and native assurance evidence before treating any step as outstanding.
 
 ## Goals
 
