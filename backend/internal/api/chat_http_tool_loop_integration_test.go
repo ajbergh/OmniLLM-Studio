@@ -201,7 +201,7 @@ func TestChatHTTPToolLoopEndToEnd(t *testing.T) {
 	response, data = client.request(t, http.MethodGet, basePath, nil)
 	chatHTTPRequireStatus(t, response, data, http.StatusOK)
 	var saved []struct {
-		Role string `json:"role"`
+		Role    string `json:"role"`
 		Content string `json:"content"`
 	}
 	if err := json.Unmarshal(data, &saved); err != nil {
