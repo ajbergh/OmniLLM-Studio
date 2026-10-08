@@ -64,7 +64,9 @@ func TestChatHTTPToolLoopEndToEnd(t *testing.T) {
 				streamFinal.Add(1)
 				w.Header().Set("Content-Type", "text/event-stream")
 				writeSSE(map[string]interface{}{"content": "Calculated 42"})
-			fmt.Fprint(w, "data: [DONE]", string([]byte{10, 10}))
+				fmt.Fprint(w, "data: [DONE]", string([]byte{10, 10}))
+				return
+			}
 			syncFinal.Add(1)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -81,9 +83,7 @@ func TestChatHTTPToolLoopEndToEnd(t *testing.T) {
 			streamInitial.Add(1)
 			w.Header().Set("Content-Type", "text/event-stream")
 			writeSSE(map[string]interface{}{"tool_calls": []interface{}{toolCall}})
-			fmt.Fprint(w, "data: [DONE]
-
-")
+			fmt.Fprint(w, "data: [DONE]", string([]byte{10, 10}))
 			return
 		}
 		syncInitial.Add(1)
