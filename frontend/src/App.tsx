@@ -353,7 +353,7 @@ function App() {
         <LoginScreen onAuthenticated={() => setAuthenticated(true)} />
       )}
 
-      {authenticated && (
+      {authenticated && authChecked && (
       <div className="flex h-full relative overflow-hidden">
         {/* Ambient background effects */}
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
