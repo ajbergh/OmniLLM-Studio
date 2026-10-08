@@ -1,7 +1,9 @@
 # OmniLLM-Studio 0.3 — Phased Delivery & Reliability Plan
 
 **Created:** 2026-10-07  
-**Baseline:** `main` at `f365da67448a0c3b58eba2727dc6faf3da89ca40`  
+**Last verified update:** 2026-10-08  
+**Original baseline:** `main` at `f365da67448a0c3b58eba2727dc6faf3da89ca40`  
+**Integration reference:** `main` at `f9f75e0afd0b2d98ba9c5ec00b0bd1ae1643fd5a` (before in-review Phase 2 tests)  
 **Goal:** A reliable, secure local-first multi-model and creative-production release, not another unrestricted feature expansion.
 
 This is the active execution tracker for Phases 1–3. Preserve subsystem engineering detail in the other active design documents, especially the [sandbox roadmap](AGENT_SANDBOX_ROADMAP_CURRENT_2026-08.md), [video WYSIWYG plan](VIDEO_EDIT_STUDIO_WYSIWYG_RENDERING_IMPLEMENTATION_PLAN_2026-08.md), and [RAG architecture](RAG_MODERNIZATION.md). The older [Master Plan](MASTER_PLAN.md) contains technical backlog context but its August 2026 status statements must be independently revalidated.
@@ -16,18 +18,18 @@ This is the active execution tracker for Phases 1–3. Preserve subsystem engine
 
 ## Phase 1 — Stabilize CI, secure dependencies, reconcile work (P0)
 
-| Work item | Status as of 2026-10-07 | Completion evidence |
+| Work item | Verified status as of 2026-10-08 | Remaining acceptance requirement |
 | --- | --- | --- |
-| Align Go 1.26 toolchain across CI/release/parity, Go module and docs | **In review — [#320](https://github.com/ajbergh/OmniLLM-Studio/pull/320)** | Quality, Security, all applicable native sandbox and video parity checks green on exact head |
-| Remediate npm audit advisories with reproducible lockfile | **In review — [#321](https://github.com/ajbergh/OmniLLM-Studio/pull/321)**, stacked on #320 | `npm ci`, frontend audit, lint, tests/build and complete CI green |
-| Protect `main` with enforceable branch rules | **Owner/admin action — [#322](https://github.com/ajbergh/OmniLLM-Studio/issues/322)** | Failing-check PR cannot merge; up-to-date required checks and review policy verified |
-| Finish rounded-rectangle canonical playback | **Open — [#314](https://github.com/ajbergh/OmniLLM-Studio/pull/314)** | Revalidate full triggered matrix after CI repairs, then squash merge; preserve v6/v7 evidence |
-| Reconcile historical sandbox status and stale PRs | **Pending** | Refresh docs with verified #231–#235 merge history and review/close obsolete docs PR #236 |
-| Document reproducible release baseline | **Pending** | README, technical reference, version/build matrix and platform tests agree |
+| Align Go 1.26 across CI, module and parity jobs | **Merged** — [#320](https://github.com/ajbergh/OmniLLM-Studio/pull/320), [#319](https://github.com/ajbergh/OmniLLM-Studio/pull/319) | Keep the CI/runtime toolchain matrix aligned; defer optional Go 1.27 Docker image bump [#256](https://github.com/ajbergh/OmniLLM-Studio/pull/256) until coordinated |
+| Resolve npm dependency advisories | **Merged** — [#321](https://github.com/ajbergh/OmniLLM-Studio/pull/321), [#315](https://github.com/ajbergh/OmniLLM-Studio/pull/315), [#317](https://github.com/ajbergh/OmniLLM-Studio/pull/317), [#318](https://github.com/ajbergh/OmniLLM-Studio/pull/318) | Monitor future automated advisories and preserve lockfile integrity |
+| Protect `main` with enforceable branch rules | **Blocked on repository owner/admin** — [#322](https://github.com/ajbergh/OmniLLM-Studio/issues/322) | Configure required up-to-date checks, review and merge restrictions; confirm a failing-check PR cannot merge |
+| Finish rounded-rectangle canonical playback | **Merged** — [#314](https://github.com/ajbergh/OmniLLM-Studio/pull/314) | Maintain fixture-specific video parity envelopes; do not claim universal preview/export equivalence |
+| Reconcile historical sandbox status | **Roadmap merged** — [#323](https://github.com/ajbergh/OmniLLM-Studio/pull/323) | Review/close superseded conflicted docs PR [#236](https://github.com/ajbergh/OmniLLM-Studio/pull/236) without discarding genuinely unique content |
+| Document reproducible release baseline | **In progress** | Validate README/reference, artifact matrix, signed platform builds and upgrade/rollback evidence for 0.3 prerelease |
 
 **Current verified baseline:** Sandbox PRs #231 (Windows governed workspaces), #232 (CPU enforcement), #233 (durable task core), #234 (worker deployment workload), and #235 (isolated worktrees) are already merged. These are *prerequisites*, not proof that remaining Phase 14 task lifecycle composition, startup/shutdown recovery, enforced process egress, or hard disk quota support is complete. Avoid reimplementing merged work.
 
-**Go/npm stacking rule:** #321 targets the #320 Go branch so the two fixes can receive one coherent full-security audit. Merge #321 into #320 first after its exact-head checks, then rerun/review #320 on the updated head before merging into `main`. Update/rebase Dependabot #319 (which currently bumps `backend/go.mod` to Go 1.26) only after baseline toolchains are consistent. Handle #315/#317/#318 independently.
+**Phase 1 merge record:** #321 was integrated into the #320 CI/security branch and the combined baseline merged into `main`; #314, #315, #317, #318, #319 and #323 also merged after CI validation. The historical merge queue below is superseded. Phase 1 remains administratively **incomplete** until [#322](https://github.com/ajbergh/OmniLLM-Studio/issues/322) is enforced. Do not upgrade Docker-only images to Go 1.27 ahead of the supported Go 1.26 toolchain.
 
 **Phase 1 exit:** Security Scan and Quality Gate green against combined head; supported native sandbox/video checks green; no outstanding high/critical npm advisory; merge policy enforceable; source of truth current; video PR disposition explicit.
 
@@ -46,9 +48,11 @@ This is the active execution tracker for Phases 1–3. Preserve subsystem engine
 - Add table-driven compatibility/fallback tests for structured model outputs and decide to implement or remove the currently UI-exposed reserved router cache.
 - Validate provider model discovery, timeouts, retries and explicit failure reporting with controllable mocks, then run opt-in credentialed smoke tests.
 
+**2.2 progress (2026-10-08):** [#327](https://github.com/ajbergh/OmniLLM-Studio/pull/327) (authenticated sync/SSE lifecycle), [#329](https://github.com/ajbergh/OmniLLM-Studio/pull/329) (calculator provider→tool→provider loop), [#331](https://github.com/ajbergh/OmniLLM-Studio/pull/331) (sanitized provider error paths) and [#332](https://github.com/ajbergh/OmniLLM-Studio/pull/332) (client disconnect propagation) are **merged** with exact-head CI green. [#333](https://github.com/ajbergh/OmniLLM-Studio/pull/333) (malformed provider frames / interrupted SSE) and [#334](https://github.com/ajbergh/OmniLLM-Studio/pull/334) (bounded tool-round limits) are **in review**, not yet accepted. The remaining handler-level coverage includes retrieval preflight followed by a tool in one turn, nil-summarizer regression via HTTP, stale search evidence, deadlines and measured duration of the complete targeted suite. Track that closure under [#324](https://github.com/ajbergh/OmniLLM-Studio/issues/324).
+
 ### 2.3 Authentication, modularization and data durability
 
-- Validate HttpOnly cookie sessions across Vite, Wails, direct API and reverse-proxy deployments. Only after compatibility and CSRF/session tests, retire browser `omnillm_auth_token` localStorage fallback while retaining deliberate API token support.
+- **Implementation merged — [#328](https://github.com/ajbergh/OmniLLM-Studio/pull/328):** browser sessions now use HttpOnly cookies instead of persistent `omnillm_auth_token` localStorage. Wails keeps a memory-only bearer fallback and `/auth/status` is no longer charged against the credential-attempt limiter. Still validate Vite/Wails/reverse-proxy behavior, CSRF, logout/refresh, desktop cold-start and controlled direct API token access; implementation merge does **not** prove that entire matrix.
 - Extract smaller bounded modules from `frontend/src/components/SettingsPanel.tsx`, `frontend/src/stores/videoStudio.ts`, `frontend/src/components/ChatView.tsx`, `backend/internal/api/message_handler.go`, and `backend/internal/llm/service.go`. Keep behavior-preserving tests and schema compatibility.
 - Test persistent asset upgrades/rollbacks, SQLite migration, restart recovery, RAG index repair, encrypted-secret portability, and lossless project import/export.
 
@@ -74,10 +78,13 @@ This is the active execution tracker for Phases 1–3. Preserve subsystem engine
 
 Each work PR must update the relevant scoped roadmap (if any) and record: baseline/head SHA, test matrix, exact findings, unsupported paths, user-visible behavior, and next independent slice. Maintain one highest-priority fix per PR; document accepted deferrals rather than presenting them as shipped.
 
-## Immediate merge queue
+## Current integration and acceptance queue (2026-10-08)
 
-1. Validate [#321](https://github.com/ajbergh/OmniLLM-Studio/pull/321) on the [#320](https://github.com/ajbergh/OmniLLM-Studio/pull/320) base; merge #321 into that branch after checks.
-2. Validate combined #320 exact head, then merge it to `main`.
-3. Rebase/revalidate [#314](https://github.com/ajbergh/OmniLLM-Studio/pull/314) against updated `main` and merge when green.
-4. Reconcile dependency PRs #315/#317/#318/#319 individually and close or replace stale #236.
-5. Complete owner-side [main-branch protection](https://github.com/ajbergh/OmniLLM-Studio/issues/322) before accepting feature expansion.
+1. Require exact-head green Quality Gate, Security Scan, and relevant native sandbox/browser/video checks before merging [#333](https://github.com/ajbergh/OmniLLM-Studio/pull/333) or [#334](https://github.com/ajbergh/OmniLLM-Studio/pull/334). Fix genuine failures and rerun; never bypass checks.
+2. Complete [#324](https://github.com/ajbergh/OmniLLM-Studio/issues/324) with a deterministic retrieval-preflight+tool HTTP/SSE case, a nil-summarizer guard regression that fails under intentional mutation, stale evidence / timeout cases and recorded test commands/durations.
+3. Validate [#328](https://github.com/ajbergh/OmniLLM-Studio/pull/328) session behavior across desktop/browser/reverse proxy and CSRF before declaring authentication migration fully completed.
+4. Finish durable sandbox task lifecycle and startup/shutdown recovery; keep unproven `disk_limit` and network-isolation capability bits disabled.
+5. Owner/admin completes [#322](https://github.com/ajbergh/OmniLLM-Studio/issues/322): main branch protection. Reconcile [#236](https://github.com/ajbergh/OmniLLM-Studio/pull/236); assess the separately scoped Go 1.27 PR [#256](https://github.com/ajbergh/OmniLLM-Studio/pull/256).
+6. Only then progress [#326](https://github.com/ajbergh/OmniLLM-Studio/issues/326) release-journey and supported-platform evidence toward a controlled 0.3 prerelease.
+
+**Status interpretation:** “Merged” denotes an integrated code change with recorded CI, not completion of all product or deployment acceptance criteria. “In review” is not green until the exact head passes every required check.
