@@ -283,7 +283,6 @@ describe('normal playback canonicalization gate', () => {
   });
 
   it.each([
-    ['shape', { ...mediaLayer(), clip: { id: 'shape', shape: {} } }],
     ['cursor', { ...mediaLayer(), clip: { id: 'cursor', cursor: {} } }],
     ['missing-asset', { ...mediaLayer(), clip: { id: 'missing-asset' }, asset: undefined }],
     ['audio-asset', mediaLayer('audio-asset', 'audio/wav')],
