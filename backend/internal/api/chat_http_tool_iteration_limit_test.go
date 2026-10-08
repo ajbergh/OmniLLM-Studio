@@ -28,7 +28,7 @@ func TestChatHTTPToolLoopIterationBoundary(t *testing.T) {
 			return
 		}
 		var request struct {
-			Stream bool `json:"stream"`
+			Stream bool          `json:"stream"`
 			Tools  []interface{} `json:"tools"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
