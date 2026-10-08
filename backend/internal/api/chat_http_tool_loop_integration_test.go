@@ -71,7 +71,7 @@ func TestChatHTTPToolLoopEndToEnd(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "Calculated 42"}}},
-				"usage": map[string]interface{}{"prompt_tokens": 11, "completion_tokens": 3, "cost": 0.02},
+				"usage":   map[string]interface{}{"prompt_tokens": 11, "completion_tokens": 3, "cost": 0.02},
 			})
 			return
 		}
@@ -129,7 +129,7 @@ func TestChatHTTPToolLoopEndToEnd(t *testing.T) {
 	}
 	basePath := "/v1/conversations/" + conversationID + "/messages"
 	toolRequest := map[string]interface{}{
-		"content": "Calculate six times seven using the calculator.",
+		"content":    "Calculate six times seven using the calculator.",
 		"web_search": false, "tool_mode": "specific", "required_tool": "calculator",
 	}
 
