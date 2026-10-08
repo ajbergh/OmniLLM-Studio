@@ -210,18 +210,18 @@ function App() {
     authApi.status()
       .then((status) => {
         if (status.auth_enabled && status.has_users) {
-          // Multi-user mode: check if we have a valid token
-          const token = localStorage.getItem('omnillm_auth_token');
-          if (!token) {
-            setAuthenticated(false);
-          }
+          // Ask the server to validate the HttpOnly cookie (or a desktop
+          // in-memory bearer), never browser-readable localStorage state.
+          return authApi.me().then(() => setAuthenticated(true))
+            .catch(() => setAuthenticated(false));
         }
-        setAuthChecked(true);
+        setAuthenticated(true); // Account-free localhost solo mode.
       })
       .catch(() => {
-        // If auth endpoint fails, assume solo mode
-        setAuthChecked(true);
-      });
+        // Fail closed when the authentication endpoint cannot be reached.
+        setAuthenticated(false);
+      })
+      .finally(() => setAuthChecked(true));
   }, []);
 
   // Keyboard shortcuts

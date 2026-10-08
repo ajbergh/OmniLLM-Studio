@@ -38,11 +38,11 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
     try {
       if (mode === 'register') {
         const res = await authApi.register({ username, password, display_name: displayName || undefined });
-        setAuthToken(res.token);
+        setAuthToken(res.token); // Memory-only on desktop; browser uses the HttpOnly cookie.
         toast.success('Account created');
       } else {
         const res = await authApi.login({ username, password });
-        setAuthToken(res.token);
+        setAuthToken(res.token); // Memory-only on desktop; browser uses the HttpOnly cookie.
         toast.success('Logged in');
       }
       onAuthenticated();
