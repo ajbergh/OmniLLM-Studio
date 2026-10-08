@@ -3,13 +3,13 @@ module github.com/ajbergh/omnillm-studio
 go 1.26.0
 
 require (
-	codeberg.org/readeck/go-readability/v2 v2.1.2
+	codeberg.org/readeck/go-readability/v2 v2.1.3
 	github.com/chinmaykhachane/espn-go v0.1.1
 	github.com/cyphar/filepath-securejoin v0.7.0
 	github.com/drumkitai/go-word v1.0.1
-	github.com/go-chi/chi/v5 v5.3.1
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-chi/cors v1.2.2
-	github.com/go-git/go-billy/v5 v5.9.1
+	github.com/go-git/go-billy/v5 v5.9.2
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-pdf/fpdf v0.9.0
 	github.com/go-rod/rod v0.116.2
@@ -18,13 +18,13 @@ require (
 	github.com/philippgille/chromem-go v0.7.0
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/tsawler/tabula v1.6.14
-	github.com/wailsapp/wails/v2 v2.14.0
+	github.com/wailsapp/wails/v2 v2.16.0
 	github.com/xuri/excelize/v2 v2.11.0
-	golang.org/x/crypto v0.55.0
-	golang.org/x/net v0.58.0
-	golang.org/x/sys v0.47.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/net v0.59.0
+	golang.org/x/sys v0.48.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.56.0
+	modernc.org/sqlite v1.60.1
 )
 
 require (
@@ -86,9 +86,9 @@ require (
 	github.com/ysmood/leakless v0.9.0 // indirect
 	github.com/yuin/goldmark v1.7.8 // indirect
 	golang.org/x/image v0.41.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	modernc.org/libc v1.74.4 // indirect
+	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.11.0 // indirect
+	modernc.org/memory v1.12.1 // indirect
 )
