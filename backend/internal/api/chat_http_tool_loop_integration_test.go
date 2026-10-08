@@ -47,14 +47,12 @@ func TestChatHTTPToolLoopEndToEnd(t *testing.T) {
 			if err != nil {
 				panic(err)
 			}
-			fmt.Fprintf(w, "data: %s
-
-", payload)
+			fmt.Fprint(w, "data: ", string(payload), string([]byte{10, 10}))
 		}
 		toolCall := map[string]interface{}{
 			"index": 0, "id": "calc-call-42", "type": "function",
 			"function": map[string]interface{}{
-				"name": "calculator", "arguments": "{"expression":"6*7"}",
+				"name": "calculator", "arguments": `{"expression":"6*7"}`,
 			},
 		}
 		if last.Role == "tool" {
@@ -66,11 +64,7 @@ func TestChatHTTPToolLoopEndToEnd(t *testing.T) {
 				streamFinal.Add(1)
 				w.Header().Set("Content-Type", "text/event-stream")
 				writeSSE(map[string]interface{}{"content": "Calculated 42"})
-				fmt.Fprint(w, "data: [DONE]
-
-")
-				return
-			}
+			fmt.Fprint(w, "data: [DONE]", string([]byte{10, 10}))
 			syncFinal.Add(1)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -168,11 +162,8 @@ func TestChatHTTPToolLoopEndToEnd(t *testing.T) {
 
 	var names []string
 	var completed map[string]interface{}
-	for _, frame := range strings.Split(strings.TrimSpace(string(data)), "
-
-") {
-		pieces := strings.SplitN(frame, "
-data: ", 2)
+	for _, frame := range strings.Split(strings.TrimSpace(string(data)), string([]byte{10, 10})) {
+		pieces := strings.SplitN(frame, string([]byte{10})+"data: ", 2)
 		if len(pieces) != 2 || !strings.HasPrefix(pieces[0], "event: ") {
 			t.Fatalf("invalid SSE frame: %q", frame)
 		}
