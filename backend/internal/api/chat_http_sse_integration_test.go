@@ -99,22 +99,14 @@ func TestAuthenticatedChatHTTPAndSSELifecycle(t *testing.T) {
 		if request.Stream {
 			streamCalls.Add(1)
 			w.Header().Set("Content-Type", "text/event-stream")
-			fmt.Fprint(w, "data: {"choices":[{"delta":{"content":"Streaming "}}]}
-
-")
-			fmt.Fprint(w, "data: {"choices":[{"delta":{"content":"works"}}]}
-
-")
-			fmt.Fprint(w, "data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":4,"cost":0.03}}
-
-")
-			fmt.Fprint(w, "data: [DONE]
-
-")
+			fmt.Fprint(w, "data: ", `{"choices":[{"delta":{"content":"Streaming "}}]}`, string([]byte{10, 10}))
+			fmt.Fprint(w, "data: ", `{"choices":[{"delta":{"content":"works"}}]}`, string([]byte{10, 10}))
+			fmt.Fprint(w, "data: ", `{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":4,"cost":0.03}}`, string([]byte{10, 10}))
+			fmt.Fprint(w, "data: [DONE]", string([]byte{10, 10}))
 			return
 		}
 		syncCalls.Add(1)
-		fmt.Fprint(w, "{"choices":[{"message":{"content":"Sync works"}}],"usage":{"prompt_tokens":6,"completion_tokens":3,"cost":0.01}}")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"Sync works"}}],"usage":{"prompt_tokens":6,"completion_tokens":3,"cost":0.01}}`)
 	}))
 	defer provider.Close()
 	baseURL := provider.URL + "/v1"
@@ -194,14 +186,11 @@ func TestAuthenticatedChatHTTPAndSSELifecycle(t *testing.T) {
 	var orderedEvents []string
 	var streamedText string
 	var done map[string]interface{}
-	for _, frame := range strings.Split(strings.TrimSpace(string(payload)), "
-
-") {
+	for _, frame := range strings.Split(strings.TrimSpace(string(payload)), string([]byte{10, 10})) {
 		if !strings.HasPrefix(frame, "event: ") {
 			t.Fatalf("malformed SSE frame: %q", frame)
 		}
-		parts := strings.SplitN(frame, "
-data: ", 2)
+		parts := strings.SplitN(frame, string([]byte{10})+"data: ", 2)
 		if len(parts) != 2 {
 			t.Fatalf("malformed SSE data: %q", frame)
 		}
