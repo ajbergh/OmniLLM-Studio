@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,17 +21,29 @@ func TestChatHTTPClientCancellationReachesUpstream(t *testing.T) {
 	cfg := newAgentRuntimeRouterTestConfig(t)
 	providerStarted := make(chan struct{}, 1)
 	providerCancelled := make(chan struct{}, 1)
+	// Ensure a failed assertion cannot strand httptest.Server.Close waiting on
+	// a deliberately blocked provider request.
+	releaseProvider := make(chan struct{})
 
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected request", http.StatusNotFound)
 			return
 		}
+		// Consume the request body so the Go HTTP server can detect the peer's
+		// connection closing; an unread POST body can defer cancellation.
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			return
+		}
 		providerStarted <- struct{}{}
-		<-r.Context().Done()
-		providerCancelled <- struct{}{}
+		select {
+		case <-r.Context().Done():
+			providerCancelled <- struct{}{}
+		case <-releaseProvider:
+		}
 	}))
 	defer provider.Close()
+	defer close(releaseProvider)
 
 	baseURL := provider.URL + "/v1"
 	model := "fixture-cancel-chat"
