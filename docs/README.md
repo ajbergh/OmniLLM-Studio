@@ -1,6 +1,6 @@
 # Documentation guide
 
-[MASTER_PLAN.md](MASTER_PLAN.md) is the single authoritative source for unfinished engineering work and execution order.
+[RELEASE_0_3_EXECUTION_PLAN_2026_10.md](RELEASE_0_3_EXECUTION_PLAN_2026_10.md) is the current three-phase delivery tracker for 0.3. [MASTER_PLAN.md](MASTER_PLAN.md) preserves the August engineering backlog and its historical execution context.
 
 ## Active references
 
