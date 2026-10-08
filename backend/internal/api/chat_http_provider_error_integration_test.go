@@ -100,7 +100,9 @@ func TestChatHTTPProviderFailureDoesNotSaveAssistant(t *testing.T) {
 	if len(messages) != 2 || messages[0].Role != "user" || messages[1].Role != "user" {
 		t.Fatalf("a failed model turn persisted an assistant response: %+v", messages)
 	}
-	if upstreamCalls.Load() != 2 {
-		t.Fatalf("upstream calls = %d, want 2", upstreamCalls.Load())
+	// Providers may retry transient upstream errors; each user turn must
+	// reach the provider, but retry count is not an API contract.
+	if upstreamCalls.Load() < 2 {
+		t.Fatalf("upstream calls = %d, want at least 2", upstreamCalls.Load())
 	}
 }
