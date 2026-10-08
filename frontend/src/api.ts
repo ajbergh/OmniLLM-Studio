@@ -154,17 +154,24 @@ export async function initAPIBase(): Promise<void> {
   }
 }
 
-// Auth token management (guarded so the module loads outside a browser,
-// e.g. in node-based unit tests).
-let authToken: string | null = typeof localStorage === 'undefined' ? null : localStorage.getItem('omnillm_auth_token');
+// Browser sessions use the HttpOnly cookie. Wails desktop talks to a separate
+// local URL prefix, so its fallback bearer token is memory-only.
+let authToken: string | null = null;
+
+function discardLegacyStoredToken(): void {
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.removeItem('omnillm_auth_token');
+  } catch {
+    // Disabled browser storage must never prevent cookie authentication.
+  }
+}
+
+// Purge historical browser-readable tokens on startup and after login/logout.
+discardLegacyStoredToken();
 
 export function setAuthToken(token: string | null): void {
-  authToken = token;
-  if (token) {
-    localStorage.setItem('omnillm_auth_token', token);
-  } else {
-    localStorage.removeItem('omnillm_auth_token');
-  }
+  authToken = BASE_URL === '/v1' ? null : token;
+  discardLegacyStoredToken();
 }
 
 export function getAuthToken(): string | null {
@@ -197,6 +204,7 @@ export async function uploadAttachment(conversationId: string, file: File): Prom
     headers['Authorization'] = `Bearer ${authToken}`;
   }
   const res = await fetch(`${BASE_URL}/conversations/${encodeURIComponent(conversationId)}/attachments`, {
+    credentials: 'include',
     method: 'POST',
     headers,
     body: formData,
@@ -220,6 +228,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
+    credentials: options?.credentials ?? 'include',
     headers,
   });
 
@@ -547,6 +556,7 @@ export const api = {
     const form = new FormData();
     form.append('file', file);
     const res = await fetch(`${BASE_URL}/conversations/${conversationId}/attachments`, {
+      credentials: 'include',
       method: 'POST',
       body: form,
     });
@@ -648,6 +658,7 @@ reindexAll: () =>
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
     const res = await fetch(`${BASE_URL}/export`, {
+      credentials: 'include',
       method: 'POST',
       headers,
       body: JSON.stringify(options),
@@ -666,6 +677,7 @@ reindexAll: () =>
     const headers: Record<string, string> = {};
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
     const res = await fetch(`${BASE_URL}/import`, {
+      credentials: 'include',
       method: 'POST',
       headers,
       body: form,
@@ -683,6 +695,7 @@ reindexAll: () =>
     const headers: Record<string, string> = {};
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
     const res = await fetch(`${BASE_URL}/import/validate`, {
+      credentials: 'include',
       method: 'POST',
       headers,
       body: form,
@@ -748,6 +761,7 @@ export const agentApi = {
 
     const promise = new Promise<void>((resolve, reject) => {
       fetch(`${BASE_URL}/conversations/${conversationId}/agent/run`, {
+        credentials: 'include',
         method: 'POST',
         headers,
         body: JSON.stringify(req),
@@ -1004,10 +1018,13 @@ export const authApi = {
       body: JSON.stringify(req),
     }),
 
-  logout: () =>
-    apiFetch<{ ok: boolean }>('/auth/logout', {
-      method: 'POST',
-    }),
+  logout: async () => {
+    try {
+      return await apiFetch<{ ok: boolean }>('/auth/logout', { method: 'POST' });
+    } finally {
+      setAuthToken(null);
+    }
+  },
 
   status: () => apiFetch<AuthStatus>('/auth/status'),
 
@@ -1327,6 +1344,7 @@ export const musicApi = {
     }
 
     fetch(`${BASE_URL}/music/generations`, {
+      credentials: 'include',
       method: 'POST',
       headers,
       body: JSON.stringify(req),
