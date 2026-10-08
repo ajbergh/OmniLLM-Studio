@@ -429,14 +429,18 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			})
 		})
 
-		// Auth (public — no auth middleware, rate-limited)
+		// The read-only status probe runs on every web bootstrap, including
+		// parallel browser tests. Keep it outside the credential-attempt rate
+		// limiter so successful cookie validation is never masked by a 429.
+		r.Get("/auth/status", authHandler.AuthStatus)
+
+		// Throttle credential-changing authentication operations.
 		authLimiter := newRateLimiter(1*time.Minute, 10)
 		r.Route("/auth", func(r chi.Router) {
 			r.Use(RateLimit(authLimiter))
 			r.Post("/register", authHandler.Register)
 			r.Post("/login", authHandler.Login)
 			r.Post("/logout", authHandler.Logout)
-			r.Get("/status", authHandler.AuthStatus)
 		})
 
 		// OAuth authorization-server callback. One-time cryptographic state is the authorization boundary.
