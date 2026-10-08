@@ -1,6 +1,6 @@
 # OmniLLM-Studio Master Plan
 
-> **Authoritative source for outstanding engineering work.**
+> **Historical engineering backlog (audited 2026-08-19).** For the current 2026-10 delivery phases, verified merged work, exact PRs and release gates, see [OmniLLM-Studio 0.3 — Phased Delivery & Reliability Plan](RELEASE_0_3_EXECUTION_PLAN_2026_10.md). Individual status claims in this archived-date section require re-verification against current `main`.
 >
 > Audited against repository `main` through merged sandbox PR #210 (`dadb0372`) and CI hardening PR #226 (`ffbf7971`) on 2026-08-19, with rebuilt Windows governed-workspace hardening active in PR #231. Completed initiatives and superseded plans are in [archive/README.md](archive/README.md). This document deliberately excludes completed work except where it is needed to explain a dependency. macOS sandbox Phase 13 completed in PR #166 (`d52ab16f`). Native Chromium browser-egress assurance completed in PR #168 (`76f4f4c`). SQLite foreign-key admission is also complete (schema V51).
 
