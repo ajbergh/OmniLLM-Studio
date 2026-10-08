@@ -161,8 +161,17 @@ if ('serviceWorker' in navigator) {
 		}
 	})
 
+	// A one-shot NavigatePage closes its ephemeral page immediately after text
+	// extraction. Chromium workers and service workers can be terminated before
+	// their requests reach the perimeter, making this test timing-dependent.
+	// Keep the fixture page alive until all blocked destinations are observed.
+	const fixtureUser = "native-egress-fixture"
+	session, err := manager.CreateSession(context.Background(), fixtureUser)
+	if err != nil {
+		t.Fatalf("create persistent native egress fixture session: %v", err)
+	}
 	if _, err := manager.NavigatePage(context.Background(), NavigateOptions{
-		URL: pageServer.URL, Extract: "text",
+		URL: pageServer.URL, Extract: "text", SessionID: session.ID, UserID: fixtureUser,
 	}); err != nil {
 		t.Fatalf("navigate native browser fixture: %v", err)
 	}
