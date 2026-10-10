@@ -3,9 +3,9 @@
 # Produces: build/bin/OmniLLM-Studio[-arm64]
 #
 # Requirements:
-#   - Go 1.25+
-#   - Node.js 20+
-#   - Wails CLI v2.12.0
+#   - Go 1.26+
+#   - Node.js 24+
+#   - Wails CLI v2.16.0
 #   - GCC + pkg-config
 #   - WebKit2GTK 4.0, or WebKit2GTK 4.1 with the webkit2_41 build tag
 
@@ -34,7 +34,7 @@ export CGO_ENABLED=1
 for cmd in go node npm wails gcc pkg-config; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "[ERROR] '$cmd' not found in PATH." >&2
-        [ "$cmd" = "wails" ] && echo "  Install with: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0" >&2
+        [ "$cmd" = "wails" ] && echo "  Install with: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0" >&2
         exit 1
     fi
 done

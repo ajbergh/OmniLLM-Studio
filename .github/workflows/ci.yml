@@ -18,6 +18,14 @@ env:
   NODE_VERSION: '24'
 
 jobs:
+  release-assets:
+    name: Release checksum contract
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise complete, missing, and tampered release assets
+        run: bash scripts/test-release-assets.sh
+
   backend:
     name: Backend tests and race detector
     runs-on: ubuntu-24.04
