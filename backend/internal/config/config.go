@@ -112,7 +112,9 @@ func Load() *Config {
 		}
 	}
 
-	origins := []string{"http://localhost:5173", "http://localhost:3000"}
+	// Accept both named and numeric loopback hosts at the Vite development port.
+	// Other frontend origins, including test-only ports, must be configured explicitly.
+	origins := []string{"http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"}
 	if configured := strings.TrimSpace(os.Getenv("OMNILLM_CORS_ORIGINS")); configured != "" {
 		origins = strings.Split(configured, ",")
 		cleaned := origins[:0]
