@@ -116,15 +116,15 @@ func (h *RAGHandler) Diagnose(w http.ResponseWriter, r *http.Request) {
 		}
 		results = append(results, map[string]interface{}{
 			"conversation_id": conversationID,
-			"summary": report,
+			"summary":         report,
 		})
 	}
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"conversations_scanned": len(results),
+		"conversations_scanned":              len(results),
 		"conversations_with_missing_vectors": mismatched,
-		"results": results,
-		"scope": "presence in any legacy/physical embedding-space collection; active-space completeness not verified",
-		"repair_performed": false,
-		"orphan_only_collections_scanned": false,
+		"results":                            results,
+		"scope":                              "presence in any legacy/physical embedding-space collection; active-space completeness not verified",
+		"repair_performed":                   false,
+		"orphan_only_collections_scanned":    false,
 	})
 }
