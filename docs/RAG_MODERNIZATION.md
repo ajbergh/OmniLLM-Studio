@@ -85,3 +85,30 @@ go test -run '^$' -bench BenchmarkVectorIndexes -benchmem ./internal/rag
 ```
 
 Historical [implementation status](archive/completed/RAG_MODERNIZATION_STATUS.md) and [validation evidence](archive/completed/RAG_BACKEND_VALIDATION.md) are retained for the completed branch checkpoint.
+
+
+## Read-only consistency diagnostics (0.3 stabilization)
+
+Administrator-only `GET /v1/rag/diagnose` checks each relational chunk
+ID against persisted physical vector collections using the installed
+chromem-go v0.7.0 `GetByID` API. A count-only health check can miss an
+equal-cardinality mismatch: the diagnostic detects missing expected IDs
+even when the physical index has the same number of records.
+
+The scan returns per-conversation missing-ID counts and total physical
+record counts, without returning document text, vector values or the
+individual chunk IDs. It is read-only: no embedding calls, index updates
+or automatic repair occur.
+
+The endpoint rejects oversized scopes (over 100,000 records) and more
+than 250 indexed conversations instead of publishing partial results.
+The underlying version of chromem **does not expose ID enumeration**,
+so this diagnostic **cannot detect orphan vector IDs**. It also checks
+for presence in *any* embedding-space collection: a positive result does
+not prove that the currently active embedding space is complete, that
+embeddings are fresh, or that entirely orphaned collections are absent.
+
+`POST /v1/rag/repair` still performs a **full conversation reindex**.
+Upcoming work (#341) is per-active-space identity/fingerprint checks,
+safe transactional targeted repair, orphan enumeration, and deterministic
+retrieval quality evaluation.

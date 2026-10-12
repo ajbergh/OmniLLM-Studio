@@ -75,3 +75,56 @@ func (h *RAGHandler) Repair(w http.ResponseWriter, r *http.Request) {
 		"failures":               failures,
 	})
 }
+
+// Diagnose compares persisted relational chunk IDs against the union of the
+// corresponding physical vector-collection IDs. It is intentionally read-only,
+// bounded and administrator-only (see router); /rag/repair retains its existing
+// full-rebuild semantics until targeted recovery is implemented.
+func (h *RAGHandler) Diagnose(w http.ResponseWriter, r *http.Request) {
+	conversationIDs, err := h.chunkRepo.DistinctConversationIDsWithChunks()
+	if err != nil {
+		respondInternalError(w, err)
+		return
+	}
+	const maxDiagnosticConversations = 250
+	if len(conversationIDs) > maxDiagnosticConversations {
+		respondError(w, http.StatusRequestEntityTooLarge, "too many indexed conversations for a single integrity scan")
+		return
+	}
+	results := make([]map[string]interface{}, 0, len(conversationIDs))
+	mismatched := 0
+	for _, conversationID := range conversationIDs {
+		if err := r.Context().Err(); err != nil {
+			return
+		}
+		chunks, err := h.chunkRepo.ListByConversation(conversationID)
+		if err != nil {
+			respondInternalError(w, err)
+			return
+		}
+		chunkIDs := make([]string, 0, len(chunks))
+		for _, chunk := range chunks {
+			chunkIDs = append(chunkIDs, chunk.ID)
+		}
+		report, err := h.vectorStore.InspectChunkIDs(r.Context(), conversationID, chunkIDs)
+		if err != nil {
+			respondError(w, http.StatusServiceUnavailable, "index integrity inspection did not complete")
+			return
+		}
+		if !report.AllExpectedPresent {
+			mismatched++
+		}
+		results = append(results, map[string]interface{}{
+			"conversation_id": conversationID,
+			"summary":         report,
+		})
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"conversations_scanned":              len(results),
+		"conversations_with_missing_vectors": mismatched,
+		"results":                            results,
+		"scope":                              "presence in any legacy/physical embedding-space collection; active-space completeness not verified",
+		"repair_performed":                   false,
+		"orphan_only_collections_scanned":    false,
+	})
+}
