@@ -826,6 +826,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 			r.Group(func(r chi.Router) {
 				r.Use(auth.RequireRole("admin"))
 				r.Get("/rag/health", ragHandler.Health)
+				r.Get("/rag/diagnose", ragHandler.Diagnose)
 				r.Post("/rag/repair", ragHandler.Repair)
 				r.Post("/rag/reindex-all", ragHandler.ReindexAll)
 			})
