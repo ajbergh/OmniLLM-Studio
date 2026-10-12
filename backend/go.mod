@@ -1,6 +1,6 @@
 module github.com/ajbergh/omnillm-studio
 
-go 1.26.0
+go 1.26.9
 
 require (
 	codeberg.org/readeck/go-readability/v2 v2.1.3
@@ -21,7 +21,7 @@ require (
 	github.com/wailsapp/wails/v2 v2.16.0
 	github.com/xuri/excelize/v2 v2.11.0
 	golang.org/x/crypto v0.57.0
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 	golang.org/x/sys v0.48.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.60.1
