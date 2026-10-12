@@ -90,3 +90,10 @@ Each work PR must update the relevant scoped roadmap (if any) and record: baseli
 **2026-10-12 security baseline:** PR #344 merged to `main` at `a0d16ddc` with Go 1.26.9 / `x/net` 0.60.0. PRs #333 and #334 are also merged. Follow-on PRs #336, #337 and #347–#349 are rebased for exact-head CI; do not mark acceptance complete until those jobs finish. The release acceptance checklist is maintained in [RELEASE_0_3_ACCEPTANCE.md](RELEASE_0_3_ACCEPTANCE.md).
 
 **Status interpretation:** “Merged” denotes an integrated code change with recorded CI, not completion of all product or deployment acceptance criteria. “In review” is not green until the exact head passes every required check.
+
+### Phase 2 authentication-origin hardening (2026-10-12, proposed)
+
+- [ ] Merge browser mutation-Origin/Fetch-Metadata guard PR after exact-head Quality, Security, browser and sandbox assurance. This is a narrow CSRF defense for credentialed browser mutations, not completion of the full cross-platform authentication matrix in #339.
+- The guard accepts exact same-origin or explicitly configured CORS origins; an explicit bearer credential continues to work for Wails/direct API clients. Rejected origins must not log out sessions or run tool, media, or project mutations.
+- Non-browser calls without Origin/Fetch Metadata remain compatible. A trusted reverse proxy must preserve the public Host and correctly set X-Forwarded-Proto; cloud/public origins must be deliberately configured. The matrix still needs full HTTPS reverse-proxy, Wails cold-start and credentials-expiry end-to-end acceptance.
+- Phase 1 dependency PRs #350, #351, #353 and #354 were merged after exact-head CI; current release gates and owner-required branch protection #322 remain outstanding.
