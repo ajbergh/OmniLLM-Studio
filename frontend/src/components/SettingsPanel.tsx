@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { useProviderStore, useSettingsStore, useFeatureFlagStore } from '../stores';
 import { api, authApi, browserApi, mcpApi, musicApi, videoApi, setAuthToken } from '../api';
 import { X, Plus, Trash2, Eye, EyeOff, Save, Check, Shield, Zap, Globe, Server, Cloud, Cpu, ExternalLink, RefreshCw, Database, Wrench, DollarSign, UserPlus, Lock, Users, Palette, ChevronDown, RotateCcw, Plug, Terminal, Play, Square, Pencil, AlertTriangle, CheckCircle2, ClipboardList, Trophy, GitBranch as Github, Calculator, Link2, Search, Music2, Film, Route as RouteIcon, Download } from 'lucide-react';
-import type { BrowserSession, BrowserStatus, CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, RAGHealthResponse, ToolPolicy, UpdateMCPServerRequest } from '../types';
+import type { BrowserSession, BrowserStatus, CreateMCPServerRequest, MCPAuditEvent, MCPServer, MCPTool, MCPTransport, OpenRouterMetadata, RAGHealthResponse, ToolPolicy } from '../types';
 import type { MusicModel, MusicProviderKey } from '../types/music';
 import type { VideoModel, VideoProviderKey } from '../types/video';
 import { useTheme, THEMES } from '../theme';
@@ -19,6 +19,8 @@ import { formatEnvOrHeaders, type ParsedMCPServerConfig } from '../mcpImportPars
 import { ScopedToolPermissionsPanel } from './ScopedToolPermissionsPanel';
 import { ToolDiagnosticsPanel } from './ToolDiagnosticsPanel';
 import { formatModelOptionLabel, getKnownChatModels, getKnownImageModels, isFreeModel } from '../models';
+import { createMCPRequest, emptyMCPForm, filesystemMCPTemplate, formFromMCPServer, updateMCPRequest } from './settings/mcpForm';
+import type { MCPFormState } from './settings/mcpForm';
 
 const PROVIDER_TYPES = [
   { value: 'openai', label: 'OpenAI', icon: Zap, color: 'from-emerald-500/20 to-green-500/20', iconColor: 'text-emerald-400' },
@@ -3125,129 +3127,6 @@ function ToolsTab() {
 // ============================================
 // MCP Servers Settings Tab
 // ============================================
-
-type MCPFormState = {
-  name: string;
-  transport: MCPTransport;
-  command: string;
-  argsText: string;
-  url: string;
-  envText: string;
-  headersText: string;
-  allowPrivateNetwork: boolean;
-  enabled: boolean;
-};
-
-const emptyMCPForm: MCPFormState = {
-  name: '',
-  transport: 'stdio',
-  command: '',
-  argsText: '',
-  url: '',
-  envText: '',
-  headersText: '',
-  allowPrivateNetwork: false,
-  enabled: false,
-};
-
-const filesystemMCPTemplate: MCPFormState = {
-  name: 'filesystem',
-  transport: 'stdio',
-  command: 'npx.cmd',
-  argsText: [
-    '-y',
-    '@modelcontextprotocol/server-filesystem@2025.8.21',
-    'C:\\Users\\you\\Documents',
-  ].join('\n'),
-  url: '',
-  envText: '',
-  headersText: '',
-  allowPrivateNetwork: false,
-  enabled: false,
-};
-
-function parseMCPArgs(value: string): string[] {
-  return value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function parseMCPEnv(value: string, label: string): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const rawLine of value.split('\n')) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const equals = line.indexOf('=');
-    if (equals <= 0) {
-      throw new Error(`${label} must use KEY=value lines`);
-    }
-    const key = line.slice(0, equals).trim();
-    const envValue = line.slice(equals + 1).trim();
-    if (!key) {
-      throw new Error(`${label} keys cannot be empty`);
-    }
-    env[key] = envValue;
-  }
-  return env;
-}
-
-function createMCPRequest(form: MCPFormState): CreateMCPServerRequest {
-  const name = form.name.trim();
-  const transport = form.transport;
-  if (!name) throw new Error('Server name is required');
-  
-  const request: CreateMCPServerRequest = {
-    name,
-    transport,
-    enabled: form.enabled,
-  };
-
-  if (transport === 'stdio') {
-    const command = form.command.trim();
-    if (!command) throw new Error('Command is required for stdio transport');
-    request.command = command;
-    request.args = parseMCPArgs(form.argsText);
-    if (form.envText.trim()) {
-      request.env = parseMCPEnv(form.envText, 'Environment variables');
-    }
-  } else if (transport === 'http') {
-    const url = form.url.trim();
-    if (!url) throw new Error('URL is required for http transport');
-    request.url = url;
-    request.allow_private_network = form.allowPrivateNetwork;
-    if (form.headersText.trim()) {
-      request.headers = parseMCPEnv(form.headersText, 'Headers');
-    }
-  }
-
-  return request;
-}
-
-function updateMCPRequest(form: MCPFormState): UpdateMCPServerRequest {
-  const request = createMCPRequest(form) as UpdateMCPServerRequest;
-  if (form.transport === 'stdio' && !form.envText.trim()) {
-    delete request.env;
-  }
-  if (form.transport === 'http' && !form.headersText.trim()) {
-    delete request.headers;
-  }
-  return request;
-}
-
-function formFromMCPServer(server: MCPServer): MCPFormState {
-  return {
-    name: server.name,
-    transport: server.transport || 'stdio',
-    command: server.command || '',
-    argsText: (server.args || []).join('\n'),
-    url: server.url || '',
-    envText: '',
-    headersText: '',
-    allowPrivateNetwork: server.allow_private_network ?? false,
-    enabled: server.enabled,
-  };
-}
 
 function statusBadgeClass(status: MCPServer['status']): string {
   if (status === 'connected') return 'border-success/30 bg-success/10 text-success';
