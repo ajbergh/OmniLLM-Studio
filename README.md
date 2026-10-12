@@ -176,6 +176,7 @@ Prefer a native desktop window, helper scripts, containers, or Kubernetes? Jump 
 
 ### Start here
 
+- [First-run workflows](docs/FIRST_RUN_WORKFLOWS.md) — choose a local-only, hybrid, creator, developer, or team starting path
 - [Technical reference](docs/TECHNICAL_REFERENCE.md) — models, architecture, API routes, environment variables, builds, and deployment
 - [Feature FAQ](docs/Feature%20FAQ.md) — how the major capabilities behave in practice
 - [RAG modernization architecture](docs/RAG_MODERNIZATION.md) — hybrid retrieval, embedding isolation, safe rebuilds, and optional vector backends

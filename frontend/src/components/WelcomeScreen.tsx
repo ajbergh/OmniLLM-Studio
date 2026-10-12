@@ -44,8 +44,8 @@ const features = [
   },
   {
     icon: Shield,
-    title: '100% Local',
-    desc: 'Your data stays on your machine, always',
+    title: 'Local-first control',
+    desc: 'Your history is local; cloud models receive the requests you send them',
     color: 'from-emerald-500/20 to-green-500/20',
     iconColor: 'text-emerald-400',
   },
@@ -87,7 +87,7 @@ export function WelcomeScreen({ onNewChat, onOpenSettings }: Props) {
             <span className="gradient-text">OmniLLM-Studio</span>
           </h1>
           <p className="text-text-muted text-lg font-light">
-            Your unified AI conversation hub
+            One local-first workspace for chat, research, images, music, and video
           </p>
         </motion.div>
 
