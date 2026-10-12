@@ -3,8 +3,8 @@ REM OmniLLM-Studio — Wails Build Script for Windows
 REM Produces: build\bin\OmniLLM-Studio[-arm64].exe
 REM
 REM Requirements:
-REM   - Go 1.24+
-REM   - Node.js 18+
+REM   - Go 1.26+
+REM   - Node.js 24+
 REM   - Wails CLI v2: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 REM   - WebView2 runtime (ships with Win10 1803+)
 REM   No GCC/CGO required — uses modernc.org/sqlite (pure Go) + Wails v2 Go WebView2 loader

@@ -3,8 +3,8 @@
 # Produces: build/bin/OmniLLM-Studio[.app]
 #
 # Requirements:
-#   - Go 1.24+
-#   - Node.js 18+
+#   - Go 1.26+
+#   - Node.js 24+
 #   - Wails CLI v2: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 #   - Xcode Command Line Tools: xcode-select --install  (needed by Wails for WebKit/Cocoa — NOT for SQLite)
 #
