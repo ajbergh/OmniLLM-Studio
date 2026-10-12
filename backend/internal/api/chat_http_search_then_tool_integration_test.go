@@ -72,7 +72,7 @@ func TestChatHTTPPreflightThenToolLoopSyncAndSSE(t *testing.T) {
 				Role    string `json:"role"`
 				Content string `json:"content"`
 			} `json:"messages"`
-			Tools []struct {
+			Tools    []struct {
 				Function struct {
 					Name string `json:"name"`
 				} `json:"function"`
