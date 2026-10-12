@@ -212,3 +212,25 @@ PR #174 adds strict Linux aggregate memory enforcement. The first two native att
 macOS Phase 13A merged in PR #159. Phase 13B passed native macOS runtime assurance and repository gates and merged in PR #162 as `840b00bb6d2b74d1a88eb1fd910d06dab64118a2`. Phase 13C merged in PR #164 as `44f410793a70444963ec1eecb989b15df159b5f1`. Phase 13D adversarial assurance passed its native and repository gates and merged in PR #166 as `d52ab16f6f1cdc14bd7762ccb13d16964d665b17`, closing Phase 13 without changing the truthful detached-process limitation.
 
 Cross-compilation alone is never considered platform-confinement evidence.
+
+
+## Durable worker lifecycle in API composition (0.3)
+
+When `OMNILLM_CODE_SANDBOX_URL` (or the canonical
+`OMNILLM_SANDBOX_URL` alias loaded by configuration) selects an authenticated
+protocol-v2 sandbox worker, the API also initializes
+`NewConfiguredSandboxTaskWorker` with **the same SQLite connection and
+Broker**. The task worker synchronously checks expired runtime associations
+before the router can serve incoming requests, then starts a single claim loop.
+The existing router shutdown hook cancels and joins that loop.
+
+Startup or unexpected worker failure **fails closed**: the process does not
+continue advertising sandbox execution without its durable coordinator.
+Do not expose a broker capability bit merely because a task is queued. The
+task execution service does not grant arbitrary process destination-scoped
+network access, disk quota enforcement or replay safety to unapproved side
+effects; those remain independently gated features.
+
+This wiring is not proof of Kubernetes worker deployment, multi-process
+leader election or migration across nodes. Those need isolated integration
+tests and a dedicated coordinator before claiming full Phase 14 completion.

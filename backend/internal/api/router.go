@@ -33,6 +33,7 @@ import (
 	"github.com/ajbergh/omnillm-studio/internal/rag"
 	"github.com/ajbergh/omnillm-studio/internal/repository"
 	intentrouter "github.com/ajbergh/omnillm-studio/internal/router"
+	"github.com/ajbergh/omnillm-studio/internal/sandbox"
 	"github.com/ajbergh/omnillm-studio/internal/search"
 	"github.com/ajbergh/omnillm-studio/internal/sports"
 	"github.com/ajbergh/omnillm-studio/internal/tasks"
@@ -217,6 +218,24 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 		if sandboxClient, sandboxErr := codesandbox.New(sandboxURL); sandboxErr != nil {
 			log.Printf("WARN: code sandbox disabled: %v", sandboxErr)
 		} else {
+			// Reuse the configured Broker and SQLite connection for durable
+			// task recovery. No new requests may arrive before recovery succeeds.
+			worker, workerErr := sandbox.NewConfiguredSandboxTaskWorker(database)
+			if workerErr != nil || worker == nil {
+				log.Fatalf("initialize sandbox task worker: %v", workerErr)
+			}
+			if workerErr = worker.Start(context.Background()); workerErr != nil {
+				log.Fatalf("recover/start sandbox task worker: %v", workerErr)
+			}
+			shutdownFns = append(shutdownFns, worker.Shutdown)
+			go func() {
+				<-worker.Done()
+				if fatalErr := worker.Err(); fatalErr != nil {
+					// Tools may retain Broker pointers, so abort if queue work
+					// loses its durable execution supervisor.
+					log.Fatalf("durable sandbox task worker stopped: %v", fatalErr)
+				}
+			}()
 			toolRegistry.MustRegister(tools.NewCodeSandboxTool(sandboxClient))
 		}
 	}
