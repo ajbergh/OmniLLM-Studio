@@ -234,3 +234,7 @@ effects; those remain independently gated features.
 This wiring is not proof of Kubernetes worker deployment, multi-process
 leader election or migration across nodes. Those need isolated integration
 tests and a dedicated coordinator before claiming full Phase 14 completion.
+
+### October 2026 Phase 2 restart recovery regression (proposed)
+
+The `TestSandboxWorkerRestartBlocksReplayUntilStaleRuntimeDestroyed` test models a durable idempotent attempt on an expired lease across two distinct worker constructions sharing SQLite. The first worker's remote runtime Destroy fails: startup must fail closed without execution and retain recorded session/runtime IDs. A second worker must destroy the predecessor before replay and complete with a fresh attempt ID and only one execution. This validates an isolated deterministic failure/recovery case, **not** deployed multi-replica leadership, real sandboxd crash containment, process destination egress, disk quota, or platform upgrade/rollback acceptance. Keep those gaps open under #338.
