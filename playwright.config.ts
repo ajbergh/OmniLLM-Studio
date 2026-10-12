@@ -132,6 +132,10 @@ export default defineConfig({
         ...process.env,
         OMNILLM_PORT: String(backendPort),
         OMNILLM_BIND_ADDRESS: '127.0.0.1',
+        // The smoke UI runs on :4173 and Vite's changeOrigin proxy rewrites
+        // Host to the backend. Explicitly allow the browser's real Origin;
+        // never relax the global CSRF guard to accept arbitrary loopback ports.
+        OMNILLM_CORS_ORIGINS: frontendUrl,
         OMNILLM_DB_PATH: smokeDbPath,
         OMNILLM_ATTACHMENTS_DIR: smokeAttachmentsDir,
       },

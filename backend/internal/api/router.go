@@ -90,6 +90,7 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(SecurityHeaders)
+	r.Use(guardBrowserMutationOrigin(cfg.CORSOrigins))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},
