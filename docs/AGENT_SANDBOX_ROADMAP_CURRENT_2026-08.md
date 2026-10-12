@@ -99,3 +99,10 @@ Concurrent agent work must use isolated owner-scoped writable workspaces derived
 ## Validation discipline
 
 A sandbox phase is complete only when platform-native negative tests exist, capability claims match enforcement, unsupported controls are explicit and fail closed, and the exact merge head passes every applicable repository gate. Previous green results do not substitute for validation after ancestry or deployment-boundary changes.
+
+### Phase 14 negative lifecycle regression slice (2026-10-12, in review)
+
+- Startup/cleanup already reuses the process-wide Broker and SQLite authority in the composition root; #359 tests idempotent retry only after orphaned runtime destruction.
+- `TestSandboxWorkerRestartNeverReplaysNonIdempotentTask` exercises the same crash/restart worker sequence for **non-idempotent** tasks: verify the predecessor runtime was destroyed, old attempt is finalized as failed, no new attempt is executed, and persisted runtime identity is cleared.
+- `TestSandboxWorkerPostStartQueueFailureIsObservable` verifies that loss of the durable SQLite queue after successful startup closes the worker's Done channel with a non-nil terminal error; application supervision must not silently continue advertising a functional durable worker.
+- **Not yet deployment acceptance:** Kill a real external `sandboxd` process/Kubernetes worker under active load, verify remote cleanup and Secret/network/cgroup constraints on target hosts, preserve native negatives, and only close #338 with operator-grade evidence and exact-head CI.
