@@ -69,6 +69,13 @@ func NewRouter(database *sql.DB, cfg *config.Config, version, commit string) htt
 // NewRouterWithShutdown creates the main HTTP router and returns a cleanup hook
 // for runtime services owned by the API layer.
 func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit string) (http.Handler, func(context.Context) error) {
+	return newRouterWithSearchProvider(database, cfg, version, commit, nil)
+}
+
+// newRouterWithSearchProvider is a package-private integration-test seam for the
+// actual authenticated HTTP router. Production always resolves web search from
+// persisted settings; tests can supply a deterministic provider with no network.
+func newRouterWithSearchProvider(database *sql.DB, cfg *config.Config, version, commit string, searchOverride websearch.Provider) (http.Handler, func(context.Context) error) {
 	r := chi.NewRouter()
 	shutdownFns := []func(context.Context) error{}
 
@@ -144,6 +151,9 @@ func NewRouterWithShutdown(database *sql.DB, cfg *config.Config, version, commit
 	//   - DuckDuckGo otherwise (zero-config, no API key needed)
 	//   - Set web_search_provider = "none" to disable)
 	wsProvider := websearch.NewProviderFromSettings(settingsRepo)
+	if searchOverride != nil {
+		wsProvider = searchOverride
+	}
 	jinaReader := websearch.NewJinaReaderFromSettings(settingsRepo)
 	orchestrator := websearch.NewOrchestrator(wsProvider, llmService, jinaReader)
 
