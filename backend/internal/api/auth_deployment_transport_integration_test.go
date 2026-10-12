@@ -57,19 +57,19 @@ func TestAuthDeploymentTransportMatrix(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			aliceHTTP := public.Client()
+			aliceHTTP := *public.Client()
 			aliceHTTP.Jar = jar
-			alice := chatHTTPTestClient{client: aliceHTTP, base: public.URL}
+			alice := chatHTTPTestClient{client: &aliceHTTP, base: public.URL}
 			bobJar, err := cookiejar.New(nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			bobHTTP := public.Client()
+			bobHTTP := *public.Client()
 			bobHTTP.Jar = bobJar
-			bob := chatHTTPTestClient{client: bobHTTP, base: public.URL}
-			apiClient := public.Client()
+			bob := chatHTTPTestClient{client: &bobHTTP, base: public.URL}
+			apiClient := *public.Client()
 			apiClient.Jar = nil
-			api := chatHTTPTestClient{client: apiClient, base: public.URL}
+			api := chatHTTPTestClient{client: &apiClient, base: public.URL}
 			secure := mode != "localhost HTTP"
 
 			send := func(client chatHTTPTestClient, method, path, origin, bearer, body string, fetchSite string) (*http.Response, []byte) {
