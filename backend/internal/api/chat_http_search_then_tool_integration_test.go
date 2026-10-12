@@ -39,13 +39,13 @@ func (p *chatHTTPPreflightProvider) Search(_ context.Context, req websearch.Sear
 				Index: 1, Title: "Provider A pricing fixture",
 				URL: "https://openai.com/api/pricing", Source: "Provider A",
 				PublishedAt: now.Add(-time.Hour).Format(time.RFC3339),
-				Snippet: "Provider A fixture evidence: 6 units",
+				Snippet:     "Provider A fixture evidence: 6 units",
 			},
 			{
 				Index: 2, Title: "Provider B pricing fixture",
 				URL: "https://www.anthropic.com/pricing", Source: "Provider B",
 				PublishedAt: now.Add(-2*time.Hour).Format(time.RFC3339),
-				Snippet: "Provider B fixture evidence: 7 units",
+				Snippet:     "Provider B fixture evidence: 7 units",
 			},
 		},
 	}, nil
@@ -67,13 +67,15 @@ func TestChatHTTPPreflightThenToolLoopSyncAndSSE(t *testing.T) {
 			return
 		}
 		var req struct {
-			Stream bool `json:"stream"`
+			Stream   bool `json:"stream"`
 			Messages []struct {
-				Role string `json:"role"`
+				Role    string `json:"role"`
 				Content string `json:"content"`
 			} `json:"messages"`
 			Tools []struct {
-				Function struct { Name string `json:"name"` } `json:"function"`
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
 			} `json:"tools"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Messages) == 0 {
@@ -145,7 +147,7 @@ func TestChatHTTPPreflightThenToolLoopSyncAndSSE(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"choices": []interface{}{map[string]interface{}{"message": message}},
-			"usage": map[string]interface{}{"prompt_tokens": 11, "completion_tokens": 4, "cost": 0.02},
+			"usage":   map[string]interface{}{"prompt_tokens": 11, "completion_tokens": 4, "cost": 0.02},
 		})
 	}))
 	defer provider.Close()
@@ -173,7 +175,7 @@ func TestChatHTTPPreflightThenToolLoopSyncAndSSE(t *testing.T) {
 	chatHTTPRequireStatus(t, resp, body, http.StatusCreated)
 
 	for _, tc := range []struct {
-		name string
+		name   string
 		stream bool
 	}{
 		{name: "sync"}, {name: "SSE", stream: true},
@@ -189,7 +191,7 @@ func TestChatHTTPPreflightThenToolLoopSyncAndSSE(t *testing.T) {
 
 			path := "/v1/conversations/" + conversationID + "/messages"
 			prompt := map[string]interface{}{
-				"content": "Find the latest API prices and calculate the monthly total using a calculator",
+				"content":    "Find the latest API prices and calculate the monthly total using a calculator",
 				"web_search": true, "tool_mode": "auto",
 			}
 			sendPath := path
@@ -267,8 +269,8 @@ func TestChatHTTPPreflightThenToolLoopSyncAndSSE(t *testing.T) {
 			resp, body = client.request(t, http.MethodGet, path, nil)
 			chatHTTPRequireStatus(t, resp, body, http.StatusOK)
 			var saved []struct {
-				Role string `json:"role"`
-				Content string `json:"content"`
+				Role         string `json:"role"`
+				Content      string `json:"content"`
 				MetadataJSON string `json:"metadata_json"`
 			}
 			if err := json.Unmarshal(body, &saved); err != nil {
