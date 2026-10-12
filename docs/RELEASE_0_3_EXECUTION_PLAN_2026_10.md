@@ -87,4 +87,6 @@ Each work PR must update the relevant scoped roadmap (if any) and record: baseli
 5. Owner/admin completes [#322](https://github.com/ajbergh/OmniLLM-Studio/issues/322): main branch protection. Reconcile [#236](https://github.com/ajbergh/OmniLLM-Studio/pull/236); assess the separately scoped Go 1.27 PR [#256](https://github.com/ajbergh/OmniLLM-Studio/pull/256).
 6. Only then progress [#326](https://github.com/ajbergh/OmniLLM-Studio/issues/326) release-journey and supported-platform evidence toward a controlled 0.3 prerelease.
 
+**2026-10-12 security baseline:** PR #344 merged to `main` at `a0d16ddc` with Go 1.26.9 / `x/net` 0.60.0. PRs #333 and #334 are also merged. Follow-on PRs #336, #337 and #347–#349 are rebased for exact-head CI; do not mark acceptance complete until those jobs finish. The release acceptance checklist is maintained in [RELEASE_0_3_ACCEPTANCE.md](RELEASE_0_3_ACCEPTANCE.md).
+
 **Status interpretation:** “Merged” denotes an integrated code change with recorded CI, not completion of all product or deployment acceptance criteria. “In review” is not green until the exact head passes every required check.
