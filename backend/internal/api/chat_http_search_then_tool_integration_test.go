@@ -44,7 +44,7 @@ func (p *chatHTTPPreflightProvider) Search(_ context.Context, req websearch.Sear
 			{
 				Index: 2, Title: "Provider B pricing fixture",
 				URL: "https://www.anthropic.com/pricing", Source: "Provider B",
-				PublishedAt: now.Add(-2*time.Hour).Format(time.RFC3339),
+				PublishedAt: now.Add(-2 * time.Hour).Format(time.RFC3339),
 				Snippet:     "Provider B fixture evidence: 7 units",
 			},
 		},
