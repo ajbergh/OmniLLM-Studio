@@ -106,3 +106,9 @@ A sandbox phase is complete only when platform-native negative tests exist, capa
 - `TestSandboxWorkerRestartNeverReplaysNonIdempotentTask` exercises the same crash/restart worker sequence for **non-idempotent** tasks: verify the predecessor runtime was destroyed, old attempt is finalized as failed, no new attempt is executed, and persisted runtime identity is cleared.
 - `TestSandboxWorkerPostStartQueueFailureIsObservable` verifies that loss of the durable SQLite queue after successful startup closes the worker's Done channel with a non-nil terminal error; application supervision must not silently continue advertising a functional durable worker.
 - **Not yet deployment acceptance:** Kill a real external `sandboxd` process/Kubernetes worker under active load, verify remote cleanup and Secret/network/cgroup constraints on target hosts, preserve native negatives, and only close #338 with operator-grade evidence and exact-head CI.
+
+### Phase 15 secure remote worker transport correction (2026-10-12, in review)
+
+- Verified a functional Helm-to-HTTPRuntime mismatch: rendered non-loopback HTTP service URLs were rejected by the control plane, despite passing YAML-only checks.
+- Require SAN-verified HTTPS and separate worker TLS Secret and backend CA-only mounts; preserve bearer authentication, fail-closed defaults and honest capability reporting.
+- Add actual worker-container TLS smoke and Helm rejection tests. Native Kubernetes execution and worker crash/recovery with delegated cgroups remain unverified under #338.
