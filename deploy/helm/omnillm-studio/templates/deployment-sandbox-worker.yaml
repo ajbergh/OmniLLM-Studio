@@ -74,7 +74,7 @@ spec:
               drop:
                 - ALL
           ports:
-            - name: http
+            - name: https
               containerPort: {{ .Values.sandboxWorker.service.port }}
               protocol: TCP
           env:
@@ -107,14 +107,14 @@ spec:
               readOnly: true
           readinessProbe:
             tcpSocket:
-              port: http
+              port: https
             initialDelaySeconds: 3
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
           livenessProbe:
             tcpSocket:
-              port: http
+              port: https
             initialDelaySeconds: 10
             periodSeconds: 20
             timeoutSeconds: 3
