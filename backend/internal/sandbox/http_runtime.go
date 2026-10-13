@@ -78,7 +78,7 @@ func NewHTTPRuntime(ctx context.Context, baseURL, token string) (*HTTPRuntime, e
 	runtime := &HTTPRuntime{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
-		client:       client,
+		client:  client,
 	}
 	if err := runtime.doJSON(ctx, http.MethodGet, "/v2/capabilities", nil, &runtime.capabilities); err != nil {
 		return nil, fmt.Errorf("sandbox capabilities handshake: %w", err)
