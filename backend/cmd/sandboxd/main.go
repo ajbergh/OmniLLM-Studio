@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -33,6 +34,13 @@ func main() {
 	if bind == "" {
 		bind = "127.0.0.1:8090"
 	}
+	tlsConfig, err := workerTLSConfig(
+		strings.TrimSpace(os.Getenv("OMNILLM_SANDBOX_TLS_CERT")),
+		strings.TrimSpace(os.Getenv("OMNILLM_SANDBOX_TLS_KEY")),
+	)
+	if err != nil {
+		log.Fatalf("configure sandbox worker TLS: %v", err)
+	}
 	runtime, err := sandbox.NewLocalRuntime(sandbox.LocalRuntimeConfig{
 		RootFS:      os.Getenv("OMNILLM_SANDBOX_ROOTFS"),
 		ScratchRoot: os.Getenv("OMNILLM_SANDBOX_SCRATCH_ROOT"),
@@ -47,6 +55,7 @@ func main() {
 	server := &http.Server{
 		Addr:              bind,
 		Handler:           handler,
+		TLSConfig:         tlsConfig,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      70 * time.Second,
@@ -57,8 +66,14 @@ func main() {
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		log.Printf("OmniLLM sandbox worker listening on %s (%s)", bind, runtime.Capabilities().Name)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("sandbox worker: %v", err)
+		var serveErr error
+		if tlsConfig != nil {
+			serveErr = server.ListenAndServeTLS("", "")
+		} else {
+			serveErr = server.ListenAndServe()
+		}
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			log.Fatalf("sandbox worker: %v", serveErr)
 		}
 	}()
 	<-done
@@ -67,6 +82,25 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		log.Printf("sandbox worker shutdown: %v", err)
 	}
+}
+
+// workerTLSConfig validates the private keypair before listening. Local
+// loopback deployments may still use plaintext; remote clients require HTTPS.
+func workerTLSConfig(certFile, keyFile string) (*tls.Config, error) {
+	if (certFile == "") != (keyFile == "") {
+		return nil, fmt.Errorf("both OMNILLM_SANDBOX_TLS_CERT and OMNILLM_SANDBOX_TLS_KEY are required")
+	}
+	if certFile == "" {
+		return nil, nil
+	}
+	certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load sandbox worker TLS keypair: %w", err)
+	}
+	return &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{certificate},
+	}, nil
 }
 
 func newHandler(runtime sandbox.Runtime) http.Handler {
