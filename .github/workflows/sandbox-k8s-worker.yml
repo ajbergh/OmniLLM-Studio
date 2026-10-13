@@ -58,7 +58,7 @@ jobs:
           grep -q 'name: OMNILLM_SANDBOX_CA_FILE' /tmp/sandbox-worker.yaml
           grep -q 'name: OMNILLM_SANDBOX_TLS_CERT' /tmp/sandbox-worker.yaml
           grep -q 'name: OMNILLM_SANDBOX_TLS_KEY' /tmp/sandbox-worker.yaml
-          grep -q 'name: sandbox-worker-tls' /tmp/sandbox-worker.yaml
+          grep -q 'secretName: sandbox-worker-tls' /tmp/sandbox-worker.yaml
           grep -q 'name: OMNILLM_SANDBOX_TOKEN' /tmp/sandbox-worker.yaml
           grep -q 'name: sandbox-worker-auth' /tmp/sandbox-worker.yaml
           grep -q 'key: OMNILLM_SANDBOX_TOKEN' /tmp/sandbox-worker.yaml
