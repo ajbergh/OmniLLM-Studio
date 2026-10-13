@@ -91,7 +91,9 @@ spec:
             {{- end }}
             {{- if .Values.sandboxWorker.enabled }}
             - name: OMNILLM_CODE_SANDBOX_URL
-              value: "http://{{ include "omnillm-studio.fullname" . }}-sandbox-worker:{{ .Values.sandboxWorker.service.port }}"
+              value: "https://{{ include "omnillm-studio.fullname" . }}-sandbox-worker:{{ .Values.sandboxWorker.service.port }}"
+            - name: OMNILLM_SANDBOX_CA_FILE
+              value: /etc/omnillm/sandbox-ca/ca.crt
             - name: OMNILLM_SANDBOX_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -139,6 +141,11 @@ spec:
           resources:
             {{- toYaml .Values.resources.backend | nindent 12 }}
           volumeMounts:
+            {{- if .Values.sandboxWorker.enabled }}
+            - name: sandbox-worker-ca
+              mountPath: /etc/omnillm/sandbox-ca
+              readOnly: true
+            {{- end }}
             - name: data
               mountPath: /data
             - name: tmp
@@ -185,6 +192,14 @@ spec:
               mountPath: /tmp
         {{- end }}
       volumes:
+        {{- if .Values.sandboxWorker.enabled }}
+        - name: sandbox-worker-ca
+          secret:
+            secretName: {{ .Values.sandboxWorker.tls.existingSecret }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}
         - name: tmp
           emptyDir: {}
         {{- if eq .Values.topology "combined" }}
