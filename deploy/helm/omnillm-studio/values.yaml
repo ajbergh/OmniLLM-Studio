@@ -93,6 +93,10 @@ sandboxWorker:
     pullPolicy: IfNotPresent
   service:
     port: 8090
+  tls:
+    # Required when enabled. This Secret must have tls.crt, tls.key, and ca.crt.
+    # The server certificate SAN must match the rendered worker Service DNS.
+    existingSecret: ""
   auth:
     # Required when enabled. The Secret key must contain a high-entropy bearer
     # token shared only with the API control plane.

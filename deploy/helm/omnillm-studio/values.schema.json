@@ -105,6 +105,24 @@
       }
     },
 
+    "sandboxWorker": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 1 },
+        "tls": {
+          "type": "object",
+          "properties": { "existingSecret": { "type": "string" } }
+        },
+        "auth": {
+          "type": "object",
+          "properties": {
+            "existingSecret": { "type": "string" },
+            "tokenKey": { "type": "string" }
+          }
+        }
+      }
+    },
     "podSecurityContext":       { "type": "object" },
     "containerSecurityContext": { "type": "object" },
     "probes":                   { "type": "object" },

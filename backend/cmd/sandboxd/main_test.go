@@ -108,3 +108,23 @@ func TestWorkerRejectsUnknownFieldsAndMultipleJSONValues(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkerTLSRequiresMatchingCertificateAndKey(t *testing.T) {
+	for _, tc := range []struct {
+		name, cert, key string
+	}{
+		{name: "missing key", cert: "/run/tls/tls.crt"},
+		{name: "missing certificate", key: "/run/tls/tls.key"},
+		{name: "nonexistent keypair", cert: "/missing/tls.crt", key: "/missing/tls.key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := workerTLSConfig(tc.cert, tc.key); err == nil {
+				t.Fatal("worker unexpectedly accepted invalid TLS configuration")
+			}
+		})
+	}
+	config, err := workerTLSConfig("", "")
+	if err != nil || config != nil {
+		t.Fatalf("loopback-only plaintext mode should stay available: config=%v err=%v", config, err)
+	}
+}

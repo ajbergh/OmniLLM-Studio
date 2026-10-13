@@ -48,3 +48,44 @@ jobs:
             test -x /opt/omnillm/rootfs/usr/bin/node
             test -x /opt/omnillm/rootfs/bin/sh
           '
+
+      - name: Exercise real worker HTTPS authentication and capabilities
+        run: |
+          set -euo pipefail
+          fixture="$(mktemp -d)"
+          trap 'docker rm -f omnillm-sandboxd-tls-ci >/dev/null 2>&1 || true; rm -rf "$fixture"' EXIT
+          openssl req -x509 -nodes -newkey rsa:2048 -sha256 \
+            -keyout "$fixture/tls.key" -out "$fixture/tls.crt" -days 1 \
+            -subj '/CN=sandbox-worker' \
+            -addext 'subjectAltName=DNS:sandbox-worker,IP:127.0.0.1' >/dev/null 2>&1
+          cp "$fixture/tls.crt" "$fixture/ca.crt"
+          # Disposable CI-only key: the worker must traverse this mounted
+          # fixture directory and read its key as uid 65532.
+          chmod 0755 "$fixture"
+          chmod 0644 "$fixture/tls.key"
+          docker run --detach --name omnillm-sandboxd-tls-ci \
+            --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+            --tmpfs /var/lib/omnillm-sandbox:rw,nosuid,nodev,uid=65532,gid=65532,size=64m \
+            -p 127.0.0.1:18090:8090 \
+            --mount "type=bind,source=$fixture,target=/run/sandbox-tls,readonly" \
+            -e OMNILLM_SANDBOX_TOKEN=ci-worker-fixture-token \
+            -e OMNILLM_SANDBOX_TLS_CERT=/run/sandbox-tls/tls.crt \
+            -e OMNILLM_SANDBOX_TLS_KEY=/run/sandbox-tls/tls.key \
+            omnillm-sandboxd:ci
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail --cacert "$fixture/ca.crt" \
+              -H 'Authorization: Bearer ci-worker-fixture-token' \
+              https://127.0.0.1:18090/v2/capabilities > "$fixture/capabilities.json"; then
+              break
+            fi
+            sleep 1
+          done
+          test -s "$fixture/capabilities.json" || { docker logs omnillm-sandboxd-tls-ci; exit 1; }
+          jq -e '.name == "linux-bubblewrap" and .disk_limit == false and .network_allowlist == false' "$fixture/capabilities.json"
+          test "$(curl --silent --cacert "$fixture/ca.crt" -o /dev/null -w '%{http_code}' https://127.0.0.1:18090/v2/capabilities)" = 401
+          test "$(curl --silent --cacert "$fixture/ca.crt" -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer wrong' https://127.0.0.1:18090/v2/capabilities)" = 401
+          test "$(curl --silent --cacert "$fixture/ca.crt" -o /dev/null -w '%{http_code}' \
+            -H 'Authorization: Bearer ci-worker-fixture-token' \
+            -H 'Content-Type: application/json' \
+            -d '{"session_id":"sbx_ci_worker","owner":{"user_id":"ci"},"spec":{"network":{"mode":"none"},"ttl_seconds":15}}' \
+            https://127.0.0.1:18090/v2/sandboxes)" = 201

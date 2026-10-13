@@ -23,13 +23,15 @@ jobs:
           helm lint deploy/helm/omnillm-studio \
             --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
             --set sandboxWorker.enabled=true \
-            --set sandboxWorker.auth.existingSecret=sandbox-worker-auth
+            --set sandboxWorker.auth.existingSecret=sandbox-worker-auth \
+            --set sandboxWorker.tls.existingSecret=sandbox-worker-tls
       - name: Render enabled worker configuration
         run: |
           helm template test deploy/helm/omnillm-studio \
             --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
             --set sandboxWorker.enabled=true \
             --set sandboxWorker.auth.existingSecret=sandbox-worker-auth \
+            --set sandboxWorker.tls.existingSecret=sandbox-worker-tls \
             > /tmp/sandbox-worker.yaml
       - name: Prove workload separation and fail-closed defaults
         run: |
@@ -52,6 +54,11 @@ jobs:
           set -euo pipefail
           grep -q 'name: OMNILLM_CODE_SANDBOX_URL' /tmp/sandbox-worker.yaml
           grep -q 'sandbox-worker:8090' /tmp/sandbox-worker.yaml
+          grep -q 'https://.*-sandbox-worker:8090' /tmp/sandbox-worker.yaml
+          grep -q 'name: OMNILLM_SANDBOX_CA_FILE' /tmp/sandbox-worker.yaml
+          grep -q 'name: OMNILLM_SANDBOX_TLS_CERT' /tmp/sandbox-worker.yaml
+          grep -q 'name: OMNILLM_SANDBOX_TLS_KEY' /tmp/sandbox-worker.yaml
+          grep -q 'secretName: sandbox-worker-tls' /tmp/sandbox-worker.yaml
           grep -q 'name: OMNILLM_SANDBOX_TOKEN' /tmp/sandbox-worker.yaml
           grep -q 'name: sandbox-worker-auth' /tmp/sandbox-worker.yaml
           grep -q 'key: OMNILLM_SANDBOX_TOKEN' /tmp/sandbox-worker.yaml
@@ -70,8 +77,21 @@ jobs:
             --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
             --set sandboxWorker.enabled=true \
             --set sandboxWorker.auth.existingSecret=sandbox-worker-auth \
+            --set sandboxWorker.tls.existingSecret=sandbox-worker-tls \
             --set sandboxWorker.replicaCount=2 >/tmp/multi-worker.yaml 2>/tmp/multi-worker.err; then
             echo 'sandbox worker rendered multiple replicas without session-aware routing' >&2
             exit 1
           fi
           grep -q 'sandboxWorker.replicaCount must be 1' /tmp/multi-worker.err
+
+      - name: Prove remote worker TLS is mandatory
+        run: |
+          set -euo pipefail
+          if helm template test deploy/helm/omnillm-studio \
+            --set secrets.encryptionKey=$(printf '0%.0s' {1..64}) \
+            --set sandboxWorker.enabled=true \
+            --set sandboxWorker.auth.existingSecret=sandbox-worker-auth >/tmp/missing-worker-tls.yaml 2>/tmp/missing-worker-tls.err; then
+            echo 'sandbox worker rendered without HTTPS certificate Secret' >&2
+            exit 1
+          fi
+          grep -q 'sandboxWorker.tls.existingSecret is required' /tmp/missing-worker-tls.err
