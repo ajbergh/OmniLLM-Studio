@@ -59,7 +59,9 @@ jobs:
             -subj '/CN=sandbox-worker' \
             -addext 'subjectAltName=DNS:sandbox-worker,IP:127.0.0.1' >/dev/null 2>&1
           cp "$fixture/tls.crt" "$fixture/ca.crt"
-          # Disposable CI-only key: the test worker must read it as non-root.
+          # Disposable CI-only key: the worker must traverse this mounted
+          # fixture directory and read its key as uid 65532.
+          chmod 0755 "$fixture"
           chmod 0644 "$fixture/tls.key"
           docker run --detach --name omnillm-sandboxd-tls-ci \
             --read-only --cap-drop=ALL --security-opt=no-new-privileges \
