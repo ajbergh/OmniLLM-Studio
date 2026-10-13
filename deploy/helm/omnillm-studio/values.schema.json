@@ -109,7 +109,7 @@
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" },
-        "replicaCount": { "type": "integer", "const": 1 },
+        "replicaCount": { "type": "integer", "minimum": 1 },
         "tls": {
           "type": "object",
           "properties": { "existingSecret": { "type": "string" } }
