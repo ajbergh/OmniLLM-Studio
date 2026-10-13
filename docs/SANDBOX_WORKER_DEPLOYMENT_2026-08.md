@@ -88,3 +88,13 @@ Phase 15 is complete only when the deployment chart proves all of the following 
 - exact Helm/manifests pass validation and a native cluster smoke test.
 
 The dedicated image closes Phase 2 packaging. It does not, by itself, close Phase 15.
+
+## Remote worker HTTPS contract (2026-10-12)
+
+The previous enabled Helm chart configured a non-loopback plaintext worker URL that the API's HTTPRuntime refused. The corrected chart requires HTTPS; do not loosen the API transport check.
+
+Create two Secrets in the application namespace: one authorization Secret with OMNILLM_SANDBOX_TOKEN, and one TLS Secret containing tls.crt, tls.key and ca.crt. Issue the worker certificate with a DNS subjectAltName matching the rendered sandbox-worker Service name (not merely the ingress host). Enable with --set sandboxWorker.enabled=true, --set sandboxWorker.auth.existingSecret=sandbox-worker-auth and --set sandboxWorker.tls.existingSecret=sandbox-worker-tls.
+
+The API connects to HTTPS, mounts only ca.crt, and preserves certificate hostname verification. The worker mounts only tls.crt and tls.key read-only, requires TLS 1.2+, and checks bearer authorization. A private OMNILLM_SANDBOX_CA_FILE is never allowed to enable plaintext HTTP. Non-cluster loopback workers may still use explicit HTTP.
+
+CI exercises real non-root read-only worker container TLS capabilities, wrong/missing bearer rejection and session creation; Helm assurance checks enabled Secret wiring and negative renders. This is NOT proof of full Kubernetes nested user namespaces, delegated cgroups, arbitrary code execution, certificate rotation or crash/restart across real cluster nodes. Those acceptance gates remain open under #338.
