@@ -12,7 +12,7 @@ spec:
     {{- include "omnillm-studio.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: sandbox-worker
   ports:
-    - name: http
+    - name: https
       port: {{ .Values.sandboxWorker.service.port }}
       targetPort: http
       protocol: TCP
