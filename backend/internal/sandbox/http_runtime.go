@@ -3,12 +3,15 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -48,15 +51,34 @@ func NewHTTPRuntime(ctx context.Context, baseURL, token string) (*HTTPRuntime, e
 		return nil, fmt.Errorf("non-loopback sandbox runtime requires https")
 	}
 
+	client := &http.Client{
+		Timeout: 65 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return fmt.Errorf("sandbox runtime redirects are disabled")
+		},
+	}
+	// Trust only the operator-provisioned worker CA for this client. Never
+	// disable TLS hostname verification or extend global process trust.
+	if caFile := strings.TrimSpace(os.Getenv("OMNILLM_SANDBOX_CA_FILE")); caFile != "" {
+		if u.Scheme != "https" {
+			return nil, fmt.Errorf("sandbox worker CA requires an https endpoint")
+		}
+		caPEM, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("read sandbox worker CA: %w", err)
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("sandbox worker CA file contains no valid certificates")
+		}
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}
+		client.Transport = transport
+	}
 	runtime := &HTTPRuntime{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
-		client: &http.Client{
-			Timeout: 65 * time.Second,
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return fmt.Errorf("sandbox runtime redirects are disabled")
-			},
-		},
+		client:       client,
 	}
 	if err := runtime.doJSON(ctx, http.MethodGet, "/v2/capabilities", nil, &runtime.capabilities); err != nil {
 		return nil, fmt.Errorf("sandbox capabilities handshake: %w", err)
