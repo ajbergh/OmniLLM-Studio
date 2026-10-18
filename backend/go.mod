@@ -7,7 +7,7 @@ require (
 	github.com/chinmaykhachane/espn-go v0.1.1
 	github.com/cyphar/filepath-securejoin v0.7.0
 	github.com/drumkitai/go-word v1.0.1
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-chi/cors v1.2.2
 	github.com/go-git/go-billy/v5 v5.9.2
 	github.com/go-git/go-git/v5 v5.19.3
